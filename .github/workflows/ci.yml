@@ -80,3 +80,13 @@ jobs:
           # RLS, as provisioning does). The app under test still uses hsdg_app.
           DATABASE_SUPERUSER_URL: postgres://postgres:postgres@localhost:5432/hsdg
         run: npm run test:e2e
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verifies the production Dockerfile builds (multi-stage, monorepo-aware).
+      - name: Build API image
+        run: docker build -f apps/api/Dockerfile -t hsdg-api:ci .

@@ -1,0 +1,16 @@
+# Never copy host build output or dependencies into the image build context.
+**/node_modules
+**/dist
+.git
+.github
+**/coverage
+**/*.log
+
+# Local env / secrets must never enter an image.
+**/.env
+**/.env.*
+
+# Docs and infra not needed by the API runtime.
+docs
+infra
+apps/web

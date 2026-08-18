@@ -16,12 +16,21 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
 
   const config = app.get(AppConfigService);
+  const logger = app.get(Logger);
   const globalPrefix = config.get('API_GLOBAL_PREFIX');
 
-  // Security headers. Disable Swagger-hostile CSP only where docs are served.
+  // Serve API docs only outside production, even if the flag is set — Swagger
+  // exposes the full API surface and its inline assets require relaxing CSP.
+  const serveDocs = config.get('SWAGGER_ENABLED') && !config.isProduction;
+  if (config.get('SWAGGER_ENABLED') && config.isProduction) {
+    logger.warn('SWAGGER_ENABLED is ignored in production; API docs are not served.');
+  }
+
+  // Security headers. CSP is only relaxed where docs are actually served, so
+  // production always runs with helmet's default Content-Security-Policy.
   app.use(
     helmet({
-      contentSecurityPolicy: config.get('SWAGGER_ENABLED') ? false : undefined,
+      contentSecurityPolicy: serveDocs ? false : undefined,
     }),
   );
 
@@ -52,19 +61,18 @@ async function bootstrap(): Promise<void> {
 
   app.enableShutdownHooks();
 
-  if (config.get('SWAGGER_ENABLED')) {
+  if (serveDocs) {
     setupSwagger(app, globalPrefix);
   }
 
   const port = config.get('PORT');
   await app.listen(port);
 
-  const logger = app.get(Logger);
   logger.log(
     `HSDG API listening on http://localhost:${port}/${globalPrefix}/${API_VERSION}`,
     'Bootstrap',
   );
-  if (config.get('SWAGGER_ENABLED')) {
+  if (serveDocs) {
     logger.log(`OpenAPI docs at http://localhost:${port}/${globalPrefix}/docs`, 'Bootstrap');
   }
 }
