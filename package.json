@@ -1,0 +1,30 @@
+{
+  "name": "hsdg-portal",
+  "version": "0.0.0",
+  "private": true,
+  "description": "HSDG Portal — practice-management and professional-work operating system for HSDG Chartered Accountants",
+  "engines": {
+    "node": ">=20 <25",
+    "npm": ">=10"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "api": "npm run start:dev --workspace @hsdg/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspaces --if-present",
+    "db:up": "docker compose up -d postgres redis",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run migrate:up --workspace @hsdg/api",
+    "db:migrate:create": "npm run migrate:create --workspace @hsdg/api",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}
