@@ -13,6 +13,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { OrganisationModule } from './modules/organisation/organisation.module';
 import { EntitiesModule } from './modules/entities/entities.module';
+import { CatalogueModule } from './modules/catalogue/catalogue.module';
 
 /**
  * Composition root of the modular monolith.
@@ -34,8 +35,11 @@ import { EntitiesModule } from './modules/entities/entities.module';
  * Entity master (Phase 3):
  *   - EntitiesModule — client entities, registrations, contacts, duplicates
  *
- * Remaining domain modules (services, engagements, …) are added one per phase
- * and imported here as they land.
+ * Service catalogue (Phase 4):
+ *   - CatalogueModule — review models, service lines, workflows, services
+ *
+ * Remaining domain modules (engagements, …) are added one per phase and
+ * imported here as they land.
  */
 @Module({
   imports: [
@@ -62,6 +66,7 @@ import { EntitiesModule } from './modules/entities/entities.module';
     AuthModule,
     OrganisationModule,
     EntitiesModule,
+    CatalogueModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

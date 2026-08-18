@@ -1,0 +1,205 @@
+import type { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { seedIdentityFixtures } from './seed.helper';
+import { createTestApp } from './create-test-app';
+
+/**
+ * Service catalogue through the HTTP API: firm-wide config reads, permission-
+ * gated + audited service/service-line management, filters, and the required-
+ * review-model data that Phase 7 will enforce.
+ */
+describe('Service Catalogue (e2e)', () => {
+  let app: INestApplication;
+
+  const token = async (email: string): Promise<string> => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/dev-token')
+      .send({ email })
+      .expect(201);
+    return res.body.accessToken as string;
+  };
+  const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
+  const code = (prefix: string): string => `${prefix}_${Date.now().toString().slice(-6)}`;
+
+  beforeAll(async () => {
+    await seedIdentityFixtures();
+    app = await createTestApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  describe('reference reads (firm-wide, any authenticated role)', () => {
+    it('lists review models ranked', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/review-models')
+        .set(bearer(await token('senior.y@hsdg.in')))
+        .expect(200);
+      const ranks = (res.body as Array<{ rank: number }>).map((r) => r.rank);
+      expect(ranks).toEqual([...ranks].sort((a, b) => a - b)); // ascending
+      expect(res.body.at(-1).slug).toBe('full_ep_review');
+    });
+
+    it('lists workflow families with ordered states', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/workflow-families')
+        .set(bearer(await token('senior.y@hsdg.in')))
+        .expect(200);
+      const audit = (res.body as Array<{ slug: string; states: Array<{ slug: string }> }>).find(
+        (f) => f.slug === 'audit_workflow',
+      )!;
+      expect(audit.states.map((s) => s.slug)).toEqual([
+        'planning',
+        'fieldwork',
+        'review',
+        'ep_sign_off',
+        'completed',
+      ]);
+    });
+
+    it('lists services with the required review model', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/services?limit=100')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      const statAudit = (
+        res.body.items as Array<{ code: string; requiredReviewModelSlug: string }>
+      ).find((s) => s.code === 'STAT_AUDIT')!;
+      expect(statAudit.requiredReviewModelSlug).toBe('full_ep_review');
+    });
+
+    it('filters services by line and active flag (combined query DTO)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/services?serviceLine=GST&active=true')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      expect((res.body.items as Array<{ code: string }>).map((s) => s.code).sort()).toEqual([
+        'GST_ANNUAL',
+        'GST_MONTHLY',
+      ]);
+    });
+
+    it('rejects an unknown query param (400)', async () => {
+      await request(app.getHttpServer())
+        .get('/api/v1/services?bogus=1')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(400);
+    });
+  });
+
+  describe('management (permission-gated + audited)', () => {
+    it('forbids a Senior (no service.manage) from creating a service (403)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('senior.y@hsdg.in')))
+        .send({
+          serviceLineCode: 'AUDIT',
+          code: code('SVC'),
+          name: 'X',
+          requiredReviewModel: 'manager_review',
+          workflowFamily: 'audit_workflow',
+        })
+        .expect(403);
+    });
+
+    it('lets an admin create a service and audits it', async () => {
+      const svcCode = code('DD');
+      const correlationId = `corr-svc-${Date.now()}`;
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('admin@hsdg.in')))
+        .set('x-correlation-id', correlationId)
+        .send({
+          serviceLineCode: 'ADVISORY',
+          code: svcCode,
+          name: 'Due Diligence',
+          requiredReviewModel: 'full_ep_review',
+          workflowFamily: 'advisory_workflow',
+          defaultRecurrence: 'as_required',
+        })
+        .expect(201);
+      expect(created.body.code).toBe(svcCode);
+      expect(created.body.workflowStates.length).toBeGreaterThan(0);
+
+      const audit = await request(app.getHttpServer())
+        .get('/api/v1/audit?limit=100')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      const event = (
+        audit.body.items as Array<{ action: string; objectId: string; correlationId: string }>
+      ).find((e) => e.action === 'service.created' && e.correlationId === correlationId);
+      expect(event?.objectId).toBe(created.body.id);
+    });
+
+    it('rejects a duplicate service code (409)', async () => {
+      const admin = await token('admin@hsdg.in');
+      const body = {
+        serviceLineCode: 'AUDIT',
+        code: code('DUP'),
+        name: 'Dup',
+        requiredReviewModel: 'manager_review',
+        workflowFamily: 'audit_workflow',
+      };
+      await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(admin))
+        .send(body)
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(admin))
+        .send(body)
+        .expect(409);
+    });
+
+    it('rejects an unknown review model (400)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('admin@hsdg.in')))
+        .send({
+          serviceLineCode: 'AUDIT',
+          code: code('BAD'),
+          name: 'X',
+          requiredReviewModel: 'nope',
+          workflowFamily: 'audit_workflow',
+        })
+        .expect(400);
+    });
+
+    it('enforces optimistic concurrency on service update (stale version ⇒ 409)', async () => {
+      const admin = await token('admin@hsdg.in');
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(admin))
+        .send({
+          serviceLineCode: 'AUDIT',
+          code: code('VER'),
+          name: 'Versioned',
+          requiredReviewModel: 'manager_review',
+          workflowFamily: 'audit_workflow',
+        })
+        .expect(201);
+      const v0 = created.body.version as number;
+      await request(app.getHttpServer())
+        .patch(`/api/v1/services/${created.body.id}`)
+        .set(bearer(admin))
+        .send({ isActive: false, version: v0 })
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/services/${created.body.id}`)
+        .set(bearer(admin))
+        .send({ isActive: true, version: v0 })
+        .expect(409);
+    });
+
+    it('creates a service line (audited)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/service-lines')
+        .set(bearer(await token('admin@hsdg.in')))
+        .send({ code: code('LINE').replace(/_/g, ''), name: 'Valuation' })
+        .expect(201);
+      expect(res.body.version).toBe(1);
+    });
+  });
+});

@@ -52,6 +52,8 @@ export const PERMISSION = {
   employeeManage: 'employee.manage',
   entityRead: 'entity.read',
   entityManage: 'entity.manage',
+  serviceRead: 'service.read',
+  serviceManage: 'service.manage',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

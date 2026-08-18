@@ -10,12 +10,12 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 3 — Entity Master (complete).** On the Phase 0–2 foundation
-> (identity, auth, RLS, audit, org/people), the system now has the **client
-> registry**: entities with statutory registrations (PAN/GSTIN/CIN/…) and
-> contacts, office-scoped RLS, audited permission-gated writes, optimistic
-> concurrency, and duplicate detection (hard PAN uniqueness + fuzzy `pg_trgm`
-> name search). All proven by tests, including database-level RLS denial
+> **Status: Phase 4 — Service Catalogue (complete).** On the Phase 0–3
+> foundation, the system now has the firm's **configurable offering**: review
+> models (ranked), service lines, workflow families/states, and services — each
+> carrying its required (minimum) review model and workflow. Firm-wide config
+> with FORCE RLS, audited permission-gated management, and optimistic
+> concurrency. All proven by tests, including database-level RLS denial
 > independent of the API. Remaining modules follow phase by phase — see
 > [Roadmap](#roadmap).
 
@@ -179,6 +179,15 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/entities/:id/registrations` | `entity.manage` | Add a registration (audited) |
 | POST | `/entities/:id/contacts` | `entity.manage` | Add a contact/signatory (audited) |
 | GET | `/entity-types` | `entity.read` | Entity type reference |
+| GET | `/review-models` | `service.read` | Review models (ranked) |
+| GET | `/workflow-families` | `service.read` | Workflow families with ordered states |
+| GET | `/service-lines` | `service.read` | Service lines |
+| POST | `/service-lines` | `service.manage` | Create (audited) |
+| PATCH | `/service-lines/:id` | `service.manage` | Update (audited; optimistic concurrency) |
+| GET | `/services` | `service.read` | Catalogue _(paginated)_; filter `?serviceLine=&active=&search=` |
+| GET | `/services/:id` | `service.read` | Detail with workflow states |
+| POST | `/services` | `service.manage` | Create (audited) |
+| PATCH | `/services/:id` | `service.manage` | Update (audited; optimistic concurrency) |
 
 ## Roadmap
 
@@ -187,8 +196,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **0** | Repository & architecture foundation | ✅ done |
 | **1** | Identity & security (users, roles, offices, RLS policies + tests) | ✅ done |
 | **2** | Organisation & people (partners, managers, seniors, articles) | ✅ done |
-| **3** | Entity master (entities, registrations, contacts, duplicates) | ✅ current |
-| 4 | Service catalogue (configurable services & review models) | ⬜ |
+| **3** | Entity master (entities, registrations, contacts, duplicates) | ✅ done |
+| **4** | Service catalogue (configurable services & review models) | ✅ current |
 | 5 | Engagement core (EP accountability, team, identity) | ⬜ |
 | 6 | Engagement lifecycle (explicit guarded transitions) | ⬜ |
 | 7 | Review & sign-off engine | ⬜ |

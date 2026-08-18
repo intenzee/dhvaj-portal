@@ -171,4 +171,41 @@ describe('RLS (database-level, independent of the application)', () => {
       ).rejects.toThrow(/permission denied/i);
     });
   });
+
+  describe('service catalogue (Phase 4)', () => {
+    it('is fail-closed: no context ⇒ zero services', async () => {
+      const rows = await underContext({}, 'SELECT id FROM hsdg.services');
+      expect(rows).toHaveLength(0);
+    });
+
+    it('is firm-wide config: any authenticated role sees all services', async () => {
+      const rows = await underContext(
+        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        'SELECT id FROM hsdg.services',
+      );
+      expect(rows.length).toBeGreaterThanOrEqual(11);
+    });
+
+    it('denies a non-firm-wide role writing services (RLS WITH CHECK)', async () => {
+      await app.query('BEGIN');
+      try {
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', 'manager']);
+        await expect(
+          app.query(
+            `INSERT INTO hsdg.services (service_line_id, code, name, required_review_model_id, workflow_family_id)
+             SELECT sl.id, 'ZZTEST', 'Z', rm.id, wf.id
+             FROM hsdg.service_lines sl, hsdg.review_models rm, hsdg.workflow_families wf LIMIT 1`,
+          ),
+        ).rejects.toThrow(/row-level security/i);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+
+    it('forbids the app role from writing review_models (reference data)', async () => {
+      await expect(
+        app.query(`INSERT INTO hsdg.review_models (slug, name, rank) VALUES ('x', 'X', 99)`),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
 });
