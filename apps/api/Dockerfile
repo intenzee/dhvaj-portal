@@ -23,8 +23,8 @@ COPY apps/api/package.json apps/api/
 
 RUN npm ci
 
-# Now the sources, and build (workspaces build packages before apps).
-COPY tsconfig.base.json ./
+# Now the sources, and build (workspaces build packages before apps). The shared
+# TypeScript config lives in packages/tsconfig, copied here with the rest.
 COPY packages ./packages
 COPY apps/api ./apps/api
 RUN npm run build
