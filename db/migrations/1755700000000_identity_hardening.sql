@@ -30,6 +30,9 @@ ALTER TABLE hsdg.role_permissions FORCE ROW LEVEL SECURITY;
 
 -- Down Migration
 
+-- `roles` is read (joined) below to resolve role ids, so it too must leave FORCE
+-- while we work — under FORCE the context-less migrator sees zero roles.
+ALTER TABLE hsdg.roles            NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.permissions      NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.role_permissions NO FORCE ROW LEVEL SECURITY;
 
@@ -44,6 +47,7 @@ JOIN hsdg.permissions p ON p.slug = 'user.read.all'
 WHERE r.slug = 'managing_partner'
 ON CONFLICT DO NOTHING;
 
+ALTER TABLE hsdg.roles            FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.permissions      FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.role_permissions FORCE ROW LEVEL SECURITY;
 

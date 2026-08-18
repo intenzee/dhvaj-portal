@@ -11,6 +11,7 @@ import { HealthModule } from './health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { OrganisationModule } from './modules/organisation/organisation.module';
 
 /**
  * Composition root of the modular monolith.
@@ -26,8 +27,11 @@ import { AuthModule } from './modules/auth/auth.module';
  * Identity & security (Phase 1):
  *   - AuditModule / IdentityModule / AuthModule
  *
- * Remaining domain modules (organisation, entities, services, engagements, …)
- * are added one per phase and imported here as they land.
+ * Organisation & people (Phase 2):
+ *   - OrganisationModule — employees, grades, partners, reporting lines
+ *
+ * Remaining domain modules (entities, services, engagements, …) are added one
+ * per phase and imported here as they land.
  */
 @Module({
   imports: [
@@ -52,6 +56,7 @@ import { AuthModule } from './modules/auth/auth.module';
     AuditModule,
     IdentityModule,
     AuthModule,
+    OrganisationModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

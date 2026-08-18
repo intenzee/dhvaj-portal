@@ -101,4 +101,39 @@ describe('RLS (database-level, independent of the application)', () => {
     );
     expect(some.length).toBeGreaterThan(0);
   });
+
+  describe('employees (Phase 2)', () => {
+    it('is fail-closed: no context ⇒ zero employees', async () => {
+      const rows = await underContext<{ employee_code: string }>(
+        {},
+        'SELECT employee_code FROM hsdg.employees',
+      );
+      expect(rows).toHaveLength(0);
+    });
+
+    it('scopes a Partner to their office (North sees North employees only)', async () => {
+      const rows = await underContext<{ employee_code: string }>(
+        { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
+        'SELECT employee_code FROM hsdg.employees',
+      );
+      const codes = rows.map((r) => r.employee_code);
+      expect(codes).toContain('EMP001'); // North
+      expect(codes).not.toContain('EMP004'); // South partner
+      expect(codes).not.toContain('EMP006'); // South senior
+    });
+
+    it('grants the Managing Partner every employee', async () => {
+      const rows = await underContext(
+        { userId: userIds['mp@hsdg.in'], role: 'managing_partner', officeId: officeIds['NORTH'] },
+        'SELECT id FROM hsdg.employees',
+      );
+      expect(rows.length).toBeGreaterThanOrEqual(8);
+    });
+
+    it('forbids the app role from writing grades (reference data)', async () => {
+      await expect(
+        app.query(`INSERT INTO hsdg.grades (slug, name, rank) VALUES ('x', 'X', 1)`),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
 });

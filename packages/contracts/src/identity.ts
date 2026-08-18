@@ -48,6 +48,30 @@ export const PERMISSION = {
   userManage: 'user.manage',
   officeRead: 'office.read',
   auditRead: 'audit.read',
+  employeeRead: 'employee.read',
+  employeeManage: 'employee.manage',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];
+
+/** Employee grades (HR/professional). Distinct from security {@link ROLE}s. */
+export const GRADE = {
+  partner: 'partner',
+  manager: 'manager',
+  senior: 'senior',
+  article: 'article',
+} as const;
+
+export type GradeSlug = (typeof GRADE)[keyof typeof GRADE];
+
+/** Employment status lifecycle values. */
+export const EMPLOYMENT_STATUS = {
+  active: 'active',
+  onLeave: 'on_leave',
+  noticePeriod: 'notice_period',
+  exited: 'exited',
+} as const;
+
+export type EmploymentStatus = (typeof EMPLOYMENT_STATUS)[keyof typeof EMPLOYMENT_STATUS];
+
+export const EMPLOYMENT_STATUSES: EmploymentStatus[] = Object.values(EMPLOYMENT_STATUS);

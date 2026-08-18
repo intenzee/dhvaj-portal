@@ -10,13 +10,13 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 1 — Identity & Security (complete).** On top of the Phase 0
-> foundation, the system now has users, offices, roles and permissions;
-> authentication (pluggable Entra ID / dev providers) with MFA enforcement;
-> application authorisation guards; **PostgreSQL Row Level Security** with an
-> immutable audit trail — all proven by tests, including database-level RLS
-> denial independent of the API. Remaining business modules follow phase by
-> phase — see [Roadmap](#roadmap).
+> **Status: Phase 2 — Organisation & People (complete).** On the Phase 0/1
+> foundation (identity, auth, RLS, audit), the system now has the firm's
+> org/HR model: employees, grades, partner profiles and reporting lines, with
+> RLS-scoped reads and audited, permission-gated writes. HR grade is kept
+> distinct from security role, and reporting line from access. All proven by
+> tests, including database-level RLS denial independent of the API. Remaining
+> business modules follow phase by phase — see [Roadmap](#roadmap).
 
 ---
 
@@ -162,14 +162,20 @@ dev-token endpoint requires a bearer token.
 | GET | `/users/:id` | `user.read` | 404 if outside RLS scope (scope not leaked) |
 | GET | `/offices` | `office.read` | |
 | GET | `/audit` | `audit.read` | Firm-wide only; append-only trail |
+| GET | `/employees` | `employee.read` | RLS-scoped; filter `?status=&grade=&office=` |
+| GET | `/employees/:id` | `employee.read` | 404 if outside scope |
+| GET | `/employees/:id/reports` | `employee.read` | Direct reports (org structure) |
+| POST | `/employees` | `employee.manage` | Create (audited) |
+| PATCH | `/employees/:id` | `employee.manage` | Update (audited, before/after) |
+| GET | `/partners` | `employee.read` | Partner register |
 
 ## Roadmap
 
 | Phase | Scope | Status |
 | --- | --- | --- |
 | **0** | Repository & architecture foundation | ✅ done |
-| **1** | Identity & security (users, roles, offices, RLS policies + tests) | ✅ current |
-| 2 | Organisation & people (partners, managers, seniors, articles) | ⬜ |
+| **1** | Identity & security (users, roles, offices, RLS policies + tests) | ✅ done |
+| **2** | Organisation & people (partners, managers, seniors, articles) | ✅ current |
 | 3 | Entity master (entities, registrations, contacts, duplicates) | ⬜ |
 | 4 | Service catalogue (configurable services & review models) | ⬜ |
 | 5 | Engagement core (EP accountability, team, identity) | ⬜ |
