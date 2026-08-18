@@ -83,6 +83,28 @@ Phase-1 plan, not an omission.
 - Later phases extend this exact context mechanism (e.g. engagement-level
   partner scoping in Phase 5) rather than inventing new access logic.
 
+## Phase-1 hardening (post-review)
+
+A short hardening pass after the initial Phase-1 delivery:
+
+- **Single round-trip context.** The four `SET LOCAL` settings are applied in one
+  `set_config(...)` statement instead of four, roughly halving the per-transaction
+  round-trips.
+- **Correlation-linked audit.** An async-local store (`nestjs-cls`) carries the
+  request correlation id; `AuditService` stamps it onto every event by default,
+  so recorded actions tie back to their originating request.
+- **Transport hardening.** `helmet` security headers and per-IP rate limiting
+  (`@nestjs/throttler`) at the edge.
+- **Reference-data integrity.** Removed the unused `user.read.all` permission
+  (firm-wide visibility is role-driven in RLS, not a permission) and added a
+  `CHECK (slug <> 'system')` so the reserved auth-bootstrap role can never be
+  seeded as assignable. Reference-data migrations toggle `FORCE` RLS to edit
+  seeded rows — the standard pattern for FORCE-RLS tables.
+
+Deferred to a later, larger effort: Redis-backed sessions + principal cache with
+token revocation, and Entra just-in-time provisioning (linking `oid` on first
+login rather than matching by email).
+
 ## Alternatives considered
 
 - **Application-only authorisation** — rejected; violates the defence-in-depth

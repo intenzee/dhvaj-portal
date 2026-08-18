@@ -141,5 +141,25 @@ describe('Identity & Security (e2e)', () => {
         .set(bearer(await token('manager.x@hsdg.in')))
         .expect(403);
     });
+
+    it('stamps audited events with the request correlation id', async () => {
+      const correlationId = `test-corr-${Date.now()}`;
+      // This request writes an audit event (dev_token_issued) under its context.
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/dev-token')
+        .set('x-correlation-id', correlationId)
+        .send({ email: 'partner.a@hsdg.in' })
+        .expect(201);
+
+      const audit = await request(app.getHttpServer())
+        .get('/api/v1/audit')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+
+      const matched = (audit.body as Array<{ correlationId: string | null }>).some(
+        (e) => e.correlationId === correlationId,
+      );
+      expect(matched).toBe(true);
+    });
   });
 });

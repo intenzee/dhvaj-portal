@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { ClsService } from 'nestjs-cls';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
+import { CLS_CORRELATION_ID } from '../../common/context/request-context';
 import type { AuditEventRecord } from '../identity/identity.types';
 
 export interface AuditInput {
@@ -23,9 +25,18 @@ export interface AuditInput {
  */
 @Injectable()
 export class AuditService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly cls: ClsService,
+  ) {}
 
   async record(ctx: RlsContext, input: AuditInput): Promise<void> {
+    // Default the correlation id from the ambient request context, so every
+    // audited event is tied to the request that caused it without callers
+    // having to thread it through. Guard for calls made outside a request.
+    const ambient = this.cls.isActive() ? this.cls.get<string>(CLS_CORRELATION_ID) : undefined;
+    const correlationId = input.correlationId ?? ambient ?? null;
+
     await this.db.withRlsContext(ctx, async (client) => {
       await client.query(
         `INSERT INTO hsdg.audit_events
@@ -41,7 +52,7 @@ export class AuditService {
           input.before === undefined ? null : JSON.stringify(input.before),
           input.after === undefined ? null : JSON.stringify(input.after),
           input.reason ?? null,
-          input.correlationId ?? null,
+          correlationId,
         ],
       );
     });

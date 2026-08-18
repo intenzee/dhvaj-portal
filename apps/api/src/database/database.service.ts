@@ -97,18 +97,25 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async applyContext(client: PoolClient, context: RlsContext): Promise<void> {
-    // Parameterised set_config() calls (not string interpolation) so context
-    // values can never be used for SQL injection. `true` => transaction-local.
-    await client.query(`SELECT set_config($1, $2, true)`, [RLS_SETTINGS.userId, context.userId]);
-    await client.query(`SELECT set_config($1, $2, true)`, [RLS_SETTINGS.role, context.role]);
-    await client.query(`SELECT set_config($1, $2, true)`, [
-      RLS_SETTINGS.officeId,
-      context.officeId ?? '',
-    ]);
-    await client.query(`SELECT set_config($1, $2, true)`, [
-      RLS_SETTINGS.orgId,
-      context.orgId ?? '',
-    ]);
+    // All four settings in ONE round-trip. Parameterised set_config() calls (not
+    // string interpolation) so context values can never be used for SQL
+    // injection. `true` => transaction-local (cleared at COMMIT/ROLLBACK).
+    await client.query(
+      `SELECT set_config($1, $2, true),
+              set_config($3, $4, true),
+              set_config($5, $6, true),
+              set_config($7, $8, true)`,
+      [
+        RLS_SETTINGS.userId,
+        context.userId,
+        RLS_SETTINGS.role,
+        context.role,
+        RLS_SETTINGS.officeId,
+        context.officeId ?? '',
+        RLS_SETTINGS.orgId,
+        context.orgId ?? '',
+      ],
+    );
   }
 
   /**

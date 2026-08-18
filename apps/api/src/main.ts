@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { API_VERSION } from '@hsdg/contracts';
 import { AppModule } from './app.module';
@@ -16,6 +17,13 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(AppConfigService);
   const globalPrefix = config.get('API_GLOBAL_PREFIX');
+
+  // Security headers. Disable Swagger-hostile CSP only where docs are served.
+  app.use(
+    helmet({
+      contentSecurityPolicy: config.get('SWAGGER_ENABLED') ? false : undefined,
+    }),
+  );
 
   // /api/v1/... — explicit URI versioning; default version is v1.
   app.setGlobalPrefix(globalPrefix);

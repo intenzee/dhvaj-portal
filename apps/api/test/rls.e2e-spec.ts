@@ -80,6 +80,18 @@ describe('RLS (database-level, independent of the application)', () => {
     await expect(app.query('DELETE FROM hsdg.audit_events')).rejects.toThrow(/permission denied/i);
   });
 
+  it('forbids seeding the reserved "system" role (CHECK constraint)', async () => {
+    const su = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
+    await su.connect();
+    try {
+      await expect(
+        su.query(`INSERT INTO hsdg.roles (slug, name) VALUES ('system', 'x')`),
+      ).rejects.toThrow(/roles_slug_not_reserved/);
+    } finally {
+      await su.end();
+    }
+  });
+
   it('hides reference data (roles) without a context, reveals it with one', async () => {
     const none = await underContext({}, 'SELECT slug FROM hsdg.roles');
     expect(none).toHaveLength(0);

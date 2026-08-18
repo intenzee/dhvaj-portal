@@ -36,10 +36,15 @@ export const ROLE_PRECEDENCE: RoleSlug[] = [
  */
 export const SYSTEM_ROLE = 'system' as const;
 
-/** Permission slugs. Must match the `permissions.slug` seed in migration 0002. */
+/**
+ * Permission slugs. Must match the `permissions.slug` rows in the database.
+ *
+ * Note: firm-wide vs office-scoped visibility is decided by RLS from the user's
+ * effective ROLE, not by a permission — so there is intentionally no
+ * "read everything" permission here.
+ */
 export const PERMISSION = {
   userRead: 'user.read',
-  userReadAll: 'user.read.all',
   userManage: 'user.manage',
   officeRead: 'office.read',
   auditRead: 'audit.read',

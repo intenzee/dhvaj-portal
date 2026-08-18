@@ -142,7 +142,10 @@ Seeded users: `mp@hsdg.in` (Managing Partner), `admin@hsdg.in`,
 - Authentication (Entra ID / dev providers), MFA enforcement, and permission
   guards sit above RLS — never instead of it.
 - Uniform error envelope, correlation IDs on every request/response, and secret
-  redaction in logs.
+  redaction in logs. The correlation id is carried in an async-local context and
+  stamped onto every audit event, tying each recorded action to its request.
+- Hardening: `helmet` security headers, per-IP rate limiting (`@nestjs/throttler`),
+  and the RLS security context applied in a single round-trip per transaction.
 
 See [ADR-0003](docs/adr/0003-identity-and-rls.md) for the identity/RLS design.
 
