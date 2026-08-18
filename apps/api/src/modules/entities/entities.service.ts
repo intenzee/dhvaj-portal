@@ -102,11 +102,29 @@ export class EntitiesService {
     params.push(page.limit, page.offset);
 
     return this.db.withRlsContext(ctx, async (client) => {
+      // Page first (with the windowed total over the filtered set), THEN compute
+      // the per-entity counts — so the correlated subqueries run only for the
+      // rows on this page, not for every matching row before LIMIT.
       const { rows } = await client.query<SummaryRow & { total_count: string }>(
-        `SELECT sub.*, count(*) OVER() AS total_count
-         FROM (${ENTITY_SUMMARY_SELECT} ${where}) sub
-         ORDER BY sub.legal_name
-         LIMIT ${limitParam} OFFSET ${offsetParam}`,
+        `SELECT sub.*,
+                (SELECT count(*) FROM hsdg.entity_registrations r WHERE r.entity_id = sub.id)
+                  AS registration_count,
+                (SELECT ec.full_name FROM hsdg.entity_contacts ec
+                   WHERE ec.entity_id = sub.id AND ec.is_primary LIMIT 1)
+                  AS primary_contact_name
+         FROM (
+           SELECT e.id, e.entity_code, e.legal_name, e.display_name, e.pan, e.status,
+                  e.incorporation_date, e.version, e.home_office_id, o.code AS office_code,
+                  et.slug AS type_slug, et.name AS type_name, et.category AS type_category,
+                  e.parent_entity_id, count(*) OVER() AS total_count
+           FROM hsdg.entities e
+           JOIN hsdg.entity_types et ON et.id = e.entity_type_id
+           JOIN hsdg.offices o ON o.id = e.home_office_id
+           ${where}
+           ORDER BY e.legal_name
+           LIMIT ${limitParam} OFFSET ${offsetParam}
+         ) sub
+         ORDER BY sub.legal_name`,
         params,
       );
       return {
