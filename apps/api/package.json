@@ -17,9 +17,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
-    "migrate": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL",
-    "migrate:up": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL up",
-    "migrate:down": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL down",
+    "migrate": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL --ignore-pattern '(.*\\.md|\\..*)'",
+    "migrate:up": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL --ignore-pattern '(.*\\.md|\\..*)' up",
+    "migrate:down": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL --ignore-pattern '(.*\\.md|\\..*)' down",
     "migrate:create": "node-pg-migrate -j sql -m ../../db/migrations create"
   },
   "dependencies": {
