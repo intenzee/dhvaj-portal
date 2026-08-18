@@ -12,6 +12,7 @@ import { IdentityModule } from './modules/identity/identity.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { OrganisationModule } from './modules/organisation/organisation.module';
+import { EntitiesModule } from './modules/entities/entities.module';
 
 /**
  * Composition root of the modular monolith.
@@ -30,8 +31,11 @@ import { OrganisationModule } from './modules/organisation/organisation.module';
  * Organisation & people (Phase 2):
  *   - OrganisationModule — employees, grades, partners, reporting lines
  *
- * Remaining domain modules (entities, services, engagements, …) are added one
- * per phase and imported here as they land.
+ * Entity master (Phase 3):
+ *   - EntitiesModule — client entities, registrations, contacts, duplicates
+ *
+ * Remaining domain modules (services, engagements, …) are added one per phase
+ * and imported here as they land.
  */
 @Module({
   imports: [
@@ -57,6 +61,7 @@ import { OrganisationModule } from './modules/organisation/organisation.module';
     IdentityModule,
     AuthModule,
     OrganisationModule,
+    EntitiesModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

@@ -13,11 +13,12 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
-import { PaginationQueryDto, paginate } from '../../common/pagination/pagination.dto';
+import { paginate } from '../../common/pagination/pagination.dto';
 import { OrganisationService } from './organisation.service';
 import type { EmployeeFilter, EmployeeRecord } from './organisation.types';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { EmployeeListQueryDto } from './dto/employee-list-query.dto';
 
 @ApiTags('employees')
 @Controller('employees')
@@ -33,17 +34,14 @@ export class EmployeesController {
   })
   async list(
     @CurrentPrincipal() principal: Principal,
-    @Query() page: PaginationQueryDto,
-    @Query('status') status?: string,
-    @Query('grade') grade?: string,
-    @Query('office') office?: string,
+    @Query() query: EmployeeListQueryDto,
   ): Promise<Paginated<EmployeeRecord>> {
     const filter: EmployeeFilter = {};
-    if (status) filter.status = status as EmployeeFilter['status'];
-    if (grade) filter.gradeSlug = grade as EmployeeFilter['gradeSlug'];
-    if (office) filter.officeCode = office;
-    const result = await this.org.listEmployees(rlsContextFromPrincipal(principal), filter, page);
-    return paginate(result, page);
+    if (query.status) filter.status = query.status;
+    if (query.grade) filter.gradeSlug = query.grade as EmployeeFilter['gradeSlug'];
+    if (query.office) filter.officeCode = query.office;
+    const result = await this.org.listEmployees(rlsContextFromPrincipal(principal), filter, query);
+    return paginate(result, query);
   }
 
   @Get(':id')

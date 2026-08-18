@@ -10,13 +10,14 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 2 — Organisation & People (complete).** On the Phase 0/1
-> foundation (identity, auth, RLS, audit), the system now has the firm's
-> org/HR model: employees, grades, partner profiles and reporting lines, with
-> RLS-scoped reads and audited, permission-gated writes. HR grade is kept
-> distinct from security role, and reporting line from access. All proven by
-> tests, including database-level RLS denial independent of the API. Remaining
-> business modules follow phase by phase — see [Roadmap](#roadmap).
+> **Status: Phase 3 — Entity Master (complete).** On the Phase 0–2 foundation
+> (identity, auth, RLS, audit, org/people), the system now has the **client
+> registry**: entities with statutory registrations (PAN/GSTIN/CIN/…) and
+> contacts, office-scoped RLS, audited permission-gated writes, optimistic
+> concurrency, and duplicate detection (hard PAN uniqueness + fuzzy `pg_trgm`
+> name search). All proven by tests, including database-level RLS denial
+> independent of the API. Remaining modules follow phase by phase — see
+> [Roadmap](#roadmap).
 
 ---
 
@@ -170,6 +171,14 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/employees` | `employee.manage` | Create (audited) |
 | PATCH | `/employees/:id` | `employee.manage` | Update (audited; optimistic concurrency via `version`) |
 | GET | `/partners` | `employee.read` | Partner register |
+| GET | `/entities` | `entity.read` | Clients _(paginated)_; filter `?status=&type=&office=&search=` |
+| GET | `/entities/:id` | `entity.read` | Detail with registrations + contacts; 404 off-scope |
+| GET | `/entities/duplicate-check` | `entity.read` | Exact PAN + fuzzy name candidates |
+| POST | `/entities` | `entity.manage` | Create (nested registrations/contacts, audited) |
+| PATCH | `/entities/:id` | `entity.manage` | Update (audited; optimistic concurrency) |
+| POST | `/entities/:id/registrations` | `entity.manage` | Add a registration (audited) |
+| POST | `/entities/:id/contacts` | `entity.manage` | Add a contact/signatory (audited) |
+| GET | `/entity-types` | `entity.read` | Entity type reference |
 
 ## Roadmap
 
@@ -177,8 +186,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | --- | --- | --- |
 | **0** | Repository & architecture foundation | ✅ done |
 | **1** | Identity & security (users, roles, offices, RLS policies + tests) | ✅ done |
-| **2** | Organisation & people (partners, managers, seniors, articles) | ✅ current |
-| 3 | Entity master (entities, registrations, contacts, duplicates) | ⬜ |
+| **2** | Organisation & people (partners, managers, seniors, articles) | ✅ done |
+| **3** | Entity master (entities, registrations, contacts, duplicates) | ✅ current |
 | 4 | Service catalogue (configurable services & review models) | ⬜ |
 | 5 | Engagement core (EP accountability, team, identity) | ⬜ |
 | 6 | Engagement lifecycle (explicit guarded transitions) | ⬜ |

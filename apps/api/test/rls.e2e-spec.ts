@@ -136,4 +136,39 @@ describe('RLS (database-level, independent of the application)', () => {
       ).rejects.toThrow(/permission denied/i);
     });
   });
+
+  describe('entities (Phase 3)', () => {
+    it('is fail-closed: no context ⇒ zero entities', async () => {
+      const rows = await underContext({}, 'SELECT id FROM hsdg.entities');
+      expect(rows).toHaveLength(0);
+    });
+
+    it('scopes a Partner to their office (North sees North clients only)', async () => {
+      const rows = await underContext<{ legal_name: string }>(
+        { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
+        'SELECT legal_name FROM hsdg.entities',
+      );
+      const names = rows.map((r) => r.legal_name);
+      expect(names).toContain('Acme Manufacturing Pvt Ltd');
+      expect(names).not.toContain('Coastal Foods Pvt Ltd'); // South
+    });
+
+    it('hides a cross-office client’s registrations from an office-scoped role', async () => {
+      const rows = await underContext<{ registration_number: string }>(
+        { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
+        'SELECT registration_number FROM hsdg.entity_registrations',
+      );
+      const numbers = rows.map((r) => r.registration_number);
+      expect(numbers).toContain('27AAACA1234A1Z5'); // Acme (North)
+      expect(numbers).not.toContain('29AACCC9012C1Z8'); // Coastal (South)
+    });
+
+    it('forbids the app role from writing entity_types (reference data)', async () => {
+      await expect(
+        app.query(
+          `INSERT INTO hsdg.entity_types (slug, name, category) VALUES ('x', 'X', 'other')`,
+        ),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
 });

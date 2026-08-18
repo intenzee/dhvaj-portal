@@ -1,8 +1,9 @@
 import 'reflect-metadata';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
+import { buildValidationPipe } from './common/validation';
 import { API_VERSION } from '@hsdg/contracts';
 import { AppModule } from './app.module';
 import { AppConfigService } from './config/config.module';
@@ -43,13 +44,7 @@ async function bootstrap(): Promise<void> {
   });
 
   // Backend validation is authoritative (frontend validation is UX only).
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
+  app.useGlobalPipes(buildValidationPipe());
 
   // Uniform error envelope for every failure.
   app.useGlobalFilters(new AllExceptionsFilter());

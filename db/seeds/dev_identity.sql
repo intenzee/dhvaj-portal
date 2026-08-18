@@ -88,3 +88,41 @@ FROM (VALUES
 ) AS v(code, membership_no, partner_since)
 JOIN hsdg.employees e ON e.employee_code = v.code
 ON CONFLICT (employee_id) DO NOTHING;
+
+-- ── Client entities (Phase 3) ─────────────────────────────────────────────
+-- Split across offices to exercise RLS scoping (a North user must not see a
+-- South client). entity_code is auto-generated (ENT#####).
+INSERT INTO hsdg.entities
+  (legal_name, display_name, entity_type_id, pan, home_office_id, status, incorporation_date)
+SELECT v.legal_name, v.display_name, et.id, v.pan, o.id, v.status, v.incorp::date
+FROM (VALUES
+  ('Acme Manufacturing Pvt Ltd', 'Acme',    'private_limited', 'AAACA1234A', 'NORTH', 'active', '2015-04-10'),
+  ('Bharat Textiles LLP',        'Bharat',  'llp',             'AABCB5678B', 'NORTH', 'active', '2018-07-01'),
+  ('Coastal Foods Pvt Ltd',      'Coastal', 'private_limited', 'AACCC9012C', 'SOUTH', 'active', '2016-01-20'),
+  ('Deepak Rao',                 'Deepak',  'individual',      'AADPD3456D', 'SOUTH', 'active', NULL)
+) AS v(legal_name, display_name, type_slug, pan, office_code, status, incorp)
+JOIN hsdg.entity_types et ON et.slug = v.type_slug
+JOIN hsdg.offices o ON o.code = v.office_code
+ON CONFLICT (pan) WHERE pan IS NOT NULL DO NOTHING;
+
+INSERT INTO hsdg.entity_registrations (entity_id, registration_type, registration_number, state_code, status)
+SELECT e.id, v.rtype, v.rnum, v.state, 'active'
+FROM (VALUES
+  ('AAACA1234A', 'gstin', '27AAACA1234A1Z5', '27'),
+  ('AAACA1234A', 'cin',   'U17110MH2015PTC123456', NULL),
+  ('AABCB5678B', 'llpin', 'AAB-5678', NULL),
+  ('AACCC9012C', 'gstin', '29AACCC9012C1Z8', '29')
+) AS v(pan, rtype, rnum, state)
+JOIN hsdg.entities e ON e.pan = v.pan
+ON CONFLICT (registration_type, registration_number) DO NOTHING;
+
+INSERT INTO hsdg.entity_contacts (entity_id, full_name, designation, email, is_primary, is_signatory)
+SELECT e.id, v.name, v.desig, v.email::citext, v.is_primary, v.is_sig
+FROM (VALUES
+  ('AAACA1234A', 'Ramesh Gupta', 'Director', 'ramesh@acme.example',    true,  true),
+  ('AACCC9012C', 'Sunita Nair',  'CFO',      'sunita@coastal.example', true,  false)
+) AS v(pan, name, desig, email, is_primary, is_sig)
+JOIN hsdg.entities e ON e.pan = v.pan
+WHERE NOT EXISTS (
+  SELECT 1 FROM hsdg.entity_contacts ec WHERE ec.entity_id = e.id AND ec.full_name = v.name
+);

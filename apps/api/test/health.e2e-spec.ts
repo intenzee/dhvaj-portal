@@ -1,10 +1,7 @@
-import { ValidationPipe, VersioningType } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { AppModule } from '../src/app.module';
-import { AllExceptionsFilter } from '../src/common/errors/all-exceptions.filter';
 import { CORRELATION_ID_HEADER } from '../src/common/logging/logger.config';
+import { createTestApp } from './create-test-app';
 
 /**
  * End-to-end smoke test of the Phase 0 foundation.
@@ -18,16 +15,7 @@ describe('Health (e2e)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1', prefix: 'v' });
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-    app.useGlobalFilters(new AllExceptionsFilter());
-    await app.init();
+    app = await createTestApp();
   });
 
   afterAll(async () => {
