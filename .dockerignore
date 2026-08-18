@@ -1,6 +1,9 @@
 # Never copy host build output or dependencies into the image build context.
 **/node_modules
 **/dist
+# TypeScript incremental cache: if a stale one is copied in, tsc skips emitting
+# dist inside the image (produces a broken build). Keep it out.
+**/*.tsbuildinfo
 .git
 .github
 **/coverage
