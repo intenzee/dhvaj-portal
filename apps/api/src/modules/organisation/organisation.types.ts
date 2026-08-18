@@ -19,6 +19,8 @@ export interface EmployeeRecord {
   dateOfExit: string | null;
   membershipNo: string | null;
   partnerSince: string | null;
+  /** Optimistic-concurrency token; increments on every update. */
+  version: number;
 }
 
 export interface EmployeeFilter {
@@ -45,4 +47,6 @@ export interface UpdateEmployeeInput {
   reportsToId?: string | null;
   employmentStatus?: EmploymentStatus;
   dateOfExit?: string | null;
+  /** Expected current version. If given and stale, the update fails with 409. */
+  version?: number;
 }

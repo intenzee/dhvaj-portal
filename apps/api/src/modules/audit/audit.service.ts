@@ -3,6 +3,7 @@ import { ClsService } from 'nestjs-cls';
 import type { PoolClient } from 'pg';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
+import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { CLS_CORRELATION_ID } from '../../common/context/request-context';
 import type { AuditEventRecord } from '../identity/identity.types';
 
@@ -67,7 +68,7 @@ export class AuditService {
     );
   }
 
-  async list(ctx: RlsContext, limit = 50): Promise<AuditEventRecord[]> {
+  async list(ctx: RlsContext, page: PageParams): Promise<PageResult<AuditEventRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{
         id: string;
@@ -79,25 +80,30 @@ export class AuditService {
         object_id: string | null;
         reason: string | null;
         correlation_id: string | null;
+        total_count: string;
       }>(
         `SELECT id, occurred_at, actor_user_id, actor_role, action,
-                object_type, object_id, reason, correlation_id
+                object_type, object_id, reason, correlation_id,
+                count(*) OVER() AS total_count
          FROM hsdg.audit_events
          ORDER BY occurred_at DESC
-         LIMIT $1`,
-        [limit],
+         LIMIT $1 OFFSET $2`,
+        [page.limit, page.offset],
       );
-      return rows.map((r) => ({
-        id: r.id,
-        occurredAt: r.occurred_at.toISOString(),
-        actorUserId: r.actor_user_id,
-        actorRole: r.actor_role,
-        action: r.action,
-        objectType: r.object_type,
-        objectId: r.object_id,
-        reason: r.reason,
-        correlationId: r.correlation_id,
-      }));
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          occurredAt: r.occurred_at.toISOString(),
+          actorUserId: r.actor_user_id,
+          actorRole: r.actor_role,
+          action: r.action,
+          objectType: r.object_type,
+          objectId: r.object_id,
+          reason: r.reason,
+          correlationId: r.correlation_id,
+        })),
+        total: rows[0] ? Number(rows[0].total_count) : 0,
+      };
     });
   }
 }

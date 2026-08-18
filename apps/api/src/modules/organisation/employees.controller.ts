@@ -10,9 +10,10 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION } from '@hsdg/contracts';
+import { PERMISSION, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
+import { PaginationQueryDto, paginate } from '../../common/pagination/pagination.dto';
 import { OrganisationService } from './organisation.service';
 import type { EmployeeFilter, EmployeeRecord } from './organisation.types';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -30,17 +31,19 @@ export class EmployeesController {
     description:
       'RLS-scoped (firm-wide roles see everyone; others see their office). Optional filters.',
   })
-  list(
+  async list(
     @CurrentPrincipal() principal: Principal,
+    @Query() page: PaginationQueryDto,
     @Query('status') status?: string,
     @Query('grade') grade?: string,
     @Query('office') office?: string,
-  ): Promise<EmployeeRecord[]> {
+  ): Promise<Paginated<EmployeeRecord>> {
     const filter: EmployeeFilter = {};
     if (status) filter.status = status as EmployeeFilter['status'];
     if (grade) filter.gradeSlug = grade as EmployeeFilter['gradeSlug'];
     if (office) filter.officeCode = office;
-    return this.org.listEmployees(rlsContextFromPrincipal(principal), filter);
+    const result = await this.org.listEmployees(rlsContextFromPrincipal(principal), filter, page);
+    return paginate(result, page);
   }
 
   @Get(':id')

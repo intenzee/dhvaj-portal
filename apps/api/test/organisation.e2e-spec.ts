@@ -21,8 +21,8 @@ describe('Organisation & People (e2e)', () => {
     return res.body.accessToken as string;
   };
   const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
-  const codes = (body: unknown): string[] =>
-    (body as Array<{ employeeCode: string }>).map((e) => e.employeeCode).sort();
+  const codes = (items: Array<{ employeeCode: string }>): string[] =>
+    items.map((e) => e.employeeCode).sort();
 
   beforeAll(async () => {
     await seedIdentityFixtures();
@@ -39,21 +39,34 @@ describe('Organisation & People (e2e)', () => {
     await app?.close();
   });
 
-  describe('reads (RLS-scoped)', () => {
-    it('gives the Managing Partner every employee', async () => {
+  describe('reads (RLS-scoped, paginated)', () => {
+    it('gives the Managing Partner every employee (paginated envelope)', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/employees')
         .set(bearer(await token('mp@hsdg.in')))
         .expect(200);
-      expect((res.body as unknown[]).length).toBeGreaterThanOrEqual(8);
+      expect(res.body.total).toBeGreaterThanOrEqual(8);
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(res.body.limit).toBe(20);
+      expect(res.body.offset).toBe(0);
+    });
+
+    it('honours limit/offset while reporting the full total', async () => {
+      const mp = await token('mp@hsdg.in');
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/employees?limit=2&offset=0')
+        .set(bearer(mp))
+        .expect(200);
+      expect(res.body.items.length).toBeLessThanOrEqual(2);
+      expect(res.body.total).toBeGreaterThanOrEqual(8); // total ignores the limit
     });
 
     it('scopes a Partner to their office', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/v1/employees')
+        .get('/api/v1/employees?limit=100')
         .set(bearer(await token('partner.a@hsdg.in')))
         .expect(200);
-      const c = codes(res.body);
+      const c = codes(res.body.items);
       expect(c).toContain('EMP001'); // North
       expect(c).not.toContain('EMP004'); // South
     });
@@ -68,19 +81,19 @@ describe('Organisation & People (e2e)', () => {
 
     it('filters by grade', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/v1/employees?grade=partner')
+        .get('/api/v1/employees?grade=partner&limit=100')
         .set(bearer(await token('mp@hsdg.in')))
         .expect(200);
       expect(
-        (res.body as Array<{ gradeSlug: string }>).every((e) => e.gradeSlug === 'partner'),
+        (res.body.items as Array<{ gradeSlug: string }>).every((e) => e.gradeSlug === 'partner'),
       ).toBe(true);
     });
 
     it('returns 404 for a cross-office employee by id (scope not leaked)', async () => {
       const all = await request(app.getHttpServer())
-        .get('/api/v1/employees')
+        .get('/api/v1/employees?limit=100')
         .set(bearer(await token('mp@hsdg.in')));
-      const south = (all.body as Array<{ employeeCode: string; id: string }>).find(
+      const south = (all.body.items as Array<{ employeeCode: string; id: string }>).find(
         (e) => e.employeeCode === 'EMP004',
       )!;
       await request(app.getHttpServer())
@@ -128,10 +141,59 @@ describe('Organisation & People (e2e)', () => {
         .set(bearer(await token('mp@hsdg.in')))
         .expect(200);
       const event = (
-        audit.body as Array<{ action: string; objectId: string; correlationId: string }>
+        audit.body.items as Array<{ action: string; objectId: string; correlationId: string }>
       ).find((e) => e.action === 'employee.created' && e.correlationId === correlationId);
       expect(event).toBeDefined();
       expect(event!.objectId).toBe(created.body.id);
+    });
+
+    it('round-trips dates without timezone drift (IST regression)', async () => {
+      const code = `EMP${Date.now().toString().slice(-6)}`;
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/employees')
+        .set(bearer(await token('admin@hsdg.in')))
+        .send({
+          employeeCode: code,
+          fullName: 'Date Test',
+          gradeSlug: 'article',
+          officeCode: 'NORTH',
+          dateOfJoining: '2024-06-01',
+        })
+        .expect(201);
+      // Would have been '2024-05-31' before the pg date-parser fix.
+      expect(created.body.dateOfJoining).toBe('2024-06-01');
+    });
+
+    it('enforces optimistic concurrency (stale version ⇒ 409)', async () => {
+      const code = `EMP${Date.now().toString().slice(-6)}`;
+      const admin = await token('admin@hsdg.in');
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/employees')
+        .set(bearer(admin))
+        .send({
+          employeeCode: code,
+          fullName: 'Version Test',
+          gradeSlug: 'article',
+          officeCode: 'NORTH',
+          dateOfJoining: '2024-01-01',
+        })
+        .expect(201);
+      const v0 = created.body.version as number;
+
+      // Correct version succeeds and bumps the version.
+      const ok = await request(app.getHttpServer())
+        .patch(`/api/v1/employees/${created.body.id}`)
+        .set(bearer(admin))
+        .send({ fullName: 'Version Test v2', version: v0 })
+        .expect(200);
+      expect(ok.body.version).toBe(v0 + 1);
+
+      // Re-using the now-stale version is rejected.
+      await request(app.getHttpServer())
+        .patch(`/api/v1/employees/${created.body.id}`)
+        .set(bearer(admin))
+        .send({ fullName: 'Version Test v3', version: v0 })
+        .expect(409);
     });
 
     it('rejects a duplicate employee code (409)', async () => {

@@ -12,3 +12,4 @@ export const API_VERSION = 'v1' as const;
 export const API_PREFIX = 'api' as const;
 
 export * from './identity';
+export * from './pagination';

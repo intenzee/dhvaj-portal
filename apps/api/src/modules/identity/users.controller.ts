@@ -1,8 +1,9 @@
-import { Controller, Get, NotFoundException, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION } from '@hsdg/contracts';
+import { PERMISSION, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
+import { PaginationQueryDto, paginate } from '../../common/pagination/pagination.dto';
 import { IdentityService } from './identity.service';
 import type { UserListItem } from './identity.types';
 
@@ -18,8 +19,12 @@ export class UsersController {
     description:
       'Results are scoped by Row Level Security: firm-wide roles see everyone; others see only their office. The database enforces this, not the UI.',
   })
-  list(@CurrentPrincipal() principal: Principal): Promise<UserListItem[]> {
-    return this.identity.listUsers(rlsContextFromPrincipal(principal));
+  async list(
+    @CurrentPrincipal() principal: Principal,
+    @Query() page: PaginationQueryDto,
+  ): Promise<Paginated<UserListItem>> {
+    const result = await this.identity.listUsers(rlsContextFromPrincipal(principal), page);
+    return paginate(result, page);
   }
 
   @Get(':id')

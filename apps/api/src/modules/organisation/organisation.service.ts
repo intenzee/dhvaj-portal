@@ -8,6 +8,7 @@ import type { PoolClient } from 'pg';
 import { EMPLOYMENT_STATUS, type EmploymentStatus, type GradeSlug } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
+import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { AuditService } from '../audit/audit.service';
 import type {
   CreateEmployeeInput,
@@ -23,7 +24,7 @@ const EMPLOYEE_SELECT = `
          e.primary_office_id, o.code AS office_code,
          e.reports_to_id, m.full_name AS reports_to_name,
          e.employment_status, e.date_of_joining, e.date_of_exit,
-         pp.membership_no, pp.partner_since
+         pp.membership_no, pp.partner_since, e.version, g.rank AS grade_rank
   FROM hsdg.employees e
   JOIN hsdg.grades g ON g.id = e.grade_id
   JOIN hsdg.offices o ON o.id = e.primary_office_id
@@ -45,10 +46,12 @@ interface EmployeeRow {
   reports_to_id: string | null;
   reports_to_name: string | null;
   employment_status: EmploymentStatus;
-  date_of_joining: Date;
-  date_of_exit: Date | null;
+  // `date` columns are returned as raw 'YYYY-MM-DD' strings (see pg-types.ts).
+  date_of_joining: string;
+  date_of_exit: string | null;
   membership_no: string | null;
-  partner_since: Date | null;
+  partner_since: string | null;
+  version: number;
 }
 
 @Injectable()
@@ -58,7 +61,11 @@ export class OrganisationService {
     private readonly audit: AuditService,
   ) {}
 
-  async listEmployees(ctx: RlsContext, filter: EmployeeFilter = {}): Promise<EmployeeRecord[]> {
+  async listEmployees(
+    ctx: RlsContext,
+    filter: EmployeeFilter,
+    page: PageParams,
+  ): Promise<PageResult<EmployeeRecord>> {
     const conditions: string[] = [];
     const params: unknown[] = [];
     if (filter.status) {
@@ -74,13 +81,23 @@ export class OrganisationService {
       conditions.push(`o.code = $${params.length}`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limitParam = `$${params.length + 1}`;
+    const offsetParam = `$${params.length + 2}`;
+    params.push(page.limit, page.offset);
 
     return this.db.withRlsContext(ctx, async (client) => {
-      const { rows } = await client.query<EmployeeRow>(
-        `${EMPLOYEE_SELECT} ${where} ORDER BY g.rank DESC, e.full_name`,
+      // One round-trip: the window count() gives the pre-limit total.
+      const { rows } = await client.query<EmployeeRow & { total_count: string }>(
+        `SELECT sub.*, count(*) OVER() AS total_count
+         FROM (${EMPLOYEE_SELECT} ${where}) sub
+         ORDER BY sub.grade_rank DESC, sub.full_name
+         LIMIT ${limitParam} OFFSET ${offsetParam}`,
         params,
       );
-      return rows.map(mapEmployee);
+      return {
+        items: rows.map(mapEmployee),
+        total: rows[0] ? Number(rows[0].total_count) : 0,
+      };
     });
   }
 
@@ -190,14 +207,34 @@ export class OrganisationService {
         return before; // Nothing to change.
       }
 
+      // Optimistic concurrency: always bump the version; if the caller supplied
+      // an expected version, only update when it still matches (else 409).
+      sets.push('version = version + 1');
       params.push(id);
+      const idParam = `$${params.length}`;
+      let versionClause = '';
+      if (input.version !== undefined) {
+        params.push(input.version);
+        versionClause = ` AND version = $${params.length}`;
+      }
+
+      let updated: number;
       try {
-        await client.query(
-          `UPDATE hsdg.employees SET ${sets.join(', ')} WHERE id = $${params.length}`,
+        const result = await client.query(
+          `UPDATE hsdg.employees SET ${sets.join(', ')} WHERE id = ${idParam}${versionClause}`,
           params,
         );
+        updated = result.rowCount ?? 0;
       } catch (err) {
         throw translatePgError(err);
+      }
+
+      if (updated === 0) {
+        // The row exists (checked above), so a zero-row update means the
+        // supplied version was stale — someone else changed it first.
+        throw new ConflictException(
+          'Employee was modified by someone else. Refresh and retry (stale version).',
+        );
       }
 
       const after = await this.selectById(client, id);
@@ -236,10 +273,6 @@ export class OrganisationService {
   }
 }
 
-function toDateString(value: Date | null): string | null {
-  return value ? value.toISOString().slice(0, 10) : null;
-}
-
 function mapEmployee(row: EmployeeRow): EmployeeRecord {
   return {
     id: row.id,
@@ -255,10 +288,11 @@ function mapEmployee(row: EmployeeRow): EmployeeRecord {
     reportsToId: row.reports_to_id,
     reportsToName: row.reports_to_name,
     employmentStatus: row.employment_status,
-    dateOfJoining: toDateString(row.date_of_joining)!,
-    dateOfExit: toDateString(row.date_of_exit),
+    dateOfJoining: row.date_of_joining,
+    dateOfExit: row.date_of_exit,
     membershipNo: row.membership_no,
-    partnerSince: toDateString(row.partner_since),
+    partnerSince: row.partner_since,
+    version: row.version,
   };
 }
 

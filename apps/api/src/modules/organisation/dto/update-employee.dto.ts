@@ -1,5 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsIn, IsOptional, IsString, IsUUID, ValidateIf } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { EMPLOYMENT_STATUSES, GRADE, type EmploymentStatus, type GradeSlug } from '@hsdg/contracts';
 
 const GRADE_SLUGS = Object.values(GRADE);
@@ -37,4 +47,13 @@ export class UpdateEmployeeDto {
   @ValidateIf((_o, v) => v !== null)
   @IsDateString()
   dateOfExit?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Expected current version for optimistic concurrency. Stale ⇒ 409.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
 }

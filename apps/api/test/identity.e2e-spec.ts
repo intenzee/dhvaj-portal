@@ -96,27 +96,28 @@ describe('Identity & Security (e2e)', () => {
   describe('RLS-scoped listing via the API', () => {
     it('scopes a Partner to their office', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/v1/users')
+        .get('/api/v1/users?limit=100')
         .set(bearer(await token('partner.a@hsdg.in')))
         .expect(200);
-      const emails = (res.body as Array<{ email: string }>).map((u) => u.email);
+      const emails = (res.body.items as Array<{ email: string }>).map((u) => u.email);
       expect(emails).toContain('partner.a@hsdg.in');
       expect(emails).not.toContain('partner.b@hsdg.in');
     });
 
     it('gives the Managing Partner every user', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/v1/users')
+        .get('/api/v1/users?limit=100')
         .set(bearer(await token('mp@hsdg.in')))
         .expect(200);
-      expect((res.body as unknown[]).length).toBeGreaterThanOrEqual(6);
+      expect(res.body.total).toBeGreaterThanOrEqual(6);
+      expect(res.body.items.length).toBeGreaterThanOrEqual(6);
     });
 
     it('returns 404 for a cross-office user fetched by id (scope not leaked)', async () => {
       const list = await request(app.getHttpServer())
-        .get('/api/v1/users')
+        .get('/api/v1/users?limit=100')
         .set(bearer(await token('mp@hsdg.in')));
-      const partnerB = (list.body as Array<{ email: string; id: string }>).find(
+      const partnerB = (list.body.items as Array<{ email: string; id: string }>).find(
         (u) => u.email === 'partner.b@hsdg.in',
       )!;
       await request(app.getHttpServer())
@@ -132,7 +133,8 @@ describe('Identity & Security (e2e)', () => {
         .get('/api/v1/audit')
         .set(bearer(await token('mp@hsdg.in')))
         .expect(200);
-      expect(Array.isArray(res.body)).toBe(true);
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(typeof res.body.total).toBe('number');
     });
 
     it('forbids a Manager from reading the audit trail (403)', async () => {
@@ -152,11 +154,11 @@ describe('Identity & Security (e2e)', () => {
         .expect(201);
 
       const audit = await request(app.getHttpServer())
-        .get('/api/v1/audit')
+        .get('/api/v1/audit?limit=100')
         .set(bearer(await token('mp@hsdg.in')))
         .expect(200);
 
-      const matched = (audit.body as Array<{ correlationId: string | null }>).some(
+      const matched = (audit.body.items as Array<{ correlationId: string | null }>).some(
         (e) => e.correlationId === correlationId,
       );
       expect(matched).toBe(true);

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { SYSTEM_ROLE, type RoleSlug } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
+import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import type { OfficeRecord, PrincipalData, UserListItem } from './identity.types';
 
 /**
@@ -85,7 +86,7 @@ export class IdentityService {
     });
   }
 
-  async listUsers(ctx: RlsContext): Promise<UserListItem[]> {
+  async listUsers(ctx: RlsContext, page: PageParams): Promise<PageResult<UserListItem>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{
         id: string;
@@ -95,21 +96,30 @@ export class IdentityService {
         office_code: string;
         is_active: boolean;
         roles: RoleSlug[];
+        total_count: string;
       }>(
-        `SELECT u.id, u.email, u.display_name, u.primary_office_id,
-                o.code AS office_code, u.is_active,
-                COALESCE(
-                  array_agg(DISTINCT r.slug) FILTER (WHERE r.slug IS NOT NULL),
-                  '{}'
-                ) AS roles
-         FROM hsdg.users u
-         JOIN hsdg.offices o ON o.id = u.primary_office_id
-         LEFT JOIN hsdg.user_roles ur ON ur.user_id = u.id
-         LEFT JOIN hsdg.roles r ON r.id = ur.role_id
-         GROUP BY u.id, o.code
-         ORDER BY u.display_name`,
+        `SELECT sub.*, count(*) OVER() AS total_count
+         FROM (
+           SELECT u.id, u.email, u.display_name, u.primary_office_id,
+                  o.code AS office_code, u.is_active,
+                  COALESCE(
+                    array_agg(DISTINCT r.slug) FILTER (WHERE r.slug IS NOT NULL),
+                    '{}'
+                  ) AS roles
+           FROM hsdg.users u
+           JOIN hsdg.offices o ON o.id = u.primary_office_id
+           LEFT JOIN hsdg.user_roles ur ON ur.user_id = u.id
+           LEFT JOIN hsdg.roles r ON r.id = ur.role_id
+           GROUP BY u.id, o.code
+         ) sub
+         ORDER BY sub.display_name
+         LIMIT $1 OFFSET $2`,
+        [page.limit, page.offset],
       );
-      return rows.map(toUserListItem);
+      return {
+        items: rows.map(toUserListItem),
+        total: rows[0] ? Number(rows[0].total_count) : 0,
+      };
     });
   }
 

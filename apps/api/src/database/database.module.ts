@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { Pool } from 'pg';
+import './pg-types'; // Register pg type-parser overrides (dates) before any query runs.
 import { AppConfigService } from '../config/config.module';
 import { PG_POOL } from './database.constants';
 import { DatabaseService } from './database.service';

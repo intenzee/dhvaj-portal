@@ -152,21 +152,23 @@ See [ADR-0003](docs/adr/0003-identity-and-rls.md) for the identity/RLS design.
 ## API (Phase 1)
 
 All endpoints are versioned under `/api/v1`. Everything except health and the
-dev-token endpoint requires a bearer token.
+dev-token endpoint requires a bearer token. List endpoints marked _paginated_
+accept `?limit=&offset=` and return `{ items, total, limit, offset }`
+([ADR-0005](docs/adr/0005-api-conventions.md)).
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
 | POST | `/auth/dev-token` | public (non-prod) | Mint a dev token for a seeded user |
 | GET | `/auth/me` | bearer | The authenticated principal + derived context |
-| GET | `/users` | `user.read` | RLS-scoped list |
+| GET | `/users` | `user.read` | RLS-scoped list _(paginated)_ |
 | GET | `/users/:id` | `user.read` | 404 if outside RLS scope (scope not leaked) |
 | GET | `/offices` | `office.read` | |
-| GET | `/audit` | `audit.read` | Firm-wide only; append-only trail |
-| GET | `/employees` | `employee.read` | RLS-scoped; filter `?status=&grade=&office=` |
+| GET | `/audit` | `audit.read` | Firm-wide only; append-only trail _(paginated)_ |
+| GET | `/employees` | `employee.read` | RLS-scoped _(paginated)_; filter `?status=&grade=&office=` |
 | GET | `/employees/:id` | `employee.read` | 404 if outside scope |
 | GET | `/employees/:id/reports` | `employee.read` | Direct reports (org structure) |
 | POST | `/employees` | `employee.manage` | Create (audited) |
-| PATCH | `/employees/:id` | `employee.manage` | Update (audited, before/after) |
+| PATCH | `/employees/:id` | `employee.manage` | Update (audited; optimistic concurrency via `version`) |
 | GET | `/partners` | `employee.read` | Partner register |
 
 ## Roadmap
