@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    # Ephemeral PostgreSQL for migration + integration/e2e tests.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # In CI the Postgres service is on 5432 (no local clash as there is on a dev laptop).
+      DATABASE_URL: postgres://hsdg_app:hsdg_app_dev_pw@localhost:5432/hsdg
+      DATABASE_MIGRATE_URL: postgres://hsdg_migrator:hsdg_migrator_dev_pw@localhost:5432/hsdg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap database roles & schema owner
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f infra/docker/postgres/init/00-roles.sql
+
+      - name: Run migrations (as migrator role)
+        run: npm run db:migrate
+
+      - name: E2E tests (as least-privilege app role)
+        env:
+          NODE_ENV: test
+          LOG_PRETTY: 'false'
+          LOG_LEVEL: warn
+        run: npm run test:e2e

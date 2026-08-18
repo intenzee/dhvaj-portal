@@ -1,0 +1,51 @@
+# Local development infrastructure for the HSDG Portal.
+# Brings up the system-of-record (PostgreSQL) and cache (Redis).
+# The API and web apps run on the host (npm) during development.
+#
+#   npm run db:up      # start postgres + redis
+#   npm run db:migrate # apply migrations (as hsdg_migrator)
+#   npm run api        # run the API against them
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hsdg-postgres
+    environment:
+      # Superuser is used ONLY for container bootstrap (role/db creation in
+      # init scripts). The application never connects with these credentials.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      # Host 5433 to avoid clashing with a local (Homebrew) PostgreSQL on 5432.
+      # Container-internal port stays 5432.
+      - '5433:5432'
+    volumes:
+      - hsdg-pgdata:/var/lib/postgresql/data
+      # Init scripts run in filename order on first start of an empty volume.
+      - ./infra/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d hsdg']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: hsdg-redis
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - hsdg-redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  hsdg-pgdata:
+  hsdg-redisdata:
