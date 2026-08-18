@@ -10,11 +10,13 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 0 — Foundation.** This repository currently contains the
-> production-grade foundation only (repo structure, backend skeleton, database
-> bootstrap with Row Level Security posture, migrations, config, logging, error
-> handling, OpenAPI, testing, CI). **No business modules are implemented yet.**
-> Development proceeds phase-by-phase — see [Roadmap](#roadmap).
+> **Status: Phase 1 — Identity & Security (complete).** On top of the Phase 0
+> foundation, the system now has users, offices, roles and permissions;
+> authentication (pluggable Entra ID / dev providers) with MFA enforcement;
+> application authorisation guards; **PostgreSQL Row Level Security** with an
+> immutable audit trail — all proven by tests, including database-level RLS
+> denial independent of the API. Remaining business modules follow phase by
+> phase — see [Roadmap](#roadmap).
 
 ---
 
@@ -82,7 +84,10 @@ cp apps/api/env.example apps/api/.env
 # 4. Apply database migrations (runs as the migrator role)
 npm run db:migrate
 
-# 5. Run the API (http://localhost:3001/api/v1)
+# 5. Seed sample identity data (offices + users; runs as the superuser)
+npm run db:seed:dev
+
+# 6. Run the API (http://localhost:3001/api/v1)
 npm run api
 ```
 
@@ -91,6 +96,23 @@ Once running:
 - Health (liveness): `GET http://localhost:3001/api/v1/health/live`
 - Health (readiness): `GET http://localhost:3001/api/v1/health/ready`
 - OpenAPI docs: `http://localhost:3001/api/docs`
+
+### Trying the API (dev auth)
+
+The dev auth provider mints tokens for seeded users (non-production only):
+
+```bash
+# Mint a token for the Managing Partner, then call a protected endpoint
+TOKEN=$(curl -s -X POST http://localhost:3001/api/v1/auth/dev-token \
+  -H 'content-type: application/json' -d '{"email":"mp@hsdg.in"}' \
+  | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).accessToken))")
+
+curl -s http://localhost:3001/api/v1/users -H "authorization: Bearer $TOKEN"
+```
+
+Seeded users: `mp@hsdg.in` (Managing Partner), `admin@hsdg.in`,
+`partner.a@hsdg.in` (North), `partner.b@hsdg.in` (South), `manager.x@hsdg.in`,
+`senior.y@hsdg.in`. Partners in different offices demonstrate RLS scoping.
 
 ### Useful scripts
 
@@ -113,17 +135,37 @@ Once running:
 - The API **verifies on boot** that its connection is genuinely least-privilege
   and **refuses to start** if it is a superuser or can bypass RLS.
 - Every data-access transaction carries a security context (`hsdg.user_id`,
-  `hsdg.role`, `hsdg.office_id`, `hsdg.org_id`) via `SET LOCAL`, ready for the
-  RLS policies added from Phase 1.
+  `hsdg.role`, `hsdg.office_id`) via `SET LOCAL`, read by the RLS policies.
+- **RLS is live (Phase 1):** `FORCE ROW LEVEL SECURITY` on identity tables,
+  office-scoped with a Managing-Partner firm-wide override, fail-closed (no
+  context ⇒ no rows). The audit trail is append-only (no UPDATE/DELETE).
+- Authentication (Entra ID / dev providers), MFA enforcement, and permission
+  guards sit above RLS — never instead of it.
 - Uniform error envelope, correlation IDs on every request/response, and secret
   redaction in logs.
+
+See [ADR-0003](docs/adr/0003-identity-and-rls.md) for the identity/RLS design.
+
+## API (Phase 1)
+
+All endpoints are versioned under `/api/v1`. Everything except health and the
+dev-token endpoint requires a bearer token.
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| POST | `/auth/dev-token` | public (non-prod) | Mint a dev token for a seeded user |
+| GET | `/auth/me` | bearer | The authenticated principal + derived context |
+| GET | `/users` | `user.read` | RLS-scoped list |
+| GET | `/users/:id` | `user.read` | 404 if outside RLS scope (scope not leaked) |
+| GET | `/offices` | `office.read` | |
+| GET | `/audit` | `audit.read` | Firm-wide only; append-only trail |
 
 ## Roadmap
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| **0** | Repository & architecture foundation | ✅ current |
-| 1 | Identity & security (users, roles, offices, RLS policies + tests) | ⬜ |
+| **0** | Repository & architecture foundation | ✅ done |
+| **1** | Identity & security (users, roles, offices, RLS policies + tests) | ✅ current |
 | 2 | Organisation & people (partners, managers, seniors, articles) | ⬜ |
 | 3 | Entity master (entities, registrations, contacts, duplicates) | ⬜ |
 | 4 | Service catalogue (configurable services & review models) | ⬜ |

@@ -2,6 +2,7 @@ import { validateEnv } from './env.validation';
 
 const validBase = {
   DATABASE_URL: 'postgres://hsdg_app:pw@localhost:5432/hsdg',
+  AUTH_JWT_SECRET: 'a-sufficiently-long-secret',
 };
 
 describe('validateEnv (fail-closed configuration)', () => {
@@ -38,5 +39,15 @@ describe('validateEnv (fail-closed configuration)', () => {
 
   it('REFUSES to start on an unknown NODE_ENV', () => {
     expect(() => validateEnv({ ...validBase, NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);
+  });
+
+  it('REFUSES to start without an AUTH_JWT_SECRET', () => {
+    expect(() => validateEnv({ DATABASE_URL: validBase.DATABASE_URL })).toThrow(/AUTH_JWT_SECRET/);
+  });
+
+  it('REFUSES to start on a too-short AUTH_JWT_SECRET', () => {
+    expect(() => validateEnv({ ...validBase, AUTH_JWT_SECRET: 'short' })).toThrow(
+      /AUTH_JWT_SECRET/,
+    );
   });
 });

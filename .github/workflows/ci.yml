@@ -70,9 +70,13 @@ jobs:
       - name: Run migrations (as migrator role)
         run: npm run db:migrate
 
-      - name: E2E tests (as least-privilege app role)
+      - name: E2E & RLS tests (as least-privilege app role)
         env:
           NODE_ENV: test
           LOG_PRETTY: 'false'
           LOG_LEVEL: warn
+          AUTH_JWT_SECRET: ci-only-secret-at-least-16-chars
+          # Superuser URL is used only by test setup to seed fixtures (bypasses
+          # RLS, as provisioning does). The app under test still uses hsdg_app.
+          DATABASE_SUPERUSER_URL: postgres://postgres:postgres@localhost:5432/hsdg
         run: npm run test:e2e

@@ -2,8 +2,10 @@ import { Controller, Get } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DatabaseHealthIndicator } from './database.health';
+import { Public } from '../modules/auth/auth.decorators';
 
 @ApiTags('health')
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

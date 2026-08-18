@@ -37,6 +37,23 @@ export const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+
+  // ── Authentication ───────────────────────────────────────────────────────
+  // Which identity provider verifies incoming tokens. `dev` uses locally-signed
+  // JWTs (development/testing only); `entra` validates Microsoft Entra ID tokens.
+  AUTH_PROVIDER: z.enum(['dev', 'entra']).default('dev'),
+
+  // Signing/verification secret for the dev provider's JWTs. No default — a
+  // secret must be supplied explicitly (fail-closed). Min length guards against
+  // trivially weak keys.
+  AUTH_JWT_SECRET: z.string().min(16),
+  AUTH_JWT_ISSUER: z.string().default('hsdg-portal'),
+  AUTH_JWT_AUDIENCE: z.string().default('hsdg-portal'),
+  AUTH_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+
+  // Entra ID (required only when AUTH_PROVIDER=entra; validated at provider use).
+  AUTH_ENTRA_TENANT_ID: z.string().optional(),
+  AUTH_ENTRA_CLIENT_ID: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
