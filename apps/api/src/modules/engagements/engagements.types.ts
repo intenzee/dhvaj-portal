@@ -61,6 +61,14 @@ export interface EngagementSummary {
   signedOffAt: string | null;
   /** Unresolved review points; completion is blocked while this is > 0. */
   openReviewPointCount: number;
+  // ── Operational state (Phase 9) ─────────────────────────────────────────
+  /** Has at least one open client dependency (pending / partially received). */
+  isWaitingForClient: boolean;
+  openTaskCount: number;
+  /** Open tasks past their due date — an INTERNAL delay, distinct from waiting-for-client. */
+  internallyOverdueTaskCount: number;
+  /** Open client dependencies past their escalation date — a CLIENT delay. */
+  clientOverdueCount: number;
 }
 
 export interface EngagementTeamMember {

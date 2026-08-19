@@ -797,4 +797,99 @@ describe('RLS (database-level, independent of the application)', () => {
       }
     });
   });
+
+  // Phase 9: tasks & client dependencies, proven at the database layer.
+  describe('tasks & client dependencies (Phase 9)', () => {
+    const emp = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.employees WHERE employee_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const engId = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const setCtx = (
+      userId: string | undefined,
+      role: string,
+      officeCode: 'NORTH' | 'SOUTH',
+      empId: string,
+    ) =>
+      app.query(
+        'SELECT set_config($1,$2,true),set_config($3,$4,true),set_config($5,$6,true),set_config($7,$8,true)',
+        [
+          'hsdg.user_id',
+          userId ?? '',
+          'hsdg.role',
+          role,
+          'hsdg.office_id',
+          officeIds[officeCode] ?? '',
+          'hsdg.employee_id',
+          empId,
+        ],
+      );
+
+    it('is fail-closed: no context ⇒ zero tasks and client dependencies', async () => {
+      expect(await underContext({}, 'SELECT id FROM hsdg.tasks')).toHaveLength(0);
+      expect(await underContext({}, 'SELECT id FROM hsdg.client_dependencies')).toHaveLength(0);
+    });
+
+    it('scopes tasks to membership, and lets the ASSIGNEE (not just a lead) update their task', async () => {
+      const acmeId = await engId('ENG00001');
+      const mpEmp = await emp('EMP001');
+      const partnerB = await emp('EMP004'); // unassigned to Acme
+      const seniorY = await emp('EMP006'); // on Acme's team
+
+      await app.query('BEGIN');
+      try {
+        // MP (firm-wide lead) creates a task assigned to Senior Y.
+        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        const task = await app.query<{ id: string }>(
+          `INSERT INTO hsdg.tasks (engagement_id, title, assigned_to_employee_id)
+           VALUES ($1, 'RLS task', $2) RETURNING id`,
+          [acmeId, seniorY],
+        );
+        const taskId = task.rows[0]!.id;
+
+        // Unassigned Partner B sees nothing.
+        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        const asB = await app.query(`SELECT id FROM hsdg.tasks WHERE id = '${taskId}'`);
+        expect(asB.rows).toHaveLength(0);
+        // …and cannot update it (RLS UPDATE: lead or assignee).
+        const bUpd = await app.query(
+          `UPDATE hsdg.tasks SET status = 'in_progress' WHERE id = '${taskId}'`,
+        );
+        expect(bUpd.rowCount).toBe(0);
+
+        // Senior Y (the assignee, NOT a lead) sees AND can update it.
+        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        const asY = await app.query(`SELECT id FROM hsdg.tasks WHERE id = '${taskId}'`);
+        expect(asY.rows).toHaveLength(1);
+        const yUpd = await app.query(
+          `UPDATE hsdg.tasks SET status = 'in_progress' WHERE id = '${taskId}'`,
+        );
+        expect(yUpd.rowCount).toBe(1);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+
+    it('only engagement-working roles hold task.update (not the platform admin)', async () => {
+      const rows = await underContext<{ slug: string }>(
+        { role: 'managing_partner' },
+        `SELECT r.slug FROM hsdg.role_permissions rp
+         JOIN hsdg.roles r ON r.id = rp.role_id
+         JOIN hsdg.permissions p ON p.id = rp.permission_id
+         WHERE p.slug = 'task.update' ORDER BY r.slug`,
+      );
+      const slugs = rows.map((r) => r.slug);
+      expect(slugs).toEqual(expect.arrayContaining(['senior', 'article', 'manager', 'partner']));
+      expect(slugs).not.toContain('admin');
+    });
+  });
 });

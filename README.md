@@ -10,7 +10,20 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 8 — Compliance Engine (complete).** The engagement is the
+> **Status: Phase 9 — Tasks & Client Dependencies (complete).** Engagements now
+> track **internal tasks** (assignment, due dates, task→task dependencies that
+> block completion) and **client dependencies** — information requested from the
+> client. An open dependency makes the engagement **WAITING FOR CLIENT** (a
+> derived operational state), and the read model surfaces **internally overdue**
+> (a task past due — our delay) separately from **client delay** (a dependency
+> past its escalation date). A task's assignee — even a senior/article — may
+> progress their own work, while assignment and governance stay lead-only.
+> Firm-wide "My Work" views aggregate assigned tasks and open dependencies. All
+> enforced by PostgreSQL RLS and proven by tests independent of the API.
+>
+> <details><summary>Earlier phases</summary>
+>
+> **Phase 8 — Compliance Engine.** The engagement is the
 > central transactional object (identity = Entity + Service + FY + Period), with
 > one accountable Engagement Partner, a per-engagement **team of shared
 > resources**, and **assignment-based** access. Lifecycle moves only through
@@ -23,8 +36,11 @@ audit trail.
 > deadline** vs **internal SLA**), deadlines are computed with offsets +
 > working-day/holiday adjustment + conditional applicability, and manual
 > overrides are audited with reason + evidence. No statutory date is hard-coded —
-> rules are data. All enforced by PostgreSQL RLS and proven by tests independent
-> of the API. Remaining modules follow phase by phase — see [Roadmap](#roadmap).
+> rules are data.
+>
+> </details>
+>
+> Remaining modules follow phase by phase — see [Roadmap](#roadmap).
 
 ---
 
@@ -230,6 +246,14 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/engagements/:id/compliance` | `engagement.manage` | Generate an obligation from a rule (snapshots the version; audited) |
 | POST | `/engagements/:id/compliance/:instanceId/override` | `engagement.manage` | Override a clock's deadline (reason + evidence; audited) |
 | POST | `/engagements/:id/compliance/:instanceId/{complete,waive}` | `engagement.manage` | Complete or waive an obligation (audited) |
+| GET/POST | `/engagements/:id/tasks` | `engagement.read` / `engagement.manage` | Engagement tasks _(paginated)_; filter `?status=&assignedToEmployeeId=` |
+| GET/PATCH | `/engagements/:id/tasks/:taskId` | `engagement.read` / `engagement.manage` | Task detail with blockers / update fields (lead) |
+| POST | `/engagements/:id/tasks/:taskId/status` | `task.update` | Progress a task (assignee or lead; blocked while a blocker is open) |
+| POST/DELETE | `/engagements/:id/tasks/:taskId/dependencies[/:depId]` | `engagement.manage` | Add/remove a blocker (rejects cycles) |
+| GET/POST | `/engagements/:id/client-dependencies` | `engagement.read` / `engagement.manage` | Client dependencies _(paginated)_; request info (→ waiting-for-client) |
+| POST | `/engagements/:id/client-dependencies/:id/{receive,close}` | `engagement.manage` | Record receipt / waive-cancel (audited) |
+| GET | `/work/tasks` | `engagement.read` | My assigned tasks across engagements _(paginated)_; `?overdueOnly=` |
+| GET | `/work/client-dependencies` | `engagement.read` | Open client dependencies I'm waiting on _(paginated)_; `?overdueOnly=` |
 
 ## Roadmap
 
@@ -243,8 +267,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **5** | Engagement core (EP accountability, team, identity) | ✅ done |
 | **6** | Engagement lifecycle (explicit guarded transitions) | ✅ done |
 | **7** | Review & sign-off engine (review models, sign-off gate, review points) | ✅ done |
-| **8** | Compliance engine (effective-dated, versioned; two clocks) | ✅ current |
-| 9 | Tasks & client dependencies | ⬜ |
+| **8** | Compliance engine (effective-dated, versioned; two clocks) | ✅ done |
+| **9** | Tasks & client dependencies (waiting-for-client; internal vs client delay) | ✅ current |
 | 10 | Documents (Azure Blob + audited access) | ⬜ |
 | 11 | Notifications | ⬜ |
 | 12 | Dashboard / frontend foundation | ⬜ |
