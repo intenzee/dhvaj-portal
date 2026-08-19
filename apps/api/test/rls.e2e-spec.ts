@@ -666,4 +666,135 @@ describe('RLS (database-level, independent of the application)', () => {
       }
     });
   });
+
+  // Phase 8: compliance engine, proven at the database layer. Rules/versions/
+  // holidays are firm-wide config; instances/overrides are engagement-scoped.
+  describe('compliance engine (Phase 8)', () => {
+    const emp = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.employees WHERE employee_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const engId = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const setCtx = (
+      userId: string | undefined,
+      role: string,
+      officeCode: 'NORTH' | 'SOUTH',
+      empId: string,
+    ) =>
+      app.query(
+        'SELECT set_config($1,$2,true),set_config($3,$4,true),set_config($5,$6,true),set_config($7,$8,true)',
+        [
+          'hsdg.user_id',
+          userId ?? '',
+          'hsdg.role',
+          role,
+          'hsdg.office_id',
+          officeIds[officeCode] ?? '',
+          'hsdg.employee_id',
+          empId,
+        ],
+      );
+
+    it('is fail-closed: no context ⇒ zero rules, versions, and instances', async () => {
+      expect(await underContext({}, 'SELECT id FROM hsdg.compliance_rules')).toHaveLength(0);
+      expect(await underContext({}, 'SELECT id FROM hsdg.compliance_rule_versions')).toHaveLength(
+        0,
+      );
+      expect(await underContext({}, 'SELECT id FROM hsdg.compliance_instances')).toHaveLength(0);
+    });
+
+    it('rules are firm-wide config: any role reads, only firm-wide writes', async () => {
+      // Resolve employee ids BEFORE opening the transaction — emp() runs its own
+      // BEGIN/ROLLBACK, which would otherwise abort the transaction below.
+      const mpEmp = await emp('EMP001');
+      const seniorEmp = await emp('EMP006');
+      await app.query('BEGIN');
+      try {
+        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        const code = `RLS_${Date.now()}`;
+        await app.query(`INSERT INTO hsdg.compliance_rules (code, name) VALUES ($1, 'x')`, [code]);
+
+        // A senior (office-scoped) can still read firm-wide config.
+        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorEmp);
+        const seen = await app.query(`SELECT id FROM hsdg.compliance_rules WHERE code = $1`, [
+          code,
+        ]);
+        expect(seen.rows).toHaveLength(1);
+
+        // …but a non-firm-wide role cannot WRITE a rule (RLS WITH CHECK).
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', 'manager']);
+        await expect(
+          app.query(
+            `INSERT INTO hsdg.compliance_rules (code, name) VALUES ('X_${Date.now()}', 'x')`,
+          ),
+        ).rejects.toThrow(/row-level security/i);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+
+    it('rule versions and the override log are append-only to the app role', async () => {
+      await expect(
+        app.query(`UPDATE hsdg.compliance_rule_versions SET offset_days = 0`),
+      ).rejects.toThrow(/permission denied/i);
+      await expect(app.query(`DELETE FROM hsdg.compliance_rule_versions`)).rejects.toThrow(
+        /permission denied/i,
+      );
+      await expect(app.query(`DELETE FROM hsdg.compliance_instances`)).rejects.toThrow(
+        /permission denied/i,
+      );
+      await expect(app.query(`DELETE FROM hsdg.compliance_instance_overrides`)).rejects.toThrow(
+        /permission denied/i,
+      );
+    });
+
+    it('scopes compliance instances to engagement membership (unassigned blind; member sees)', async () => {
+      const acmeId = await engId('ENG00001');
+      const mpEmp = await emp('EMP001');
+      const partnerB = await emp('EMP004'); // unassigned to Acme
+      const seniorY = await emp('EMP006'); // on Acme's team
+      await app.query('BEGIN');
+      try {
+        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        const rule = await app.query<{ id: string }>(
+          `INSERT INTO hsdg.compliance_rules (code, name) VALUES ('INST_${Date.now()}', 'x') RETURNING id`,
+        );
+        const ruleId = rule.rows[0]!.id;
+        const ver = await app.query<{ id: string }>(
+          `INSERT INTO hsdg.compliance_rule_versions (compliance_rule_id, version, effective_from, calculation_basis)
+           VALUES ($1, 1, '2020-04-01', 'fy_end') RETURNING id`,
+          [ruleId],
+        );
+        await app.query(
+          `INSERT INTO hsdg.compliance_instances
+             (engagement_id, compliance_rule_id, compliance_rule_version_id, reference_date, statutory_deadline, internal_sla_date)
+           VALUES ($1, $2, $3, '2027-03-31', '2027-10-31', '2027-10-01')`,
+          [acmeId, ruleId, ver.rows[0]!.id],
+        );
+
+        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        const asB = await app.query(
+          `SELECT id FROM hsdg.compliance_instances WHERE engagement_id = '${acmeId}'`,
+        );
+        expect(asB.rows).toHaveLength(0);
+
+        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        const asY = await app.query(
+          `SELECT id FROM hsdg.compliance_instances WHERE engagement_id = '${acmeId}'`,
+        );
+        expect(asY.rows.length).toBeGreaterThanOrEqual(1);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+  });
 });

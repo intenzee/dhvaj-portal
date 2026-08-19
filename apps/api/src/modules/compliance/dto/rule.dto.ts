@@ -1,0 +1,166 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import {
+  CALCULATION_BASES,
+  COMPLIANCE_CATEGORIES,
+  WORKING_DAY_ADJUSTMENTS,
+  type CalculationBasis,
+  type ComplianceCategory,
+  type WorkingDayAdjustment,
+} from '@hsdg/contracts';
+import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
+
+export class CreateComplianceRuleDto {
+  @ApiProperty({ example: 'ITR_FILING_IND' })
+  @Matches(/^[A-Z0-9_]{2,50}$/, { message: 'code must be UPPER_SNAKE (2–50 chars)' })
+  code!: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @ApiPropertyOptional({ description: 'Link the obligation to a service by code.' })
+  @IsOptional()
+  @IsString()
+  serviceCode?: string;
+
+  @ApiPropertyOptional({ enum: COMPLIANCE_CATEGORIES })
+  @IsOptional()
+  @IsIn(COMPLIANCE_CATEGORIES)
+  category?: ComplianceCategory;
+}
+
+export class AddRuleVersionDto {
+  @ApiProperty({ example: '2020-04-01' })
+  @IsDateString()
+  effectiveFrom!: string;
+
+  @ApiPropertyOptional({ example: '2027-03-31' })
+  @IsOptional()
+  @IsDateString()
+  effectiveTo?: string | null;
+
+  @ApiProperty({ enum: CALCULATION_BASES })
+  @IsIn(CALCULATION_BASES)
+  calculationBasis!: CalculationBasis;
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(-120)
+  @Max(120)
+  offsetMonths?: number;
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(-366)
+  @Max(366)
+  offsetDays?: number;
+
+  @ApiPropertyOptional({ description: 'For fixed_date basis (1–12).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  fixedMonth?: number;
+
+  @ApiPropertyOptional({ description: 'For fixed_date basis (1–31).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  fixedDay?: number;
+
+  @ApiPropertyOptional({ enum: WORKING_DAY_ADJUSTMENTS, default: 'next' })
+  @IsOptional()
+  @IsIn(WORKING_DAY_ADJUSTMENTS)
+  workingDayAdjustment?: WorkingDayAdjustment;
+
+  @ApiPropertyOptional({
+    default: 0,
+    description: 'Buffer days before statutory for the internal SLA.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(366)
+  internalSlaOffsetDays?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Configurable conditional applicability, e.g. {"field":"turnover","op":">","value":10000000}.',
+  })
+  @IsOptional()
+  @IsObject()
+  condition?: Record<string, unknown>;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
+}
+
+export class SetRuleActiveDto {
+  @ApiProperty()
+  @IsBoolean()
+  isActive!: boolean;
+}
+
+export class ComplianceRuleListQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: COMPLIANCE_CATEGORIES })
+  @IsOptional()
+  @IsIn(COMPLIANCE_CATEGORIES)
+  category?: ComplianceCategory;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  serviceCode?: string;
+
+  @ApiPropertyOptional({ description: 'Only active rules.' })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  activeOnly?: boolean;
+}
+
+export class AddHolidayDto {
+  @ApiProperty({ example: '2026-08-15' })
+  @IsDateString()
+  date!: string;
+
+  @ApiProperty({ example: 'Independence Day' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name!: string;
+}

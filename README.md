@@ -10,19 +10,21 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 7 — Review & Sign-off Engine (complete).** The engagement is
-> the central transactional object (identity = Entity + Service + FY + Period),
-> with one accountable Engagement Partner, a manager, and a per-engagement
-> **team of shared resources**; access is **assignment-based** (a team member
-> sees an engagement, its client, and co-workers regardless of office).
-> Lifecycle moves only through **explicit guarded transitions** (Phase 6), and
-> **completion is now gated by review sign-off** (Phase 7): each service's
-> required review model — which the EP may escalate but never weaken — decides
-> who may sign off. A manager can complete routine work (ITR), but a statutory
-> audit cannot complete without **EP sign-off**. Review points block sign-off
-> until resolved; reopening invalidates the sign-off. All enforced by PostgreSQL
-> RLS and proven by tests independent of the API. Remaining modules follow phase
-> by phase — see [Roadmap](#roadmap).
+> **Status: Phase 8 — Compliance Engine (complete).** The engagement is the
+> central transactional object (identity = Entity + Service + FY + Period), with
+> one accountable Engagement Partner, a per-engagement **team of shared
+> resources**, and **assignment-based** access. Lifecycle moves only through
+> **explicit guarded transitions** (Phase 6); **completion is gated by review
+> sign-off** (Phase 7 — a manager can complete an ITR, but a statutory audit
+> needs **EP sign-off**). Phase 8 adds a **compliance engine**: configurable,
+> effective-dated, **versioned** statutory rules turned into per-engagement
+> obligations that **snapshot the rule version used** — so changing a *future*
+> rule never rewrites history. Two clocks are tracked separately (**statutory
+> deadline** vs **internal SLA**), deadlines are computed with offsets +
+> working-day/holiday adjustment + conditional applicability, and manual
+> overrides are audited with reason + evidence. No statutory date is hard-coded —
+> rules are data. All enforced by PostgreSQL RLS and proven by tests independent
+> of the API. Remaining modules follow phase by phase — see [Roadmap](#roadmap).
 
 ---
 
@@ -217,6 +219,17 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/engagements/:id/sign-off` | `engagement.manage` | Terminal sign-off; authority set by the effective review model (audited) |
 | POST | `/engagements/:id/review-points/:pointId/resolve` | `engagement.manage` | Resolve an open review point (audited) |
 | POST | `/engagements/:id/review-plan` | `engagement.manage` | Escalate the review model (escalate-only; audited) |
+| GET | `/compliance-rules` | `compliance.read` | Compliance rules with version history _(paginated)_; filter `?category=&serviceCode=&activeOnly=` |
+| GET | `/compliance-rules/:idOrCode` | `compliance.read` | One rule with all versions |
+| POST | `/compliance-rules` | `compliance.manage` | Create a rule (firm-wide config; audited) |
+| POST | `/compliance-rules/:id/versions` | `compliance.manage` | Add an effective-dated version (append-only; audited) |
+| PATCH | `/compliance-rules/:id/active` | `compliance.manage` | Activate/deactivate a rule (audited) |
+| GET/POST | `/compliance-holidays` | `compliance.read` / `compliance.manage` | Working-day holiday calendar |
+| GET | `/engagements/:id/compliance` | `engagement.read` | Engagement compliance obligations (both clocks + overdue flags) _(paginated)_ |
+| GET | `/engagements/:id/compliance/:instanceId` | `engagement.read` | One obligation with its override history |
+| POST | `/engagements/:id/compliance` | `engagement.manage` | Generate an obligation from a rule (snapshots the version; audited) |
+| POST | `/engagements/:id/compliance/:instanceId/override` | `engagement.manage` | Override a clock's deadline (reason + evidence; audited) |
+| POST | `/engagements/:id/compliance/:instanceId/{complete,waive}` | `engagement.manage` | Complete or waive an obligation (audited) |
 
 ## Roadmap
 
@@ -229,8 +242,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **4** | Service catalogue (configurable services & review models) | ✅ done |
 | **5** | Engagement core (EP accountability, team, identity) | ✅ done |
 | **6** | Engagement lifecycle (explicit guarded transitions) | ✅ done |
-| **7** | Review & sign-off engine (review models, sign-off gate, review points) | ✅ current |
-| 8 | Compliance engine (effective-dated, versioned) | ⬜ |
+| **7** | Review & sign-off engine (review models, sign-off gate, review points) | ✅ done |
+| **8** | Compliance engine (effective-dated, versioned; two clocks) | ✅ current |
 | 9 | Tasks & client dependencies | ⬜ |
 | 10 | Documents (Azure Blob + audited access) | ⬜ |
 | 11 | Notifications | ⬜ |
