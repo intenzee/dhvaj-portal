@@ -1,15 +1,10 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type { CalculationBasis, WorkingDayAdjustment } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
+import { translatePgError as mapPgError } from '../../common/errors/pg-error.util';
 import { AuditService } from '../audit/audit.service';
 import type {
   AddRuleVersionInput,
@@ -355,31 +350,25 @@ function mapRule(row: RuleRow, versions: ComplianceRuleVersionRecord[]): Complia
   };
 }
 
-/** Map PostgreSQL constraint/RLS violations to clean HTTP errors. */
+/** Map PostgreSQL constraint/RLS violations to clean HTTP errors (compliance domain). */
 export function translateComplianceError(err: unknown): Error {
-  const e = err as { code?: string; constraint?: string; message?: string };
-  if (e.code === '23505') {
-    if (e.constraint?.includes('rules_code')) {
-      return new ConflictException('A compliance rule with that code already exists.');
-    }
-    if (e.constraint?.includes('effective')) {
-      return new ConflictException('A rule version with that effective-from date already exists.');
-    }
-    if (e.constraint?.includes('instances_unique')) {
-      return new ConflictException(
-        'A compliance instance already exists for this engagement, rule and period.',
-      );
-    }
-    return new ConflictException('A duplicate value violates a unique constraint.');
-  }
-  if (e.code === '23503') return new BadRequestException('A referenced record does not exist.');
-  if (e.code === '23514') {
-    return new BadRequestException(
-      e.message && e.message.length <= 200 ? e.message : 'A value violates a check constraint.',
-    );
-  }
-  if (e.code === '42501') {
-    return new ForbiddenException('Not permitted to write this compliance record.');
-  }
-  return err as Error;
+  return mapPgError(err, {
+    unique: [
+      { match: 'rules_code', message: 'A compliance rule with that code already exists.' },
+      {
+        match: 'effective',
+        message: 'A rule version with that effective-from date already exists.',
+      },
+      {
+        match: 'instances_unique',
+        message: 'A compliance instance already exists for this engagement, rule and period.',
+      },
+    ],
+    uniqueDefault: 'A duplicate value violates a unique constraint.',
+    foreignKey: 'A referenced record does not exist.',
+    // Check constraints here carry developer-authored, data-free messages.
+    check: (message) =>
+      message && message.length <= 200 ? message : 'A value violates a check constraint.',
+    forbidden: 'Not permitted to write this compliance record.',
+  });
 }

@@ -89,6 +89,19 @@ export interface ComplianceInstanceDetail extends ComplianceInstanceRecord {
   overrides: ComplianceOverrideRecord[];
 }
 
+/** A calendar row — an obligation enriched with its engagement/entity/service context. */
+export interface ComplianceCalendarRecord extends ComplianceInstanceRecord {
+  engagementCode: string;
+  entityName: string;
+  serviceCode: string;
+}
+
+/** Result of a bulk generate-for-service call. */
+export interface BulkGenerateResult {
+  generated: ComplianceInstanceRecord[];
+  skipped: Array<{ rule: string; reason: string }>;
+}
+
 // ── Inputs ──────────────────────────────────────────────────────────────────
 
 export interface CreateComplianceRuleInput {

@@ -3,11 +3,19 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
-import { PaginationQueryDto, paginate } from '../../common/pagination/pagination.dto';
+import { paginate } from '../../common/pagination/pagination.dto';
 import { ComplianceInstancesService } from './compliance-instances.service';
-import type { ComplianceInstanceDetail, ComplianceInstanceRecord } from './compliance.types';
+import type {
+  BulkGenerateResult,
+  ComplianceCalendarRecord,
+  ComplianceInstanceDetail,
+  ComplianceInstanceRecord,
+} from './compliance.types';
 import {
   CompleteInstanceDto,
+  ComplianceCalendarQueryDto,
+  ComplianceInstanceListQueryDto,
+  GenerateForServiceDto,
   GenerateInstanceDto,
   OverrideInstanceDto,
   WaiveInstanceDto,
@@ -35,10 +43,11 @@ export class ComplianceInstancesController {
   list(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
-    @Query() query: PaginationQueryDto,
+    @Query() query: ComplianceInstanceListQueryDto,
   ): Promise<Paginated<ComplianceInstanceRecord>> {
+    const filter = query.status ? { status: query.status } : {};
     return this.instances
-      .list(rlsContextFromPrincipal(principal), id, query)
+      .list(rlsContextFromPrincipal(principal), id, query, filter)
       .then((result) => paginate(result, query));
   }
 
@@ -67,6 +76,22 @@ export class ComplianceInstancesController {
     @Body() dto: GenerateInstanceDto,
   ): Promise<ComplianceInstanceRecord> {
     return this.instances.generate(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Post(':id/compliance/generate-for-service')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Generate obligations for all active rules on the engagement’s service (audited)',
+    description:
+      'Bulk generation. Rules that need an explicit date (period/event basis), do not apply under ' +
+      'the context, or already exist are returned in `skipped` with a reason, not failed.',
+  })
+  generateForService(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: GenerateForServiceDto,
+  ): Promise<BulkGenerateResult> {
+    return this.instances.generateForService(rlsContextFromPrincipal(principal), id, dto);
   }
 
   @Post(':id/compliance/:instanceId/override')
@@ -106,5 +131,44 @@ export class ComplianceInstancesController {
     @Body() dto: WaiveInstanceDto,
   ): Promise<ComplianceInstanceRecord> {
     return this.instances.waive(rlsContextFromPrincipal(principal), id, instanceId, dto);
+  }
+}
+
+/**
+ * Firm-wide compliance calendar (Phase 8 / §12). Cross-engagement view of
+ * obligations, RLS-scoped to what the caller can see, for dashboards and the
+ * Compliance Calendar. Reads need `engagement.read` (same floor as the
+ * per-engagement list).
+ */
+@ApiTags('engagement-compliance')
+@Controller('compliance')
+export class ComplianceCalendarController {
+  constructor(private readonly instances: ComplianceInstancesService) {}
+
+  @Get()
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Firm-wide compliance calendar (paginated, RLS-scoped)',
+    description:
+      'Obligations across all engagements the caller can access, ordered by effective statutory ' +
+      'deadline. Filter by ?status=, ?dueFrom=/?dueTo=, and ?overdueOnly=true.',
+  })
+  calendar(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: ComplianceCalendarQueryDto,
+  ): Promise<Paginated<ComplianceCalendarRecord>> {
+    const filter: {
+      status?: ComplianceCalendarQueryDto['status'];
+      dueFrom?: string;
+      dueTo?: string;
+      overdueOnly?: boolean;
+    } = {};
+    if (query.status) filter.status = query.status;
+    if (query.dueFrom) filter.dueFrom = query.dueFrom;
+    if (query.dueTo) filter.dueTo = query.dueTo;
+    if (query.overdueOnly !== undefined) filter.overdueOnly = query.overdueOnly;
+    return this.instances
+      .calendar(rlsContextFromPrincipal(principal), query, filter)
+      .then((result) => paginate(result, query));
   }
 }
