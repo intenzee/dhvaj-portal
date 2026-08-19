@@ -4,7 +4,7 @@ import type { PoolClient } from 'pg';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
-import { CLS_CORRELATION_ID } from '../../common/context/request-context';
+import { resolveAmbientCorrelationId } from '../../common/context/request-context';
 import type { AuditEventRecord } from '../identity/identity.types';
 
 export interface AuditInput {
@@ -46,8 +46,7 @@ export class AuditService {
     // Default the correlation id from the ambient request context, so every
     // audited event is tied to the request that caused it without callers
     // having to thread it through. Guard for calls made outside a request.
-    const ambient = this.cls.isActive() ? this.cls.get<string>(CLS_CORRELATION_ID) : undefined;
-    const correlationId = input.correlationId ?? ambient ?? null;
+    const correlationId = input.correlationId ?? resolveAmbientCorrelationId(this.cls) ?? null;
 
     await client.query(
       `INSERT INTO hsdg.audit_events

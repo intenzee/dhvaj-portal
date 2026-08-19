@@ -11,6 +11,8 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { AuditService } from '../audit/audit.service';
+import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
+import type { EngagementRow } from './engagement-detail.query';
 import type {
   AssignTeamMemberInput,
   CreateEngagementInput,
@@ -19,46 +21,6 @@ import type {
   EngagementSummary,
   UpdateEngagementInput,
 } from './engagements.types';
-
-const ENGAGEMENT_BASE = `
-  SELECT eng.id, eng.engagement_code, eng.entity_id, ent.entity_code, ent.legal_name AS entity_name,
-         eng.service_id, s.code AS service_code, s.name AS service_name,
-         eng.financial_year, eng.period_label, eng.office_id, o.code AS office_code,
-         eng.status, eng.engagement_partner_id, ep.full_name AS ep_name,
-         eng.engagement_manager_id, mgr.full_name AS manager_name,
-         eng.predecessor_engagement_id, eng.planned_start_date, eng.planned_end_date,
-         eng.accepted_at, eng.version
-  FROM hsdg.engagements eng
-  JOIN hsdg.entities ent ON ent.id = eng.entity_id
-  JOIN hsdg.services s ON s.id = eng.service_id
-  JOIN hsdg.offices o ON o.id = eng.office_id
-  LEFT JOIN hsdg.employees ep ON ep.id = eng.engagement_partner_id
-  LEFT JOIN hsdg.employees mgr ON mgr.id = eng.engagement_manager_id`;
-
-interface EngagementRow {
-  id: string;
-  engagement_code: string;
-  entity_id: string;
-  entity_code: string;
-  entity_name: string;
-  service_id: string;
-  service_code: string;
-  service_name: string;
-  financial_year: string;
-  period_label: string;
-  office_id: string;
-  office_code: string;
-  status: EngagementStatus;
-  engagement_partner_id: string | null;
-  ep_name: string | null;
-  engagement_manager_id: string | null;
-  manager_name: string | null;
-  predecessor_engagement_id: string | null;
-  planned_start_date: string | null;
-  planned_end_date: string | null;
-  accepted_at: Date | null;
-  version: number;
-}
 
 @Injectable()
 export class EngagementsService {
@@ -132,7 +94,7 @@ export class EngagementsService {
   }
 
   async getEngagementById(ctx: RlsContext, id: string): Promise<EngagementDetail | null> {
-    return this.db.withRlsContext(ctx, (client) => this.selectDetail(client, id));
+    return this.db.withRlsContext(ctx, (client) => selectEngagementDetail(client, id));
   }
 
   async createEngagement(ctx: RlsContext, input: CreateEngagementInput): Promise<EngagementDetail> {
@@ -190,7 +152,7 @@ export class EngagementsService {
         throw translatePgError(err);
       }
 
-      const detail = await this.selectDetail(client, id);
+      const detail = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.created',
         objectType: 'engagement',
@@ -207,7 +169,7 @@ export class EngagementsService {
     input: UpdateEngagementInput,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectDetail(client, id);
+      const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
 
       const sets: string[] = [];
@@ -216,11 +178,6 @@ export class EngagementsService {
         params.push(val);
         sets.push(`${col} = $${params.length}`);
       };
-      if (input.status !== undefined) {
-        set('status', input.status);
-        // Stamp acceptance the first time the engagement is accepted.
-        if (isAccepted(input.status) && !before.acceptedAt) set('accepted_at', new Date());
-      }
       if (input.engagementManagerEmployeeId !== undefined) {
         set('engagement_manager_id', input.engagementManagerEmployeeId);
       }
@@ -232,7 +189,7 @@ export class EngagementsService {
       if (sets.length === 0) return before;
 
       await this.versionedUpdate(client, id, sets, params, input.version);
-      const after = await this.selectDetail(client, id);
+      const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.updated',
         objectType: 'engagement',
@@ -253,7 +210,7 @@ export class EngagementsService {
     expectedVersion?: number,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectDetail(client, id);
+      const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
       // Optimistic concurrency: reject if the caller acted on a stale copy.
       if (expectedVersion !== undefined && before.version !== expectedVersion) {
@@ -277,7 +234,7 @@ export class EngagementsService {
       if (updated === 0) {
         throw new ForbiddenException('Not permitted to reassign the Engagement Partner.');
       }
-      const after = await this.selectDetail(client, id);
+      const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.ep_changed',
         objectType: 'engagement',
@@ -296,7 +253,7 @@ export class EngagementsService {
     input: AssignTeamMemberInput,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectDetail(client, id);
+      const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
       try {
         await client.query(
@@ -308,7 +265,7 @@ export class EngagementsService {
         throw translatePgError(err);
       }
       await this.bumpVersion(client, id);
-      const after = await this.selectDetail(client, id);
+      const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.team_assigned',
         objectType: 'engagement',
@@ -325,7 +282,7 @@ export class EngagementsService {
     employeeId: string,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectDetail(client, id);
+      const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
       const result = await client.query(
         `DELETE FROM hsdg.engagement_team WHERE engagement_id = $1 AND employee_id = $2`,
@@ -335,7 +292,7 @@ export class EngagementsService {
         throw new NotFoundException('Team member not found on this engagement.');
       }
       await this.bumpVersion(client, id);
-      const after = await this.selectDetail(client, id);
+      const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.team_removed',
         objectType: 'engagement',
@@ -380,39 +337,6 @@ export class EngagementsService {
     }
   }
 
-  private async selectDetail(client: PoolClient, id: string): Promise<EngagementDetail | null> {
-    const { rows } = await client.query<EngagementRow>(`${ENGAGEMENT_BASE} WHERE eng.id = $1`, [
-      id,
-    ]);
-    if (!rows[0]) return null;
-    const team = await client.query<{
-      id: string;
-      employee_id: string;
-      employee_code: string;
-      full_name: string;
-      role_on_engagement: EngagementDetail['team'][number]['roleOnEngagement'];
-      assigned_at: Date;
-    }>(
-      `SELECT t.id, t.employee_id, e.employee_code, e.full_name, t.role_on_engagement, t.assigned_at
-       FROM hsdg.engagement_team t
-       JOIN hsdg.employees e ON e.id = t.employee_id
-       WHERE t.engagement_id = $1
-       ORDER BY t.assigned_at`,
-      [id],
-    );
-    return {
-      ...mapEngagement({ ...rows[0], team_count: String(team.rows.length) }),
-      team: team.rows.map((m) => ({
-        id: m.id,
-        employeeId: m.employee_id,
-        employeeCode: m.employee_code,
-        employeeName: m.full_name,
-        roleOnEngagement: m.role_on_engagement,
-        assignedAt: m.assigned_at.toISOString(),
-      })),
-    };
-  }
-
   private async resolveOfficeId(client: PoolClient, code: string): Promise<string> {
     const { rows } = await client.query<{ id: string }>(
       `SELECT id FROM hsdg.offices WHERE code = $1`,
@@ -450,34 +374,6 @@ export class EngagementsService {
 
 function isAccepted(status: EngagementStatus | undefined): boolean {
   return status !== undefined && !EP_OPTIONAL_STATUSES.includes(status);
-}
-
-function mapEngagement(row: EngagementRow & { team_count: string }): EngagementSummary {
-  return {
-    id: row.id,
-    engagementCode: row.engagement_code,
-    entityId: row.entity_id,
-    entityCode: row.entity_code,
-    entityName: row.entity_name,
-    serviceId: row.service_id,
-    serviceCode: row.service_code,
-    serviceName: row.service_name,
-    financialYear: row.financial_year,
-    periodLabel: row.period_label,
-    officeId: row.office_id,
-    officeCode: row.office_code,
-    status: row.status,
-    engagementPartnerId: row.engagement_partner_id,
-    engagementPartnerName: row.ep_name,
-    engagementManagerId: row.engagement_manager_id,
-    engagementManagerName: row.manager_name,
-    predecessorEngagementId: row.predecessor_engagement_id,
-    plannedStartDate: row.planned_start_date,
-    plannedEndDate: row.planned_end_date,
-    acceptedAt: row.accepted_at ? row.accepted_at.toISOString() : null,
-    teamCount: Number(row.team_count),
-    version: row.version,
-  };
 }
 
 /** Map PostgreSQL constraint/RLS violations to clean HTTP errors. */

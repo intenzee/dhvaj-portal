@@ -1,10 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { ClsModuleOptions } from 'nestjs-cls';
+import type { ClsService } from 'nestjs-cls';
 import type { Request } from 'express';
 import { CORRELATION_ID_HEADER } from '../logging/logger.config';
 
 /** CLS key under which the request correlation id is stored. */
 export const CLS_CORRELATION_ID = 'correlationId';
+
+/** Read the ambient request correlation id, if any (safe outside a request). */
+export function resolveAmbientCorrelationId(cls: ClsService): string | undefined {
+  return cls.isActive() ? cls.get<string>(CLS_CORRELATION_ID) : undefined;
+}
 
 /**
  * ClsModule configuration.

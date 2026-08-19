@@ -2,7 +2,6 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsDateString,
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -10,15 +9,13 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
-import { ENGAGEMENT_STATUSES, type EngagementStatus } from '@hsdg/contracts';
 
-/** Partial update. Note: reassigning the EP is a separate command. */
+/**
+ * Partial update of non-lifecycle fields. Reassigning the EP is a separate
+ * command. Status is deliberately NOT here (Phase 6): lifecycle state moves
+ * only through the guarded transition endpoints (POST /engagements/:id/<action>).
+ */
 export class UpdateEngagementDto {
-  @ApiPropertyOptional({ enum: ENGAGEMENT_STATUSES })
-  @IsOptional()
-  @IsIn(ENGAGEMENT_STATUSES)
-  status?: EngagementStatus;
-
   @ApiPropertyOptional({ nullable: true, description: 'Manager employee id, or null to clear.' })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)

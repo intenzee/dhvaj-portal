@@ -11,21 +11,43 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type Paginated } from '@hsdg/contracts';
+import {
+  LIFECYCLE_ACTION,
+  PERMISSION,
+  type LifecycleAction,
+  type Paginated,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
-import { paginate } from '../../common/pagination/pagination.dto';
+import { PaginationQueryDto, paginate } from '../../common/pagination/pagination.dto';
 import { EngagementsService } from './engagements.service';
-import type { EngagementDetail, EngagementFilter, EngagementSummary } from './engagements.types';
+import { EngagementLifecycleService } from './lifecycle/engagement-lifecycle.service';
+import { EngagementWorkflowService } from './lifecycle/engagement-workflow.service';
+import type {
+  EngagementDetail,
+  EngagementFilter,
+  EngagementSummary,
+  LifecycleHistoryRecord,
+} from './engagements.types';
 import { CreateEngagementDto } from './dto/create-engagement.dto';
 import { UpdateEngagementDto } from './dto/update-engagement.dto';
 import { EngagementListQueryDto } from './dto/engagement-list-query.dto';
 import { AssignTeamMemberDto, ReassignPartnerDto } from './dto/engagement-commands.dto';
+import {
+  LifecycleTransitionDto,
+  PutOnHoldDto,
+  ReopenEngagementDto,
+  WorkflowTransitionDto,
+} from './dto/lifecycle-transition.dto';
 
 @ApiTags('engagements')
 @Controller('engagements')
 export class EngagementsController {
-  constructor(private readonly engagements: EngagementsService) {}
+  constructor(
+    private readonly engagements: EngagementsService,
+    private readonly lifecycle: EngagementLifecycleService,
+    private readonly workflow: EngagementWorkflowService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSION.engagementRead)
@@ -131,5 +153,191 @@ export class EngagementsController {
     @Param('employeeId', new ParseUUIDPipe()) employeeId: string,
   ): Promise<EngagementDetail> {
     return this.engagements.removeTeamMember(rlsContextFromPrincipal(principal), id, employeeId);
+  }
+
+  // ── Lifecycle (Phase 6): explicit, guarded transitions — never a generic
+  // "set status" endpoint. Each maps to exactly one hsdg.engagement_lifecycle_
+  // transitions action; see EngagementLifecycleService for the shared
+  // orchestration (validate → guard → version-checked mutate → history → audit).
+
+  @Get(':id/lifecycle-history')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: "The engagement's lifecycle history (its business journey)",
+    description: 'Distinct from /audit — this is status transitions only, in order.',
+  })
+  lifecycleHistory(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<LifecycleHistoryRecord>> {
+    return this.lifecycle
+      .listHistory(rlsContextFromPrincipal(principal), id, query)
+      .then((result) => paginate(result, query));
+  }
+
+  private runTransition(
+    action: LifecycleAction,
+    principal: Principal,
+    id: string,
+    dto: LifecycleTransitionDto | PutOnHoldDto | ReopenEngagementDto,
+  ): Promise<EngagementDetail> {
+    return this.lifecycle.transition(rlsContextFromPrincipal(principal), id, action, dto);
+  }
+
+  @Post(':id/submit-for-acceptance')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Submit a prospect for acceptance (audited)' })
+  submitForAcceptance(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.submitForAcceptance, principal, id, dto);
+  }
+
+  @Post(':id/accept')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Accept the engagement (audited)',
+    description: 'Requires an accountable Engagement Partner already assigned.',
+  })
+  accept(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.accept, principal, id, dto);
+  }
+
+  @Post(':id/start')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Start the engagement (audited)',
+    description: "Initialises the service workflow at the service's configured initial state.",
+  })
+  start(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.start, principal, id, dto);
+  }
+
+  @Post(':id/put-on-hold')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Put the engagement on hold (audited; reason required)' })
+  putOnHold(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: PutOnHoldDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.putOnHold, principal, id, dto);
+  }
+
+  @Post(':id/resume')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Resume a held engagement (audited)',
+    description:
+      'Returns to the operational status recorded when the hold began — not always "active".',
+  })
+  resume(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.resume, principal, id, dto);
+  }
+
+  @Post(':id/complete')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Mark the engagement complete (audited)',
+    description: 'Requires the service workflow to have reached its terminal state.',
+  })
+  complete(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.complete, principal, id, dto);
+  }
+
+  @Post(':id/close')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Close a completed engagement (audited)' })
+  close(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.close, principal, id, dto);
+  }
+
+  @Post(':id/decline')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Decline a pending-acceptance engagement (audited)' })
+  decline(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.decline, principal, id, dto);
+  }
+
+  @Post(':id/withdraw')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Withdraw an accepted or active engagement (audited)' })
+  withdraw(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.withdraw, principal, id, dto);
+  }
+
+  @Post(':id/cancel')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Cancel a prospect or pending-acceptance engagement (audited)' })
+  cancel(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: LifecycleTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.cancel, principal, id, dto);
+  }
+
+  @Post(':id/reopen')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Reopen a completed or closed engagement (audited)',
+    description: 'Managing-Partner-only governance action; reason required.',
+  })
+  reopen(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ReopenEngagementDto,
+  ): Promise<EngagementDetail> {
+    return this.runTransition(LIFECYCLE_ACTION.reopen, principal, id, dto);
+  }
+
+  // ── Service workflow (Phase 6 foundation, §16-19): independent of lifecycle.
+
+  @Post(':id/workflow-transitions')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Advance the service-workflow state (audited)',
+    description:
+      'Distinct from the engagement lifecycle — moves hsdg.engagements.current_workflow_state_id ' +
+      'along the configured hsdg.workflow_transitions for the service’s workflow family. Requires the ' +
+      'engagement to be "active" and the workflow already started (see POST .../start).',
+  })
+  advanceWorkflow(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: WorkflowTransitionDto,
+  ): Promise<EngagementDetail> {
+    return this.workflow.advance(rlsContextFromPrincipal(principal), id, dto);
   }
 }

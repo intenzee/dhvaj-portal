@@ -68,8 +68,11 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('shows the EP their own engagement', async () => {
+      // limit=100: partner.a accrues many engagements across the suite (incl.
+      // Phase 6's lifecycle tests below), so the default page can't be relied
+      // on to still contain the oldest (seeded) one.
       const res = await request(app.getHttpServer())
-        .get('/api/v1/engagements')
+        .get('/api/v1/engagements?limit=100')
         .set(bearer(await token('partner.a@hsdg.in')))
         .expect(200);
       expect(codes(res.body.items)).toContain('ENG00001');
@@ -98,7 +101,9 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('does NOT show an unassigned partner another partner’s engagement (404 by id)', async () => {
-      const list = await request(app.getHttpServer()).get('/api/v1/engagements').set(bearer(mp));
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/engagements?limit=100')
+        .set(bearer(mp));
       const acme = list.body.items.find(
         (e: { engagementCode: string }) => e.engagementCode === 'ENG00001',
       );
@@ -110,7 +115,7 @@ describe('Engagement Core (e2e)', () => {
 
     it('supports ?mine=true', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/v1/engagements?mine=true')
+        .get('/api/v1/engagements?mine=true&limit=100')
         .set(bearer(await token('partner.a@hsdg.in')))
         .expect(200);
       expect(codes(res.body.items)).toContain('ENG00001');
@@ -263,20 +268,35 @@ describe('Engagement Core (e2e)', () => {
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
-          status: 'accepted',
         })
         .expect(201);
       const v0 = created.body.version as number;
       await request(app.getHttpServer())
         .patch(`/api/v1/engagements/${created.body.id}`)
         .set(bearer(pa))
-        .send({ status: 'active', version: v0 })
+        .send({ plannedStartDate: '2024-04-01', version: v0 })
         .expect(200);
       await request(app.getHttpServer())
         .patch(`/api/v1/engagements/${created.body.id}`)
         .set(bearer(pa))
-        .send({ status: 'on_hold', version: v0 })
+        .send({ plannedEndDate: '2025-03-31', version: v0 })
         .expect(409);
+    });
+
+    it('rejects "status" on the generic PATCH — lifecycle moves only through transition endpoints (Phase 6)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const entityId = await findEntityId('Bharat');
+      const serviceId = await findServiceId('ROC_ANNUAL');
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(pa))
+        .send({ entityId, serviceId, financialYear: '2022-23', periodLabel: uniquePeriod() })
+        .expect(201);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/engagements/${created.body.id}`)
+        .set(bearer(pa))
+        .send({ status: 'active' })
+        .expect(400);
     });
   });
 
@@ -389,6 +409,518 @@ describe('Engagement Core (e2e)', () => {
         .set(bearer(mp))
         .send({ engagementPartnerEmployeeId: partnerA, version: v0 })
         .expect(409);
+    });
+  });
+
+  // ── Phase 6: lifecycle transitions & the service-workflow instance ────────
+  describe('lifecycle transitions (Phase 6)', () => {
+    /** Create directly at 'accepted' (existing pattern) so a test can start mid-chain. */
+    const createAccepted = async (
+      actorToken: string,
+      serviceCode: string,
+      entitySearch = 'Bharat',
+    ): Promise<{ id: string; version: number; engagementPartnerId: string }> => {
+      const entityId = await findEntityId(entitySearch);
+      const serviceId = await findServiceId(serviceCode);
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(actorToken))
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          status: 'accepted',
+        })
+        .expect(201);
+      return {
+        id: res.body.id,
+        version: res.body.version,
+        engagementPartnerId: res.body.engagementPartnerId,
+      };
+    };
+
+    describe('the primary chain + side states', () => {
+      it('walks prospect → pending_acceptance → accepted → active → completed → closed, audited and versioned throughout', async () => {
+        const mgr = await token('manager.x@hsdg.in');
+        const entityId = await findEntityId('Bharat');
+        const serviceId = await findServiceId('GST_MONTHLY'); // short filing_workflow chain
+        // Manager creates: defaults to manager, NOT EP (grade-aware defaulting).
+        const created = await request(app.getHttpServer())
+          .post('/api/v1/engagements')
+          .set(bearer(mgr))
+          .send({ entityId, serviceId, financialYear: '2024-25', periodLabel: uniquePeriod() })
+          .expect(201);
+        expect(created.body.status).toBe('prospect');
+        expect(created.body.engagementPartnerId).toBeNull();
+        let version = created.body.version as number;
+        const id = created.body.id as string;
+
+        // 1. prospect -> pending_acceptance
+        const submitted = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/submit-for-acceptance`)
+          .set(bearer(mgr))
+          .send({ version })
+          .expect(201);
+        expect(submitted.body.status).toBe('pending_acceptance');
+        expect(submitted.body.version).toBeGreaterThan(version); // §21 test 21
+        version = submitted.body.version;
+
+        // §25 test 24: a failed transition leaves no misleading audit event.
+        // submit-for-acceptance above already left one legitimate
+        // 'engagement.status_changed' event for this engagement — so the
+        // proof is that the COUNT doesn't grow from the failed attempt below,
+        // not that it's zero.
+        const countStatusChangedEvents = async (): Promise<number> => {
+          const res = await request(app.getHttpServer())
+            .get('/api/v1/audit?limit=100')
+            .set(bearer(mp))
+            .expect(200);
+          return (res.body.items as Array<{ action: string; objectId: string }>).filter(
+            (e) => e.action === 'engagement.status_changed' && e.objectId === id,
+          ).length;
+        };
+        const countBeforeFailedAccept = await countStatusChangedEvents();
+        expect(countBeforeFailedAccept).toBeGreaterThanOrEqual(1); // from submit-for-acceptance
+
+        // No EP yet: accept must fail (§7, §25 test 11).
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/accept`)
+          .set(bearer(mgr))
+          .send({})
+          .expect(400);
+        expect(submitted.body.status).toBe('pending_acceptance'); // unchanged by the failed attempt
+        expect(await countStatusChangedEvents()).toBe(countBeforeFailedAccept); // no misleading event added
+
+        // MP assigns the EP (governance: only firm-wide may set the EP away
+        // from nobody-in-particular via reassign-partner).
+        const partnerA = await findEmployeeId('EMP003');
+        const withEp = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/reassign-partner`)
+          .set(bearer(mp))
+          .send({ engagementPartnerEmployeeId: partnerA, version })
+          .expect(201);
+        expect(withEp.body.engagementPartnerId).toBe(partnerA);
+        version = withEp.body.version;
+
+        // 2. pending_acceptance -> accepted (§25 test 12: accepted always has an EP)
+        const accepted = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/accept`)
+          .set(bearer(mp))
+          .send({ version })
+          .expect(201);
+        expect(accepted.body.status).toBe('accepted');
+        expect(accepted.body.engagementPartnerId).toBe(partnerA);
+        expect(accepted.body.acceptedAt).toBeTruthy();
+        version = accepted.body.version;
+
+        // 3. accepted -> active, initialising the service workflow from config.
+        const started = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/start`)
+          .set(bearer(mp))
+          .send({ version })
+          .expect(201);
+        expect(started.body.status).toBe('active');
+        expect(started.body.currentWorkflowState.slug).toBe('preparation'); // filing_workflow's initial state
+        version = started.body.version;
+
+        // 4. Cannot complete before the workflow reaches its terminal state.
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/complete`)
+          .set(bearer(mp))
+          .send({ version })
+          .expect(400);
+
+        // Walk the workflow to its terminal state (preparation -> review -> filing -> completed).
+        for (let i = 0; i < 3; i += 1) {
+          const advanced = await request(app.getHttpServer())
+            .post(`/api/v1/engagements/${id}/workflow-transitions`)
+            .set(bearer(mp))
+            .send({ action: 'advance', version })
+            .expect(201);
+          expect(advanced.body.status).toBe('active'); // lifecycle untouched by workflow moves
+          version = advanced.body.version;
+        }
+
+        const readyToComplete = await request(app.getHttpServer())
+          .get(`/api/v1/engagements/${id}`)
+          .set(bearer(mp))
+          .expect(200);
+        expect(readyToComplete.body.currentWorkflowState.slug).toBe('completed');
+        expect(readyToComplete.body.currentWorkflowState.isTerminal).toBe(true);
+
+        // active -> completed
+        const completed = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/complete`)
+          .set(bearer(mp))
+          .send({ version })
+          .expect(201);
+        expect(completed.body.status).toBe('completed');
+        version = completed.body.version;
+
+        // completed -> closed. COMPLETED and CLOSED are distinct (§10): the
+        // service workflow's own terminal state did NOT auto-close the engagement.
+        const closed = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/close`)
+          .set(bearer(mp))
+          .send({ version })
+          .expect(201);
+        expect(closed.body.status).toBe('closed');
+
+        // §25 test 22/26: every hop left an audit event and a history row.
+        const history = await request(app.getHttpServer())
+          .get(`/api/v1/engagements/${id}/lifecycle-history`)
+          .set(bearer(mp))
+          .expect(200);
+        const actions = (history.body.items as Array<{ action: string }>).map((h) => h.action);
+        expect(actions).toEqual(
+          expect.arrayContaining(['submit_for_acceptance', 'accept', 'start', 'complete', 'close']),
+        );
+      });
+
+      it('invalid transition is rejected (400) — e.g. "start" on a fresh prospect', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const entityId = await findEntityId('Bharat');
+        const serviceId = await findServiceId('TAX_ADVISORY');
+        const created = await request(app.getHttpServer())
+          .post('/api/v1/engagements')
+          .set(bearer(pa))
+          .send({ entityId, serviceId, financialYear: '2024-25', periodLabel: uniquePeriod() })
+          .expect(201);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${created.body.id}/start`)
+          .set(bearer(pa))
+          .send({})
+          .expect(400);
+      });
+
+      it('declines a pending-acceptance engagement', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const entityId = await findEntityId('Bharat');
+        const serviceId = await findServiceId('TAX_ADVISORY');
+        const created = await request(app.getHttpServer())
+          .post('/api/v1/engagements')
+          .set(bearer(pa))
+          .send({ entityId, serviceId, financialYear: '2024-25', periodLabel: uniquePeriod() })
+          .expect(201);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${created.body.id}/submit-for-acceptance`)
+          .set(bearer(pa))
+          .send({})
+          .expect(201);
+        const declined = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${created.body.id}/decline`)
+          .set(bearer(pa))
+          .send({ reason: 'client went with another firm' })
+          .expect(201);
+        expect(declined.body.status).toBe('declined');
+      });
+
+      it('active -> on_hold -> resume returns to the recorded previous status, not always "active"', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const acc = await createAccepted(pa, 'INT_AUDIT');
+        const started = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/start`)
+          .set(bearer(pa))
+          .send({ version: acc.version })
+          .expect(201);
+        expect(started.body.status).toBe('active');
+
+        const held = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/put-on-hold`)
+          .set(bearer(pa))
+          .send({ reason: 'awaiting client documents', expectedResumeDate: '2026-09-01' })
+          .expect(201);
+        expect(held.body.status).toBe('on_hold');
+        expect(held.body.onHoldReason).toBe('awaiting client documents');
+        expect(held.body.onHoldPreviousStatus).toBe('active');
+        // Workflow state is untouched by the hold (§17, §36).
+        expect(held.body.currentWorkflowState.slug).toBe(started.body.currentWorkflowState.slug);
+
+        const resumed = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/resume`)
+          .set(bearer(pa))
+          .send({})
+          .expect(201);
+        expect(resumed.body.status).toBe('active');
+        expect(resumed.body.onHoldReason).toBeNull();
+        expect(resumed.body.onHoldPreviousStatus).toBeNull();
+      });
+
+      it('put-on-hold requires a reason (400 without one)', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const acc = await createAccepted(pa, 'ROC_ANNUAL');
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/start`)
+          .set(bearer(pa))
+          .send({ version: acc.version })
+          .expect(201);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/put-on-hold`)
+          .set(bearer(pa))
+          .send({})
+          .expect(400);
+      });
+
+      it('withdraws an active engagement', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const acc = await createAccepted(pa, 'ADVISORY_GEN');
+        const started = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/start`)
+          .set(bearer(pa))
+          .send({ version: acc.version })
+          .expect(201);
+        const withdrawn = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/withdraw`)
+          .set(bearer(pa))
+          .send({ reason: 'client ceased operations', version: started.body.version })
+          .expect(201);
+        expect(withdrawn.body.status).toBe('withdrawn');
+      });
+    });
+
+    describe('authority (§9, §25 tests 14-19)', () => {
+      /**
+       * Create (as `pa`), start, walk GST_MONTHLY's short filing_workflow to
+       * its terminal state, and complete — so reopen (completed/closed only)
+       * has a legal `from_status` to work with. Optionally assigns Manager X
+       * so a manager-authority test can reach the guard instead of a 404.
+       */
+      const completeEngagement = async (
+        pa: string,
+        withManager = false,
+      ): Promise<{ id: string; version: number }> => {
+        const acc = await createAccepted(pa, 'GST_MONTHLY');
+        let acceptedVersion = acc.version;
+        if (withManager) {
+          const managerXId = await findEmployeeId('EMP005');
+          const withMgr = await request(app.getHttpServer())
+            .patch(`/api/v1/engagements/${acc.id}`)
+            .set(bearer(mp))
+            .send({ engagementManagerEmployeeId: managerXId })
+            .expect(200);
+          acceptedVersion = withMgr.body.version; // the PATCH bumped version too
+        }
+        const started = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/start`)
+          .set(bearer(pa))
+          .send({ version: acceptedVersion })
+          .expect(201);
+        let version = started.body.version as number;
+        for (let i = 0; i < 3; i += 1) {
+          const advanced = await request(app.getHttpServer())
+            .post(`/api/v1/engagements/${acc.id}/workflow-transitions`)
+            .set(bearer(pa))
+            .send({ action: 'advance', version })
+            .expect(201);
+          version = advanced.body.version;
+        }
+        const completed = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/complete`)
+          .set(bearer(pa))
+          .send({ version })
+          .expect(201);
+        return { id: acc.id, version: completed.body.version };
+      };
+
+      it('the EP itself cannot reopen (MP-only governance action)', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const eng = await completeEngagement(pa);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${eng.id}/reopen`)
+          .set(bearer(pa))
+          .send({ reason: 'attempted self-service reopen' })
+          .expect(403);
+      });
+
+      it('a Manager assigned to the engagement cannot reopen (MP-only governance action)', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const eng = await completeEngagement(pa, true);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${eng.id}/reopen`)
+          .set(bearer(await token('manager.x@hsdg.in')))
+          .send({ reason: 'manager attempted reopen' })
+          .expect(403);
+      });
+
+      it('the platform admin cannot reopen — no business-firm-wide governance merely from the admin role', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const eng = await completeEngagement(pa);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${eng.id}/reopen`)
+          .set(bearer(await token('admin@hsdg.in')))
+          .send({ reason: 'admin attempted reopen' })
+          .expect(403);
+      });
+
+      it('a Senior (no engagement.manage) cannot perform any lifecycle action', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const acc = await createAccepted(pa, 'STAT_AUDIT');
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/start`)
+          .set(bearer(await token('senior.y@hsdg.in')))
+          .send({})
+          .expect(403);
+      });
+
+      it('the Managing Partner can reopen a completed engagement (permitted governance action)', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const eng = await completeEngagement(pa);
+
+        // Reopen requires a reason (§12, §25 test 38).
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${eng.id}/reopen`)
+          .set(bearer(mp))
+          .send({ version: eng.version })
+          .expect(400);
+
+        // §25 test 41: a STALE version (same status, older version number) is
+        // 409 — distinct from a wrong-status attempt, which is 400. Bump the
+        // version via an unrelated field first so status stays 'completed'.
+        const bumped = await request(app.getHttpServer())
+          .patch(`/api/v1/engagements/${eng.id}`)
+          .set(bearer(mp))
+          .send({ plannedStartDate: '2024-04-01', version: eng.version })
+          .expect(200);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${eng.id}/reopen`)
+          .set(bearer(mp))
+          .send({ reason: 'stale retry', version: eng.version })
+          .expect(409);
+
+        const reopened = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${eng.id}/reopen`)
+          .set(bearer(mp))
+          .send({ reason: 'client requested additional fieldwork', version: bumped.body.version })
+          .expect(201);
+        expect(reopened.body.status).toBe('active');
+
+        // Reopen left a history row and an audit event (§25 tests 39-40).
+        const history = await request(app.getHttpServer())
+          .get(`/api/v1/engagements/${eng.id}/lifecycle-history`)
+          .set(bearer(mp))
+          .expect(200);
+        expect(
+          (history.body.items as Array<{ action: string; toStatus: string }>).some(
+            (h) => h.action === 'reopen' && h.toStatus === 'active',
+          ),
+        ).toBe(true);
+        const audit = await request(app.getHttpServer())
+          .get('/api/v1/audit?limit=100')
+          .set(bearer(mp))
+          .expect(200);
+        expect(
+          (audit.body.items as Array<{ action: string; objectId: string }>).some(
+            (e) => e.action === 'engagement.status_changed' && e.objectId === eng.id,
+          ),
+        ).toBe(true);
+
+        // A second reopen attempt is now a genuinely invalid transition
+        // (status is already 'active', not 'completed'/'closed') — 400, not 409.
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${eng.id}/reopen`)
+          .set(bearer(mp))
+          .send({ reason: 'already active', version: reopened.body.version })
+          .expect(400);
+      });
+    });
+
+    describe('service workflow independence (§16-19, §25 tests 33-36)', () => {
+      it('gets the correct workflow family + initial state on start, advances independently of lifecycle, and rejects an unconfigured action', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const acc = await createAccepted(pa, 'STAT_AUDIT');
+        const started = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/start`)
+          .set(bearer(pa))
+          .send({ version: acc.version })
+          .expect(201);
+        expect(started.body.currentWorkflowState.slug).toBe('planning'); // audit_workflow's initial state
+
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/workflow-transitions`)
+          .set(bearer(pa))
+          .send({ action: 'not_a_configured_action' })
+          .expect(400);
+
+        const advanced = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/workflow-transitions`)
+          .set(bearer(pa))
+          .send({ action: 'advance', version: started.body.version })
+          .expect(201);
+        expect(advanced.body.currentWorkflowState.slug).toBe('fieldwork');
+        expect(advanced.body.status).toBe('active');
+
+        // Lifecycle changes; workflow state must stay put (independence, §17).
+        const held = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/put-on-hold`)
+          .set(bearer(pa))
+          .send({ reason: 'pausing fieldwork', version: advanced.body.version })
+          .expect(201);
+        expect(held.body.status).toBe('on_hold');
+        expect(held.body.currentWorkflowState.slug).toBe('fieldwork');
+      });
+
+      it('cannot advance the workflow while the engagement is not active', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const acc = await createAccepted(pa, 'STAT_AUDIT'); // still 'accepted', not started
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/workflow-transitions`)
+          .set(bearer(pa))
+          .send({ action: 'advance' })
+          .expect(400);
+      });
+    });
+
+    describe('RLS-backed access (§25 tests 28-32)', () => {
+      it('an unrelated partner cannot see or act on lifecycle history for an engagement they are not assigned to', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const acc = await createAccepted(pa, 'GST_MONTHLY');
+        const pb = await token('partner.b@hsdg.in');
+        await request(app.getHttpServer())
+          .get(`/api/v1/engagements/${acc.id}/lifecycle-history`)
+          .set(bearer(pb))
+          .expect(404);
+        await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/start`)
+          .set(bearer(pb))
+          .send({})
+          .expect(404);
+      });
+
+      it('a manager shared across two partners can operate lifecycle transitions on both engagements', async () => {
+        const pa = await token('partner.a@hsdg.in');
+        const pb = await token('partner.b@hsdg.in');
+        const mgr = await token('manager.x@hsdg.in');
+        const managerXId = await findEmployeeId('EMP005');
+
+        const engA = await createAccepted(pa, 'TAX_ADVISORY', 'Bharat'); // North client
+        const engB = await createAccepted(pb, 'ADVISORY_GEN', 'Coastal'); // South client
+        // MP assigns Manager X onto both, as the engagement manager (shared
+        // resource across partners — ADR-0008's model, applied to Phase 6).
+        await request(app.getHttpServer())
+          .patch(`/api/v1/engagements/${engA.id}`)
+          .set(bearer(mp))
+          .send({ engagementManagerEmployeeId: managerXId })
+          .expect(200);
+        await request(app.getHttpServer())
+          .patch(`/api/v1/engagements/${engB.id}`)
+          .set(bearer(mp))
+          .send({ engagementManagerEmployeeId: managerXId })
+          .expect(200);
+
+        const startedA = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${engA.id}/start`)
+          .set(bearer(mgr))
+          .send({})
+          .expect(201);
+        expect(startedA.body.status).toBe('active');
+        const startedB = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${engB.id}/start`)
+          .set(bearer(mgr))
+          .send({})
+          .expect(201);
+        expect(startedB.body.status).toBe('active');
+      });
     });
   });
 });

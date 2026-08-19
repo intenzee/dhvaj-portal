@@ -37,3 +37,26 @@ export const TEAM_ROLE = {
 } as const;
 export type TeamRole = (typeof TEAM_ROLE)[keyof typeof TEAM_ROLE];
 export const TEAM_ROLES: TeamRole[] = Object.values(TEAM_ROLE);
+
+/**
+ * Phase 6: the engagement lifecycle's guarded transition actions. Each is its
+ * own endpoint (`POST /engagements/:id/<action, kebab-case>`) — there is no
+ * generic "set status" endpoint. `from`/`to` are the shapes seeded into
+ * `hsdg.engagement_lifecycle_transitions`; `resume`'s destination is dynamic
+ * (the engagement's own `on_hold_previous_status`), not a fixed status.
+ */
+export const LIFECYCLE_ACTION = {
+  submitForAcceptance: 'submit_for_acceptance',
+  accept: 'accept',
+  start: 'start',
+  putOnHold: 'put_on_hold',
+  resume: 'resume',
+  complete: 'complete',
+  close: 'close',
+  decline: 'decline',
+  withdraw: 'withdraw',
+  cancel: 'cancel',
+  reopen: 'reopen',
+} as const;
+export type LifecycleAction = (typeof LIFECYCLE_ACTION)[keyof typeof LIFECYCLE_ACTION];
+export const LIFECYCLE_ACTIONS: LifecycleAction[] = Object.values(LIFECYCLE_ACTION);

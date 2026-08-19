@@ -49,10 +49,13 @@ describe('Service Catalogue (e2e)', () => {
       const audit = (res.body as Array<{ slug: string; states: Array<{ slug: string }> }>).find(
         (f) => f.slug === 'audit_workflow',
       )!;
+      // Phase 6 reconciliation (ADR-0011): the generic "review" state split
+      // into Manager Review / EP Review to match the firm's actual practice.
       expect(audit.states.map((s) => s.slug)).toEqual([
         'planning',
         'fieldwork',
-        'review',
+        'manager_review',
+        'ep_review',
         'ep_sign_off',
         'completed',
       ]);

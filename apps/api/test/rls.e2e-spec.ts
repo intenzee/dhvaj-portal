@@ -373,4 +373,166 @@ describe('RLS (database-level, independent of the application)', () => {
       expect(engagements.length).toBeGreaterThanOrEqual(2);
     });
   });
+
+  // Phase 6: lifecycle/workflow transition config + history, proven at the
+  // database layer independently of the API/NestJS guards.
+  describe('engagement lifecycle & workflow (Phase 6)', () => {
+    const emp = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.employees WHERE employee_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const acmeEngagementId = async (): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = 'ENG00001'`,
+      );
+      return rows[0]!.id;
+    };
+
+    it.each(['article', 'senior'])(
+      '"%s" holds no engagement.manage permission — no lifecycle governance authority (§25 tests 18-19)',
+      async (roleSlug) => {
+        const rows = await underContext<{ slug: string }>(
+          { role: 'managing_partner' },
+          `SELECT p.slug FROM hsdg.role_permissions rp
+           JOIN hsdg.roles r ON r.id = rp.role_id
+           JOIN hsdg.permissions p ON p.id = rp.permission_id
+           WHERE r.slug = '${roleSlug}' AND p.slug = 'engagement.manage'`,
+        );
+        expect(rows).toHaveLength(0);
+      },
+    );
+
+    it('is fail-closed: no context ⇒ zero lifecycle transitions and zero workflow transitions visible', async () => {
+      const transitions = await underContext(
+        {},
+        'SELECT id FROM hsdg.engagement_lifecycle_transitions',
+      );
+      expect(transitions).toHaveLength(0);
+      const workflow = await underContext({}, 'SELECT id FROM hsdg.workflow_transitions');
+      expect(workflow).toHaveLength(0);
+    });
+
+    it('lifecycle transitions and workflow transitions are firm-wide config: any authenticated role reads them', async () => {
+      const rows = await underContext(
+        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        'SELECT action FROM hsdg.engagement_lifecycle_transitions',
+      );
+      expect(rows.length).toBeGreaterThanOrEqual(14);
+      const wf = await underContext(
+        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        'SELECT id FROM hsdg.workflow_transitions',
+      );
+      expect(wf.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('forbids the app role from writing lifecycle/workflow transition config (reference data)', async () => {
+      await expect(
+        app.query(
+          `INSERT INTO hsdg.engagement_lifecycle_transitions (action, from_status, to_status, display_name)
+           VALUES ('x', 'prospect', 'cancelled', 'X')`,
+        ),
+      ).rejects.toThrow(/permission denied/i);
+      await expect(
+        app.query(`UPDATE hsdg.workflow_transitions SET display_name = 'tampered' WHERE true`),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    it('makes engagement_lifecycle_history immutable to the app role (UPDATE/DELETE denied)', async () => {
+      await expect(
+        app.query(`UPDATE hsdg.engagement_lifecycle_history SET reason = 'tamper'`),
+      ).rejects.toThrow(/permission denied/i);
+      await expect(app.query(`DELETE FROM hsdg.engagement_lifecycle_history`)).rejects.toThrow(
+        /permission denied/i,
+      );
+    });
+
+    it('is fail-closed: no context ⇒ zero lifecycle-history rows visible, even if some exist', async () => {
+      const rows = await underContext({}, 'SELECT id FROM hsdg.engagement_lifecycle_history');
+      expect(rows).toHaveLength(0);
+    });
+
+    it('denies an unassigned partner the workflow state and lifecycle history of an engagement they are not on', async () => {
+      const partnerB = await emp('EMP004'); // not on Acme (ENG00001)
+      const acmeId = await acmeEngagementId();
+      const rows = await underEmpFor(
+        'partner',
+        'SOUTH',
+        partnerB,
+        `SELECT current_workflow_state_id FROM hsdg.engagements WHERE id = '${acmeId}'`,
+      );
+      expect(rows).toHaveLength(0); // the row itself is invisible, not just the column
+      const history = await underEmpFor(
+        'partner',
+        'SOUTH',
+        partnerB,
+        `SELECT id FROM hsdg.engagement_lifecycle_history WHERE engagement_id = '${acmeId}'`,
+      );
+      expect(history).toHaveLength(0);
+    });
+
+    it('lets an assigned team member see the engagement workflow-state and lifecycle history columns/rows', async () => {
+      // Senior Y (SOUTH) is on Acme's (NORTH) team — shared resource, ADR-0008.
+      const seniorY = await emp('EMP006');
+      const acmeId = await acmeEngagementId();
+      const rows = await underEmpFor(
+        'senior',
+        'SOUTH',
+        seniorY,
+        `SELECT id, current_workflow_state_id FROM hsdg.engagements WHERE id = '${acmeId}'`,
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it('records before/after status on the audit event for a lifecycle transition (direct column check)', async () => {
+      // Insert directly (mirrors what EngagementLifecycleService/AuditService
+      // do inside the same transaction as the mutation) then inspect
+      // audit_events' jsonb columns — the API's GET /audit never exposes them.
+      // Runs firm-wide throughout so the INSERT's own transaction can also
+      // SELECT it back (audit read is firm-wide-only; §26 direct-DB test).
+      const acmeId = await acmeEngagementId();
+      await app.query('BEGIN');
+      try {
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', userIds['mp@hsdg.in']]);
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', 'managing_partner']);
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.office_id', officeIds['NORTH']]);
+        await app.query(
+          `INSERT INTO hsdg.audit_events (actor_user_id, actor_role, action, object_type, object_id, before_state, after_state)
+           VALUES ($1, 'partner', 'engagement.status_changed', 'engagement', $2, $3::jsonb, $4::jsonb)`,
+          [
+            userIds['partner.a@hsdg.in'],
+            acmeId,
+            JSON.stringify({ status: 'accepted', version: 1 }),
+            JSON.stringify({ status: 'active', version: 2 }),
+          ],
+        );
+        const { rows } = await app.query<{
+          before_state: { status: string };
+          after_state: { status: string };
+        }>(
+          `SELECT before_state, after_state FROM hsdg.audit_events
+           WHERE object_id = $1 AND action = 'engagement.status_changed'
+           ORDER BY occurred_at DESC LIMIT 1`,
+          [acmeId],
+        );
+        expect(rows[0]!.before_state.status).toBe('accepted');
+        expect(rows[0]!.after_state.status).toBe('active');
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+
+    /** Assignment-based context read, mirroring `underEmp` in the engagements block above. */
+    async function underEmpFor<T>(
+      role: string,
+      officeCode: 'NORTH' | 'SOUTH',
+      employeeId: string,
+      sql: string,
+    ): Promise<T[]> {
+      return underContext<T>({ role, officeId: officeIds[officeCode], employeeId }, sql);
+    }
+  });
 });
