@@ -5,7 +5,7 @@ import {
   LIFECYCLE_GUARDS,
   managingPartnerOnlyGuard,
   reasonRequiredGuard,
-  workflowTerminalGuard,
+  reviewSignedOffGuard,
 } from './lifecycle-guards';
 import type { LifecycleGuardContext } from './lifecycle.types';
 
@@ -41,6 +41,18 @@ function ctx(overrides: Partial<LifecycleGuardContext> = {}): LifecycleGuardCont
       onHoldPreviousStatus: null,
       onHoldAt: null,
       onHoldExpectedResumeDate: null,
+      effectiveReviewModel: {
+        slug: 'full_ep_review',
+        name: 'Full EP Review',
+        rank: 30,
+        requiresEpSignoff: true,
+      },
+      reviewPlanModel: null,
+      isSignedOff: false,
+      signedOffById: null,
+      signedOffByName: null,
+      signedOffAt: null,
+      openReviewPointCount: 0,
       team: [],
     },
     action: LIFECYCLE_ACTION.accept,
@@ -89,32 +101,24 @@ describe('lifecycle guards', () => {
     });
   });
 
-  describe('workflowTerminalGuard', () => {
-    const terminalState = {
-      id: 'ws1',
-      slug: 'completed',
-      name: 'Completed',
-      sequence: 5,
-      isInitial: false,
-      isTerminal: true,
-    };
-    const nonTerminalState = { ...terminalState, slug: 'fieldwork', isTerminal: false };
-
-    it('passes when the workflow state is terminal', () => {
-      const c = ctx({ engagement: { ...ctx().engagement, currentWorkflowState: terminalState } });
-      expect(() => workflowTerminalGuard.check(c)).not.toThrow();
-    });
-
-    it('rejects when the workflow state is not terminal', () => {
+  describe('reviewSignedOffGuard', () => {
+    it('passes when signed off with no open review points', () => {
       const c = ctx({
-        engagement: { ...ctx().engagement, currentWorkflowState: nonTerminalState },
+        engagement: { ...ctx().engagement, isSignedOff: true, openReviewPointCount: 0 },
       });
-      expect(() => workflowTerminalGuard.check(c)).toThrow(BadRequestException);
+      expect(() => reviewSignedOffGuard.check(c)).not.toThrow();
     });
 
-    it('rejects when the workflow has not started (null state)', () => {
-      const c = ctx({ engagement: { ...ctx().engagement, currentWorkflowState: null } });
-      expect(() => workflowTerminalGuard.check(c)).toThrow(BadRequestException);
+    it('rejects when the engagement is not signed off', () => {
+      const c = ctx({ engagement: { ...ctx().engagement, isSignedOff: false } });
+      expect(() => reviewSignedOffGuard.check(c)).toThrow(BadRequestException);
+    });
+
+    it('rejects when signed off but review points remain open', () => {
+      const c = ctx({
+        engagement: { ...ctx().engagement, isSignedOff: true, openReviewPointCount: 2 },
+      });
+      expect(() => reviewSignedOffGuard.check(c)).toThrow(BadRequestException);
     });
   });
 

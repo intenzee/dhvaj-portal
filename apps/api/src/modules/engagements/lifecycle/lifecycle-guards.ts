@@ -48,18 +48,32 @@ export const reasonRequiredGuard: LifecycleGuard = {
 };
 
 /**
- * COMPLETE requires the service workflow to have reached its terminal state
- * (§6, §20) — a shallow "did the operational workflow finish" check, not a
- * review/sign-off decision. Phase 7 extends or replaces this with the real
- * review engine; this is the extension point it plugs into.
+ * COMPLETE is gated by the review engine (Phase 7), which replaces Phase 6's
+ * shallow workflow-terminal check (ADR-0011 §6 follow-up). An engagement may
+ * complete only when it carries a current, valid sign-off AND has no open
+ * review points. WHO was allowed to record that sign-off is decided at sign-off
+ * time by the effective review model (EngagementReviewsService) — so by the
+ * time a non-superseded sign-off exists, the required authority (e.g. EP sign-
+ * off for a statutory audit) has already been enforced. This guard is
+ * deliberately pure: it reads the review state carried on the engagement detail
+ * (isSignedOff / openReviewPointCount), never the workflow slug.
  */
-export const workflowTerminalGuard: LifecycleGuard = {
-  name: 'workflow-terminal',
+export const reviewSignedOffGuard: LifecycleGuard = {
+  name: 'review-signed-off',
   check({ engagement }: LifecycleGuardContext) {
-    if (!engagement.currentWorkflowState?.isTerminal) {
+    if (!engagement.isSignedOff) {
       throw new BadRequestException(
-        `Cannot complete: the service workflow has not reached its terminal state ` +
-          `(currently: ${engagement.currentWorkflowState?.name ?? 'not started'}).`,
+        'Cannot complete: the engagement has not been signed off. ' +
+          `Its effective review model is "${engagement.effectiveReviewModel.name}"` +
+          (engagement.effectiveReviewModel.requiresEpSignoff
+            ? ' — the accountable Engagement Partner must sign off first.'
+            : ' — an engagement lead must sign off first.'),
+      );
+    }
+    if (engagement.openReviewPointCount > 0) {
+      throw new BadRequestException(
+        `Cannot complete: ${engagement.openReviewPointCount} review point(s) are still open. ` +
+          'Resolve them before completing.',
       );
     }
   },
@@ -77,7 +91,7 @@ export const LIFECYCLE_GUARDS: Record<LifecycleAction, LifecycleGuard[]> = {
   [LIFECYCLE_ACTION.start]: [],
   [LIFECYCLE_ACTION.putOnHold]: [reasonRequiredGuard],
   [LIFECYCLE_ACTION.resume]: [],
-  [LIFECYCLE_ACTION.complete]: [workflowTerminalGuard],
+  [LIFECYCLE_ACTION.complete]: [reviewSignedOffGuard],
   [LIFECYCLE_ACTION.close]: [],
   [LIFECYCLE_ACTION.decline]: [],
   [LIFECYCLE_ACTION.withdraw]: [],

@@ -524,7 +524,8 @@ describe('Engagement Core (e2e)', () => {
         expect(started.body.currentWorkflowState.slug).toBe('preparation'); // filing_workflow's initial state
         version = started.body.version;
 
-        // 4. Cannot complete before the workflow reaches its terminal state.
+        // 4. Cannot complete before sign-off (Phase 7 gate, which replaced the
+        // Phase 6 workflow-terminal check). No sign-off yet ⇒ 400.
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${id}/complete`)
           .set(bearer(mp))
@@ -548,6 +549,17 @@ describe('Engagement Core (e2e)', () => {
           .expect(200);
         expect(readyToComplete.body.currentWorkflowState.slug).toBe('completed');
         expect(readyToComplete.body.currentWorkflowState.isTerminal).toBe(true);
+
+        // Phase 7: completion requires a valid sign-off. GST_MONTHLY is a
+        // manager_review service, so any engagement lead (here the firm-wide MP)
+        // may sign off — no EP sign-off is mandated.
+        const signedOff = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${id}/sign-off`)
+          .set(bearer(mp))
+          .send({ version })
+          .expect(201);
+        expect(signedOff.body.isSignedOff).toBe(true);
+        version = signedOff.body.version;
 
         // active -> completed
         const completed = await request(app.getHttpServer())
@@ -715,6 +727,14 @@ describe('Engagement Core (e2e)', () => {
             .expect(201);
           version = advanced.body.version;
         }
+        // Phase 7 sign-off gate: GST_MONTHLY is manager_review, so the EP (pa,
+        // a lead) may sign off before completion.
+        const signedOff = await request(app.getHttpServer())
+          .post(`/api/v1/engagements/${acc.id}/sign-off`)
+          .set(bearer(pa))
+          .send({ version })
+          .expect(201);
+        version = signedOff.body.version;
         const completed = await request(app.getHttpServer())
           .post(`/api/v1/engagements/${acc.id}/complete`)
           .set(bearer(pa))

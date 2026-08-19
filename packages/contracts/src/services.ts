@@ -18,6 +18,7 @@ export const REVIEW_MODEL = {
   fullEpReview: 'full_ep_review',
 } as const;
 export type ReviewModelSlug = (typeof REVIEW_MODEL)[keyof typeof REVIEW_MODEL];
+export const REVIEW_MODELS: ReviewModelSlug[] = Object.values(REVIEW_MODEL);
 
 /**
  * A completed/actual review satisfies a service's requirement only when its

@@ -535,4 +535,135 @@ describe('RLS (database-level, independent of the application)', () => {
       return underContext<T>({ role, officeId: officeIds[officeCode], employeeId }, sql);
     }
   });
+
+  // Phase 7: review & sign-off engine, proven at the database layer independently
+  // of the API. Reviews/points are engagement-scoped professional evidence;
+  // review models drive the completion gate; the review plan is escalate-only.
+  describe('review engine (Phase 7)', () => {
+    const emp = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.employees WHERE employee_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const engId = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const reviewModelId = async (slug: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.review_models WHERE slug = '${slug}'`,
+      );
+      return rows[0]!.id;
+    };
+
+    it('is fail-closed: no context ⇒ zero reviews and zero review points', async () => {
+      expect(await underContext({}, 'SELECT id FROM hsdg.engagement_reviews')).toHaveLength(0);
+      expect(await underContext({}, 'SELECT id FROM hsdg.engagement_review_points')).toHaveLength(
+        0,
+      );
+    });
+
+    it('review models expose requires_ep_signoff and are read-only to the app role', async () => {
+      const rows = await underContext<{ slug: string; requires_ep_signoff: boolean }>(
+        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        `SELECT slug, requires_ep_signoff FROM hsdg.review_models ORDER BY rank`,
+      );
+      const byslug = Object.fromEntries(rows.map((r) => [r.slug, r.requires_ep_signoff]));
+      expect(byslug['manager_review']).toBe(false);
+      expect(byslug['full_ep_review']).toBe(true);
+      await expect(
+        app.query(
+          `INSERT INTO hsdg.review_models (slug, name, rank, requires_ep_signoff) VALUES ('z','Z',88,true)`,
+        ),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    it('scopes reviews to engagement membership (unassigned partner blind; team member sees)', async () => {
+      const acmeId = await engId('ENG00001'); // Acme audit, North
+      const mpEmp = await emp('EMP001');
+      const partnerB = await emp('EMP004'); // unassigned to Acme
+      const seniorY = await emp('EMP006'); // on Acme's team (South resource)
+
+      await app.query('BEGIN');
+      try {
+        const setCtx = (
+          userId: string | undefined,
+          role: string,
+          officeCode: 'NORTH' | 'SOUTH',
+          empId: string,
+        ) =>
+          app.query(
+            'SELECT set_config($1,$2,true),set_config($3,$4,true),set_config($5,$6,true),set_config($7,$8,true)',
+            [
+              'hsdg.user_id',
+              userId ?? '',
+              'hsdg.role',
+              role,
+              'hsdg.office_id',
+              officeIds[officeCode] ?? '',
+              'hsdg.employee_id',
+              empId,
+            ],
+          );
+
+        // MP (firm-wide lead) records a review on the Acme engagement.
+        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        await app.query(
+          `INSERT INTO hsdg.engagement_reviews
+             (engagement_id, review_type, reviewer_employee_id, reviewer_role, outcome)
+           VALUES ($1, 'manager_review', $2, 'managing_partner', 'cleared')`,
+          [acmeId, mpEmp],
+        );
+
+        // Unassigned Partner B (South) cannot see it.
+        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        const asB = await app.query(
+          `SELECT id FROM hsdg.engagement_reviews WHERE engagement_id = '${acmeId}'`,
+        );
+        expect(asB.rows).toHaveLength(0);
+
+        // Senior Y — on Acme's team — can.
+        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        const asY = await app.query(
+          `SELECT id FROM hsdg.engagement_reviews WHERE engagement_id = '${acmeId}'`,
+        );
+        expect(asY.rows.length).toBeGreaterThanOrEqual(1);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+
+    it('forbids the app role from DELETEing review evidence (reviews & points)', async () => {
+      await expect(app.query(`DELETE FROM hsdg.engagement_reviews`)).rejects.toThrow(
+        /permission denied/i,
+      );
+      await expect(app.query(`DELETE FROM hsdg.engagement_review_points`)).rejects.toThrow(
+        /permission denied/i,
+      );
+    });
+
+    it('enforces escalate-only review plans at the database layer (weakening rejected)', async () => {
+      const acmeId = await engId('ENG00001'); // STAT_AUDIT ⇒ requires full_ep_review
+      const managerReview = await reviewModelId('manager_review'); // weaker (rank 10)
+      await app.query('BEGIN');
+      try {
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', 'managing_partner']);
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.office_id', officeIds['NORTH']]);
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', userIds['mp@hsdg.in']]);
+        await expect(
+          app.query(
+            `UPDATE hsdg.engagements SET review_model_id = '${managerReview}' WHERE id = '${acmeId}'`,
+          ),
+        ).rejects.toThrow(/weaker/i);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+  });
 });
