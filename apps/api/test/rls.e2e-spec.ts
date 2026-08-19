@@ -297,5 +297,80 @@ describe('RLS (database-level, independent of the application)', () => {
       );
       expect(rows.length).toBeGreaterThanOrEqual(2);
     });
+
+    it('the SECURITY DEFINER helpers are not an information side channel', async () => {
+      // The helpers answer only "does MY context grant access"; they never leak
+      // other rows or reveal existence. Same argument → true for the assigned
+      // EP, false for an unassigned partner and for a non-existent id.
+      const acme = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = 'ENG00001'`,
+      );
+      const acmeId = acme[0]!.id;
+      const partnerA = await emp('EMP003'); // the Acme EP
+      const partnerB = await emp('EMP004'); // unassigned to Acme
+
+      const asEp = await underEmp<{ v: boolean }>(
+        'partner',
+        'NORTH',
+        partnerA,
+        `SELECT hsdg.is_engagement_lead('${acmeId}') AS v`,
+      );
+      expect(asEp[0]!.v).toBe(true);
+
+      const asUnassigned = await underEmp<{ lead: boolean; member: boolean; ghost: boolean }>(
+        'partner',
+        'SOUTH',
+        partnerB,
+        `SELECT hsdg.is_engagement_lead('${acmeId}') AS lead,
+                hsdg.is_engagement_member('${acmeId}') AS member,
+                hsdg.is_engagement_lead('00000000-0000-0000-0000-000000000000') AS ghost`,
+      );
+      expect(asUnassigned[0]).toEqual({ lead: false, member: false, ghost: false });
+    });
+  });
+
+  // The Phase 0–5 checkpoint separated business firm-wide authority (Managing
+  // Partner) from technical/platform administration (admin). Admin keeps
+  // identity/HR/config/audit reach but must NOT have automatic access to
+  // client/engagement data. Enforced at the database layer (migration 0009).
+  describe('role separation: platform admin vs business firm-wide (checkpoint)', () => {
+    // Lazy: officeIds is only populated in beforeAll, after describe collection.
+    const adminNorth = (): Ctx => ({ role: 'admin', officeId: officeIds['NORTH'] });
+
+    it('denies the platform admin business firm-wide reach into engagements', async () => {
+      // admin is not assigned to any engagement and is not business-firm-wide.
+      const rows = await underContext(adminNorth(), `SELECT id FROM hsdg.engagements`);
+      expect(rows).toHaveLength(0);
+    });
+
+    it('denies the platform admin cross-office client visibility (not firm-wide)', async () => {
+      const rows = await underContext<{ legal_name: string }>(
+        adminNorth(),
+        `SELECT legal_name FROM hsdg.entities`,
+      );
+      const names = rows.map((r) => r.legal_name);
+      // Only its own office's clients are visible via the generic office branch…
+      expect(names).toContain('Acme Manufacturing Pvt Ltd'); // North
+      // …never the whole firm.
+      expect(names).not.toContain('Coastal Foods Pvt Ltd'); // South
+    });
+
+    it('keeps the platform admin firm-wide for identity/HR and audit (unchanged)', async () => {
+      const employees = await underContext(adminNorth(), `SELECT id FROM hsdg.employees`);
+      expect(employees.length).toBeGreaterThanOrEqual(8);
+      const users = await underContext(adminNorth(), `SELECT id FROM hsdg.users`);
+      expect(users.length).toBeGreaterThanOrEqual(6);
+      const audit = await underContext(adminNorth(), `SELECT id FROM hsdg.audit_events LIMIT 1`);
+      expect(audit.length).toBeGreaterThanOrEqual(0); // readable (no permission error)
+    });
+
+    it('keeps the Managing Partner business firm-wide (regression guard)', async () => {
+      const engagements = await underContext(
+        { role: 'managing_partner', officeId: officeIds['NORTH'] },
+        `SELECT id FROM hsdg.engagements`,
+      );
+      expect(engagements.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });

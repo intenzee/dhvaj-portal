@@ -53,6 +53,14 @@ describe('Entity Master (e2e)', () => {
       expect(names).not.toContain('Coastal Foods Pvt Ltd'); // South
     });
 
+    it('forbids the platform admin (no entity.read) from listing clients (403)', async () => {
+      // Checkpoint role separation: technical admin has no client-data access.
+      await request(app.getHttpServer())
+        .get('/api/v1/entities')
+        .set(bearer(await token('admin@hsdg.in')))
+        .expect(403);
+    });
+
     // Regression: unknown query params used to 400 under forbidNonWhitelisted.
     it('supports the search filter (200, not 400)', async () => {
       const res = await request(app.getHttpServer())

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { TEAM_ROLES, type TeamRole } from '@hsdg/contracts';
 
 export class ReassignPartnerDto {
@@ -11,6 +11,14 @@ export class ReassignPartnerDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  @ApiPropertyOptional({
+    description: 'Expected current version for optimistic concurrency (stale ⇒ 409).',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  version?: number;
 }
 
 export class AssignTeamMemberDto {

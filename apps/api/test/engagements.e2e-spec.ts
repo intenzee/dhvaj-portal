@@ -115,6 +115,14 @@ describe('Engagement Core (e2e)', () => {
         .expect(200);
       expect(codes(res.body.items)).toContain('ENG00001');
     });
+
+    it('forbids the platform admin (no engagement.read) from listing engagements (403)', async () => {
+      // Checkpoint role separation: technical admin has no engagement access.
+      await request(app.getHttpServer())
+        .get('/api/v1/engagements')
+        .set(bearer(await token('admin@hsdg.in')))
+        .expect(403);
+    });
   });
 
   describe('creation & management (audited)', () => {
@@ -268,6 +276,118 @@ describe('Engagement Core (e2e)', () => {
         .patch(`/api/v1/engagements/${created.body.id}`)
         .set(bearer(pa))
         .send({ status: 'on_hold', version: v0 })
+        .expect(409);
+    });
+  });
+
+  describe('accountability grade rules (checkpoint)', () => {
+    it('rejects a non-partner Engagement Partner (400)', async () => {
+      const entityId = await findEntityId('Bharat');
+      const serviceId = await findServiceId('ITR_FILING');
+      const seniorEmp = await findEmployeeId('EMP006'); // Senior Y
+      await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(mp)) // firm-wide, so RLS is not the gate — the grade trigger is
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          engagementPartnerEmployeeId: seniorEmp,
+        })
+        .expect(400);
+    });
+
+    it('rejects a non-manager Engagement Manager (400)', async () => {
+      const entityId = await findEntityId('Bharat');
+      const serviceId = await findServiceId('ITR_FILING');
+      const articleEmp = await findEmployeeId('EMP007'); // Article North
+      await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(mp))
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          engagementManagerEmployeeId: articleEmp,
+        })
+        .expect(400);
+    });
+
+    it('a Manager creating becomes the engagement Manager (not the EP)', async () => {
+      const entityId = await findEntityId('Bharat'); // North client
+      const serviceId = await findServiceId('GST_MONTHLY');
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(await token('manager.x@hsdg.in')))
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          status: 'prospect',
+        })
+        .expect(201);
+      expect(created.body.engagementManagerName).toBe('Manager X');
+      expect(created.body.engagementPartnerId).toBeNull();
+    });
+  });
+
+  describe('concurrency consistency (checkpoint)', () => {
+    it('bumps the engagement version when the team changes', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const entityId = await findEntityId('Bharat');
+      const serviceId = await findServiceId('INT_AUDIT');
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(pa))
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          status: 'accepted',
+        })
+        .expect(201);
+      const article = await findEmployeeId('EMP007');
+      const assigned = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${created.body.id}/team`)
+        .set(bearer(pa))
+        .send({ employeeId: article, roleOnEngagement: 'member' })
+        .expect(201);
+      expect(assigned.body.version).toBeGreaterThan(created.body.version);
+    });
+
+    it('reassign honours optimistic concurrency (stale version ⇒ 409)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const entityId = await findEntityId('Bharat');
+      const serviceId = await findServiceId('TAX_ADVISORY');
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(pa))
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          status: 'accepted',
+        })
+        .expect(201);
+      const v0 = created.body.version as number;
+      const partnerB = await findEmployeeId('EMP004');
+      const partnerA = await findEmployeeId('EMP003');
+      // Correct version succeeds (firm-wide MP performs the governance action).
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${created.body.id}/reassign-partner`)
+        .set(bearer(mp))
+        .send({ engagementPartnerEmployeeId: partnerB, version: v0 })
+        .expect(201);
+      // Re-using the now-stale version is rejected.
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${created.body.id}/reassign-partner`)
+        .set(bearer(mp))
+        .send({ engagementPartnerEmployeeId: partnerA, version: v0 })
         .expect(409);
     });
   });

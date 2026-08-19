@@ -149,10 +149,17 @@ export class EngagementsService {
         ? await this.resolveOfficeId(client, input.officeCode)
         : entity.rows[0].home_office_id;
 
-      // Default the EP to the creator so a partner can create their own
-      // engagement; RLS then requires the EP (or manager) to be the caller
-      // unless they are firm-wide.
-      const epId = input.engagementPartnerEmployeeId ?? ctx.employeeId ?? null;
+      // Default accountability to the creator, but only into a role their grade
+      // allows: a partner becomes the EP, a manager becomes the manager. RLS
+      // then requires the EP/manager to be the caller unless they are firm-wide,
+      // and the grade trigger rejects a non-partner EP / non-manager manager.
+      let epId = input.engagementPartnerEmployeeId ?? null;
+      let managerId = input.engagementManagerEmployeeId ?? null;
+      if (ctx.employeeId && (epId === null || managerId === null)) {
+        const grade = await this.callerGradeClass(client, ctx.employeeId);
+        if (epId === null && grade === 'partner') epId = ctx.employeeId;
+        if (managerId === null && grade === 'manager') managerId = ctx.employeeId;
+      }
 
       let id: string;
       try {
@@ -170,7 +177,7 @@ export class EngagementsService {
             input.periodLabel ?? 'FY',
             officeId,
             epId,
-            input.engagementManagerEmployeeId ?? null,
+            managerId,
             input.status ?? 'prospect',
             input.predecessorEngagementId ?? null,
             input.plannedStartDate ?? null,
@@ -243,10 +250,17 @@ export class EngagementsService {
     id: string,
     newEpEmployeeId: string,
     reason: string | undefined,
+    expectedVersion?: number,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
+      // Optimistic concurrency: reject if the caller acted on a stale copy.
+      if (expectedVersion !== undefined && before.version !== expectedVersion) {
+        throw new ConflictException(
+          'Engagement was modified by someone else. Refresh and retry (stale version).',
+        );
+      }
 
       let updated: number;
       try {
@@ -293,6 +307,7 @@ export class EngagementsService {
       } catch (err) {
         throw translatePgError(err);
       }
+      await this.bumpVersion(client, id);
       const after = await this.selectDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.team_assigned',
@@ -319,6 +334,7 @@ export class EngagementsService {
       if ((result.rowCount ?? 0) === 0) {
         throw new NotFoundException('Team member not found on this engagement.');
       }
+      await this.bumpVersion(client, id);
       const after = await this.selectDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.team_removed',
@@ -405,6 +421,31 @@ export class EngagementsService {
     if (!rows[0]) throw new BadRequestException(`Unknown office "${code}".`);
     return rows[0].id;
   }
+
+  /** Increment the aggregate version so roster changes are visible to optimistic
+   *  concurrency (team writes touch a child table, not the engagement row). */
+  private async bumpVersion(client: PoolClient, id: string): Promise<void> {
+    await client.query(`UPDATE hsdg.engagements SET version = version + 1 WHERE id = $1`, [id]);
+  }
+
+  /** Classify the caller's grade for accountability defaulting (partner ⇒ EP,
+   *  manager ⇒ manager). Reads only the caller's own visible employee row. */
+  private async callerGradeClass(
+    client: PoolClient,
+    employeeId: string,
+  ): Promise<'partner' | 'manager' | 'other'> {
+    const { rows } = await client.query<{ is_partner: boolean; is_manager: boolean }>(
+      `SELECT g.is_partner_grade AS is_partner,
+              (g.rank >= (SELECT rank FROM hsdg.grades WHERE slug = 'manager')) AS is_manager
+       FROM hsdg.employees e JOIN hsdg.grades g ON g.id = e.grade_id
+       WHERE e.id = $1`,
+      [employeeId],
+    );
+    if (!rows[0]) return 'other';
+    if (rows[0].is_partner) return 'partner';
+    if (rows[0].is_manager) return 'manager';
+    return 'other';
+  }
 }
 
 function isAccepted(status: EngagementStatus | undefined): boolean {
@@ -457,6 +498,14 @@ export function translatePgError(err: unknown): Error {
   if (e.code === '23514') {
     return new BadRequestException(
       'Invalid engagement state — an accepted engagement requires an Engagement Partner.',
+    );
+  }
+  // Raised by the engagement grade-rules trigger (partner/manager accountability).
+  // The message is a fixed, developer-authored string — safe to surface.
+  if (e.code === 'P0001') {
+    const message = (err as { message?: string }).message;
+    return new BadRequestException(
+      message && message.length <= 200 ? message : 'Invalid engagement accountability.',
     );
   }
   if (e.code === '42501') {

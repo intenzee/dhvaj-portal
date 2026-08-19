@@ -24,6 +24,15 @@ describe('translatePgError (engagements)', () => {
     expect(translatePgError({ code: '23503' })).toBeInstanceOf(BadRequestException);
   });
 
+  it('maps the grade-rules trigger (P0001) to a 400 that surfaces the reason', () => {
+    const e = translatePgError({
+      code: 'P0001',
+      message: 'Engagement Partner must be a partner-grade employee.',
+    });
+    expect(e).toBeInstanceOf(BadRequestException);
+    expect(e.message).toMatch(/partner-grade/i);
+  });
+
   it('maps an RLS violation to 403', () => {
     expect(translatePgError({ code: '42501' })).toBeInstanceOf(ForbiddenException);
   });

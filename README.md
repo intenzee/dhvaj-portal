@@ -140,6 +140,15 @@ Seeded users: `mp@hsdg.in` (Managing Partner), `admin@hsdg.in`,
 - **RLS is live (Phase 1):** `FORCE ROW LEVEL SECURITY` on identity tables,
   office-scoped with a Managing-Partner firm-wide override, fail-closed (no
   context ⇒ no rows). The audit trail is append-only (no UPDATE/DELETE).
+- **Role separation (business vs platform):** firm-wide authority is split in
+  two — `managing_partner` is **business** firm-wide (all client/engagement
+  data), while the technical **`admin`** role is firm-wide only for identity,
+  HR, catalogue config and audit **read**, with **no** automatic access to
+  client or engagement data (enforced at the data layer *and* the API). See
+  [ADR-0009](docs/adr/0009-security-role-separation.md).
+- **Accountability integrity:** a database trigger enforces that an Engagement
+  Partner is partner-grade and an Engagement Manager is manager-grade — for every
+  writer, atomically. See [ADR-0010](docs/adr/0010-engagement-grade-rules-and-concurrency.md).
 - Authentication (Entra ID / dev providers), MFA enforcement, and permission
   guards sit above RLS — never instead of it.
 - Uniform error envelope, correlation IDs on every request/response, and secret

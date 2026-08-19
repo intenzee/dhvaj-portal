@@ -107,6 +107,7 @@ export class EngagementsController {
       id,
       dto.engagementPartnerEmployeeId,
       dto.reason,
+      dto.version,
     );
   }
 
