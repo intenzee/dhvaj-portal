@@ -16,4 +16,5 @@ export * from './entities';
 export * from './services';
 export * from './engagements';
 export * from './reviews';
+export * from './compliance';
 export * from './pagination';
