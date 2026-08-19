@@ -10,6 +10,7 @@ describe('PermissionsGuard', () => {
     displayName: 'P',
     officeId: 'o1',
     officeCode: 'NORTH',
+    employeeId: null,
     roles: ['manager'],
     effectiveRole: 'manager',
     permissions,

@@ -126,3 +126,35 @@ JOIN hsdg.entities e ON e.pan = v.pan
 WHERE NOT EXISTS (
   SELECT 1 FROM hsdg.entity_contacts ec WHERE ec.entity_id = e.id AND ec.full_name = v.name
 );
+
+-- ── Engagements (Phase 5) ─────────────────────────────────────────────────
+-- Acme (NORTH) statutory audit: EP Partner A, Manager X — team includes a
+-- SOUTH senior, demonstrating shared resources across offices.
+INSERT INTO hsdg.engagements
+  (entity_id, service_id, financial_year, period_label, office_id,
+   engagement_partner_id, engagement_manager_id, status, accepted_at)
+SELECT e.id, s.id, v.fy, v.period, e.home_office_id, ep.id, mgr.id, v.status,
+       CASE WHEN v.status NOT IN ('prospect', 'pending_acceptance') THEN now() END
+FROM (VALUES
+  ('AAACA1234A', 'STAT_AUDIT', '2024-25', 'FY',     'EMP003', 'EMP005', 'accepted'),
+  ('AACCC9012C', 'GST_ANNUAL', '2024-25', 'Annual', 'EMP004', NULL,     'active')
+) AS v(entity_pan, service_code, fy, period, ep_code, mgr_code, status)
+JOIN hsdg.entities e ON e.pan = v.entity_pan::citext
+JOIN hsdg.services s ON s.code = v.service_code
+JOIN hsdg.employees ep ON ep.employee_code = v.ep_code
+LEFT JOIN hsdg.employees mgr ON mgr.employee_code = v.mgr_code
+ON CONFLICT (entity_id, service_id, financial_year, period_label) DO NOTHING;
+
+INSERT INTO hsdg.engagement_team (engagement_id, employee_id, role_on_engagement)
+SELECT eng.id, emp.id, v.role
+FROM (VALUES
+  ('AAACA1234A', 'STAT_AUDIT', 'EMP006', 'in_charge'),  -- Senior Y (SOUTH) on Acme (NORTH)
+  ('AAACA1234A', 'STAT_AUDIT', 'EMP007', 'member'),     -- Article North on Acme
+  ('AACCC9012C', 'GST_ANNUAL', 'EMP008', 'member')      -- Article South on Coastal
+) AS v(entity_pan, service_code, emp_code, role)
+JOIN hsdg.entities e ON e.pan = v.entity_pan::citext
+JOIN hsdg.services s ON s.code = v.service_code
+JOIN hsdg.engagements eng
+  ON eng.entity_id = e.id AND eng.service_id = s.id AND eng.financial_year = '2024-25'
+JOIN hsdg.employees emp ON emp.employee_code = v.emp_code
+ON CONFLICT (engagement_id, employee_id) DO NOTHING;

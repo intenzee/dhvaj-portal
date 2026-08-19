@@ -44,6 +44,7 @@ export class AuthService {
       displayName: data.displayName,
       officeId: data.officeId,
       officeCode: data.officeCode,
+      employeeId: data.employeeId,
       roles: data.roles,
       effectiveRole: pickEffectiveRole(data.roles),
       permissions: data.permissions,

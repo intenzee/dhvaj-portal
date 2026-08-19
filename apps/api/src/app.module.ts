@@ -14,6 +14,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { OrganisationModule } from './modules/organisation/organisation.module';
 import { EntitiesModule } from './modules/entities/entities.module';
 import { CatalogueModule } from './modules/catalogue/catalogue.module';
+import { EngagementsModule } from './modules/engagements/engagements.module';
 
 /**
  * Composition root of the modular monolith.
@@ -38,8 +39,11 @@ import { CatalogueModule } from './modules/catalogue/catalogue.module';
  * Service catalogue (Phase 4):
  *   - CatalogueModule — review models, service lines, workflows, services
  *
- * Remaining domain modules (engagements, …) are added one per phase and
- * imported here as they land.
+ * Engagement core (Phase 5):
+ *   - EngagementsModule — the central transactional object; assignment-based access
+ *
+ * Remaining domain modules (lifecycle, reviews, compliance, …) are added one
+ * per phase and imported here as they land.
  */
 @Module({
   imports: [
@@ -67,6 +71,7 @@ import { CatalogueModule } from './modules/catalogue/catalogue.module';
     OrganisationModule,
     EntitiesModule,
     CatalogueModule,
+    EngagementsModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

@@ -7,6 +7,7 @@ export interface PrincipalData {
   displayName: string;
   officeId: string;
   officeCode: string;
+  employeeId: string | null;
   isActive: boolean;
   mfaRequired: boolean;
   roles: RoleSlug[];

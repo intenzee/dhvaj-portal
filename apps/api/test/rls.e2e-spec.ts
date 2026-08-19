@@ -13,7 +13,7 @@ describe('RLS (database-level, independent of the application)', () => {
   let userIds: Record<string, string>;
   let officeIds: Record<string, string>;
 
-  type Ctx = { userId?: string; role?: string; officeId?: string };
+  type Ctx = { userId?: string; role?: string; officeId?: string; employeeId?: string };
 
   /** Run a read under a security context, in a rolled-back transaction. */
   async function underContext<T>(ctx: Ctx, sql: string): Promise<T[]> {
@@ -22,6 +22,7 @@ describe('RLS (database-level, independent of the application)', () => {
       await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', ctx.userId ?? '']);
       await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', ctx.role ?? '']);
       await app.query('SELECT set_config($1,$2,true)', ['hsdg.office_id', ctx.officeId ?? '']);
+      await app.query('SELECT set_config($1,$2,true)', ['hsdg.employee_id', ctx.employeeId ?? '']);
       const { rows } = await app.query(sql);
       return rows as T[];
     } finally {
@@ -206,6 +207,95 @@ describe('RLS (database-level, independent of the application)', () => {
       await expect(
         app.query(`INSERT INTO hsdg.review_models (slug, name, rank) VALUES ('x', 'X', 99)`),
       ).rejects.toThrow(/permission denied/i);
+    });
+  });
+
+  describe('engagements — assignment-based access (Phase 5)', () => {
+    // Employees behind the seeded users (fetched under a firm-wide context,
+    // since employee reads are themselves RLS-scoped and fail-closed).
+    const emp = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.employees WHERE employee_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+
+    /** A context carrying an employee id (assignment-based access). */
+    async function underEmp<T>(
+      role: string,
+      officeCode: 'NORTH' | 'SOUTH',
+      employeeId: string,
+      sql: string,
+    ): Promise<T[]> {
+      return underContext<T>({ role, officeId: officeIds[officeCode], employeeId }, sql);
+    }
+
+    it('is fail-closed: no context ⇒ zero engagements', async () => {
+      const rows = await underContext({}, 'SELECT id FROM hsdg.engagements');
+      expect(rows).toHaveLength(0);
+    });
+
+    it('shows the EP their engagement', async () => {
+      const partnerA = await emp('EMP003');
+      const rows = await underEmp<{ engagement_code: string }>(
+        'partner',
+        'NORTH',
+        partnerA,
+        `SELECT engagement_code FROM hsdg.engagements`,
+      );
+      expect(rows.map((r) => r.engagement_code)).toContain('ENG00001'); // Acme audit
+    });
+
+    it('gives a cross-office team member access to the engagement, its client, and co-workers', async () => {
+      // Senior Y is in the SOUTH office but is on the team of the NORTH Acme engagement.
+      const seniorY = await emp('EMP006');
+
+      const engagements = await underEmp<{ engagement_code: string }>(
+        'senior',
+        'SOUTH',
+        seniorY,
+        `SELECT engagement_code FROM hsdg.engagements`,
+      );
+      expect(engagements.map((r) => r.engagement_code)).toContain('ENG00001');
+
+      // The North client Acme — normally invisible to a South user — is visible via the engagement.
+      const clients = await underEmp<{ legal_name: string }>(
+        'senior',
+        'SOUTH',
+        seniorY,
+        `SELECT legal_name FROM hsdg.entities WHERE pan = 'AAACA1234A'`,
+      );
+      expect(clients).toHaveLength(1);
+
+      // North co-workers on the engagement are visible.
+      const coworkers = await underEmp<{ employee_code: string }>(
+        'senior',
+        'SOUTH',
+        seniorY,
+        `SELECT employee_code FROM hsdg.employees WHERE employee_code IN ('EMP003', 'EMP005')`,
+      );
+      expect(coworkers.map((r) => r.employee_code).sort()).toEqual(['EMP003', 'EMP005']);
+    });
+
+    it('does NOT show an unassigned partner another partner’s engagement', async () => {
+      // Partner B (South) is not on the Acme (North) engagement.
+      const partnerB = await emp('EMP004');
+      const rows = await underEmp<{ engagement_code: string }>(
+        'partner',
+        'SOUTH',
+        partnerB,
+        `SELECT engagement_code FROM hsdg.engagements`,
+      );
+      expect(rows.map((r) => r.engagement_code)).not.toContain('ENG00001');
+    });
+
+    it('grants the Managing Partner every engagement (firm-wide)', async () => {
+      const rows = await underContext(
+        { role: 'managing_partner', officeId: officeIds['NORTH'] },
+        `SELECT id FROM hsdg.engagements`,
+      );
+      expect(rows.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

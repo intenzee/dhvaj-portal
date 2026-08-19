@@ -24,6 +24,7 @@ describe('AuthGuard', () => {
     displayName: 'P',
     officeId: 'o1',
     officeCode: 'NORTH',
+    employeeId: null,
     roles: ['partner'],
     effectiveRole: 'partner',
     permissions: ['user.read'],

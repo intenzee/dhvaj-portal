@@ -10,14 +10,14 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 4 — Service Catalogue (complete).** On the Phase 0–3
-> foundation, the system now has the firm's **configurable offering**: review
-> models (ranked), service lines, workflow families/states, and services — each
-> carrying its required (minimum) review model and workflow. Firm-wide config
-> with FORCE RLS, audited permission-gated management, and optimistic
-> concurrency. All proven by tests, including database-level RLS denial
-> independent of the API. Remaining modules follow phase by phase — see
-> [Roadmap](#roadmap).
+> **Status: Phase 5 — Engagement Core (complete).** The central transactional
+> object is live: engagements with identity (Entity + Service + FY + Period),
+> one accountable Engagement Partner, a manager, and a per-engagement **team of
+> shared resources**. Access is **assignment-based** — a team member sees an
+> engagement (and its client and co-workers) regardless of office — enforced by
+> PostgreSQL RLS and proven by tests independent of the API. Audited management,
+> EP-reassignment governance, and optimistic concurrency throughout. Remaining
+> modules follow phase by phase — see [Roadmap](#roadmap).
 
 ---
 
@@ -188,6 +188,13 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | GET | `/services/:id` | `service.read` | Detail with workflow states |
 | POST | `/services` | `service.manage` | Create (audited) |
 | PATCH | `/services/:id` | `service.manage` | Update (audited; optimistic concurrency) |
+| GET | `/engagements` | `engagement.read` | Assignment-scoped _(paginated)_; filter `?status=&entityId=&serviceCode=&office=&mine=` |
+| GET | `/engagements/:id` | `engagement.read` | Detail with team; 404 unless assigned |
+| POST | `/engagements` | `engagement.manage` | Create (audited) |
+| PATCH | `/engagements/:id` | `engagement.manage` | Update (audited; optimistic concurrency) |
+| POST | `/engagements/:id/reassign-partner` | `engagement.manage` | Change EP (firm-wide; audited) |
+| POST | `/engagements/:id/team` | `engagement.manage` | Assign a team member (audited) |
+| DELETE | `/engagements/:id/team/:employeeId` | `engagement.manage` | Remove a team member (audited) |
 
 ## Roadmap
 
@@ -197,8 +204,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **1** | Identity & security (users, roles, offices, RLS policies + tests) | ✅ done |
 | **2** | Organisation & people (partners, managers, seniors, articles) | ✅ done |
 | **3** | Entity master (entities, registrations, contacts, duplicates) | ✅ done |
-| **4** | Service catalogue (configurable services & review models) | ✅ current |
-| 5 | Engagement core (EP accountability, team, identity) | ⬜ |
+| **4** | Service catalogue (configurable services & review models) | ✅ done |
+| **5** | Engagement core (EP accountability, team, identity) | ✅ current |
 | 6 | Engagement lifecycle (explicit guarded transitions) | ⬜ |
 | 7 | Review & sign-off engine | ⬜ |
 | 8 | Compliance engine (effective-dated, versioned) | ⬜ |

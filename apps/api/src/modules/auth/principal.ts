@@ -12,6 +12,8 @@ export interface Principal {
   displayName: string;
   officeId: string;
   officeCode: string;
+  /** The user's linked employee id, if any (drives engagement-assignment access). */
+  employeeId: string | null;
   roles: RoleSlug[];
   /**
    * Highest-precedence role — what RLS policies test (firm-wide vs office).
@@ -30,5 +32,6 @@ export function rlsContextFromPrincipal(principal: Principal): RlsContext {
     userId: principal.userId,
     role: principal.effectiveRole ?? '',
     officeId: principal.officeId,
+    ...(principal.employeeId ? { employeeId: principal.employeeId } : {}),
   };
 }

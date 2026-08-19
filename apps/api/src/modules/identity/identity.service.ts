@@ -41,22 +41,24 @@ export class IdentityService {
         display_name: string;
         primary_office_id: string;
         office_code: string;
+        employee_id: string | null;
         is_active: boolean;
         mfa_required: boolean;
         roles: RoleSlug[];
       }>(
         `SELECT u.id, u.email, u.display_name, u.primary_office_id,
-                o.code AS office_code, u.is_active, u.mfa_required,
+                o.code AS office_code, emp.id AS employee_id, u.is_active, u.mfa_required,
                 COALESCE(
                   array_agg(DISTINCT r.slug) FILTER (WHERE r.slug IS NOT NULL),
                   '{}'
                 ) AS roles
          FROM hsdg.users u
          JOIN hsdg.offices o ON o.id = u.primary_office_id
+         LEFT JOIN hsdg.employees emp ON emp.user_id = u.id
          LEFT JOIN hsdg.user_roles ur ON ur.user_id = u.id
          LEFT JOIN hsdg.roles r ON r.id = ur.role_id
          WHERE ${whereClause}
-         GROUP BY u.id, o.code`,
+         GROUP BY u.id, o.code, emp.id`,
         [value],
       );
 
@@ -78,6 +80,7 @@ export class IdentityService {
         displayName: row.display_name,
         officeId: row.primary_office_id,
         officeCode: row.office_code,
+        employeeId: row.employee_id,
         isActive: row.is_active,
         mfaRequired: row.mfa_required,
         roles: row.roles,

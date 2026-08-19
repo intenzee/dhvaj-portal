@@ -54,6 +54,8 @@ export const PERMISSION = {
   entityManage: 'entity.manage',
   serviceRead: 'service.read',
   serviceManage: 'service.manage',
+  engagementRead: 'engagement.read',
+  engagementManage: 'engagement.manage',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

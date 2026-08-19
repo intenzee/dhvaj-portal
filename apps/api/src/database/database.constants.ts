@@ -15,4 +15,6 @@ export const RLS_SETTINGS = {
   role: 'hsdg.role',
   officeId: 'hsdg.office_id',
   orgId: 'hsdg.org_id',
+  /** Acting user's employee id — drives engagement-assignment access (Phase 5). */
+  employeeId: 'hsdg.employee_id',
 } as const;

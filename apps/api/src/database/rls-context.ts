@@ -14,6 +14,12 @@ export interface RlsContext {
   role: string;
   /** Acting office UUID, when the request is office-scoped. */
   officeId?: string;
+  /**
+   * Acting user's employee UUID, when they are linked to an employee record.
+   * Engagement RLS (Phase 5) tests this for assignment-based access — being the
+   * EP, manager, or a team member — which is independent of office.
+   */
+  employeeId?: string;
   /** Organisation UUID (firm). */
   orgId?: string;
 }
