@@ -212,26 +212,37 @@ export class EngagementsService {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
-      // Optimistic concurrency: reject if the caller acted on a stale copy.
-      if (expectedVersion !== undefined && before.version !== expectedVersion) {
-        throw new ConflictException(
-          'Engagement was modified by someone else. Refresh and retry (stale version).',
-        );
-      }
 
+      // Optimistic concurrency is enforced atomically in the WHERE (not a
+      // read-then-write compare), so a concurrent version bump between the read
+      // above and this UPDATE cannot be lost.
+      const params: unknown[] = [newEpEmployeeId, id];
+      let versionClause = '';
+      if (expectedVersion !== undefined) {
+        params.push(expectedVersion);
+        versionClause = ` AND version = $${params.length}`;
+      }
       let updated: number;
       try {
         const result = await client.query(
           `UPDATE hsdg.engagements
            SET engagement_partner_id = $1, version = version + 1
-           WHERE id = $2`,
-          [newEpEmployeeId, id],
+           WHERE id = $2${versionClause}`,
+          params,
         );
         updated = result.rowCount ?? 0;
       } catch (err) {
         throw translatePgError(err);
       }
       if (updated === 0) {
+        // Distinguish a stale version (the row moved on) from an RLS/governance
+        // denial (e.g. a non-firm-wide EP trying to hand off accountability).
+        const current = await selectEngagementDetail(client, id);
+        if (current && expectedVersion !== undefined && current.version !== expectedVersion) {
+          throw new ConflictException(
+            'Engagement was modified by someone else. Refresh and retry (stale version).',
+          );
+        }
         throw new ForbiddenException('Not permitted to reassign the Engagement Partner.');
       }
       const after = await selectEngagementDetail(client, id);
