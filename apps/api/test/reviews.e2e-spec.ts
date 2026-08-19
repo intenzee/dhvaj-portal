@@ -325,6 +325,69 @@ describe('Review & Sign-off Engine (e2e)', () => {
         .send({ reviewModelSlug: 'manager_review', version: eng.version })
         .expect(400);
     });
+
+    it('forbids a non-EP lead (the manager) from setting the review plan (403)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const mgr = await token('manager.x@hsdg.in');
+      const eng = await setupActive({
+        epToken: pa,
+        serviceCode: 'ITR_FILING',
+        managerCode: 'EMP005',
+      });
+      // The plan is the accountable EP's decision — a lead manager cannot set it.
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng.id}/review-plan`)
+        .set(bearer(mgr))
+        .send({ reviewModelSlug: 'full_ep_review' })
+        .expect(403);
+    });
+  });
+
+  // ── Sign-off is terminal to further review changes ───────────────────────
+  describe('sign-off is terminal to review changes (no silent gate bypass)', () => {
+    it('blocks recording a new review once signed off (409)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
+      const signed = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng.id}/sign-off`)
+        .set(bearer(pa))
+        .send({ version: eng.version })
+        .expect(201);
+      expect(signed.body.isSignedOff).toBe(true);
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng.id}/reviews`)
+        .set(bearer(pa))
+        .send({
+          reviewType: 'manager_review',
+          outcome: 'returned',
+          reviewPoints: [{ matter: 'late finding' }],
+        })
+        .expect(409);
+    });
+
+    it('blocks escalating the review plan once signed off — so a manager sign-off cannot be silently invalidated (400)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const mgr = await token('manager.x@hsdg.in');
+      const eng = await setupActive({
+        epToken: pa,
+        serviceCode: 'ITR_FILING',
+        managerCode: 'EMP005',
+      });
+      // Manager validly signs off a manager_review engagement.
+      const signed = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng.id}/sign-off`)
+        .set(bearer(mgr))
+        .send({ version: eng.version })
+        .expect(201);
+      expect(signed.body.isSignedOff).toBe(true);
+      // The EP cannot now escalate to an EP-required model behind the sign-off —
+      // that would leave a manager sign-off passing an EP-required completion gate.
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng.id}/review-plan`)
+        .set(bearer(pa))
+        .send({ reviewModelSlug: 'full_ep_review', version: signed.body.version })
+        .expect(400);
+    });
   });
 
   // ── Reopen invalidates the sign-off ──────────────────────────────────────

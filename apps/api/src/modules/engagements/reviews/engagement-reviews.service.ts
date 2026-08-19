@@ -95,6 +95,16 @@ export class EngagementReviewsService {
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = this.requireActive(await selectEngagementDetail(client, id), ctx);
+      // Sign-off is terminal: no further review evidence or points may be added
+      // once signed off, or the engagement could sit "signed off" yet carry
+      // newer, unresolved findings. To revise the review, reopen it first (which
+      // supersedes the sign-off). Sign-off ⇒ zero open points, so this also keeps
+      // the "no open points while signed off" invariant intact.
+      if (before.isSignedOff) {
+        throw new ConflictException(
+          'Cannot record a review: the engagement is already signed off. Reopen it to revise the review.',
+        );
+      }
       // EP review must be the accountable EP (the RLS lead floor also admits the
       // manager; this is the professional ceiling on top of it).
       if (
@@ -263,6 +273,23 @@ export class EngagementReviewsService {
       if (TERMINAL_STATUSES.includes(before.status)) {
         throw new BadRequestException(
           `Cannot change the review plan of a "${before.status}" engagement.`,
+        );
+      }
+      // The review plan is the EP's professional judgement (§2.1) — only the
+      // accountable EP sets it, not merely any engagement lead (the RLS floor
+      // also admits the manager and firm-wide MP; this is the ceiling on top).
+      if (!ctx.employeeId || ctx.employeeId !== before.engagementPartnerId) {
+        throw new ForbiddenException(
+          "Only the accountable Engagement Partner may set the engagement's review plan.",
+        );
+      }
+      // Changing the plan after sign-off would silently invalidate it — e.g.
+      // escalating a manager-signed engagement to an EP-required model would
+      // leave an insufficient sign-off that still passes the completion gate.
+      // Reopen (which supersedes the sign-off) is the governed way back.
+      if (before.isSignedOff) {
+        throw new BadRequestException(
+          'Cannot change the review plan of a signed-off engagement. Reopen it first.',
         );
       }
       const modelId = await this.resolveReviewModelId(client, input.reviewModelSlug);
