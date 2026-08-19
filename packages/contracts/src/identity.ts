@@ -58,6 +58,7 @@ export const PERMISSION = {
   engagementManage: 'engagement.manage',
   complianceRead: 'compliance.read',
   complianceManage: 'compliance.manage',
+  taskUpdate: 'task.update',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

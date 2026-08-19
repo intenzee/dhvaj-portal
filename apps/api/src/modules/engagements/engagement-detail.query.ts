@@ -29,7 +29,22 @@ export const ENGAGEMENT_BASE = `
          so.id AS sign_off_id, so.reviewer_employee_id AS signed_off_by_id,
          sob.full_name AS signed_off_by_name, so.created_at AS signed_off_at,
          (SELECT count(*) FROM hsdg.engagement_review_points rp
-            WHERE rp.engagement_id = eng.id AND rp.status = 'open')::int AS open_review_point_count
+            WHERE rp.engagement_id = eng.id AND rp.status = 'open')::int AS open_review_point_count,
+         -- Operational state (Phase 9): waiting-for-client vs internally overdue.
+         EXISTS (SELECT 1 FROM hsdg.client_dependencies cd
+                 WHERE cd.engagement_id = eng.id
+                   AND cd.status IN ('pending', 'partially_received')) AS is_waiting_for_client,
+         (SELECT count(*) FROM hsdg.tasks t
+            WHERE t.engagement_id = eng.id AND t.status NOT IN ('done', 'cancelled'))::int
+            AS open_task_count,
+         (SELECT count(*) FROM hsdg.tasks t
+            WHERE t.engagement_id = eng.id AND t.status NOT IN ('done', 'cancelled')
+              AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE)::int
+            AS internally_overdue_task_count,
+         (SELECT count(*) FROM hsdg.client_dependencies cd
+            WHERE cd.engagement_id = eng.id AND cd.status IN ('pending', 'partially_received')
+              AND cd.escalation_date IS NOT NULL AND cd.escalation_date < CURRENT_DATE)::int
+            AS client_overdue_count
   FROM hsdg.engagements eng
   JOIN hsdg.entities ent ON ent.id = eng.entity_id
   JOIN hsdg.services s ON s.id = eng.service_id
@@ -93,6 +108,10 @@ export interface EngagementRow {
   signed_off_by_name: string | null;
   signed_off_at: Date | null;
   open_review_point_count: number;
+  is_waiting_for_client: boolean;
+  open_task_count: number;
+  internally_overdue_task_count: number;
+  client_overdue_count: number;
 }
 
 export function mapEngagement(row: EngagementRow & { team_count: string }): EngagementSummary {
@@ -152,6 +171,10 @@ export function mapEngagement(row: EngagementRow & { team_count: string }): Enga
     signedOffByName: row.signed_off_by_name,
     signedOffAt: row.signed_off_at ? row.signed_off_at.toISOString() : null,
     openReviewPointCount: Number(row.open_review_point_count),
+    isWaitingForClient: row.is_waiting_for_client,
+    openTaskCount: Number(row.open_task_count),
+    internallyOverdueTaskCount: Number(row.internally_overdue_task_count),
+    clientOverdueCount: Number(row.client_overdue_count),
   };
 }
 
