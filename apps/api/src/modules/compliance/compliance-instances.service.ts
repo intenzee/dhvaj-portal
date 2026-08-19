@@ -29,6 +29,8 @@ import {
 } from './compliance-calc';
 import { translateComplianceError } from './compliance-rules.service';
 import type {
+  BulkGenerateResult,
+  ComplianceCalendarRecord,
   ComplianceInstanceDetail,
   ComplianceInstanceRecord,
   ComplianceOverrideRecord,
@@ -37,6 +39,12 @@ import type {
   OverrideInstanceInput,
   WaiveInstanceInput,
 } from './compliance.types';
+
+interface CalendarExtraRow {
+  engagement_code: string;
+  entity_name: string;
+  service_code: string;
+}
 
 interface InstanceRow {
   id: string;
@@ -119,6 +127,14 @@ export class ComplianceInstancesService {
     engagementId: string,
     input: GenerateInstanceInput,
   ): Promise<ComplianceInstanceRecord> {
+    // referenceDate and eventDate are inputs for different bases — a rule uses
+    // exactly one, so supplying both is ambiguous (it could pick the version
+    // "as of" the wrong date). Reject rather than silently prefer one.
+    if (input.referenceDate && input.eventDate) {
+      throw new BadRequestException(
+        'Provide either referenceDate or eventDate, not both — a compliance rule uses a single basis.',
+      );
+    }
     return this.db.withRlsContext(ctx, async (client) => {
       const eng = await client.query<{ financial_year: string }>(
         `SELECT financial_year FROM hsdg.engagements WHERE id = $1`,
@@ -219,10 +235,59 @@ export class ComplianceInstancesService {
     });
   }
 
+  /**
+   * Generate obligations for every active rule linked to the engagement's
+   * service, in one call. Each rule is generated in its own transaction, so a
+   * rule that can't be derived automatically (a period/event basis needing an
+   * explicit date), doesn't apply under the context, or already exists is
+   * skipped with a reason rather than failing the batch.
+   */
+  async generateForService(
+    ctx: RlsContext,
+    engagementId: string,
+    input: { context?: Record<string, unknown> },
+  ): Promise<BulkGenerateResult> {
+    const codes = await this.db.withRlsContext(ctx, async (client) => {
+      const eng = await client.query<{ service_id: string }>(
+        `SELECT service_id FROM hsdg.engagements WHERE id = $1`,
+        [engagementId],
+      );
+      if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
+      const { rows } = await client.query<{ code: string }>(
+        `SELECT code FROM hsdg.compliance_rules
+         WHERE service_id = $1 AND is_active = true ORDER BY code`,
+        [eng.rows[0].service_id],
+      );
+      return rows.map((r) => r.code);
+    });
+    if (codes.length === 0) {
+      throw new BadRequestException(
+        "No active compliance rules are linked to this engagement's service.",
+      );
+    }
+
+    const generated: ComplianceInstanceRecord[] = [];
+    const skipped: Array<{ rule: string; reason: string }> = [];
+    for (const code of codes) {
+      try {
+        generated.push(
+          await this.generate(ctx, engagementId, {
+            complianceRuleCode: code,
+            ...(input.context ? { context: input.context } : {}),
+          }),
+        );
+      } catch (err) {
+        skipped.push({ rule: code, reason: (err as Error).message ?? 'skipped' });
+      }
+    }
+    return { generated, skipped };
+  }
+
   async list(
     ctx: RlsContext,
     engagementId: string,
     page: PageParams,
+    filter: { status?: ComplianceStatus } = {},
   ): Promise<PageResult<ComplianceInstanceRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const eng = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [
@@ -230,21 +295,95 @@ export class ComplianceInstancesService {
       ]);
       if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
 
-      const { rows } = await client.query<InstanceRow & { total_count: string }>(
+      const params: unknown[] = [engagementId];
+      let statusClause = '';
+      if (filter.status) {
+        params.push(filter.status);
+        statusClause = ` AND ci.status = $${params.length}`;
+      }
+      params.push(page.limit, page.offset);
+      const { rows } = await client.query<InstanceRow>(
         `${INSTANCE_BASE}
-         WHERE ci.engagement_id = $1
+         WHERE ci.engagement_id = $1${statusClause}
          ORDER BY COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)
-         LIMIT $2 OFFSET $3`,
-        [engagementId, page.limit, page.offset],
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
       );
-      // count(*) OVER() doesn't survive the deadline ORDER BY cleanly with the
-      // joins here, so total is a separate cheap count under the same RLS.
       const totalRes = await client.query<{ total: string }>(
-        `SELECT count(*) AS total FROM hsdg.compliance_instances WHERE engagement_id = $1`,
-        [engagementId],
+        `SELECT count(*) AS total FROM hsdg.compliance_instances ci
+         WHERE ci.engagement_id = $1${statusClause}`,
+        params.slice(0, params.length - 2),
       );
       return {
         items: rows.map(mapInstance),
+        total: Number(totalRes.rows[0]?.total ?? 0),
+      };
+    });
+  }
+
+  /**
+   * A firm-wide compliance calendar (§12): every obligation across the
+   * engagements the caller can see (RLS-scoped), ordered by effective statutory
+   * deadline. Filter by status, a due-date window, and overdue-only — the data
+   * behind a Compliance Calendar / "due soon" dashboard card.
+   */
+  async calendar(
+    ctx: RlsContext,
+    page: PageParams,
+    filter: {
+      status?: ComplianceStatus;
+      dueFrom?: string;
+      dueTo?: string;
+      overdueOnly?: boolean;
+    } = {},
+  ): Promise<PageResult<ComplianceCalendarRecord>> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (filter.status) {
+        params.push(filter.status);
+        conditions.push(`ci.status = $${params.length}`);
+      }
+      const effective = `COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)`;
+      if (filter.dueFrom) {
+        params.push(filter.dueFrom);
+        conditions.push(`${effective} >= $${params.length}::date`);
+      }
+      if (filter.dueTo) {
+        params.push(filter.dueTo);
+        conditions.push(`${effective} <= $${params.length}::date`);
+      }
+      if (filter.overdueOnly) {
+        conditions.push(`ci.status = 'open' AND ${effective} < CURRENT_DATE`);
+      }
+      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+      params.push(page.limit, page.offset);
+
+      const { rows } = await client.query<InstanceRow & CalendarExtraRow>(
+        `${INSTANCE_BASE.replace(
+          'FROM hsdg.compliance_instances ci',
+          `, eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code
+           FROM hsdg.compliance_instances ci
+           JOIN hsdg.engagements eng ON eng.id = ci.engagement_id
+           JOIN hsdg.entities ent ON ent.id = eng.entity_id
+           JOIN hsdg.services s ON s.id = eng.service_id`,
+        )}
+         ${where}
+         ORDER BY ${effective}
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
+      );
+      const totalRes = await client.query<{ total: string }>(
+        `SELECT count(*) AS total FROM hsdg.compliance_instances ci ${where}`,
+        params.slice(0, params.length - 2),
+      );
+      return {
+        items: rows.map((r) => ({
+          ...mapInstance(r),
+          engagementCode: r.engagement_code,
+          entityName: r.entity_name,
+          serviceCode: r.service_code,
+        })),
         total: Number(totalRes.rows[0]?.total ?? 0),
       };
     });

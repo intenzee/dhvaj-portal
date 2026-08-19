@@ -6,7 +6,10 @@ import {
   ComplianceHolidaysController,
   ComplianceRulesController,
 } from './compliance-rules.controller';
-import { ComplianceInstancesController } from './compliance-instances.controller';
+import {
+  ComplianceCalendarController,
+  ComplianceInstancesController,
+} from './compliance-instances.controller';
 
 /**
  * Compliance engine (Phase 8, ADR-0013). Configurable, effective-dated,
@@ -21,6 +24,7 @@ import { ComplianceInstancesController } from './compliance-instances.controller
     ComplianceRulesController,
     ComplianceHolidaysController,
     ComplianceInstancesController,
+    ComplianceCalendarController,
   ],
   providers: [ComplianceRulesService, ComplianceInstancesService],
   exports: [ComplianceRulesService, ComplianceInstancesService],

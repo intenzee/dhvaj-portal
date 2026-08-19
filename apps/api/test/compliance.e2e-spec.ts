@@ -40,9 +40,13 @@ describe('Compliance Engine (e2e)', () => {
   };
 
   /** A partner-owned engagement (partner becomes EP), at the given financial year. */
-  const createEngagement = async (epToken: string, financialYear: string): Promise<string> => {
+  const createEngagement = async (
+    epToken: string,
+    financialYear: string,
+    serviceCode = 'ITR_FILING',
+  ): Promise<string> => {
     const entityId = await findEntityId('Bharat'); // North client
-    const serviceId = await findServiceId('ITR_FILING');
+    const serviceId = await findServiceId(serviceCode);
     const res = await request(app.getHttpServer())
       .post('/api/v1/engagements')
       .set(bearer(epToken))
@@ -403,6 +407,231 @@ describe('Compliance Engine (e2e)', () => {
         .set(bearer(pb))
         .send({ complianceRuleCode: code })
         .expect(404);
+    });
+  });
+
+  // ── Version selection for DERIVED reference dates (fixed_date / event_date) ──
+  describe('version selection for derived reference dates', () => {
+    it('fixed_date: picks the version in force at FY end and uses its month/day', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const code = `FIX_${unique()}`;
+      // v1: 31 Oct; v2 (future): 30 Nov.
+      const ruleId = await createRule(code, {
+        effectiveFrom: '2020-04-01',
+        calculationBasis: 'fixed_date',
+        fixedMonth: 10,
+        fixedDay: 31,
+        workingDayAdjustment: 'none',
+      });
+      await request(app.getHttpServer())
+        .post(`/api/v1/compliance-rules/${ruleId}/versions`)
+        .set(bearer(mp))
+        .send({
+          effectiveFrom: '2028-01-01',
+          calculationBasis: 'fixed_date',
+          fixedMonth: 11,
+          fixedDay: 30,
+          workingDayAdjustment: 'none',
+        })
+        .expect(201);
+
+      // FY 2026-27 (FY end 2027-03-31 < 2028-01-01) ⇒ v1 ⇒ 2027-10-31.
+      const engA = await createEngagement(pa, '2026-27');
+      const a = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${engA}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code })
+        .expect(201);
+      expect(a.body.complianceRuleVersion).toBe(1);
+      expect(a.body.statutoryDeadline).toBe('2027-10-31');
+
+      // FY 2028-29 (FY end 2029-03-31 ≥ 2028-01-01) ⇒ v2 ⇒ 2029-11-30.
+      const engB = await createEngagement(pa, '2028-29');
+      const b = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${engB}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code })
+        .expect(201);
+      expect(b.body.complianceRuleVersion).toBe(2);
+      expect(b.body.statutoryDeadline).toBe('2029-11-30');
+    });
+
+    it('event_date: selects the version as of the event date and rejects both dates', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const code = `EVT_${unique()}`;
+      const ruleId = await createRule(code, {
+        effectiveFrom: '2020-04-01',
+        calculationBasis: 'event_date',
+        offsetDays: 30,
+        workingDayAdjustment: 'none',
+      });
+      await request(app.getHttpServer())
+        .post(`/api/v1/compliance-rules/${ruleId}/versions`)
+        .set(bearer(mp))
+        .send({
+          effectiveFrom: '2027-01-01',
+          calculationBasis: 'event_date',
+          offsetDays: 45,
+          workingDayAdjustment: 'none',
+        })
+        .expect(201);
+      const eng = await createEngagement(pa, '2026-27');
+
+      // Event before v2 ⇒ v1 (+30d): 2026-08-15 → 2026-09-14.
+      const a = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code, eventDate: '2026-08-15' })
+        .expect(201);
+      expect(a.body.complianceRuleVersion).toBe(1);
+      expect(a.body.statutoryDeadline).toBe('2026-09-14');
+
+      // Event on/after v2 ⇒ v2 (+45d): 2027-06-01 → 2027-07-16.
+      const b = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code, eventDate: '2027-06-01' })
+        .expect(201);
+      expect(b.body.complianceRuleVersion).toBe(2);
+      expect(b.body.statutoryDeadline).toBe('2027-07-16');
+
+      // Supplying both referenceDate AND eventDate is ambiguous ⇒ 400.
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code, eventDate: '2026-08-15', referenceDate: '2026-08-15' })
+        .expect(400);
+    });
+  });
+
+  // ── Bulk generation, list filter, firm-wide calendar ─────────────────────
+  describe('bulk generation, status filter, and the firm-wide calendar', () => {
+    it('generates obligations for every derivable rule on the service, skipping the rest', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      // Two fy_end rules on ROC_ANNUAL (derivable) + one period_end rule (needs a date ⇒ skipped).
+      const okA = `BULKA_${unique()}`;
+      const okB = `BULKB_${unique()}`;
+      const needsDate = `BULKC_${unique()}`;
+      await createRule(
+        okA,
+        { effectiveFrom: '2020-04-01', calculationBasis: 'fy_end', offsetMonths: 7 },
+        { serviceCode: 'ROC_ANNUAL' },
+      );
+      await createRule(
+        okB,
+        { effectiveFrom: '2020-04-01', calculationBasis: 'fy_end', offsetMonths: 9 },
+        { serviceCode: 'ROC_ANNUAL' },
+      );
+      await createRule(
+        needsDate,
+        { effectiveFrom: '2020-04-01', calculationBasis: 'period_end', offsetDays: 20 },
+        { serviceCode: 'ROC_ANNUAL' },
+      );
+
+      const eng = await createEngagement(pa, '2026-27', 'ROC_ANNUAL');
+      const res = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance/generate-for-service`)
+        .set(bearer(pa))
+        .send({})
+        .expect(201);
+      const generatedCodes = (res.body.generated as Array<{ complianceRuleCode: string }>).map(
+        (g) => g.complianceRuleCode,
+      );
+      expect(generatedCodes).toEqual(expect.arrayContaining([okA, okB]));
+      const skippedCodes = (res.body.skipped as Array<{ rule: string }>).map((s) => s.rule);
+      expect(skippedCodes).toContain(needsDate); // period_end needs an explicit date
+    });
+
+    it('filters the per-engagement list by status', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const code = `LST_${unique()}`;
+      await createRule(code, {
+        effectiveFrom: '2020-04-01',
+        calculationBasis: 'fy_end',
+        offsetMonths: 7,
+      });
+      const eng = await createEngagement(pa, '2026-27');
+      const gen = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance/${gen.body.id}/complete`)
+        .set(bearer(pa))
+        .send({ version: gen.body.version })
+        .expect(201);
+      // Only-open filter now returns nothing; completed filter returns it.
+      const open = await request(app.getHttpServer())
+        .get(`/api/v1/engagements/${eng}/compliance?status=open`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(open.body.total).toBe(0);
+      const done = await request(app.getHttpServer())
+        .get(`/api/v1/engagements/${eng}/compliance?status=completed`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(done.body.total).toBe(1);
+    });
+
+    it('exposes an RLS-scoped firm-wide calendar with overdue filtering', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const code = `CAL_${unique()}`;
+      await createRule(code, {
+        effectiveFrom: '2017-07-01',
+        calculationBasis: 'period_end',
+        offsetDays: 20,
+        workingDayAdjustment: 'none',
+      });
+      const eng = await createEngagement(pa, '2020-21');
+      // A past-due obligation (2020-02-20).
+      const gen = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code, referenceDate: '2020-01-31' })
+        .expect(201);
+
+      // The EP sees it on their calendar (tight window), enriched with context.
+      const window = '?status=open&dueFrom=2020-02-20&dueTo=2020-02-20&overdueOnly=true&limit=100';
+      const cal = await request(app.getHttpServer())
+        .get(`/api/v1/compliance${window}`)
+        .set(bearer(pa))
+        .expect(200);
+      const mine = (
+        cal.body.items as Array<{ id: string; engagementCode: string; entityName: string }>
+      ).find((i) => i.id === gen.body.id);
+      expect(mine).toBeDefined();
+      expect(mine!.entityName).toBe('Bharat Textiles LLP');
+
+      // An unrelated partner does NOT see it on their calendar (RLS-scoped).
+      const pbCal = await request(app.getHttpServer())
+        .get(`/api/v1/compliance${window}`)
+        .set(bearer(await token('partner.b@hsdg.in')))
+        .expect(200);
+      expect((pbCal.body.items as Array<{ id: string }>).some((i) => i.id === gen.body.id)).toBe(
+        false,
+      );
+    });
+
+    it('?activeOnly=false is parsed correctly (regression: Boolean("false") is truthy)', async () => {
+      const code = `INACT_${unique()}`;
+      const ruleId = await createRule(code, {
+        effectiveFrom: '2020-04-01',
+        calculationBasis: 'fy_end',
+        offsetMonths: 7,
+      });
+      // Deactivate it.
+      await request(app.getHttpServer())
+        .patch(`/api/v1/compliance-rules/${ruleId}/active`)
+        .set(bearer(mp))
+        .send({ isActive: false })
+        .expect(200);
+      // activeOnly=false must include inactive rules (not coerce to true).
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/compliance-rules?activeOnly=false&limit=100`)
+        .set(bearer(mp))
+        .expect(200);
+      expect((res.body.items as Array<{ code: string }>).some((r) => r.code === code)).toBe(true);
     });
   });
 });

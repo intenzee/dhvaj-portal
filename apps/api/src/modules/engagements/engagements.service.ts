@@ -10,6 +10,7 @@ import { EP_OPTIONAL_STATUSES, type EngagementStatus } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
+import { translatePgError as mapPgError } from '../../common/errors/pg-error.util';
 import { AuditService } from '../audit/audit.service';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
@@ -212,26 +213,37 @@ export class EngagementsService {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
-      // Optimistic concurrency: reject if the caller acted on a stale copy.
-      if (expectedVersion !== undefined && before.version !== expectedVersion) {
-        throw new ConflictException(
-          'Engagement was modified by someone else. Refresh and retry (stale version).',
-        );
-      }
 
+      // Optimistic concurrency is enforced atomically in the WHERE (not a
+      // read-then-write compare), so a concurrent version bump between the read
+      // above and this UPDATE cannot be lost.
+      const params: unknown[] = [newEpEmployeeId, id];
+      let versionClause = '';
+      if (expectedVersion !== undefined) {
+        params.push(expectedVersion);
+        versionClause = ` AND version = $${params.length}`;
+      }
       let updated: number;
       try {
         const result = await client.query(
           `UPDATE hsdg.engagements
            SET engagement_partner_id = $1, version = version + 1
-           WHERE id = $2`,
-          [newEpEmployeeId, id],
+           WHERE id = $2${versionClause}`,
+          params,
         );
         updated = result.rowCount ?? 0;
       } catch (err) {
         throw translatePgError(err);
       }
       if (updated === 0) {
+        // Distinguish a stale version (the row moved on) from an RLS/governance
+        // denial (e.g. a non-firm-wide EP trying to hand off accountability).
+        const current = await selectEngagementDetail(client, id);
+        if (current && expectedVersion !== undefined && current.version !== expectedVersion) {
+          throw new ConflictException(
+            'Engagement was modified by someone else. Refresh and retry (stale version).',
+          );
+        }
         throw new ForbiddenException('Not permitted to reassign the Engagement Partner.');
       }
       const after = await selectEngagementDetail(client, id);
@@ -376,36 +388,23 @@ function isAccepted(status: EngagementStatus | undefined): boolean {
   return status !== undefined && !EP_OPTIONAL_STATUSES.includes(status);
 }
 
-/** Map PostgreSQL constraint/RLS violations to clean HTTP errors. */
+/** Map PostgreSQL constraint/RLS violations to clean HTTP errors (engagement domain). */
 export function translatePgError(err: unknown): Error {
-  const e = err as { code?: string; constraint?: string };
-  if (e.code === '23505') {
-    if (e.constraint?.includes('identity')) {
-      return new ConflictException(
-        'An engagement already exists for this client, service, year and period.',
-      );
-    }
-    if (e.constraint?.includes('engagement_team')) {
-      return new ConflictException('That employee is already on the engagement team.');
-    }
-    return new ConflictException('A duplicate value violates a unique constraint.');
-  }
-  if (e.code === '23503') return new BadRequestException('A referenced record does not exist.');
-  if (e.code === '23514') {
-    return new BadRequestException(
-      'Invalid engagement state — an accepted engagement requires an Engagement Partner.',
-    );
-  }
-  // Raised by the engagement grade-rules trigger (partner/manager accountability).
-  // The message is a fixed, developer-authored string — safe to surface.
-  if (e.code === 'P0001') {
-    const message = (err as { message?: string }).message;
-    return new BadRequestException(
+  return mapPgError(err, {
+    unique: [
+      {
+        match: 'identity',
+        message: 'An engagement already exists for this client, service, year and period.',
+      },
+      { match: 'engagement_team', message: 'That employee is already on the engagement team.' },
+    ],
+    uniqueDefault: 'A duplicate value violates a unique constraint.',
+    foreignKey: 'A referenced record does not exist.',
+    check: 'Invalid engagement state — an accepted engagement requires an Engagement Partner.',
+    // Raised by the engagement grade-/review-plan triggers; the message is a
+    // fixed, developer-authored string — safe to surface when short.
+    raise: (message) =>
       message && message.length <= 200 ? message : 'Invalid engagement accountability.',
-    );
-  }
-  if (e.code === '42501') {
-    return new ForbiddenException('Not permitted to write this engagement.');
-  }
-  return err as Error;
+    forbidden: 'Not permitted to write this engagement.',
+  });
 }

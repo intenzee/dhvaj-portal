@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -23,6 +23,10 @@ import {
   type WorkingDayAdjustment,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
+
+/** Parse a querystring boolean correctly — `Boolean('false')` is `true`, so coerce explicitly. */
+const toBool = ({ value }: { value: unknown }): unknown =>
+  value === 'true' ? true : value === 'false' ? false : value;
 
 export class CreateComplianceRuleDto {
   @ApiProperty({ example: 'ITR_FILING_IND' })
@@ -148,7 +152,7 @@ export class ComplianceRuleListQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({ description: 'Only active rules.' })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(toBool)
   @IsBoolean()
   activeOnly?: boolean;
 }
