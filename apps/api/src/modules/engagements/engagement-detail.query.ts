@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import type { EngagementStatus } from '@hsdg/contracts';
+import type { EngagementStatus, ReviewModelSlug } from '@hsdg/contracts';
 import type { EngagementDetail, EngagementSummary } from './engagements.types';
 
 /**
@@ -17,14 +17,35 @@ export const ENGAGEMENT_BASE = `
          eng.current_workflow_state_id, ws.slug AS workflow_state_slug, ws.name AS workflow_state_name,
          ws.sequence AS workflow_state_sequence, ws.is_initial AS workflow_state_is_initial,
          ws.is_terminal AS workflow_state_is_terminal,
-         eng.on_hold_reason, eng.on_hold_previous_status, eng.on_hold_at, eng.on_hold_expected_resume_date
+         eng.on_hold_reason, eng.on_hold_previous_status, eng.on_hold_at, eng.on_hold_expected_resume_date,
+         -- Review state (Phase 7): effective model = review-plan escalation, else the service default.
+         COALESCE(rmplan.slug, rmreq.slug) AS effective_review_model_slug,
+         COALESCE(rmplan.name, rmreq.name) AS effective_review_model_name,
+         COALESCE(rmplan.rank, rmreq.rank) AS effective_review_model_rank,
+         COALESCE(rmplan.requires_ep_signoff, rmreq.requires_ep_signoff) AS effective_requires_ep_signoff,
+         eng.review_model_id AS review_plan_model_id,
+         rmplan.slug AS review_plan_model_slug, rmplan.name AS review_plan_model_name,
+         rmplan.rank AS review_plan_model_rank,
+         so.id AS sign_off_id, so.reviewer_employee_id AS signed_off_by_id,
+         sob.full_name AS signed_off_by_name, so.created_at AS signed_off_at,
+         (SELECT count(*) FROM hsdg.engagement_review_points rp
+            WHERE rp.engagement_id = eng.id AND rp.status = 'open')::int AS open_review_point_count
   FROM hsdg.engagements eng
   JOIN hsdg.entities ent ON ent.id = eng.entity_id
   JOIN hsdg.services s ON s.id = eng.service_id
   JOIN hsdg.offices o ON o.id = eng.office_id
+  JOIN hsdg.review_models rmreq ON rmreq.id = s.required_review_model_id
+  LEFT JOIN hsdg.review_models rmplan ON rmplan.id = eng.review_model_id
   LEFT JOIN hsdg.employees ep ON ep.id = eng.engagement_partner_id
   LEFT JOIN hsdg.employees mgr ON mgr.id = eng.engagement_manager_id
-  LEFT JOIN hsdg.workflow_states ws ON ws.id = eng.current_workflow_state_id`;
+  LEFT JOIN hsdg.workflow_states ws ON ws.id = eng.current_workflow_state_id
+  LEFT JOIN LATERAL (
+    SELECT r.id, r.reviewer_employee_id, r.created_at
+    FROM hsdg.engagement_reviews r
+    WHERE r.engagement_id = eng.id AND r.review_type = 'sign_off' AND r.superseded_at IS NULL
+    ORDER BY r.created_at DESC LIMIT 1
+  ) so ON true
+  LEFT JOIN hsdg.employees sob ON sob.id = so.reviewer_employee_id`;
 
 export interface EngagementRow {
   id: string;
@@ -59,6 +80,19 @@ export interface EngagementRow {
   on_hold_previous_status: string | null;
   on_hold_at: Date | null;
   on_hold_expected_resume_date: string | null;
+  effective_review_model_slug: string;
+  effective_review_model_name: string;
+  effective_review_model_rank: number;
+  effective_requires_ep_signoff: boolean;
+  review_plan_model_id: string | null;
+  review_plan_model_slug: string | null;
+  review_plan_model_name: string | null;
+  review_plan_model_rank: number | null;
+  sign_off_id: string | null;
+  signed_off_by_id: string | null;
+  signed_off_by_name: string | null;
+  signed_off_at: Date | null;
+  open_review_point_count: number;
 }
 
 export function mapEngagement(row: EngagementRow & { team_count: string }): EngagementSummary {
@@ -100,6 +134,24 @@ export function mapEngagement(row: EngagementRow & { team_count: string }): Enga
     onHoldPreviousStatus: (row.on_hold_previous_status as EngagementStatus | null) ?? null,
     onHoldAt: row.on_hold_at ? row.on_hold_at.toISOString() : null,
     onHoldExpectedResumeDate: row.on_hold_expected_resume_date,
+    effectiveReviewModel: {
+      slug: row.effective_review_model_slug as ReviewModelSlug,
+      name: row.effective_review_model_name,
+      rank: row.effective_review_model_rank,
+      requiresEpSignoff: row.effective_requires_ep_signoff,
+    },
+    reviewPlanModel: row.review_plan_model_id
+      ? {
+          slug: row.review_plan_model_slug as ReviewModelSlug,
+          name: row.review_plan_model_name!,
+          rank: row.review_plan_model_rank!,
+        }
+      : null,
+    isSignedOff: row.sign_off_id !== null,
+    signedOffById: row.signed_off_by_id,
+    signedOffByName: row.signed_off_by_name,
+    signedOffAt: row.signed_off_at ? row.signed_off_at.toISOString() : null,
+    openReviewPointCount: Number(row.open_review_point_count),
   };
 }
 

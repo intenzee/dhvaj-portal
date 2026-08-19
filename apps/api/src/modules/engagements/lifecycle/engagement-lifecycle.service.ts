@@ -162,6 +162,20 @@ export class EngagementLifecycleService {
         );
       }
 
+      // Phase 7: reopening invalidates the prior sign-off (ADR-0011 §6 follow-
+      // up). The completed work is being reopened for change, so its
+      // certification no longer holds — a fresh sign-off is required before the
+      // engagement can complete again. Runs under the MP's (reopen is MP-only)
+      // is_engagement_lead RLS floor, in the same transaction as the mutation.
+      if (action === LIFECYCLE_ACTION.reopen) {
+        await client.query(
+          `UPDATE hsdg.engagement_reviews
+           SET superseded_at = now(), superseded_reason = $2
+           WHERE engagement_id = $1 AND review_type = 'sign_off' AND superseded_at IS NULL`,
+          [id, `engagement reopened: ${input.reason ?? ''}`.slice(0, 500)],
+        );
+      }
+
       const after = await selectEngagementDetail(client, id);
       const correlationId = resolveAmbientCorrelationId(this.cls) ?? null;
 

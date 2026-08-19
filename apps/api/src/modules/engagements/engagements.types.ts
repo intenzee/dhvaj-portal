@@ -1,4 +1,4 @@
-import type { EngagementStatus, TeamRole } from '@hsdg/contracts';
+import type { EngagementStatus, ReviewModelSlug, TeamRole } from '@hsdg/contracts';
 
 /** The service-workflow state instance an engagement currently sits in (Phase 6, §16-19). */
 export interface WorkflowStateRef {
@@ -8,6 +8,15 @@ export interface WorkflowStateRef {
   sequence: number;
   isInitial: boolean;
   isTerminal: boolean;
+}
+
+/** A review model, ranked by rigour (Phase 7). */
+export interface ReviewModelRef {
+  slug: ReviewModelSlug;
+  name: string;
+  rank: number;
+  /** Whether the accountable EP's personal sign-off is mandatory before completion. */
+  requiresEpSignoff: boolean;
 }
 
 export interface EngagementSummary {
@@ -40,6 +49,18 @@ export interface EngagementSummary {
   onHoldPreviousStatus: EngagementStatus | null;
   onHoldAt: string | null;
   onHoldExpectedResumeDate: string | null;
+  // ── Review state (Phase 7) ──────────────────────────────────────────────
+  /** The service's required model, escalated by the review plan when set. */
+  effectiveReviewModel: ReviewModelRef;
+  /** The explicit review-plan escalation (rank ≥ required), or null when inheriting the service default. */
+  reviewPlanModel: Omit<ReviewModelRef, 'requiresEpSignoff'> | null;
+  /** A current (non-superseded) sign-off exists — the professional gate for completion. */
+  isSignedOff: boolean;
+  signedOffById: string | null;
+  signedOffByName: string | null;
+  signedOffAt: string | null;
+  /** Unresolved review points; completion is blocked while this is > 0. */
+  openReviewPointCount: number;
 }
 
 export interface EngagementTeamMember {

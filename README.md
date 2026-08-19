@@ -10,14 +10,19 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 5 — Engagement Core (complete).** The central transactional
-> object is live: engagements with identity (Entity + Service + FY + Period),
-> one accountable Engagement Partner, a manager, and a per-engagement **team of
-> shared resources**. Access is **assignment-based** — a team member sees an
-> engagement (and its client and co-workers) regardless of office — enforced by
-> PostgreSQL RLS and proven by tests independent of the API. Audited management,
-> EP-reassignment governance, and optimistic concurrency throughout. Remaining
-> modules follow phase by phase — see [Roadmap](#roadmap).
+> **Status: Phase 7 — Review & Sign-off Engine (complete).** The engagement is
+> the central transactional object (identity = Entity + Service + FY + Period),
+> with one accountable Engagement Partner, a manager, and a per-engagement
+> **team of shared resources**; access is **assignment-based** (a team member
+> sees an engagement, its client, and co-workers regardless of office).
+> Lifecycle moves only through **explicit guarded transitions** (Phase 6), and
+> **completion is now gated by review sign-off** (Phase 7): each service's
+> required review model — which the EP may escalate but never weaken — decides
+> who may sign off. A manager can complete routine work (ITR), but a statutory
+> audit cannot complete without **EP sign-off**. Review points block sign-off
+> until resolved; reopening invalidates the sign-off. All enforced by PostgreSQL
+> RLS and proven by tests independent of the API. Remaining modules follow phase
+> by phase — see [Roadmap](#roadmap).
 
 ---
 
@@ -204,6 +209,14 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/engagements/:id/reassign-partner` | `engagement.manage` | Change EP (firm-wide; audited) |
 | POST | `/engagements/:id/team` | `engagement.manage` | Assign a team member (audited) |
 | DELETE | `/engagements/:id/team/:employeeId` | `engagement.manage` | Remove a team member (audited) |
+| POST | `/engagements/:id/{submit-for-acceptance,accept,start,put-on-hold,resume,complete,close,decline,withdraw,cancel,reopen}` | `engagement.manage` | Guarded lifecycle transitions (Phase 6; each audited, versioned, `reopen` is MP-only) |
+| GET | `/engagements/:id/lifecycle-history` | `engagement.read` | Lifecycle transition journal _(paginated)_ |
+| POST | `/engagements/:id/workflow-transitions` | `engagement.manage` | Advance the service-workflow state (Phase 6; audited) |
+| GET | `/engagements/:id/reviews` | `engagement.read` | Review & sign-off history with review points _(paginated)_ |
+| POST | `/engagements/:id/reviews` | `engagement.manage` | Record a manager/EP review, optionally raising review points (audited) |
+| POST | `/engagements/:id/sign-off` | `engagement.manage` | Terminal sign-off; authority set by the effective review model (audited) |
+| POST | `/engagements/:id/review-points/:pointId/resolve` | `engagement.manage` | Resolve an open review point (audited) |
+| POST | `/engagements/:id/review-plan` | `engagement.manage` | Escalate the review model (escalate-only; audited) |
 
 ## Roadmap
 
@@ -214,9 +227,9 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **2** | Organisation & people (partners, managers, seniors, articles) | ✅ done |
 | **3** | Entity master (entities, registrations, contacts, duplicates) | ✅ done |
 | **4** | Service catalogue (configurable services & review models) | ✅ done |
-| **5** | Engagement core (EP accountability, team, identity) | ✅ current |
-| 6 | Engagement lifecycle (explicit guarded transitions) | ⬜ |
-| 7 | Review & sign-off engine | ⬜ |
+| **5** | Engagement core (EP accountability, team, identity) | ✅ done |
+| **6** | Engagement lifecycle (explicit guarded transitions) | ✅ done |
+| **7** | Review & sign-off engine (review models, sign-off gate, review points) | ✅ current |
 | 8 | Compliance engine (effective-dated, versioned) | ⬜ |
 | 9 | Tasks & client dependencies | ⬜ |
 | 10 | Documents (Azure Blob + audited access) | ⬜ |
