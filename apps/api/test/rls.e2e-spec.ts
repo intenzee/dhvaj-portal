@@ -892,4 +892,114 @@ describe('RLS (database-level, independent of the application)', () => {
       expect(slugs).not.toContain('admin');
     });
   });
+
+  // Phase 10: documents, proven at the database layer. Metadata + versioned
+  // bytes are engagement-scoped; version rows are append-only (immutable
+  // professional evidence) — the storage reference lives only behind an
+  // RLS-passing read, so there is no URL that bypasses access.
+  describe('documents (Phase 10)', () => {
+    const emp = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.employees WHERE employee_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const engId = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+    const setCtx = (
+      userId: string | undefined,
+      role: string,
+      officeCode: 'NORTH' | 'SOUTH',
+      empId: string,
+    ) =>
+      app.query(
+        'SELECT set_config($1,$2,true),set_config($3,$4,true),set_config($5,$6,true),set_config($7,$8,true)',
+        [
+          'hsdg.user_id',
+          userId ?? '',
+          'hsdg.role',
+          role,
+          'hsdg.office_id',
+          officeIds[officeCode] ?? '',
+          'hsdg.employee_id',
+          empId,
+        ],
+      );
+
+    it('is fail-closed: no context ⇒ zero documents and zero versions', async () => {
+      expect(await underContext({}, 'SELECT id FROM hsdg.documents')).toHaveLength(0);
+      expect(await underContext({}, 'SELECT id FROM hsdg.document_versions')).toHaveLength(0);
+    });
+
+    it('version rows are append-only to the app role (UPDATE/DELETE denied)', async () => {
+      await expect(
+        app.query(`UPDATE hsdg.document_versions SET filename = 'tamper'`),
+      ).rejects.toThrow(/permission denied/i);
+      await expect(app.query(`DELETE FROM hsdg.document_versions`)).rejects.toThrow(
+        /permission denied/i,
+      );
+    });
+
+    it('the app role cannot hard-delete a document (no cascade into the version chain)', async () => {
+      await expect(app.query(`DELETE FROM hsdg.documents`)).rejects.toThrow(/permission denied/i);
+    });
+
+    it('scopes documents to engagement membership (unassigned blind; member sees the metadata AND the storage reference only via RLS)', async () => {
+      const acmeId = await engId('ENG00001');
+      const mpEmp = await emp('EMP001');
+      const partnerB = await emp('EMP004'); // unassigned to Acme
+      const seniorY = await emp('EMP006'); // on Acme's team
+
+      await app.query('BEGIN');
+      try {
+        // MP (firm-wide lead) creates a document + its first version.
+        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        const doc = await app.query<{ id: string }>(
+          `INSERT INTO hsdg.documents (engagement_id, title) VALUES ($1, 'RLS doc') RETURNING id`,
+          [acmeId],
+        );
+        const docId = doc.rows[0]!.id;
+        await app.query(
+          `INSERT INTO hsdg.document_versions
+             (document_id, engagement_id, version_no, filename, size_bytes, checksum_sha256, storage_reference)
+           VALUES ($1, $2, 1, 'f.txt', 5, repeat('a', 64), 'ref/one')`,
+          [docId, acmeId],
+        );
+
+        // Unassigned Partner B sees neither the document nor its version/reference.
+        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        expect(
+          (await app.query(`SELECT id FROM hsdg.documents WHERE id = '${docId}'`)).rows,
+        ).toHaveLength(0);
+        expect(
+          (
+            await app.query(
+              `SELECT storage_reference FROM hsdg.document_versions WHERE document_id = '${docId}'`,
+            )
+          ).rows,
+        ).toHaveLength(0);
+
+        // Senior Y — on Acme's team — sees both.
+        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        expect(
+          (await app.query(`SELECT id FROM hsdg.documents WHERE id = '${docId}'`)).rows,
+        ).toHaveLength(1);
+        expect(
+          (
+            await app.query(
+              `SELECT storage_reference FROM hsdg.document_versions WHERE document_id = '${docId}'`,
+            )
+          ).rows,
+        ).toHaveLength(1);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+  });
 });

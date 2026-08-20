@@ -17,6 +17,7 @@ import { CatalogueModule } from './modules/catalogue/catalogue.module';
 import { EngagementsModule } from './modules/engagements/engagements.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { TasksModule } from './modules/tasks/tasks.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 
 /**
  * Composition root of the modular monolith.
@@ -76,6 +77,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
     EngagementsModule,
     ComplianceModule,
     TasksModule,
+    DocumentsModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

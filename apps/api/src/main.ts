@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { buildValidationPipe } from './common/validation';
@@ -11,7 +12,7 @@ import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { setupSwagger } from './bootstrap/swagger';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
 
   // Route all framework logs through pino.
   app.useLogger(app.get(Logger));
@@ -19,6 +20,11 @@ async function bootstrap(): Promise<void> {
   const config = app.get(AppConfigService);
   const logger = app.get(Logger);
   const globalPrefix = config.get('API_GLOBAL_PREFIX');
+
+  // Documents are uploaded base64-encoded in JSON, so raise the body ceiling to
+  // clear the largest allowed file (default parsers cap JSON at 100 kB).
+  app.useBodyParser('json', { limit: config.jsonBodyLimitBytes });
+  app.useBodyParser('urlencoded', { limit: config.jsonBodyLimitBytes, extended: true });
 
   // Serve API docs only outside production, even if the flag is set — Swagger
   // exposes the full API surface and its inline assets require relaxing CSP.

@@ -54,6 +54,22 @@ export const envSchema = z.object({
   // Entra ID (required only when AUTH_PROVIDER=entra; validated at provider use).
   AUTH_ENTRA_TENANT_ID: z.string().optional(),
   AUTH_ENTRA_CLIENT_ID: z.string().optional(),
+
+  // ── Document storage (Phase 10) ──────────────────────────────────────────
+  // Where document bytes live. `local` is a filesystem provider for dev/test;
+  // `azure_blob` is the production path. The database only ever holds metadata.
+  STORAGE_PROVIDER: z.enum(['local', 'azure_blob']).default('local'),
+  // Base directory for the local provider (defaults to an OS temp dir if blank).
+  STORAGE_LOCAL_DIR: z.string().optional(),
+  // Azure Blob (required only when STORAGE_PROVIDER=azure_blob; validated at use).
+  STORAGE_AZURE_CONNECTION_STRING: z.string().optional(),
+  STORAGE_AZURE_CONTAINER: z.string().optional(),
+  // Hard ceiling on a single uploaded document version (bytes). Default 10 MiB.
+  DOCUMENT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10 * 1024 * 1024),
 });
 
 export type Env = z.infer<typeof envSchema>;

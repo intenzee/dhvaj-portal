@@ -10,18 +10,29 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 9 — Tasks & Client Dependencies (complete).** Engagements now
-> track **internal tasks** (assignment, due dates, task→task dependencies that
-> block completion) and **client dependencies** — information requested from the
-> client. An open dependency makes the engagement **WAITING FOR CLIENT** (a
-> derived operational state), and the read model surfaces **internally overdue**
-> (a task past due — our delay) separately from **client delay** (a dependency
-> past its escalation date). A task's assignee — even a senior/article — may
-> progress their own work, while assignment and governance stay lead-only.
-> Firm-wide "My Work" views aggregate assigned tasks and open dependencies. All
-> enforced by PostgreSQL RLS and proven by tests independent of the API.
+> **Status: Phase 10 — Documents (complete).** Engagements now carry
+> **document evidence**: metadata + a versioned file chain, with the bytes held
+> in **blob storage** behind a provider abstraction (Azure Blob in production, a
+> local filesystem provider in dev/test) — PostgreSQL stores only metadata and an
+> **opaque storage reference**. Access **inherits the engagement** (members read
+> and download, leads upload/re-version/re-classify/archive/restore). Uploading
+> again creates a **new version and retains the old one** (version rows are
+> append-only, so completed/signed-off evidence is never silently replaced), and
+> documents are **never hard-deleted**. Every **download is RLS-mediated and
+> audited** — a document id alone can never reach the bytes, so there is no
+> direct-URL bypass. Proven end-to-end and at the database layer.
 >
 > <details><summary>Earlier phases</summary>
+>
+> **Phase 9 — Tasks & Client Dependencies.** Engagements track **internal tasks**
+> (assignment, due dates, task→task dependencies that block completion) and
+> **client dependencies** — information requested from the client. An open
+> dependency makes the engagement **WAITING FOR CLIENT** (a derived operational
+> state), and the read model surfaces **internally overdue** (a task past due —
+> our delay) separately from **client delay** (a dependency past its escalation
+> date). A task's assignee — even a senior/article — may progress their own work,
+> while assignment and governance stay lead-only. Firm-wide "My Work" views
+> aggregate assigned tasks and open dependencies.
 >
 > **Phase 8 — Compliance Engine.** The engagement is the
 > central transactional object (identity = Entity + Service + FY + Period), with
@@ -67,7 +78,8 @@ audit trail.
 | Database | PostgreSQL 16 · Row Level Security (`FORCE`) · `node-pg-migrate` |
 | Data access | `pg` (Phase 0) → Drizzle (from Phase 1, alongside first tables) |
 | Auth (Phase 1) | Microsoft Entra ID · MFA for partners/admins |
-| Docs, cache, storage | Azure Blob (documents) · Redis (cache) · Azure Service Bus (jobs) |
+| Document storage (Phase 10) | Blob storage behind a provider abstraction — **Azure Blob** (prod) · **local filesystem** (dev/test); DB holds metadata only |
+| Cache, jobs | Redis (cache) · Azure Service Bus (jobs) |
 | Cloud / secrets / obs. | Azure · Key Vault · App Insights / Azure Monitor |
 | Testing | Jest · Supertest · Playwright (E2E, later) · RLS tests |
 
@@ -172,6 +184,12 @@ Seeded users: `mp@hsdg.in` (Managing Partner), `admin@hsdg.in`,
 - **Accountability integrity:** a database trigger enforces that an Engagement
   Partner is partner-grade and an Engagement Manager is manager-grade — for every
   writer, atomically. See [ADR-0010](docs/adr/0010-engagement-grade-rules-and-concurrency.md).
+- **Document access (Phase 10) has no bypass URL:** files live in blob storage
+  under opaque references never exposed to clients; a download reads the version
+  row under RLS first (non-members get 404) and only then streams the bytes,
+  writing an audit event in the same transaction. Version rows are append-only
+  and documents are never hard-deleted, so evidence cannot be silently replaced.
+  See [ADR-0015](docs/adr/0015-documents.md).
 - Authentication (Entra ID / dev providers), MFA enforcement, and permission
   guards sit above RLS — never instead of it.
 - Uniform error envelope, correlation IDs on every request/response, and secret
@@ -254,6 +272,14 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/engagements/:id/client-dependencies/:id/{receive,close}` | `engagement.manage` | Record receipt / waive-cancel (audited) |
 | GET | `/work/tasks` | `engagement.read` | My assigned tasks across engagements _(paginated)_; `?overdueOnly=` |
 | GET | `/work/client-dependencies` | `engagement.read` | Open client dependencies I'm waiting on _(paginated)_; `?overdueOnly=` |
+| GET | `/engagements/:id/documents` | `engagement.read` | Documents _(paginated)_; filter `?status=&documentType=&classification=&search=` |
+| GET | `/engagements/:id/documents/:docId` | `engagement.read` | Detail with full version history |
+| POST | `/engagements/:id/documents` | `engagement.manage` | Upload a document (first version; bytes base64; audited) |
+| POST | `/engagements/:id/documents/:docId/versions` | `engagement.manage` | Upload a new version (supersedes; earlier versions retained; audited) |
+| PATCH | `/engagements/:id/documents/:docId` | `engagement.manage` | Update metadata (audited; optimistic concurrency) |
+| POST | `/engagements/:id/documents/:docId/{archive,restore}` | `engagement.manage` | Archive / restore (reason recorded; audited) |
+| GET | `/engagements/:id/documents/:docId/download` | `engagement.read` | Download current version bytes (RLS-mediated; audited) |
+| GET | `/engagements/:id/documents/:docId/versions/:versionId/download` | `engagement.read` | Download a specific version's bytes (RLS-mediated; audited) |
 
 ## Roadmap
 
@@ -268,8 +294,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **6** | Engagement lifecycle (explicit guarded transitions) | ✅ done |
 | **7** | Review & sign-off engine (review models, sign-off gate, review points) | ✅ done |
 | **8** | Compliance engine (effective-dated, versioned; two clocks) | ✅ done |
-| **9** | Tasks & client dependencies (waiting-for-client; internal vs client delay) | ✅ current |
-| 10 | Documents (Azure Blob + audited access) | ⬜ |
+| **9** | Tasks & client dependencies (waiting-for-client; internal vs client delay) | ✅ done |
+| **10** | Documents (blob storage, versioned evidence, audited RLS-mediated access) | ✅ current |
 | 11 | Notifications | ⬜ |
 | 12 | Dashboard / frontend foundation | ⬜ |
 

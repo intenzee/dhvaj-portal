@@ -30,6 +30,15 @@ export class AppConfigService {
       .map((o) => o.trim())
       .filter(Boolean);
   }
+
+  /**
+   * Max JSON request body, in bytes. Documents are uploaded base64-encoded in
+   * JSON, so the body ceiling must clear the largest allowed file plus base64
+   * overhead (~4/3) and a little envelope headroom.
+   */
+  get jsonBodyLimitBytes(): number {
+    return Math.ceil(this.get('DOCUMENT_MAX_BYTES') * (4 / 3)) + 64 * 1024;
+  }
 }
 
 @Global()

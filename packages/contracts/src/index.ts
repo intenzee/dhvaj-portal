@@ -18,4 +18,5 @@ export * from './engagements';
 export * from './reviews';
 export * from './compliance';
 export * from './tasks';
+export * from './documents';
 export * from './pagination';

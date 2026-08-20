@@ -1,6 +1,8 @@
 import { VersioningType, type INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
+import { AppConfigService } from '../src/config/config.module';
 import { AllExceptionsFilter } from '../src/common/errors/all-exceptions.filter';
 import { buildValidationPipe } from '../src/common/validation';
 
@@ -11,9 +13,12 @@ import { buildValidationPipe } from '../src/common/validation';
  */
 export async function createTestApp(): Promise<INestApplication> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  const app = moduleRef.createNestApplication();
+  const app = moduleRef.createNestApplication<NestExpressApplication>();
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1', prefix: 'v' });
+  const config = app.get(AppConfigService);
+  app.useBodyParser('json', { limit: config.jsonBodyLimitBytes });
+  app.useBodyParser('urlencoded', { limit: config.jsonBodyLimitBytes, extended: true });
   app.useGlobalPipes(buildValidationPipe());
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();

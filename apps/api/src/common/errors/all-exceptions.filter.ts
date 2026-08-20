@@ -93,6 +93,27 @@ export class AllExceptionsFilter implements ExceptionFilter {
       };
     }
 
+    // Framework/middleware errors (e.g. body-parser's 413 "entity too large" or
+    // 400 malformed JSON) arrive as plain Errors carrying an HTTP status rather
+    // than as HttpExceptions. Surface genuine 4xx client errors cleanly; anything
+    // else stays a fail-closed internal error with no detail leaked.
+    const httpish = exception as { status?: unknown; statusCode?: unknown; message?: unknown };
+    const rawStatus =
+      typeof httpish.status === 'number'
+        ? httpish.status
+        : typeof httpish.statusCode === 'number'
+          ? httpish.statusCode
+          : undefined;
+    if (rawStatus !== undefined && rawStatus >= 400 && rawStatus < 500) {
+      const message =
+        rawStatus === HttpStatus.PAYLOAD_TOO_LARGE
+          ? 'Request body is too large.'
+          : typeof httpish.message === 'string'
+            ? httpish.message
+            : codeFor(rawStatus);
+      return { status: rawStatus, error: codeFor(rawStatus), message };
+    }
+
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       error: 'INTERNAL_SERVER_ERROR',
