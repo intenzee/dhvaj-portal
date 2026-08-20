@@ -25,15 +25,15 @@ export function DataTable<T>({
   if (data.length === 0) return <EmptyState>{empty}</EmptyState>;
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+    <div className="scroll-slim overflow-x-auto rounded-xl border border-slate-200 bg-white">
       <table className="w-full text-sm">
         <thead>
           {table.getHeaderGroups().map((hg) => (
-            <tr key={hg.id} className="border-b border-slate-100 bg-slate-50 text-left">
+            <tr key={hg.id} className="border-b border-slate-100 bg-slate-50/70 text-left">
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
-                  className="whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-wide text-ink-faint"
+                  className="whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint"
                 >
                   {flexRender(header.column.columnDef.header, header.getContext())}
                 </th>
@@ -52,7 +52,7 @@ export function DataTable<T>({
               }
             >
               {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="whitespace-nowrap px-3 py-2 text-ink">
+                <td key={cell.id} className="whitespace-nowrap px-4 py-2.5 text-ink">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>
               ))}

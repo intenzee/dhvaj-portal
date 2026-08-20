@@ -38,3 +38,12 @@ const ROLE_LABELS: Record<RoleSlug, string> = {
 export function roleLabel(role: RoleSlug | undefined): string {
   return role ? ROLE_LABELS[role] : 'No role';
 }
+
+/** Two-letter initials from a display name, for avatars. */
+export function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const first = parts[0]![0] ?? '';
+  const last = parts.length > 1 ? (parts[parts.length - 1]![0] ?? '') : '';
+  return (first + last).toUpperCase();
+}

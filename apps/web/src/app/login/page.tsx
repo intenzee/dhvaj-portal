@@ -7,9 +7,10 @@ import { ApiError } from '@/lib/api';
 import { Button, Card, CardBody } from '@/components/ui';
 
 /**
- * Development sign-in. In non-production the API mints a token for a seeded user
- * by email; production replaces this with Microsoft Entra SSO. The quick-select
- * buttons cover the seeded personas so every role dashboard is one click away.
+ * Sign-in. Production uses Microsoft Entra SSO (secure, MFA — no passwords stored
+ * by us); it appears once the tenant/app registration is configured via env. In
+ * local dev, the API mints a token for a seeded user (this path is disabled in
+ * production), with quick-select personas for each role.
  */
 const SEEDED = [
   { email: 'mp@hsdg.in', label: 'Managing Partner' },
@@ -21,9 +22,8 @@ const SEEDED = [
 ];
 
 export default function LoginPage(): JSX.Element {
-  const { principal, loading, login } = useAuth();
+  const { principal, loading, login, loginWithEntra, entraEnabled } = useAuth();
   const router = useRouter();
-  const [email, setEmail] = useState('mp@hsdg.in');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -31,14 +31,14 @@ export default function LoginPage(): JSX.Element {
     if (!loading && principal) router.replace('/');
   }, [loading, principal, router]);
 
-  const signIn = async (value: string) => {
+  const run = async (fn: () => Promise<void>, fallbackMsg: string) => {
     setBusy(true);
     setError(null);
     try {
-      await login(value);
+      await fn();
       router.replace('/');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Sign-in failed. Is the API running?');
+      setError(err instanceof ApiError ? err.message : fallbackMsg);
     } finally {
       setBusy(false);
     }
@@ -48,54 +48,50 @@ export default function LoginPage(): JSX.Element {
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
       <Card className="w-full max-w-md">
         <CardBody className="p-6">
-          <div className="mb-1 text-2xl font-bold tracking-tight text-brand-700">HSDG Portal</div>
-          <p className="mb-6 text-sm text-ink-muted">
-            Sign in to the practice portal. (Development sign-in — production uses Microsoft Entra
-            SSO.)
-          </p>
+          <div className="mb-1 flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600 text-sm font-black text-white">
+              H
+            </div>
+            <div className="text-2xl font-bold tracking-tight text-ink">
+              HSDG <span className="text-ink-faint">Portal</span>
+            </div>
+          </div>
+          <p className="mb-6 text-sm text-ink-muted">Sign in to the practice portal.</p>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void signIn(email);
-            }}
-            className="space-y-3"
-          >
-            <label className="block text-sm font-medium text-ink" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              autoComplete="username"
-            />
-            <Button type="submit" disabled={busy} className="w-full">
-              {busy ? 'Signing in…' : 'Sign in'}
+          {entraEnabled && (
+            <Button
+              onClick={() => void run(loginWithEntra, 'Microsoft sign-in failed.')}
+              disabled={busy}
+              className="w-full"
+            >
+              {busy ? 'Signing in…' : 'Sign in with Microsoft'}
             </Button>
-          </form>
+          )}
 
-          {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
+          {error && <p className="mt-3 text-sm text-danger-600">{error}</p>}
 
           <div className="mt-6">
-            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
-              Quick sign-in (seeded users)
+            <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
+              <span>{entraEnabled ? 'Developer sign-in (local only)' : 'Developer sign-in'}</span>
+              <span className="h-px flex-1 bg-slate-200" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               {SEEDED.map((u) => (
                 <button
                   key={u.email}
-                  onClick={() => void signIn(u.email)}
+                  onClick={() => void run(() => login(u.email), 'Sign-in failed. Is the API running?')}
                   disabled={busy}
-                  className="rounded-md border border-slate-200 px-3 py-2 text-left text-xs text-ink-muted transition hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-left text-xs transition hover:border-primary-300 hover:bg-primary-50 disabled:opacity-50"
                 >
                   <div className="font-medium text-ink">{u.label}</div>
                   <div className="text-ink-faint">{u.email}</div>
                 </button>
               ))}
             </div>
+            <p className="mt-3 text-xs text-ink-faint">
+              Developer sign-in is disabled in production; there, sign-in goes through Microsoft
+              Entra SSO with MFA.
+            </p>
           </div>
         </CardBody>
       </Card>

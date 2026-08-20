@@ -65,6 +65,10 @@ export class EngagementsService {
           OR EXISTS (SELECT 1 FROM hsdg.engagement_team t WHERE t.engagement_id = eng.id AND t.employee_id = ${p}::uuid))`,
       );
     }
+    if (filter.search) {
+      params.push(`%${filter.search}%`);
+      conditions.push(`(eng.engagement_code ILIKE $${params.length} OR ent.legal_name ILIKE $${params.length})`);
+    }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const limitParam = `$${params.length + 1}`;
     const offsetParam = `$${params.length + 2}`;
@@ -86,7 +90,8 @@ export class EngagementsService {
       const totalResult = await client.query<{ total: string }>(
         `SELECT count(*) AS total FROM hsdg.engagements eng
          JOIN hsdg.services s ON s.id = eng.service_id
-         JOIN hsdg.offices o ON o.id = eng.office_id ${where}`,
+         JOIN hsdg.offices o ON o.id = eng.office_id
+         JOIN hsdg.entities ent ON ent.id = eng.entity_id ${where}`,
         params.slice(0, params.length - 2),
       );
       return {

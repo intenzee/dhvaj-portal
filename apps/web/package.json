@@ -12,6 +12,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@azure/msal-browser": "^3.30.0",
     "@hsdg/contracts": "*",
     "@tanstack/react-query": "^5.62.7",
     "@tanstack/react-table": "^8.20.6",

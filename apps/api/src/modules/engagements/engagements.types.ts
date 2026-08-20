@@ -91,6 +91,8 @@ export interface EngagementFilter {
   officeCode?: string;
   /** Limit to engagements the caller is personally assigned to. */
   mine?: boolean;
+  /** Case-insensitive search on engagement code or client legal name. */
+  search?: string;
 }
 
 export interface CreateEngagementInput {

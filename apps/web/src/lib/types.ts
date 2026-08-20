@@ -21,17 +21,30 @@ export interface EngagementRow {
   financialYear: string;
   periodLabel: string;
   status: EngagementStatus;
+  engagementPartnerId: string | null;
   engagementPartnerName: string | null;
+  engagementManagerId: string | null;
   engagementManagerName: string | null;
+  plannedEndDate: string | null;
   isSignedOff: boolean;
   openReviewPointCount: number;
   isWaitingForClient: boolean;
   internallyOverdueTaskCount: number;
   effectiveReviewModel: { slug: string; name: string; requiresEpSignoff: boolean };
+  version: number;
+}
+
+/** The caller's role on an engagement, for "My Engagements — At a Glance". */
+export function myEngagementRole(e: EngagementRow, employeeId: string | null): string {
+  if (!employeeId) return 'Member';
+  if (e.engagementPartnerId === employeeId) return 'EP';
+  if (e.engagementManagerId === employeeId) return 'Manager';
+  return 'Member';
 }
 
 export interface TeamMember {
   id: string;
+  employeeId: string;
   employeeCode: string;
   employeeName: string;
   roleOnEngagement: string;
@@ -47,21 +60,28 @@ export interface EngagementDetail extends EngagementRow {
 
 export interface MyTask {
   id: string;
+  engagementId: string;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
   dueDate: string | null;
   isOverdue: boolean;
+  blockedByOpenCount: number;
+  assignedToName?: string | null;
+  version: number;
   engagementCode: string;
   entityName: string;
 }
 
 export interface MyClientDependency {
   id: string;
+  engagementId: string;
   requestedInfo: string;
   status: ClientDependencyStatus;
   escalationDate: string | null;
   isOverdue: boolean;
+  isOpen: boolean;
+  version: number;
   engagementCode: string;
   entityName: string;
 }

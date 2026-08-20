@@ -34,4 +34,9 @@ export class EngagementListQueryDto extends PaginationQueryDto {
   @Transform(toBool)
   @IsBoolean()
   mine?: boolean;
+
+  @ApiPropertyOptional({ description: 'Case-insensitive search on engagement code or client name.' })
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

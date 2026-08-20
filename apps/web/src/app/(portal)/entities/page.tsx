@@ -12,7 +12,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 
 const columns: ColumnDef<EntityRow, unknown>[] = [
-  { header: 'Code', cell: ({ row }) => <span className="font-medium text-brand-700">{row.original.entityCode}</span> },
+  { header: 'Code', cell: ({ row }) => <span className="font-medium text-primary-700">{row.original.entityCode}</span> },
   { header: 'Legal name', accessorKey: 'legalName' },
   { header: 'Type', accessorKey: 'typeName' },
   { header: 'PAN', cell: ({ row }) => row.original.pan ?? <span className="text-ink-faint">—</span> },
@@ -41,7 +41,7 @@ export default function EntitiesPage(): JSX.Element {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name or PAN…"
-          className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
       </div>
 

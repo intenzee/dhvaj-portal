@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { Briefcase } from 'lucide-react';
 import { StatCard } from '../stat-card';
 import type { CardDef } from '@/lib/dashboard-cards';
 
@@ -8,6 +9,7 @@ const card: CardDef = {
   value: 'activeEngagements',
   href: '/engagements?status=active',
   tone: 'info',
+  icon: Briefcase,
 };
 
 describe('StatCard', () => {

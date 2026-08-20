@@ -1,8 +1,10 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { Plus } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { ENGAGEMENT_STATUSES, type Paginated, type EngagementStatus } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
@@ -16,7 +18,7 @@ import { cn } from '@/lib/cn';
 const columns: ColumnDef<EngagementRow, unknown>[] = [
   {
     header: 'Code',
-    cell: ({ row }) => <span className="font-medium text-brand-700">{row.original.engagementCode}</span>,
+    cell: ({ row }) => <span className="font-medium text-primary-700">{row.original.engagementCode}</span>,
   },
   { header: 'Client', accessorKey: 'entityName' },
   {
@@ -69,6 +71,14 @@ function EngagementsInner(): JSX.Element {
       <PageHeader
         title="Engagements"
         subtitle="Engagements you can access (assignment-scoped)."
+        actions={
+          <Link
+            href="/engagements/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-700"
+          >
+            <Plus className="h-4 w-4" /> New engagement
+          </Link>
+        }
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -116,7 +126,7 @@ function FilterChip({
       className={cn(
         'rounded-full border px-3 py-1 text-xs font-medium transition',
         active
-          ? 'border-brand-600 bg-brand-600 text-white'
+          ? 'border-primary-600 bg-primary-600 text-white'
           : 'border-slate-200 bg-white text-ink-muted hover:bg-slate-50',
       )}
     >

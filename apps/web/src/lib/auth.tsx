@@ -2,13 +2,17 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch, setToken } from './api';
+import { entraSignIn, entraSignOut, isEntraConfigured } from './entra';
 import type { Principal } from './principal';
 
 interface AuthState {
   principal: Principal | null;
   loading: boolean;
-  /** Dev-token sign-in (non-production). Real Entra SSO replaces this later. */
+  /** Dev-token sign-in (non-production only). */
   login: (email: string) => Promise<void>;
+  /** Microsoft Entra SSO sign-in (production). */
+  loginWithEntra: () => Promise<void>;
+  entraEnabled: boolean;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -51,13 +55,30 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     setPrincipal(await loadMe());
   }, []);
 
+  const loginWithEntra = useCallback(async () => {
+    const accessToken = await entraSignIn();
+    setToken(accessToken);
+    setPrincipal(await loadMe());
+  }, []);
+
   const logout = useCallback(() => {
     setToken(null);
     setPrincipal(null);
+    if (isEntraConfigured) void entraSignOut().catch(() => undefined);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ principal, loading, login, logout, refresh }}>
+    <AuthContext.Provider
+      value={{
+        principal,
+        loading,
+        login,
+        loginWithEntra,
+        entraEnabled: isEntraConfigured,
+        logout,
+        refresh,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

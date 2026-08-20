@@ -20,7 +20,7 @@ const columns: ColumnDef<ComplianceRow, unknown>[] = [
     header: 'Engagement',
     cell: ({ row }) => (
       <span>
-        <span className="font-medium text-brand-700">{row.original.engagementCode}</span>
+        <span className="font-medium text-primary-700">{row.original.engagementCode}</span>
         <span className="ml-1 text-ink-faint">· {row.original.entityName}</span>
       </span>
     ),
@@ -102,7 +102,7 @@ function ComplianceInner(): JSX.Element {
             className={cn(
               'rounded-full border px-3 py-1 text-xs font-medium transition',
               filter === key
-                ? 'border-brand-600 bg-brand-600 text-white'
+                ? 'border-primary-600 bg-primary-600 text-white'
                 : 'border-slate-200 bg-white text-ink-muted hover:bg-slate-50',
             )}
           >

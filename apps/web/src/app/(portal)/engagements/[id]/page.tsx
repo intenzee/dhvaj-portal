@@ -3,14 +3,27 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import type { ColumnDef } from '@tanstack/react-table';
 import type { Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
-import { humanize, formatDate } from '@/lib/format';
-import type { EngagementDetail, MyTask, ComplianceRow } from '@/lib/types';
-import { PageHeader, Spinner, Card, CardHeader, CardTitle, CardBody, Badge, EmptyState } from '@/components/ui';
-import { StatusBadge } from '@/components/status-badge';
-import { DataTable } from '@/components/data-table';
+import { formatDate } from '@/lib/format';
+import type { EngagementDetail, MyTask, ComplianceRow, MyClientDependency } from '@/lib/types';
+import {
+  PageHeader,
+  Spinner,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardBody,
+  Badge,
+  EmptyState,
+} from '@/components/ui';
+import { StatusBadge, PriorityBadge } from '@/components/status-badge';
+import { LifecycleActions } from '@/components/actions/lifecycle-actions';
+import { ReviewActions } from '@/components/actions/review-actions';
+import { CreateTaskModal } from '@/components/actions/create-task-modal';
+import { RequestDependencyModal } from '@/components/actions/request-dependency-modal';
+import { TaskStatusControl } from '@/components/actions/task-status-control';
+import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
 
 export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
@@ -22,7 +35,11 @@ export default function EngagementDetailPage(): JSX.Element {
   });
   const tasks = useQuery({
     queryKey: ['engagement', id, 'tasks'],
-    queryFn: () => apiFetch<Paginated<MyTask & { assignedToName: string | null }>>(`/engagements/${id}/tasks?limit=50`),
+    queryFn: () => apiFetch<Paginated<MyTask>>(`/engagements/${id}/tasks?limit=50`),
+  });
+  const deps = useQuery({
+    queryKey: ['engagement', id, 'client-dependencies'],
+    queryFn: () => apiFetch<Paginated<MyClientDependency>>(`/engagements/${id}/client-dependencies?limit=50`),
   });
   const compliance = useQuery({
     queryKey: ['engagement', id, 'compliance'],
@@ -43,18 +60,31 @@ export default function EngagementDetailPage(): JSX.Element {
         actions={
           <Link
             href={`/entities/${e.entityId}`}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
           >
             Client 360 →
           </Link>
         }
       />
 
+      {/* Action bar */}
+      <Card className="mb-4">
+        <CardBody className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-ink-faint">Status</span>
+            <StatusBadge status={e.status} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <ReviewActions engagement={e} />
+            <LifecycleActions engagement={e} />
+          </div>
+        </CardBody>
+      </Card>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader className="flex items-center justify-between">
+          <CardHeader>
             <CardTitle>Overview</CardTitle>
-            <StatusBadge status={e.status} />
           </CardHeader>
           <CardBody className="grid grid-cols-2 gap-y-3 text-sm sm:grid-cols-3">
             <Fact label="Engagement Partner" value={e.engagementPartnerName} />
@@ -88,36 +118,122 @@ export default function EngagementDetailPage(): JSX.Element {
             {e.team.map((m) => (
               <div key={m.id} className="flex items-center justify-between text-sm">
                 <span className="text-ink">{m.employeeName}</span>
-                <Badge>{humanize(m.roleOnEngagement)}</Badge>
+                <Badge>{m.roleOnEngagement.replace(/_/g, ' ')}</Badge>
               </div>
             ))}
           </CardBody>
         </Card>
       </div>
 
-      <div className="mt-4 grid gap-4">
-        <section>
-          <h2 className="mb-2 text-sm font-semibold text-ink">Tasks</h2>
-          <Card className="p-0">
-            {tasks.data && (
-              <DataTable columns={taskCols} data={tasks.data.items} empty="No tasks on this engagement yet." />
-            )}
-          </Card>
-        </section>
+      {/* Tasks */}
+      <section className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-ink">Tasks</h2>
+          <CreateTaskModal engagementId={e.id} team={e.team} />
+        </div>
+        <Card className="overflow-hidden p-0">
+          {tasks.data && tasks.data.items.length === 0 && (
+            <div className="p-5"><EmptyState>No tasks on this engagement yet.</EmptyState></div>
+          )}
+          {tasks.data && tasks.data.items.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                  <th className="px-4 py-2.5 font-semibold">Task</th>
+                  <th className="px-4 py-2.5 font-semibold">Assignee</th>
+                  <th className="px-4 py-2.5 font-semibold">Priority</th>
+                  <th className="px-4 py-2.5 font-semibold">Due</th>
+                  <th className="px-4 py-2.5 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.data.items.map((t) => (
+                  <tr key={t.id} className="border-b border-slate-50 last:border-0">
+                    <td className="px-4 py-2.5 text-ink">{t.title}</td>
+                    <td className="px-4 py-2.5 text-ink-muted">{t.assignedToName ?? 'Unassigned'}</td>
+                    <td className="px-4 py-2.5"><PriorityBadge priority={t.priority} /></td>
+                    <td className="px-4 py-2.5 text-ink-muted">{t.dueDate ? formatDate(t.dueDate) : '—'}</td>
+                    <td className="px-4 py-2.5"><TaskStatusControl task={t} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </section>
 
-        <section>
-          <h2 className="mb-2 text-sm font-semibold text-ink">Compliance obligations</h2>
-          <Card className="p-0">
-            {compliance.data && (
-              <DataTable
-                columns={complianceCols}
-                data={compliance.data.items}
-                empty="No compliance obligations generated for this engagement."
-              />
-            )}
-          </Card>
-        </section>
-      </div>
+      {/* Client dependencies */}
+      <section className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-ink">Client dependencies</h2>
+          <RequestDependencyModal engagementId={e.id} />
+        </div>
+        <Card className="overflow-hidden p-0">
+          {deps.data && deps.data.items.length === 0 && (
+            <div className="p-5"><EmptyState>No information requested from the client.</EmptyState></div>
+          )}
+          {deps.data && deps.data.items.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                  <th className="px-4 py-2.5 font-semibold">Requested</th>
+                  <th className="px-4 py-2.5 font-semibold">Status</th>
+                  <th className="px-4 py-2.5 font-semibold">Escalation</th>
+                  <th className="px-4 py-2.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {deps.data.items.map((d) => (
+                  <tr key={d.id} className="border-b border-slate-50 last:border-0">
+                    <td className="px-4 py-2.5 text-ink">{d.requestedInfo}</td>
+                    <td className="px-4 py-2.5"><StatusBadge status={d.status} /></td>
+                    <td className="px-4 py-2.5 text-ink-muted">
+                      {d.escalationDate ? formatDate(d.escalationDate) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right"><ClientDependencyActions dep={d} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </section>
+
+      {/* Compliance */}
+      <section className="mt-4">
+        <h2 className="mb-2 text-sm font-semibold text-ink">Compliance obligations</h2>
+        <Card className="overflow-hidden p-0">
+          {compliance.data && compliance.data.items.length === 0 && (
+            <div className="p-5"><EmptyState>No compliance obligations generated.</EmptyState></div>
+          )}
+          {compliance.data && compliance.data.items.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                  <th className="px-4 py-2.5 font-semibold">Obligation</th>
+                  <th className="px-4 py-2.5 font-semibold">Statutory</th>
+                  <th className="px-4 py-2.5 font-semibold">Internal SLA</th>
+                  <th className="px-4 py-2.5 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compliance.data.items.map((c) => (
+                  <tr key={c.id} className="border-b border-slate-50 last:border-0">
+                    <td className="px-4 py-2.5 text-ink">{c.complianceRuleName}</td>
+                    <td className={`px-4 py-2.5 ${c.isStatutoryOverdue ? 'font-medium text-danger-600' : 'text-ink-muted'}`}>
+                      {formatDate(c.effectiveStatutoryDeadline)}
+                    </td>
+                    <td className={`px-4 py-2.5 ${c.isInternallyOverdue ? 'font-medium text-warning-700' : 'text-ink-muted'}`}>
+                      {formatDate(c.effectiveInternalSlaDate)}
+                    </td>
+                    <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </section>
     </div>
   );
 }
@@ -130,32 +246,3 @@ function Fact({ label, value }: { label: string; value: string | null }): JSX.El
     </div>
   );
 }
-
-const taskCols: ColumnDef<MyTask & { assignedToName: string | null }, unknown>[] = [
-  { header: 'Task', accessorKey: 'title' },
-  { header: 'Assignee', cell: ({ row }) => row.original.assignedToName ?? <span className="text-ink-faint">Unassigned</span> },
-  { header: 'Priority', cell: ({ row }) => <Badge>{humanize(row.original.priority)}</Badge> },
-  { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
-  { header: 'Due', cell: ({ row }) => (row.original.dueDate ? formatDate(row.original.dueDate) : '—') },
-];
-
-const complianceCols: ColumnDef<ComplianceRow, unknown>[] = [
-  { header: 'Obligation', accessorKey: 'complianceRuleName' },
-  {
-    header: 'Statutory',
-    cell: ({ row }) => (
-      <span className={row.original.isStatutoryOverdue ? 'font-medium text-rose-600' : ''}>
-        {formatDate(row.original.effectiveStatutoryDeadline)}
-      </span>
-    ),
-  },
-  {
-    header: 'Internal SLA',
-    cell: ({ row }) => (
-      <span className={row.original.isInternallyOverdue ? 'font-medium text-amber-700' : ''}>
-        {formatDate(row.original.effectiveInternalSlaDate)}
-      </span>
-    ),
-  },
-  { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
-];

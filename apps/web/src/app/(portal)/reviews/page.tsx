@@ -22,7 +22,7 @@ function reviewState(e: EngagementRow): { label: string; tone: string } {
 }
 
 const columns: ColumnDef<EngagementRow, unknown>[] = [
-  { header: 'Code', cell: ({ row }) => <span className="font-medium text-brand-700">{row.original.engagementCode}</span> },
+  { header: 'Code', cell: ({ row }) => <span className="font-medium text-primary-700">{row.original.engagementCode}</span> },
   { header: 'Client', accessorKey: 'entityName' },
   { header: 'Service', accessorKey: 'serviceName' },
   { header: 'Review model', cell: ({ row }) => row.original.effectiveReviewModel.name },
@@ -78,7 +78,7 @@ function ReviewsInner(): JSX.Element {
             className={cn(
               'rounded-full border px-3 py-1 text-xs font-medium transition',
               filter === key
-                ? 'border-brand-600 bg-brand-600 text-white'
+                ? 'border-primary-600 bg-primary-600 text-white'
                 : 'border-slate-200 bg-white text-ink-muted hover:bg-slate-50',
             )}
           >

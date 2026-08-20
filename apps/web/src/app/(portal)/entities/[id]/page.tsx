@@ -106,7 +106,7 @@ export default function EntityDetailPage(): JSX.Element {
       </section>
 
       <p className="mt-4 text-xs text-ink-faint">
-        <Link href="/entities" className="text-brand-600 hover:underline">
+        <Link href="/entities" className="text-primary-600 hover:underline">
           ← Back to entities
         </Link>
       </p>
@@ -115,7 +115,7 @@ export default function EntityDetailPage(): JSX.Element {
 }
 
 const engagementCols: ColumnDef<EngagementRow, unknown>[] = [
-  { header: 'Code', cell: ({ row }) => <span className="font-medium text-brand-700">{row.original.engagementCode}</span> },
+  { header: 'Code', cell: ({ row }) => <span className="font-medium text-primary-700">{row.original.engagementCode}</span> },
   { header: 'Service', accessorKey: 'serviceName' },
   {
     header: 'Period',

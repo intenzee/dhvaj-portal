@@ -7,11 +7,13 @@ import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
-import { humanize, formatDate, deadlineLabel } from '@/lib/format';
+import { formatDate, deadlineLabel } from '@/lib/format';
 import type { MyTask, MyClientDependency } from '@/lib/types';
-import { PageHeader, Spinner, Badge, Card } from '@/components/ui';
-import { StatusBadge } from '@/components/status-badge';
+import { PageHeader, Spinner, Card } from '@/components/ui';
+import { StatusBadge, PriorityBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
+import { TaskStatusControl } from '@/components/actions/task-status-control';
+import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
 import { cn } from '@/lib/cn';
 
 type Tab = 'tasks' | 'client-dependencies';
@@ -26,20 +28,19 @@ const taskColumns: ColumnDef<MyTask, unknown>[] = [
       </span>
     ),
   },
-  { header: 'Priority', cell: ({ row }) => <Badge>{humanize(row.original.priority)}</Badge> },
-  { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+  { header: 'Priority', cell: ({ row }) => <PriorityBadge priority={row.original.priority} /> },
   {
     header: 'Due',
     cell: ({ row }) =>
       row.original.dueDate ? (
-        <span className={row.original.isOverdue ? 'font-medium text-rose-600' : ''}>
+        <span className={row.original.isOverdue ? 'font-medium text-danger-600' : ''}>
           {formatDate(row.original.dueDate)}
-          {row.original.isOverdue && ' · overdue'}
         </span>
       ) : (
         <span className="text-ink-faint">—</span>
       ),
   },
+  { header: 'Status', cell: ({ row }) => <TaskStatusControl task={row.original} /> },
 ];
 
 const depColumns: ColumnDef<MyClientDependency, unknown>[] = [
@@ -57,13 +58,14 @@ const depColumns: ColumnDef<MyClientDependency, unknown>[] = [
     header: 'Escalation',
     cell: ({ row }) =>
       row.original.escalationDate ? (
-        <span className={row.original.isOverdue ? 'font-medium text-rose-600' : ''}>
+        <span className={row.original.isOverdue ? 'font-medium text-danger-600' : ''}>
           {deadlineLabel(row.original.escalationDate)}
         </span>
       ) : (
         <span className="text-ink-faint">—</span>
       ),
   },
+  { header: '', cell: ({ row }) => <ClientDependencyActions dep={row.original} /> },
 ];
 
 function MyWorkInner(): JSX.Element {
@@ -99,7 +101,7 @@ function MyWorkInner(): JSX.Element {
             onClick={() => setTab(key)}
             className={cn(
               'rounded-md px-3 py-1.5 text-sm font-medium transition',
-              tab === key ? 'bg-brand-600 text-white' : 'text-ink-muted hover:bg-slate-100',
+              tab === key ? 'bg-primary-600 text-white' : 'text-ink-muted hover:bg-slate-100',
             )}
           >
             {label}
@@ -128,7 +130,7 @@ function MyWorkInner(): JSX.Element {
 
       <p className="mt-4 text-xs text-ink-faint">
         Looking for an engagement?{' '}
-        <Link href="/engagements" className="text-brand-600 hover:underline">
+        <Link href="/engagements" className="text-primary-600 hover:underline">
           Browse engagements
         </Link>
         .
