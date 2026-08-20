@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "api": "npm run start:dev --workspace @hsdg/api",
+    "web": "npm run dev --workspace @hsdg/web",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",

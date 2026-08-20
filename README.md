@@ -10,20 +10,30 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 11 — Notifications (complete).** Material events now reach the
-> right person through a **notification framework**: a **recipient-scoped** inbox
-> written only through a SECURITY DEFINER emit path (the app role can't insert
-> directly — recipients are resolved by business logic, never client input), with
-> a **channel abstraction** (in-app portal always on; email/Teams pluggable). Five
-> events fire in-request — **task assigned**, **EP changed**, **engagement
-> reopened**, **EP sign-off pending**, **high-risk (key matter)** — each committed
-> atomically with the change that caused it. An idempotent **date-driven sweep**
-> turns the Phase 8–9 clocks into notifications (**internal SLA
-> overdue/approaching**, **statutory deadline approaching**, **client-dependency
-> reminders**). Proven end-to-end and at the database layer (recipient scoping,
-> narrow write path, dedup).
+> **Status: Phase 12 — Dashboard / Frontend Foundation (complete).** The first
+> frontend lands: a **Next.js portal** — one app whose navigation and Home
+> dashboards are **permission-driven** per role (MP/Partner get the full
+> accountability view; manager/senior/article see progressively less), never
+> separate apps. Role dashboards render the mandated cards (**Active Engagements,
+> Overdue, Due Soon, Pending Reviews, Pending Sign-offs, Client Dependencies, High
+> Risk, My Tasks**) from a single **RLS-scoped `GET /dashboard/summary`** — the
+> counts are already scoped to what each user can see. Core screens are live: **My
+> Work, Engagements (list + detail), Client 360, Review Queue, Compliance
+> Calendar**. The browser calls the API directly; every authorisation/RLS rule
+> stays enforced by the backend. Verified end-to-end in a real browser (login →
+> role dashboard → list → detail).
 >
 > <details><summary>Earlier phases</summary>
+>
+> **Phase 11 — Notifications.** Material events reach the right person through a
+> **notification framework**: a **recipient-scoped** inbox written only through a
+> SECURITY DEFINER emit path (the app role can't insert directly), with a
+> **channel abstraction** (in-app portal always on; email/Teams pluggable). Five
+> events fire in-request — **task assigned**, **EP changed**, **engagement
+> reopened**, **EP sign-off pending**, **high-risk (key matter)**. An idempotent
+> **date-driven sweep** turns the Phase 8–9 clocks into notifications (**internal
+> SLA overdue/approaching**, **statutory deadline approaching**, **client-dependency
+> reminders**).
 >
 > **Phase 10 — Documents.** Engagements carry **document evidence**: metadata + a
 > versioned file chain, with the bytes held in **blob storage** behind a provider
@@ -83,7 +93,7 @@ audit trail.
 
 | Layer | Choice |
 | --- | --- |
-| Frontend (from Phase 12) | Next.js · React · TypeScript · Tailwind · shadcn/ui · TanStack Query/Table · React Hook Form · Zod |
+| Frontend (Phase 12) | Next.js (App Router) · React · TypeScript (strict) · Tailwind · TanStack Query/Table · React Hook Form · Zod |
 | Backend | NestJS · TypeScript (strict) · REST · OpenAPI/Swagger |
 | Database | PostgreSQL 16 · Row Level Security (`FORCE`) · `node-pg-migrate` |
 | Data access | `pg` (Phase 0) → Drizzle (from Phase 1, alongside first tables) |
@@ -99,7 +109,7 @@ audit trail.
 ```
 apps/
   api/          NestJS modular monolith (the backend)
-  web/          Next.js portal (reserved; begins Phase 12)
+  web/          Next.js portal (Phase 12 — role dashboards + core screens)
 packages/
   tsconfig/     shared strict TypeScript config
   contracts/    shared enums/DTOs between api and web (filled per phase)
@@ -161,11 +171,27 @@ Seeded users: `mp@hsdg.in` (Managing Partner), `admin@hsdg.in`,
 `partner.a@hsdg.in` (North), `partner.b@hsdg.in` (South), `manager.x@hsdg.in`,
 `senior.y@hsdg.in`. Partners in different offices demonstrate RLS scoping.
 
+### Running the web portal (Phase 12)
+
+With the API running, start the Next.js portal (it calls the API directly; CORS
+is enabled for `http://localhost:3000`):
+
+```bash
+npm run web
+```
+
+Open `http://localhost:3000`, then use a **quick sign-in** button (seeded
+persona) to land on that role's dashboard. Sign in as the Managing Partner for
+the full firm-wide view, or a senior for the personal-work view. Configuration:
+copy `apps/web/.env.example` to `apps/web/.env.local` to point at a non-default
+API URL.
+
 ### Useful scripts
 
 | Command | Description |
 | --- | --- |
 | `npm run api` | Run the API in watch mode |
+| `npm run web` | Run the Next.js portal (http://localhost:3000) |
 | `npm run build` | Build all workspaces |
 | `npm run lint` / `npm run typecheck` | Lint / typecheck all workspaces |
 | `npm test` | Unit tests (no infrastructure required) |
@@ -301,6 +327,7 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/notifications/read-all` | `notification.read` | Mark all my unread notifications read |
 | POST | `/notifications/:id/{read,dismiss}` | `notification.read` | Mark one read / dismiss (404 if not mine) |
 | POST | `/notifications/scan` | `notification.scan` | Run the date-driven sweep (MP/worker; idempotent) |
+| GET | `/dashboard/summary` | `engagement.read` | RLS-scoped Home-dashboard counts; `?dueSoonDays=` (default 7) |
 
 ## Roadmap
 
@@ -317,8 +344,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **8** | Compliance engine (effective-dated, versioned; two clocks) | ✅ done |
 | **9** | Tasks & client dependencies (waiting-for-client; internal vs client delay) | ✅ done |
 | **10** | Documents (blob storage, versioned evidence, audited RLS-mediated access) | ✅ done |
-| **11** | Notifications (recipient-scoped inbox, channel abstraction, date-driven sweep) | ✅ current |
-| 12 | Dashboard / frontend foundation | ⬜ |
+| **11** | Notifications (recipient-scoped inbox, channel abstraction, date-driven sweep) | ✅ done |
+| **12** | Dashboard / frontend foundation (Next.js portal, role dashboards, core screens) | ✅ current |
 
 Each phase delivers **database + business logic + API + security + RLS + audit +
 tests + documentation** — not merely UI.
