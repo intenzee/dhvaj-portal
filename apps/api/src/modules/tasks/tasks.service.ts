@@ -6,12 +6,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import { TASK_STATUS, type TaskPriority, type TaskStatus } from '@hsdg/contracts';
+import {
+  NOTIFICATION_TYPE,
+  TASK_STATUS,
+  type TaskPriority,
+  type TaskStatus,
+} from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { translatePgError as mapPgError } from '../../common/errors/pg-error.util';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import type {
   CreateTaskInput,
   MyTaskRecord,
@@ -73,6 +79,7 @@ export class TasksService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(ctx: RlsContext, engagementId: string, input: CreateTaskInput): Promise<TaskRecord> {
@@ -109,6 +116,14 @@ export class TasksService {
         objectId: id,
         after: { engagementId, title: input.title, assignedTo: input.assignedToEmployeeId ?? null },
       });
+      await this.notifyAssignee(
+        client,
+        ctx,
+        engagementId,
+        id,
+        input.assignedToEmployeeId,
+        input.title,
+      );
       return task!;
     });
   }
@@ -218,6 +233,17 @@ export class TasksService {
         objectId: taskId,
         after: { engagementId },
       });
+      // Notify a newly-assigned member (assignment changed to someone else).
+      if (input.assignedToEmployeeId && input.assignedToEmployeeId !== before.assignedToId) {
+        await this.notifyAssignee(
+          client,
+          ctx,
+          engagementId,
+          taskId,
+          input.assignedToEmployeeId,
+          after!.title,
+        );
+      }
       return after!;
     });
   }
@@ -389,6 +415,26 @@ export class TasksService {
   private async requireEngagement(client: PoolClient, engagementId: string): Promise<void> {
     const eng = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [engagementId]);
     if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
+  }
+
+  /** Notify a task's assignee (skipping self-assignment), atomically with the change. */
+  private async notifyAssignee(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    taskId: string,
+    assigneeId: string | null | undefined,
+    title: string,
+  ): Promise<void> {
+    if (!assigneeId || assigneeId === ctx.employeeId) return;
+    await this.notifications.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.taskAssigned,
+      recipientEmployeeIds: [assigneeId],
+      title: `Task assigned: ${title}`,
+      engagementId,
+      objectType: 'task',
+      objectId: taskId,
+    });
   }
 
   /** The assignee must be on the engagement (EP, manager, or team) so RLS lets them see it. */

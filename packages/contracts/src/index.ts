@@ -19,4 +19,5 @@ export * from './reviews';
 export * from './compliance';
 export * from './tasks';
 export * from './documents';
+export * from './notifications';
 export * from './pagination';

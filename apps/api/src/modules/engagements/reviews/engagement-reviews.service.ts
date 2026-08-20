@@ -9,6 +9,8 @@ import type { PoolClient } from 'pg';
 import { ClsService } from 'nestjs-cls';
 import {
   ENGAGEMENT_STATUS,
+  NOTIFICATION_TYPE,
+  REVIEW_OUTCOME,
   REVIEW_TYPE,
   type EngagementStatus,
   type ReviewOutcome,
@@ -20,6 +22,7 @@ import type { RlsContext } from '../../../database/rls-context';
 import type { PageParams, PageResult } from '../../../common/pagination/pagination.dto';
 import { resolveAmbientCorrelationId } from '../../../common/context/request-context';
 import { AuditService } from '../../audit/audit.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { selectEngagementDetail } from '../engagement-detail.query';
 import { translatePgError } from '../engagements.service';
 import type { EngagementDetail } from '../engagements.types';
@@ -85,6 +88,7 @@ export class EngagementReviewsService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly cls: ClsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Record a manager or EP review, optionally raising review points. */
@@ -160,8 +164,53 @@ export class EngagementReviewsService {
         },
         correlationId,
       });
+      await this.notifyOnReview(client, ctx, after!, input);
       return after!;
     });
+  }
+
+  /**
+   * Move-the-ball notifications after a review is recorded: flag a key/high-risk
+   * matter, and tell the accountable EP when their sign-off is now pending.
+   */
+  private async notifyOnReview(
+    client: PoolClient,
+    ctx: RlsContext,
+    after: EngagementDetail,
+    input: RecordReviewInput,
+  ): Promise<void> {
+    const epId = after.engagementPartnerId;
+    if (!epId || epId === ctx.employeeId) return; // never self-notify the EP
+    const context = `${after.engagementCode} · ${after.entityName}`;
+
+    if ((input.reviewPoints ?? []).some((p) => p.isKeyMatter)) {
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.highRiskException,
+        recipientEmployeeIds: [epId],
+        title: `Key matter raised — ${context}`,
+        body: `A key/high-risk review point was raised on ${context}.`,
+        engagementId: after.id,
+        objectType: 'engagement',
+        objectId: after.id,
+      });
+    }
+
+    if (
+      input.outcome === REVIEW_OUTCOME.cleared &&
+      after.effectiveReviewModel.requiresEpSignoff &&
+      !after.isSignedOff &&
+      after.openReviewPointCount === 0
+    ) {
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.epSignoffPending,
+        recipientEmployeeIds: [epId],
+        title: `EP sign-off pending — ${context}`,
+        body: `${context} is cleared at review and ready for your sign-off.`,
+        engagementId: after.id,
+        objectType: 'engagement',
+        objectId: after.id,
+      });
+    }
   }
 
   /**

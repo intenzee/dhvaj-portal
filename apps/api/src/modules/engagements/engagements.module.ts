@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { EngagementsService } from './engagements.service';
 import { EngagementsController } from './engagements.controller';
 import { EngagementLifecycleService } from './lifecycle/engagement-lifecycle.service';
@@ -16,7 +17,7 @@ import { EngagementReviewsController } from './reviews/engagement-reviews.contro
  * completion — see ADR-0011 and ADR-0012.
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, NotificationsModule],
   controllers: [EngagementsController, EngagementReviewsController],
   providers: [
     EngagementsService,

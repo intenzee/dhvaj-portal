@@ -59,6 +59,8 @@ export const PERMISSION = {
   complianceRead: 'compliance.read',
   complianceManage: 'compliance.manage',
   taskUpdate: 'task.update',
+  notificationRead: 'notification.read',
+  notificationScan: 'notification.scan',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

@@ -39,6 +39,14 @@ export class AppConfigService {
   get jsonBodyLimitBytes(): number {
     return Math.ceil(this.get('DOCUMENT_MAX_BYTES') * (4 / 3)) + 64 * 1024;
   }
+
+  /** Enabled notification delivery channels (`portal` is always implicitly on). */
+  get notificationChannels(): string[] {
+    return this.get('NOTIFICATION_CHANNELS')
+      .split(',')
+      .map((c) => c.trim().toLowerCase())
+      .filter(Boolean);
+  }
 }
 
 @Global()

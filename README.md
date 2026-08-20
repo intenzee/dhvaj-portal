@@ -10,19 +10,29 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 10 — Documents (complete).** Engagements now carry
-> **document evidence**: metadata + a versioned file chain, with the bytes held
-> in **blob storage** behind a provider abstraction (Azure Blob in production, a
-> local filesystem provider in dev/test) — PostgreSQL stores only metadata and an
-> **opaque storage reference**. Access **inherits the engagement** (members read
-> and download, leads upload/re-version/re-classify/archive/restore). Uploading
-> again creates a **new version and retains the old one** (version rows are
-> append-only, so completed/signed-off evidence is never silently replaced), and
-> documents are **never hard-deleted**. Every **download is RLS-mediated and
-> audited** — a document id alone can never reach the bytes, so there is no
-> direct-URL bypass. Proven end-to-end and at the database layer.
+> **Status: Phase 11 — Notifications (complete).** Material events now reach the
+> right person through a **notification framework**: a **recipient-scoped** inbox
+> written only through a SECURITY DEFINER emit path (the app role can't insert
+> directly — recipients are resolved by business logic, never client input), with
+> a **channel abstraction** (in-app portal always on; email/Teams pluggable). Five
+> events fire in-request — **task assigned**, **EP changed**, **engagement
+> reopened**, **EP sign-off pending**, **high-risk (key matter)** — each committed
+> atomically with the change that caused it. An idempotent **date-driven sweep**
+> turns the Phase 8–9 clocks into notifications (**internal SLA
+> overdue/approaching**, **statutory deadline approaching**, **client-dependency
+> reminders**). Proven end-to-end and at the database layer (recipient scoping,
+> narrow write path, dedup).
 >
 > <details><summary>Earlier phases</summary>
+>
+> **Phase 10 — Documents.** Engagements carry **document evidence**: metadata + a
+> versioned file chain, with the bytes held in **blob storage** behind a provider
+> abstraction (Azure Blob in production, a local filesystem provider in dev/test)
+> — PostgreSQL stores only metadata and an **opaque storage reference**. Access
+> **inherits the engagement**; a new upload creates a **new version and retains
+> the old one** (version rows are append-only), documents are **never
+> hard-deleted**, and every **download is RLS-mediated and audited** — a document
+> id alone can never reach the bytes, so there is no direct-URL bypass.
 >
 > **Phase 9 — Tasks & Client Dependencies.** Engagements track **internal tasks**
 > (assignment, due dates, task→task dependencies that block completion) and
@@ -79,6 +89,7 @@ audit trail.
 | Data access | `pg` (Phase 0) → Drizzle (from Phase 1, alongside first tables) |
 | Auth (Phase 1) | Microsoft Entra ID · MFA for partners/admins |
 | Document storage (Phase 10) | Blob storage behind a provider abstraction — **Azure Blob** (prod) · **local filesystem** (dev/test); DB holds metadata only |
+| Notifications (Phase 11) | Recipient-scoped inbox · channel abstraction (portal always on; email/Teams pluggable) · idempotent date-driven sweep |
 | Cache, jobs | Redis (cache) · Azure Service Bus (jobs) |
 | Cloud / secrets / obs. | Azure · Key Vault · App Insights / Azure Monitor |
 | Testing | Jest · Supertest · Playwright (E2E, later) · RLS tests |
@@ -190,6 +201,11 @@ Seeded users: `mp@hsdg.in` (Managing Partner), `admin@hsdg.in`,
   writing an audit event in the same transaction. Version rows are append-only
   and documents are never hard-deleted, so evidence cannot be silently replaced.
   See [ADR-0015](docs/adr/0015-documents.md).
+- **Notifications have a deliberately narrow write path (Phase 11):** they are
+  recipient-scoped by RLS (a user sees/mutates only their own), and the app role
+  **cannot INSERT one directly** — every notification is created through a
+  SECURITY DEFINER emit function, so recipients are resolved by business logic
+  (never client input) and de-duplicated. See [ADR-0016](docs/adr/0016-notifications.md).
 - Authentication (Entra ID / dev providers), MFA enforcement, and permission
   guards sit above RLS — never instead of it.
 - Uniform error envelope, correlation IDs on every request/response, and secret
@@ -280,6 +296,11 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/engagements/:id/documents/:docId/{archive,restore}` | `engagement.manage` | Archive / restore (reason recorded; audited) |
 | GET | `/engagements/:id/documents/:docId/download` | `engagement.read` | Download current version bytes (RLS-mediated; audited) |
 | GET | `/engagements/:id/documents/:docId/versions/:versionId/download` | `engagement.read` | Download a specific version's bytes (RLS-mediated; audited) |
+| GET | `/notifications` | `notification.read` | My notifications _(paginated)_; filter `?status=&unreadOnly=` |
+| GET | `/notifications/unread-count` | `notification.read` | Unread badge count |
+| POST | `/notifications/read-all` | `notification.read` | Mark all my unread notifications read |
+| POST | `/notifications/:id/{read,dismiss}` | `notification.read` | Mark one read / dismiss (404 if not mine) |
+| POST | `/notifications/scan` | `notification.scan` | Run the date-driven sweep (MP/worker; idempotent) |
 
 ## Roadmap
 
@@ -295,8 +316,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **7** | Review & sign-off engine (review models, sign-off gate, review points) | ✅ done |
 | **8** | Compliance engine (effective-dated, versioned; two clocks) | ✅ done |
 | **9** | Tasks & client dependencies (waiting-for-client; internal vs client delay) | ✅ done |
-| **10** | Documents (blob storage, versioned evidence, audited RLS-mediated access) | ✅ current |
-| 11 | Notifications | ⬜ |
+| **10** | Documents (blob storage, versioned evidence, audited RLS-mediated access) | ✅ done |
+| **11** | Notifications (recipient-scoped inbox, channel abstraction, date-driven sweep) | ✅ current |
 | 12 | Dashboard / frontend foundation | ⬜ |
 
 Each phase delivers **database + business logic + API + security + RLS + audit +

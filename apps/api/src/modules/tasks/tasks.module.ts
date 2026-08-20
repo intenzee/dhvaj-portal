@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksService } from './tasks.service';
 import { ClientDependenciesService } from './client-dependencies.service';
 import { TasksController } from './tasks.controller';
@@ -13,7 +14,7 @@ import { WorkController } from './work.controller';
  * the engagement read model and in the firm-wide "My Work" views.
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, NotificationsModule],
   controllers: [TasksController, ClientDependenciesController, WorkController],
   providers: [TasksService, ClientDependenciesService],
   exports: [TasksService, ClientDependenciesService],

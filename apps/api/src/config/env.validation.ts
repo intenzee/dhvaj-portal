@@ -70,6 +70,16 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(10 * 1024 * 1024),
+
+  // ── Notifications (Phase 11) ─────────────────────────────────────────────
+  // Enabled delivery channels (comma-separated). `portal` (the in-app row) is
+  // always on; add `email` and/or `teams` to fan out to those (stub transports
+  // for now). Example: NOTIFICATION_CHANNELS=portal,email
+  NOTIFICATION_CHANNELS: z.string().default('portal'),
+  // How many days ahead the sweep flags an internal SLA / statutory deadline as
+  // "approaching".
+  NOTIFICATION_SLA_LEAD_DAYS: z.coerce.number().int().nonnegative().default(3),
+  NOTIFICATION_DEADLINE_LEAD_DAYS: z.coerce.number().int().nonnegative().default(7),
 });
 
 export type Env = z.infer<typeof envSchema>;

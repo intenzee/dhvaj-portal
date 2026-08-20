@@ -5,12 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
-import { LIFECYCLE_ACTION, type EngagementStatus, type LifecycleAction } from '@hsdg/contracts';
+import {
+  LIFECYCLE_ACTION,
+  NOTIFICATION_TYPE,
+  type EngagementStatus,
+  type LifecycleAction,
+} from '@hsdg/contracts';
 import { DatabaseService } from '../../../database/database.service';
 import type { RlsContext } from '../../../database/rls-context';
 import type { PageParams, PageResult } from '../../../common/pagination/pagination.dto';
 import { resolveAmbientCorrelationId } from '../../../common/context/request-context';
 import { AuditService } from '../../audit/audit.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { selectEngagementDetail } from '../engagement-detail.query';
 import { translatePgError } from '../engagements.service';
 import type { EngagementDetail, LifecycleHistoryRecord } from '../engagements.types';
@@ -52,6 +58,7 @@ export class EngagementLifecycleService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly cls: ClsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async transition(
@@ -207,6 +214,22 @@ export class EngagementLifecycleService {
         reason: input.reason ?? null,
         correlationId,
       });
+
+      // Reopening completed/signed-off work is a material event — tell its EP and
+      // manager their engagement is active again (a fresh sign-off is required).
+      if (action === LIFECYCLE_ACTION.reopen) {
+        await this.notifications.emitWith(client, ctx, {
+          type: NOTIFICATION_TYPE.engagementReopened,
+          recipientEmployeeIds: [after!.engagementPartnerId, after!.engagementManagerId],
+          title: `Engagement reopened — ${after!.engagementCode}`,
+          body: `${after!.engagementCode} (${after!.entityName}) was reopened${
+            input.reason ? `: ${input.reason}` : ''
+          }. A fresh sign-off is required before it can complete again.`,
+          engagementId: id,
+          objectType: 'engagement',
+          objectId: id,
+        });
+      }
 
       return after!;
     });

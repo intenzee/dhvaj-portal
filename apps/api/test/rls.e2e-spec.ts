@@ -1002,4 +1002,112 @@ describe('RLS (database-level, independent of the application)', () => {
       }
     });
   });
+
+  // Phase 11: notifications, proven at the database layer. Notifications are
+  // recipient-scoped; the app role may NOT insert directly (there is no INSERT
+  // policy) — every notification is created through the SECURITY DEFINER
+  // hsdg.emit_notification(), which resolves the recipient employee → its user.
+  describe('notifications (Phase 11)', () => {
+    const emp = async (code: string): Promise<string> => {
+      const rows = await underContext<{ id: string }>(
+        { role: 'managing_partner' },
+        `SELECT id FROM hsdg.employees WHERE employee_code = '${code}'`,
+      );
+      return rows[0]!.id;
+    };
+
+    it('is fail-closed: no context ⇒ zero notifications', async () => {
+      expect(await underContext({}, 'SELECT id FROM hsdg.notifications')).toHaveLength(0);
+    });
+
+    it('forbids the app role inserting a notification directly (no INSERT policy)', async () => {
+      await expect(
+        app.query(
+          `INSERT INTO hsdg.notifications (recipient_user_id, type, title)
+           VALUES ($1, 'task_assigned', 'x')`,
+          [userIds['senior.y@hsdg.in']],
+        ),
+      ).rejects.toThrow(/row-level security/i);
+    });
+
+    it('emit_notification writes for the recipient and it is visible only to them', async () => {
+      const seniorY = await emp('EMP006');
+      await app.query('BEGIN');
+      try {
+        // Any authenticated context may CALL emit; the function (definer) resolves
+        // the employee → user and writes bypassing RLS.
+        await app.query('SELECT set_config($1,$2,true),set_config($3,$4,true)', [
+          'hsdg.user_id',
+          userIds['mp@hsdg.in'],
+          'hsdg.role',
+          'managing_partner',
+        ]);
+        const created = await app.query<{ recipient: string | null }>(
+          `SELECT hsdg.emit_notification($1,'task_assigned','RLS notify',NULL,NULL,NULL,NULL,NULL,NULL) AS recipient`,
+          [seniorY],
+        );
+        expect(created.rows[0]!.recipient).toBe(userIds['senior.y@hsdg.in']);
+
+        // The sender (MP) does not see someone else's notification…
+        const asMp = await app.query(
+          `SELECT id FROM hsdg.notifications WHERE title = 'RLS notify'`,
+        );
+        expect(asMp.rows).toHaveLength(0);
+
+        // …but the recipient (Senior Y) does.
+        await app.query('SELECT set_config($1,$2,true),set_config($3,$4,true)', [
+          'hsdg.user_id',
+          userIds['senior.y@hsdg.in'],
+          'hsdg.role',
+          'senior',
+        ]);
+        const asY = await app.query(`SELECT id FROM hsdg.notifications WHERE title = 'RLS notify'`);
+        expect(asY.rows).toHaveLength(1);
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+
+    it('de-duplicates on dedup_key: a second emit with the same key is a no-op', async () => {
+      const seniorY = await emp('EMP006');
+      await app.query('BEGIN');
+      try {
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', 'managing_partner']);
+        const key = `rls_dedup_${Date.now()}`;
+        const first = await app.query<{ recipient: string | null }>(
+          `SELECT hsdg.emit_notification($1,'internal_sla_overdue','once',NULL,NULL,NULL,NULL,$2,NULL) AS recipient`,
+          [seniorY, key],
+        );
+        const second = await app.query<{ recipient: string | null }>(
+          `SELECT hsdg.emit_notification($1,'internal_sla_overdue','once',NULL,NULL,NULL,NULL,$2,NULL) AS recipient`,
+          [seniorY, key],
+        );
+        expect(first.rows[0]!.recipient).not.toBeNull();
+        expect(second.rows[0]!.recipient).toBeNull(); // deduped
+      } finally {
+        await app.query('ROLLBACK');
+      }
+    });
+
+    it('only the Managing Partner holds notification.scan; every role holds notification.read', async () => {
+      const scan = await underContext<{ slug: string }>(
+        { role: 'managing_partner' },
+        `SELECT r.slug FROM hsdg.role_permissions rp
+         JOIN hsdg.roles r ON r.id = rp.role_id
+         JOIN hsdg.permissions p ON p.id = rp.permission_id
+         WHERE p.slug = 'notification.scan' ORDER BY r.slug`,
+      );
+      expect(scan.map((r) => r.slug)).toEqual(['managing_partner']);
+      const read = await underContext<{ slug: string }>(
+        { role: 'managing_partner' },
+        `SELECT r.slug FROM hsdg.role_permissions rp
+         JOIN hsdg.roles r ON r.id = rp.role_id
+         JOIN hsdg.permissions p ON p.id = rp.permission_id
+         WHERE p.slug = 'notification.read'`,
+      );
+      expect(read.map((r) => r.slug).sort()).toEqual(
+        ['admin', 'article', 'manager', 'managing_partner', 'partner', 'senior'].sort(),
+      );
+    });
+  });
 });

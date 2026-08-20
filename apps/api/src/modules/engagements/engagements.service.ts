@@ -6,12 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import { EP_OPTIONAL_STATUSES, type EngagementStatus } from '@hsdg/contracts';
+import { EP_OPTIONAL_STATUSES, NOTIFICATION_TYPE, type EngagementStatus } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { translatePgError as mapPgError } from '../../common/errors/pg-error.util';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
 import type {
@@ -28,6 +29,7 @@ export class EngagementsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async listEngagements(
@@ -254,6 +256,16 @@ export class EngagementsService {
         before: { engagementPartnerId: before.engagementPartnerId },
         after: { engagementPartnerId: after!.engagementPartnerId },
         reason: reason ?? null,
+      });
+      // Notify the incoming EP (now accountable) and the outgoing EP.
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.epChanged,
+        recipientEmployeeIds: [after!.engagementPartnerId, before.engagementPartnerId],
+        title: `Engagement Partner changed — ${after!.engagementCode}`,
+        body: `You are now the accountable EP for ${after!.engagementCode} (${after!.entityName}).`,
+        engagementId: id,
+        objectType: 'engagement',
+        objectId: id,
       });
       return after!;
     });
