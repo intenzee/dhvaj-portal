@@ -77,15 +77,22 @@ export class EntraAuthProvider implements AuthenticationProvider {
         audience: this.audiences!,
       }));
     } catch (err) {
-      // Log the mismatch (claims only, never the raw token) so setup issues are
-      // diagnosable: token version, issuer, audience.
-      this.logger.warn(
-        `Entra token rejected: ${err instanceof Error ? err.message : String(err)} ` +
-          `[iss=${unverified.iss} aud=${JSON.stringify(unverified.aud)} ` +
-          `ver=${unverified.ver as string | undefined} appid=${
-            (unverified.appid as string | undefined) ?? (unverified.azp as string | undefined)
-          }]`,
-      );
+      // Only diagnose actual Microsoft tokens (a dev-fallback token, iss other
+      // than Microsoft, is expected to fail here and shouldn't log noise).
+      const looksMicrosoft =
+        typeof unverified.iss === 'string' &&
+        (unverified.iss.includes('microsoftonline') || unverified.iss.includes('sts.windows.net'));
+      if (looksMicrosoft) {
+        // Claims only, never the raw token — surfaces setup issues (token
+        // version, issuer, audience) without leaking secrets.
+        this.logger.warn(
+          `Entra token rejected: ${err instanceof Error ? err.message : String(err)} ` +
+            `[iss=${unverified.iss} aud=${JSON.stringify(unverified.aud)} ` +
+            `ver=${unverified.ver as string | undefined} appid=${
+              (unverified.appid as string | undefined) ?? (unverified.azp as string | undefined)
+            }]`,
+        );
+      }
       throw new UnauthorizedException('Invalid or expired token.');
     }
 

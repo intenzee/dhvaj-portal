@@ -43,6 +43,15 @@ export const envSchema = z.object({
   // JWTs (development/testing only); `entra` validates Microsoft Entra ID tokens.
   AUTH_PROVIDER: z.enum(['dev', 'entra']).default('dev'),
 
+  // Non-production convenience: when true AND not production, the dev-token
+  // sign-in and dev JWTs are ALSO accepted alongside the active provider (so a
+  // local build can use Microsoft Entra SSO and the seeded persona logins at the
+  // same time). Ignored/forced off in production — fail-closed.
+  AUTH_DEV_FALLBACK: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
   // Signing/verification secret for the dev provider's JWTs. No default — a
   // secret must be supplied explicitly (fail-closed). Min length guards against
   // trivially weak keys.

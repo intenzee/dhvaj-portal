@@ -24,6 +24,15 @@ export class AppConfigService {
     return this.get('NODE_ENV') === 'test';
   }
 
+  /**
+   * Whether dev-token sign-in and dev JWTs are accepted alongside the active
+   * provider. Only ever true outside production (fail-closed): a local build can
+   * then use Entra SSO and the seeded persona logins simultaneously.
+   */
+  get devFallbackEnabled(): boolean {
+    return !this.isProduction && this.get('AUTH_DEV_FALLBACK') === true;
+  }
+
   get corsOrigins(): string[] {
     return this.get('CORS_ORIGINS')
       .split(',')

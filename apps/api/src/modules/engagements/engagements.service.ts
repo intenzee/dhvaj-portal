@@ -67,7 +67,9 @@ export class EngagementsService {
     }
     if (filter.search) {
       params.push(`%${filter.search}%`);
-      conditions.push(`(eng.engagement_code ILIKE $${params.length} OR ent.legal_name ILIKE $${params.length})`);
+      conditions.push(
+        `(eng.engagement_code ILIKE $${params.length} OR ent.legal_name ILIKE $${params.length})`,
+      );
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const limitParam = `$${params.length + 1}`;

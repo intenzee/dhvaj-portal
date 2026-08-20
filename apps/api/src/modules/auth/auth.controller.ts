@@ -29,7 +29,8 @@ export class AuthController {
   async devToken(
     @Body() dto: DevTokenDto,
   ): Promise<{ accessToken: string; tokenType: 'Bearer'; expiresIn: number }> {
-    if (this.config.isProduction || this.config.get('AUTH_PROVIDER') !== 'dev') {
+    const devEnabled = this.config.get('AUTH_PROVIDER') === 'dev' || this.config.devFallbackEnabled;
+    if (this.config.isProduction || !devEnabled) {
       // Hide the endpoint entirely outside its intended use.
       throw new NotFoundException();
     }
