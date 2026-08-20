@@ -73,3 +73,49 @@ function safeJson(text: string): unknown {
     return text;
   }
 }
+
+/** Fetch a binary payload from an authenticated endpoint (for inline preview). */
+export async function fetchBlob(
+  path: string,
+): Promise<{ blob: Blob; contentType: string; filename: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new ApiError(res.status, `Could not load the file (${res.status}).`);
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const match = /filename="?([^"]+)"?/i.exec(disposition);
+  const filename = match?.[1] ?? 'file';
+  const blob = await res.blob();
+  const contentType = blob.type || res.headers.get('content-type') || 'application/octet-stream';
+  return { blob, contentType, filename };
+}
+
+/**
+ * Download a file from an authenticated endpoint and save it in the browser.
+ * The API needs a bearer token, so we fetch the blob (not a plain <a href>) and
+ * trigger a save via an object URL.
+ */
+export async function downloadFile(path: string, fallbackName = 'download'): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
+
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const match = /filename="?([^"]+)"?/i.exec(disposition);
+  const name = match?.[1] ?? fallbackName;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

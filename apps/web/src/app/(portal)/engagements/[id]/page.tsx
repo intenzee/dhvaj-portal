@@ -24,6 +24,9 @@ import { CreateTaskModal } from '@/components/actions/create-task-modal';
 import { RequestDependencyModal } from '@/components/actions/request-dependency-modal';
 import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
+import { TeamSection } from '@/components/actions/team-section';
+import { DocumentsSection } from '@/components/actions/documents-section';
+import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
 
 export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
@@ -109,20 +112,7 @@ export default function EngagementDetailPage(): JSX.Element {
           </CardBody>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Team ({e.team.length})</CardTitle>
-          </CardHeader>
-          <CardBody className="space-y-2">
-            {e.team.length === 0 && <p className="text-sm text-ink-faint">No team assigned yet.</p>}
-            {e.team.map((m) => (
-              <div key={m.id} className="flex items-center justify-between text-sm">
-                <span className="text-ink">{m.employeeName}</span>
-                <Badge>{m.roleOnEngagement.replace(/_/g, ' ')}</Badge>
-              </div>
-            ))}
-          </CardBody>
-        </Card>
+        <TeamSection engagementId={e.id} team={e.team} />
       </div>
 
       {/* Tasks */}
@@ -199,9 +189,15 @@ export default function EngagementDetailPage(): JSX.Element {
         </Card>
       </section>
 
+      {/* Documents */}
+      <DocumentsSection engagementId={e.id} />
+
       {/* Compliance */}
       <section className="mt-4">
-        <h2 className="mb-2 text-sm font-semibold text-ink">Compliance obligations</h2>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-ink">Compliance obligations</h2>
+          <GenerateComplianceButton engagementId={e.id} />
+        </div>
         <Card className="overflow-hidden p-0">
           {compliance.data && compliance.data.items.length === 0 && (
             <div className="p-5"><EmptyState>No compliance obligations generated.</EmptyState></div>

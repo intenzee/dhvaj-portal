@@ -33,7 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'My Work', href: '/my-work', icon: Briefcase, permission: PERMISSION.engagementRead, ready: true },
   { label: 'Engagements', href: '/engagements', icon: Layers, permission: PERMISSION.engagementRead, ready: true },
   { label: 'Entities', href: '/entities', icon: Building2, permission: PERMISSION.entityRead, ready: true },
-  { label: 'Services', href: '/services', icon: FileText, permission: PERMISSION.serviceRead, ready: false },
+  { label: 'Services', href: '/services', icon: FileText, permission: PERMISSION.serviceRead, ready: true },
   { label: 'Client Dependencies', href: '/client-dependencies', icon: MessageSquareWarning, permission: PERMISSION.engagementRead, ready: true },
   { label: 'Tasks', href: '/tasks', icon: ListTodo, permission: PERMISSION.engagementRead, ready: true },
   { label: 'Reviews & Sign-offs', href: '/reviews', icon: ClipboardCheck, permission: PERMISSION.engagementRead, ready: true },

@@ -138,3 +138,34 @@ export interface NotificationRow {
   status: string;
   createdAt: string;
 }
+
+export interface EmployeeRow {
+  id: string;
+  employeeCode: string;
+  fullName: string;
+  gradeSlug: string;
+  gradeName: string;
+  officeCode: string;
+}
+
+export interface DocumentRow {
+  id: string;
+  title: string;
+  documentType: string;
+  classification: string;
+  status: string;
+  currentVersionNo: number;
+  currentFilename: string | null;
+  createdByName: string | null;
+  version: number;
+  updatedAt: string;
+}
+
+export interface ServiceRow {
+  id: string;
+  code: string;
+  name: string;
+  serviceLineName: string;
+  requiredReviewModelSlug: string;
+  isActive: boolean;
+}
