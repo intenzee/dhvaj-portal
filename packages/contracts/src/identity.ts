@@ -16,6 +16,20 @@ export const ROLE = {
 export type RoleSlug = (typeof ROLE)[keyof typeof ROLE];
 
 /**
+ * The roles an administrator may assign to a user, highest authority first.
+ * Every value is a real `roles.slug`; the reserved {@link SYSTEM_ROLE} is
+ * deliberately absent and can never be assigned.
+ */
+export const ASSIGNABLE_ROLES: RoleSlug[] = [
+  ROLE.managingPartner,
+  ROLE.admin,
+  ROLE.partner,
+  ROLE.manager,
+  ROLE.senior,
+  ROLE.article,
+];
+
+/**
  * Precedence, highest first. The "effective role" placed into the database
  * security context (hsdg.role) is the highest-precedence role a user holds —
  * this is what RLS policies test for firm-wide vs office-scoped access.
@@ -47,6 +61,7 @@ export const PERMISSION = {
   userRead: 'user.read',
   userManage: 'user.manage',
   officeRead: 'office.read',
+  officeManage: 'office.manage',
   auditRead: 'audit.read',
   employeeRead: 'employee.read',
   employeeManage: 'employee.manage',

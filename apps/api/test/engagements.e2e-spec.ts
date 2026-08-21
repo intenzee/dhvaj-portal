@@ -68,11 +68,11 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('shows the EP their own engagement', async () => {
-      // limit=100: partner.a accrues many engagements across the suite (incl.
-      // Phase 6's lifecycle tests below), so the default page can't be relied
-      // on to still contain the oldest (seeded) one.
+      // partner.a accrues many engagements across the suite (and across runs in a
+      // shared dev DB), so scan for the seeded one by code — search matches
+      // engagement_code exactly, making this independent of page/volume.
       const res = await request(app.getHttpServer())
-        .get('/api/v1/engagements?limit=100')
+        .get('/api/v1/engagements?search=ENG00001&limit=100')
         .set(bearer(await token('partner.a@hsdg.in')))
         .expect(200);
       expect(codes(res.body.items)).toContain('ENG00001');
@@ -82,7 +82,7 @@ describe('Engagement Core (e2e)', () => {
       // Senior Y (South office) is on the North Acme engagement's team.
       const sy = await token('senior.y@hsdg.in');
       const list = await request(app.getHttpServer())
-        .get('/api/v1/engagements')
+        .get('/api/v1/engagements?search=ENG00001&limit=100')
         .set(bearer(sy))
         .expect(200);
       expect(codes(list.body.items)).toContain('ENG00001');
@@ -102,7 +102,7 @@ describe('Engagement Core (e2e)', () => {
 
     it('does NOT show an unassigned partner another partner’s engagement (404 by id)', async () => {
       const list = await request(app.getHttpServer())
-        .get('/api/v1/engagements?limit=100')
+        .get('/api/v1/engagements?search=ENG00001&limit=100')
         .set(bearer(mp));
       const acme = list.body.items.find(
         (e: { engagementCode: string }) => e.engagementCode === 'ENG00001',
@@ -115,7 +115,7 @@ describe('Engagement Core (e2e)', () => {
 
     it('supports ?mine=true', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/v1/engagements?mine=true&limit=100')
+        .get('/api/v1/engagements?mine=true&search=ENG00001&limit=100')
         .set(bearer(await token('partner.a@hsdg.in')))
         .expect(200);
       expect(codes(res.body.items)).toContain('ENG00001');

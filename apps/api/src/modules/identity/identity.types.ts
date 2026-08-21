@@ -32,6 +32,39 @@ export interface OfficeRecord {
   isActive: boolean;
 }
 
+/** An assignable role, exposed so the Administration UI can offer a role picker. */
+export interface RoleRecord {
+  id: string;
+  slug: RoleSlug;
+  name: string;
+  description: string | null;
+}
+
+export interface CreateUserInput {
+  email: string;
+  displayName: string;
+  officeCode: string;
+  mfaRequired?: boolean;
+  roles?: RoleSlug[];
+}
+
+export interface UpdateUserInput {
+  displayName?: string;
+  officeCode?: string;
+  isActive?: boolean;
+  mfaRequired?: boolean;
+}
+
+export interface CreateOfficeInput {
+  code: string;
+  name: string;
+}
+
+export interface UpdateOfficeInput {
+  name?: string;
+  isActive?: boolean;
+}
+
 export interface AuditEventRecord {
   id: string;
   occurredAt: string;

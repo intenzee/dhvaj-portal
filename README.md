@@ -10,20 +10,29 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 12 — Dashboard / Frontend Foundation (complete).** The first
-> frontend lands: a **Next.js portal** — one app whose navigation and Home
-> dashboards are **permission-driven** per role (MP/Partner get the full
-> accountability view; manager/senior/article see progressively less), never
-> separate apps. Role dashboards render the mandated cards (**Active Engagements,
-> Overdue, Due Soon, Pending Reviews, Pending Sign-offs, Client Dependencies, High
-> Risk, My Tasks**) from a single **RLS-scoped `GET /dashboard/summary`** — the
-> counts are already scoped to what each user can see. Core screens are live: **My
-> Work, Engagements (list + detail), Client 360, Review Queue, Compliance
-> Calendar**. The browser calls the API directly; every authorisation/RLS rule
-> stays enforced by the backend. Verified end-to-end in a real browser (login →
-> role dashboard → list → detail).
+> **Status: Phase 13 — Administration (complete).** The firm can now be
+> administered from the portal: an **Administration** screen (gated on
+> `user.manage`) with **Users & Roles** and **Offices** tabs. New audited write
+> endpoints land on the previously read-only identity module — **create/update a
+> user**, **replace a user's role set** (`PUT /users/:id/roles`, idempotent),
+> **create/update an office** — each firm-wide-gated by RLS *and* a permission
+> guard (defence in depth), each recording a before/after **audit** entry. Users
+> are **deactivated, never deleted** (soft flag). A new `office.manage` permission
+> is granted to the Managing Partner and administrators. Role assignment reuses
+> the existing `user_roles` RLS write policy; nothing bypasses the database.
 >
 > <details><summary>Earlier phases</summary>
+>
+> **Phase 12 — Dashboard / Frontend Foundation.** The first frontend: a
+> **Next.js portal** — one app whose navigation and Home dashboards are
+> **permission-driven** per role (MP/Partner get the full accountability view;
+> manager/senior/article see progressively less), never separate apps. Role
+> dashboards render the mandated cards (**Active Engagements, Overdue, Due Soon,
+> Pending Reviews, Pending Sign-offs, Client Dependencies, High Risk, My Tasks**)
+> from a single **RLS-scoped `GET /dashboard/summary`**. Core screens are live:
+> **My Work, Engagements (list + detail), Client 360, Review Queue, Compliance
+> Calendar**. The browser calls the API directly; every authorisation/RLS rule
+> stays enforced by the backend.
 >
 > **Phase 11 — Notifications.** Material events reach the right person through a
 > **notification framework**: a **recipient-scoped** inbox written only through a
@@ -345,7 +354,8 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | **9** | Tasks & client dependencies (waiting-for-client; internal vs client delay) | ✅ done |
 | **10** | Documents (blob storage, versioned evidence, audited RLS-mediated access) | ✅ done |
 | **11** | Notifications (recipient-scoped inbox, channel abstraction, date-driven sweep) | ✅ done |
-| **12** | Dashboard / frontend foundation (Next.js portal, role dashboards, core screens) | ✅ current |
+| **12** | Dashboard / frontend foundation (Next.js portal, role dashboards, core screens) | ✅ done |
+| **13** | Administration (audited user/role/office write flows + admin UI) | ✅ current |
 
 Each phase delivers **database + business logic + API + security + RLS + audit +
 tests + documentation** — not merely UI.

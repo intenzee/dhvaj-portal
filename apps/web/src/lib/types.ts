@@ -7,6 +7,7 @@ import type {
   ClientDependencyStatus,
   ComplianceStatus,
   EngagementStatus,
+  RoleSlug,
   TaskPriority,
   TaskStatus,
 } from '@hsdg/contracts';
@@ -168,4 +169,30 @@ export interface ServiceRow {
   serviceLineName: string;
   requiredReviewModelSlug: string;
   isActive: boolean;
+}
+
+// ── Administration (Phase 13) ───────────────────────────────────────────────
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  displayName: string;
+  officeId: string;
+  officeCode: string;
+  isActive: boolean;
+  roles: RoleSlug[];
+}
+
+export interface OfficeRow {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface RoleRow {
+  id: string;
+  slug: RoleSlug;
+  name: string;
+  description: string | null;
 }

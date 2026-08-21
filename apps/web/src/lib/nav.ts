@@ -42,7 +42,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Reports & MIS', href: '/reports', icon: BarChart3, permission: PERMISSION.auditRead, ready: false },
   { label: 'Resource Management', href: '/resources', icon: Users, permission: PERMISSION.employeeRead, ready: false },
   { label: 'Billing & Collections', href: '/billing', icon: Wallet, ready: false },
-  { label: 'Administration', href: '/admin', icon: Settings, permission: PERMISSION.userManage, ready: false },
+  { label: 'Administration', href: '/admin', icon: Settings, permission: PERMISSION.userManage, ready: true },
 ];
 
 /** The nav items a principal may see. */
