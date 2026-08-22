@@ -180,7 +180,7 @@ function NotificationBell(): JSX.Element {
   const unread = data?.unread ?? 0;
   return (
     <Link
-      href="/my-work"
+      href="/notifications"
       title={`${unread} unread notifications`}
       aria-label="Notifications"
       className="relative rounded-lg p-2 text-ink-muted transition hover:bg-slate-100 hover:text-ink"

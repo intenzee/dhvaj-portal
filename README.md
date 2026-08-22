@@ -21,6 +21,16 @@ audit trail.
 > is granted to the Managing Partner and administrators. Role assignment reuses
 > the existing `user_roles` RLS write policy; nothing bypasses the database.
 >
+> **Production-hardening UI cluster (follow-on).** The backend-ready gaps are now
+> closed in the portal: **client onboarding** (create/edit entities with a live
+> duplicate-check, plus add registrations & contacts), a **Notifications inbox**
+> (read / dismiss / mark-all-read, deep-linking to engagements), a **cross-engagement
+> Documents view** (one new RLS-scoped `GET /documents`, same visibility as the
+> per-engagement list, flattened), **Compliance configuration** (rules, append-only
+> effective-dated versions, and the holiday calendar), and reusable **pagination
+> controls** on the busy lists. Every write reuses an existing audited, RLS-enforced
+> endpoint; the browser never re-implements a rule.
+>
 > <details><summary>Earlier phases</summary>
 >
 > **Phase 12 — Dashboard / Frontend Foundation.** The first frontend: a

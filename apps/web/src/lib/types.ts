@@ -98,6 +98,22 @@ export interface EntityRow {
   registrationCount: number;
 }
 
+export interface EntityType {
+  id: string;
+  slug: string;
+  name: string;
+  category: string;
+}
+
+export interface DuplicateCandidate {
+  id: string;
+  entityCode: string;
+  legalName: string;
+  pan: string | null;
+  score: number;
+  matchReason: 'pan' | 'name';
+}
+
 export interface Registration {
   id: string;
   registrationType: string;
@@ -113,6 +129,11 @@ export interface Contact {
   isSignatory: boolean;
 }
 export interface EntityDetail extends EntityRow {
+  displayName: string | null;
+  typeSlug: string;
+  officeCode: string;
+  incorporationDate: string | null;
+  version: number;
   registrations: Registration[];
   contacts: Contact[];
 }
@@ -131,12 +152,54 @@ export interface ComplianceRow {
   isInternallyOverdue: boolean;
 }
 
+// ── Compliance configuration (Phase 8 admin) ────────────────────────────────
+
+export interface ComplianceRuleVersion {
+  id: string;
+  version: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  calculationBasis: string;
+  offsetMonths: number;
+  offsetDays: number;
+  fixedMonth: number | null;
+  fixedDay: number | null;
+  workingDayAdjustment: string;
+  internalSlaOffsetDays: number;
+  condition: unknown | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface ComplianceRule {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  serviceId: string | null;
+  serviceCode: string | null;
+  category: string;
+  isActive: boolean;
+  version: number;
+  versions: ComplianceRuleVersion[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Holiday {
+  id: string;
+  holidayDate: string;
+  name: string;
+}
+
 export interface NotificationRow {
   id: string;
   type: string;
   title: string;
   body: string | null;
+  engagementId: string | null;
   status: string;
+  readAt: string | null;
   createdAt: string;
 }
 
@@ -160,6 +223,15 @@ export interface DocumentRow {
   createdByName: string | null;
   version: number;
   updatedAt: string;
+}
+
+/** A document in the cross-engagement view (adds engagement/client context). */
+export interface GlobalDocumentRow extends DocumentRow {
+  engagementId: string;
+  engagementCode: string;
+  entityName: string | null;
+  currentSizeBytes: number | null;
+  createdAt: string;
 }
 
 export interface ServiceRow {

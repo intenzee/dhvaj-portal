@@ -3,6 +3,7 @@ import { AuditModule } from '../audit/audit.module';
 import { StorageModule } from './storage/storage.module';
 import { DocumentsService } from './documents.service';
 import { DocumentsController } from './documents.controller';
+import { DocumentsListController } from './documents-list.controller';
 
 /**
  * Documents (Phase 10). Engagement-scoped professional evidence: metadata +
@@ -13,7 +14,7 @@ import { DocumentsController } from './documents.controller';
  */
 @Module({
   imports: [AuditModule, StorageModule],
-  controllers: [DocumentsController],
+  controllers: [DocumentsController, DocumentsListController],
   providers: [DocumentsService],
   exports: [DocumentsService],
 })

@@ -1,14 +1,18 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { Paginated } from '@hsdg/contracts';
+import { PERMISSION, type Paginated } from '@hsdg/contracts';
+import { Settings2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { can } from '@/lib/principal';
 import { formatDate, deadlineLabel } from '@/lib/format';
 import type { ComplianceRow } from '@/lib/types';
-import { PageHeader, Spinner, Card, Badge } from '@/components/ui';
+import { PageHeader, Spinner, Card, Badge, Button } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { cn } from '@/lib/cn';
@@ -66,6 +70,7 @@ function inNextDays(iso: string, days: number): boolean {
 function ComplianceInner(): JSX.Element {
   const params = useSearchParams();
   const router = useRouter();
+  const { principal } = useAuth();
   const initial: Filter =
     params.get('filter') === 'overdue' ? 'overdue' : params.get('filter') === 'due-soon' ? 'due-soon' : 'all';
   const [filter, setFilter] = useState<Filter>(initial);
@@ -86,6 +91,15 @@ function ComplianceInner(): JSX.Element {
       <PageHeader
         title="Compliance Calendar"
         subtitle="Open obligations across your engagements, by statutory deadline. Two clocks: statutory vs internal SLA."
+        actions={
+          can(principal, PERMISSION.complianceManage) ? (
+            <Link href="/compliance/rules">
+              <Button variant="secondary">
+                <Settings2 className="h-4 w-4" /> Configure rules
+              </Button>
+            </Link>
+          ) : undefined
+        }
       />
 
       <div className="mb-4 flex flex-wrap gap-2">

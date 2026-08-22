@@ -30,6 +30,7 @@ import type {
   DocumentDownload,
   DocumentRecord,
   DocumentVersionRecord,
+  GlobalDocumentRecord,
   UpdateDocumentInput,
 } from './documents.types';
 
@@ -80,6 +81,22 @@ const DOC_BASE = `
   FROM hsdg.documents d
   LEFT JOIN hsdg.document_versions cv ON cv.id = d.current_version_id
   LEFT JOIN hsdg.employees ce ON ce.id = d.created_by_employee_id`;
+
+/** Like {@link DOC_BASE} but with engagement/client context, for the cross-engagement view. */
+const GLOBAL_DOC_BASE = `
+  SELECT d.id, d.engagement_id, d.title, d.document_type, d.classification, d.sensitivity,
+         d.status, d.current_version_no,
+         cv.filename AS current_filename, cv.content_type AS current_content_type,
+         cv.size_bytes AS current_size_bytes,
+         d.retention_until::text, d.archived_at, d.archived_by_employee_id,
+         d.created_by_employee_id, ce.full_name AS created_by_name,
+         d.version, d.created_at, d.updated_at,
+         eng.engagement_code, ent.legal_name AS entity_name
+  FROM hsdg.documents d
+  LEFT JOIN hsdg.document_versions cv ON cv.id = d.current_version_id
+  LEFT JOIN hsdg.employees ce ON ce.id = d.created_by_employee_id
+  JOIN hsdg.engagements eng ON eng.id = d.engagement_id
+  LEFT JOIN hsdg.entities ent ON ent.id = eng.entity_id`;
 
 const VERSION_BASE = `
   SELECT v.id, v.document_id, v.version_no, v.filename, v.content_type, v.size_bytes,
@@ -271,6 +288,57 @@ export class DocumentsService {
         params.slice(0, params.length - 2),
       );
       return { items: rows.map(mapDocument), total: Number(totalRes.rows[0]?.total ?? 0) };
+    });
+  }
+
+  /**
+   * List documents across every engagement the caller can access. RLS scopes the
+   * `documents` rows to accessible engagements automatically (access inherits the
+   * engagement), so this is the same visibility as the per-engagement list,
+   * flattened — with engagement/client context for a global view.
+   */
+  async listAll(
+    ctx: RlsContext,
+    page: PageParams,
+    filter: {
+      status?: DocumentStatus;
+      documentType?: DocumentType;
+      classification?: DocumentClassification;
+      search?: string;
+    },
+  ): Promise<PageResult<GlobalDocumentRecord>> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const params: unknown[] = [];
+      const conds: string[] = [];
+      if (filter.status) {
+        params.push(filter.status);
+        conds.push(`d.status = $${params.length}`);
+      }
+      if (filter.documentType) {
+        params.push(filter.documentType);
+        conds.push(`d.document_type = $${params.length}`);
+      }
+      if (filter.classification) {
+        params.push(filter.classification);
+        conds.push(`d.classification = $${params.length}`);
+      }
+      if (filter.search) {
+        params.push(`%${filter.search}%`);
+        conds.push(`d.title ILIKE $${params.length}`);
+      }
+      const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+      params.push(page.limit, page.offset);
+      const { rows } = await client.query<GlobalDocumentRow>(
+        `${GLOBAL_DOC_BASE} ${where}
+         ORDER BY d.created_at DESC
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
+      );
+      const totalRes = await client.query<{ total: string }>(
+        `SELECT count(*) AS total FROM hsdg.documents d ${where}`,
+        params.slice(0, params.length - 2),
+      );
+      return { items: rows.map(mapGlobalDocument), total: Number(totalRes.rows[0]?.total ?? 0) };
     });
   }
 
@@ -540,6 +608,19 @@ export class DocumentsService {
     );
     return { ...doc, versions: rows.map(mapVersion) };
   }
+}
+
+interface GlobalDocumentRow extends DocumentRow {
+  engagement_code: string;
+  entity_name: string | null;
+}
+
+function mapGlobalDocument(row: GlobalDocumentRow): GlobalDocumentRecord {
+  return {
+    ...mapDocument(row),
+    engagementCode: row.engagement_code,
+    entityName: row.entity_name,
+  };
 }
 
 function mapDocument(row: DocumentRow): DocumentRecord {

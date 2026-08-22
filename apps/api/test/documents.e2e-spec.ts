@@ -282,4 +282,61 @@ describe('Documents (e2e)', () => {
       }).expect(413);
     });
   });
+
+  describe('cross-engagement list (GET /documents)', () => {
+    it('lists the caller’s documents across engagements with client/engagement context', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const title = `Global doc ${unique()}`;
+      const created = await uploadDoc(pa, eng, {
+        title,
+        filename: 'letter.txt',
+        contentBase64: b64('cross-engagement listing'),
+      }).expect(201);
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/documents?search=${encodeURIComponent(title)}&limit=50`)
+        .set(bearer(pa))
+        .expect(200);
+
+      const hit = (
+        res.body.items as Array<{
+          id: string;
+          title: string;
+          engagementId: string;
+          engagementCode: string;
+          entityName: string | null;
+        }>
+      ).find((d) => d.id === created.body.id);
+      expect(hit).toBeDefined();
+      expect(hit!.title).toBe(title);
+      expect(hit!.engagementId).toBe(eng);
+      expect(hit!.engagementCode).toMatch(/^ENG\d+$/);
+      expect(hit!.entityName).toBeTruthy();
+    });
+
+    it('does NOT surface a document on an engagement the caller is not assigned to', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const title = `Private doc ${unique()}`;
+      await uploadDoc(pa, eng, {
+        title,
+        filename: 'p.txt',
+        contentBase64: b64('secret'),
+      }).expect(201);
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/documents?search=${encodeURIComponent(title)}&limit=50`)
+        .set(bearer(await token('partner.b@hsdg.in')))
+        .expect(200);
+      expect(res.body.items).toHaveLength(0);
+    });
+
+    it('forbids a caller without engagement.read (403)', async () => {
+      await request(app.getHttpServer())
+        .get('/api/v1/documents')
+        .set(bearer(await token('admin@hsdg.in')))
+        .expect(403);
+    });
+  });
 });

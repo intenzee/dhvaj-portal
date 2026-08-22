@@ -20,6 +20,7 @@ import {
 } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
+import { EntityDetailActions } from '@/components/entities/entity-actions';
 
 /** Client 360 — the entity, its registrations & contacts, and its engagements. */
 export default function EntityDetailPage(): JSX.Element {
@@ -43,7 +44,11 @@ export default function EntityDetailPage(): JSX.Element {
 
   return (
     <div>
-      <PageHeader title={e.legalName} subtitle={`${e.entityCode} · ${e.typeName}`} />
+      <PageHeader
+        title={e.legalName}
+        subtitle={`${e.entityCode} · ${e.typeName}`}
+        actions={<EntityDetailActions entity={e} />}
+      />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>

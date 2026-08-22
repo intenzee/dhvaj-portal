@@ -13,7 +13,10 @@ import type { EngagementRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
+import { Pagination } from '@/components/pagination';
 import { cn } from '@/lib/cn';
+
+const PAGE_SIZE = 25;
 
 const columns: ColumnDef<EngagementRow, unknown>[] = [
   {
@@ -57,12 +60,19 @@ function EngagementsInner(): JSX.Element {
   const [status, setStatus] = useState<EngagementStatus | ''>(
     (params.get('status') as EngagementStatus | null) ?? '',
   );
+  const [offset, setOffset] = useState(0);
+
+  // Reset to the first page whenever the filter changes.
+  const setStatusFiltered = (s: EngagementStatus | ''): void => {
+    setStatus(s);
+    setOffset(0);
+  };
 
   const q = useQuery({
-    queryKey: ['engagements', status],
+    queryKey: ['engagements', status, offset],
     queryFn: () =>
       apiFetch<Paginated<EngagementRow>>(
-        `/engagements?limit=100${status ? `&status=${status}` : ''}`,
+        `/engagements?limit=${PAGE_SIZE}&offset=${offset}${status ? `&status=${status}` : ''}`,
       ),
   });
 
@@ -82,13 +92,13 @@ function EngagementsInner(): JSX.Element {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <FilterChip label="All" active={status === ''} onClick={() => setStatus('')} />
+        <FilterChip label="All" active={status === ''} onClick={() => setStatusFiltered('')} />
         {ENGAGEMENT_STATUSES.map((s) => (
           <FilterChip
             key={s}
             label={humanize(s)}
             active={status === s}
-            onClick={() => setStatus(s)}
+            onClick={() => setStatusFiltered(s)}
           />
         ))}
       </div>
@@ -105,7 +115,13 @@ function EngagementsInner(): JSX.Element {
         )}
       </Card>
       {q.data && (
-        <p className="mt-3 text-xs text-ink-faint">{q.data.total} engagement(s) in scope.</p>
+        <Pagination
+          total={q.data.total}
+          limit={PAGE_SIZE}
+          offset={offset}
+          onOffsetChange={setOffset}
+          unit="engagements"
+        />
       )}
     </div>
   );

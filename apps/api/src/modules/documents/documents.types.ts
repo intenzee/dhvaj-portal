@@ -47,6 +47,12 @@ export interface DocumentDetail extends DocumentRecord {
   versions: DocumentVersionRecord[];
 }
 
+/** A document plus its engagement/client context — for the cross-engagement view. */
+export interface GlobalDocumentRecord extends DocumentRecord {
+  engagementCode: string;
+  entityName: string | null;
+}
+
 /** The bytes plus what a caller needs to save them — returned by download. */
 export interface DocumentDownload {
   buffer: Buffer;

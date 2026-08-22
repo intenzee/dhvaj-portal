@@ -13,17 +13,21 @@ import { Button, Badge, Spinner } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select } from '@/components/form';
 import { DataTable } from '@/components/data-table';
+import { Pagination } from '@/components/pagination';
 import type { ColumnDef } from '@tanstack/react-table';
+
+const PAGE_SIZE = 25;
 
 export function UsersSection(): JSX.Element {
   const { principal } = useAuth();
   const mayManage = can(principal, PERMISSION.userManage);
   const [editing, setEditing] = useState<AdminUserRow | null>(null);
   const [creating, setCreating] = useState(false);
+  const [offset, setOffset] = useState(0);
 
   const users = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => apiFetch<Paginated<AdminUserRow>>('/users?limit=100'),
+    queryKey: ['admin', 'users', offset],
+    queryFn: () => apiFetch<Paginated<AdminUserRow>>(`/users?limit=${PAGE_SIZE}&offset=${offset}`),
   });
   const offices = useQuery({
     queryKey: ['admin', 'offices'],
@@ -95,6 +99,15 @@ export function UsersSection(): JSX.Element {
         </div>
       )}
       <DataTable columns={columns} data={users.data?.items ?? []} empty="No users in your scope." />
+      {users.data && (
+        <Pagination
+          total={users.data.total}
+          limit={PAGE_SIZE}
+          offset={offset}
+          onOffsetChange={setOffset}
+          unit="users"
+        />
+      )}
 
       {creating && (
         <UserFormModal offices={offices.data ?? []} onClose={() => setCreating(false)} />
