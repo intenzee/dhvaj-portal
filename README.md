@@ -31,6 +31,14 @@ audit trail.
 > controls** on the busy lists. Every write reuses an existing audited, RLS-enforced
 > endpoint; the browser never re-implements a rule.
 >
+> **Reports & MIS.** A management view (new `report.read` permission → Managing
+> Partner / admin / partner / manager): **engagement MIS** (totals + breakdowns by
+> status, service line, office and Engagement Partner), **compliance MIS**
+> (open / overdue / due-soon by category) and **utilisation** (per-person workload
+> — active engagements as EP/manager/member plus open & overdue tasks), each with
+> **CSV export**. Every figure is **RLS-scoped** exactly like the dashboard —
+> firm-wide for the MP, assignment-scoped for a partner — computed in the database.
+>
 > <details><summary>Earlier phases</summary>
 >
 > **Phase 12 — Dashboard / Frontend Foundation.** The first frontend: a

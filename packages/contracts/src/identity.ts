@@ -63,6 +63,7 @@ export const PERMISSION = {
   officeRead: 'office.read',
   officeManage: 'office.manage',
   auditRead: 'audit.read',
+  reportRead: 'report.read',
   employeeRead: 'employee.read',
   employeeManage: 'employee.manage',
   entityRead: 'entity.read',

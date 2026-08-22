@@ -21,4 +21,5 @@ export * from './tasks';
 export * from './documents';
 export * from './notifications';
 export * from './dashboard';
+export * from './reports';
 export * from './pagination';
