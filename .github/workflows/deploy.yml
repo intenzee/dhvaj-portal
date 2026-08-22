@@ -1,0 +1,122 @@
+name: Deploy (Azure)
+
+# Manual, environment-gated deploys. Nothing runs automatically until the Azure
+# OIDC credentials and per-environment secrets are configured (see
+# infra/azure/README.md). Enable push-to-staging later by adding a `push` trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, prod]
+        required: true
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC federated login to Azure
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }} # GitHub environment protection rules apply
+    env:
+      LOCATION: centralindia
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ── Phase 1: ensure infra exists, read its outputs (FQDNs, ACR) ──────────
+      - name: Provision infrastructure (placeholder images on first run)
+        id: infra1
+        env:
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          PG_APP_PASSWORD: ${{ secrets.PG_APP_PASSWORD }}
+          PG_MIGRATOR_PASSWORD: ${{ secrets.PG_MIGRATOR_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENTRA_CLIENT_ID: ${{ secrets.ENTRA_CLIENT_ID }}
+        run: |
+          out=$(az deployment sub create \
+            --name hsdg-${{ github.event.inputs.environment }}-$IMAGE_TAG \
+            --location "$LOCATION" \
+            --template-file infra/azure/main.bicep \
+            --parameters infra/azure/params/${{ github.event.inputs.environment }}.bicepparam \
+            --query properties.outputs -o json)
+          echo "acrName=$(echo "$out" | jq -r .acrName.value)" >> "$GITHUB_OUTPUT"
+          echo "acrLoginServer=$(echo "$out" | jq -r .acrLoginServer.value)" >> "$GITHUB_OUTPUT"
+          echo "apiFqdn=$(echo "$out" | jq -r .apiFqdn.value)" >> "$GITHUB_OUTPUT"
+          echo "webFqdn=$(echo "$out" | jq -r .webFqdn.value)" >> "$GITHUB_OUTPUT"
+          echo "keyVaultName=$(echo "$out" | jq -r .keyVaultName.value)" >> "$GITHUB_OUTPUT"
+          echo "postgresFqdn=$(echo "$out" | jq -r .postgresFqdn.value)" >> "$GITHUB_OUTPUT"
+
+      # ── Build & push images (web is built against the API's FQDN) ────────────
+      - name: ACR login
+        run: az acr login --name ${{ steps.infra1.outputs.acrName }}
+
+      - name: Build & push API image
+        run: |
+          docker build -f apps/api/Dockerfile \
+            -t ${{ steps.infra1.outputs.acrLoginServer }}/hsdg-api:$IMAGE_TAG .
+          docker push ${{ steps.infra1.outputs.acrLoginServer }}/hsdg-api:$IMAGE_TAG
+
+      - name: Build & push Web image
+        run: |
+          docker build -f apps/web/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_URL=https://${{ steps.infra1.outputs.apiFqdn }}/api/v1 \
+            -t ${{ steps.infra1.outputs.acrLoginServer }}/hsdg-web:$IMAGE_TAG .
+          docker push ${{ steps.infra1.outputs.acrLoginServer }}/hsdg-web:$IMAGE_TAG
+
+      # ── Phase 2: point the container apps at the freshly pushed images ───────
+      - name: Deploy application (real images)
+        env:
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          PG_APP_PASSWORD: ${{ secrets.PG_APP_PASSWORD }}
+          PG_MIGRATOR_PASSWORD: ${{ secrets.PG_MIGRATOR_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENTRA_CLIENT_ID: ${{ secrets.ENTRA_CLIENT_ID }}
+          API_IMAGE: ${{ steps.infra1.outputs.acrLoginServer }}/hsdg-api:${{ github.sha }}
+          WEB_IMAGE: ${{ steps.infra1.outputs.acrLoginServer }}/hsdg-web:${{ github.sha }}
+        run: |
+          az deployment sub create \
+            --name hsdg-${{ github.event.inputs.environment }}-apps-$IMAGE_TAG \
+            --location "$LOCATION" \
+            --template-file infra/azure/main.bicep \
+            --parameters infra/azure/params/${{ github.event.inputs.environment }}.bicepparam
+
+      # ── Migrations: as the migrator role, from a temporarily allowed runner IP ─
+      # NOTE: run infra/azure/postgres-roles.sql ONCE (manually) before the first
+      # deploy so hsdg_app/hsdg_migrator exist. See the runbook.
+      - name: Run database migrations
+        env:
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          RG="rg-hsdg-${{ github.event.inputs.environment }}"
+          PG_NAME="$(echo '${{ steps.infra1.outputs.postgresFqdn }}' | cut -d. -f1)"
+          RUNNER_IP="$(curl -s https://api.ipify.org)"
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$RG" --name "$PG_NAME" \
+            --rule-name "gh-runner-$IMAGE_TAG" \
+            --start-ip-address "$RUNNER_IP" --end-ip-address "$RUNNER_IP"
+          trap 'az postgres flexible-server firewall-rule delete --yes \
+                  --resource-group "$RG" --name "$PG_NAME" \
+                  --rule-name "gh-runner-$IMAGE_TAG" || true' EXIT
+
+          DATABASE_MIGRATE_URL="$(az keyvault secret show \
+            --vault-name ${{ steps.infra1.outputs.keyVaultName }} \
+            --name database-migrate-url --query value -o tsv)"
+
+          npm ci
+          DATABASE_MIGRATE_URL="$DATABASE_MIGRATE_URL" npm run db:migrate
