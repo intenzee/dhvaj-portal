@@ -1,0 +1,147 @@
+/**
+ * Component vocabulary (Service Configuration spec §11–§13, §16, §23–§24, §36)
+ * shared by the API and web.
+ *
+ * A Component is a specific scope/obligation available under a Service. The
+ * catalogue (service_components) declares each component's DEFAULT applicability
+ * and frequency; the per-client CONFIGURATION (engagement_components) records the
+ * professional applicability determination, frequency, owner/reviewer and
+ * lifecycle status for one engagement.
+ */
+
+import type { Recurrence } from './services';
+
+/** The default applicability a catalogue component starts from (spec §11). */
+export const COMPONENT_APPLICABILITY_DEFAULT = {
+  mandatory: 'mandatory',
+  recommended: 'recommended',
+  optional: 'optional',
+} as const;
+export type ComponentApplicabilityDefault =
+  (typeof COMPONENT_APPLICABILITY_DEFAULT)[keyof typeof COMPONENT_APPLICABILITY_DEFAULT];
+export const COMPONENT_APPLICABILITY_DEFAULTS: ComponentApplicabilityDefault[] = Object.values(
+  COMPONENT_APPLICABILITY_DEFAULT,
+);
+
+/**
+ * The professional applicability determination for a component on a specific
+ * engagement — the §11 OUTPUT categories. `mandatory`/`applicable`/`optional`
+ * are in-scope; `pending_review` needs professional determination;
+ * `not_applicable` is explicitly excluded (with a reason).
+ */
+export const COMPONENT_APPLICABILITY_STATUS = {
+  mandatory: 'mandatory',
+  applicable: 'applicable',
+  optional: 'optional',
+  pendingReview: 'pending_review',
+  notApplicable: 'not_applicable',
+} as const;
+export type ComponentApplicabilityStatus =
+  (typeof COMPONENT_APPLICABILITY_STATUS)[keyof typeof COMPONENT_APPLICABILITY_STATUS];
+export const COMPONENT_APPLICABILITY_STATUSES: ComponentApplicabilityStatus[] = Object.values(
+  COMPONENT_APPLICABILITY_STATUS,
+);
+
+/** Lifecycle status of a component configuration (spec §23, pragmatic subset). */
+export const COMPONENT_CONFIG_STATUS = {
+  draft: 'draft',
+  active: 'active',
+  onHold: 'on_hold',
+  completed: 'completed',
+  cancelled: 'cancelled',
+  superseded: 'superseded',
+} as const;
+export type ComponentConfigStatus =
+  (typeof COMPONENT_CONFIG_STATUS)[keyof typeof COMPONENT_CONFIG_STATUS];
+export const COMPONENT_CONFIG_STATUSES: ComponentConfigStatus[] =
+  Object.values(COMPONENT_CONFIG_STATUS);
+
+/** Discovery categories the selection screen groups components by (spec §11/§12). */
+export const COMPONENT_DISCOVERY_CATEGORY = {
+  mandatory: 'mandatory',
+  applicable: 'applicable',
+  optional: 'optional',
+  notApplicable: 'not_applicable',
+  pendingReview: 'pending_review',
+} as const;
+export type ComponentDiscoveryCategory =
+  (typeof COMPONENT_DISCOVERY_CATEGORY)[keyof typeof COMPONENT_DISCOVERY_CATEGORY];
+
+/** A catalogue component available under a service. */
+export interface ServiceComponentRecord {
+  id: string;
+  serviceId: string;
+  serviceCode: string;
+  code: string;
+  name: string;
+  description: string | null;
+  defaultApplicability: ComponentApplicabilityDefault;
+  defaultFrequency: Recurrence;
+  complianceRuleId: string | null;
+  complianceRuleCode: string | null;
+  displayOrder: number;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A per-engagement component configuration. */
+export interface EngagementComponentRecord {
+  id: string;
+  engagementId: string;
+  serviceComponentId: string;
+  componentCode: string;
+  componentName: string;
+  applicabilityStatus: ComponentApplicabilityStatus;
+  applicabilityReason: string | null;
+  frequency: Recurrence;
+  ownerEmployeeId: string | null;
+  ownerName: string | null;
+  reviewerEmployeeId: string | null;
+  reviewerName: string | null;
+  epReviewRequired: boolean;
+  status: ComponentConfigStatus;
+  startDate: string | null;
+  endDate: string | null;
+  notes: string | null;
+  complianceRuleVersionId: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * One row of the Component Discovery result (spec §11/§12): a catalogue
+ * component, the category the engine placed it in, the reason, a deadline
+ * preview where a compliance rule governs it, and — if already configured on
+ * this engagement — a pointer to that live configuration.
+ */
+export interface ComponentDiscoveryRow {
+  serviceComponentId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  category: ComponentDiscoveryCategory;
+  reason: string;
+  frequency: Recurrence;
+  /** Preview only — statutory deadline from the effective rule version (§12/§17). */
+  statutoryDeadlinePreview: string | null;
+  /** Preview only — internal SLA date from the effective rule version. */
+  internalDeadlinePreview: string | null;
+  /** The rule version id the preview used (null when no rule governs). */
+  complianceRuleVersionId: string | null;
+  alreadyConfigured: boolean;
+  engagementComponentId: string | null;
+  configuredStatus: ComponentConfigStatus | null;
+}
+
+/** Full discovery result for one engagement's service. */
+export interface ComponentDiscoveryResult {
+  engagementId: string;
+  serviceId: string;
+  serviceCode: string;
+  financialYear: string;
+  rows: ComponentDiscoveryRow[];
+  counts: Record<ComponentDiscoveryCategory, number>;
+}

@@ -25,6 +25,7 @@ import { RequestDependencyModal } from '@/components/actions/request-dependency-
 import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
 import { TeamSection } from '@/components/actions/team-section';
+import { ComponentsSection } from '@/components/actions/components-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
 
@@ -114,6 +115,9 @@ export default function EngagementDetailPage(): JSX.Element {
 
         <TeamSection engagementId={e.id} team={e.team} />
       </div>
+
+      {/* Scope & components */}
+      <ComponentsSection engagementId={e.id} />
 
       {/* Tasks */}
       <section className="mt-4">

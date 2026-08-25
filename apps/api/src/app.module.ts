@@ -15,6 +15,7 @@ import { OrganisationModule } from './modules/organisation/organisation.module';
 import { EntitiesModule } from './modules/entities/entities.module';
 import { CatalogueModule } from './modules/catalogue/catalogue.module';
 import { EngagementsModule } from './modules/engagements/engagements.module';
+import { ComponentsModule } from './modules/components/components.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { DocumentsModule } from './modules/documents/documents.module';
@@ -78,6 +79,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     EntitiesModule,
     CatalogueModule,
     EngagementsModule,
+    ComponentsModule,
     ComplianceModule,
     TasksModule,
     DocumentsModule,

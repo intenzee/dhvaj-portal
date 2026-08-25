@@ -10,7 +10,27 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Phase 13 — Administration (complete).** The firm can now be
+> **Status: Service Components & Component Configuration (complete).** The layer
+> the practice spec calls **Component → Component Configuration** now sits between
+> the service catalogue and the work/compliance instances. A firm-wide
+> **component catalogue** (`service_components`, gated `service.manage`) declares
+> the scopes/obligations available under each service, their default applicability
+> (**mandatory / recommended / optional**) and frequency, and an optional link to
+> the **compliance rule** that governs the deadline. A **Component Discovery**
+> engine (`GET /engagements/:id/components/discovery`) categorises that catalogue
+> for one engagement — **mandatory / applicable / optional** — with the reason and
+> a **statutory + internal deadline preview** (reusing the compliance-calc engine
+> where the basis is determinable). Leads then **select and configure** components
+> per engagement (`engagement_components`, RLS members-read / leads-write): the
+> professional applicability decision, frequency, owner/reviewer, EP-review flag
+> and config status. A **partial unique index** enforces one *live* configuration
+> per component (duplication prevention); **removal is a soft-cancel** that stops
+> future work and **preserves history**, so a component can be re-added. Every
+> mutation is **audited**. The engagement workspace gains a **Scope & components**
+> panel with a discovery drawer. Additive by design — it hangs off the existing
+> single-service engagement, so no existing engagement, test or policy changed.
+>
+> **Phase 13 — Administration (complete).** The firm can now be
 > administered from the portal: an **Administration** screen (gated on
 > `user.manage`) with **Users & Roles** and **Offices** tabs. New audited write
 > endpoints land on the previously read-only identity module — **create/update a

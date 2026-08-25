@@ -14,6 +14,7 @@ export const API_PREFIX = 'api' as const;
 export * from './identity';
 export * from './entities';
 export * from './services';
+export * from './components';
 export * from './engagements';
 export * from './reviews';
 export * from './compliance';
