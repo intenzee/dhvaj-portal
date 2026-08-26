@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, X } from 'lucide-react';
+import { Pencil, Plus, Repeat, X } from 'lucide-react';
 import {
   PERMISSION,
   type ComponentDiscoveryResult,
@@ -19,6 +19,7 @@ import { useToast } from '@/lib/toast';
 import { Card, EmptyState, Badge, Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { EditComponentModal } from '@/components/actions/edit-component-modal';
+import { ChangeFrequencyModal } from '@/components/actions/change-frequency-modal';
 
 const CATEGORY_TONE: Record<ComponentDiscoveryCategory, string> = {
   mandatory: 'info',
@@ -49,6 +50,7 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
   const canManage = can(principal, PERMISSION.engagementManage);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<EngagementComponentRecord | null>(null);
+  const [freqChanging, setFreqChanging] = useState<EngagementComponentRecord | null>(null);
 
   const configured = useQuery({
     queryKey: ['engagement', engagementId, 'components'],
@@ -148,6 +150,14 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
                         {!removed && (
                           <div className="flex items-center justify-end gap-1">
                             <button
+                              onClick={() => setFreqChanging(c)}
+                              className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-ink"
+                              aria-label={`Change frequency of ${c.componentName}`}
+                              title="Change frequency"
+                            >
+                              <Repeat className="h-3.5 w-3.5" />
+                            </button>
+                            <button
                               onClick={() => setEditing(c)}
                               className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-ink"
                               aria-label={`Configure ${c.componentName}`}
@@ -242,6 +252,14 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
           engagementId={engagementId}
           component={editing}
           onClose={() => setEditing(null)}
+        />
+      )}
+
+      {freqChanging && (
+        <ChangeFrequencyModal
+          engagementId={engagementId}
+          component={freqChanging}
+          onClose={() => setFreqChanging(null)}
         />
       )}
     </section>

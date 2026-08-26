@@ -21,7 +21,10 @@ audit trail.
 > "I look after this client Apr–Sep"), **frequency**, **applicability**
 > (`not_applicable` suppresses it) and **status**; removing a component cancels
 > its pending work too, while **completed/waived work is always preserved**
-> (§25). Each period's deadline is computed from the compliance rule version
+> (§25). Changing **frequency** once work exists is a controlled version change
+> (§23/§24): the current configuration is **superseded** and a **new version**
+> (new frequency) takes over — old periods become history, new ones generate — in
+> one click. Each period's deadline is computed from the compliance rule version
 > **effective as of that period's end** and snapshotted, so a later rule change
 > never rewrites history; scheduled/future work is derived and shown distinctly
 > from current work. The engagement gains a **Component work** panel (bulk

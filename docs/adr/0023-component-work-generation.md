@@ -51,6 +51,21 @@ every one of these is reconciled on the next generate. Removing a component (or
 editing it to a non-live/not-applicable state) also cancels its pending
 instances immediately, so removed scope leaves no orphan work.
 
+### 2c. Frequency change SUPERSEDES the configuration version (§23/§24)
+
+Reconcile (2) can cancel/create instances under one config row, but a frequency
+change is a **controlled configuration change**, not an in-place edit — the spec
+calls the old setup *Superseded* (§23) and says future periods use the new setup
+without rewriting history (§24). So changing frequency **once work exists**
+(migration `0022`): the current `engagement_component` is marked `superseded`
+(freeing the partial live-unique slot), a **new version** is inserted (same
+setup, new frequency, `superseded_by_id` links old→new), and the old frequency's
+pending work is closed to `'superseded'` — its completed/waived work preserved as
+history. The caller then generates the new version's work. With **no work yet**,
+frequency updates in place (no version churn). One `POST …/change-frequency`
+endpoint; the web edit modal shows frequency read-only and a dedicated control
+performs the change-and-generate in one click.
+
 ### 3. Each instance snapshots the rule version used
 
 Where a component links a compliance rule, each period's deadline is computed
@@ -84,10 +99,11 @@ Generation and status changes need `engagement.manage`; listing needs
   manual controls. Cancelled work is hidden from the operational view.
 - A configured recurring component now drives real, dated, auditable work, and
   the lead can bound and reshape it (window, frequency, applicability, removal).
-- 7 e2e tests (12-month idempotent generation, deadline snapshot, completion,
+- 9 e2e tests (12-month idempotent generation, deadline snapshot, completion,
   bulk generate, **window narrow-removes / widen-revives**, **remove cancels
-  pending work but preserves completed**, role/RLS negatives) + 7 unit tests for
-  period enumeration.
+  pending work but preserves completed**, **frequency change supersedes the
+  config + pending work and versions a new one**, **no-work frequency change is
+  in place**, role/RLS negatives) + 7 unit tests for period enumeration.
 - **Follow-ups:** a scheduled Container Apps Job to call `generate` as periods
   come into range (the endpoint is already idempotent); linking a component
   instance to its workflow/checklist/PBC structures; and reconciling with the

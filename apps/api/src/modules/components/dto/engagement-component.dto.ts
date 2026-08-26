@@ -147,6 +147,12 @@ export class UpdateEngagementComponentDto {
   version?: number;
 }
 
+export class ChangeFrequencyDto {
+  @ApiProperty({ enum: RECURRENCES, description: 'The new frequency for the component.' })
+  @IsIn(RECURRENCES)
+  frequency!: Recurrence;
+}
+
 export class RemoveEngagementComponentDto {
   @ApiPropertyOptional({ description: 'Reason recorded in the audit trail.' })
   @IsOptional()

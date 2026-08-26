@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   COMPONENT_APPLICABILITY_STATUSES,
   COMPONENT_CONFIG_STATUSES,
-  RECURRENCES,
   type EngagementComponentRecord,
   type Paginated,
 } from '@hsdg/contracts';
@@ -31,7 +30,6 @@ export function EditComponentModal({
   const toast = useToast();
 
   const [applicabilityStatus, setApplicability] = useState(component.applicabilityStatus);
-  const [frequency, setFrequency] = useState(component.frequency);
   const [ownerEmployeeId, setOwner] = useState(component.ownerEmployeeId ?? '');
   const [reviewerEmployeeId, setReviewer] = useState(component.reviewerEmployeeId ?? '');
   const [epReviewRequired, setEpReview] = useState(component.epReviewRequired);
@@ -51,7 +49,6 @@ export function EditComponentModal({
         method: 'PATCH',
         body: {
           applicabilityStatus,
-          frequency,
           ownerEmployeeId: ownerEmployeeId || null,
           reviewerEmployeeId: reviewerEmployeeId || null,
           epReviewRequired,
@@ -106,13 +103,10 @@ export function EditComponentModal({
           </Select>
         </Field>
         <Field label="Frequency">
-          <Select value={frequency} onChange={(e) => setFrequency(e.target.value as typeof frequency)}>
-            {RECURRENCES.map((r) => (
-              <option key={r} value={r}>
-                {humanize(r)}
-              </option>
-            ))}
-          </Select>
+          <div className="flex h-9 items-center text-sm text-ink-muted">
+            {humanize(component.frequency)}
+            <span className="ml-2 text-xs text-ink-faint">(use the Frequency button to change)</span>
+          </div>
         </Field>
         <Field label="Owner">
           <Select value={ownerEmployeeId} onChange={(e) => setOwner(e.target.value)}>

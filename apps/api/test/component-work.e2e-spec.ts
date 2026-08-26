@@ -247,6 +247,82 @@ describe('Component Work Generation (e2e)', () => {
     expect(statuses.filter((s: string) => s === 'scheduled')).toHaveLength(0);
   });
 
+  it('changing frequency with existing work supersedes the config + pending work, versions a new one', async () => {
+    const pa = await token('partner.a@hsdg.in');
+    const engId = await createEngagement(pa);
+    const componentId = await configure(pa, engId, 'GSTR1'); // monthly
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/components/${componentId}/instances/generate`)
+      .set(bearer(pa))
+      .expect(201);
+
+    // Complete one monthly instance — it must survive the supersession (history).
+    const before = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/components/${componentId}/instances?limit=50`)
+      .set(bearer(pa));
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/component-work/${before.body.items[0].id}/status`)
+      .set(bearer(pa))
+      .send({ status: 'completed' })
+      .expect(201);
+
+    // Change monthly → quarterly.
+    const changed = await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/components/${componentId}/change-frequency`)
+      .set(bearer(pa))
+      .send({ frequency: 'quarterly' })
+      .expect(201);
+    const newId = changed.body.id as string;
+    expect(newId).not.toBe(componentId);
+    expect(changed.body.frequency).toBe('quarterly');
+    expect(changed.body.status).not.toBe('superseded');
+
+    // Old config is superseded and points to the new version.
+    const cfgList = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/components?limit=100`)
+      .set(bearer(pa));
+    const oldCfg = cfgList.body.items.find((c: { id: string }) => c.id === componentId);
+    expect(oldCfg.status).toBe('superseded');
+    expect(oldCfg.supersededById).toBe(newId);
+
+    // Old pending work is superseded (11); the completed one is preserved.
+    const oldWork = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/components/${componentId}/instances?limit=50`)
+      .set(bearer(pa));
+    const st = oldWork.body.items.map((i: { status: string }) => i.status);
+    expect(st.filter((s: string) => s === 'completed')).toHaveLength(1);
+    expect(st.filter((s: string) => s === 'superseded')).toHaveLength(11);
+
+    // The new quarterly version generates 4 fresh periods.
+    const gen = await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/components/${newId}/instances/generate`)
+      .set(bearer(pa))
+      .expect(201);
+    expect(gen.body.generated).toHaveLength(4);
+  });
+
+  it('changing frequency with no work yet updates in place (no supersede), and rejects a no-op', async () => {
+    const pa = await token('partner.a@hsdg.in');
+    const engId = await createEngagement(pa);
+    const componentId = await configure(pa, engId, 'GSTR1'); // monthly, no work generated
+
+    const changed = await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/components/${componentId}/change-frequency`)
+      .set(bearer(pa))
+      .send({ frequency: 'quarterly' })
+      .expect(201);
+    expect(changed.body.id).toBe(componentId); // same config row — in place
+    expect(changed.body.frequency).toBe('quarterly');
+    expect(changed.body.status).not.toBe('superseded');
+
+    // Same frequency again → 400.
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/components/${componentId}/change-frequency`)
+      .set(bearer(pa))
+      .send({ frequency: 'quarterly' })
+      .expect(400);
+  });
+
   it('blocks generation without engagement.manage and hides another’s work (403/404)', async () => {
     const pa = await token('partner.a@hsdg.in');
     const engId = await createEngagement(pa);

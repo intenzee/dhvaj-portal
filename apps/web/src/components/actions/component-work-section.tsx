@@ -22,6 +22,7 @@ const STATUS_TONE: Record<ComponentInstanceStatus, string> = {
   completed: 'success',
   waived: 'warn',
   cancelled: 'danger',
+  superseded: 'neutral',
 };
 
 /**
@@ -83,10 +84,12 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
     onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not update.', 'error'),
   });
 
-  // Hide cancelled work from the operational view — reconciling to a narrower
-  // window/frequency cancels out-of-scope instances, which should simply
-  // disappear here (they remain in the DB for audit).
-  const items = (work.data?.items ?? []).filter((w) => w.status !== 'cancelled');
+  // Hide cancelled and superseded work from the operational view — narrowing a
+  // window cancels out-of-scope instances, and a frequency change supersedes the
+  // old ones; both should simply disappear here (they remain in the DB for audit).
+  const items = (work.data?.items ?? []).filter(
+    (w) => w.status !== 'cancelled' && w.status !== 'superseded',
+  );
 
   return (
     <section className="mt-4">

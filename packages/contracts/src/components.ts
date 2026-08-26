@@ -106,6 +106,8 @@ export interface EngagementComponentRecord {
   endDate: string | null;
   notes: string | null;
   complianceRuleVersionId: string | null;
+  /** When superseded (e.g. by a frequency change), the id of the version that replaced this. */
+  supersededById: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -153,6 +155,8 @@ export const COMPONENT_INSTANCE_STATUS = {
   completed: 'completed',
   waived: 'waived',
   cancelled: 'cancelled',
+  /** Replaced by a new configuration version (e.g. a frequency change). */
+  superseded: 'superseded',
 } as const;
 export type ComponentInstanceStatus =
   (typeof COMPONENT_INSTANCE_STATUS)[keyof typeof COMPONENT_INSTANCE_STATUS];

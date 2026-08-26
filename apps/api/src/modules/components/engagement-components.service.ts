@@ -52,6 +52,7 @@ interface EngagementComponentRow {
   end_date: string | null;
   notes: string | null;
   compliance_rule_version_id: string | null;
+  superseded_by_id: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -92,7 +93,8 @@ const EC_BASE = `
          ec.owner_employee_id, oe.full_name AS owner_name,
          ec.reviewer_employee_id, re.full_name AS reviewer_name,
          ec.ep_review_required, ec.status, ec.start_date::text, ec.end_date::text, ec.notes,
-         ec.compliance_rule_version_id, ec.version, ec.created_at, ec.updated_at
+         ec.compliance_rule_version_id, ec.superseded_by_id, ec.version,
+         ec.created_at, ec.updated_at
   FROM hsdg.engagement_components ec
   JOIN hsdg.service_components sc ON sc.id = ec.service_component_id
   LEFT JOIN hsdg.employees oe ON oe.id = ec.owner_employee_id
@@ -367,7 +369,7 @@ export class EngagementComponentsService {
           input.applicabilityStatus === COMPONENT_APPLICABILITY_STATUS.notApplicable) &&
         current.status !== input.status
       ) {
-        await this.cancelPendingInstances(client, componentId);
+        await this.closePendingInstances(client, componentId, 'cancelled');
       }
       const record = (await this.selectOne(client, componentId))!;
       await this.audit.recordWith(client, ctx, {
@@ -405,7 +407,7 @@ export class EngagementComponentsService {
       );
       // Removing scope also stops its pending work: cancel this component's
       // scheduled/active instances (completed/waived work is preserved, §25).
-      const cancelledWork = await this.cancelPendingInstances(client, componentId);
+      const cancelledWork = await this.closePendingInstances(client, componentId, 'cancelled');
       const record = (await this.selectOne(client, componentId))!;
       await this.audit.recordWith(client, ctx, {
         action: 'component.removed',
@@ -418,22 +420,121 @@ export class EngagementComponentsService {
     });
   }
 
+  /**
+   * §23/§24 — change a component's frequency. Once work exists this is a
+   * controlled configuration CHANGE, not an in-place edit: the current
+   * configuration is SUPERSEDED and a new version (same setup, new frequency)
+   * takes over. The old frequency's pending work is marked 'superseded' (its
+   * completed/waived work is preserved as history); the caller then generates
+   * the new frequency's work against the returned new version. If no work exists
+   * yet, the frequency is simply updated in place (no version churn).
+   */
+  async changeFrequency(
+    ctx: RlsContext,
+    engagementId: string,
+    componentId: string,
+    newFrequency: Recurrence,
+  ): Promise<EngagementComponentRecord> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const current = await this.selectOneForEngagement(client, engagementId, componentId);
+      if (
+        current.status === COMPONENT_CONFIG_STATUS.cancelled ||
+        current.status === COMPONENT_CONFIG_STATUS.superseded
+      ) {
+        throw new BadRequestException('This component configuration is no longer live.');
+      }
+      if (current.frequency === newFrequency) {
+        throw new BadRequestException('The component already has that frequency.');
+      }
+
+      // Any real work (not cancelled/superseded) means we version rather than
+      // edit in place — so the old frequency's history is preserved.
+      const { rows: workRows } = await client.query<{ n: string }>(
+        `SELECT count(*) AS n FROM hsdg.component_instances
+         WHERE engagement_component_id = $1 AND status NOT IN ('cancelled','superseded')`,
+        [componentId],
+      );
+      const hasWork = Number(workRows[0]?.n ?? 0) > 0;
+
+      if (!hasWork) {
+        await client.query(
+          `UPDATE hsdg.engagement_components SET frequency = $2, version = version + 1
+           WHERE id = $1`,
+          [componentId, newFrequency],
+        );
+        const updated = (await this.selectOne(client, componentId))!;
+        await this.audit.recordWith(client, ctx, {
+          action: 'component.frequency_changed',
+          objectType: 'engagement_component',
+          objectId: componentId,
+          before: { frequency: current.frequency },
+          after: { frequency: newFrequency, superseded: false },
+        });
+        return updated;
+      }
+
+      // Supersede: free the live-unique slot first (old → superseded), then
+      // insert the new version, then link old → new and mark old pending work.
+      await client.query(
+        `UPDATE hsdg.engagement_components
+         SET status = 'superseded', superseded_at = now(), version = version + 1
+         WHERE id = $1`,
+        [componentId],
+      );
+      let newId: string;
+      try {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO hsdg.engagement_components
+             (engagement_id, service_component_id, applicability_status, applicability_reason,
+              frequency, owner_employee_id, reviewer_employee_id, ep_review_required, status,
+              start_date, end_date, notes)
+           SELECT engagement_id, service_component_id, applicability_status, applicability_reason,
+                  $2, owner_employee_id, reviewer_employee_id, ep_review_required, $3,
+                  start_date, end_date, notes
+           FROM hsdg.engagement_components WHERE id = $1
+           RETURNING id`,
+          // Carry the original live status onto the new version (not 'superseded').
+          [componentId, newFrequency, current.status],
+        );
+        newId = rows[0]!.id;
+      } catch (err) {
+        throw translateEngagementComponentError(err);
+      }
+      await client.query(
+        `UPDATE hsdg.engagement_components SET superseded_by_id = $2 WHERE id = $1`,
+        [componentId, newId],
+      );
+      const supersededWork = await this.closePendingInstances(client, componentId, 'superseded');
+
+      const newRecord = (await this.selectOne(client, newId))!;
+      await this.audit.recordWith(client, ctx, {
+        action: 'component.frequency_superseded',
+        objectType: 'engagement_component',
+        objectId: componentId,
+        before: { frequency: current.frequency, status: current.status },
+        after: { frequency: newFrequency, supersededByComponentId: newId, supersededWork },
+      });
+      return newRecord;
+    });
+  }
+
   // ── internals ──────────────────────────────────────────────────────────
 
   /**
-   * Cancel a component's not-yet-finalised work instances (scheduled/active),
-   * used when its scope is removed or the configuration is cancelled/superseded.
-   * Completed/waived instances are left untouched (filed work is history, §25).
-   * Returns the count cancelled (for the audit trail).
+   * Close out a component's not-yet-finalised work instances (scheduled/active)
+   * to `toStatus` — 'cancelled' when scope is removed, 'superseded' when a new
+   * configuration version replaces it. Completed/waived instances are left
+   * untouched (filed work is history, §25). Returns the count changed.
    */
-  private async cancelPendingInstances(
+  private async closePendingInstances(
     client: PoolClient,
     engagementComponentId: string,
+    toStatus: 'cancelled' | 'superseded',
   ): Promise<number> {
     const result = await client.query(
-      `UPDATE hsdg.component_instances SET status = 'cancelled', version = version + 1
+      `UPDATE hsdg.component_instances SET status = $2, version = version + 1
        WHERE engagement_component_id = $1 AND status IN ('scheduled','active')`,
-      [engagementComponentId],
+      [engagementComponentId, toStatus],
     );
     return result.rowCount ?? 0;
   }
@@ -579,6 +680,7 @@ function mapEngagementComponent(row: EngagementComponentRow): EngagementComponen
     endDate: row.end_date,
     notes: row.notes,
     complianceRuleVersionId: row.compliance_rule_version_id,
+    supersededById: row.superseded_by_id,
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
