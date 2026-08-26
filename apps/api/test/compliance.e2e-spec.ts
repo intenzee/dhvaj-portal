@@ -627,8 +627,10 @@ describe('Compliance Engine (e2e)', () => {
         .send({ isActive: false })
         .expect(200);
       // activeOnly=false must include inactive rules (not coerce to true).
+      // Search by the unique code so the assertion is independent of how many
+      // rules the shared dev DB has accumulated (no per-run reset).
       const res = await request(app.getHttpServer())
-        .get(`/api/v1/compliance-rules?activeOnly=false&limit=100`)
+        .get(`/api/v1/compliance-rules?activeOnly=false&search=${code}&limit=100`)
         .set(bearer(mp))
         .expect(200);
       expect((res.body.items as Array<{ code: string }>).some((r) => r.code === code)).toBe(true);

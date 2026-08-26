@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { ServiceComponentsService } from './service-components.service';
 import { EngagementComponentsService } from './engagement-components.service';
+import { ComponentInstancesService } from './component-instances.service';
 import { ServiceComponentsController } from './service-components.controller';
 import { EngagementComponentsController } from './engagement-components.controller';
 
@@ -19,7 +20,7 @@ import { EngagementComponentsController } from './engagement-components.controll
 @Module({
   imports: [AuditModule],
   controllers: [ServiceComponentsController, EngagementComponentsController],
-  providers: [ServiceComponentsService, EngagementComponentsService],
-  exports: [ServiceComponentsService, EngagementComponentsService],
+  providers: [ServiceComponentsService, EngagementComponentsService, ComponentInstancesService],
+  exports: [ServiceComponentsService, EngagementComponentsService, ComponentInstancesService],
 })
 export class ComponentsModule {}

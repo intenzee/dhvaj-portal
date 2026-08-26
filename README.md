@@ -10,7 +10,30 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
-> **Status: Service Components & Component Configuration (complete).** The layer
+> **Status: Component work generation (complete).** A configured **recurring
+> component now generates period-specific work** (spec §21–§22): one
+> `component_instance` per period of the engagement's financial year (12 months /
+> 4 quarters / 2 halves / 1 year — the FY bounds the horizon), never duplicated
+> (a `(component, period)` unique key). Generation **reconciles to the current
+> configuration** rather than only adding: it creates or revives the in-scope
+> periods and **cancels work that falls out of scope** — so the lead has full
+> **manual control** via the config's **active window** (`start`/`end` dates —
+> "I look after this client Apr–Sep"), **frequency**, **applicability**
+> (`not_applicable` suppresses it) and **status**; removing a component cancels
+> its pending work too, while **completed/waived work is always preserved**
+> (§25). Each period's deadline is computed from the compliance rule version
+> **effective as of that period's end** and snapshotted, so a later rule change
+> never rewrites history; scheduled/future work is derived and shown distinctly
+> from current work. The engagement gains a **Component work** panel (bulk
+> "Generate work" + per-instance completion), the **Scope** panel gains **inline
+> configuration editing** (owner/reviewer/frequency/applicability/EP-review +
+> active window), and a firm-wide **Component catalogue** admin screen
+> (`/services/components`, gated `service.manage`) manages the catalogue. Also in
+> this pass: the component list/discovery queries were optimised (single-query
+> totals, batched deadline preview, a SQL optimistic-lock guard) and the
+> compliance-rule list gained a `search` filter.
+>
+> **Service Components & Component Configuration (complete).** The layer
 > the practice spec calls **Component → Component Configuration** now sits between
 > the service catalogue and the work/compliance instances. A firm-wide
 > **component catalogue** (`service_components`, gated `service.manage`) declares

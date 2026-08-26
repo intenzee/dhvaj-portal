@@ -155,6 +155,12 @@ export class ComplianceRuleListQueryDto extends PaginationQueryDto {
   @Transform(toBool)
   @IsBoolean()
   activeOnly?: boolean;
+
+  @ApiPropertyOptional({ description: 'Case-insensitive match on rule code or name.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }
 
 export class AddHolidayDto {

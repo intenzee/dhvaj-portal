@@ -15,9 +15,11 @@ import {
 import {
   COMPONENT_APPLICABILITY_STATUSES,
   COMPONENT_CONFIG_STATUSES,
+  COMPONENT_INSTANCE_STATUSES,
   RECURRENCES,
   type ComponentApplicabilityStatus,
   type ComponentConfigStatus,
+  type ComponentInstanceStatus,
   type Recurrence,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
@@ -158,4 +160,35 @@ export class EngagementComponentListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(COMPONENT_CONFIG_STATUSES)
   status?: ComponentConfigStatus;
+}
+
+export class ComponentWorkListQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ description: 'Filter to one configured component.' })
+  @IsOptional()
+  @IsUUID()
+  componentId?: string;
+
+  @ApiPropertyOptional({ enum: COMPONENT_INSTANCE_STATUSES })
+  @IsOptional()
+  @IsIn(COMPONENT_INSTANCE_STATUSES)
+  status?: ComponentInstanceStatus;
+}
+
+export class SetInstanceStatusDto {
+  @ApiProperty({ enum: COMPONENT_INSTANCE_STATUSES })
+  @IsIn(COMPONENT_INSTANCE_STATUSES)
+  status!: ComponentInstanceStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
+
+  @ApiPropertyOptional({ description: 'Optimistic-lock guard: expected current version.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
 }

@@ -25,7 +25,11 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { AuditService } from '../audit/audit.service';
-import { computeDeadlines, resolveReferenceDate } from '../compliance/compliance-calc';
+import {
+  computeDeadlines,
+  financialYearEndYear,
+  resolveReferenceDate,
+} from '../compliance/compliance-calc';
 import type { ConfigureComponentInput, UpdateEngagementComponentInput } from './components.types';
 import { translateComponentError } from './service-components.service';
 
@@ -63,9 +67,28 @@ interface CatalogueRow {
   compliance_rule_id: string | null;
 }
 
+interface RuleVersionRow {
+  compliance_rule_id: string;
+  id: string;
+  calculation_basis: CalculationBasis;
+  offset_months: number;
+  offset_days: number;
+  fixed_month: number | null;
+  fixed_day: number | null;
+  working_day_adjustment: WorkingDayAdjustment;
+  internal_sla_offset_days: number;
+}
+
+interface DeadlinePreview {
+  statutoryDeadline: string | null;
+  internalSlaDate: string | null;
+  versionId: string;
+}
+
 const EC_BASE = `
   SELECT ec.id, ec.engagement_id, ec.service_component_id, sc.code AS component_code,
-         sc.name AS component_name, ec.applicability_status, ec.applicability_reason, ec.frequency,
+         sc.name AS component_name, sc.display_order AS component_display_order,
+         ec.applicability_status, ec.applicability_reason, ec.frequency,
          ec.owner_employee_id, oe.full_name AS owner_name,
          ec.reviewer_employee_id, re.full_name AS reviewer_name,
          ec.ep_review_required, ec.status, ec.start_date::text, ec.end_date::text, ec.notes,
@@ -131,23 +154,29 @@ export class EngagementComponentsService {
         if (LIVE_STATUSES.includes(row.status)) liveByComponent.set(row.service_component_id, row);
       }
 
-      const holidays = await this.loadHolidays(client);
-      const rows: ComponentDiscoveryRow[] = [];
-      for (const c of catalogue) {
+      // Batch the deadline preview: one query for the effective rule version of
+      // every compliance-linked component, computed in JS (no per-component query).
+      const ruleIds = [
+        ...new Set(
+          catalogue.map((c) => c.compliance_rule_id).filter((x): x is string => x !== null),
+        ),
+      ];
+      const previews =
+        ruleIds.length > 0
+          ? await this.loadPreviews(client, ruleIds, eng.financial_year)
+          : new Map<string, DeadlinePreview>();
+
+      const rows: ComponentDiscoveryRow[] = catalogue.map((c) => {
         const live = liveByComponent.get(c.id);
         const historical = anyByComponent.get(c.id);
-        const preview = c.compliance_rule_id
-          ? await this.previewDeadline(client, c.compliance_rule_id, eng.financial_year, holidays)
-          : null;
-
+        const preview = c.compliance_rule_id ? (previews.get(c.compliance_rule_id) ?? null) : null;
         const category = live
           ? mapStatusToCategory(live.applicability_status)
           : defaultToCategory(c.default_applicability);
         const reason = live
           ? `Configured on this engagement (${live.status}).`
           : defaultReason(c.default_applicability);
-
-        rows.push({
+        return {
           serviceComponentId: c.id,
           code: c.code,
           name: c.name,
@@ -161,8 +190,8 @@ export class EngagementComponentsService {
           alreadyConfigured: Boolean(live),
           engagementComponentId: (live ?? historical)?.id ?? null,
           configuredStatus: (live ?? historical)?.status ?? null,
-        });
-      }
+        };
+      });
 
       const counts = {
         [COMPONENT_DISCOVERY_CATEGORY.mandatory]: 0,
@@ -198,24 +227,19 @@ export class EngagementComponentsService {
         params.push(filter.status);
         statusClause = `AND ec.status = $${params.length}`;
       }
+      // Single query: count(*) OVER() carries the full filtered total alongside
+      // the page (computed before LIMIT).
       params.push(page.limit, page.offset);
-      const { rows } = await client.query<EngagementComponentRow>(
-        `${EC_BASE}
-         WHERE ec.engagement_id = $1 ${statusClause}
-         ORDER BY sc.display_order, sc.code
+      const { rows } = await client.query<EngagementComponentRow & { total_count: string }>(
+        `SELECT c.*, count(*) OVER() AS total_count
+         FROM (${EC_BASE} WHERE ec.engagement_id = $1 ${statusClause}) c
+         ORDER BY c.component_display_order, c.component_code
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params,
       );
-      const countParams: unknown[] = [engagementId];
-      if (filter.status) countParams.push(filter.status);
-      const { rows: countRows } = await client.query<{ total: string }>(
-        `SELECT count(*) AS total FROM hsdg.engagement_components ec
-         WHERE ec.engagement_id = $1 ${filter.status ? 'AND ec.status = $2' : ''}`,
-        countParams,
-      );
       return {
         items: rows.map(mapEngagementComponent),
-        total: countRows[0] ? Number(countRows[0].total) : 0,
+        total: rows[0] ? Number(rows[0].total_count) : 0,
       };
     });
   }
@@ -308,16 +332,42 @@ export class EngagementComponentsService {
       if (input.notes !== undefined) push('notes', input.notes);
       if (sets.length === 0) return current;
 
-      params.push(componentId, engagementId);
+      params.push(componentId);
+      const idIdx = params.length;
+      params.push(engagementId);
+      const engIdx = params.length;
+      // Close the read-then-write race: when the caller supplied a version, guard
+      // the UPDATE on the row we read, so a concurrent edit in between yields
+      // rowCount 0 (a lost update) rather than silently overwriting.
+      let versionGuard = '';
+      if (input.version !== undefined) {
+        params.push(current.version);
+        versionGuard = ` AND version = $${params.length}`;
+      }
+      let updated: number;
       try {
-        await client.query(
+        const result = await client.query(
           `UPDATE hsdg.engagement_components
            SET ${sets.join(', ')}, version = version + 1
-           WHERE id = $${params.length - 1} AND engagement_id = $${params.length}`,
+           WHERE id = $${idIdx} AND engagement_id = $${engIdx}${versionGuard}`,
           params,
         );
+        updated = result.rowCount ?? 0;
       } catch (err) {
         throw translateEngagementComponentError(err);
+      }
+      if (updated === 0 && input.version !== undefined) {
+        throw new ConflictException('Configuration was modified concurrently — reload and retry.');
+      }
+      // If this edit removed the component (status → cancelled/superseded) or
+      // marked it not applicable, stop its pending work too — same as remove().
+      if (
+        (input.status === COMPONENT_CONFIG_STATUS.cancelled ||
+          input.status === COMPONENT_CONFIG_STATUS.superseded ||
+          input.applicabilityStatus === COMPONENT_APPLICABILITY_STATUS.notApplicable) &&
+        current.status !== input.status
+      ) {
+        await this.cancelPendingInstances(client, componentId);
       }
       const record = (await this.selectOne(client, componentId))!;
       await this.audit.recordWith(client, ctx, {
@@ -353,19 +403,40 @@ export class EngagementComponentsService {
          WHERE id = $1 AND engagement_id = $2`,
         [componentId, engagementId, reason ?? null],
       );
+      // Removing scope also stops its pending work: cancel this component's
+      // scheduled/active instances (completed/waived work is preserved, §25).
+      const cancelledWork = await this.cancelPendingInstances(client, componentId);
       const record = (await this.selectOne(client, componentId))!;
       await this.audit.recordWith(client, ctx, {
         action: 'component.removed',
         objectType: 'engagement_component',
         objectId: componentId,
         before: { status: current.status },
-        after: { status: 'cancelled', reason: reason ?? null },
+        after: { status: 'cancelled', reason: reason ?? null, cancelledWork },
       });
       return record;
     });
   }
 
   // ── internals ──────────────────────────────────────────────────────────
+
+  /**
+   * Cancel a component's not-yet-finalised work instances (scheduled/active),
+   * used when its scope is removed or the configuration is cancelled/superseded.
+   * Completed/waived instances are left untouched (filed work is history, §25).
+   * Returns the count cancelled (for the audit trail).
+   */
+  private async cancelPendingInstances(
+    client: PoolClient,
+    engagementComponentId: string,
+  ): Promise<number> {
+    const result = await client.query(
+      `UPDATE hsdg.component_instances SET status = 'cancelled', version = version + 1
+       WHERE engagement_component_id = $1 AND status IN ('scheduled','active')`,
+      [engagementComponentId],
+    );
+    return result.rowCount ?? 0;
+  }
 
   private async loadEngagement(
     client: PoolClient,
@@ -420,66 +491,33 @@ export class EngagementComponentsService {
   }
 
   /**
-   * Preview a component's deadline from the compliance rule that governs it,
-   * using the version effective as of the engagement's FY end. Only bases that
-   * are derivable without a per-instance date (fy_end, fixed_date) yield a
-   * preview; period/month/event bases need an explicit date supplied later, so
-   * they preview as null (spec §12 "preview where determinable").
+   * Preview deadlines for many rules at once: one query selects the version
+   * effective as of the engagement's FY end for each rule, then dates are
+   * computed in JS. Only bases derivable without a per-instance date (fy_end,
+   * fixed_date) yield dates; period/month/event bases surface the version but
+   * leave the dates unpreviewed (spec §12 "preview where determinable").
    */
-  private async previewDeadline(
+  private async loadPreviews(
     client: PoolClient,
-    complianceRuleId: string,
+    ruleIds: string[],
     financialYear: string,
-    holidays: ReadonlySet<string>,
-  ): Promise<{
-    statutoryDeadline: string | null;
-    internalSlaDate: string | null;
-    versionId: string;
-  } | null> {
-    // FY end (31 March of the FY's ending year) as the "as of" selector.
-    const endYear = Number(financialYear.slice(0, 4)) + 1;
-    const asOf = `${endYear}-03-31`;
-    const { rows } = await client.query<{
-      id: string;
-      calculation_basis: CalculationBasis;
-      offset_months: number;
-      offset_days: number;
-      fixed_month: number | null;
-      fixed_day: number | null;
-      working_day_adjustment: WorkingDayAdjustment;
-      internal_sla_offset_days: number;
-    }>(
-      `SELECT id, calculation_basis, offset_months, offset_days, fixed_month, fixed_day,
-              working_day_adjustment, internal_sla_offset_days
+  ): Promise<Map<string, DeadlinePreview>> {
+    const asOf = `${financialYearEndYear(financialYear)}-03-31`; // 31 March of the FY's ending year
+    const { rows } = await client.query<RuleVersionRow>(
+      `SELECT DISTINCT ON (compliance_rule_id)
+              compliance_rule_id, id, calculation_basis, offset_months, offset_days,
+              fixed_month, fixed_day, working_day_adjustment, internal_sla_offset_days
        FROM hsdg.compliance_rule_versions
-       WHERE compliance_rule_id = $1 AND effective_from <= $2::date
-         AND (effective_to IS NULL OR $2::date <= effective_to)
-       ORDER BY effective_from DESC LIMIT 1`,
-      [complianceRuleId, asOf],
+       WHERE compliance_rule_id = ANY($1::uuid[])
+         AND effective_from <= $2::date AND (effective_to IS NULL OR $2::date <= effective_to)
+       ORDER BY compliance_rule_id, effective_from DESC`,
+      [ruleIds, asOf],
     );
-    const v = rows[0];
-    if (!v) return null;
-    // period/month/event bases need a per-instance date we don't have at
-    // discovery time — surface the version but leave the dates unpreviewed.
-    if (v.calculation_basis !== 'fy_end' && v.calculation_basis !== 'fixed_date') {
-      return { statutoryDeadline: null, internalSlaDate: null, versionId: v.id };
-    }
-    const referenceDate = resolveReferenceDate(v.calculation_basis, {
-      financialYear,
-      fixedMonth: v.fixed_month,
-      fixedDay: v.fixed_day,
-    });
-    const { statutoryDeadline, internalSlaDate } = computeDeadlines(
-      {
-        referenceDate,
-        offsetMonths: v.offset_months,
-        offsetDays: v.offset_days,
-        workingDayAdjustment: v.working_day_adjustment,
-        internalSlaOffsetDays: v.internal_sla_offset_days,
-      },
-      holidays,
-    );
-    return { statutoryDeadline, internalSlaDate, versionId: v.id };
+    if (rows.length === 0) return new Map();
+    const holidays = await this.loadHolidays(client);
+    const map = new Map<string, DeadlinePreview>();
+    for (const v of rows) map.set(v.compliance_rule_id, computePreview(v, financialYear, holidays));
+    return map;
   }
 
   private async loadHolidays(client: PoolClient): Promise<Set<string>> {
@@ -491,6 +529,35 @@ export class EngagementComponentsService {
 }
 
 // ── mapping & category helpers ───────────────────────────────────────────────
+
+/** Compute a deadline preview from an effective rule version (pure). */
+function computePreview(
+  v: RuleVersionRow,
+  financialYear: string,
+  holidays: ReadonlySet<string>,
+): DeadlinePreview {
+  // period/month/event bases need a per-instance date we don't have at discovery
+  // time — surface the version but leave the dates unpreviewed.
+  if (v.calculation_basis !== 'fy_end' && v.calculation_basis !== 'fixed_date') {
+    return { statutoryDeadline: null, internalSlaDate: null, versionId: v.id };
+  }
+  const referenceDate = resolveReferenceDate(v.calculation_basis, {
+    financialYear,
+    fixedMonth: v.fixed_month,
+    fixedDay: v.fixed_day,
+  });
+  const { statutoryDeadline, internalSlaDate } = computeDeadlines(
+    {
+      referenceDate,
+      offsetMonths: v.offset_months,
+      offsetDays: v.offset_days,
+      workingDayAdjustment: v.working_day_adjustment,
+      internalSlaOffsetDays: v.internal_sla_offset_days,
+    },
+    holidays,
+  );
+  return { statutoryDeadline, internalSlaDate, versionId: v.id };
+}
 
 function mapEngagementComponent(row: EngagementComponentRow): EngagementComponentRecord {
   return {

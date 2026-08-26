@@ -31,10 +31,16 @@ export class ComplianceRulesController {
     @CurrentPrincipal() principal: Principal,
     @Query() query: ComplianceRuleListQueryDto,
   ): Promise<Paginated<ComplianceRuleRecord>> {
-    const filter: { category?: string; serviceCode?: string; activeOnly?: boolean } = {};
+    const filter: {
+      category?: string;
+      serviceCode?: string;
+      activeOnly?: boolean;
+      search?: string;
+    } = {};
     if (query.category) filter.category = query.category;
     if (query.serviceCode) filter.serviceCode = query.serviceCode;
     if (query.activeOnly !== undefined) filter.activeOnly = query.activeOnly;
+    if (query.search) filter.search = query.search;
     return this.rules
       .listRules(rlsContextFromPrincipal(principal), query, filter)
       .then((result) => paginate(result, query));

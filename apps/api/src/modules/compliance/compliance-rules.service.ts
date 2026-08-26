@@ -184,7 +184,7 @@ export class ComplianceRulesService {
   async listRules(
     ctx: RlsContext,
     page: PageParams,
-    filter: { category?: string; serviceCode?: string; activeOnly?: boolean },
+    filter: { category?: string; serviceCode?: string; activeOnly?: boolean; search?: string },
   ): Promise<PageResult<ComplianceRuleRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const conditions: string[] = [];
@@ -196,6 +196,10 @@ export class ComplianceRulesService {
       if (filter.serviceCode) {
         params.push(filter.serviceCode);
         conditions.push(`s.code = $${params.length}`);
+      }
+      if (filter.search) {
+        params.push(`%${filter.search}%`);
+        conditions.push(`(r.code ILIKE $${params.length} OR r.name ILIKE $${params.length})`);
       }
       if (filter.activeOnly) conditions.push(`r.is_active = true`);
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

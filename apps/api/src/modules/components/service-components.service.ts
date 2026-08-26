@@ -72,26 +72,20 @@ export class ServiceComponentsService {
       if (filter.activeOnly) conditions.push(`sc.is_active = true`);
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+      // Single query: count(*) OVER() reports the full filtered total (computed
+      // before LIMIT), so page + total come back together (same pattern as the
+      // compliance-rules list).
       params.push(page.limit, page.offset);
       const { rows } = await client.query<ComponentRow & { total_count: string }>(
-        `${COMPONENT_BASE} ${where}
-         ORDER BY s.code, sc.display_order, sc.code
+        `SELECT c.*, count(*) OVER() AS total_count
+         FROM (${COMPONENT_BASE} ${where}) c
+         ORDER BY c.service_code, c.display_order, c.code
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params,
       );
-      // count(*) OVER() is unavailable once ORDER BY/LIMIT are applied here, so
-      // fetch the total with a matching COUNT (same WHERE, no pagination args).
-      const countParams = params.slice(0, params.length - 2);
-      const { rows: countRows } = await client.query<{ total: string }>(
-        `SELECT count(*) AS total
-         FROM hsdg.service_components sc
-         JOIN hsdg.services s ON s.id = sc.service_id
-         ${where}`,
-        countParams,
-      );
       return {
         items: rows.map(mapComponent),
-        total: countRows[0] ? Number(countRows[0].total) : 0,
+        total: rows[0] ? Number(rows[0].total_count) : 0,
       };
     });
   }

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X } from 'lucide-react';
+import { Pencil, Plus, X } from 'lucide-react';
 import {
   PERMISSION,
   type ComponentDiscoveryResult,
@@ -18,6 +18,7 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, EmptyState, Badge, Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
+import { EditComponentModal } from '@/components/actions/edit-component-modal';
 
 const CATEGORY_TONE: Record<ComponentDiscoveryCategory, string> = {
   mandatory: 'info',
@@ -47,6 +48,7 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<EngagementComponentRecord | null>(null);
 
   const configured = useQuery({
     queryKey: ['engagement', engagementId, 'components'],
@@ -62,7 +64,9 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
   });
 
   const invalidate = (): void => {
-    void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'components'] });
+    // Broaden to the whole engagement: removing/adding scope also affects the
+    // component-work list (a sibling query key), not just the component list.
+    void qc.invalidateQueries({ queryKey: ['engagement', engagementId] });
   };
 
   const configure = useMutation({
@@ -142,15 +146,25 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
                     {canManage && (
                       <td className="px-4 py-2.5 text-right">
                         {!removed && (
-                          <button
-                            onClick={() => remove.mutate(c.id)}
-                            disabled={remove.isPending}
-                            className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-danger-600"
-                            aria-label={`Remove ${c.componentName}`}
-                            title="Remove from scope"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setEditing(c)}
+                              className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-ink"
+                              aria-label={`Configure ${c.componentName}`}
+                              title="Configure"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => remove.mutate(c.id)}
+                              disabled={remove.isPending}
+                              className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-danger-600"
+                              aria-label={`Remove ${c.componentName}`}
+                              title="Remove from scope"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         )}
                       </td>
                     )}
@@ -222,6 +236,14 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
           </div>
         )}
       </Modal>
+
+      {editing && (
+        <EditComponentModal
+          engagementId={engagementId}
+          component={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </section>
   );
 }

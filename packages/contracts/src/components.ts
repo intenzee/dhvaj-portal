@@ -145,3 +145,56 @@ export interface ComponentDiscoveryResult {
   rows: ComponentDiscoveryRow[];
   counts: Record<ComponentDiscoveryCategory, number>;
 }
+
+/** Status of a generated component work instance (spec §22/§23). */
+export const COMPONENT_INSTANCE_STATUS = {
+  scheduled: 'scheduled',
+  active: 'active',
+  completed: 'completed',
+  waived: 'waived',
+  cancelled: 'cancelled',
+} as const;
+export type ComponentInstanceStatus =
+  (typeof COMPONENT_INSTANCE_STATUS)[keyof typeof COMPONENT_INSTANCE_STATUS];
+export const COMPONENT_INSTANCE_STATUSES: ComponentInstanceStatus[] =
+  Object.values(COMPONENT_INSTANCE_STATUS);
+
+/** A generated period-specific work instance of a configured component (§21/§22/§36). */
+export interface ComponentInstanceRecord {
+  id: string;
+  engagementComponentId: string;
+  engagementId: string;
+  componentCode: string;
+  componentName: string;
+  periodKey: string;
+  periodLabel: string;
+  periodStart: string;
+  periodEnd: string;
+  statutoryDeadline: string | null;
+  internalSlaDate: string | null;
+  complianceRuleVersionId: string | null;
+  status: ComponentInstanceStatus;
+  /** Derived: the period has not started yet (§22 scheduled/future vs current). */
+  isFuture: boolean;
+  /** Derived: open and past the statutory deadline (only when a deadline exists). */
+  isOverdue: boolean;
+  completedAt: string | null;
+  completedById: string | null;
+  completedByName: string | null;
+  notes: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Result of a generate call. Generation RECONCILES to the current config
+ * (frequency × active window): `generated` was created or revived to match,
+ * `removed` was cancelled because it fell out of scope (window narrowed or
+ * frequency changed) and was not yet finalised, and `skipped` already matched.
+ */
+export interface GenerateInstancesResult {
+  generated: ComponentInstanceRecord[];
+  removed: ComponentInstanceRecord[];
+  skipped: Array<{ period: string; reason: string }>;
+}

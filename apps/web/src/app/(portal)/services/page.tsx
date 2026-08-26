@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Paginated } from '@hsdg/contracts';
@@ -40,6 +41,14 @@ export default function ServicesPage(): JSX.Element {
       <PageHeader
         title="Services"
         subtitle="The firm's service catalogue — each service carries its workflow and review requirement."
+        actions={
+          <Link
+            href="/services/components"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+          >
+            Manage components →
+          </Link>
+        }
       />
       <div className="mb-4">
         <input
