@@ -2,6 +2,8 @@ import type {
   ComponentApplicabilityDefault,
   ComponentApplicabilityStatus,
   ComponentConfigStatus,
+  DueDateCategory,
+  DueDateSource,
   Recurrence,
 } from '@hsdg/contracts';
 
@@ -14,6 +16,8 @@ export interface CreateServiceComponentInput {
   description?: string;
   defaultApplicability?: ComponentApplicabilityDefault;
   defaultFrequency?: Recurrence;
+  dueDateCategory?: DueDateCategory;
+  dueDateSource?: DueDateSource;
   complianceRuleCode?: string;
   displayOrder?: number;
 }
@@ -23,6 +27,8 @@ export interface UpdateServiceComponentInput {
   description?: string | null;
   defaultApplicability?: ComponentApplicabilityDefault;
   defaultFrequency?: Recurrence;
+  dueDateCategory?: DueDateCategory;
+  dueDateSource?: DueDateSource | null;
   complianceRuleCode?: string | null;
   displayOrder?: number;
   isActive?: boolean;

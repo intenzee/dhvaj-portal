@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { PoolClient } from 'pg';
 import type {
   ComponentApplicabilityDefault,
+  DueDateCategory,
+  DueDateSource,
   Recurrence,
   ServiceComponentRecord,
 } from '@hsdg/contracts';
@@ -21,6 +23,8 @@ interface ComponentRow {
   description: string | null;
   default_applicability: ComponentApplicabilityDefault;
   default_frequency: Recurrence;
+  due_date_category: DueDateCategory;
+  due_date_source: DueDateSource | null;
   compliance_rule_id: string | null;
   compliance_rule_code: string | null;
   display_order: number;
@@ -33,6 +37,7 @@ interface ComponentRow {
 const COMPONENT_BASE = `
   SELECT sc.id, sc.service_id, s.code AS service_code, sc.code, sc.name, sc.description,
          sc.default_applicability, sc.default_frequency,
+         sc.due_date_category, sc.due_date_source,
          sc.compliance_rule_id, cr.code AS compliance_rule_code,
          sc.display_order, sc.is_active, sc.version, sc.created_at, sc.updated_at
   FROM hsdg.service_components sc
@@ -112,8 +117,9 @@ export class ServiceComponentsService {
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO hsdg.service_components
              (service_id, code, name, description, default_applicability, default_frequency,
-              compliance_rule_id, display_order)
-           VALUES ($1,$2,$3,$4,COALESCE($5,'optional'),COALESCE($6,'as_required'),$7,COALESCE($8,0))
+              due_date_category, due_date_source, compliance_rule_id, display_order)
+           VALUES ($1,$2,$3,$4,COALESCE($5,'optional'),COALESCE($6,'as_required'),
+                   COALESCE($7,'NO_FIXED_DATE'),$8,$9,COALESCE($10,0))
            RETURNING id`,
           [
             serviceId,
@@ -122,6 +128,8 @@ export class ServiceComponentsService {
             input.description ?? null,
             input.defaultApplicability ?? null,
             input.defaultFrequency ?? null,
+            input.dueDateCategory ?? null,
+            input.dueDateSource ?? null,
             complianceRuleId,
             input.displayOrder ?? null,
           ],
@@ -158,6 +166,8 @@ export class ServiceComponentsService {
       if (input.defaultApplicability !== undefined)
         push('default_applicability', input.defaultApplicability);
       if (input.defaultFrequency !== undefined) push('default_frequency', input.defaultFrequency);
+      if (input.dueDateCategory !== undefined) push('due_date_category', input.dueDateCategory);
+      if (input.dueDateSource !== undefined) push('due_date_source', input.dueDateSource);
       if (input.displayOrder !== undefined) push('display_order', input.displayOrder);
       if (input.isActive !== undefined) push('is_active', input.isActive);
       if (input.complianceRuleCode !== undefined) {
@@ -235,6 +245,8 @@ function mapComponent(row: ComponentRow): ServiceComponentRecord {
     description: row.description,
     defaultApplicability: row.default_applicability,
     defaultFrequency: row.default_frequency,
+    dueDateCategory: row.due_date_category,
+    dueDateSource: row.due_date_source,
     complianceRuleId: row.compliance_rule_id,
     complianceRuleCode: row.compliance_rule_code,
     displayOrder: row.display_order,

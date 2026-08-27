@@ -13,13 +13,18 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import {
   CALCULATION_BASES,
   COMPLIANCE_CATEGORIES,
+  DUE_DATE_CATEGORIES,
+  DUE_DATE_SOURCES,
   WORKING_DAY_ADJUSTMENTS,
   type CalculationBasis,
   type ComplianceCategory,
+  type DueDateCategory,
+  type DueDateSource,
   type WorkingDayAdjustment,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
@@ -54,6 +59,41 @@ export class CreateComplianceRuleDto {
   @IsOptional()
   @IsIn(COMPLIANCE_CATEGORIES)
   category?: ComplianceCategory;
+
+  @ApiPropertyOptional({
+    enum: DUE_DATE_CATEGORIES,
+    default: 'NO_FIXED_DATE',
+    description: 'Frozen due-date category (§2) — how the deadline is generated.',
+  })
+  @IsOptional()
+  @IsIn(DUE_DATE_CATEGORIES)
+  dueDateCategory?: DueDateCategory;
+
+  @ApiPropertyOptional({
+    enum: DUE_DATE_SOURCES,
+    description: 'Due-date source (§3) — where the deadline’s authority comes from.',
+  })
+  @IsOptional()
+  @IsIn(DUE_DATE_SOURCES)
+  dueDateSource?: DueDateSource;
+}
+
+/** Amend a rule's due-date classification (§2 category / §3 source). */
+export class UpdateComplianceRuleClassificationDto {
+  @ApiPropertyOptional({ enum: DUE_DATE_CATEGORIES })
+  @IsOptional()
+  @IsIn(DUE_DATE_CATEGORIES)
+  dueDateCategory?: DueDateCategory;
+
+  @ApiPropertyOptional({
+    enum: DUE_DATE_SOURCES,
+    nullable: true,
+    description: 'Set or clear (null) the due-date source.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsIn(DUE_DATE_SOURCES)
+  dueDateSource?: DueDateSource | null;
 }
 
 export class AddRuleVersionDto {
@@ -144,6 +184,19 @@ export class ComplianceRuleListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(COMPLIANCE_CATEGORIES)
   category?: ComplianceCategory;
+
+  @ApiPropertyOptional({
+    enum: DUE_DATE_CATEGORIES,
+    description: 'Filter by due-date category (§2).',
+  })
+  @IsOptional()
+  @IsIn(DUE_DATE_CATEGORIES)
+  dueDateCategory?: DueDateCategory;
+
+  @ApiPropertyOptional({ enum: DUE_DATE_SOURCES, description: 'Filter by due-date source (§3).' })
+  @IsOptional()
+  @IsIn(DUE_DATE_SOURCES)
+  dueDateSource?: DueDateSource;
 
   @ApiPropertyOptional()
   @IsOptional()

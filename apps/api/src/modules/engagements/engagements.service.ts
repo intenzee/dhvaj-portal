@@ -372,11 +372,7 @@ export class EngagementsService {
    *  service is created automatically by a DB trigger; this adds ADDITIONAL,
    *  non-primary services. A duplicate (same client + service + FY + period) is
    *  rejected by the service-grain unique index (clean 409). */
-  async addService(
-    ctx: RlsContext,
-    id: string,
-    input: AddServiceInput,
-  ): Promise<EngagementDetail> {
+  async addService(ctx: RlsContext, id: string, input: AddServiceInput): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
@@ -390,8 +386,13 @@ export class EngagementsService {
              (engagement_id, service_id, office_id, lead_employee_id, is_primary, status)
            VALUES ($1, $2, $3, $4, false, $5)
            RETURNING id`,
-          [id, input.serviceId, officeId, input.leadEmployeeId ?? null,
-           serviceStatusFromEngagement(before.status)],
+          [
+            id,
+            input.serviceId,
+            officeId,
+            input.leadEmployeeId ?? null,
+            serviceStatusFromEngagement(before.status),
+          ],
         );
         serviceLineId = rows[0]!.id;
       } catch (err) {
@@ -440,10 +441,9 @@ export class EngagementsService {
             AND status NOT IN ('completed', 'cancelled', 'superseded')`,
         [serviceLineId],
       );
-      await client.query(
-        `UPDATE hsdg.engagement_services SET status = 'cancelled' WHERE id = $1`,
-        [serviceLineId],
-      );
+      await client.query(`UPDATE hsdg.engagement_services SET status = 'cancelled' WHERE id = $1`, [
+        serviceLineId,
+      ]);
       await this.bumpVersion(client, id);
       const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
@@ -511,10 +511,9 @@ export class EngagementsService {
       if (cov.status === 'removed') {
         throw new ConflictException('That entity is already removed from coverage.');
       }
-      await client.query(
-        `UPDATE hsdg.engagement_entities SET status = 'removed' WHERE id = $1`,
-        [coverageId],
-      );
+      await client.query(`UPDATE hsdg.engagement_entities SET status = 'removed' WHERE id = $1`, [
+        coverageId,
+      ]);
       await this.bumpVersion(client, id);
       const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {

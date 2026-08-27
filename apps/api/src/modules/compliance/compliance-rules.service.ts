@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import type { CalculationBasis, WorkingDayAdjustment } from '@hsdg/contracts';
+import type {
+  CalculationBasis,
+  DueDateCategory,
+  DueDateSource,
+  WorkingDayAdjustment,
+} from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
@@ -11,7 +16,14 @@ import type {
   ComplianceRuleRecord,
   ComplianceRuleVersionRecord,
   CreateComplianceRuleInput,
+  UpdateComplianceRuleInput,
 } from './compliance.types';
+
+/** The stable projection of a compliance rule (identity + classification). */
+const RULE_SELECT = `
+  SELECT r.id, r.code, r.name, r.description, r.service_id, s.code AS service_code,
+         r.category, r.due_date_category, r.due_date_source,
+         r.is_active, r.version, r.created_at, r.updated_at`;
 
 interface RuleRow {
   id: string;
@@ -21,6 +33,8 @@ interface RuleRow {
   service_id: string | null;
   service_code: string | null;
   category: ComplianceRuleRecord['category'];
+  due_date_category: DueDateCategory;
+  due_date_source: DueDateSource | null;
   is_active: boolean;
   version: number;
   created_at: Date;
@@ -75,9 +89,18 @@ export class ComplianceRulesService {
       let id: string;
       try {
         const { rows } = await client.query<{ id: string }>(
-          `INSERT INTO hsdg.compliance_rules (code, name, description, service_id, category)
-           VALUES ($1,$2,$3,$4,COALESCE($5,'other')) RETURNING id`,
-          [input.code, input.name, input.description ?? null, serviceId, input.category ?? null],
+          `INSERT INTO hsdg.compliance_rules
+             (code, name, description, service_id, category, due_date_category, due_date_source)
+           VALUES ($1,$2,$3,$4,COALESCE($5,'other'),COALESCE($6,'NO_FIXED_DATE'),$7) RETURNING id`,
+          [
+            input.code,
+            input.name,
+            input.description ?? null,
+            serviceId,
+            input.category ?? null,
+            input.dueDateCategory ?? null,
+            input.dueDateSource ?? null,
+          ],
         );
         id = rows[0]!.id;
       } catch (err) {
@@ -88,7 +111,61 @@ export class ComplianceRulesService {
         action: 'compliance.rule_created',
         objectType: 'compliance_rule',
         objectId: id,
-        after: { code: input.code },
+        after: {
+          code: input.code,
+          dueDateCategory: rule!.dueDateCategory,
+          dueDateSource: rule!.dueDateSource,
+        },
+      });
+      return rule!;
+    });
+  }
+
+  /**
+   * Amend a rule's due-date classification (§2 category / §3 source) without
+   * touching its calculation versions — classification is rule identity, not a
+   * versioned calculation, so this is a plain audited update (no new version).
+   */
+  async updateRuleClassification(
+    ctx: RlsContext,
+    ruleId: string,
+    input: UpdateComplianceRuleInput,
+  ): Promise<ComplianceRuleRecord> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      if (input.dueDateCategory !== undefined) {
+        params.push(input.dueDateCategory);
+        sets.push(`due_date_category = $${params.length}`);
+      }
+      if (input.dueDateSource !== undefined) {
+        params.push(input.dueDateSource);
+        sets.push(`due_date_source = $${params.length}`);
+      }
+      if (sets.length === 0) return this.getRule(ctx, ruleId);
+
+      params.push(ruleId);
+      let updated: number;
+      try {
+        const result = await client.query(
+          `UPDATE hsdg.compliance_rules SET ${sets.join(', ')}, version = version + 1
+           WHERE id = $${params.length}`,
+          params,
+        );
+        updated = result.rowCount ?? 0;
+      } catch (err) {
+        throw translateComplianceError(err);
+      }
+      if (updated === 0) throw new NotFoundException('Compliance rule not found.');
+      const rule = await this.selectRule(client, ruleId);
+      await this.audit.recordWith(client, ctx, {
+        action: 'compliance.rule_classified',
+        objectType: 'compliance_rule',
+        objectId: ruleId,
+        after: {
+          dueDateCategory: rule!.dueDateCategory,
+          dueDateSource: rule!.dueDateSource,
+        },
       });
       return rule!;
     });
@@ -184,7 +261,14 @@ export class ComplianceRulesService {
   async listRules(
     ctx: RlsContext,
     page: PageParams,
-    filter: { category?: string; serviceCode?: string; activeOnly?: boolean; search?: string },
+    filter: {
+      category?: string;
+      dueDateCategory?: DueDateCategory;
+      dueDateSource?: DueDateSource;
+      serviceCode?: string;
+      activeOnly?: boolean;
+      search?: string;
+    },
   ): Promise<PageResult<ComplianceRuleRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const conditions: string[] = [];
@@ -192,6 +276,14 @@ export class ComplianceRulesService {
       if (filter.category) {
         params.push(filter.category);
         conditions.push(`r.category = $${params.length}`);
+      }
+      if (filter.dueDateCategory) {
+        params.push(filter.dueDateCategory);
+        conditions.push(`r.due_date_category = $${params.length}`);
+      }
+      if (filter.dueDateSource) {
+        params.push(filter.dueDateSource);
+        conditions.push(`r.due_date_source = $${params.length}`);
       }
       if (filter.serviceCode) {
         params.push(filter.serviceCode);
@@ -206,9 +298,7 @@ export class ComplianceRulesService {
 
       params.push(page.limit, page.offset);
       const { rows } = await client.query<RuleRow & { total_count: string }>(
-        `SELECT r.id, r.code, r.name, r.description, r.service_id, s.code AS service_code,
-                r.category, r.is_active, r.version, r.created_at, r.updated_at,
-                count(*) OVER() AS total_count
+        `${RULE_SELECT}, count(*) OVER() AS total_count
          FROM hsdg.compliance_rules r
          LEFT JOIN hsdg.services s ON s.id = r.service_id
          ${where}
@@ -281,8 +371,7 @@ export class ComplianceRulesService {
   ): Promise<ComplianceRuleRecord | null> {
     const byId = /^[0-9a-f-]{36}$/i.test(idOrCode);
     const { rows } = await client.query<RuleRow>(
-      `SELECT r.id, r.code, r.name, r.description, r.service_id, s.code AS service_code,
-              r.category, r.is_active, r.version, r.created_at, r.updated_at
+      `${RULE_SELECT}
        FROM hsdg.compliance_rules r
        LEFT JOIN hsdg.services s ON s.id = r.service_id
        WHERE ${byId ? 'r.id' : 'r.code'} = $1`,
@@ -346,6 +435,8 @@ function mapRule(row: RuleRow, versions: ComplianceRuleVersionRecord[]): Complia
     serviceId: row.service_id,
     serviceCode: row.service_code,
     category: row.category,
+    dueDateCategory: row.due_date_category,
+    dueDateSource: row.due_date_source,
     isActive: row.is_active,
     version: row.version,
     versions,

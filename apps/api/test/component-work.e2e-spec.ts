@@ -31,13 +31,22 @@ describe('Component Work Generation (e2e)', () => {
     return res.body.items[0].id as string;
   };
 
-  const createEngagement = async (epToken: string, serviceCode = 'GST_MONTHLY'): Promise<string> => {
+  const createEngagement = async (
+    epToken: string,
+    serviceCode = 'GST_MONTHLY',
+  ): Promise<string> => {
     const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
     const serviceId = await findId(`/api/v1/services?search=${serviceCode}&limit=100`);
     const res = await request(app.getHttpServer())
       .post('/api/v1/engagements')
       .set(bearer(epToken))
-      .send({ entityId, serviceId, financialYear: '2026-27', periodLabel: `W${unique()}`, status: 'accepted' })
+      .send({
+        entityId,
+        serviceId,
+        financialYear: '2026-27',
+        periodLabel: `W${unique()}`,
+        status: 'accepted',
+      })
       .expect(201);
     return res.body.id as string;
   };
@@ -106,14 +115,25 @@ describe('Component Work Generation (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/compliance-rules/${rule.body.id}/versions`)
       .set(bearer(mp))
-      .send({ effectiveFrom: '2020-04-01', calculationBasis: 'month_end', offsetDays: 20, internalSlaOffsetDays: 5 })
+      .send({
+        effectiveFrom: '2020-04-01',
+        calculationBasis: 'month_end',
+        offsetDays: 20,
+        internalSlaOffsetDays: 5,
+      })
       .expect(201);
 
     const compCode = `WC_${unique()}`;
     await request(app.getHttpServer())
       .post('/api/v1/service-components')
       .set(bearer(mp))
-      .send({ serviceCode: 'GST_MONTHLY', code: compCode, name: 'Linked monthly', defaultFrequency: 'monthly', complianceRuleCode: ruleCode })
+      .send({
+        serviceCode: 'GST_MONTHLY',
+        code: compCode,
+        name: 'Linked monthly',
+        defaultFrequency: 'monthly',
+        complianceRuleCode: ruleCode,
+      })
       .expect(201);
 
     const pa = await token('partner.a@hsdg.in');

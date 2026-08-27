@@ -116,9 +116,7 @@ describe('Service Components & Configuration (e2e)', () => {
         .expect(200);
 
       expect(res.body.serviceCode).toBe('GST_MONTHLY');
-      const byCode = Object.fromEntries(
-        res.body.rows.map((r: { code: string }) => [r.code, r]),
-      );
+      const byCode = Object.fromEntries(res.body.rows.map((r: { code: string }) => [r.code, r]));
       expect(byCode.GSTR1.category).toBe('mandatory');
       expect(byCode.GSTR3B.category).toBe('mandatory');
       expect(byCode.ITC_RECON.category).toBe('applicable'); // recommended → applicable

@@ -1,4 +1,8 @@
-import { evaluateApplicability, type CatalogueRow, type EntityFacts } from './engagement-components.service';
+import {
+  evaluateApplicability,
+  type CatalogueRow,
+  type EntityFacts,
+} from './engagement-components.service';
 
 /** Build a catalogue row with just the fields §11 evaluation reads. */
 function comp(partial: Partial<CatalogueRow>): CatalogueRow {

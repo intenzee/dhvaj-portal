@@ -22,7 +22,9 @@ export class ReportsController {
 
   @Get('engagements')
   @RequirePermissions(PERMISSION.reportRead)
-  @ApiOperation({ summary: 'Engagement MIS: totals and breakdowns by status/service line/office/EP' })
+  @ApiOperation({
+    summary: 'Engagement MIS: totals and breakdowns by status/service line/office/EP',
+  })
   engagements(@CurrentPrincipal() principal: Principal): Promise<EngagementMisReport> {
     return this.reports.engagementMis(rlsContextFromPrincipal(principal));
   }
@@ -40,7 +42,9 @@ export class ReportsController {
 
   @Get('utilisation')
   @RequirePermissions(PERMISSION.reportRead)
-  @ApiOperation({ summary: 'Utilisation: per-employee workload (active engagements + open/overdue tasks)' })
+  @ApiOperation({
+    summary: 'Utilisation: per-employee workload (active engagements + open/overdue tasks)',
+  })
   utilisation(@CurrentPrincipal() principal: Principal): Promise<UtilisationReport> {
     return this.reports.utilisation(rlsContextFromPrincipal(principal));
   }

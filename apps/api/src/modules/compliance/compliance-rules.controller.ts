@@ -12,6 +12,7 @@ import {
   ComplianceRuleListQueryDto,
   CreateComplianceRuleDto,
   SetRuleActiveDto,
+  UpdateComplianceRuleClassificationDto,
 } from './dto/rule.dto';
 
 /**
@@ -33,11 +34,15 @@ export class ComplianceRulesController {
   ): Promise<Paginated<ComplianceRuleRecord>> {
     const filter: {
       category?: string;
+      dueDateCategory?: ComplianceRuleListQueryDto['dueDateCategory'];
+      dueDateSource?: ComplianceRuleListQueryDto['dueDateSource'];
       serviceCode?: string;
       activeOnly?: boolean;
       search?: string;
     } = {};
     if (query.category) filter.category = query.category;
+    if (query.dueDateCategory) filter.dueDateCategory = query.dueDateCategory;
+    if (query.dueDateSource) filter.dueDateSource = query.dueDateSource;
     if (query.serviceCode) filter.serviceCode = query.serviceCode;
     if (query.activeOnly !== undefined) filter.activeOnly = query.activeOnly;
     if (query.search) filter.search = query.search;
@@ -91,6 +96,22 @@ export class ComplianceRulesController {
     @Body() dto: SetRuleActiveDto,
   ): Promise<ComplianceRuleRecord> {
     return this.rules.setRuleActive(rlsContextFromPrincipal(principal), id, dto.isActive);
+  }
+
+  @Patch(':id/classification')
+  @RequirePermissions(PERMISSION.complianceManage)
+  @ApiOperation({
+    summary: 'Set a rule’s due-date classification (§2 category / §3 source; audited)',
+    description:
+      'Classification is rule identity, not a versioned calculation — this updates it in place ' +
+      'without adding a rule version, so historical instances keep their snapshotted calculation.',
+  })
+  classify(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateComplianceRuleClassificationDto,
+  ): Promise<ComplianceRuleRecord> {
+    return this.rules.updateRuleClassification(rlsContextFromPrincipal(principal), id, dto);
   }
 }
 

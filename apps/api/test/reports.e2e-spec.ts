@@ -89,7 +89,11 @@ describe('Reports & MIS (e2e)', () => {
       expect(typeof res.body.totals.open).toBe('number');
       expect(Array.isArray(res.body.byCategory)).toBe(true);
       // Overdue + due-soon are subsets of open, per category.
-      for (const c of res.body.byCategory as Array<{ open: number; overdue: number; dueSoon: number }>) {
+      for (const c of res.body.byCategory as Array<{
+        open: number;
+        overdue: number;
+        dueSoon: number;
+      }>) {
         expect(c.overdue).toBeLessThanOrEqual(c.open);
         expect(c.dueSoon).toBeLessThanOrEqual(c.open);
       }

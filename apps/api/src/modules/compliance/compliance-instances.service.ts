@@ -13,6 +13,8 @@ import {
   type CalculationBasis,
   type ComplianceClock,
   type ComplianceStatus,
+  type DueDateCategory,
+  type DueDateSource,
   type WorkingDayAdjustment,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -29,6 +31,7 @@ import {
 } from './compliance-calc';
 import { translateComplianceError } from './compliance-rules.service';
 import type {
+  ApplyExtensionInput,
   BulkGenerateResult,
   ComplianceCalendarRecord,
   ComplianceInstanceDetail,
@@ -36,6 +39,7 @@ import type {
   ComplianceOverrideRecord,
   CompleteInstanceInput,
   GenerateInstanceInput,
+  InstanceGovernmentExtension,
   OverrideInstanceInput,
   WaiveInstanceInput,
 } from './compliance.types';
@@ -52,6 +56,8 @@ interface InstanceRow {
   compliance_rule_id: string;
   rule_code: string;
   rule_name: string;
+  due_date_category: DueDateCategory;
+  due_date_source: DueDateSource | null;
   compliance_rule_version_id: string;
   rule_version: number;
   reference_date: string;
@@ -64,6 +70,13 @@ interface InstanceRow {
   status: ComplianceStatus;
   is_statutory_overdue: boolean;
   is_internally_overdue: boolean;
+  is_extended: boolean;
+  government_extension_id: string | null;
+  ext_original_due_date: string | null;
+  ext_revised_due_date: string | null;
+  ext_notification_reference: string | null;
+  ext_applicable_population: string | null;
+  ext_effective_date: string | null;
   completed_at: Date | null;
   completed_by_employee_id: string | null;
   completed_by_name: string | null;
@@ -86,24 +99,42 @@ interface VersionRow {
   condition: unknown | null;
 }
 
+/**
+ * The operative statutory date, in precedence order (§19/§20):
+ *   1. manual override  (§20 — the authorised exception)
+ *   2. government extension revised date  (§19 — the overlay)
+ *   3. computed snapshot  (the original statutory deadline)
+ * The original (ci.statutory_deadline) is always retained alongside.
+ */
+const EFFECTIVE_STATUTORY = `COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)`;
+
 const INSTANCE_BASE = `
   SELECT ci.id, ci.engagement_id, ci.compliance_rule_id, cr.code AS rule_code, cr.name AS rule_name,
+         cr.due_date_category, cr.due_date_source,
          ci.compliance_rule_version_id, crv.version AS rule_version,
          ci.reference_date::text, ci.statutory_deadline::text, ci.statutory_deadline_override::text,
-         COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)::text AS effective_statutory,
+         ${EFFECTIVE_STATUTORY}::text AS effective_statutory,
          ci.internal_sla_date::text, ci.internal_sla_override::text,
          COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS effective_sla,
          ci.status,
-         (ci.status = 'open' AND COALESCE(ci.statutory_deadline_override, ci.statutory_deadline) < CURRENT_DATE)
+         (ci.status = 'open' AND ${EFFECTIVE_STATUTORY} < CURRENT_DATE)
            AS is_statutory_overdue,
          (ci.status = 'open' AND COALESCE(ci.internal_sla_override, ci.internal_sla_date) < CURRENT_DATE)
            AS is_internally_overdue,
+         (ci.government_extension_id IS NOT NULL) AS is_extended,
+         ci.government_extension_id,
+         ge.original_due_date::text AS ext_original_due_date,
+         ge.revised_due_date::text AS ext_revised_due_date,
+         ge.notification_reference AS ext_notification_reference,
+         ge.applicable_population AS ext_applicable_population,
+         ge.effective_date::text AS ext_effective_date,
          ci.completed_at, ci.completed_by_employee_id, ce.full_name AS completed_by_name,
          ci.notes, ci.version, ci.created_at, ci.updated_at
   FROM hsdg.compliance_instances ci
   JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
   JOIN hsdg.compliance_rule_versions crv ON crv.id = ci.compliance_rule_version_id
-  LEFT JOIN hsdg.employees ce ON ce.id = ci.completed_by_employee_id`;
+  LEFT JOIN hsdg.employees ce ON ce.id = ci.completed_by_employee_id
+  LEFT JOIN hsdg.government_extensions ge ON ge.id = ci.government_extension_id`;
 
 /**
  * The per-engagement compliance engine (Phase 8, ADR-0013).
@@ -305,7 +336,7 @@ export class ComplianceInstancesService {
       const { rows } = await client.query<InstanceRow>(
         `${INSTANCE_BASE}
          WHERE ci.engagement_id = $1${statusClause}
-         ORDER BY COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)
+         ORDER BY ${EFFECTIVE_STATUTORY}
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params,
       );
@@ -335,6 +366,7 @@ export class ComplianceInstancesService {
       dueFrom?: string;
       dueTo?: string;
       overdueOnly?: boolean;
+      dueDateCategory?: DueDateCategory;
     } = {},
   ): Promise<PageResult<ComplianceCalendarRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
@@ -344,7 +376,11 @@ export class ComplianceInstancesService {
         params.push(filter.status);
         conditions.push(`ci.status = $${params.length}`);
       }
-      const effective = `COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)`;
+      if (filter.dueDateCategory) {
+        params.push(filter.dueDateCategory);
+        conditions.push(`cr.due_date_category = $${params.length}`);
+      }
+      const effective = EFFECTIVE_STATUTORY;
       if (filter.dueFrom) {
         params.push(filter.dueFrom);
         conditions.push(`${effective} >= $${params.length}::date`);
@@ -374,7 +410,12 @@ export class ComplianceInstancesService {
         params,
       );
       const totalRes = await client.query<{ total: string }>(
-        `SELECT count(*) AS total FROM hsdg.compliance_instances ci ${where}`,
+        // The rule + extension joins must be present here too: ${where} can
+        // filter on the effective statutory date (ge.revised_due_date) and on
+        // the rule's due-date category (cr.due_date_category).
+        `SELECT count(*) AS total FROM hsdg.compliance_instances ci
+         JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+         LEFT JOIN hsdg.government_extensions ge ON ge.id = ci.government_extension_id ${where}`,
         params.slice(0, params.length - 2),
       );
       return {
@@ -459,6 +500,111 @@ export class ComplianceInstancesService {
         before: { clock: input.clock, date: previous },
         after: { clock: input.clock, date: input.newDate },
         reason: input.reason,
+        correlationId,
+      });
+      return (await this.selectInstanceDetail(client, instanceId, engagementId))!;
+    });
+  }
+
+  /**
+   * Apply a government extension (§19) as an OVERLAY on this obligation's
+   * statutory clock. Unlike a manual override (§20), the extension is a
+   * firm-wide record referenced by id — the instance keeps its original computed
+   * date, and the effective statutory date becomes the extension's revised date
+   * (unless a manual override, higher precedence, is also present). Open only.
+   */
+  async applyExtension(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    input: ApplyExtensionInput,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.selectInstance(client, instanceId, engagementId);
+      if (!before) throw new NotFoundException('Compliance instance not found.');
+      if (before.status !== COMPLIANCE_STATUS.open) {
+        throw new BadRequestException(
+          `Cannot apply an extension to a "${before.status}" compliance instance — only open obligations.`,
+        );
+      }
+
+      // The extension must exist and target the SAME rule — an extension is
+      // evidence tied to one statutory obligation, never applied cross-rule.
+      const extRes = await client.query<{
+        id: string;
+        compliance_rule_id: string;
+        revised_due_date: string;
+        notification_reference: string;
+      }>(
+        `SELECT id, compliance_rule_id, revised_due_date::text, notification_reference
+         FROM hsdg.government_extensions WHERE id = $1`,
+        [input.governmentExtensionId],
+      );
+      if (!extRes.rows[0]) throw new BadRequestException('Unknown government extension.');
+      const ext = extRes.rows[0];
+      if (ext.compliance_rule_id !== before.complianceRuleId) {
+        throw new BadRequestException(
+          'This government extension targets a different compliance rule than the obligation.',
+        );
+      }
+
+      const correlationId = resolveAmbientCorrelationId(this.cls) ?? null;
+      const updated = await this.versionedUpdate(
+        client,
+        instanceId,
+        engagementId,
+        `government_extension_id = $1`,
+        [ext.id],
+        input.version,
+      );
+      if (!updated) return this.notPermittedOrStale(before, input.version);
+
+      await this.audit.recordWith(client, ctx, {
+        action: 'compliance.extension_applied',
+        objectType: 'compliance_instance',
+        objectId: instanceId,
+        before: { effectiveStatutory: before.effectiveStatutoryDeadline },
+        after: {
+          governmentExtensionId: ext.id,
+          revisedDueDate: ext.revised_due_date,
+          notificationReference: ext.notification_reference,
+        },
+        correlationId,
+      });
+      return (await this.selectInstanceDetail(client, instanceId, engagementId))!;
+    });
+  }
+
+  /** Remove a government extension overlay, reverting to the original clock (audited). */
+  async clearExtension(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    version: number | undefined,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.selectInstance(client, instanceId, engagementId);
+      if (!before) throw new NotFoundException('Compliance instance not found.');
+      if (!before.isExtended) {
+        throw new BadRequestException('No government extension is applied to this obligation.');
+      }
+      const correlationId = resolveAmbientCorrelationId(this.cls) ?? null;
+      const updated = await this.versionedUpdate(
+        client,
+        instanceId,
+        engagementId,
+        `government_extension_id = NULL`,
+        [],
+        version,
+      );
+      if (!updated) return this.notPermittedOrStale(before, version);
+
+      await this.audit.recordWith(client, ctx, {
+        action: 'compliance.extension_cleared',
+        objectType: 'compliance_instance',
+        objectId: instanceId,
+        before: { governmentExtensionId: before.governmentExtension?.id ?? null },
+        after: { governmentExtensionId: null },
         correlationId,
       });
       return (await this.selectInstanceDetail(client, instanceId, engagementId))!;
@@ -656,9 +802,12 @@ function mapInstance(row: InstanceRow): ComplianceInstanceRecord {
     complianceRuleName: row.rule_name,
     complianceRuleVersionId: row.compliance_rule_version_id,
     complianceRuleVersion: row.rule_version,
+    dueDateCategory: row.due_date_category,
+    dueDateSource: row.due_date_source,
     referenceDate: row.reference_date,
     statutoryDeadline: row.statutory_deadline,
     statutoryDeadlineOverride: row.statutory_deadline_override,
+    revisedStatutoryDeadline: row.ext_revised_due_date,
     effectiveStatutoryDeadline: row.effective_statutory,
     internalSlaDate: row.internal_sla_date,
     internalSlaOverride: row.internal_sla_override,
@@ -666,6 +815,8 @@ function mapInstance(row: InstanceRow): ComplianceInstanceRecord {
     status: row.status,
     isStatutoryOverdue: row.is_statutory_overdue,
     isInternallyOverdue: row.is_internally_overdue,
+    isExtended: row.is_extended,
+    governmentExtension: mapInstanceExtension(row),
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
     completedById: row.completed_by_employee_id,
     completedByName: row.completed_by_name,
@@ -673,5 +824,27 @@ function mapInstance(row: InstanceRow): ComplianceInstanceRecord {
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+/** Build the embedded government-extension summary from a joined instance row (§19). */
+function mapInstanceExtension(row: InstanceRow): InstanceGovernmentExtension | null {
+  if (
+    row.government_extension_id === null ||
+    row.ext_original_due_date === null ||
+    row.ext_revised_due_date === null ||
+    row.ext_notification_reference === null ||
+    row.ext_applicable_population === null ||
+    row.ext_effective_date === null
+  ) {
+    return null;
+  }
+  return {
+    id: row.government_extension_id,
+    originalDueDate: row.ext_original_due_date,
+    revisedDueDate: row.ext_revised_due_date,
+    notificationReference: row.ext_notification_reference,
+    applicablePopulation: row.ext_applicable_population,
+    effectiveDate: row.ext_effective_date,
   };
 }

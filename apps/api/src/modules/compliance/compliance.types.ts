@@ -3,6 +3,8 @@ import type {
   ComplianceCategory,
   ComplianceClock,
   ComplianceStatus,
+  DueDateCategory,
+  DueDateSource,
   WorkingDayAdjustment,
 } from '@hsdg/contracts';
 
@@ -33,6 +35,10 @@ export interface ComplianceRuleRecord {
   serviceId: string | null;
   serviceCode: string | null;
   category: ComplianceCategory;
+  /** Frozen due-date CATEGORY (§2) — how the deadline is generated. */
+  dueDateCategory: DueDateCategory;
+  /** Due-date SOURCE (§3) — where the deadline's authority comes from (optional). */
+  dueDateSource: DueDateSource | null;
   isActive: boolean;
   version: number;
   versions: ComplianceRuleVersionRecord[];
@@ -49,12 +55,25 @@ export interface ComplianceInstanceRecord {
   complianceRuleName: string;
   complianceRuleVersionId: string;
   complianceRuleVersion: number;
+  /** Frozen due-date CATEGORY of the governing rule (§2). */
+  dueDateCategory: DueDateCategory;
+  /** Due-date SOURCE of the governing rule (§3), if declared. */
+  dueDateSource: DueDateSource | null;
   referenceDate: string;
-  /** Computed snapshot from the rule version (immutable). */
+  /** Computed snapshot from the rule version (immutable) — the ORIGINAL statutory date. */
   statutoryDeadline: string;
   statutoryDeadlineOverride: string | null;
-  /** COALESCE(override, computed) — what the two clocks actually read. */
+  /** Government-notified revised operative date (§19 overlay), if one is applied. */
+  revisedStatutoryDeadline: string | null;
+  /**
+   * COALESCE(manual override, government extension, computed) — the operative
+   * statutory date. Precedence: §20 manual override ▸ §19 extension ▸ snapshot.
+   */
   effectiveStatutoryDeadline: string;
+  /** True when a government extension overlay is applied (§24 "Extended"). */
+  isExtended: boolean;
+  /** The applied government extension (§19), for calendar display; null if none. */
+  governmentExtension: InstanceGovernmentExtension | null;
   internalSlaDate: string;
   internalSlaOverride: string | null;
   effectiveInternalSlaDate: string;
@@ -70,6 +89,36 @@ export interface ComplianceInstanceRecord {
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** The government extension applied to an instance, embedded for display (§19/§24). */
+export interface InstanceGovernmentExtension {
+  id: string;
+  originalDueDate: string;
+  revisedDueDate: string;
+  notificationReference: string;
+  applicablePopulation: string;
+  effectiveDate: string;
+}
+
+/**
+ * A government extension (§19) — a firm-wide overlay on a statutory rule's date.
+ * Append-only evidence; not an edit to the rule and not a manual override.
+ */
+export interface GovernmentExtensionRecord {
+  id: string;
+  complianceRuleId: string;
+  complianceRuleCode: string;
+  complianceRuleName: string;
+  originalDueDate: string;
+  revisedDueDate: string;
+  notificationReference: string;
+  applicablePopulation: string;
+  effectiveDate: string;
+  notes: string | null;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  createdAt: string;
 }
 
 /** One recorded deadline override (append-only governance event). */
@@ -110,6 +159,29 @@ export interface CreateComplianceRuleInput {
   description?: string;
   serviceCode?: string;
   category?: ComplianceCategory;
+  dueDateCategory?: DueDateCategory;
+  dueDateSource?: DueDateSource;
+}
+
+/** Amend a rule's classification (category/source) — identity fields only. */
+export interface UpdateComplianceRuleInput {
+  dueDateCategory?: DueDateCategory;
+  dueDateSource?: DueDateSource | null;
+}
+
+export interface CreateGovernmentExtensionInput {
+  complianceRuleCode: string;
+  originalDueDate: string;
+  revisedDueDate: string;
+  notificationReference: string;
+  applicablePopulation: string;
+  effectiveDate: string;
+  notes?: string;
+}
+
+export interface ApplyExtensionInput {
+  governmentExtensionId: string;
+  version?: number;
 }
 
 export interface AddRuleVersionInput {

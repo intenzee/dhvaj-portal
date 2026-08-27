@@ -162,12 +162,23 @@ export interface ComplianceRow {
   engagementCode: string;
   entityName: string;
   serviceCode: string;
+  complianceRuleId: string;
+  complianceRuleCode: string;
   complianceRuleName: string;
+  /** Frozen due-date category (§2) — how the deadline is generated. */
+  dueDateCategory: string;
+  /** Due-date source (§3) — where the deadline's authority comes from. */
+  dueDateSource: string | null;
+  statutoryDeadline: string;
   effectiveStatutoryDeadline: string;
+  /** Government-notified revised operative date (§19 overlay), if applied. */
+  revisedStatutoryDeadline: string | null;
   effectiveInternalSlaDate: string;
   status: ComplianceStatus;
   isStatutoryOverdue: boolean;
   isInternallyOverdue: boolean;
+  /** True when a government extension overlay is applied (§24 "Extended"). */
+  isExtended: boolean;
 }
 
 // ── Compliance configuration (Phase 8 admin) ────────────────────────────────
@@ -197,6 +208,10 @@ export interface ComplianceRule {
   serviceId: string | null;
   serviceCode: string | null;
   category: string;
+  /** Frozen due-date category (§2) — how the deadline is generated. */
+  dueDateCategory: string;
+  /** Due-date source (§3) — where the deadline's authority comes from. */
+  dueDateSource: string | null;
   isActive: boolean;
   version: number;
   versions: ComplianceRuleVersion[];
@@ -208,6 +223,23 @@ export interface Holiday {
   id: string;
   holidayDate: string;
   name: string;
+}
+
+/** A government extension (§19) — a firm-wide overlay on a statutory rule's date. */
+export interface GovernmentExtension {
+  id: string;
+  complianceRuleId: string;
+  complianceRuleCode: string;
+  complianceRuleName: string;
+  originalDueDate: string;
+  revisedDueDate: string;
+  notificationReference: string;
+  applicablePopulation: string;
+  effectiveDate: string;
+  notes: string | null;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  createdAt: string;
 }
 
 export interface NotificationRow {

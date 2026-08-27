@@ -32,6 +32,7 @@ import { CoveredEntitiesSection } from '@/components/actions/covered-entities-se
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
+import { ObligationExtensionActions } from '@/components/compliance/extension-modals';
 
 type TabKey =
   | 'overview'
@@ -322,19 +323,38 @@ export default function EngagementDetailPage(): JSX.Element {
                 <thead>
                   <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                     <th className="px-4 py-2.5 font-semibold">Obligation</th>
+                    <th className="px-4 py-2.5 font-semibold">Category</th>
                     <th className="px-4 py-2.5 font-semibold">Statutory</th>
                     <th className="px-4 py-2.5 font-semibold">Internal SLA</th>
                     <th className="px-4 py-2.5 font-semibold">Status</th>
+                    <th className="px-4 py-2.5 font-semibold text-right">Extension</th>
                   </tr>
                 </thead>
                 <tbody>
                   {compliance.data.items.map((c) => (
                     <tr key={c.id} className="border-b border-line last:border-0">
                       <td className="px-4 py-2.5 text-ink">{c.complianceRuleName}</td>
+                      <td className="px-4 py-2.5">
+                        {c.dueDateCategory ? (
+                          <Badge tone="neutral">{humanize(c.dueDateCategory)}</Badge>
+                        ) : null}
+                      </td>
                       <td
                         className={`px-4 py-2.5 ${c.isStatutoryOverdue ? 'font-medium text-danger-600' : 'text-ink-muted'}`}
                       >
                         {formatDate(c.effectiveStatutoryDeadline)}
+                        {c.isExtended && (
+                          <span
+                            className="ml-1 text-xs font-medium text-secondary-600"
+                            title={
+                              c.revisedStatutoryDeadline
+                                ? `Government extension — revised from ${formatDate(c.statutoryDeadline)}`
+                                : 'Government extension applied'
+                            }
+                          >
+                            · Extended
+                          </span>
+                        )}
                       </td>
                       <td
                         className={`px-4 py-2.5 ${c.isInternallyOverdue ? 'font-medium text-warning-700' : 'text-ink-muted'}`}
@@ -343,6 +363,9 @@ export default function EngagementDetailPage(): JSX.Element {
                       </td>
                       <td className="px-4 py-2.5">
                         <StatusBadge status={c.status} />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <ObligationExtensionActions engagementId={e.id} obligation={c} />
                       </td>
                     </tr>
                   ))}

@@ -9,6 +9,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   Min,
@@ -16,8 +17,10 @@ import {
 import {
   COMPLIANCE_CLOCKS,
   COMPLIANCE_STATUSES,
+  DUE_DATE_CATEGORIES,
   type ComplianceClock,
   type ComplianceStatus,
+  type DueDateCategory,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
 
@@ -57,6 +60,14 @@ export class ComplianceCalendarQueryDto extends PaginationQueryDto {
   @Transform(toBool)
   @IsBoolean()
   overdueOnly?: boolean;
+
+  @ApiPropertyOptional({
+    enum: DUE_DATE_CATEGORIES,
+    description: 'Filter the calendar by frozen due-date category (§2).',
+  })
+  @IsOptional()
+  @IsIn(DUE_DATE_CATEGORIES)
+  dueDateCategory?: DueDateCategory;
 }
 
 /** Bulk-generate obligations for all active rules on the engagement's service. */
@@ -145,6 +156,34 @@ export class WaiveInstanceDto {
   @MaxLength(2000)
   reason!: string;
 
+  @ApiPropertyOptional({
+    description: 'Expected version for optimistic concurrency (stale ⇒ 409).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
+}
+
+/** Apply a government extension (§19) overlay to this obligation's statutory clock. */
+export class ApplyExtensionDto {
+  @ApiProperty({ description: 'Id of the government extension (§19) to apply.' })
+  @IsUUID()
+  governmentExtensionId!: string;
+
+  @ApiPropertyOptional({
+    description: 'Expected version for optimistic concurrency (stale ⇒ 409).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
+}
+
+/** Remove a government extension overlay, reverting to the original clock. */
+export class ClearExtensionDto {
   @ApiPropertyOptional({
     description: 'Expected version for optimistic concurrency (stale ⇒ 409).',
   })

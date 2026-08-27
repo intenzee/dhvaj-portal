@@ -198,12 +198,8 @@ export class EngagementComponentsService {
         const preview = c.compliance_rule_id ? (previews.get(c.compliance_rule_id) ?? null) : null;
         // A live config wins; otherwise §11 fact evaluation decides.
         const fact = live ? null : evaluateApplicability(c, facts);
-        const category = live
-          ? mapStatusToCategory(live.applicability_status)
-          : fact!.category;
-        const reason = live
-          ? `Configured on this engagement (${live.status}).`
-          : fact!.reason;
+        const category = live ? mapStatusToCategory(live.applicability_status) : fact!.category;
+        const reason = live ? `Configured on this engagement (${live.status}).` : fact!.reason;
         return {
           serviceComponentId: c.id,
           code: c.code,

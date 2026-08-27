@@ -10,6 +10,7 @@
  */
 
 import type { Recurrence } from './services';
+import type { DueDateCategory, DueDateSource } from './compliance';
 
 /** The default applicability a catalogue component starts from (spec §11). */
 export const COMPONENT_APPLICABILITY_DEFAULT = {
@@ -77,6 +78,10 @@ export interface ServiceComponentRecord {
   description: string | null;
   defaultApplicability: ComponentApplicabilityDefault;
   defaultFrequency: Recurrence;
+  /** Frozen due-date CATEGORY (§2/§6–§15) — how this component's deadline is generated. */
+  dueDateCategory: DueDateCategory;
+  /** Due-date SOURCE (§3) — where this component's deadline authority comes from (optional). */
+  dueDateSource: DueDateSource | null;
   complianceRuleId: string | null;
   complianceRuleCode: string | null;
   displayOrder: number;

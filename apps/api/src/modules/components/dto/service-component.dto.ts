@@ -10,11 +10,16 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import {
   COMPONENT_APPLICABILITY_DEFAULTS,
+  DUE_DATE_CATEGORIES,
+  DUE_DATE_SOURCES,
   RECURRENCES,
   type ComponentApplicabilityDefault,
+  type DueDateCategory,
+  type DueDateSource,
   type Recurrence,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
@@ -54,6 +59,23 @@ export class CreateServiceComponentDto {
   @IsIn(RECURRENCES)
   defaultFrequency?: Recurrence;
 
+  @ApiPropertyOptional({
+    enum: DUE_DATE_CATEGORIES,
+    default: 'NO_FIXED_DATE',
+    description: 'Frozen due-date category (§2/§6–§15) — how the deadline is generated.',
+  })
+  @IsOptional()
+  @IsIn(DUE_DATE_CATEGORIES)
+  dueDateCategory?: DueDateCategory;
+
+  @ApiPropertyOptional({
+    enum: DUE_DATE_SOURCES,
+    description: 'Due-date source (§3) — where the deadline’s authority comes from.',
+  })
+  @IsOptional()
+  @IsIn(DUE_DATE_SOURCES)
+  dueDateSource?: DueDateSource;
+
   @ApiPropertyOptional({ description: 'Link the component to a compliance rule by code.' })
   @IsOptional()
   @IsString()
@@ -90,6 +112,17 @@ export class UpdateServiceComponentDto {
   @IsOptional()
   @IsIn(RECURRENCES)
   defaultFrequency?: Recurrence;
+
+  @ApiPropertyOptional({ enum: DUE_DATE_CATEGORIES })
+  @IsOptional()
+  @IsIn(DUE_DATE_CATEGORIES)
+  dueDateCategory?: DueDateCategory;
+
+  @ApiPropertyOptional({ enum: DUE_DATE_SOURCES, nullable: true })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsIn(DUE_DATE_SOURCES)
+  dueDateSource?: DueDateSource | null;
 
   @ApiPropertyOptional({ description: 'Set or clear (null) the linked compliance rule by code.' })
   @IsOptional()

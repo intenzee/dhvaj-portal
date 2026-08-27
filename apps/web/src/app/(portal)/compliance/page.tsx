@@ -19,6 +19,13 @@ import { cn } from '@/lib/cn';
 
 type Filter = 'all' | 'overdue' | 'due-soon';
 
+/** Humanise a frozen due-date category code (§2), e.g. STATUTORY_FIXED → "Statutory fixed". */
+function dueDateCategoryLabel(code: string): string {
+  if (!code) return '';
+  const spaced = code.replace(/_/g, ' ').toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 const columns: ColumnDef<ComplianceRow, unknown>[] = [
   {
     header: 'Engagement',
@@ -31,6 +38,13 @@ const columns: ColumnDef<ComplianceRow, unknown>[] = [
   },
   { header: 'Obligation', accessorKey: 'complianceRuleName' },
   {
+    header: 'Category',
+    cell: ({ row }) =>
+      row.original.dueDateCategory ? (
+        <Badge tone="neutral">{dueDateCategoryLabel(row.original.dueDateCategory)}</Badge>
+      ) : null,
+  },
+  {
     header: 'Statutory deadline',
     cell: ({ row }) => (
       <span className={row.original.isStatutoryOverdue ? 'font-medium text-rose-600' : ''}>
@@ -38,6 +52,18 @@ const columns: ColumnDef<ComplianceRow, unknown>[] = [
         <span className="ml-1 text-xs text-ink-faint">
           ({deadlineLabel(row.original.effectiveStatutoryDeadline)})
         </span>
+        {row.original.isExtended && (
+          <span
+            className="ml-1 text-xs font-medium text-sky-700"
+            title={
+              row.original.revisedStatutoryDeadline
+                ? `Government extension applied — revised from ${formatDate(row.original.statutoryDeadline)}`
+                : 'Government extension applied'
+            }
+          >
+            · Extended
+          </span>
+        )}
       </span>
     ),
   },

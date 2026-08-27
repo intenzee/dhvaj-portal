@@ -111,6 +111,10 @@ FROM (VALUES
   ('AAACA1234A', 'gstin', '27AAACA1234A1Z5', '27'),
   ('AAACA1234A', 'cin',   'U17110MH2015PTC123456', NULL),
   ('AABCB5678B', 'llpin', 'AAB-5678', NULL),
+  -- Bharat is a GST-registered LLP: the component-discovery fixtures run
+  -- GST_MONTHLY engagements against it and expect GSTR-1/3B (which require a
+  -- gstin) to be mandatory. Without this the discovery test cannot pass.
+  ('AABCB5678B', 'gstin', '27AABCB5678B1Z4', '27'),
   ('AACCC9012C', 'gstin', '29AACCC9012C1Z8', '29')
 ) AS v(pan, rtype, rnum, state)
 JOIN hsdg.entities e ON e.pan = v.pan
@@ -143,7 +147,16 @@ JOIN hsdg.entities e ON e.pan = v.entity_pan::citext
 JOIN hsdg.services s ON s.code = v.service_code
 JOIN hsdg.employees ep ON ep.employee_code = v.ep_code
 LEFT JOIN hsdg.employees mgr ON mgr.employee_code = v.mgr_code
-ON CONFLICT (entity_id, service_id, financial_year, period_label) DO NOTHING;
+-- Idempotency guard (§5–§6 multi-entity dropped the old
+-- (entity_id, service_id, financial_year, period_label) unique constraint in
+-- favour of the engagement_entities join table, so ON CONFLICT can no longer
+-- infer it). NOT EXISTS keeps the re-runnable seed schema-agnostic — mirrors
+-- the entity_contacts guard above.
+WHERE NOT EXISTS (
+  SELECT 1 FROM hsdg.engagements ex
+  WHERE ex.entity_id = e.id AND ex.service_id = s.id
+    AND ex.financial_year = v.fy AND ex.period_label = v.period
+);
 
 INSERT INTO hsdg.engagement_team (engagement_id, employee_id, role_on_engagement)
 SELECT eng.id, emp.id, v.role

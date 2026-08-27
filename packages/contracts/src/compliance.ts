@@ -62,3 +62,63 @@ export const COMPLIANCE_CATEGORY = {
 } as const;
 export type ComplianceCategory = (typeof COMPLIANCE_CATEGORY)[keyof typeof COMPLIANCE_CATEGORY];
 export const COMPLIANCE_CATEGORIES: ComplianceCategory[] = Object.values(COMPLIANCE_CATEGORY);
+
+/**
+ * Frozen Due-Date CATEGORY (Due-Date Classification spec §2) — HOW a deadline is
+ * generated. This is a separate axis from {@link COMPLIANCE_CATEGORY} (which is
+ * the statutory DOMAIN: income-tax / GST / …). Every compliance rule and every
+ * catalogue component carries one, so the calendar engine treats each obligation
+ * by its generation model rather than as a generic date-and-repeat.
+ *
+ * The set is closed and stable ("frozen") — adding a category is a deliberate,
+ * migration-backed change, never ad-hoc. Codes are the spec's own UPPER_SNAKE.
+ */
+export const DUE_DATE_CATEGORY = {
+  /** Recurring legal obligation with fixed calendar logic (e.g. a fixed return date). */
+  statutoryFixed: 'STATUTORY_FIXED',
+  /** Legal deadline calculated from facts/rules (e.g. taxpayer-dependent tax deadline). */
+  statutoryRule: 'STATUTORY_RULE',
+  /** Legal deadline triggered by an event (e.g. response after a notice/order). */
+  statutoryEvent: 'STATUTORY_EVENT',
+  /** Government-notified temporary revised statutory deadline (an extension overlay). */
+  govtExtension: 'GOVT_EXTENSION',
+  /** Internal recurring HSDG SLA (e.g. books by the 6th). */
+  hsdgRecurring: 'HSDG_RECURRING',
+  /** Internal assignment/stage milestone (e.g. manager review). */
+  hsdgMilestone: 'HSDG_MILESTONE',
+  /** Client-agreed contractual/management commitment (e.g. MIS by the 7th). */
+  clientCommitted: 'CLIENT_COMMITTED',
+  /** Specific material ad-hoc task deadline (e.g. agreement review). */
+  taskDeadline: 'TASK_DEADLINE',
+  /** Deadline generated from an event plus a configured SLA (response within X days). */
+  eventSla: 'EVENT_SLA',
+  /** Open-ended work with no predetermined date (e.g. general advisory). */
+  noFixedDate: 'NO_FIXED_DATE',
+} as const;
+export type DueDateCategory = (typeof DUE_DATE_CATEGORY)[keyof typeof DUE_DATE_CATEGORY];
+export const DUE_DATE_CATEGORIES: DueDateCategory[] = Object.values(DUE_DATE_CATEGORY);
+
+/**
+ * Due-Date SOURCE (spec §3) — WHERE a deadline's authority comes from. Kept
+ * independent of {@link DUE_DATE_CATEGORY}: a statutory event may be sourced from
+ * LAW_RULE, a client deliverable from CLIENT_COMMITMENT, a task from USER_ENTERED.
+ * Optional on a rule/component (an obligation need not declare its source).
+ */
+export const DUE_DATE_SOURCE = {
+  /** Underlying statutory requirement (the law or rule itself). */
+  lawRule: 'LAW_RULE',
+  /** A government extension / special notification. */
+  governmentNotification: 'GOVERNMENT_NOTIFICATION',
+  /** Internal firm SLA / policy. */
+  hsdgPolicy: 'HSDG_POLICY',
+  /** Contractual engagement-letter obligation. */
+  engagementLetter: 'ENGAGEMENT_LETTER',
+  /** A specific agreed client deadline. */
+  clientCommitment: 'CLIENT_COMMITMENT',
+  /** An internal workflow/stage deadline. */
+  workflow: 'WORKFLOW',
+  /** An authorised manual date entered by a user. */
+  userEntered: 'USER_ENTERED',
+} as const;
+export type DueDateSource = (typeof DUE_DATE_SOURCE)[keyof typeof DUE_DATE_SOURCE];
+export const DUE_DATE_SOURCES: DueDateSource[] = Object.values(DUE_DATE_SOURCE);

@@ -12,6 +12,8 @@ import type {
   ComplianceInstanceRecord,
 } from './compliance.types';
 import {
+  ApplyExtensionDto,
+  ClearExtensionDto,
   CompleteInstanceDto,
   ComplianceCalendarQueryDto,
   ComplianceInstanceListQueryDto,
@@ -109,6 +111,41 @@ export class ComplianceInstancesController {
     return this.instances.override(rlsContextFromPrincipal(principal), id, instanceId, dto);
   }
 
+  @Post(':id/compliance/:instanceId/apply-extension')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Apply a government extension overlay to a deadline (§19; audited)',
+    description:
+      'References a firm-wide government extension by id. The original computed date is retained; ' +
+      'the effective statutory date becomes the revised date (unless a manual override, which ' +
+      'takes precedence, is present). Must target the same rule as the obligation.',
+  })
+  applyExtension(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+    @Body() dto: ApplyExtensionDto,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.instances.applyExtension(rlsContextFromPrincipal(principal), id, instanceId, dto);
+  }
+
+  @Post(':id/compliance/:instanceId/clear-extension')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Remove a government extension overlay (§19; audited)' })
+  clearExtension(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+    @Body() dto: ClearExtensionDto,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.instances.clearExtension(
+      rlsContextFromPrincipal(principal),
+      id,
+      instanceId,
+      dto.version,
+    );
+  }
+
   @Post(':id/compliance/:instanceId/complete')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({ summary: 'Mark a compliance obligation completed (audited)' })
@@ -162,11 +199,13 @@ export class ComplianceCalendarController {
       dueFrom?: string;
       dueTo?: string;
       overdueOnly?: boolean;
+      dueDateCategory?: ComplianceCalendarQueryDto['dueDateCategory'];
     } = {};
     if (query.status) filter.status = query.status;
     if (query.dueFrom) filter.dueFrom = query.dueFrom;
     if (query.dueTo) filter.dueTo = query.dueTo;
     if (query.overdueOnly !== undefined) filter.overdueOnly = query.overdueOnly;
+    if (query.dueDateCategory) filter.dueDateCategory = query.dueDateCategory;
     return this.instances
       .calendar(rlsContextFromPrincipal(principal), query, filter)
       .then((result) => paginate(result, query));

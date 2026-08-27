@@ -11,11 +11,12 @@ import { useToast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { cn } from '@/lib/cn';
-import type { ComplianceRule, Holiday } from '@/lib/types';
+import type { ComplianceRule, Holiday, GovernmentExtension } from '@/lib/types';
 import { PageHeader, Card, Spinner, EmptyState, Button, Badge } from '@/components/ui';
 import { CreateRuleModal, AddVersionModal, AddHolidayModal } from '@/components/compliance/rule-modals';
+import { CreateExtensionModal } from '@/components/compliance/extension-modals';
 
-type Tab = 'rules' | 'holidays';
+type Tab = 'rules' | 'holidays' | 'extensions';
 
 export default function ComplianceConfigPage(): JSX.Element {
   const { principal } = useAuth();
@@ -43,7 +44,7 @@ export default function ComplianceConfigPage(): JSX.Element {
       />
 
       <div className="mb-4 flex gap-1 border-b border-line-strong">
-        {(['rules', 'holidays'] as Tab[]).map((t) => (
+        {(['rules', 'holidays', 'extensions'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -57,7 +58,13 @@ export default function ComplianceConfigPage(): JSX.Element {
         ))}
       </div>
 
-      {tab === 'rules' ? <RulesPanel /> : <HolidaysPanel />}
+      {tab === 'rules' ? (
+        <RulesPanel />
+      ) : tab === 'holidays' ? (
+        <HolidaysPanel />
+      ) : (
+        <ExtensionsPanel />
+      )}
     </div>
   );
 }
@@ -117,6 +124,7 @@ function RulesPanel(): JSX.Element {
                       </span>
                       <span className="block text-xs text-ink-faint">
                         {humanize(r.category)}
+                        {r.dueDateCategory ? ` · ${humanize(r.dueDateCategory)}` : ''}
                         {r.serviceCode ? ` · ${r.serviceCode}` : ''} · {r.versions.length} version
                         {r.versions.length === 1 ? '' : 's'}
                       </span>
@@ -212,6 +220,53 @@ function HolidaysPanel(): JSX.Element {
       )}
 
       {adding && <AddHolidayModal onClose={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+function ExtensionsPanel(): JSX.Element {
+  const [creating, setCreating] = useState(false);
+  const extensions = useQuery({
+    queryKey: ['compliance', 'extensions'],
+    queryFn: () => apiFetch<Paginated<GovernmentExtension>>('/compliance-extensions?limit=100'),
+  });
+
+  if (extensions.isLoading) return <Spinner label="Loading extensions…" />;
+  const items = extensions.data?.items ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-ink-muted">
+          Government-notified revised deadlines (§19). Applied to obligations from the engagement —
+          the original date is always retained.
+        </p>
+        <Button size="sm" onClick={() => setCreating(true)}>
+          <Plus className="h-4 w-4" /> Import extension
+        </Button>
+      </div>
+
+      {items.length === 0 ? (
+        <EmptyState>No government extensions imported.</EmptyState>
+      ) : (
+        <Card className="divide-y divide-line">
+          {items.map((x) => (
+            <div key={x.id} className="px-4 py-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-ink">{x.notificationReference}</span>
+                <Badge tone="neutral">{x.complianceRuleCode}</Badge>
+              </div>
+              <div className="mt-0.5 text-xs text-ink-muted">
+                {formatDate(x.originalDueDate)} → <span className="text-ink">{formatDate(x.revisedDueDate)}</span>{' '}
+                · effective {formatDate(x.effectiveDate)}
+              </div>
+              <div className="text-xs text-ink-faint">{x.applicablePopulation}</div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {creating && <CreateExtensionModal onClose={() => setCreating(false)} />}
     </div>
   );
 }

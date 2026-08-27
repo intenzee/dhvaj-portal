@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { ComplianceRulesService } from './compliance-rules.service';
 import { ComplianceInstancesService } from './compliance-instances.service';
+import { GovernmentExtensionsService } from './government-extensions.service';
 import {
   ComplianceHolidaysController,
   ComplianceRulesController,
@@ -10,6 +11,7 @@ import {
   ComplianceCalendarController,
   ComplianceInstancesController,
 } from './compliance-instances.controller';
+import { GovernmentExtensionsController } from './government-extensions.controller';
 
 /**
  * Compliance engine (Phase 8, ADR-0013). Configurable, effective-dated,
@@ -25,8 +27,9 @@ import {
     ComplianceHolidaysController,
     ComplianceInstancesController,
     ComplianceCalendarController,
+    GovernmentExtensionsController,
   ],
-  providers: [ComplianceRulesService, ComplianceInstancesService],
-  exports: [ComplianceRulesService, ComplianceInstancesService],
+  providers: [ComplianceRulesService, ComplianceInstancesService, GovernmentExtensionsService],
+  exports: [ComplianceRulesService, ComplianceInstancesService, GovernmentExtensionsService],
 })
 export class ComplianceModule {}

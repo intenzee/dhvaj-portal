@@ -6,6 +6,8 @@ import {
   CALCULATION_BASES,
   CALCULATION_BASIS,
   COMPLIANCE_CATEGORIES,
+  DUE_DATE_CATEGORIES,
+  DUE_DATE_SOURCES,
   WORKING_DAY_ADJUSTMENTS,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -30,6 +32,8 @@ export function CreateRuleModal({ onClose }: { onClose: () => void }): JSX.Eleme
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState<string>(COMPLIANCE_CATEGORIES[0] ?? 'income_tax');
+  const [dueDateCategory, setDueDateCategory] = useState<string>('NO_FIXED_DATE');
+  const [dueDateSource, setDueDateSource] = useState<string>('');
   const [serviceCode, setServiceCode] = useState('');
   const [description, setDescription] = useState('');
 
@@ -43,6 +47,8 @@ export function CreateRuleModal({ onClose }: { onClose: () => void }): JSX.Eleme
           code: code.trim().toUpperCase(),
           name: name.trim(),
           category,
+          dueDateCategory,
+          ...(dueDateSource ? { dueDateSource } : {}),
           ...(serviceCode.trim() ? { serviceCode: serviceCode.trim().toUpperCase() } : {}),
           ...(description.trim() ? { description: description.trim() } : {}),
         },
@@ -81,11 +87,32 @@ export function CreateRuleModal({ onClose }: { onClose: () => void }): JSX.Eleme
               className={code && !codeValid ? 'border-danger-400' : undefined}
             />
           </Field>
-          <Field label="Category" required>
+          <Field label="Category" required hint="Statutory domain.">
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
               {COMPLIANCE_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {humanize(c)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Due-date category" required hint="How the deadline is generated (§2).">
+            <Select value={dueDateCategory} onChange={(e) => setDueDateCategory(e.target.value)}>
+              {DUE_DATE_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {humanize(c)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Due-date source" hint="Where the authority comes from (§3).">
+            <Select value={dueDateSource} onChange={(e) => setDueDateSource(e.target.value)}>
+              <option value="">— unset —</option>
+              {DUE_DATE_SOURCES.map((s) => (
+                <option key={s} value={s}>
+                  {humanize(s)}
                 </option>
               ))}
             </Select>
