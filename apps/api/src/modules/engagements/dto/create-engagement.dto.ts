@@ -1,6 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsDateString, IsIn, IsOptional, IsString, IsUUID, Matches } from 'class-validator';
-import { ENGAGEMENT_STATUSES, type EngagementStatus } from '@hsdg/contracts';
+import {
+  BILLING_MODELS,
+  ENGAGEMENT_CONFIDENTIALITIES,
+  ENGAGEMENT_PRIORITIES,
+  ENGAGEMENT_STATUSES,
+  ENGAGEMENT_TYPES,
+  type BillingModel,
+  type EngagementConfidentiality,
+  type EngagementPriority,
+  type EngagementStatus,
+  type EngagementType,
+} from '@hsdg/contracts';
 
 export class CreateEngagementDto {
   @ApiProperty({ description: 'Client entity id.' })
@@ -56,4 +67,39 @@ export class CreateEngagementDto {
   @IsOptional()
   @IsDateString()
   plannedEndDate?: string;
+
+  @ApiPropertyOptional({ enum: ENGAGEMENT_TYPES, default: 'recurring_compliance' })
+  @IsOptional()
+  @IsIn(ENGAGEMENT_TYPES)
+  engagementType?: EngagementType;
+
+  @ApiPropertyOptional({ enum: ENGAGEMENT_PRIORITIES, default: 'normal' })
+  @IsOptional()
+  @IsIn(ENGAGEMENT_PRIORITIES)
+  priority?: EngagementPriority;
+
+  @ApiPropertyOptional({ enum: ENGAGEMENT_CONFIDENTIALITIES, default: 'normal' })
+  @IsOptional()
+  @IsIn(ENGAGEMENT_CONFIDENTIALITIES)
+  confidentiality?: EngagementConfidentiality;
+
+  @ApiPropertyOptional({ example: 'INR', description: 'ISO 4217 code (3 uppercase letters).' })
+  @IsOptional()
+  @Matches(/^[A-Z]{3}$/, { message: 'currency must be a 3-letter ISO code, e.g. INR' })
+  currency?: string;
+
+  @ApiPropertyOptional({ enum: BILLING_MODELS })
+  @IsOptional()
+  @IsIn(BILLING_MODELS)
+  billingModel?: BillingModel;
+
+  @ApiPropertyOptional({ description: 'Mandate / engagement-letter reference.' })
+  @IsOptional()
+  @IsString()
+  mandateLetterReference?: string;
+
+  @ApiPropertyOptional({ example: '2024-04-01' })
+  @IsOptional()
+  @IsDateString()
+  mandateLetterDate?: string;
 }

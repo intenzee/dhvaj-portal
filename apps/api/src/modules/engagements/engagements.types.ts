@@ -1,6 +1,10 @@
 import type {
+  BillingModel,
+  EngagementConfidentiality,
+  EngagementPriority,
   EngagementServiceLine,
   EngagementStatus,
+  EngagementType,
   ReviewModelSlug,
   TeamRole,
 } from '@hsdg/contracts';
@@ -46,6 +50,14 @@ export interface EngagementSummary {
   plannedStartDate: string | null;
   plannedEndDate: string | null;
   acceptedAt: string | null;
+  // ── Type & commercial/governance fields (§3/§7) ─────────────────────────
+  engagementType: EngagementType;
+  priority: EngagementPriority;
+  confidentiality: EngagementConfidentiality;
+  currency: string;
+  billingModel: BillingModel | null;
+  mandateLetterReference: string | null;
+  mandateLetterDate: string | null;
   teamCount: number;
   version: number;
   /** Independent of lifecycle status (§17) — null until the service workflow is initialised (on 'start'). */
@@ -125,6 +137,13 @@ export interface CreateEngagementInput {
   plannedStartDate?: string;
   plannedEndDate?: string;
   predecessorEngagementId?: string;
+  engagementType?: EngagementType;
+  priority?: EngagementPriority;
+  confidentiality?: EngagementConfidentiality;
+  currency?: string;
+  billingModel?: BillingModel;
+  mandateLetterReference?: string;
+  mandateLetterDate?: string;
 }
 
 /**

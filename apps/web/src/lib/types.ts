@@ -4,10 +4,14 @@
  * declares the subset it displays.
  */
 import type {
+  BillingModel,
   ClientDependencyStatus,
   ComplianceStatus,
+  EngagementConfidentiality,
+  EngagementPriority,
   EngagementServiceLine,
   EngagementStatus,
+  EngagementType,
   RoleSlug,
   TaskPriority,
   TaskStatus,
@@ -60,6 +64,14 @@ export interface EngagementDetail extends EngagementRow {
   signedOffByName: string | null;
   clientOverdueCount: number;
   openTaskCount: number;
+  // ── Type & commercial/governance fields (§3/§7) ─────────────────────────
+  engagementType: EngagementType;
+  priority: EngagementPriority;
+  confidentiality: EngagementConfidentiality;
+  currency: string;
+  billingModel: BillingModel | null;
+  mandateLetterReference: string | null;
+  mandateLetterDate: string | null;
 }
 
 export interface MyTask {

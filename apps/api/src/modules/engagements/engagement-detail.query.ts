@@ -1,8 +1,12 @@
 import type { PoolClient } from 'pg';
 import type {
+  BillingModel,
+  EngagementConfidentiality,
+  EngagementPriority,
   EngagementServiceLine,
   EngagementServiceStatus,
   EngagementStatus,
+  EngagementType,
   ReviewModelSlug,
 } from '@hsdg/contracts';
 import type { EngagementDetail, EngagementSummary } from './engagements.types';
@@ -63,6 +67,8 @@ export const ENGAGEMENT_BASE = `
          eng.engagement_manager_id, mgr.full_name AS manager_name,
          eng.predecessor_engagement_id, eng.planned_start_date, eng.planned_end_date,
          eng.accepted_at, eng.version,
+         eng.engagement_type, eng.priority, eng.confidentiality, eng.currency,
+         eng.billing_model, eng.mandate_letter_reference, eng.mandate_letter_date::text,
          eng.current_workflow_state_id, ws.slug AS workflow_state_slug, ws.name AS workflow_state_name,
          ws.sequence AS workflow_state_sequence, ws.is_initial AS workflow_state_is_initial,
          ws.is_terminal AS workflow_state_is_terminal,
@@ -134,6 +140,13 @@ export interface EngagementRow {
   planned_end_date: string | null;
   accepted_at: Date | null;
   version: number;
+  engagement_type: EngagementType;
+  priority: EngagementPriority;
+  confidentiality: EngagementConfidentiality;
+  currency: string;
+  billing_model: BillingModel | null;
+  mandate_letter_reference: string | null;
+  mandate_letter_date: string | null;
   current_workflow_state_id: string | null;
   workflow_state_slug: string | null;
   workflow_state_name: string | null;
@@ -186,6 +199,13 @@ export function mapEngagement(row: EngagementRow & { team_count: string }): Enga
     plannedStartDate: row.planned_start_date,
     plannedEndDate: row.planned_end_date,
     acceptedAt: row.accepted_at ? row.accepted_at.toISOString() : null,
+    engagementType: row.engagement_type,
+    priority: row.priority,
+    confidentiality: row.confidentiality,
+    currency: row.currency,
+    billingModel: row.billing_model,
+    mandateLetterReference: row.mandate_letter_reference,
+    mandateLetterDate: row.mandate_letter_date,
     teamCount: Number(row.team_count),
     version: row.version,
     currentWorkflowState: row.current_workflow_state_id

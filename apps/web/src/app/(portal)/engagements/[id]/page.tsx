@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
-import { formatDate } from '@/lib/format';
+import { formatDate, humanize } from '@/lib/format';
 import type { EngagementDetail, MyTask, ComplianceRow, MyClientDependency } from '@/lib/types';
 import {
   PageHeader,
@@ -99,6 +99,21 @@ export default function EngagementDetailPage(): JSX.Element {
             <Fact label="Signed off" value={e.isSignedOff ? (e.signedOffByName ?? 'Yes') : 'No'} />
             <Fact label="Open review points" value={String(e.openReviewPointCount)} />
             <Fact label="Open tasks" value={String(e.openTaskCount)} />
+          </CardBody>
+          <CardBody className="grid grid-cols-2 gap-y-3 border-t border-line text-sm sm:grid-cols-3">
+            <Fact label="Type" value={humanize(e.engagementType)} />
+            <Fact label="Priority" value={humanize(e.priority)} />
+            <Fact label="Confidentiality" value={humanize(e.confidentiality)} />
+            <Fact label="Billing model" value={e.billingModel ? humanize(e.billingModel) : '—'} />
+            <Fact label="Currency" value={e.currency} />
+            <Fact
+              label="Mandate letter"
+              value={
+                e.mandateLetterReference
+                  ? `${e.mandateLetterReference}${e.mandateLetterDate ? ` · ${formatDate(e.mandateLetterDate)}` : ''}`
+                  : '—'
+              }
+            />
           </CardBody>
           <CardBody className="flex flex-wrap gap-2 border-t border-line pt-3">
             {e.isWaitingForClient && <Badge tone="warn">Waiting for client</Badge>}

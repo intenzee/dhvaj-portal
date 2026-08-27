@@ -19,6 +19,53 @@ export const ENGAGEMENT_STATUS = {
 export type EngagementStatus = (typeof ENGAGEMENT_STATUS)[keyof typeof ENGAGEMENT_STATUS];
 export const ENGAGEMENT_STATUSES: EngagementStatus[] = Object.values(ENGAGEMENT_STATUS);
 
+/** Engagement taxonomy (spec §3) — what KIND of engagement this is. */
+export const ENGAGEMENT_TYPE = {
+  recurringCompliance: 'recurring_compliance',
+  oneTimeAssignment: 'one_time_assignment',
+  project: 'project',
+  retainer: 'retainer',
+  advisory: 'advisory',
+  audit: 'audit',
+  certification: 'certification',
+  litigation: 'litigation',
+} as const;
+export type EngagementType = (typeof ENGAGEMENT_TYPE)[keyof typeof ENGAGEMENT_TYPE];
+export const ENGAGEMENT_TYPES: EngagementType[] = Object.values(ENGAGEMENT_TYPE);
+
+/** Engagement priority (spec §7). */
+export const ENGAGEMENT_PRIORITY = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  urgent: 'urgent',
+} as const;
+export type EngagementPriority = (typeof ENGAGEMENT_PRIORITY)[keyof typeof ENGAGEMENT_PRIORITY];
+export const ENGAGEMENT_PRIORITIES: EngagementPriority[] = Object.values(ENGAGEMENT_PRIORITY);
+
+/** Confidentiality classification (spec §7). */
+export const ENGAGEMENT_CONFIDENTIALITY = {
+  normal: 'normal',
+  confidential: 'confidential',
+  restricted: 'restricted',
+} as const;
+export type EngagementConfidentiality =
+  (typeof ENGAGEMENT_CONFIDENTIALITY)[keyof typeof ENGAGEMENT_CONFIDENTIALITY];
+export const ENGAGEMENT_CONFIDENTIALITIES: EngagementConfidentiality[] =
+  Object.values(ENGAGEMENT_CONFIDENTIALITY);
+
+/** Commercial billing model (spec §7; the full commercial module is deferred). */
+export const BILLING_MODEL = {
+  fixedFee: 'fixed_fee',
+  timeAndMaterial: 'time_and_material',
+  retainer: 'retainer',
+  milestone: 'milestone',
+  proBono: 'pro_bono',
+  notBilled: 'not_billed',
+} as const;
+export type BillingModel = (typeof BILLING_MODEL)[keyof typeof BILLING_MODEL];
+export const BILLING_MODELS: BillingModel[] = Object.values(BILLING_MODEL);
+
 /** States at which an accountable Engagement Partner is NOT yet required. */
 export const EP_OPTIONAL_STATUSES: EngagementStatus[] = [
   ENGAGEMENT_STATUS.prospect,

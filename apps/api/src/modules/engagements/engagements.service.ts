@@ -161,8 +161,12 @@ export class EngagementsService {
           `INSERT INTO hsdg.engagements
              (entity_id, service_id, financial_year, period_label, office_id,
               engagement_partner_id, engagement_manager_id, status,
-              predecessor_engagement_id, planned_start_date, planned_end_date, accepted_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+              predecessor_engagement_id, planned_start_date, planned_end_date, accepted_at,
+              engagement_type, priority, confidentiality, currency, billing_model,
+              mandate_letter_reference, mandate_letter_date)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+              COALESCE($13,'recurring_compliance'),COALESCE($14,'normal'),
+              COALESCE($15,'normal'),COALESCE($16,'INR'),$17,$18,$19)
            RETURNING id`,
           [
             input.entityId,
@@ -177,6 +181,13 @@ export class EngagementsService {
             input.plannedStartDate ?? null,
             input.plannedEndDate ?? null,
             isAccepted(input.status) ? new Date() : null,
+            input.engagementType ?? null,
+            input.priority ?? null,
+            input.confidentiality ?? null,
+            input.currency ?? null,
+            input.billingModel ?? null,
+            input.mandateLetterReference ?? null,
+            input.mandateLetterDate ?? null,
           ],
         );
         id = rows[0]!.id;

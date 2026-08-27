@@ -4,8 +4,16 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import { ENGAGEMENT_STATUS, type Paginated } from '@hsdg/contracts';
+import {
+  BILLING_MODELS,
+  ENGAGEMENT_CONFIDENTIALITIES,
+  ENGAGEMENT_PRIORITIES,
+  ENGAGEMENT_STATUS,
+  ENGAGEMENT_TYPES,
+  type Paginated,
+} from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
+import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import type { EntityRow } from '@/lib/types';
 import { PageHeader, Card, CardBody, Button, Spinner } from '@/components/ui';
@@ -37,6 +45,13 @@ export default function NewEngagementPage(): JSX.Element {
   const [financialYear, setFinancialYear] = useState(currentFinancialYear());
   const [periodLabel, setPeriodLabel] = useState('FY');
   const [status, setStatus] = useState<string>(ENGAGEMENT_STATUS.accepted);
+  const [engagementType, setEngagementType] = useState<string>('recurring_compliance');
+  const [priority, setPriority] = useState<string>('normal');
+  const [confidentiality, setConfidentiality] = useState<string>('normal');
+  const [currency, setCurrency] = useState('INR');
+  const [billingModel, setBillingModel] = useState<string>('');
+  const [mandateRef, setMandateRef] = useState('');
+  const [mandateDate, setMandateDate] = useState('');
 
   const services = useQuery({
     queryKey: ['services', 'all'],
@@ -53,6 +68,13 @@ export default function NewEngagementPage(): JSX.Element {
           financialYear,
           periodLabel: periodLabel || 'FY',
           status,
+          engagementType,
+          priority,
+          confidentiality,
+          currency: currency.toUpperCase() || 'INR',
+          billingModel: billingModel || undefined,
+          mandateLetterReference: mandateRef.trim() || undefined,
+          mandateLetterDate: mandateDate || undefined,
         },
       }),
     onSuccess: (data) => {
@@ -107,6 +129,74 @@ export default function NewEngagementPage(): JSX.Element {
               <option value={ENGAGEMENT_STATUS.accepted}>Accepted (you become EP)</option>
             </Select>
           </Field>
+
+          <div className="border-t border-line pt-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Type &amp; commercial
+            </p>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <Field label="Type">
+                <Select value={engagementType} onChange={(e) => setEngagementType(e.target.value)}>
+                  {ENGAGEMENT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {humanize(t)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Priority">
+                <Select value={priority} onChange={(e) => setPriority(e.target.value)}>
+                  {ENGAGEMENT_PRIORITIES.map((p) => (
+                    <option key={p} value={p}>
+                      {humanize(p)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Confidentiality">
+                <Select
+                  value={confidentiality}
+                  onChange={(e) => setConfidentiality(e.target.value)}
+                >
+                  {ENGAGEMENT_CONFIDENTIALITIES.map((c) => (
+                    <option key={c} value={c}>
+                      {humanize(c)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Billing model">
+                <Select value={billingModel} onChange={(e) => setBillingModel(e.target.value)}>
+                  <option value="">—</option>
+                  {BILLING_MODELS.map((b) => (
+                    <option key={b} value={b}>
+                      {humanize(b)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Currency" hint="ISO code">
+                <Input
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+                  maxLength={3}
+                  placeholder="INR"
+                />
+              </Field>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <Field label="Mandate letter ref" hint="Engagement-letter reference (optional)">
+                <Input
+                  value={mandateRef}
+                  onChange={(e) => setMandateRef(e.target.value)}
+                  placeholder="ENG-LTR-2026-001"
+                />
+              </Field>
+              <Field label="Mandate letter date">
+                <Input type="date" value={mandateDate} onChange={(e) => setMandateDate(e.target.value)} />
+              </Field>
+            </div>
+          </div>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => router.back()}>
