@@ -60,7 +60,7 @@ interface EngagementComponentRow {
   updated_at: Date;
 }
 
-interface CatalogueRow {
+export interface CatalogueRow {
   id: string;
   service_id: string;
   code: string;
@@ -69,6 +69,14 @@ interface CatalogueRow {
   default_applicability: ComponentApplicabilityDefault;
   default_frequency: Recurrence;
   compliance_rule_id: string | null;
+  requires_registration: string[] | null;
+  applies_to_categories: string[] | null;
+}
+
+/** The client facts §11 evaluates a component's applicability against. */
+export interface EntityFacts {
+  category: string;
+  activeRegistrations: Set<string>;
 }
 
 interface RuleVersionRow {
@@ -140,12 +148,16 @@ export class EngagementComponentsService {
 
       const { rows: catalogue } = await client.query<CatalogueRow>(
         `SELECT id, service_id, code, name, description, default_applicability, default_frequency,
-                compliance_rule_id
+                compliance_rule_id, requires_registration, applies_to_categories
          FROM hsdg.service_components
          WHERE service_id = $1 AND is_active = true
          ORDER BY display_order, code`,
         [eng.service_id],
       );
+
+      // §11 — the client facts applicability is decided against (entity legal
+      // category + the registrations it actively holds).
+      const facts = await this.loadEntityFacts(client, engagementId);
 
       // Existing configurations on THIS service line, keyed by component.
       const { rows: existing } = await client.query<{
@@ -183,12 +195,14 @@ export class EngagementComponentsService {
         const live = liveByComponent.get(c.id);
         const historical = anyByComponent.get(c.id);
         const preview = c.compliance_rule_id ? (previews.get(c.compliance_rule_id) ?? null) : null;
+        // A live config wins; otherwise §11 fact evaluation decides.
+        const fact = live ? null : evaluateApplicability(c, facts);
         const category = live
           ? mapStatusToCategory(live.applicability_status)
-          : defaultToCategory(c.default_applicability);
+          : fact!.category;
         const reason = live
           ? `Configured on this engagement (${live.status}).`
-          : defaultReason(c.default_applicability);
+          : fact!.reason;
         return {
           serviceComponentId: c.id,
           code: c.code,
@@ -606,10 +620,33 @@ export class EngagementComponentsService {
     };
   }
 
+  /** §11 — the entity's legal category and the registrations it actively holds. */
+  private async loadEntityFacts(client: PoolClient, engagementId: string): Promise<EntityFacts> {
+    const cat = await client.query<{ category: string }>(
+      `SELECT et.category
+         FROM hsdg.engagements e
+         JOIN hsdg.entities ent ON ent.id = e.entity_id
+         JOIN hsdg.entity_types et ON et.id = ent.entity_type_id
+        WHERE e.id = $1`,
+      [engagementId],
+    );
+    const regs = await client.query<{ registration_type: string }>(
+      `SELECT DISTINCT r.registration_type
+         FROM hsdg.entity_registrations r
+         JOIN hsdg.engagements e ON e.entity_id = r.entity_id
+        WHERE e.id = $1 AND r.status = 'active'`,
+      [engagementId],
+    );
+    return {
+      category: cat.rows[0]?.category ?? 'other',
+      activeRegistrations: new Set(regs.rows.map((r) => r.registration_type)),
+    };
+  }
+
   private async resolveComponent(client: PoolClient, code: string): Promise<CatalogueRow> {
     const { rows } = await client.query<CatalogueRow>(
       `SELECT id, service_id, code, name, description, default_applicability, default_frequency,
-              compliance_rule_id
+              compliance_rule_id, requires_registration, applies_to_categories
        FROM hsdg.service_components WHERE code = $1 AND is_active = true`,
       [code],
     );
@@ -780,6 +817,62 @@ function defaultReason(d: ComponentApplicabilityDefault): string {
   if (d === COMPONENT_APPLICABILITY_DEFAULT.recommended)
     return 'Recommended by default — confirm applicability.';
   return 'Optional — include if within scope.';
+}
+
+/** Human labels for the registration types §11 gates on. */
+const REGISTRATION_LABEL: Record<string, string> = {
+  gstin: 'GST',
+  tan: 'TAN (TDS)',
+  cin: 'CIN',
+  llpin: 'LLPIN',
+  iec: 'IEC',
+  pt: 'Professional Tax',
+  esic: 'ESIC',
+  pf: 'PF',
+  other: 'registration',
+};
+
+/**
+ * §11 — decide a component's applicability from CLIENT FACTS rather than the
+ * static catalogue default. A registration or category rule that the client
+ * fails makes the component `not_applicable` with a plain-English reason; a rule
+ * the client satisfies keeps the catalogue default and explains why; a component
+ * with no rule falls back to the default behaviour.
+ */
+export function evaluateApplicability(
+  c: CatalogueRow,
+  facts: EntityFacts,
+): { category: ComponentDiscoveryCategory; reason: string } {
+  const needsReg = c.requires_registration ?? [];
+  const needsCat = c.applies_to_categories ?? [];
+
+  if (needsReg.length > 0 && !needsReg.some((r) => facts.activeRegistrations.has(r))) {
+    const labels = needsReg.map((r) => REGISTRATION_LABEL[r] ?? r).join(' or ');
+    return {
+      category: COMPONENT_DISCOVERY_CATEGORY.notApplicable,
+      reason: `Not applicable — client holds no active ${labels} registration.`,
+    };
+  }
+  if (needsCat.length > 0 && !needsCat.includes(facts.category)) {
+    return {
+      category: COMPONENT_DISCOVERY_CATEGORY.notApplicable,
+      reason: `Not applicable — applies to ${needsCat.join(' / ')} entities only (this client is ${facts.category}).`,
+    };
+  }
+
+  const category = defaultToCategory(c.default_applicability);
+  const parts: string[] = [];
+  if (needsReg.length > 0) {
+    const matched = needsReg
+      .filter((r) => facts.activeRegistrations.has(r))
+      .map((r) => REGISTRATION_LABEL[r] ?? r);
+    parts.push(`client holds an active ${matched.join(' / ')} registration`);
+  }
+  if (needsCat.length > 0) parts.push(`client is a ${facts.category} entity`);
+  if (parts.length > 0) {
+    return { category, reason: `Applicable — ${parts.join('; ')}.` };
+  }
+  return { category, reason: defaultReason(c.default_applicability) };
 }
 
 /** Component-config PG errors: the live-unique index is the duplication guard (§16). */
