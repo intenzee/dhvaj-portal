@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
 import type {
+  AddCoveredEntityInput,
   AddServiceInput,
   AssignTeamMemberInput,
   CreateEngagementInput,
@@ -450,6 +451,77 @@ export class EngagementsService {
         objectType: 'engagement',
         objectId: id,
         after: { engagementServiceId: serviceLineId, serviceId: line.serviceId },
+      });
+      return after!;
+    });
+  }
+
+  /** Add an entity to a multi-entity / group engagement's coverage (§30). The
+   *  primary entity is created automatically by a DB trigger; this adds further
+   *  covered entities. A duplicate (same entity already covered) is rejected. */
+  async addCoveredEntity(
+    ctx: RlsContext,
+    id: string,
+    input: AddCoveredEntityInput,
+  ): Promise<EngagementDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await selectEngagementDetail(client, id);
+      if (!before) throw new NotFoundException('Engagement not found.');
+      let coverageId: string;
+      try {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO hsdg.engagement_entities (engagement_id, entity_id, is_primary, role, status)
+           VALUES ($1, $2, false, $3, 'active')
+           RETURNING id`,
+          [id, input.entityId, input.role ?? 'covered'],
+        );
+        coverageId = rows[0]!.id;
+      } catch (err) {
+        throw translatePgError(err);
+      }
+      await this.bumpVersion(client, id);
+      const after = await selectEngagementDetail(client, id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'engagement.entity_added',
+        objectType: 'engagement',
+        objectId: id,
+        after: { engagementEntityId: coverageId, entityId: input.entityId },
+      });
+      return after!;
+    });
+  }
+
+  /** Remove a covered entity — a SOFT status change that preserves history; the
+   *  primary entity cannot be removed (it is the engagement's identity anchor). */
+  async removeCoveredEntity(
+    ctx: RlsContext,
+    id: string,
+    coverageId: string,
+  ): Promise<EngagementDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await selectEngagementDetail(client, id);
+      if (!before) throw new NotFoundException('Engagement not found.');
+      const cov = before.coveredEntities.find((c) => c.id === coverageId);
+      if (!cov) throw new NotFoundException('Entity not found on this engagement.');
+      if (cov.isPrimary) {
+        throw new BadRequestException(
+          'The primary entity cannot be removed; it anchors the engagement identity.',
+        );
+      }
+      if (cov.status === 'removed') {
+        throw new ConflictException('That entity is already removed from coverage.');
+      }
+      await client.query(
+        `UPDATE hsdg.engagement_entities SET status = 'removed' WHERE id = $1`,
+        [coverageId],
+      );
+      await this.bumpVersion(client, id);
+      const after = await selectEngagementDetail(client, id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'engagement.entity_removed',
+        objectType: 'engagement',
+        objectId: id,
+        after: { engagementEntityId: coverageId, entityId: cov.entityId },
       });
       return after!;
     });

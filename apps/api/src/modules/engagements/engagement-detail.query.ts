@@ -2,6 +2,8 @@ import type { PoolClient } from 'pg';
 import type {
   BillingModel,
   EngagementConfidentiality,
+  EngagementCoveredEntity,
+  EngagementEntityRole,
   EngagementPriority,
   EngagementServiceLine,
   EngagementServiceStatus,
@@ -10,6 +12,41 @@ import type {
   ReviewModelSlug,
 } from '@hsdg/contracts';
 import type { EngagementDetail, EngagementSummary } from './engagements.types';
+
+/** The entities covered by an engagement (multi-entity / group, §30), primary first. */
+export async function selectEngagementCoveredEntities(
+  client: PoolClient,
+  engagementId: string,
+): Promise<EngagementCoveredEntity[]> {
+  const { rows } = await client.query<{
+    id: string;
+    entity_id: string;
+    entity_code: string;
+    legal_name: string;
+    is_primary: boolean;
+    role: EngagementEntityRole;
+    status: 'active' | 'removed';
+    created_at: Date;
+  }>(
+    `SELECT ee.id, ee.entity_id, ent.entity_code, ent.legal_name,
+            ee.is_primary, ee.role, ee.status, ee.created_at
+     FROM hsdg.engagement_entities ee
+     JOIN hsdg.entities ent ON ent.id = ee.entity_id
+     WHERE ee.engagement_id = $1
+     ORDER BY ee.is_primary DESC, ent.legal_name`,
+    [engagementId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    entityId: r.entity_id,
+    entityCode: r.entity_code,
+    entityName: r.legal_name,
+    isPrimary: r.is_primary,
+    role: r.role,
+    status: r.status,
+    createdAt: r.created_at.toISOString(),
+  }));
+}
 
 /** The service lines carried by an engagement (multi-service, §9–§10), primary first. */
 export async function selectEngagementServices(
@@ -270,6 +307,7 @@ export async function selectEngagementDetail(
     [id],
   );
   const services = await selectEngagementServices(client, id);
+  const coveredEntities = await selectEngagementCoveredEntities(client, id);
   return {
     ...mapEngagement({ ...rows[0], team_count: String(team.rows.length) }),
     team: team.rows.map((m) => ({
@@ -281,5 +319,6 @@ export async function selectEngagementDetail(
       assignedAt: m.assigned_at.toISOString(),
     })),
     services,
+    coveredEntities,
   };
 }

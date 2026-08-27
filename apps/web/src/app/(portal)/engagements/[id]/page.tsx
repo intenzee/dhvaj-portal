@@ -27,6 +27,7 @@ import { ClientDependencyActions } from '@/components/actions/client-dependency-
 import { TeamSection } from '@/components/actions/team-section';
 import { ComponentsSection } from '@/components/actions/components-section';
 import { ServicesSection } from '@/components/actions/services-section';
+import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
@@ -132,6 +133,9 @@ export default function EngagementDetailPage(): JSX.Element {
 
         <TeamSection engagementId={e.id} team={e.team} />
       </div>
+
+      {/* Entities covered (multi-entity / group, §30) */}
+      <CoveredEntitiesSection engagementId={e.id} entities={e.coveredEntities} />
 
       {/* Services (multi-service, §9–§10) */}
       <ServicesSection engagementId={e.id} services={e.services} />

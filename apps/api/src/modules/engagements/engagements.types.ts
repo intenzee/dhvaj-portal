@@ -1,6 +1,8 @@
 import type {
   BillingModel,
   EngagementConfidentiality,
+  EngagementCoveredEntity,
+  EngagementEntityRole,
   EngagementPriority,
   EngagementServiceLine,
   EngagementStatus,
@@ -105,6 +107,11 @@ export interface EngagementDetail extends EngagementSummary {
    * which remain for backward compatibility.
    */
   services: EngagementServiceLine[];
+  /**
+   * Every entity covered by this engagement (multi-entity / group, §30). Always
+   * at least one — the primary row mirrors the top-level entityId.
+   */
+  coveredEntities: EngagementCoveredEntity[];
 }
 
 export interface AddServiceInput {
@@ -112,6 +119,11 @@ export interface AddServiceInput {
   /** Servicing office for this service; defaults to the engagement's office. */
   officeCode?: string;
   leadEmployeeId?: string;
+}
+
+export interface AddCoveredEntityInput {
+  entityId: string;
+  role?: EngagementEntityRole;
 }
 
 export interface EngagementFilter {

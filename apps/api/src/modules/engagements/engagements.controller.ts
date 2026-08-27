@@ -32,6 +32,7 @@ import type {
 import { CreateEngagementDto } from './dto/create-engagement.dto';
 import { UpdateEngagementDto } from './dto/update-engagement.dto';
 import { AddServiceDto } from './dto/add-service.dto';
+import { AddCoveredEntityDto } from './dto/add-covered-entity.dto';
 import { EngagementListQueryDto } from './dto/engagement-list-query.dto';
 import { AssignTeamMemberDto, ReassignPartnerDto } from './dto/engagement-commands.dto';
 import {
@@ -191,6 +192,42 @@ export class EngagementsController {
     @Param('serviceLineId', new ParseUUIDPipe()) serviceLineId: string,
   ): Promise<EngagementDetail> {
     return this.engagements.removeService(rlsContextFromPrincipal(principal), id, serviceLineId);
+  }
+
+  // ── Covered entities (multi-entity / group engagements, §30) ─────────────
+
+  @Get(':id/entities')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'List the entities an engagement covers' })
+  async listEntities(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const detail = await this.engagements.getEngagementById(rlsContextFromPrincipal(principal), id);
+    if (!detail) throw new NotFoundException('Engagement not found.');
+    return detail.coveredEntities;
+  }
+
+  @Post(':id/entities')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Add an entity to the engagement coverage (audited)' })
+  addEntity(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AddCoveredEntityDto,
+  ): Promise<EngagementDetail> {
+    return this.engagements.addCoveredEntity(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Delete(':id/entities/:coverageId')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Remove (soft) an entity from the engagement coverage (audited)' })
+  removeEntity(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('coverageId', new ParseUUIDPipe()) coverageId: string,
+  ): Promise<EngagementDetail> {
+    return this.engagements.removeCoveredEntity(rlsContextFromPrincipal(principal), id, coverageId);
   }
 
   // ── Lifecycle (Phase 6): explicit, guarded transitions — never a generic

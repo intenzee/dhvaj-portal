@@ -108,6 +108,31 @@ export interface EngagementServiceLine {
   createdAt: string;
 }
 
+/** How an entity participates in a multi-entity / group engagement (§5–§6, §30). */
+export const ENGAGEMENT_ENTITY_ROLE = {
+  primary: 'primary',
+  covered: 'covered',
+  parent: 'parent',
+  subsidiary: 'subsidiary',
+} as const;
+export type EngagementEntityRole =
+  (typeof ENGAGEMENT_ENTITY_ROLE)[keyof typeof ENGAGEMENT_ENTITY_ROLE];
+export const ENGAGEMENT_ENTITY_ROLES: EngagementEntityRole[] =
+  Object.values(ENGAGEMENT_ENTITY_ROLE);
+
+/** One entity covered by an engagement (multi-entity / group, §30). */
+export interface EngagementCoveredEntity {
+  id: string;
+  entityId: string;
+  entityCode: string;
+  entityName: string;
+  /** The primary entity (mirrors engagements.entity_id); exactly one per engagement. */
+  isPrimary: boolean;
+  role: EngagementEntityRole;
+  status: 'active' | 'removed';
+  createdAt: string;
+}
+
 /** Role a team member plays on a specific engagement (EP/manager are separate). */
 export const TEAM_ROLE = {
   inCharge: 'in_charge',

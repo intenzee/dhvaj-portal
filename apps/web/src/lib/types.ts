@@ -8,6 +8,7 @@ import type {
   ClientDependencyStatus,
   ComplianceStatus,
   EngagementConfidentiality,
+  EngagementCoveredEntity,
   EngagementPriority,
   EngagementServiceLine,
   EngagementStatus,
@@ -61,6 +62,8 @@ export interface EngagementDetail extends EngagementRow {
   team: TeamMember[];
   /** Every service line the engagement carries (multi-service, §9–§10). */
   services: EngagementServiceLine[];
+  /** Every entity the engagement covers (multi-entity / group, §30). */
+  coveredEntities: EngagementCoveredEntity[];
   signedOffByName: string | null;
   clientOverdueCount: number;
   openTaskCount: number;
