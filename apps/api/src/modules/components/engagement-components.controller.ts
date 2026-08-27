@@ -1,7 +1,18 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
+  type ComponentChecklistItem,
   type ComponentDiscoveryResult,
   type ComponentInstanceRecord,
   type EngagementActivationResult,
@@ -15,11 +26,13 @@ import { paginate } from '../../common/pagination/pagination.dto';
 import { EngagementComponentsService } from './engagement-components.service';
 import { ComponentInstancesService } from './component-instances.service';
 import {
+  AddChecklistItemDto,
   ChangeFrequencyDto,
   ComponentWorkListQueryDto,
   ConfigureComponentDto,
   EngagementComponentListQueryDto,
   RemoveEngagementComponentDto,
+  SetChecklistItemDto,
   SetInstanceStatusDto,
   UpdateEngagementComponentDto,
 } from './dto/engagement-component.dto';
@@ -132,6 +145,72 @@ export class EngagementComponentsController {
     @Body() dto: RemoveEngagementComponentDto,
   ): Promise<EngagementComponentRecord> {
     return this.components.remove(rlsContextFromPrincipal(principal), id, componentId, dto.reason);
+  }
+
+  // ── Component checklist (spec §13/§17) ───────────────────────────────────
+
+  @Get(':id/components/:componentId/checklist')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'List a component’s checklist steps.' })
+  checklist(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('componentId', new ParseUUIDPipe()) componentId: string,
+  ): Promise<ComponentChecklistItem[]> {
+    return this.components.listChecklist(rlsContextFromPrincipal(principal), id, componentId);
+  }
+
+  @Post(':id/components/:componentId/checklist')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Add a checklist step (lead).' })
+  addChecklistItem(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('componentId', new ParseUUIDPipe()) componentId: string,
+    @Body() dto: AddChecklistItemDto,
+  ): Promise<ComponentChecklistItem[]> {
+    return this.components.addChecklistItem(
+      rlsContextFromPrincipal(principal),
+      id,
+      componentId,
+      dto.label,
+    );
+  }
+
+  @Patch(':id/components/:componentId/checklist/:itemId')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Tick / rename a checklist step (any engagement member).' })
+  setChecklistItem(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('componentId', new ParseUUIDPipe()) componentId: string,
+    @Param('itemId', new ParseUUIDPipe()) itemId: string,
+    @Body() dto: SetChecklistItemDto,
+  ): Promise<ComponentChecklistItem[]> {
+    return this.components.setChecklistItem(
+      rlsContextFromPrincipal(principal),
+      id,
+      componentId,
+      itemId,
+      dto,
+    );
+  }
+
+  @Delete(':id/components/:componentId/checklist/:itemId')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Remove a checklist step (lead).' })
+  removeChecklistItem(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('componentId', new ParseUUIDPipe()) componentId: string,
+    @Param('itemId', new ParseUUIDPipe()) itemId: string,
+  ): Promise<ComponentChecklistItem[]> {
+    return this.components.removeChecklistItem(
+      rlsContextFromPrincipal(principal),
+      id,
+      componentId,
+      itemId,
+    );
   }
 
   // ── Component work instances (spec §21–§22) ──────────────────────────────

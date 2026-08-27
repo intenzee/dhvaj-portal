@@ -10,6 +10,7 @@ import {
   COMPONENT_APPLICABILITY_STATUS,
   COMPONENT_CONFIG_STATUS,
   COMPONENT_DISCOVERY_CATEGORY,
+  type ComponentChecklistItem,
   type ComponentApplicabilityDefault,
   type ComponentApplicabilityStatus,
   type ComponentConfigStatus,
@@ -320,6 +321,16 @@ export class EngagementComponentsService {
       } catch (err) {
         throw translateEngagementComponentError(err);
       }
+      // §13/§17 — materialise the component's default checklist (if any) from
+      // the catalogue template, so the team starts with the standard steps.
+      await client.query(
+        `INSERT INTO hsdg.engagement_component_checklist (engagement_component_id, label, sequence)
+         SELECT $1, t.label, t.ord
+         FROM hsdg.service_components sc,
+              unnest(sc.checklist_template) WITH ORDINALITY AS t(label, ord)
+         WHERE sc.id = $2 AND sc.checklist_template IS NOT NULL`,
+        [id, component.id],
+      );
       const record = (await this.selectOne(client, id))!;
       await this.audit.recordWith(client, ctx, {
         action: 'component.configured',
@@ -548,6 +559,145 @@ export class EngagementComponentsService {
       });
       return newRecord;
     });
+  }
+
+  // ── Checklist (spec §13/§17) ─────────────────────────────────────────────
+
+  /** List a component's checklist items (ordered). */
+  async listChecklist(
+    ctx: RlsContext,
+    engagementId: string,
+    componentId: string,
+  ): Promise<ComponentChecklistItem[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertComponentInEngagement(client, engagementId, componentId);
+      return this.selectChecklist(client, componentId);
+    });
+  }
+
+  /** Add a custom checklist item (leads only, via RLS). */
+  async addChecklistItem(
+    ctx: RlsContext,
+    engagementId: string,
+    componentId: string,
+    label: string,
+  ): Promise<ComponentChecklistItem[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertComponentInEngagement(client, engagementId, componentId);
+      try {
+        await client.query(
+          `INSERT INTO hsdg.engagement_component_checklist (engagement_component_id, label, sequence)
+           VALUES ($1, $2,
+             COALESCE((SELECT max(sequence) + 1 FROM hsdg.engagement_component_checklist
+                        WHERE engagement_component_id = $1), 0))`,
+          [componentId, label],
+        );
+      } catch (err) {
+        throw translateEngagementComponentError(err);
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'component.checklist_item_added',
+        objectType: 'engagement_component',
+        objectId: componentId,
+        after: { engagementId, label },
+      });
+      return this.selectChecklist(client, componentId);
+    });
+  }
+
+  /** Toggle done or rename a checklist item (any member may tick; via RLS). */
+  async setChecklistItem(
+    ctx: RlsContext,
+    engagementId: string,
+    componentId: string,
+    itemId: string,
+    patch: { isDone?: boolean; label?: string },
+  ): Promise<ComponentChecklistItem[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertComponentInEngagement(client, engagementId, componentId);
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      if (patch.isDone !== undefined) {
+        params.push(patch.isDone);
+        sets.push(`is_done = $${params.length}`);
+      }
+      if (patch.label !== undefined) {
+        params.push(patch.label);
+        sets.push(`label = $${params.length}`);
+      }
+      if (sets.length === 0) return this.selectChecklist(client, componentId);
+      params.push(itemId, componentId);
+      const result = await client.query(
+        `UPDATE hsdg.engagement_component_checklist SET ${sets.join(', ')}
+          WHERE id = $${params.length - 1} AND engagement_component_id = $${params.length}`,
+        params,
+      );
+      if ((result.rowCount ?? 0) === 0) throw new NotFoundException('Checklist item not found.');
+      return this.selectChecklist(client, componentId);
+    });
+  }
+
+  /** Remove a checklist item (leads only, via RLS). */
+  async removeChecklistItem(
+    ctx: RlsContext,
+    engagementId: string,
+    componentId: string,
+    itemId: string,
+  ): Promise<ComponentChecklistItem[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertComponentInEngagement(client, engagementId, componentId);
+      const result = await client.query(
+        `DELETE FROM hsdg.engagement_component_checklist
+          WHERE id = $1 AND engagement_component_id = $2`,
+        [itemId, componentId],
+      );
+      if ((result.rowCount ?? 0) === 0) throw new NotFoundException('Checklist item not found.');
+      return this.selectChecklist(client, componentId);
+    });
+  }
+
+  private async assertComponentInEngagement(
+    client: PoolClient,
+    engagementId: string,
+    componentId: string,
+  ): Promise<void> {
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.engagement_components WHERE id = $1 AND engagement_id = $2`,
+      [componentId, engagementId],
+    );
+    if (!rows[0]) throw new NotFoundException('Component not found on this engagement.');
+  }
+
+  private async selectChecklist(
+    client: PoolClient,
+    componentId: string,
+  ): Promise<ComponentChecklistItem[]> {
+    const { rows } = await client.query<{
+      id: string;
+      label: string;
+      sequence: number;
+      is_done: boolean;
+      done_by_employee_id: string | null;
+      done_by_name: string | null;
+      done_at: Date | null;
+    }>(
+      `SELECT cl.id, cl.label, cl.sequence, cl.is_done,
+              cl.done_by_employee_id, e.full_name AS done_by_name, cl.done_at
+       FROM hsdg.engagement_component_checklist cl
+       LEFT JOIN hsdg.employees e ON e.id = cl.done_by_employee_id
+       WHERE cl.engagement_component_id = $1
+       ORDER BY cl.sequence, cl.created_at`,
+      [componentId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      label: r.label,
+      sequence: r.sequence,
+      isDone: r.is_done,
+      doneByEmployeeId: r.done_by_employee_id,
+      doneByName: r.done_by_name,
+      doneAt: r.done_at ? r.done_at.toISOString() : null,
+    }));
   }
 
   // ── internals ──────────────────────────────────────────────────────────

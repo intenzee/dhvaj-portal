@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Play, Plus, Repeat, X } from 'lucide-react';
+import { ListChecks, Pencil, Play, Plus, Repeat, X } from 'lucide-react';
 import {
   PERMISSION,
   type ComponentDiscoveryResult,
@@ -21,6 +21,7 @@ import { Card, EmptyState, Badge, Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { EditComponentModal } from '@/components/actions/edit-component-modal';
 import { ChangeFrequencyModal } from '@/components/actions/change-frequency-modal';
+import { ComponentChecklistModal } from '@/components/actions/component-checklist-modal';
 
 const CATEGORY_TONE: Record<ComponentDiscoveryCategory, string> = {
   mandatory: 'info',
@@ -58,6 +59,7 @@ export function ComponentsSection({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<EngagementComponentRecord | null>(null);
   const [freqChanging, setFreqChanging] = useState<EngagementComponentRecord | null>(null);
+  const [checklistFor, setChecklistFor] = useState<EngagementComponentRecord | null>(null);
 
   // The service lines a caller can scope components under (live only), primary first.
   const lines = services.filter((s) => s.status !== 'cancelled');
@@ -192,7 +194,7 @@ export function ComponentsSection({
                 <th className="px-4 py-2.5 font-semibold">Frequency</th>
                 <th className="px-4 py-2.5 font-semibold">Owner</th>
                 <th className="px-4 py-2.5 font-semibold">Status</th>
-                {canManage && <th className="px-4 py-2.5" />}
+                <th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -211,10 +213,18 @@ export function ComponentsSection({
                     <td className="px-4 py-2.5">
                       <Badge tone={STATUS_TONE[c.status] ?? 'neutral'}>{humanize(c.status)}</Badge>
                     </td>
-                    {canManage && (
-                      <td className="px-4 py-2.5 text-right">
+                    <td className="px-4 py-2.5 text-right">
                         {!removed && (
                           <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setChecklistFor(c)}
+                              className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-ink"
+                              aria-label={`Checklist for ${c.componentName}`}
+                              title="Checklist"
+                            >
+                              <ListChecks className="h-3.5 w-3.5" />
+                            </button>
+                            {canManage && (
                             <button
                               onClick={() => setFreqChanging(c)}
                               className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-ink"
@@ -223,6 +233,8 @@ export function ComponentsSection({
                             >
                               <Repeat className="h-3.5 w-3.5" />
                             </button>
+                            )}
+                            {canManage && (
                             <button
                               onClick={() => setEditing(c)}
                               className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-ink"
@@ -231,6 +243,8 @@ export function ComponentsSection({
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
+                            )}
+                            {canManage && (
                             <button
                               onClick={() => remove.mutate(c.id)}
                               disabled={remove.isPending}
@@ -240,10 +254,10 @@ export function ComponentsSection({
                             >
                               <X className="h-3.5 w-3.5" />
                             </button>
+                            )}
                           </div>
                         )}
                       </td>
-                    )}
                   </tr>
                 );
               })}
@@ -328,6 +342,15 @@ export function ComponentsSection({
           engagementId={engagementId}
           component={freqChanging}
           onClose={() => setFreqChanging(null)}
+        />
+      )}
+
+      {checklistFor && (
+        <ComponentChecklistModal
+          engagementId={engagementId}
+          componentId={checklistFor.id}
+          componentName={checklistFor.componentName}
+          onClose={() => setChecklistFor(null)}
         />
       )}
     </section>

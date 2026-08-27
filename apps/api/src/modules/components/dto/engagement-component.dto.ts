@@ -206,3 +206,25 @@ export class SetInstanceStatusDto {
   @Min(1)
   version?: number;
 }
+
+export class AddChecklistItemDto {
+  @ApiProperty({ description: 'Checklist step label.', example: 'Reconcile ITC against GSTR-2B' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  label!: string;
+}
+
+export class SetChecklistItemDto {
+  @ApiPropertyOptional({ description: 'Mark the step done / not done.' })
+  @IsOptional()
+  @IsBoolean()
+  isDone?: boolean;
+
+  @ApiPropertyOptional({ description: 'Rename the step.' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  label?: string;
+}

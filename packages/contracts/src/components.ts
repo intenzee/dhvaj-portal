@@ -209,6 +209,17 @@ export interface GenerateInstancesResult {
   skipped: Array<{ period: string; reason: string }>;
 }
 
+/** One step in a component's checklist (spec §13). */
+export interface ComponentChecklistItem {
+  id: string;
+  label: string;
+  sequence: number;
+  isDone: boolean;
+  doneByEmployeeId: string | null;
+  doneByName: string | null;
+  doneAt: string | null;
+}
+
 /**
  * Result of the engagement activation ceremony (spec §20/§37): the gated,
  * atomic step that confirms scope, activates its draft component configurations
