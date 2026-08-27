@@ -103,6 +103,28 @@ describe('Seeded statutory compliance rules (e2e)', () => {
     );
   });
 
+  it('computes the broadened §6–§15 statutory obligations (TCS, DIR-3 KYC, advance tax, LUT)', async () => {
+    // Period-anchored: TCS monthly deposit = period_end + 7.
+    const tcs = await generate(pa, eng, 'TCS_COLLECTION_MONTHLY', '2026-04-30').expect(201);
+    expect(tcs.body.statutoryDeadline).toBe('2026-05-07');
+
+    // FY-anchored, no referenceDate: DIR-3 KYC = fy_end + 6 = 30 Sep 2027.
+    const kyc = await generate(pa, eng, 'DIR3_KYC_ANNUAL').expect(201);
+    expect(kyc.body.statutoryDeadline).toBe('2027-09-30');
+
+    // GSTR-9C = fy_end + 9 = 31 Dec 2027; LUT = fy_end + 0 = 31 Mar 2027.
+    expect((await generate(pa, eng, 'GSTR9C_ANNUAL').expect(201)).body.statutoryDeadline).toBe(
+      '2027-12-31',
+    );
+    expect((await generate(pa, eng, 'GST_LUT_ANNUAL').expect(201)).body.statutoryDeadline).toBe(
+      '2027-03-31',
+    );
+
+    // Advance tax first instalment = fixed 15 June of the FY-end year (2027).
+    const at = await generate(pa, eng, 'ADVANCE_TAX_Q1').expect(201);
+    expect(at.body.statutoryDeadline).toBe('2027-06-15');
+  });
+
   it('surfaces the seeded rules pre-classified and linked to their components', async () => {
     const gstr1 = await request(app.getHttpServer())
       .get('/api/v1/service-components/GSTR1')
