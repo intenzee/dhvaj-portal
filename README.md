@@ -10,6 +10,28 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Group engagements, creation wizard & tabbed workspace (complete).**
+> Three more spec areas closed:
+>
+> - **Group / multi-entity engagements (§5–§6, §30)** — a new `engagement_entities`
+>   coverage grain lets one engagement cover several entities (a group audit over
+>   parent + subsidiaries), and `entity_groups` + `entities.group_id` model a named
+>   client group. Strictly additive (mirrors the multi-service work): 169/169
+>   engagements backfilled to one primary covered entity; `engagements.entity_id`
+>   stays the identity anchor. An **Entities covered** panel adds/removes coverage,
+>   and being on an engagement now grants visibility of every entity it covers.
+> - **Guided creation wizard (§4/§41)** — the create form is now a 4-step stepper
+>   (Client + group coverage → Details → Services → Review) that provisions the
+>   engagement, its additional services and covered entities in one flow.
+> - **Tabbed engagement workspace (§26)** — the engagement page is a tabbed
+>   workspace (Overview / Services / Work / Compliance / Documents / Team /
+>   Activity / Invoices / Notes) with the status & lifecycle action bar always
+>   visible; the **Activity** tab shows lifecycle history, and Invoices/Notes are
+>   honest placeholders for the deferred modules.
+>
+> §31 Commercial/Billing remains the deliberately deferred module. api+web
+> typecheck, lint, and API tests (112) pass; verified end-to-end in the browser.
+>
 > **Status: Config-depth partials + dark mode (complete).** Four spec gaps
 > closed, each additive, plus a full UI theme:
 >
