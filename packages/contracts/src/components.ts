@@ -141,6 +141,8 @@ export interface ComponentDiscoveryRow {
 /** Full discovery result for one engagement's service. */
 export interface ComponentDiscoveryResult {
   engagementId: string;
+  /** The service line discovery was run for (multi-service, §9–§10); primary by default. */
+  engagementServiceId: string;
   serviceId: string;
   serviceCode: string;
   financialYear: string;

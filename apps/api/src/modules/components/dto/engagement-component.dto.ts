@@ -31,6 +31,14 @@ export class ConfigureComponentDto {
   serviceComponentCode!: string;
 
   @ApiPropertyOptional({
+    description:
+      'Target service line (multi-service, §9–§10). Defaults to the engagement’s primary service.',
+  })
+  @IsOptional()
+  @IsUUID()
+  engagementServiceId?: string;
+
+  @ApiPropertyOptional({
     enum: COMPONENT_APPLICABILITY_STATUSES,
     description: 'Defaults from the component catalogue when omitted.',
   })

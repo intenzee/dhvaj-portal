@@ -60,6 +60,7 @@ interface EngagementComponentRow {
 
 interface CatalogueRow {
   id: string;
+  service_id: string;
   code: string;
   name: string;
   description: string | null;
@@ -123,13 +124,17 @@ export class EngagementComponentsService {
     private readonly audit: AuditService,
   ) {}
 
-  /** §11/§12 — categorise the service's catalogue for this engagement. */
-  async discover(ctx: RlsContext, engagementId: string): Promise<ComponentDiscoveryResult> {
+  /** §11/§12 — categorise a service line's catalogue for this engagement. */
+  async discover(
+    ctx: RlsContext,
+    engagementId: string,
+    engagementServiceId?: string,
+  ): Promise<ComponentDiscoveryResult> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const eng = await this.loadEngagement(client, engagementId);
+      const eng = await this.resolveServiceLine(client, engagementId, engagementServiceId);
 
       const { rows: catalogue } = await client.query<CatalogueRow>(
-        `SELECT id, code, name, description, default_applicability, default_frequency,
+        `SELECT id, service_id, code, name, description, default_applicability, default_frequency,
                 compliance_rule_id
          FROM hsdg.service_components
          WHERE service_id = $1 AND is_active = true
@@ -137,7 +142,7 @@ export class EngagementComponentsService {
         [eng.service_id],
       );
 
-      // Existing configurations on this engagement, keyed by component.
+      // Existing configurations on THIS service line, keyed by component.
       const { rows: existing } = await client.query<{
         id: string;
         service_component_id: string;
@@ -145,8 +150,9 @@ export class EngagementComponentsService {
         applicability_status: ComponentApplicabilityStatus;
       }>(
         `SELECT id, service_component_id, status, applicability_status
-         FROM hsdg.engagement_components WHERE engagement_id = $1`,
-        [engagementId],
+         FROM hsdg.engagement_components
+         WHERE engagement_id = $1 AND engagement_service_id = $2`,
+        [engagementId, eng.engagement_service_id],
       );
       // Prefer a live config; fall back to any historical one for display only.
       const liveByComponent = new Map<string, (typeof existing)[number]>();
@@ -206,6 +212,7 @@ export class EngagementComponentsService {
 
       return {
         engagementId,
+        engagementServiceId: eng.engagement_service_id,
         serviceId: eng.service_id,
         serviceCode: eng.service_code,
         financialYear: eng.financial_year,
@@ -222,7 +229,7 @@ export class EngagementComponentsService {
     filter: { status?: ComponentConfigStatus },
   ): Promise<PageResult<EngagementComponentRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
-      await this.loadEngagement(client, engagementId); // 404 if not a member
+      await this.assertEngagementVisible(client, engagementId); // 404 if not a member
       const params: unknown[] = [engagementId];
       let statusClause = '';
       if (filter.status) {
@@ -253,8 +260,13 @@ export class EngagementComponentsService {
     input: ConfigureComponentInput,
   ): Promise<EngagementComponentRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
-      await this.loadEngagement(client, engagementId);
+      const line = await this.resolveServiceLine(client, engagementId, input.engagementServiceId);
       const component = await this.resolveComponent(client, input.serviceComponentCode);
+      if (component.service_id !== line.service_id) {
+        throw new BadRequestException(
+          `Component "${component.code}" does not belong to the selected service.`,
+        );
+      }
 
       const applicabilityStatus =
         input.applicabilityStatus ?? defaultToStatus(component.default_applicability);
@@ -264,13 +276,14 @@ export class EngagementComponentsService {
       try {
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO hsdg.engagement_components
-             (engagement_id, service_component_id, applicability_status, applicability_reason,
-              frequency, owner_employee_id, reviewer_employee_id, ep_review_required, status,
-              start_date, end_date, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,false),COALESCE($9,'draft'),$10,$11,$12)
+             (engagement_id, engagement_service_id, service_component_id, applicability_status,
+              applicability_reason, frequency, owner_employee_id, reviewer_employee_id,
+              ep_review_required, status, start_date, end_date, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,false),COALESCE($10,'draft'),$11,$12,$13)
            RETURNING id`,
           [
             engagementId,
+            line.engagement_service_id,
             component.id,
             applicabilityStatus,
             input.applicabilityReason ?? null,
@@ -539,27 +552,58 @@ export class EngagementComponentsService {
     return result.rowCount ?? 0;
   }
 
-  private async loadEngagement(
+  /** 404 if the engagement is not visible to the caller (RLS). */
+  private async assertEngagementVisible(client: PoolClient, engagementId: string): Promise<void> {
+    const { rows } = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [
+      engagementId,
+    ]);
+    if (!rows[0]) throw new NotFoundException('Engagement not found.');
+  }
+
+  /**
+   * Resolve the target service line (multi-service, §9–§10). With an explicit
+   * engagementServiceId, that live line is used; otherwise the primary line —
+   * so single-service callers behave exactly as before.
+   */
+  private async resolveServiceLine(
     client: PoolClient,
     engagementId: string,
-  ): Promise<{ service_id: string; service_code: string; financial_year: string }> {
-    const { rows } = await client.query<{
+    engagementServiceId?: string,
+  ): Promise<{
+    engagement_service_id: string;
+    service_id: string;
+    service_code: string;
+    financial_year: string;
+  }> {
+    const base = `SELECT es.id AS engagement_service_id, es.service_id,
+                         s.code AS service_code, es.financial_year
+                  FROM hsdg.engagement_services es
+                  JOIN hsdg.services s ON s.id = es.service_id
+                  WHERE es.engagement_id = $1`;
+    const { rows } = engagementServiceId
+      ? await client.query(`${base} AND es.id = $2 AND es.status <> 'cancelled'`, [
+          engagementId,
+          engagementServiceId,
+        ])
+      : await client.query(`${base} AND es.is_primary`, [engagementId]);
+    if (!rows[0]) {
+      throw new NotFoundException(
+        engagementServiceId
+          ? 'Service line not found on this engagement.'
+          : 'Engagement not found.',
+      );
+    }
+    return rows[0] as {
+      engagement_service_id: string;
       service_id: string;
       service_code: string;
       financial_year: string;
-    }>(
-      `SELECT e.service_id, s.code AS service_code, e.financial_year
-       FROM hsdg.engagements e JOIN hsdg.services s ON s.id = e.service_id
-       WHERE e.id = $1`,
-      [engagementId],
-    );
-    if (!rows[0]) throw new NotFoundException('Engagement not found.');
-    return rows[0];
+    };
   }
 
   private async resolveComponent(client: PoolClient, code: string): Promise<CatalogueRow> {
     const { rows } = await client.query<CatalogueRow>(
-      `SELECT id, code, name, description, default_applicability, default_frequency,
+      `SELECT id, service_id, code, name, description, default_applicability, default_frequency,
               compliance_rule_id
        FROM hsdg.service_components WHERE code = $1 AND is_active = true`,
       [code],

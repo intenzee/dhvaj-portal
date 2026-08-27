@@ -49,8 +49,9 @@ export class EngagementComponentsController {
   discover(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
+    @Query('engagementServiceId') engagementServiceId?: string,
   ): Promise<ComponentDiscoveryResult> {
-    return this.components.discover(rlsContextFromPrincipal(principal), id);
+    return this.components.discover(rlsContextFromPrincipal(principal), id, engagementServiceId);
   }
 
   @Get(':id/components')

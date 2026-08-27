@@ -31,6 +31,8 @@ export interface UpdateServiceComponentInput {
 /** Select/configure a component on an engagement (spec §12/§13). */
 export interface ConfigureComponentInput {
   serviceComponentCode: string;
+  /** Target service line (multi-service, §9–§10); defaults to the primary service. */
+  engagementServiceId?: string;
   applicabilityStatus?: ComponentApplicabilityStatus;
   applicabilityReason?: string;
   frequency?: Recurrence;
