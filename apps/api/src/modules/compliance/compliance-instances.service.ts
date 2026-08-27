@@ -281,10 +281,12 @@ export class ComplianceInstancesService {
         engagement_partner_id: string | null;
         engagement_manager_id: string | null;
         review_model_slug: string | null;
+        annual_turnover: string | null;
       }>(
         `SELECT e.financial_year, e.engagement_partner_id, e.engagement_manager_id,
-                rm.slug AS review_model_slug
+                rm.slug AS review_model_slug, ent.annual_turnover
          FROM hsdg.engagements e
+         JOIN hsdg.entities ent ON ent.id = e.entity_id
          LEFT JOIN hsdg.services s ON s.id = e.service_id
          LEFT JOIN hsdg.review_models rm ON rm.id = s.required_review_model_id
          WHERE e.id = $1`,
@@ -335,7 +337,14 @@ export class ComplianceInstancesService {
       }
       const v = verRes.rows[0];
 
-      if (!evaluateCondition(v.condition, input.context ?? {})) {
+      // Applicability context (§17): the engagement entity's turnover is always
+      // available as `turnover` so threshold-gated rules evaluate; an explicit
+      // caller context can add to or override it.
+      const genContext: Record<string, unknown> = {
+        turnover: Number(eng.rows[0].annual_turnover ?? 0),
+        ...(input.context ?? {}),
+      };
+      if (!evaluateCondition(v.condition, genContext)) {
         throw new BadRequestException(
           'This compliance rule does not apply under the supplied context.',
         );

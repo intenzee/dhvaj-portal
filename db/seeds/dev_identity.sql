@@ -93,14 +93,17 @@ ON CONFLICT (employee_id) DO NOTHING;
 -- Split across offices to exercise RLS scoping (a North user must not see a
 -- South client). entity_code is auto-generated (ENT#####).
 INSERT INTO hsdg.entities
-  (legal_name, display_name, entity_type_id, pan, home_office_id, status, incorporation_date)
-SELECT v.legal_name, v.display_name, et.id, v.pan, o.id, v.status, v.incorp::date
+  (legal_name, display_name, entity_type_id, pan, home_office_id, status, incorporation_date,
+   annual_turnover)
+SELECT v.legal_name, v.display_name, et.id, v.pan, o.id, v.status, v.incorp::date, v.turnover
 FROM (VALUES
-  ('Acme Manufacturing Pvt Ltd', 'Acme',    'private_limited', 'AAACA1234A', 'NORTH', 'active', '2015-04-10'),
-  ('Bharat Textiles LLP',        'Bharat',  'llp',             'AABCB5678B', 'NORTH', 'active', '2018-07-01'),
-  ('Coastal Foods Pvt Ltd',      'Coastal', 'private_limited', 'AACCC9012C', 'SOUTH', 'active', '2016-01-20'),
-  ('Deepak Rao',                 'Deepak',  'individual',      'AADPD3456D', 'SOUTH', 'active', NULL)
-) AS v(legal_name, display_name, type_slug, pan, office_code, status, incorp)
+  -- annual_turnover (₹) drives threshold-based applicability (§17). Bharat sits
+  -- above every seeded threshold; Deepak (individual) sits below them all.
+  ('Acme Manufacturing Pvt Ltd', 'Acme',    'private_limited', 'AAACA1234A', 'NORTH', 'active', '2015-04-10', 150000000::bigint),
+  ('Bharat Textiles LLP',        'Bharat',  'llp',             'AABCB5678B', 'NORTH', 'active', '2018-07-01', 80000000::bigint),
+  ('Coastal Foods Pvt Ltd',      'Coastal', 'private_limited', 'AACCC9012C', 'SOUTH', 'active', '2016-01-20', 30000000::bigint),
+  ('Deepak Rao',                 'Deepak',  'individual',      'AADPD3456D', 'SOUTH', 'active', NULL,         500000::bigint)
+) AS v(legal_name, display_name, type_slug, pan, office_code, status, incorp, turnover)
 JOIN hsdg.entity_types et ON et.slug = v.type_slug
 JOIN hsdg.offices o ON o.code = v.office_code
 ON CONFLICT (pan) WHERE pan IS NOT NULL DO NOTHING;
