@@ -27,6 +27,15 @@ function dueDateCategoryLabel(code: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/** The §24 escalation band → badge tone + label. */
+const ESCALATION: Record<string, { tone: 'neutral' | 'warn' | 'danger'; label: string }> = {
+  critical: { tone: 'danger', label: 'Critical' },
+  overdue: { tone: 'danger', label: 'Overdue' },
+  due_today: { tone: 'warn', label: 'Due today' },
+  due_soon: { tone: 'warn', label: 'Due soon' },
+  upcoming: { tone: 'neutral', label: 'Upcoming' },
+};
+
 const columns: ColumnDef<ComplianceRow, unknown>[] = [
   {
     header: 'Engagement',
@@ -77,10 +86,16 @@ const columns: ColumnDef<ComplianceRow, unknown>[] = [
     ),
   },
   {
+    header: 'Escalation',
+    cell: ({ row }) => {
+      const e = ESCALATION[row.original.escalation];
+      return e ? <Badge tone={e.tone}>{e.label}</Badge> : null;
+    },
+  },
+  {
     header: 'Flags',
     cell: ({ row }) => (
       <div className="flex gap-1">
-        {row.original.isStatutoryOverdue && <Badge tone="danger">Statutory overdue</Badge>}
         {row.original.isInternallyOverdue && <Badge tone="warn">SLA overdue</Badge>}
       </div>
     ),

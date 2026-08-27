@@ -179,6 +179,8 @@ export interface ComplianceRow {
   isInternallyOverdue: boolean;
   /** True when a government extension overlay is applied (§24 "Extended"). */
   isExtended: boolean;
+  /** Escalation band (§24): none | upcoming | due_soon | due_today | overdue | critical. */
+  escalation: string;
 }
 
 /** One additional deadline layer on an obligation (§16). */

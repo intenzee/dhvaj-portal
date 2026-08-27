@@ -10,6 +10,7 @@ export interface ScanResult {
   internalSlaOverdue: number;
   internalSlaApproaching: number;
   statutoryDeadlineApproaching: number;
+  statutoryDeadlineOverdue: number;
   clientDependencyReminder: number;
   total: number;
 }
@@ -26,6 +27,8 @@ interface DueComplianceRow {
   sla_overdue: boolean;
   sla_approaching: boolean;
   statutory_approaching: boolean;
+  statutory_overdue: boolean;
+  statutory_critical: boolean;
 }
 
 interface DueDependencyRow {
@@ -62,15 +65,28 @@ export class NotificationsScanService {
   async run(ctx: RlsContext): Promise<ScanResult> {
     const slaLead = this.config.get('NOTIFICATION_SLA_LEAD_DAYS');
     const deadlineLead = this.config.get('NOTIFICATION_DEADLINE_LEAD_DAYS');
+    const criticalDays = this.config.get('COMPLIANCE_CRITICAL_OVERDUE_DAYS');
 
     return this.db.withRlsContext(ctx, async (client) => {
       const result: ScanResult = {
         internalSlaOverdue: 0,
         internalSlaApproaching: 0,
         statutoryDeadlineApproaching: 0,
+        statutoryDeadlineOverdue: 0,
         clientDependencyReminder: 0,
         total: 0,
       };
+
+      // The firm (managing partner) — the top of the §24 escalation ladder for a
+      // critically overdue statutory deadline. Loaded once, RLS-scoped.
+      const { rows: mps } = await client.query<{ id: string }>(
+        `SELECT DISTINCT emp.id FROM hsdg.employees emp
+         JOIN hsdg.users u ON u.id = emp.user_id
+         JOIN hsdg.user_roles ur ON ur.user_id = u.id
+         JOIN hsdg.roles r ON r.id = ur.role_id
+         WHERE r.slug = 'managing_partner' AND emp.employment_status = 'active'`,
+      );
+      const managingPartnerIds = mps.map((m) => m.id);
 
       // ── Compliance clocks (open instances only) ──────────────────────────
       const { rows: compliance } = await client.query<DueComplianceRow>(
@@ -82,12 +98,16 @@ export class NotificationsScanService {
                 COALESCE(ci.internal_sla_override, ci.internal_sla_date)
                   BETWEEN CURRENT_DATE AND CURRENT_DATE + $1::int AS sla_approaching,
                 COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)
-                  BETWEEN CURRENT_DATE AND CURRENT_DATE + $2::int AS statutory_approaching
+                  BETWEEN CURRENT_DATE AND CURRENT_DATE + $2::int AS statutory_approaching,
+                COALESCE(ci.statutory_deadline_override, ci.statutory_deadline) < CURRENT_DATE
+                  AS statutory_overdue,
+                COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)
+                  < CURRENT_DATE - $3::int AS statutory_critical
          FROM hsdg.compliance_instances ci
          JOIN hsdg.engagements e ON e.id = ci.engagement_id
          JOIN hsdg.entities ent ON ent.id = e.entity_id
          WHERE ci.status = 'open'`,
-        [slaLead, deadlineLead],
+        [slaLead, deadlineLead, criticalDays],
       );
 
       for (const row of compliance) {
@@ -127,6 +147,22 @@ export class NotificationsScanService {
             objectId: row.id,
             dedupKey: `stat_approaching:${row.id}`,
           });
+        } else if (row.statutory_overdue) {
+          // §24 escalation ladder: overdue → engagement leads; when CRITICAL
+          // (past the threshold) escalate up to the firm (managing partner).
+          const recipients = row.statutory_critical ? [...leads, ...managingPartnerIds] : leads;
+          const severity = row.statutory_critical ? 'CRITICAL — ' : '';
+          result.statutoryDeadlineOverdue += await this.notifications.emitWith(client, ctx, {
+            type: NOTIFICATION_TYPE.statutoryDeadlineOverdue,
+            recipientEmployeeIds: recipients,
+            title: `${severity}Statutory deadline overdue — ${context}`,
+            body: `The statutory deadline (${row.effective_statutory}) has passed for ${context}.`,
+            engagementId: row.engagement_id,
+            objectType: 'compliance_instance',
+            objectId: row.id,
+            // Distinct dedup per severity, so escalating to critical emits once more.
+            dedupKey: `stat_overdue${row.statutory_critical ? '_critical' : ''}:${row.id}`,
+          });
         }
       }
 
@@ -160,6 +196,7 @@ export class NotificationsScanService {
         result.internalSlaOverdue +
         result.internalSlaApproaching +
         result.statutoryDeadlineApproaching +
+        result.statutoryDeadlineOverdue +
         result.clientDependencyReminder;
       return result;
     });

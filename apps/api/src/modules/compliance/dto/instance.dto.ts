@@ -70,6 +70,25 @@ export class ComplianceCalendarQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(DUE_DATE_CATEGORIES)
   dueDateCategory?: DueDateCategory;
+
+  @ApiPropertyOptional({ description: 'Service-wide view (§22): filter by service code.' })
+  @IsOptional()
+  @IsString()
+  serviceCode?: string;
+
+  @ApiPropertyOptional({
+    description: 'Partner portfolio view (§22): engagement-partner employee id.',
+  })
+  @IsOptional()
+  @IsUUID()
+  partnerId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Manager workload view (§22): engagement-manager employee id.',
+  })
+  @IsOptional()
+  @IsUUID()
+  managerId?: string;
 }
 
 /** Bulk-generate obligations for all active rules on the engagement's service. */

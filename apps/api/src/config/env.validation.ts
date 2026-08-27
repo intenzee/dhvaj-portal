@@ -95,6 +95,11 @@ export const envSchema = z.object({
   // rolling job extends it as time advances. Default 12 months keeps a current
   // financial year fully materialised while bounding far-future generation.
   COMPLIANCE_HORIZON_MONTHS: z.coerce.number().int().positive().max(120).default(12),
+
+  // Escalation ladder (spec §24): an OPEN obligation this many days past its
+  // operative deadline is "critical" — escalated beyond the engagement leads to
+  // the firm (managing partner). Below the threshold it is plain "overdue".
+  COMPLIANCE_CRITICAL_OVERDUE_DAYS: z.coerce.number().int().positive().max(365).default(7),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -146,3 +146,21 @@ export const DEADLINE_LAYER_TYPE = {
 } as const;
 export type DeadlineLayerType = (typeof DEADLINE_LAYER_TYPE)[keyof typeof DEADLINE_LAYER_TYPE];
 export const DEADLINE_LAYER_TYPES: DeadlineLayerType[] = Object.values(DEADLINE_LAYER_TYPE);
+
+/**
+ * Escalation level (spec §24 — Status and Escalation). A derived urgency band
+ * for an OPEN obligation, from its operative date and today: it drives the
+ * calendar's colour and the escalation ladder (due-soon → owner; overdue →
+ * owner + manager; critical → engagement partner / firm). Closed obligations
+ * (completed / waived) are `none`.
+ */
+export const ESCALATION_LEVEL = {
+  none: 'none',
+  upcoming: 'upcoming',
+  dueSoon: 'due_soon',
+  dueToday: 'due_today',
+  overdue: 'overdue',
+  critical: 'critical',
+} as const;
+export type EscalationLevel = (typeof ESCALATION_LEVEL)[keyof typeof ESCALATION_LEVEL];
+export const ESCALATION_LEVELS: EscalationLevel[] = Object.values(ESCALATION_LEVEL);

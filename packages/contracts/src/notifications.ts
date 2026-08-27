@@ -15,6 +15,7 @@ export const NOTIFICATION_TYPE = {
   internalSlaApproaching: 'internal_sla_approaching',
   internalSlaOverdue: 'internal_sla_overdue',
   statutoryDeadlineApproaching: 'statutory_deadline_approaching',
+  statutoryDeadlineOverdue: 'statutory_deadline_overdue',
   clientDependencyReminder: 'client_dependency_reminder',
   engagementReopened: 'engagement_reopened',
   epChanged: 'ep_changed',

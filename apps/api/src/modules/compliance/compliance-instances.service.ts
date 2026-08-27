@@ -16,11 +16,13 @@ import {
   type DeadlineLayerType,
   type DueDateCategory,
   type DueDateSource,
+  type EscalationLevel,
   type WorkingDayAdjustment,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
+import { AppConfigService } from '../../config/config.module';
 import { resolveAmbientCorrelationId } from '../../common/context/request-context';
 import { AuditService } from '../audit/audit.service';
 import {
@@ -55,6 +57,7 @@ interface CalendarExtraRow {
   engagement_code: string;
   entity_name: string;
   service_code: string;
+  escalation: EscalationLevel;
 }
 
 interface InstanceRow {
@@ -190,6 +193,7 @@ interface EventRow {
   entity_name: string;
   service_code: string;
   is_overdue: boolean;
+  escalation: EscalationLevel;
 }
 
 /**
@@ -235,7 +239,25 @@ export class ComplianceInstancesService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly cls: ClsService,
+    private readonly config: AppConfigService,
   ) {}
+
+  /**
+   * The SQL CASE that derives an obligation's escalation band (§24) from its
+   * operative date `eff`. Thresholds come from firm config and are validated
+   * integers, so inlining them is safe (no user input).
+   */
+  private escalationCase(statusCol: string, dueCol: string): string {
+    const dueSoon = this.config.get('NOTIFICATION_DEADLINE_LEAD_DAYS');
+    const critical = this.config.get('COMPLIANCE_CRITICAL_OVERDUE_DAYS');
+    return `CASE
+      WHEN ${statusCol} <> 'open' THEN 'none'
+      WHEN ${dueCol} > CURRENT_DATE + ${dueSoon} THEN 'upcoming'
+      WHEN ${dueCol} > CURRENT_DATE THEN 'due_soon'
+      WHEN ${dueCol} = CURRENT_DATE THEN 'due_today'
+      WHEN ${dueCol} >= CURRENT_DATE - ${critical} THEN 'overdue'
+      ELSE 'critical' END`;
+  }
 
   async generate(
     ctx: RlsContext,
@@ -451,6 +473,9 @@ export class ComplianceInstancesService {
       dueTo?: string;
       overdueOnly?: boolean;
       dueDateCategory?: DueDateCategory;
+      serviceCode?: string;
+      partnerId?: string;
+      managerId?: string;
     } = {},
   ): Promise<PageResult<ComplianceCalendarRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
@@ -463,6 +488,20 @@ export class ComplianceInstancesService {
       if (filter.dueDateCategory) {
         params.push(filter.dueDateCategory);
         conditions.push(`cr.due_date_category = $${params.length}`);
+      }
+      // §22 views: scope the calendar to a service, an engagement partner
+      // (partner portfolio), or a manager (team workload).
+      if (filter.serviceCode) {
+        params.push(filter.serviceCode);
+        conditions.push(`s.code = $${params.length}`);
+      }
+      if (filter.partnerId) {
+        params.push(filter.partnerId);
+        conditions.push(`eng.engagement_partner_id = $${params.length}`);
+      }
+      if (filter.managerId) {
+        params.push(filter.managerId);
+        conditions.push(`eng.engagement_manager_id = $${params.length}`);
       }
       const effective = EFFECTIVE_STATUTORY;
       if (filter.dueFrom) {
@@ -482,7 +521,8 @@ export class ComplianceInstancesService {
       const { rows } = await client.query<InstanceRow & CalendarExtraRow>(
         `${INSTANCE_BASE.replace(
           'FROM hsdg.compliance_instances ci',
-          `, eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code
+          `, eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
+             ${this.escalationCase('ci.status', effective)} AS escalation
            FROM hsdg.compliance_instances ci
            JOIN hsdg.engagements eng ON eng.id = ci.engagement_id
            JOIN hsdg.entities ent ON ent.id = eng.entity_id
@@ -494,11 +534,13 @@ export class ComplianceInstancesService {
         params,
       );
       const totalRes = await client.query<{ total: string }>(
-        // The rule + extension joins must be present here too: ${where} can
-        // filter on the effective statutory date (ge.revised_due_date) and on
-        // the rule's due-date category (cr.due_date_category).
+        // The joins must mirror the filters: ${where} can reference the effective
+        // statutory date (ge), the rule's category (cr) and the service/partner/
+        // manager (eng, s).
         `SELECT count(*) AS total FROM hsdg.compliance_instances ci
          JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+         JOIN hsdg.engagements eng ON eng.id = ci.engagement_id
+         JOIN hsdg.services s ON s.id = eng.service_id
          LEFT JOIN hsdg.government_extensions ge ON ge.id = ci.government_extension_id ${where}`,
         params.slice(0, params.length - 2),
       );
@@ -508,6 +550,7 @@ export class ComplianceInstancesService {
           engagementCode: r.engagement_code,
           entityName: r.entity_name,
           serviceCode: r.service_code,
+          escalation: r.escalation,
         })),
         total: Number(totalRes.rows[0]?.total ?? 0),
       };
@@ -856,7 +899,8 @@ export class ComplianceInstancesService {
                 ev.engagement_id, ev.rule_code, ev.rule_name, ev.label, ev.due_date_category,
                 ev.due_date::text AS due_date, ev.status,
                 eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
-                (ev.status = 'open' AND ev.due_date < CURRENT_DATE) AS is_overdue
+                (ev.status = 'open' AND ev.due_date < CURRENT_DATE) AS is_overdue,
+                ${this.escalationCase('ev.status', 'ev.due_date')} AS escalation
          FROM ev
          JOIN hsdg.engagements eng ON eng.id = ev.engagement_id
          JOIN hsdg.entities ent ON ent.id = eng.entity_id
@@ -1274,5 +1318,6 @@ function mapEvent(row: EventRow): ComplianceCalendarEventRecord {
     dueDate: row.due_date,
     status: row.status,
     isOverdue: row.is_overdue,
+    escalation: row.escalation,
   };
 }

@@ -278,12 +278,18 @@ export class ComplianceCalendarController {
       dueTo?: string;
       overdueOnly?: boolean;
       dueDateCategory?: ComplianceCalendarQueryDto['dueDateCategory'];
+      serviceCode?: string;
+      partnerId?: string;
+      managerId?: string;
     } = {};
     if (query.status) filter.status = query.status;
     if (query.dueFrom) filter.dueFrom = query.dueFrom;
     if (query.dueTo) filter.dueTo = query.dueTo;
     if (query.overdueOnly !== undefined) filter.overdueOnly = query.overdueOnly;
     if (query.dueDateCategory) filter.dueDateCategory = query.dueDateCategory;
+    if (query.serviceCode) filter.serviceCode = query.serviceCode;
+    if (query.partnerId) filter.partnerId = query.partnerId;
+    if (query.managerId) filter.managerId = query.managerId;
     return this.instances
       .calendar(rlsContextFromPrincipal(principal), query, filter)
       .then((result) => paginate(result, query));

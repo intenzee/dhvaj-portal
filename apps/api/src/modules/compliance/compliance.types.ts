@@ -6,6 +6,7 @@ import type {
   DeadlineLayerType,
   DueDateCategory,
   DueDateSource,
+  EscalationLevel,
   WorkingDayAdjustment,
 } from '@hsdg/contracts';
 
@@ -172,6 +173,8 @@ export interface ComplianceCalendarRecord extends ComplianceInstanceRecord {
   engagementCode: string;
   entityName: string;
   serviceCode: string;
+  /** Escalation band (§24), derived from the operative date and today. */
+  escalation: EscalationLevel;
 }
 
 /** The kind of a flattened calendar event (§16). */
@@ -199,6 +202,8 @@ export interface ComplianceCalendarEventRecord {
   dueDate: string;
   status: ComplianceStatus;
   isOverdue: boolean;
+  /** Escalation band (§24). */
+  escalation: EscalationLevel;
 }
 
 /** Result of a bulk generate-for-service call. */
