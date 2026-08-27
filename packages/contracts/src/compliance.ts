@@ -122,3 +122,27 @@ export const DUE_DATE_SOURCE = {
 } as const;
 export type DueDateSource = (typeof DUE_DATE_SOURCE)[keyof typeof DUE_DATE_SOURCE];
 export const DUE_DATE_SOURCES: DueDateSource[] = Object.values(DUE_DATE_SOURCE);
+
+/**
+ * Deadline LAYER type (spec §16) — one compliance obligation can carry several
+ * deadline layers, each surfaced as its own calendar event: the statutory
+ * filing, the HSDG preparation target, and the review milestones. The statutory
+ * and internal-SLA layers live on the obligation itself; these are the ADDED
+ * milestone layers (preparation + reviews + assurance stage gates).
+ */
+export const DEADLINE_LAYER_TYPE = {
+  /** HSDG preparation target ahead of the statutory date (HSDG_RECURRING). */
+  hsdgPreparation: 'hsdg_preparation',
+  /** Manager review milestone (HSDG_MILESTONE). */
+  managerReview: 'manager_review',
+  /** Engagement-partner review milestone (HSDG_MILESTONE). */
+  epReview: 'ep_review',
+  /** Provided-by-client complete gate (CLIENT_COMMITTED / HSDG_MILESTONE). */
+  pbcComplete: 'pbc_complete',
+  /** Fieldwork complete gate (HSDG_MILESTONE). */
+  fieldworkComplete: 'fieldwork_complete',
+  /** Any other configured layer. */
+  custom: 'custom',
+} as const;
+export type DeadlineLayerType = (typeof DEADLINE_LAYER_TYPE)[keyof typeof DEADLINE_LAYER_TYPE];
+export const DEADLINE_LAYER_TYPES: DeadlineLayerType[] = Object.values(DEADLINE_LAYER_TYPE);

@@ -3,6 +3,7 @@ import type {
   ComplianceCategory,
   ComplianceClock,
   ComplianceStatus,
+  DeadlineLayerType,
   DueDateCategory,
   DueDateSource,
   WorkingDayAdjustment,
@@ -134,8 +135,36 @@ export interface ComplianceOverrideRecord {
   createdAt: string;
 }
 
+/**
+ * One additional deadline LAYER on an obligation (§16) — a preparation target or
+ * review/stage gate, surfaced as its own calendar event with its own category.
+ */
+export interface ComplianceDeadlineLayerRecord {
+  id: string;
+  complianceInstanceId: string;
+  engagementId: string;
+  layerType: DeadlineLayerType;
+  label: string;
+  dueDateCategory: DueDateCategory;
+  dueDate: string;
+  ownerEmployeeId: string | null;
+  ownerName: string | null;
+  status: ComplianceStatus;
+  /** Derived: open and past its due date. */
+  isOverdue: boolean;
+  completedAt: string | null;
+  completedById: string | null;
+  completedByName: string | null;
+  notes: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ComplianceInstanceDetail extends ComplianceInstanceRecord {
   overrides: ComplianceOverrideRecord[];
+  /** The obligation's additional deadline layers (§16), by due date. */
+  deadlines: ComplianceDeadlineLayerRecord[];
 }
 
 /** A calendar row — an obligation enriched with its engagement/entity/service context. */
@@ -143,6 +172,33 @@ export interface ComplianceCalendarRecord extends ComplianceInstanceRecord {
   engagementCode: string;
   entityName: string;
   serviceCode: string;
+}
+
+/** The kind of a flattened calendar event (§16). */
+export type ComplianceEventKind = 'statutory' | 'internal_sla' | 'layer';
+
+/**
+ * A single flattened calendar EVENT (§16). One obligation fans out into its
+ * statutory event, its internal-SLA event, and one event per deadline layer —
+ * each a separate, categorised row the calendar can surface independently.
+ */
+export interface ComplianceCalendarEventRecord {
+  eventId: string;
+  kind: ComplianceEventKind;
+  complianceInstanceId: string;
+  deadlineLayerId: string | null;
+  layerType: DeadlineLayerType | null;
+  engagementId: string;
+  engagementCode: string;
+  entityName: string;
+  serviceCode: string;
+  complianceRuleCode: string;
+  complianceRuleName: string;
+  label: string;
+  dueDateCategory: DueDateCategory;
+  dueDate: string;
+  status: ComplianceStatus;
+  isOverdue: boolean;
 }
 
 /** Result of a bulk generate-for-service call. */
@@ -181,6 +237,25 @@ export interface CreateGovernmentExtensionInput {
 
 export interface ApplyExtensionInput {
   governmentExtensionId: string;
+  version?: number;
+}
+
+export interface AddDeadlineLayerInput {
+  layerType: DeadlineLayerType;
+  label: string;
+  dueDateCategory: DueDateCategory;
+  dueDate: string;
+  ownerEmployeeId?: string | null;
+  notes?: string;
+}
+
+export interface CompleteDeadlineLayerInput {
+  notes?: string;
+  version?: number;
+}
+
+export interface WaiveDeadlineLayerInput {
+  reason: string;
   version?: number;
 }
 

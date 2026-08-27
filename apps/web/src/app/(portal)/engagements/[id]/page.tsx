@@ -33,6 +33,7 @@ import { ComponentWorkSection } from '@/components/actions/component-work-sectio
 import { DocumentsSection } from '@/components/actions/documents-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
 import { ObligationExtensionActions } from '@/components/compliance/extension-modals';
+import { DeadlineLayersModal } from '@/components/compliance/deadline-layers-modal';
 
 type TabKey =
   | 'overview'
@@ -70,6 +71,7 @@ interface ActivityRecord {
 export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<TabKey>('overview');
+  const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
 
   const eng = useQuery({
     queryKey: ['engagement', id],
@@ -327,6 +329,7 @@ export default function EngagementDetailPage(): JSX.Element {
                     <th className="px-4 py-2.5 font-semibold">Statutory</th>
                     <th className="px-4 py-2.5 font-semibold">Internal SLA</th>
                     <th className="px-4 py-2.5 font-semibold">Status</th>
+                    <th className="px-4 py-2.5 font-semibold">Deadlines</th>
                     <th className="px-4 py-2.5 font-semibold text-right">Extension</th>
                   </tr>
                 </thead>
@@ -365,6 +368,14 @@ export default function EngagementDetailPage(): JSX.Element {
                         <StatusBadge status={c.status} />
                       </td>
                       <td className="px-4 py-2.5">
+                        <button
+                          onClick={() => setDeadlinesFor(c)}
+                          className="text-xs font-medium text-primary-600 hover:underline"
+                        >
+                          Manage layers
+                        </button>
+                      </td>
+                      <td className="px-4 py-2.5">
                         <ObligationExtensionActions engagementId={e.id} obligation={c} />
                       </td>
                     </tr>
@@ -373,6 +384,13 @@ export default function EngagementDetailPage(): JSX.Element {
               </table>
             )}
           </Card>
+          {deadlinesFor && (
+            <DeadlineLayersModal
+              engagementId={e.id}
+              obligation={deadlinesFor}
+              onClose={() => setDeadlinesFor(null)}
+            />
+          )}
         </section>
       )}
 

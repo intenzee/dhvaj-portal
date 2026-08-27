@@ -13,6 +13,7 @@ import {
   type CalculationBasis,
   type ComplianceClock,
   type ComplianceStatus,
+  type DeadlineLayerType,
   type DueDateCategory,
   type DueDateSource,
   type WorkingDayAdjustment,
@@ -31,16 +32,22 @@ import {
 } from './compliance-calc';
 import { translateComplianceError } from './compliance-rules.service';
 import type {
+  AddDeadlineLayerInput,
   ApplyExtensionInput,
   BulkGenerateResult,
+  ComplianceCalendarEventRecord,
   ComplianceCalendarRecord,
+  ComplianceDeadlineLayerRecord,
+  ComplianceEventKind,
   ComplianceInstanceDetail,
   ComplianceInstanceRecord,
   ComplianceOverrideRecord,
+  CompleteDeadlineLayerInput,
   CompleteInstanceInput,
   GenerateInstanceInput,
   InstanceGovernmentExtension,
   OverrideInstanceInput,
+  WaiveDeadlineLayerInput,
   WaiveInstanceInput,
 } from './compliance.types';
 
@@ -135,6 +142,83 @@ const INSTANCE_BASE = `
   JOIN hsdg.compliance_rule_versions crv ON crv.id = ci.compliance_rule_version_id
   LEFT JOIN hsdg.employees ce ON ce.id = ci.completed_by_employee_id
   LEFT JOIN hsdg.government_extensions ge ON ge.id = ci.government_extension_id`;
+
+interface LayerRow {
+  id: string;
+  compliance_instance_id: string;
+  engagement_id: string;
+  layer_type: DeadlineLayerType;
+  label: string;
+  due_date_category: DueDateCategory;
+  due_date: string;
+  owner_employee_id: string | null;
+  owner_name: string | null;
+  status: ComplianceStatus;
+  is_overdue: boolean;
+  completed_at: Date | null;
+  completed_by_employee_id: string | null;
+  completed_by_name: string | null;
+  notes: string | null;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const LAYER_SELECT = `
+  SELECT d.id, d.compliance_instance_id, d.engagement_id, d.layer_type, d.label,
+         d.due_date_category, d.due_date::text, d.owner_employee_id, oe.full_name AS owner_name,
+         d.status, (d.status = 'open' AND d.due_date < CURRENT_DATE) AS is_overdue,
+         d.completed_at, d.completed_by_employee_id, ce.full_name AS completed_by_name,
+         d.notes, d.version, d.created_at, d.updated_at
+  FROM hsdg.compliance_instance_deadlines d
+  LEFT JOIN hsdg.employees oe ON oe.id = d.owner_employee_id
+  LEFT JOIN hsdg.employees ce ON ce.id = d.completed_by_employee_id`;
+
+interface EventRow {
+  compliance_instance_id: string;
+  deadline_layer_id: string | null;
+  kind: ComplianceEventKind;
+  layer_type: DeadlineLayerType | null;
+  engagement_id: string;
+  rule_code: string;
+  rule_name: string;
+  label: string;
+  due_date_category: DueDateCategory;
+  due_date: string;
+  status: ComplianceStatus;
+  engagement_code: string;
+  entity_name: string;
+  service_code: string;
+  is_overdue: boolean;
+}
+
+/**
+ * The event fan-out (§16). Each obligation yields three event families: its
+ * statutory event (operative date, precedence-aware), its internal-SLA event,
+ * and one event per deadline layer. RLS on both source tables scopes the union.
+ */
+const EVENTS_UNION = `
+  SELECT ci.id AS compliance_instance_id, NULL::uuid AS deadline_layer_id,
+         'statutory'::text AS kind, NULL::text AS layer_type, ci.engagement_id,
+         cr.code AS rule_code, cr.name AS rule_name, cr.name AS label,
+         cr.due_date_category AS due_date_category,
+         COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline) AS due_date,
+         ci.status AS status
+  FROM hsdg.compliance_instances ci
+  JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+  LEFT JOIN hsdg.government_extensions ge ON ge.id = ci.government_extension_id
+  UNION ALL
+  SELECT ci.id, NULL::uuid, 'internal_sla'::text, NULL::text, ci.engagement_id,
+         cr.code, cr.name, 'Internal SLA'::text, 'HSDG_RECURRING'::text,
+         COALESCE(ci.internal_sla_override, ci.internal_sla_date), ci.status
+  FROM hsdg.compliance_instances ci
+  JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+  UNION ALL
+  SELECT d.compliance_instance_id, d.id, 'layer'::text, d.layer_type, d.engagement_id,
+         cr.code, cr.name, d.label, d.due_date_category, d.due_date, d.status
+  FROM hsdg.compliance_instance_deadlines d
+  JOIN hsdg.compliance_instances ci ON ci.id = d.compliance_instance_id
+  JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id`;
 
 /**
  * The per-engagement compliance engine (Phase 8, ADR-0013).
@@ -611,6 +695,189 @@ export class ComplianceInstancesService {
     });
   }
 
+  // ── Deadline layers (§16 — one obligation, many deadline events) ─────────
+
+  /** Add a deadline layer (preparation / review / stage gate) to an obligation. */
+  async addDeadlineLayer(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    input: AddDeadlineLayerInput,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const parent = await this.selectInstance(client, instanceId, engagementId);
+      if (!parent) throw new NotFoundException('Compliance instance not found.');
+
+      let layerId: string;
+      try {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO hsdg.compliance_instance_deadlines
+             (compliance_instance_id, engagement_id, layer_type, label, due_date_category,
+              due_date, owner_employee_id, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+          [
+            instanceId,
+            engagementId,
+            input.layerType,
+            input.label,
+            input.dueDateCategory,
+            input.dueDate,
+            input.ownerEmployeeId ?? null,
+            input.notes ?? null,
+          ],
+        );
+        layerId = rows[0]!.id;
+      } catch (err) {
+        throw translateComplianceError(err);
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'compliance.deadline_layer_added',
+        objectType: 'compliance_instance',
+        objectId: instanceId,
+        after: {
+          layerId,
+          layerType: input.layerType,
+          label: input.label,
+          dueDateCategory: input.dueDateCategory,
+          dueDate: input.dueDate,
+        },
+      });
+      return (await this.selectInstanceDetail(client, instanceId, engagementId))!;
+    });
+  }
+
+  async completeDeadlineLayer(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    layerId: string,
+    input: CompleteDeadlineLayerInput,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.transitionLayer(ctx, engagementId, instanceId, layerId, {
+      to: COMPLIANCE_STATUS.completed,
+      notes: input.notes,
+      version: input.version,
+      auditAction: 'compliance.deadline_layer_completed',
+    });
+  }
+
+  async waiveDeadlineLayer(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    layerId: string,
+    input: WaiveDeadlineLayerInput,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.transitionLayer(ctx, engagementId, instanceId, layerId, {
+      to: COMPLIANCE_STATUS.waived,
+      reason: input.reason,
+      version: input.version,
+      auditAction: 'compliance.deadline_layer_waived',
+    });
+  }
+
+  /** Remove a deadline layer (leads only; audited). */
+  async removeDeadlineLayer(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    layerId: string,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const parent = await this.selectInstance(client, instanceId, engagementId);
+      if (!parent) throw new NotFoundException('Compliance instance not found.');
+      const layer = await this.selectLayer(client, layerId, instanceId, engagementId);
+      if (!layer) throw new NotFoundException('Deadline layer not found.');
+
+      let removed: number;
+      try {
+        const result = await client.query(
+          `DELETE FROM hsdg.compliance_instance_deadlines
+           WHERE id = $1 AND compliance_instance_id = $2 AND engagement_id = $3`,
+          [layerId, instanceId, engagementId],
+        );
+        removed = result.rowCount ?? 0;
+      } catch (err) {
+        throw translateComplianceError(err);
+      }
+      if (removed === 0) {
+        throw new ForbiddenException('Not permitted to remove this deadline layer.');
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'compliance.deadline_layer_removed',
+        objectType: 'compliance_instance',
+        objectId: instanceId,
+        before: { layerId, layerType: layer.layerType, label: layer.label },
+      });
+      return (await this.selectInstanceDetail(client, instanceId, engagementId))!;
+    });
+  }
+
+  /**
+   * The FLATTENED calendar events (§16): each obligation the caller can see fans
+   * out into its statutory event, its internal-SLA event, and one event per
+   * deadline layer — so multiple deadlines on one component surface as separate,
+   * individually categorised calendar events. RLS-scoped; ordered by due date.
+   */
+  async calendarEvents(
+    ctx: RlsContext,
+    page: PageParams,
+    filter: {
+      dueFrom?: string;
+      dueTo?: string;
+      overdueOnly?: boolean;
+      openOnly?: boolean;
+      engagementId?: string;
+    } = {},
+  ): Promise<PageResult<ComplianceCalendarEventRecord>> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (filter.engagementId) {
+        params.push(filter.engagementId);
+        conditions.push(`ev.engagement_id = $${params.length}`);
+      }
+      if (filter.dueFrom) {
+        params.push(filter.dueFrom);
+        conditions.push(`ev.due_date >= $${params.length}::date`);
+      }
+      if (filter.dueTo) {
+        params.push(filter.dueTo);
+        conditions.push(`ev.due_date <= $${params.length}::date`);
+      }
+      if (filter.openOnly) conditions.push(`ev.status = 'open'`);
+      if (filter.overdueOnly) conditions.push(`ev.status = 'open' AND ev.due_date < CURRENT_DATE`);
+      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+      params.push(page.limit, page.offset);
+
+      const { rows } = await client.query<EventRow>(
+        `WITH ev AS (${EVENTS_UNION})
+         SELECT ev.compliance_instance_id, ev.deadline_layer_id, ev.kind, ev.layer_type,
+                ev.engagement_id, ev.rule_code, ev.rule_name, ev.label, ev.due_date_category,
+                ev.due_date::text AS due_date, ev.status,
+                eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
+                (ev.status = 'open' AND ev.due_date < CURRENT_DATE) AS is_overdue
+         FROM ev
+         JOIN hsdg.engagements eng ON eng.id = ev.engagement_id
+         JOIN hsdg.entities ent ON ent.id = eng.entity_id
+         JOIN hsdg.services s ON s.id = eng.service_id
+         ${where}
+         ORDER BY ev.due_date, ev.kind
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
+      );
+      const totalRes = await client.query<{ total: string }>(
+        `WITH ev AS (${EVENTS_UNION})
+         SELECT count(*) AS total FROM ev ${where}`,
+        params.slice(0, params.length - 2),
+      );
+      return {
+        items: rows.map(mapEvent),
+        total: Number(totalRes.rows[0]?.total ?? 0),
+      };
+    });
+  }
+
   async complete(
     ctx: RlsContext,
     engagementId: string,
@@ -789,7 +1056,122 @@ export class ComplianceInstancesService {
       actorRole: r.actor_role,
       createdAt: r.created_at.toISOString(),
     }));
-    return { ...base, overrides };
+    const deadlines = await this.selectLayers(client, instanceId);
+    return { ...base, overrides, deadlines };
+  }
+
+  private async selectLayers(
+    client: PoolClient,
+    instanceId: string,
+  ): Promise<ComplianceDeadlineLayerRecord[]> {
+    const { rows } = await client.query<LayerRow>(
+      `${LAYER_SELECT}
+       WHERE d.compliance_instance_id = $1
+       ORDER BY d.due_date, d.created_at`,
+      [instanceId],
+    );
+    return rows.map(mapLayer);
+  }
+
+  private async selectLayer(
+    client: PoolClient,
+    layerId: string,
+    instanceId: string,
+    engagementId: string,
+  ): Promise<ComplianceDeadlineLayerRecord | null> {
+    const { rows } = await client.query<LayerRow>(
+      `${LAYER_SELECT}
+       WHERE d.id = $1 AND d.compliance_instance_id = $2 AND d.engagement_id = $3`,
+      [layerId, instanceId, engagementId],
+    );
+    return rows[0] ? mapLayer(rows[0]) : null;
+  }
+
+  /** Complete/waive a deadline layer with an optimistic version guard (audited). */
+  private async transitionLayer(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    layerId: string,
+    opts: {
+      to: ComplianceStatus;
+      notes?: string;
+      reason?: string;
+      version?: number;
+      auditAction: string;
+    },
+  ): Promise<ComplianceInstanceDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const parent = await this.selectInstance(client, instanceId, engagementId);
+      if (!parent) throw new NotFoundException('Compliance instance not found.');
+      const before = await this.selectLayer(client, layerId, instanceId, engagementId);
+      if (!before) throw new NotFoundException('Deadline layer not found.');
+      if (before.status !== COMPLIANCE_STATUS.open) {
+        throw new BadRequestException(
+          `Deadline layer is already "${before.status}" — only open layers can change.`,
+        );
+      }
+
+      const completing = opts.to === COMPLIANCE_STATUS.completed;
+      // Build SET + params together so no parameter is left unreferenced (a bare,
+      // unused $n makes Postgres fail with "could not determine data type").
+      const setClauses: string[] = [];
+      const params: unknown[] = [];
+      if (completing) {
+        params.push(ctx.employeeId ?? null);
+        setClauses.push(
+          `status = 'completed'`,
+          `completed_at = now()`,
+          `completed_by_employee_id = $${params.length}::uuid`,
+        );
+      } else {
+        setClauses.push(`status = 'waived'`);
+      }
+      params.push(opts.notes ?? opts.reason ?? null);
+      setClauses.push(`notes = COALESCE($${params.length}, notes)`);
+      params.push(layerId);
+      const idParam = `$${params.length}`;
+      params.push(instanceId);
+      const instParam = `$${params.length}`;
+      params.push(engagementId);
+      const engParam = `$${params.length}`;
+      let versionClause = '';
+      if (opts.version !== undefined) {
+        params.push(opts.version);
+        versionClause = ` AND version = $${params.length}`;
+      }
+      let updated: number;
+      try {
+        const result = await client.query(
+          `UPDATE hsdg.compliance_instance_deadlines
+           SET ${setClauses.join(', ')}, version = version + 1
+           WHERE id = ${idParam} AND compliance_instance_id = ${instParam}
+             AND engagement_id = ${engParam}${versionClause}`,
+          params,
+        );
+        updated = result.rowCount ?? 0;
+      } catch (err) {
+        throw translateComplianceError(err);
+      }
+      if (updated === 0) {
+        if (opts.version !== undefined && before.version !== opts.version) {
+          throw new ConflictException(
+            'Deadline layer was modified by someone else. Refresh and retry (stale version).',
+          );
+        }
+        throw new ForbiddenException('Not permitted to modify this deadline layer.');
+      }
+
+      await this.audit.recordWith(client, ctx, {
+        action: opts.auditAction,
+        objectType: 'compliance_instance',
+        objectId: instanceId,
+        before: { layerId, status: before.status },
+        after: { layerId, status: opts.to },
+        reason: opts.reason ?? null,
+      });
+      return (await this.selectInstanceDetail(client, instanceId, engagementId))!;
+    });
   }
 }
 
@@ -846,5 +1228,51 @@ function mapInstanceExtension(row: InstanceRow): InstanceGovernmentExtension | n
     notificationReference: row.ext_notification_reference,
     applicablePopulation: row.ext_applicable_population,
     effectiveDate: row.ext_effective_date,
+  };
+}
+
+function mapLayer(row: LayerRow): ComplianceDeadlineLayerRecord {
+  return {
+    id: row.id,
+    complianceInstanceId: row.compliance_instance_id,
+    engagementId: row.engagement_id,
+    layerType: row.layer_type,
+    label: row.label,
+    dueDateCategory: row.due_date_category,
+    dueDate: row.due_date,
+    ownerEmployeeId: row.owner_employee_id,
+    ownerName: row.owner_name,
+    status: row.status,
+    isOverdue: row.is_overdue,
+    completedAt: row.completed_at ? row.completed_at.toISOString() : null,
+    completedById: row.completed_by_employee_id,
+    completedByName: row.completed_by_name,
+    notes: row.notes,
+    version: row.version,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function mapEvent(row: EventRow): ComplianceCalendarEventRecord {
+  return {
+    eventId: row.deadline_layer_id
+      ? `layer:${row.deadline_layer_id}`
+      : `${row.kind}:${row.compliance_instance_id}`,
+    kind: row.kind,
+    complianceInstanceId: row.compliance_instance_id,
+    deadlineLayerId: row.deadline_layer_id,
+    layerType: row.layer_type,
+    engagementId: row.engagement_id,
+    engagementCode: row.engagement_code,
+    entityName: row.entity_name,
+    serviceCode: row.service_code,
+    complianceRuleCode: row.rule_code,
+    complianceRuleName: row.rule_name,
+    label: row.label,
+    dueDateCategory: row.due_date_category,
+    dueDate: row.due_date,
+    status: row.status,
+    isOverdue: row.is_overdue,
   };
 }

@@ -181,6 +181,46 @@ export interface ComplianceRow {
   isExtended: boolean;
 }
 
+/** One additional deadline layer on an obligation (§16). */
+export interface ComplianceDeadlineLayer {
+  id: string;
+  layerType: string;
+  label: string;
+  dueDateCategory: string;
+  dueDate: string;
+  ownerName: string | null;
+  status: ComplianceStatus;
+  isOverdue: boolean;
+  version: number;
+}
+
+/** An obligation with its override history and deadline layers (detail view). */
+export interface ComplianceInstanceDetail {
+  id: string;
+  complianceRuleName: string;
+  effectiveStatutoryDeadline: string;
+  effectiveInternalSlaDate: string;
+  status: ComplianceStatus;
+  isExtended: boolean;
+  deadlines: ComplianceDeadlineLayer[];
+}
+
+/** One flattened calendar event (§16): statutory / internal-SLA / layer. */
+export interface ComplianceEvent {
+  eventId: string;
+  kind: 'statutory' | 'internal_sla' | 'layer';
+  complianceInstanceId: string;
+  layerType: string | null;
+  engagementCode: string;
+  entityName: string;
+  complianceRuleName: string;
+  label: string;
+  dueDateCategory: string;
+  dueDate: string;
+  status: ComplianceStatus;
+  isOverdue: boolean;
+}
+
 // ── Compliance configuration (Phase 8 admin) ────────────────────────────────
 
 export interface ComplianceRuleVersion {

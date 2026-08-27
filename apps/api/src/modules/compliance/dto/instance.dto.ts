@@ -17,9 +17,11 @@ import {
 import {
   COMPLIANCE_CLOCKS,
   COMPLIANCE_STATUSES,
+  DEADLINE_LAYER_TYPES,
   DUE_DATE_CATEGORIES,
   type ComplianceClock,
   type ComplianceStatus,
+  type DeadlineLayerType,
   type DueDateCategory,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
@@ -192,4 +194,96 @@ export class ClearExtensionDto {
   @IsInt()
   @Min(1)
   version?: number;
+}
+
+/** Add a deadline layer (§16) — a preparation target or review/stage gate. */
+export class AddDeadlineLayerDto {
+  @ApiProperty({ enum: DEADLINE_LAYER_TYPES })
+  @IsIn(DEADLINE_LAYER_TYPES)
+  layerType!: DeadlineLayerType;
+
+  @ApiProperty({ example: 'Manager review' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  label!: string;
+
+  @ApiProperty({ enum: DUE_DATE_CATEGORIES, description: 'How this layer is generated (§2).' })
+  @IsIn(DUE_DATE_CATEGORIES)
+  dueDateCategory!: DueDateCategory;
+
+  @ApiProperty({ example: '2026-01-15' })
+  @IsDateString()
+  dueDate!: string;
+
+  @ApiPropertyOptional({ description: 'Owner (employee id) accountable for this layer.' })
+  @IsOptional()
+  @IsUUID()
+  ownerEmployeeId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
+}
+
+export class CompleteDeadlineLayerDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
+
+  @ApiPropertyOptional({ description: 'Expected version (stale ⇒ 409).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
+}
+
+export class WaiveDeadlineLayerDto {
+  @ApiProperty({ description: 'Why the layer is being waived (recorded + audited).' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2000)
+  reason!: string;
+
+  @ApiPropertyOptional({ description: 'Expected version (stale ⇒ 409).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
+}
+
+/** Filters for the flattened calendar-events stream (§16). */
+export class ComplianceEventsQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ description: 'Only events for this engagement.' })
+  @IsOptional()
+  @IsUUID()
+  engagementId?: string;
+
+  @ApiPropertyOptional({ description: 'Event due date on/after this date.' })
+  @IsOptional()
+  @IsDateString()
+  dueFrom?: string;
+
+  @ApiPropertyOptional({ description: 'Event due date on/before this date.' })
+  @IsOptional()
+  @IsDateString()
+  dueTo?: string;
+
+  @ApiPropertyOptional({ description: 'Only open events.' })
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  openOnly?: boolean;
+
+  @ApiPropertyOptional({ description: 'Only open events past their due date.' })
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  overdueOnly?: boolean;
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -7,19 +7,24 @@ import { paginate } from '../../common/pagination/pagination.dto';
 import { ComplianceInstancesService } from './compliance-instances.service';
 import type {
   BulkGenerateResult,
+  ComplianceCalendarEventRecord,
   ComplianceCalendarRecord,
   ComplianceInstanceDetail,
   ComplianceInstanceRecord,
 } from './compliance.types';
 import {
+  AddDeadlineLayerDto,
   ApplyExtensionDto,
   ClearExtensionDto,
+  CompleteDeadlineLayerDto,
   CompleteInstanceDto,
   ComplianceCalendarQueryDto,
+  ComplianceEventsQueryDto,
   ComplianceInstanceListQueryDto,
   GenerateForServiceDto,
   GenerateInstanceDto,
   OverrideInstanceDto,
+  WaiveDeadlineLayerDto,
   WaiveInstanceDto,
 } from './dto/instance.dto';
 
@@ -146,6 +151,79 @@ export class ComplianceInstancesController {
     );
   }
 
+  @Post(':id/compliance/:instanceId/deadlines')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Add a deadline layer to an obligation (§16; audited)',
+    description:
+      'One obligation can carry several deadline layers — a preparation target and review/stage ' +
+      'gates — each its own categorised calendar event alongside the statutory and internal-SLA ' +
+      'clocks. Standard layer types are unique per obligation; "custom" may repeat.',
+  })
+  addDeadlineLayer(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+    @Body() dto: AddDeadlineLayerDto,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.instances.addDeadlineLayer(rlsContextFromPrincipal(principal), id, instanceId, dto);
+  }
+
+  @Post(':id/compliance/:instanceId/deadlines/:layerId/complete')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Mark a deadline layer completed (§16; audited)' })
+  completeDeadlineLayer(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+    @Param('layerId', new ParseUUIDPipe()) layerId: string,
+    @Body() dto: CompleteDeadlineLayerDto,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.instances.completeDeadlineLayer(
+      rlsContextFromPrincipal(principal),
+      id,
+      instanceId,
+      layerId,
+      dto,
+    );
+  }
+
+  @Post(':id/compliance/:instanceId/deadlines/:layerId/waive')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Waive a deadline layer (§16; audited; reason required)' })
+  waiveDeadlineLayer(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+    @Param('layerId', new ParseUUIDPipe()) layerId: string,
+    @Body() dto: WaiveDeadlineLayerDto,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.instances.waiveDeadlineLayer(
+      rlsContextFromPrincipal(principal),
+      id,
+      instanceId,
+      layerId,
+      dto,
+    );
+  }
+
+  @Delete(':id/compliance/:instanceId/deadlines/:layerId')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Remove a deadline layer (§16; audited)' })
+  removeDeadlineLayer(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+    @Param('layerId', new ParseUUIDPipe()) layerId: string,
+  ): Promise<ComplianceInstanceDetail> {
+    return this.instances.removeDeadlineLayer(
+      rlsContextFromPrincipal(principal),
+      id,
+      instanceId,
+      layerId,
+    );
+  }
+
   @Post(':id/compliance/:instanceId/complete')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({ summary: 'Mark a compliance obligation completed (audited)' })
@@ -208,6 +286,36 @@ export class ComplianceCalendarController {
     if (query.dueDateCategory) filter.dueDateCategory = query.dueDateCategory;
     return this.instances
       .calendar(rlsContextFromPrincipal(principal), query, filter)
+      .then((result) => paginate(result, query));
+  }
+
+  @Get('events')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Flattened compliance calendar events (§16; paginated, RLS-scoped)',
+    description:
+      'Each obligation fans out into separate events — its statutory event, its internal-SLA ' +
+      'event, and one per deadline layer — so multiple deadlines on one component surface ' +
+      'individually. Filter by ?dueFrom=/?dueTo=, ?openOnly=true and ?overdueOnly=true.',
+  })
+  events(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: ComplianceEventsQueryDto,
+  ): Promise<Paginated<ComplianceCalendarEventRecord>> {
+    const filter: {
+      dueFrom?: string;
+      dueTo?: string;
+      overdueOnly?: boolean;
+      openOnly?: boolean;
+      engagementId?: string;
+    } = {};
+    if (query.engagementId) filter.engagementId = query.engagementId;
+    if (query.dueFrom) filter.dueFrom = query.dueFrom;
+    if (query.dueTo) filter.dueTo = query.dueTo;
+    if (query.overdueOnly !== undefined) filter.overdueOnly = query.overdueOnly;
+    if (query.openOnly !== undefined) filter.openOnly = query.openOnly;
+    return this.instances
+      .calendarEvents(rlsContextFromPrincipal(principal), query, filter)
       .then((result) => paginate(result, query));
   }
 }
