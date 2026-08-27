@@ -90,6 +90,10 @@ export interface ServiceComponentRecord {
 export interface EngagementComponentRecord {
   id: string;
   engagementId: string;
+  /** The service line this component belongs to (multi-service, §9–§10). */
+  engagementServiceId: string | null;
+  /** Name of that service line's service, for display/grouping. */
+  serviceName: string | null;
   serviceComponentId: string;
   componentCode: string;
   componentName: string;

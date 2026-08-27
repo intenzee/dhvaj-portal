@@ -36,6 +36,8 @@ import { translateComponentError } from './service-components.service';
 interface EngagementComponentRow {
   id: string;
   engagement_id: string;
+  engagement_service_id: string | null;
+  service_name: string | null;
   service_component_id: string;
   component_code: string;
   component_name: string;
@@ -88,7 +90,8 @@ interface DeadlinePreview {
 }
 
 const EC_BASE = `
-  SELECT ec.id, ec.engagement_id, ec.service_component_id, sc.code AS component_code,
+  SELECT ec.id, ec.engagement_id, ec.engagement_service_id, svc.name AS service_name,
+         ec.service_component_id, sc.code AS component_code,
          sc.name AS component_name, sc.display_order AS component_display_order,
          ec.applicability_status, ec.applicability_reason, ec.frequency,
          ec.owner_employee_id, oe.full_name AS owner_name,
@@ -98,6 +101,8 @@ const EC_BASE = `
          ec.created_at, ec.updated_at
   FROM hsdg.engagement_components ec
   JOIN hsdg.service_components sc ON sc.id = ec.service_component_id
+  LEFT JOIN hsdg.engagement_services es ON es.id = ec.engagement_service_id
+  LEFT JOIN hsdg.services svc ON svc.id = es.service_id
   LEFT JOIN hsdg.employees oe ON oe.id = ec.owner_employee_id
   LEFT JOIN hsdg.employees re ON re.id = ec.reviewer_employee_id`;
 
@@ -708,6 +713,8 @@ function mapEngagementComponent(row: EngagementComponentRow): EngagementComponen
   return {
     id: row.id,
     engagementId: row.engagement_id,
+    engagementServiceId: row.engagement_service_id,
+    serviceName: row.service_name,
     serviceComponentId: row.service_component_id,
     componentCode: row.component_code,
     componentName: row.component_name,

@@ -26,6 +26,7 @@ import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
 import { TeamSection } from '@/components/actions/team-section';
 import { ComponentsSection } from '@/components/actions/components-section';
+import { ServicesSection } from '@/components/actions/services-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
@@ -117,8 +118,11 @@ export default function EngagementDetailPage(): JSX.Element {
         <TeamSection engagementId={e.id} team={e.team} />
       </div>
 
-      {/* Scope & components */}
-      <ComponentsSection engagementId={e.id} />
+      {/* Services (multi-service, §9–§10) */}
+      <ServicesSection engagementId={e.id} services={e.services} />
+
+      {/* Scope & components — scoped per service line */}
+      <ComponentsSection engagementId={e.id} services={e.services} />
 
       {/* Component work (generated instances) */}
       <ComponentWorkSection engagementId={e.id} />

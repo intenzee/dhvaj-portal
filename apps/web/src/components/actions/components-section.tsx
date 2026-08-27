@@ -9,6 +9,7 @@ import {
   type ComponentDiscoveryCategory,
   type ComponentConfigStatus,
   type EngagementComponentRecord,
+  type EngagementServiceLine,
   type Paginated,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -43,7 +44,13 @@ const STATUS_TONE: Record<ComponentConfigStatus, string> = {
  * engagement, plus a discovery drawer that categorises the service catalogue
  * (mandatory / applicable / optional) and lets a lead select and remove scope.
  */
-export function ComponentsSection({ engagementId }: { engagementId: string }): JSX.Element {
+export function ComponentsSection({
+  engagementId,
+  services,
+}: {
+  engagementId: string;
+  services: EngagementServiceLine[];
+}): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
   const { principal } = useAuth();
@@ -52,6 +59,14 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
   const [editing, setEditing] = useState<EngagementComponentRecord | null>(null);
   const [freqChanging, setFreqChanging] = useState<EngagementComponentRecord | null>(null);
 
+  // The service lines a caller can scope components under (live only), primary first.
+  const lines = services.filter((s) => s.status !== 'cancelled');
+  const primaryLineId = lines.find((s) => s.isPrimary)?.id ?? lines[0]?.id ?? '';
+  const [lineId, setLineId] = useState(primaryLineId);
+  // Keep the selection valid if the set of lines changes.
+  const activeLineId = lines.some((s) => s.id === lineId) ? lineId : primaryLineId;
+  const multiService = lines.length > 1;
+
   const configured = useQuery({
     queryKey: ['engagement', engagementId, 'components'],
     queryFn: () =>
@@ -59,9 +74,11 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
   });
 
   const discovery = useQuery({
-    queryKey: ['engagement', engagementId, 'components', 'discovery'],
+    queryKey: ['engagement', engagementId, 'components', 'discovery', activeLineId],
     queryFn: () =>
-      apiFetch<ComponentDiscoveryResult>(`/engagements/${engagementId}/components/discovery`),
+      apiFetch<ComponentDiscoveryResult>(
+        `/engagements/${engagementId}/components/discovery?engagementServiceId=${activeLineId}`,
+      ),
     enabled: open,
   });
 
@@ -75,7 +92,7 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
     mutationFn: (serviceComponentCode: string) =>
       apiFetch(`/engagements/${engagementId}/components`, {
         method: 'POST',
-        body: { serviceComponentCode },
+        body: { serviceComponentCode, engagementServiceId: activeLineId },
       }),
     onSuccess: () => {
       toast('Component added to scope.');
@@ -97,17 +114,39 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
     onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not remove component.', 'error'),
   });
 
-  const items = configured.data?.items ?? [];
+  const allItems = configured.data?.items ?? [];
+  // In a multi-service engagement, scope the table to the selected service line.
+  const items = multiService
+    ? allItems.filter((c) => c.engagementServiceId === activeLineId)
+    : allItems;
+  const activeLine = lines.find((s) => s.id === activeLineId);
 
   return (
     <section className="mt-4">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-ink">Scope &amp; components</h2>
-        {canManage && (
-          <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4" /> Discover &amp; add
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {multiService && (
+            <select
+              value={activeLineId}
+              onChange={(e) => setLineId(e.target.value)}
+              aria-label="Service line"
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-ink focus:border-brand-400 focus:outline-none"
+            >
+              {lines.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.serviceName}
+                  {s.isPrimary ? ' (primary)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          {canManage && (
+            <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+              <Plus className="h-4 w-4" /> Discover &amp; add
+            </Button>
+          )}
+        </div>
       </div>
       <Card className="overflow-hidden p-0">
         {configured.isSuccess && items.length === 0 && (
@@ -190,7 +229,9 @@ export function ComponentsSection({ engagementId }: { engagementId: string }): J
         open={open}
         onClose={() => setOpen(false)}
         title="Discover components"
-        description="Applicable components for this engagement’s service. The system recommends; you confirm the scope."
+        description={`Applicable components for ${
+          activeLine ? `the “${activeLine.serviceName}” service` : 'this engagement’s service'
+        }. The system recommends; you confirm the scope.`}
         footer={
           <Button variant="secondary" onClick={() => setOpen(false)}>
             Done

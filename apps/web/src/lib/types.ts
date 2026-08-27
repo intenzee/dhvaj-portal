@@ -6,6 +6,7 @@
 import type {
   ClientDependencyStatus,
   ComplianceStatus,
+  EngagementServiceLine,
   EngagementStatus,
   RoleSlug,
   TaskPriority,
@@ -54,6 +55,8 @@ export interface TeamMember {
 export interface EngagementDetail extends EngagementRow {
   officeCode: string;
   team: TeamMember[];
+  /** Every service line the engagement carries (multi-service, §9–§10). */
+  services: EngagementServiceLine[];
   signedOffByName: string | null;
   clientOverdueCount: number;
   openTaskCount: number;
