@@ -60,10 +60,12 @@ describe('Compliance deadline layers & events (e2e)', () => {
     epToken: string,
   ): Promise<{ engagementId: string; instanceId: string; code: string }> => {
     const code = `LYR_${unique()}`;
+    // A non-statutory parent so auto-generated review layers (§16, on statutory
+    // obligations) don't interfere with the MANUAL layer CRUD under test here.
     const rule = await request(app.getHttpServer())
       .post('/api/v1/compliance-rules')
       .set(bearer(mp))
-      .send({ code, name: code, dueDateCategory: 'STATUTORY_RULE' })
+      .send({ code, name: code, dueDateCategory: 'HSDG_MILESTONE' })
       .expect(201);
     await request(app.getHttpServer())
       .post(`/api/v1/compliance-rules/${rule.body.id}/versions`)
@@ -284,7 +286,10 @@ describe('Compliance deadline layers & events (e2e)', () => {
       // statutory + internal_sla + 2 layers = 4 events for this one obligation.
       expect(kinds).toEqual(['internal_sla', 'layer', 'layer', 'statutory']);
       const statutory = mine.find((e) => e.kind === 'statutory')!;
-      expect(statutory.dueDateCategory).toBe('STATUTORY_RULE');
+      // The obligation carries its parent rule's frozen category (§2); this
+      // suite's fixtures use a non-statutory parent to keep manual layer CRUD
+      // free of auto-generated review layers.
+      expect(statutory.dueDateCategory).toBe('HSDG_MILESTONE');
     });
 
     it('scopes the events stream by RLS — an unrelated partner sees none of them', async () => {

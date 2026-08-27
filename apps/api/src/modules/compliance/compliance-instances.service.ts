@@ -26,9 +26,11 @@ import { AppConfigService } from '../../config/config.module';
 import { resolveAmbientCorrelationId } from '../../common/context/request-context';
 import { AuditService } from '../audit/audit.service';
 import {
+  addWorkingDaysUTC,
   computeDeadlines,
   evaluateCondition,
   financialYearEndYear,
+  parseISODate,
   resolveReferenceDate,
   toISODate,
 } from './compliance-calc';
@@ -274,15 +276,30 @@ export class ComplianceInstancesService {
       );
     }
     return this.db.withRlsContext(ctx, async (client) => {
-      const eng = await client.query<{ financial_year: string }>(
-        `SELECT financial_year FROM hsdg.engagements WHERE id = $1`,
+      const eng = await client.query<{
+        financial_year: string;
+        engagement_partner_id: string | null;
+        engagement_manager_id: string | null;
+        review_model_slug: string | null;
+      }>(
+        `SELECT e.financial_year, e.engagement_partner_id, e.engagement_manager_id,
+                rm.slug AS review_model_slug
+         FROM hsdg.engagements e
+         LEFT JOIN hsdg.services s ON s.id = e.service_id
+         LEFT JOIN hsdg.review_models rm ON rm.id = s.required_review_model_id
+         WHERE e.id = $1`,
         [engagementId],
       );
       if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
       const financialYear = eng.rows[0].financial_year;
 
-      const ruleRes = await client.query<{ id: string; is_active: boolean }>(
-        `SELECT id, is_active FROM hsdg.compliance_rules WHERE code = $1`,
+      const ruleRes = await client.query<{
+        id: string;
+        name: string;
+        is_active: boolean;
+        due_date_category: DueDateCategory;
+      }>(
+        `SELECT id, name, is_active, due_date_category FROM hsdg.compliance_rules WHERE code = $1`,
         [input.complianceRuleCode],
       );
       if (!ruleRes.rows[0]) {
@@ -292,6 +309,8 @@ export class ComplianceInstancesService {
         throw new BadRequestException(`Compliance rule "${input.complianceRuleCode}" is inactive.`);
       }
       const ruleId = ruleRes.rows[0].id;
+      const ruleName = ruleRes.rows[0].name;
+      const ruleCategory = ruleRes.rows[0].due_date_category;
 
       // The "as of" date selects the effective rule version. It is the caller's
       // explicit reference/event date, else the engagement's FY end.
@@ -356,6 +375,32 @@ export class ComplianceInstancesService {
       } catch (err) {
         throw translateComplianceError(err);
       }
+
+      // §16/§17 step 8 — materialise the standard review milestones as their own
+      // calendar events. Statutory obligations only (advisory/internal work stays
+      // out of the calendar per §21); each review is owned by the accountable
+      // lead so the §24 review-overdue escalation reaches the right person.
+      await this.autoGenerateLayers(client, {
+        instanceId,
+        engagementId,
+        statutoryDeadline,
+        ruleCategory,
+        managerId: eng.rows[0].engagement_manager_id,
+        partnerId: eng.rows[0].engagement_partner_id,
+        reviewModelSlug: eng.rows[0].review_model_slug,
+        holidays,
+      });
+
+      // §17 step 10 — the single material "complete this obligation" task.
+      await this.autoGenerateTask(client, ctx, {
+        instanceId,
+        engagementId,
+        ruleName,
+        ruleCategory,
+        referenceLabel: refIso,
+        dueDate: internalSlaDate,
+        ownerId: eng.rows[0].engagement_manager_id ?? eng.rows[0].engagement_partner_id,
+      });
 
       const instance = await this.selectInstance(client, instanceId, engagementId);
       await this.audit.recordWith(client, ctx, {
@@ -743,6 +788,129 @@ export class ComplianceInstancesService {
   // ── Deadline layers (§16 — one obligation, many deadline events) ─────────
 
   /** Add a deadline layer (preparation / review / stage gate) to an obligation. */
+  /**
+   * §16/§17 step 8 — auto-materialise the standard review milestones for a newly
+   * generated STATUTORY obligation, each as its own calendar event. The manager
+   * review lands `MANAGER_REVIEW_LEAD` working days before the statutory date
+   * (owned by the engagement manager); an EP review lands `EP_REVIEW_LEAD`
+   * working days before it (owned by the partner) only when the service requires
+   * full EP review. Advisory/internal categories get none (§21 — no calendar
+   * noise). Runs inside the generation transaction; best-effort per layer.
+   */
+  private async autoGenerateLayers(
+    client: PoolClient,
+    args: {
+      instanceId: string;
+      engagementId: string;
+      statutoryDeadline: string;
+      ruleCategory: DueDateCategory;
+      managerId: string | null;
+      partnerId: string | null;
+      reviewModelSlug: string | null;
+      holidays: ReadonlySet<string>;
+    },
+  ): Promise<void> {
+    if (!this.config.get('COMPLIANCE_AUTO_LAYERS')) return;
+    const statutoryCategories: DueDateCategory[] = [
+      'STATUTORY_FIXED',
+      'STATUTORY_RULE',
+      'STATUTORY_EVENT',
+    ];
+    if (!statutoryCategories.includes(args.ruleCategory)) return;
+
+    const statutoryDate = parseISODate(args.statutoryDeadline);
+    const managerLead = this.config.get('COMPLIANCE_MANAGER_REVIEW_LEAD_DAYS');
+    const epLead = this.config.get('COMPLIANCE_EP_REVIEW_LEAD_DAYS');
+
+    const layers: Array<{
+      type: DeadlineLayerType;
+      label: string;
+      due: string;
+      owner: string | null;
+    }> = [
+      {
+        type: 'manager_review',
+        label: 'Manager review',
+        due: toISODate(addWorkingDaysUTC(statutoryDate, -managerLead, args.holidays)),
+        owner: args.managerId ?? args.partnerId,
+      },
+    ];
+    if (args.reviewModelSlug === 'full_ep_review') {
+      layers.push({
+        type: 'ep_review',
+        label: 'EP review',
+        due: toISODate(addWorkingDaysUTC(statutoryDate, -epLead, args.holidays)),
+        owner: args.partnerId,
+      });
+    }
+
+    // One round-trip for all (1–2) layers — unnest the parallel arrays. Bulk
+    // generation (rollHorizon / generateForService) creates many instances, so
+    // saving a round-trip per instance adds up.
+    await client.query(
+      `INSERT INTO hsdg.compliance_instance_deadlines
+         (compliance_instance_id, engagement_id, layer_type, label, due_date_category,
+          due_date, owner_employee_id)
+       SELECT $1, $2, l.layer_type, l.label, 'HSDG_MILESTONE', l.due_date::date, l.owner
+       FROM unnest($3::text[], $4::text[], $5::date[], $6::uuid[])
+         AS l(layer_type, label, due_date, owner)`,
+      [
+        args.instanceId,
+        args.engagementId,
+        layers.map((l) => l.type),
+        layers.map((l) => l.label),
+        layers.map((l) => l.due),
+        layers.map((l) => l.owner),
+      ],
+    );
+  }
+
+  /**
+   * §17 step 10 — the ONE material task per statutory obligation ("complete this
+   * filing"), assigned to the accountable owner and due at the internal SLA date.
+   * Routine checklist items stay in Workflow (§21). Idempotent: the partial
+   * unique index on source_compliance_instance_id makes a re-run a no-op.
+   */
+  private async autoGenerateTask(
+    client: PoolClient,
+    ctx: RlsContext,
+    args: {
+      instanceId: string;
+      engagementId: string;
+      ruleName: string;
+      ruleCategory: DueDateCategory;
+      referenceLabel: string;
+      dueDate: string;
+      ownerId: string | null;
+    },
+  ): Promise<void> {
+    if (!this.config.get('COMPLIANCE_AUTO_TASKS')) return;
+    const statutoryCategories: DueDateCategory[] = [
+      'STATUTORY_FIXED',
+      'STATUTORY_RULE',
+      'STATUTORY_EVENT',
+    ];
+    if (!statutoryCategories.includes(args.ruleCategory)) return;
+
+    await client.query(
+      `INSERT INTO hsdg.tasks
+         (engagement_id, title, description, assigned_to_employee_id, created_by_employee_id,
+          priority, due_date, source_compliance_instance_id)
+       VALUES ($1, $2, $3, $4, $5, 'normal', $6::date, $7)
+       ON CONFLICT (source_compliance_instance_id)
+         WHERE source_compliance_instance_id IS NOT NULL DO NOTHING`,
+      [
+        args.engagementId,
+        `Complete ${args.ruleName} (${args.referenceLabel})`,
+        'Auto-generated from the compliance obligation (§17 step 10).',
+        args.ownerId,
+        ctx.employeeId ?? null,
+        args.dueDate,
+        args.instanceId,
+      ],
+    );
+  }
+
   async addDeadlineLayer(
     ctx: RlsContext,
     engagementId: string,
