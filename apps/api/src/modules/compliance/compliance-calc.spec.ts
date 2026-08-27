@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   addMonthsUTC,
+  addWorkingDaysUTC,
   adjustWorkingDay,
   computeDeadlines,
   evaluateCondition,
@@ -185,6 +186,64 @@ describe('compliance-calc', () => {
       expect(() => evaluateCondition({ field: 'turnover', op: '>', value: 1 }, {})).toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('§4 calculation methods', () => {
+    it('period_start basis anchors on the supplied reference (period start)', () => {
+      const ref = resolveReferenceDate('period_start', { referenceDate: '2026-04-01' });
+      expect(toISODate(ref)).toBe('2026-04-01');
+    });
+
+    it('addWorkingDaysUTC skips weekends', () => {
+      // Fri 2026-06-19 + 1 working day ⇒ Mon 2026-06-22 (skips Sat/Sun).
+      expect(toISODate(addWorkingDaysUTC(parseISODate('2026-06-19'), 1, NO_HOLIDAYS))).toBe(
+        '2026-06-22',
+      );
+      // + 3 working days ⇒ Wed 2026-06-24.
+      expect(toISODate(addWorkingDaysUTC(parseISODate('2026-06-19'), 3, NO_HOLIDAYS))).toBe(
+        '2026-06-24',
+      );
+    });
+
+    it('addWorkingDaysUTC skips holidays and steps backwards for negatives', () => {
+      const holidays = new Set(['2026-06-22']);
+      // Fri +1 working day, Mon is a holiday ⇒ Tue 2026-06-23.
+      expect(toISODate(addWorkingDaysUTC(parseISODate('2026-06-19'), 1, holidays))).toBe(
+        '2026-06-23',
+      );
+      // Mon 2026-06-22 − 1 working day ⇒ Fri 2026-06-19.
+      expect(toISODate(addWorkingDaysUTC(parseISODate('2026-06-22'), -1, NO_HOLIDAYS))).toBe(
+        '2026-06-19',
+      );
+    });
+
+    it('computeDeadlines counts the offset in working days when offsetWorkingDays is set', () => {
+      // Reference Fri 2026-06-19, +2 WORKING days ⇒ Tue 2026-06-23 (vs +2 calendar ⇒ Sun 21).
+      const wd = computeDeadlines(
+        {
+          referenceDate: parseISODate('2026-06-19'),
+          offsetMonths: 0,
+          offsetDays: 2,
+          offsetWorkingDays: true,
+          workingDayAdjustment: 'none',
+          internalSlaOffsetDays: 0,
+        },
+        NO_HOLIDAYS,
+      );
+      expect(wd.statutoryDeadline).toBe('2026-06-23');
+      const cal = computeDeadlines(
+        {
+          referenceDate: parseISODate('2026-06-19'),
+          offsetMonths: 0,
+          offsetDays: 2,
+          offsetWorkingDays: false,
+          workingDayAdjustment: 'none',
+          internalSlaOffsetDays: 0,
+        },
+        NO_HOLIDAYS,
+      );
+      expect(cal.statutoryDeadline).toBe('2026-06-21');
     });
   });
 });

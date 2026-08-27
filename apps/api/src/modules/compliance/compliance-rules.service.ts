@@ -53,6 +53,7 @@ interface VersionRow {
   fixed_day: number | null;
   working_day_adjustment: WorkingDayAdjustment;
   internal_sla_offset_days: number;
+  offset_working_days: boolean;
   condition: unknown | null;
   notes: string | null;
   created_at: Date;
@@ -195,8 +196,8 @@ export class ComplianceRulesService {
           `INSERT INTO hsdg.compliance_rule_versions
              (compliance_rule_id, version, effective_from, effective_to, calculation_basis,
               offset_months, offset_days, fixed_month, fixed_day, working_day_adjustment,
-              internal_sla_offset_days, condition, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,'next'),$11,$12::jsonb,$13)
+              internal_sla_offset_days, condition, notes, offset_working_days)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,'next'),$11,$12::jsonb,$13,COALESCE($14,false))
            RETURNING id`,
           [
             ruleId,
@@ -212,6 +213,7 @@ export class ComplianceRulesService {
             input.internalSlaOffsetDays ?? 0,
             input.condition === undefined ? null : JSON.stringify(input.condition),
             input.notes ?? null,
+            input.offsetWorkingDays ?? null,
           ],
         );
         versionId = rows[0]!.id;
@@ -391,7 +393,7 @@ export class ComplianceRulesService {
     const { rows } = await client.query<VersionRow & { compliance_rule_id: string }>(
       `SELECT compliance_rule_id, id, version, effective_from::text, effective_to::text,
               calculation_basis, offset_months, offset_days, fixed_month, fixed_day,
-              working_day_adjustment, internal_sla_offset_days, condition, notes, created_at
+              working_day_adjustment, internal_sla_offset_days, offset_working_days, condition, notes, created_at
        FROM hsdg.compliance_rule_versions
        WHERE compliance_rule_id = ANY($1::uuid[])
        ORDER BY version`,
@@ -420,6 +422,7 @@ function mapVersion(row: VersionRow): ComplianceRuleVersionRecord {
     fixedDay: row.fixed_day,
     workingDayAdjustment: row.working_day_adjustment,
     internalSlaOffsetDays: row.internal_sla_offset_days,
+    offsetWorkingDays: row.offset_working_days,
     condition: row.condition,
     notes: row.notes,
     createdAt: row.created_at.toISOString(),

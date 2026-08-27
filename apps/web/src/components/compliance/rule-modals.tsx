@@ -151,6 +151,7 @@ export function AddVersionModal({
   const [fixedDay, setFixedDay] = useState('');
   const [workingDayAdjustment, setWorkingDayAdjustment] = useState<string>('next');
   const [internalSlaOffsetDays, setInternalSlaOffsetDays] = useState('0');
+  const [offsetWorkingDays, setOffsetWorkingDays] = useState(false);
   const [condition, setCondition] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -167,6 +168,7 @@ export function AddVersionModal({
         offsetDays: Number(offsetDays) || 0,
         workingDayAdjustment,
         internalSlaOffsetDays: Number(internalSlaOffsetDays) || 0,
+        offsetWorkingDays,
       };
       if (effectiveTo) body.effectiveTo = effectiveTo;
       if (isFixed) {
@@ -260,6 +262,15 @@ export function AddVersionModal({
             <Input type="number" min={0} max={366} value={internalSlaOffsetDays} onChange={(e) => setInternalSlaOffsetDays(e.target.value)} />
           </Field>
         </div>
+
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            checked={offsetWorkingDays}
+            onChange={(e) => setOffsetWorkingDays(e.target.checked)}
+          />
+          Count the day offset in working days (skip weekends &amp; holidays) — §4
+        </label>
 
         <Field
           label="Conditional applicability (JSON)"

@@ -106,6 +106,7 @@ interface VersionRow {
   fixed_day: number | null;
   working_day_adjustment: WorkingDayAdjustment;
   internal_sla_offset_days: number;
+  offset_working_days: boolean;
   condition: unknown | null;
 }
 
@@ -301,7 +302,7 @@ export class ComplianceInstancesService {
 
       const verRes = await client.query<VersionRow>(
         `SELECT id, version, calculation_basis, offset_months, offset_days, fixed_month, fixed_day,
-                working_day_adjustment, internal_sla_offset_days, condition
+                working_day_adjustment, internal_sla_offset_days, offset_working_days, condition
          FROM hsdg.compliance_rule_versions
          WHERE compliance_rule_id = $1 AND effective_from <= $2::date
            AND (effective_to IS NULL OR $2::date <= effective_to)
@@ -336,6 +337,7 @@ export class ComplianceInstancesService {
           offsetDays: v.offset_days,
           workingDayAdjustment: v.working_day_adjustment,
           internalSlaOffsetDays: v.internal_sla_offset_days,
+          offsetWorkingDays: v.offset_working_days,
         },
         holidays,
       );

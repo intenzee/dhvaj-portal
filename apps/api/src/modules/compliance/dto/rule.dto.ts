@@ -159,6 +159,14 @@ export class AddRuleVersionDto {
   internalSlaOffsetDays?: number;
 
   @ApiPropertyOptional({
+    default: false,
+    description: 'Count offsetDays in working days (skip weekends/holidays) — §4 WORKING_DAYS.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  offsetWorkingDays?: boolean;
+
+  @ApiPropertyOptional({
     description:
       'Configurable conditional applicability, e.g. {"field":"turnover","op":">","value":10000000}.',
   })

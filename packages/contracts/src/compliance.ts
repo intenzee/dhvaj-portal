@@ -13,6 +13,9 @@ export const CALCULATION_BASIS = {
   fyEnd: 'fy_end',
   /** End of the compliance period (supplied per instance). */
   periodEnd: 'period_end',
+  /** Start of the compliance period (supplied per instance) — for start-anchored
+   *  deadlines (PERIOD_START_PLUS_DAYS, §4). */
+  periodStart: 'period_start',
   /** End of a month (supplied per instance). */
   monthEnd: 'month_end',
   /** A recurring fixed date (month + day) in the relevant year. */

@@ -61,6 +61,7 @@ interface RuleVersionRow {
   fixed_day: number | null;
   working_day_adjustment: WorkingDayAdjustment;
   internal_sla_offset_days: number;
+  offset_working_days: boolean;
 }
 
 interface ConfigRow {
@@ -486,7 +487,13 @@ export class ComponentInstancesService {
 
     // 1. Ensure every in-window period exists and is live.
     for (const period of periods) {
-      const deadline = this.computeForPeriod(versions, financialYear, period.end, holidays);
+      const deadline = this.computeForPeriod(
+        versions,
+        financialYear,
+        period.start,
+        period.end,
+        holidays,
+      );
       const ex = existingByKey.get(period.key);
       if (!ex) {
         const { rows } = await client.query<{ id: string }>(
@@ -546,6 +553,7 @@ export class ComponentInstancesService {
   private computeForPeriod(
     versions: RuleVersionRow[],
     financialYear: string,
+    periodStart: string,
     periodEnd: string,
     holidays: ReadonlySet<string>,
   ): { statutoryDeadline: string; internalSlaDate: string; versionId: string } | null {
@@ -553,9 +561,11 @@ export class ComponentInstancesService {
     if (!v) return null;
     // event_date needs an explicit event, unavailable at generation — no deadline.
     if (v.calculation_basis === 'event_date') return null;
+    // period_start basis anchors on the period's start; the rest on its end.
+    const anchor = v.calculation_basis === 'period_start' ? periodStart : periodEnd;
     const referenceDate = resolveReferenceDate(v.calculation_basis, {
       financialYear,
-      referenceDate: periodEnd,
+      referenceDate: anchor,
       fixedMonth: v.fixed_month,
       fixedDay: v.fixed_day,
     });
@@ -566,6 +576,7 @@ export class ComponentInstancesService {
         offsetDays: v.offset_days,
         workingDayAdjustment: v.working_day_adjustment,
         internalSlaOffsetDays: v.internal_sla_offset_days,
+        offsetWorkingDays: v.offset_working_days,
       },
       holidays,
     );
@@ -597,7 +608,8 @@ export class ComponentInstancesService {
   private async loadVersions(client: PoolClient, ruleId: string): Promise<RuleVersionRow[]> {
     const { rows } = await client.query<RuleVersionRow>(
       `SELECT id, effective_from::text, effective_to::text, calculation_basis, offset_months,
-              offset_days, fixed_month, fixed_day, working_day_adjustment, internal_sla_offset_days
+              offset_days, fixed_month, fixed_day, working_day_adjustment, internal_sla_offset_days,
+              offset_working_days
        FROM hsdg.compliance_rule_versions
        WHERE compliance_rule_id = $1
        ORDER BY effective_from`,

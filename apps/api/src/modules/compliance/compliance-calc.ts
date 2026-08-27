@@ -53,6 +53,23 @@ export function addDaysUTC(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 86_400_000);
 }
 
+/**
+ * Advance `days` WORKING days from a date, skipping weekends and holidays (§4
+ * WORKING_DAYS). Negative counts step backwards. The start date itself is not
+ * required to be a working day; each counted step lands on one.
+ */
+export function addWorkingDaysUTC(date: Date, days: number, holidays: ReadonlySet<string>): Date {
+  if (days === 0) return date;
+  const step = days > 0 ? 1 : -1;
+  let remaining = Math.abs(days);
+  let d = date;
+  while (remaining > 0) {
+    d = addDaysUTC(d, step);
+    if (!isWeekend(d) && !holidays.has(toISODate(d))) remaining -= 1;
+  }
+  return d;
+}
+
 function isWeekend(date: Date): boolean {
   const day = date.getUTCDay();
   return day === 0 || day === 6; // Sunday or Saturday
@@ -116,6 +133,7 @@ export function resolveReferenceDate(basis: CalculationBasis, ctx: ReferenceCont
       return new Date(Date.UTC(financialYearEndYear(ctx.financialYear), 2, 31)); // 31 March
     }
     case CALCULATION_BASIS.periodEnd:
+    case CALCULATION_BASIS.periodStart:
     case CALCULATION_BASIS.monthEnd: {
       if (!ctx.referenceDate) {
         throw new BadRequestException(`${basis} basis requires an explicit referenceDate.`);
@@ -154,6 +172,8 @@ export interface ComputeInput {
   referenceDate: Date;
   offsetMonths: number;
   offsetDays: number;
+  /** Count offsetDays in WORKING days (skip weekends/holidays) rather than calendar days (§4). */
+  offsetWorkingDays?: boolean;
   workingDayAdjustment: WorkingDayAdjustment;
   internalSlaOffsetDays: number;
 }
@@ -174,7 +194,9 @@ export function computeDeadlines(
   holidays: ReadonlySet<string>,
 ): ComputedDeadlines {
   const withMonths = addMonthsUTC(input.referenceDate, input.offsetMonths);
-  const raw = addDaysUTC(withMonths, input.offsetDays);
+  const raw = input.offsetWorkingDays
+    ? addWorkingDaysUTC(withMonths, input.offsetDays, holidays)
+    : addDaysUTC(withMonths, input.offsetDays);
   const statutory = adjustWorkingDay(raw, input.workingDayAdjustment, holidays);
 
   const slaRaw = addDaysUTC(statutory, -input.internalSlaOffsetDays);

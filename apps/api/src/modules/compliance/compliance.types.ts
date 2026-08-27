@@ -23,6 +23,7 @@ export interface ComplianceRuleVersionRecord {
   fixedDay: number | null;
   workingDayAdjustment: WorkingDayAdjustment;
   internalSlaOffsetDays: number;
+  offsetWorkingDays: boolean;
   condition: unknown | null;
   notes: string | null;
   createdAt: string;
@@ -274,6 +275,7 @@ export interface AddRuleVersionInput {
   fixedDay?: number;
   workingDayAdjustment?: WorkingDayAdjustment;
   internalSlaOffsetDays?: number;
+  offsetWorkingDays?: boolean;
   condition?: unknown;
   notes?: string;
 }

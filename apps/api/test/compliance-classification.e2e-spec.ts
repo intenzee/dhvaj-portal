@@ -485,4 +485,54 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
       }
     });
   });
+
+  // ── §4 calculation methods ───────────────────────────────────────────────
+  describe('calculation methods (§4)', () => {
+    it('computes a working-days offset (WORKING_DAYS) end to end', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const code = `WDAYS_${unique()}`;
+      // period_end + 2 WORKING days, no weekend nudge.
+      await createRule(code, {
+        effectiveFrom: '2017-04-01',
+        calculationBasis: 'period_end',
+        offsetDays: 2,
+        offsetWorkingDays: true,
+        workingDayAdjustment: 'none',
+      });
+      const eng = await createEngagement(pa, '2026-27');
+      // Reference Fri 2026-11-13 + 2 working days ⇒ Tue 2026-11-17 (skips Sat/Sun).
+      const gen = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code, referenceDate: '2026-11-13' })
+        .expect(201);
+      expect(gen.body.statutoryDeadline).toBe('2026-11-17');
+
+      // The rule version round-trips the flag.
+      const rule = await request(app.getHttpServer())
+        .get(`/api/v1/compliance-rules/${code}`)
+        .set(bearer(mp))
+        .expect(200);
+      expect(rule.body.versions[0].offsetWorkingDays).toBe(true);
+    });
+
+    it('accepts the period_start basis', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const code = `PSTART_${unique()}`;
+      await createRule(code, {
+        effectiveFrom: '2017-04-01',
+        calculationBasis: 'period_start',
+        offsetDays: 10,
+        workingDayAdjustment: 'none',
+      });
+      const eng = await createEngagement(pa, '2026-27');
+      // period_start 2026-04-01 + 10 days ⇒ 2026-04-11.
+      const gen = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: code, referenceDate: '2026-04-01' })
+        .expect(201);
+      expect(gen.body.statutoryDeadline).toBe('2026-04-11');
+    });
+  });
 });
