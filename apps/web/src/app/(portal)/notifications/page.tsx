@@ -14,6 +14,27 @@ import { PageHeader, Card, Spinner, EmptyState, Button, Badge } from '@/componen
 
 type Tab = 'all' | 'unread';
 
+/** §24 severity → badge tone. Overdue/critical read red, warnings amber. */
+const TYPE_TONE: Record<string, 'danger' | 'warn' | 'info' | 'neutral'> = {
+  statutory_deadline_overdue: 'danger',
+  internal_sla_overdue: 'danger',
+  deadline_layer_overdue: 'danger',
+  client_commitment_overdue: 'danger',
+  client_dependency_overdue: 'danger',
+  high_risk_exception: 'danger',
+  compliance_due_today: 'warn',
+  statutory_deadline_approaching: 'warn',
+  internal_sla_approaching: 'warn',
+  review_pending: 'warn',
+  ep_signoff_pending: 'warn',
+  client_dependency_reminder: 'warn',
+  task_assigned: 'info',
+  ep_changed: 'info',
+  engagement_reopened: 'info',
+};
+const toneForType = (type: string): 'danger' | 'warn' | 'info' | 'neutral' =>
+  TYPE_TONE[type] ?? 'neutral';
+
 export default function NotificationsPage(): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
@@ -116,7 +137,7 @@ export default function NotificationsPage(): JSX.Element {
                     <span className={cn('truncate text-sm', unread ? 'font-semibold text-ink' : 'text-ink-muted')}>
                       {n.title}
                     </span>
-                    <Badge tone="neutral">{humanize(n.type)}</Badge>
+                    <Badge tone={toneForType(n.type)}>{humanize(n.type)}</Badge>
                     {n.engagementId && <ArrowRight className="h-3.5 w-3.5 text-ink-faint" />}
                   </div>
                   {n.body && <p className="mt-0.5 truncate text-sm text-ink-muted">{n.body}</p>}
