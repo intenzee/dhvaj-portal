@@ -10,6 +10,25 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Multi-service foundation — schema (Part A, complete).** The
+> engagement is no longer keyed to a single service. A new **`engagement_services`**
+> table (spec §2, §9–§10, §27, §36, §38) is the **service-line grain** that lets
+> **one engagement carry several services** (e.g. GST + TDS + Accounting) for the
+> same client, FY and period — each with its own servicing office, lead and
+> lifecycle. The change is **strictly additive**: every existing engagement was
+> **backfilled** to one *primary* service row derived from its current
+> `service_id` (169/169), and `engagements.service_id` is **kept** as the
+> primary/legacy pointer (retired in a later cleanup). Duplication prevention
+> (§16/§35) is **preserved end-to-end with no API change**: an AFTER-INSERT
+> trigger auto-creates the primary service row for every new engagement, and a
+> partial unique index enforces *entity + service + FY + period* at the service
+> grain, so a duplicate still fails with a clean 409. `engagement_components`
+> gained an `engagement_service_id` (backfilled, guard re-pointed) so components
+> now hang off the service-line row. See
+> [ADR-0024](docs/adr/0024-multi-service-engagements.md). **Next parts:** API
+> `services[]` read + add/remove endpoints (B), discovery/config per service (C),
+> web (D).
+>
 > **Status: Component work generation (complete).** A configured **recurring
 > component now generates period-specific work** (spec §21–§22): one
 > `component_instance` per period of the engagement's financial year (12 months /
