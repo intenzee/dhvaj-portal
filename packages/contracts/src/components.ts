@@ -208,3 +208,19 @@ export interface GenerateInstancesResult {
   removed: ComponentInstanceRecord[];
   skipped: Array<{ period: string; reason: string }>;
 }
+
+/**
+ * Result of the engagement activation ceremony (spec §20/§37): the gated,
+ * atomic step that confirms scope, activates its draft component configurations
+ * and generates the recurring work — in one transaction.
+ */
+export interface EngagementActivationResult {
+  /** Draft component configurations flipped to active. */
+  activatedComponents: number;
+  /** Work instances created. */
+  generated: number;
+  /** Work instances cancelled because they fell out of scope. */
+  removed: number;
+  /** Non-blocking notes (e.g. ad-hoc components that produced no periods). */
+  warnings: string[];
+}

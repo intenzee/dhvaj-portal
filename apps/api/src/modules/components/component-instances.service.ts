@@ -5,6 +5,7 @@ import {
   type CalculationBasis,
   type ComponentInstanceRecord,
   type ComponentInstanceStatus,
+  type EngagementActivationResult,
   type GenerateInstancesResult,
   type Recurrence,
   type WorkingDayAdjustment,
@@ -160,6 +161,73 @@ export class ComponentInstancesService {
         },
       });
       return merged;
+    });
+  }
+
+  /**
+   * §20/§37 — the engagement activation ceremony. A single, gated, atomic step:
+   * check preconditions, flip every DRAFT component configuration to ACTIVE and
+   * generate the recurring work — all in one transaction. Only an engagement
+   * lead may run it (enforced by RLS on the engagement_components write).
+   */
+  async activate(ctx: RlsContext, engagementId: string): Promise<EngagementActivationResult> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      // ── Preconditions (§37) ──────────────────────────────────────────────
+      const eng = await client.query<{ engagement_partner_id: string | null }>(
+        `SELECT engagement_partner_id FROM hsdg.engagements WHERE id = $1`,
+        [engagementId],
+      );
+      if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
+      if (!eng.rows[0].engagement_partner_id) {
+        throw new BadRequestException(
+          'Assign an accountable Engagement Partner before activating.',
+        );
+      }
+
+      const { rows: configs } = await client.query<ConfigRow>(
+        `${CONFIG_SELECT}
+         WHERE ec.engagement_id = $1 AND ec.status NOT IN ('cancelled','superseded')`,
+        [engagementId],
+      );
+      if (configs.length === 0) {
+        throw new BadRequestException('Configure at least one component before activating.');
+      }
+      const pending = configs.filter((c) => c.applicability_status === 'pending_review');
+      if (pending.length > 0) {
+        throw new BadRequestException(
+          `Resolve applicability before activating: ${pending.map((c) => c.component_code).join(', ')}.`,
+        );
+      }
+
+      // ── Activate: draft configurations → active ──────────────────────────
+      const flip = await client.query(
+        `UPDATE hsdg.engagement_components
+            SET status = 'active', version = version + 1
+          WHERE engagement_id = $1 AND status = 'draft'`,
+        [engagementId],
+      );
+      const activatedComponents = flip.rowCount ?? 0;
+
+      // ── Generate the recurring work for every applicable component ────────
+      const financialYear = await this.engagementFy(client, engagementId);
+      let generated = 0;
+      let removed = 0;
+      const warnings: string[] = [];
+      for (const config of configs) {
+        if (config.applicability_status === 'not_applicable') continue;
+        const one = await this.generateOne(client, engagementId, financialYear, config);
+        generated += one.generated.length;
+        removed += one.removed.length;
+        for (const s of one.skipped) warnings.push(`${config.component_code}: ${s.reason}`);
+      }
+
+      await this.audit.recordWith(client, ctx, {
+        action: 'engagement.activated',
+        objectType: 'engagement',
+        objectId: engagementId,
+        after: { activatedComponents, generated, removed },
+      });
+      return { activatedComponents, generated, removed, warnings };
     });
   }
 

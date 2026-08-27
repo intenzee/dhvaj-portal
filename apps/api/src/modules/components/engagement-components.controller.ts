@@ -4,6 +4,7 @@ import {
   PERMISSION,
   type ComponentDiscoveryResult,
   type ComponentInstanceRecord,
+  type EngagementActivationResult,
   type EngagementComponentRecord,
   type GenerateInstancesResult,
   type Paginated,
@@ -180,6 +181,22 @@ export class EngagementComponentsController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<GenerateInstancesResult> {
     return this.instances.generateAll(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post(':id/activate')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Activate the engagement scope (§20/§37): a single gated, atomic ceremony.',
+    description:
+      'Checks preconditions (accountable EP assigned, ≥1 component configured, no applicability ' +
+      'left pending review), then flips draft component configurations to active and generates ' +
+      'the recurring work — all in one transaction. Returns a summary of what changed.',
+  })
+  activate(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<EngagementActivationResult> {
+    return this.instances.activate(rlsContextFromPrincipal(principal), id);
   }
 
   @Get(':id/component-work')

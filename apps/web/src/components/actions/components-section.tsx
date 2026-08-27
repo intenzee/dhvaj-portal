@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, Repeat, X } from 'lucide-react';
+import { Pencil, Play, Plus, Repeat, X } from 'lucide-react';
 import {
   PERMISSION,
   type ComponentDiscoveryResult,
@@ -114,6 +114,23 @@ export function ComponentsSection({
     onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not remove component.', 'error'),
   });
 
+  // §20/§37 — the gated, atomic activation ceremony.
+  const activate = useMutation({
+    mutationFn: () =>
+      apiFetch<{ activatedComponents: number; generated: number; removed: number }>(
+        `/engagements/${engagementId}/activate`,
+        { method: 'POST', body: {} },
+      ),
+    onSuccess: (r) => {
+      toast(
+        `Activated: ${r.activatedComponents} component${r.activatedComponents === 1 ? '' : 's'}, ${r.generated} work item${r.generated === 1 ? '' : 's'} generated.`,
+      );
+      invalidate();
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not activate the engagement.', 'error'),
+  });
+
   const allItems = configured.data?.items ?? [];
   // In a multi-service engagement, scope the table to the selected service line.
   const items = multiService
@@ -144,6 +161,16 @@ export function ComponentsSection({
           {canManage && (
             <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
               <Plus className="h-4 w-4" /> Discover &amp; add
+            </Button>
+          )}
+          {canManage && (
+            <Button
+              size="sm"
+              onClick={() => activate.mutate()}
+              disabled={activate.isPending || items.length === 0}
+              title="Confirm scope, activate draft components and generate work"
+            >
+              <Play className="h-4 w-4" /> {activate.isPending ? 'Activating…' : 'Activate'}
             </Button>
           )}
         </div>
