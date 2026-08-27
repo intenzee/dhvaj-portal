@@ -14,8 +14,9 @@ export class TeamsChannel implements NotificationChannel {
   private readonly logger = new Logger(TeamsChannel.name);
 
   async deliver(notification: OutboundNotification): Promise<void> {
-    this.logger.debug(
-      `[teams] → user ${notification.recipientUserId}: ${notification.type} — ${notification.title}`,
-    );
+    const to = notification.recipientEmail
+      ? `client <${notification.recipientEmail}>`
+      : `user ${notification.recipientUserId}`;
+    this.logger.debug(`[teams] → ${to}: ${notification.type} — ${notification.title}`);
   }
 }

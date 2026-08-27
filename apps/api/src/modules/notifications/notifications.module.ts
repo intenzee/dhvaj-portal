@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppConfigService } from '../../config/config.module';
 import { NotificationsService } from './notifications.service';
 import { NotificationsScanService } from './notifications-scan.service';
+import { NotificationOutboxService } from './notification-outbox.service';
 import { NotificationsController } from './notifications.controller';
 import { EXTERNAL_CHANNELS, type NotificationChannel } from './channels/notification-channel';
 import { EmailChannel } from './channels/email.channel';
@@ -21,6 +22,7 @@ import { TeamsChannel } from './channels/teams.channel';
   providers: [
     NotificationsService,
     NotificationsScanService,
+    NotificationOutboxService,
     {
       provide: EXTERNAL_CHANNELS,
       inject: [AppConfigService],
@@ -33,6 +35,6 @@ import { TeamsChannel } from './channels/teams.channel';
       },
     },
   ],
-  exports: [NotificationsService, NotificationsScanService],
+  exports: [NotificationsService, NotificationsScanService, NotificationOutboxService],
 })
 export class NotificationsModule {}

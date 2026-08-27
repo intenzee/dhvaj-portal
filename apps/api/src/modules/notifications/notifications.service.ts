@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import type { PoolClient } from 'pg';
 import {
@@ -10,11 +10,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { resolveAmbientCorrelationId } from '../../common/context/request-context';
-import {
-  EXTERNAL_CHANNELS,
-  type NotificationChannel,
-  type OutboundNotification,
-} from './channels/notification-channel';
+import { EXTERNAL_CHANNELS, type NotificationChannel } from './channels/notification-channel';
 import type { NotificationEvent, NotificationRecord } from './notifications.types';
 
 interface NotificationRow {
@@ -45,8 +41,6 @@ interface NotificationRow {
  */
 @Injectable()
 export class NotificationsService {
-  private readonly logger = new Logger(NotificationsService.name);
-
   constructor(
     private readonly db: DatabaseService,
     private readonly cls: ClsService,
@@ -88,10 +82,24 @@ export class NotificationsService {
       .map((r) => r.recipient_user_id)
       .filter((id): id is string => Boolean(id));
     const created = delivered.length;
-    // Fan out to external channels after the rows are staged. Best-effort: a
-    // channel failure must never roll back the domain transaction.
+    // Enqueue external delivery to the durable outbox, ATOMIC with the portal
+    // rows (same transaction). A scheduled worker drains it with retry, so a
+    // channel outage never drops a message and never rolls back the domain op.
     if (delivered.length > 0 && this.channels.length > 0) {
-      await this.dispatchExternal(delivered, event);
+      for (const channel of this.channels) {
+        await client.query(
+          `SELECT hsdg.enqueue_delivery(u.uid, $2, $3, $4, $5, $6)
+           FROM unnest($1::uuid[]) AS u(uid)`,
+          [
+            delivered,
+            channel.name,
+            event.type,
+            event.title,
+            event.body ?? null,
+            event.engagementId ?? null,
+          ],
+        );
+      }
     }
     return created;
   }
@@ -101,30 +109,35 @@ export class NotificationsService {
     return this.db.withRlsContext(ctx, (client) => this.emitWith(client, ctx, event));
   }
 
-  private async dispatchExternal(
-    recipientUserIds: string[],
-    event: NotificationEvent,
-  ): Promise<void> {
-    for (const recipientUserId of recipientUserIds) {
-      const outbound: OutboundNotification = {
-        recipientUserId,
-        type: event.type,
-        title: event.title,
-        body: event.body ?? null,
-        engagementId: event.engagementId ?? null,
-      };
-      for (const channel of this.channels) {
-        try {
-          await channel.deliver(outbound);
-        } catch (err) {
-          this.logger.warn(
-            `Channel "${channel.name}" failed to deliver ${event.type}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
-      }
+  /**
+   * Enqueue a CLIENT-facing delivery (external email) on an existing transaction
+   * — §24 client-facing routing. Clients have no portal row; this addresses the
+   * client contact's email through every enabled external channel, drained by the
+   * same outbox worker. A no-op when no external channel is enabled or no email.
+   * Returns the number of deliveries enqueued.
+   */
+  async enqueueClientDeliveryWith(
+    client: PoolClient,
+    event: {
+      recipientEmail: string | null;
+      type: string;
+      title: string;
+      body?: string | null;
+      engagementId?: string | null;
+    },
+  ): Promise<number> {
+    if (!event.recipientEmail || this.channels.length === 0) return 0;
+    for (const channel of this.channels) {
+      await client.query(`SELECT hsdg.enqueue_client_delivery($1, $2, $3, $4, $5, $6)`, [
+        event.recipientEmail,
+        channel.name,
+        event.type,
+        event.title,
+        event.body ?? null,
+        event.engagementId ?? null,
+      ]);
     }
+    return this.channels.length;
   }
 
   // ── Read side (recipient-scoped by RLS) ──────────────────────────────────

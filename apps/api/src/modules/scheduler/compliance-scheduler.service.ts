@@ -6,6 +6,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AppConfigService } from '../../config/config.module';
 import { NotificationsScanService } from '../notifications/notifications-scan.service';
+import { NotificationOutboxService } from '../notifications/notification-outbox.service';
 import { ComponentInstancesService } from '../components/component-instances.service';
 
 /**
@@ -29,12 +30,14 @@ export class ComplianceSchedulerService implements OnModuleInit {
   private readonly logger = new Logger(ComplianceSchedulerService.name);
   private sweepRunning = false;
   private horizonRunning = false;
+  private outboxRunning = false;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly config: AppConfigService,
     private readonly registry: SchedulerRegistry,
     private readonly scan: NotificationsScanService,
+    private readonly outbox: NotificationOutboxService,
     private readonly instances: ComponentInstancesService,
   ) {}
 
@@ -49,9 +52,13 @@ export class ComplianceSchedulerService implements OnModuleInit {
     this.register('compliance-horizon-roll', this.config.get('SCHEDULER_HORIZON_CRON'), () =>
       this.runHorizonRoll(),
     );
+    this.register('notification-outbox-drain', this.config.get('SCHEDULER_OUTBOX_CRON'), () =>
+      this.runOutboxDrain(),
+    );
     this.logger.log(
       `Background scheduler enabled — sweep [${this.config.get('SCHEDULER_SWEEP_CRON')}], ` +
-        `horizon roll [${this.config.get('SCHEDULER_HORIZON_CRON')}].`,
+        `horizon roll [${this.config.get('SCHEDULER_HORIZON_CRON')}], ` +
+        `outbox drain [${this.config.get('SCHEDULER_OUTBOX_CRON')}].`,
     );
   }
 
@@ -122,6 +129,28 @@ export class ComplianceSchedulerService implements OnModuleInit {
       this.logger.error(`Notification sweep failed: ${e.message}`, e.stack);
     } finally {
       this.sweepRunning = false;
+    }
+  }
+
+  /** Drain the external-delivery outbox. Public so it is unit-testable. */
+  async runOutboxDrain(): Promise<void> {
+    if (this.outboxRunning) {
+      this.logger.warn('Outbox drain still running from a previous tick; skipping.');
+      return;
+    }
+    this.outboxRunning = true;
+    try {
+      const ctx = await this.resolveOperatorContext();
+      if (!ctx) {
+        this.logger.warn('No active managing partner found; outbox drain skipped.');
+        return;
+      }
+      await this.outbox.drain(ctx);
+    } catch (err) {
+      const e = err as Error;
+      this.logger.error(`Outbox drain failed: ${e.message}`, e.stack);
+    } finally {
+      this.outboxRunning = false;
     }
   }
 

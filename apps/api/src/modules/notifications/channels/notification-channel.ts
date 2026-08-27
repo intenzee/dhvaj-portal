@@ -1,8 +1,13 @@
 import type { NotificationType } from '@hsdg/contracts';
 
-/** What an external channel receives to deliver one notification. */
+/**
+ * What an external channel receives to deliver one notification. The recipient
+ * is EITHER an internal user (recipientUserId) OR an external client email
+ * (recipientEmail) — exactly one is set (§24 client-facing delivery).
+ */
 export interface OutboundNotification {
-  recipientUserId: string;
+  recipientUserId: string | null;
+  recipientEmail?: string | null;
   type: NotificationType;
   title: string;
   body: string | null;

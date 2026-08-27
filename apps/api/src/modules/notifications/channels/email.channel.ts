@@ -15,8 +15,9 @@ export class EmailChannel implements NotificationChannel {
   private readonly logger = new Logger(EmailChannel.name);
 
   async deliver(notification: OutboundNotification): Promise<void> {
-    this.logger.debug(
-      `[email] → user ${notification.recipientUserId}: ${notification.type} — ${notification.title}`,
-    );
+    const to = notification.recipientEmail
+      ? `client <${notification.recipientEmail}>`
+      : `user ${notification.recipientUserId}`;
+    this.logger.debug(`[email] → ${to}: ${notification.type} — ${notification.title}`);
   }
 }

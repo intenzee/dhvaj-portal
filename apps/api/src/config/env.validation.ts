@@ -114,6 +114,8 @@ export const envSchema = z.object({
   // once-a-day housekeeping job.
   SCHEDULER_SWEEP_CRON: z.string().default('0 * * * *'),
   SCHEDULER_HORIZON_CRON: z.string().default('30 1 * * *'),
+  // The outbox drain runs frequently so external delivery latency stays low.
+  SCHEDULER_OUTBOX_CRON: z.string().default('*/5 * * * *'),
 
   // Auto-generated deadline layers (spec §16/§17 step 8): when a STATUTORY
   // obligation is generated, add the standard review milestones as separate

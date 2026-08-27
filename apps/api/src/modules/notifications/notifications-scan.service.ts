@@ -16,6 +16,7 @@ export interface ScanResult {
   deadlineLayerOverdue: number;
   clientDependencyOverdue: number;
   clientDependencyReminder: number;
+  clientDeliveryEnqueued: number;
   total: number;
 }
 
@@ -60,6 +61,7 @@ interface DueDependencyRow {
   requested_info: string;
   responsible_employee_id: string | null;
   engagement_partner_id: string | null;
+  client_email: string | null;
   escalation_overdue: boolean;
 }
 
@@ -100,6 +102,7 @@ export class NotificationsScanService {
         deadlineLayerOverdue: 0,
         clientDependencyOverdue: 0,
         clientDependencyReminder: 0,
+        clientDeliveryEnqueued: 0,
         total: 0,
       };
 
@@ -275,10 +278,17 @@ export class NotificationsScanService {
       const { rows: deps } = await client.query<DueDependencyRow>(
         `SELECT cd.id, cd.engagement_id, e.engagement_code, ent.legal_name AS entity_name,
                 cd.requested_info, cd.responsible_employee_id, e.engagement_partner_id,
+                pc.email::text AS client_email,
                 (cd.escalation_date IS NOT NULL AND cd.escalation_date <= CURRENT_DATE) AS escalation_overdue
          FROM hsdg.client_dependencies cd
          JOIN hsdg.engagements e ON e.id = cd.engagement_id
          JOIN hsdg.entities ent ON ent.id = e.entity_id
+         LEFT JOIN LATERAL (
+           SELECT email FROM hsdg.entity_contacts
+           WHERE entity_id = ent.id AND email IS NOT NULL
+           ORDER BY is_primary DESC, created_at
+           LIMIT 1
+         ) pc ON true
          WHERE cd.status IN ('pending','partially_received')
            AND (
              (cd.reminder_date IS NOT NULL AND cd.reminder_date <= CURRENT_DATE)
@@ -299,6 +309,18 @@ export class NotificationsScanService {
             objectId: row.id,
             dedupKey: `dep_overdue:${row.id}`,
           });
+          // §24 "PBC overdue → client + owner": also reach the CLIENT directly,
+          // via the delivery outbox to their contact email (no portal row).
+          result.clientDeliveryEnqueued += await this.notifications.enqueueClientDeliveryWith(
+            client,
+            {
+              recipientEmail: row.client_email,
+              type: NOTIFICATION_TYPE.clientDependencyOverdue,
+              title: `Information overdue — ${row.engagement_code}`,
+              body: `The following is overdue; please provide it at the earliest: ${row.requested_info}.`,
+              engagementId: row.engagement_id,
+            },
+          );
         } else {
           result.clientDependencyReminder += await this.notifications.emitWith(client, ctx, {
             type: NOTIFICATION_TYPE.clientDependencyReminder,

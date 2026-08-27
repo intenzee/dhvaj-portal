@@ -7,6 +7,10 @@ process.env.LOG_LEVEL ??= 'error';
 process.env.LOG_PRETTY ??= 'false';
 process.env.AUTH_JWT_SECRET ??= 'test-only-secret-at-least-16-chars';
 
+// Enable the email channel so the delivery outbox is exercised end-to-end (the
+// EmailChannel is a logging stub, so nothing is actually sent). Portal is always on.
+process.env.NOTIFICATION_CHANNELS ??= 'portal,email';
+
 // Local dev DB (docker-compose publishes Postgres on 5433). CI overrides these
 // to point at its own service on 5432.
 process.env.DATABASE_URL ??= 'postgres://hsdg_app:hsdg_app_dev_pw@localhost:5433/hsdg';
