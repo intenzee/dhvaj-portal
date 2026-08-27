@@ -484,6 +484,45 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
         expect([code, res.body.dueDateSource]).toEqual([code, src]);
       }
     });
+
+    it('ships the FULL §6–§15 catalogue expansion, each component classified', async () => {
+      // The 0034 migration populates the rest of the firm offering. Spot-check
+      // one archetype from each spec section, spanning every §2 category family.
+      const expected: Record<string, [string, string | null]> = {
+        SA_PBC: ['CLIENT_COMMITTED', 'CLIENT_COMMITMENT'], // §6 audit PBC
+        IFC_TESTING: ['HSDG_MILESTONE', 'WORKFLOW'], // §6 IFC
+        TDS_PAYMENT: ['STATUTORY_FIXED', 'LAW_RULE'], // §7 TDS deposit
+        TXA_NOTICE: ['STATUTORY_EVENT', 'LAW_RULE'], // §7 assessment
+        GST_EWAYBILL: ['EVENT_SLA', 'LAW_RULE'], // §8 event + SLA
+        CMP08: ['STATUTORY_FIXED', 'LAW_RULE'], // §8 GST
+        BK_BANKREC: ['HSDG_RECURRING', 'HSDG_POLICY'], // §9 accounting
+        LC_PF: ['STATUTORY_FIXED', 'LAW_RULE'], // §10 labour PF
+        ROCE_FILING: ['STATUTORY_EVENT', 'LAW_RULE'], // §11 MCA event
+        REG_RENEWAL: ['STATUTORY_FIXED', 'LAW_RULE'], // §12 licence renewal
+        TXN_AGREEMENT: ['TASK_DEADLINE', 'USER_ENTERED'], // §13 ad-hoc task
+        VAL_REPORT: ['CLIENT_COMMITTED', 'CLIENT_COMMITMENT'], // §14 valuation
+        VCFO_CLOSE: ['HSDG_RECURRING', 'HSDG_POLICY'], // §15 CFO close
+      };
+      for (const [code, [cat, src]] of Object.entries(expected)) {
+        const res = await request(app.getHttpServer())
+          .get(`/api/v1/service-components/${code}`)
+          .set(bearer(mp))
+          .expect(200);
+        expect([code, res.body.dueDateCategory]).toEqual([code, cat]);
+        expect([code, res.body.dueDateSource]).toEqual([code, src]);
+      }
+    });
+
+    it('exposes the new §10/§12 service lines and their services', async () => {
+      const services = await request(app.getHttpServer())
+        .get('/api/v1/services?limit=100')
+        .set(bearer(mp))
+        .expect(200);
+      const codes = (services.body.items as Array<{ code: string }>).map((s) => s.code);
+      for (const code of ['PAYROLL', 'LABOUR_COMPLIANCE', 'REGISTRATIONS', 'FEMA', 'VIRTUAL_CFO']) {
+        expect(codes).toContain(code);
+      }
+    });
   });
 
   // ── §4 calculation methods ───────────────────────────────────────────────

@@ -77,10 +77,13 @@ describe('Service Catalogue (e2e)', () => {
         .get('/api/v1/services?serviceLine=GST&active=true')
         .set(bearer(await token('mp@hsdg.in')))
         .expect(200);
-      expect((res.body.items as Array<{ code: string }>).map((s) => s.code).sort()).toEqual([
-        'GST_ANNUAL',
-        'GST_MONTHLY',
-      ]);
+      const codes = (res.body.items as Array<{ code: string }>).map((s) => s.code);
+      // The filter returns the GST line (which the §8 catalogue expansion grows),
+      // so assert its intent: the core GST services are present and nothing from
+      // another line leaks in — not a frozen exact list.
+      expect(codes).toEqual(expect.arrayContaining(['GST_ANNUAL', 'GST_MONTHLY']));
+      expect(codes).not.toContain('STAT_AUDIT');
+      expect(codes.every((c) => c.startsWith('GST'))).toBe(true);
     });
 
     it('rejects an unknown query param (400)', async () => {

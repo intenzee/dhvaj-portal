@@ -16,6 +16,14 @@ export const NOTIFICATION_TYPE = {
   internalSlaOverdue: 'internal_sla_overdue',
   statutoryDeadlineApproaching: 'statutory_deadline_approaching',
   statutoryDeadlineOverdue: 'statutory_deadline_overdue',
+  /** §24 Due Today — an obligation whose operative date is today (owner/reviewer). */
+  complianceDueToday: 'compliance_due_today',
+  /** §24 Review overdue — a manager/EP review deadline LAYER has passed (reviewer + escalation). */
+  deadlineLayerOverdue: 'deadline_layer_overdue',
+  /** §24 Client-commitment overdue — a CLIENT_COMMITTED obligation has passed (owner/manager). */
+  clientCommitmentOverdue: 'client_commitment_overdue',
+  /** §24 PBC overdue — a client dependency past its escalation date (client + owner). */
+  clientDependencyOverdue: 'client_dependency_overdue',
   clientDependencyReminder: 'client_dependency_reminder',
   engagementReopened: 'engagement_reopened',
   epChanged: 'ep_changed',

@@ -56,12 +56,12 @@ describe('Compliance escalation & calendar views (e2e)', () => {
   };
 
   /** A period_end + 0-day rule ⇒ statutory date == reference date. */
-  const createExactRule = async (): Promise<string> => {
+  const createExactRule = async (category = 'STATUTORY_RULE'): Promise<string> => {
     const code = `ESC_${unique()}`;
     const rule = await request(app.getHttpServer())
       .post('/api/v1/compliance-rules')
       .set(bearer(mp))
-      .send({ code, name: code, dueDateCategory: 'STATUTORY_RULE' })
+      .send({ code, name: code, dueDateCategory: category })
       .expect(201);
     await request(app.getHttpServer())
       .post(`/api/v1/compliance-rules/${rule.body.id}/versions`)
@@ -74,6 +74,19 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       })
       .expect(201);
     return code;
+  };
+
+  const scanAs = (t: string) =>
+    request(app.getHttpServer()).post('/api/v1/notifications/scan').set(bearer(t)).expect(201);
+
+  const notificationsFor = async (
+    t: string,
+  ): Promise<Array<{ type: string; engagementId: string }>> => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/notifications?limit=100')
+      .set(bearer(t))
+      .expect(200);
+    return res.body.items as Array<{ type: string; engagementId: string }>;
   };
 
   const generate = (t: string, eng: string, code: string, referenceDate: string) =>
@@ -200,6 +213,70 @@ describe('Compliance escalation & calendar views (e2e)', () => {
         .post('/api/v1/notifications/scan')
         .set(bearer(await token('partner.a@hsdg.in')))
         .expect(403);
+    });
+  });
+
+  describe('§24 finer escalation routing', () => {
+    it('Due Today → a compliance-due-today notification to the lead', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const code = await createExactRule();
+      await generate(pa, eng, code, '2026-08-27').expect(201); // due TODAY
+
+      const scan = await scanAs(mp);
+      expect(scan.body.complianceDueToday).toBeGreaterThanOrEqual(1);
+      expect(
+        (await notificationsFor(pa)).some(
+          (n) => n.type === 'compliance_due_today' && n.engagementId === eng,
+        ),
+      ).toBe(true);
+    });
+
+    it('Client-commitment overdue → a distinct client-commitment notification, not a statutory breach', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const code = await createExactRule('CLIENT_COMMITTED');
+      await generate(pa, eng, code, '2026-08-20').expect(201); // 7 days overdue
+
+      const scan = await scanAs(mp);
+      expect(scan.body.clientCommitmentOverdue).toBeGreaterThanOrEqual(1);
+      const mine = (await notificationsFor(pa)).filter((n) => n.engagementId === eng);
+      expect(mine.some((n) => n.type === 'client_commitment_overdue')).toBe(true);
+      // A client commitment is NOT routed as a statutory-deadline breach.
+      expect(mine.some((n) => n.type === 'statutory_deadline_overdue')).toBe(false);
+    });
+
+    it('Review overdue → the layer OWNER (reviewer) is notified, leads escalated', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      // Non-statutory parent so no auto review layer collides with the manual one.
+      const code = await createExactRule('HSDG_MILESTONE');
+      const gen = await generate(pa, eng, code, '2026-12-01').expect(201); // instance itself upcoming
+      const reviewer = await findEmployeeId('EMP005'); // Manager X — NOT an engagement lead
+
+      // A manager-review layer whose own due date has already passed.
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance/${gen.body.id}/deadlines`)
+        .set(bearer(pa))
+        .send({
+          layerType: 'manager_review',
+          label: 'Manager review',
+          dueDateCategory: 'HSDG_MILESTONE',
+          dueDate: '2026-08-20',
+          ownerEmployeeId: reviewer,
+        })
+        .expect(201);
+
+      const scan = await scanAs(mp);
+      expect(scan.body.deadlineLayerOverdue).toBeGreaterThanOrEqual(1);
+
+      // The reviewer (layer owner), though not an engagement lead, is notified.
+      const mx = await token('manager.x@hsdg.in');
+      expect(
+        (await notificationsFor(mx)).some(
+          (n) => n.type === 'deadline_layer_overdue' && n.engagementId === eng,
+        ),
+      ).toBe(true);
     });
   });
 });
