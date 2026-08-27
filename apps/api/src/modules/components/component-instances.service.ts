@@ -8,13 +8,21 @@ import {
   type EngagementActivationResult,
   type GenerateInstancesResult,
   type Recurrence,
+  type RollHorizonResult,
   type WorkingDayAdjustment,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
+import { AppConfigService } from '../../config/config.module';
 import { AuditService } from '../audit/audit.service';
-import { computeDeadlines, resolveReferenceDate } from '../compliance/compliance-calc';
+import {
+  addMonthsUTC,
+  computeDeadlines,
+  parseISODate,
+  resolveReferenceDate,
+  toISODate,
+} from '../compliance/compliance-calc';
 import { enumeratePeriods } from './component-periods';
 
 interface InstanceRow {
@@ -105,7 +113,20 @@ export class ComponentInstancesService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly config: AppConfigService,
   ) {}
+
+  /** The firm's configured recurring-work horizon, in months (spec §18). */
+  configuredHorizonMonths(): number {
+    return this.config.get('COMPLIANCE_HORIZON_MONTHS');
+  }
+
+  /** The horizon cut-off date (today + configured/overridden months), ISO. */
+  private horizonEnd(overrideMonths?: number): string {
+    const months = overrideMonths ?? this.config.get('COMPLIANCE_HORIZON_MONTHS');
+    const today = parseISODate(toISODate(new Date()));
+    return toISODate(addMonthsUTC(today, months));
+  }
 
   /** Generate instances for one configured component (idempotent). */
   async generateForComponent(
@@ -116,7 +137,13 @@ export class ComponentInstancesService {
     return this.db.withRlsContext(ctx, async (client) => {
       const financialYear = await this.engagementFy(client, engagementId);
       const config = await this.loadConfig(client, engagementId, componentId);
-      const result = await this.generateOne(client, engagementId, financialYear, config);
+      const result = await this.generateOne(
+        client,
+        engagementId,
+        financialYear,
+        config,
+        this.horizonEnd(),
+      );
       await this.audit.recordWith(client, ctx, {
         action: 'component.work_generated',
         objectType: 'engagement_component',
@@ -143,8 +170,9 @@ export class ComponentInstancesService {
         [engagementId],
       );
       const merged: GenerateInstancesResult = { generated: [], removed: [], skipped: [] };
+      const horizon = this.horizonEnd();
       for (const config of configs) {
-        const one = await this.generateOne(client, engagementId, financialYear, config);
+        const one = await this.generateOne(client, engagementId, financialYear, config, horizon);
         merged.generated.push(...one.generated);
         merged.removed.push(...one.removed);
         for (const s of one.skipped)
@@ -213,9 +241,10 @@ export class ComponentInstancesService {
       let generated = 0;
       let removed = 0;
       const warnings: string[] = [];
+      const horizon = this.horizonEnd();
       for (const config of configs) {
         if (config.applicability_status === 'not_applicable') continue;
-        const one = await this.generateOne(client, engagementId, financialYear, config);
+        const one = await this.generateOne(client, engagementId, financialYear, config, horizon);
         generated += one.generated.length;
         removed += one.removed.length;
         for (const s of one.skipped) warnings.push(`${config.component_code}: ${s.reason}`);
@@ -228,6 +257,74 @@ export class ComponentInstancesService {
         after: { activatedComponents, generated, removed },
       });
       return { activatedComponents, generated, removed, warnings };
+    });
+  }
+
+  /**
+   * Rolling-horizon sweep (spec §18). Across every engagement the caller can
+   * LEAD (RLS-scoped; the firm-wide operator/MP covers the whole firm), fill in
+   * the recurring work now within the future horizon — idempotently, so as time
+   * advances new periods are materialised and existing ones are never
+   * duplicated. This is the scheduled worker's entry point (a cron authenticates
+   * as the firm-wide operator); it can also be scoped to one engagement.
+   */
+  async rollHorizon(
+    ctx: RlsContext,
+    opts: { horizonMonths?: number; engagementId?: string } = {},
+  ): Promise<RollHorizonResult> {
+    const months = opts.horizonMonths ?? this.config.get('COMPLIANCE_HORIZON_MONTHS');
+    const horizonEndDate = this.horizonEnd(opts.horizonMonths);
+    return this.db.withRlsContext(ctx, async (client) => {
+      const engParams: unknown[] = [];
+      let engFilter = '';
+      if (opts.engagementId) {
+        engParams.push(opts.engagementId);
+        engFilter = ` AND e.id = $${engParams.length}`;
+      }
+      // Engagements the caller can WRITE (is_engagement_lead) that carry at least
+      // one live, applicable component configuration.
+      const { rows: engs } = await client.query<{ id: string; financial_year: string }>(
+        `SELECT DISTINCT e.id, e.financial_year
+         FROM hsdg.engagements e
+         JOIN hsdg.engagement_components ec ON ec.engagement_id = e.id
+         WHERE ec.status NOT IN ('cancelled','superseded')
+           AND ec.applicability_status <> 'not_applicable'
+           AND hsdg.is_engagement_lead(e.id)${engFilter}`,
+        engParams,
+      );
+
+      let engagementsProcessed = 0;
+      let generated = 0;
+      let removed = 0;
+      for (const eng of engs) {
+        const { rows: configs } = await client.query<ConfigRow>(
+          `${CONFIG_SELECT}
+           WHERE ec.engagement_id = $1
+             AND ec.status NOT IN ('cancelled','superseded')
+             AND ec.applicability_status <> 'not_applicable'`,
+          [eng.id],
+        );
+        for (const config of configs) {
+          const one = await this.generateOne(
+            client,
+            eng.id,
+            eng.financial_year,
+            config,
+            horizonEndDate,
+          );
+          generated += one.generated.length;
+          removed += one.removed.length;
+        }
+        engagementsProcessed += 1;
+      }
+
+      await this.audit.recordWith(client, ctx, {
+        action: 'compliance.horizon_rolled',
+        objectType: 'engagement',
+        objectId: opts.engagementId ?? null,
+        after: { horizonMonths: months, horizonEndDate, engagementsProcessed, generated, removed },
+      });
+      return { horizonMonths: months, horizonEndDate, engagementsProcessed, generated, removed };
     });
   }
 
@@ -308,6 +405,7 @@ export class ComponentInstancesService {
     engagementId: string,
     financialYear: string,
     config: ConfigRow,
+    horizonEndIso: string,
   ): Promise<GenerateInstancesResult> {
     const generated: ComponentInstanceRecord[] = [];
     const removed: ComponentInstanceRecord[] = [];
@@ -317,6 +415,13 @@ export class ComponentInstancesService {
     // suppressed (component removed / not applicable / ad-hoc frequency / an
     // empty active window), the target is empty — the reconcile below then
     // cancels any scheduled work that no longer belongs.
+    //
+    // Two sets are derived. `windowPeriods` is the config's full in-window set
+    // (frequency × active window) — it drives the cancel-reconcile, so existing
+    // future work is never cancelled merely for being beyond the horizon.
+    // `periods` further restricts to the FUTURE HORIZON (§18) and drives what is
+    // CREATED now; the rolling job fills the rest as time advances.
+    let windowPeriods: ReturnType<typeof enumeratePeriods> = [];
     let periods: ReturnType<typeof enumeratePeriods> = [];
     if (config.status === 'cancelled' || config.status === 'superseded') {
       skipped.push({ period: '—', reason: 'component configuration is removed' });
@@ -333,12 +438,17 @@ export class ComponentInstancesService {
         // Manual "active window" (spec §13/§24): if the user set an active-from
         // and/or active-to, keep only periods that OVERLAP that window — so "I
         // look after this client Apr–Sep" produces only Apr–Sep work.
-        periods = allPeriods.filter(
+        windowPeriods = allPeriods.filter(
           (p) =>
             (config.start_date === null || p.end >= config.start_date) &&
             (config.end_date === null || p.start <= config.end_date),
         );
-        if (periods.length === 0) {
+        // FUTURE HORIZON (spec §18): only CREATE periods starting on/before the
+        // horizon cut-off. Past periods are always in scope; the rolling job
+        // re-runs to fill periods as they come within the horizon. The horizon
+        // never cancels already-created in-window work (it only bounds creation).
+        periods = windowPeriods.filter((p) => p.start <= horizonEndIso);
+        if (windowPeriods.length === 0) {
           skipped.push({
             period: '—',
             reason: 'no periods fall within the component’s active window',
@@ -369,7 +479,10 @@ export class ComponentInstancesService {
       [config.id],
     );
     const existingByKey = new Map(existing.map((e) => [e.period_key, e]));
-    const targetKeys = new Set(periods.map((p) => p.key));
+    // Reconcile against the full in-window set, not the horizon-limited set — so
+    // future in-window work already created is kept, only truly out-of-scope
+    // (out-of-window / stale-frequency) work is cancelled.
+    const targetKeys = new Set(windowPeriods.map((p) => p.key));
 
     // 1. Ensure every in-window period exists and is live.
     for (const period of periods) {

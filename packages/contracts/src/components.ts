@@ -240,3 +240,17 @@ export interface EngagementActivationResult {
   /** Non-blocking notes (e.g. ad-hoc components that produced no periods). */
   warnings: string[];
 }
+
+/** Result of a rolling-horizon generation sweep (spec §18). */
+export interface RollHorizonResult {
+  /** The horizon used, in months from today. */
+  horizonMonths: number;
+  /** The horizon's end date (today + horizonMonths), ISO. */
+  horizonEndDate: string;
+  /** Engagements swept (RLS-scoped to what the caller can see). */
+  engagementsProcessed: number;
+  /** Work instances created to fill periods newly within the horizon. */
+  generated: number;
+  /** Work instances cancelled because they fell out of scope. */
+  removed: number;
+}

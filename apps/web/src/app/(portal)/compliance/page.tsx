@@ -15,6 +15,7 @@ import type { ComplianceRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge, Button } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
+import { RollHorizonButton } from '@/components/compliance/roll-horizon-button';
 import { cn } from '@/lib/cn';
 
 type Filter = 'all' | 'overdue' | 'due-soon';
@@ -118,13 +119,16 @@ function ComplianceInner(): JSX.Element {
         title="Compliance Calendar"
         subtitle="Open obligations across your engagements, by statutory deadline. Two clocks: statutory vs internal SLA."
         actions={
-          can(principal, PERMISSION.complianceManage) ? (
-            <Link href="/compliance/rules">
-              <Button variant="secondary">
-                <Settings2 className="h-4 w-4" /> Configure rules
-              </Button>
-            </Link>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            {can(principal, PERMISSION.engagementManage) && <RollHorizonButton />}
+            {can(principal, PERMISSION.complianceManage) && (
+              <Link href="/compliance/rules">
+                <Button variant="secondary">
+                  <Settings2 className="h-4 w-4" /> Configure rules
+                </Button>
+              </Link>
+            )}
+          </div>
         }
       />
 

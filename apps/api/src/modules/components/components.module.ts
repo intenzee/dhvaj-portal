@@ -5,6 +5,7 @@ import { EngagementComponentsService } from './engagement-components.service';
 import { ComponentInstancesService } from './component-instances.service';
 import { ServiceComponentsController } from './service-components.controller';
 import { EngagementComponentsController } from './engagement-components.controller';
+import { ComplianceHorizonController } from './compliance-horizon.controller';
 
 /**
  * Service Components & Component Configuration (spec §11–§13, §16, §24, §36).
@@ -19,7 +20,11 @@ import { EngagementComponentsController } from './engagement-components.controll
  */
 @Module({
   imports: [AuditModule],
-  controllers: [ServiceComponentsController, EngagementComponentsController],
+  controllers: [
+    ServiceComponentsController,
+    EngagementComponentsController,
+    ComplianceHorizonController,
+  ],
   providers: [ServiceComponentsService, EngagementComponentsService, ComponentInstancesService],
   exports: [ServiceComponentsService, EngagementComponentsService, ComponentInstancesService],
 })

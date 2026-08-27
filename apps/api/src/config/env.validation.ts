@@ -89,6 +89,12 @@ export const envSchema = z.object({
   // "approaching".
   NOTIFICATION_SLA_LEAD_DAYS: z.coerce.number().int().nonnegative().default(3),
   NOTIFICATION_DEADLINE_LEAD_DAYS: z.coerce.number().int().nonnegative().default(7),
+
+  // Recurring-work FUTURE HORIZON (spec §18): recurring component work is
+  // generated only for periods starting within this many months of today, and a
+  // rolling job extends it as time advances. Default 12 months keeps a current
+  // financial year fully materialised while bounding far-future generation.
+  COMPLIANCE_HORIZON_MONTHS: z.coerce.number().int().positive().max(120).default(12),
 });
 
 export type Env = z.infer<typeof envSchema>;
