@@ -10,6 +10,33 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Config-depth partials + dark mode (complete).** Four spec gaps
+> closed, each additive, plus a full UI theme:
+>
+> - **Engagement Type & commercial fields (§3/§7)** — `engagement_type`
+>   (recurring-compliance / one-time / project / retainer / advisory / audit /
+>   certification / litigation) plus Priority, Confidentiality, Currency, Billing
+>   model and the mandate-letter reference, shown on the engagement and settable
+>   in the create form.
+> - **Fact-driven applicability (§11)** — component discovery now decides
+>   applicability from **client facts** (the registrations the entity holds, its
+>   legal category) rather than a static catalogue default; a GST scope shows
+>   *“not applicable — no active GST registration”* for a client without a GSTIN.
+> - **Activation ceremony (§20/§37)** — one gated, atomic `POST
+>   /engagements/:id/activate`: precondition checks, draft component configs →
+>   active, and recurring-work generation in a single transaction; an **Activate**
+>   button drives it.
+> - **Per-component checklists + PBC (§13/§17)** — each component carries a
+>   checklist (seeded from a catalogue template, materialised on selection),
+>   tickable by any member with who/when attribution and lead-managed structure;
+>   client dependencies can now be **attached to a component** (PBC).
+> - **Dark mode** — a theme-aware token system (CSS variables flipped by a
+>   `.dark` class) with a topbar Sun/Moon toggle, persisted per-viewer and
+>   respecting the OS preference, applied with no flash of the wrong theme.
+>
+> All parts: api+web typecheck, web lint & production build pass, 112/112 API
+> tests green, verified end-to-end in the browser.
+>
 > **Status: Multiple services per engagement (complete).** The engagement is no
 > longer keyed to a single service. A new **`engagement_services`** table (spec
 > §2, §9–§10, §27, §36, §38) is the **service-line grain** that lets **one
