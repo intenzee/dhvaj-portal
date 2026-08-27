@@ -461,5 +461,28 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
         .expect(201);
       expect(plain.body.dueDateCategory).toBe('NO_FIXED_DATE');
     });
+
+    it('ships the seeded catalogue pre-classified per the spec mapping (§6–§15)', async () => {
+      // The 0029 migration classified the seeded components. Spot-check the
+      // three archetypes: statutory-fixed filing, internal recurring, milestone.
+      const expected: Record<string, [string, string]> = {
+        GSTR1: ['STATUTORY_FIXED', 'LAW_RULE'],
+        GSTR3B: ['STATUTORY_FIXED', 'LAW_RULE'],
+        GSTR9: ['STATUTORY_RULE', 'LAW_RULE'],
+        ITR_FILE: ['STATUTORY_RULE', 'LAW_RULE'],
+        ITC_RECON: ['HSDG_RECURRING', 'HSDG_POLICY'],
+        BK_CLOSE: ['HSDG_RECURRING', 'HSDG_POLICY'],
+        SA_PLANNING: ['HSDG_MILESTONE', 'WORKFLOW'],
+        BK_MIS: ['CLIENT_COMMITTED', 'CLIENT_COMMITMENT'],
+      };
+      for (const [code, [cat, src]] of Object.entries(expected)) {
+        const res = await request(app.getHttpServer())
+          .get(`/api/v1/service-components/${code}`)
+          .set(bearer(mp))
+          .expect(200);
+        expect([code, res.body.dueDateCategory]).toEqual([code, cat]);
+        expect([code, res.body.dueDateSource]).toEqual([code, src]);
+      }
+    });
   });
 });
