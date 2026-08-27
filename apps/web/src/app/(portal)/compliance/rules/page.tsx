@@ -42,7 +42,7 @@ export default function ComplianceConfigPage(): JSX.Element {
         }
       />
 
-      <div className="mb-4 flex gap-1 border-b border-slate-200">
+      <div className="mb-4 flex gap-1 border-b border-line-strong">
         {(['rules', 'holidays'] as Tab[]).map((t) => (
           <button
             key={t}
@@ -99,7 +99,7 @@ function RulesPanel(): JSX.Element {
       {items.length === 0 ? (
         <EmptyState>No compliance rules yet.</EmptyState>
       ) : (
-        <Card className="divide-y divide-slate-100">
+        <Card className="divide-y divide-line">
           {items.map((r) => {
             const open = expanded === r.id;
             const current = currentVersion(r);
@@ -132,7 +132,7 @@ function RulesPanel(): JSX.Element {
                 </div>
 
                 {open && (
-                  <div className="bg-slate-50/60 px-4 py-3">
+                  <div className="bg-surface-raised/60 px-4 py-3">
                     {r.versions.length === 0 ? (
                       <p className="text-sm text-ink-faint">No versions — this rule is not yet effective.</p>
                     ) : (
@@ -149,7 +149,7 @@ function RulesPanel(): JSX.Element {
                           </thead>
                           <tbody>
                             {r.versions.map((v) => (
-                              <tr key={v.id} className={cn('border-t border-slate-200', current?.id === v.id && 'font-medium text-ink')}>
+                              <tr key={v.id} className={cn('border-t border-line-strong', current?.id === v.id && 'font-medium text-ink')}>
                                 <td className="py-1 pr-4">
                                   {formatDate(v.effectiveFrom)} → {v.effectiveTo ? formatDate(v.effectiveTo) : 'open'}
                                   {current?.id === v.id && <span className="ml-1 text-primary-600">(current)</span>}
@@ -201,7 +201,7 @@ function HolidaysPanel(): JSX.Element {
       {items.length === 0 ? (
         <EmptyState>No holidays in the calendar.</EmptyState>
       ) : (
-        <Card className="divide-y divide-slate-100">
+        <Card className="divide-y divide-line">
           {items.map((h) => (
             <div key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
               <span className="font-medium text-ink">{h.name}</span>

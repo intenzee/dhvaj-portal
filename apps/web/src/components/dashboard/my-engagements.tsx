@@ -28,7 +28,7 @@ export function MyEngagementsPanel(): JSX.Element {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-faint">
                 <th className="px-5 py-2 font-semibold">Entity / Engagement</th>
                 <th className="px-3 py-2 font-semibold">Service</th>
                 <th className="px-3 py-2 font-semibold">FY / Period</th>
@@ -42,7 +42,7 @@ export function MyEngagementsPanel(): JSX.Element {
                 <tr
                   key={e.id}
                   onClick={() => router.push(`/engagements/${e.id}`)}
-                  className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50"
+                  className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-raised"
                 >
                   <td className="px-5 py-2.5">
                     <div className="font-medium text-ink">{e.entityName}</div>

@@ -84,12 +84,12 @@ export function DocumentPreview({
       onClick={onClose}
     >
       <div
-        className="flex h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-pop"
+        className="flex h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-pop"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+        <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-ink">{doc.title}</div>
             <div className="truncate text-xs text-ink-faint">
@@ -102,7 +102,7 @@ export function DocumentPreview({
             </Button>
             <button
               onClick={onClose}
-              className="rounded-lg p-2 text-ink-faint hover:bg-slate-100 hover:text-ink"
+              className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
               aria-label="Close preview"
             >
               <X className="h-5 w-5" />
@@ -110,7 +110,7 @@ export function DocumentPreview({
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto bg-slate-50">
+        <div className="flex-1 overflow-auto bg-surface-raised">
           {state.loading && (
             <div className="flex h-full items-center justify-center">
               <Spinner label="Loading preview…" />

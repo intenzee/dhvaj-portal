@@ -131,7 +131,7 @@ export function ComponentsSection({
               value={activeLineId}
               onChange={(e) => setLineId(e.target.value)}
               aria-label="Service line"
-              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-ink focus:border-brand-400 focus:outline-none"
+              className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs text-ink focus:border-primary-500 focus:outline-none"
             >
               {lines.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -159,7 +159,7 @@ export function ComponentsSection({
         {items.length > 0 && (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                 <th className="px-4 py-2.5 font-semibold">Component</th>
                 <th className="px-4 py-2.5 font-semibold">Applicability</th>
                 <th className="px-4 py-2.5 font-semibold">Frequency</th>
@@ -172,7 +172,7 @@ export function ComponentsSection({
               {items.map((c) => {
                 const removed = c.status === 'cancelled' || c.status === 'superseded';
                 return (
-                  <tr key={c.id} className="border-b border-slate-50 last:border-0">
+                  <tr key={c.id} className="border-b border-line last:border-0">
                     <td className="px-4 py-2.5 text-ink">{c.componentName}</td>
                     <td className="px-4 py-2.5">
                       <Badge tone={CATEGORY_TONE[c.applicabilityStatus] ?? 'neutral'}>
@@ -190,7 +190,7 @@ export function ComponentsSection({
                           <div className="flex items-center justify-end gap-1">
                             <button
                               onClick={() => setFreqChanging(c)}
-                              className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-ink"
+                              className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-ink"
                               aria-label={`Change frequency of ${c.componentName}`}
                               title="Change frequency"
                             >
@@ -198,7 +198,7 @@ export function ComponentsSection({
                             </button>
                             <button
                               onClick={() => setEditing(c)}
-                              className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-ink"
+                              className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-ink"
                               aria-label={`Configure ${c.componentName}`}
                               title="Configure"
                             >
@@ -207,7 +207,7 @@ export function ComponentsSection({
                             <button
                               onClick={() => remove.mutate(c.id)}
                               disabled={remove.isPending}
-                              className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-danger-600"
+                              className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
                               aria-label={`Remove ${c.componentName}`}
                               title="Remove from scope"
                             >
@@ -250,7 +250,7 @@ export function ComponentsSection({
             {discovery.data.rows.map((r) => (
               <div
                 key={r.serviceComponentId}
-                className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 p-3"
+                className="flex items-start justify-between gap-3 rounded-lg border border-line-strong p-3"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">

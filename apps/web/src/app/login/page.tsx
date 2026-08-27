@@ -45,7 +45,7 @@ export default function LoginPage(): JSX.Element {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-surface-sunken p-4">
       <Card className="w-full max-w-md">
         <CardBody className="p-6">
           <div className="mb-1 flex items-center gap-2">
@@ -73,7 +73,7 @@ export default function LoginPage(): JSX.Element {
           <div className="mt-6">
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
               <span>{entraEnabled ? 'Developer sign-in (local only)' : 'Developer sign-in'}</span>
-              <span className="h-px flex-1 bg-slate-200" />
+              <span className="h-px flex-1 bg-line-strong" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               {SEEDED.map((u) => (
@@ -81,7 +81,7 @@ export default function LoginPage(): JSX.Element {
                   key={u.email}
                   onClick={() => void run(() => login(u.email), 'Sign-in failed. Is the API running?')}
                   disabled={busy}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-left text-xs transition hover:border-primary-300 hover:bg-primary-50 disabled:opacity-50"
+                  className="rounded-lg border border-line-strong px-3 py-2 text-left text-xs transition hover:border-primary-300 hover:bg-primary-50 disabled:opacity-50"
                 >
                   <div className="font-medium text-ink">{u.label}</div>
                   <div className="text-ink-faint">{u.email}</div>

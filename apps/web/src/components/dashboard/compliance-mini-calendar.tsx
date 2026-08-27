@@ -49,7 +49,7 @@ export function ComplianceMiniCalendar(): JSX.Element {
 
   return (
     <Card className="flex flex-col">
-      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
+      <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
         <h3 className="text-[15px] font-semibold text-ink">Compliance Calendar</h3>
         <Link
           href="/compliance"
@@ -64,13 +64,13 @@ export function ComplianceMiniCalendar(): JSX.Element {
         ) : (
           <>
             <div className="mb-2 flex items-center justify-between">
-              <button onClick={() => step(-1)} className="rounded p-1 text-ink-muted hover:bg-slate-100" aria-label="Previous month">
+              <button onClick={() => step(-1)} className="rounded p-1 text-ink-muted hover:bg-surface-sunken" aria-label="Previous month">
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <div className="text-sm font-semibold text-ink">
                 {MONTHS[view.m]} {view.y}
               </div>
-              <button onClick={() => step(1)} className="rounded p-1 text-ink-muted hover:bg-slate-100" aria-label="Next month">
+              <button onClick={() => step(1)} className="rounded p-1 text-ink-muted hover:bg-surface-sunken" aria-label="Next month">
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>

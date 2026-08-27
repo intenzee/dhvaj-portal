@@ -113,7 +113,7 @@ export function DocumentsSection({ engagementId }: { engagementId: string }): JS
         {docs.data && docs.data.items.length > 0 && (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                 <th className="px-4 py-2.5 font-semibold">Title</th>
                 <th className="px-4 py-2.5 font-semibold">Type</th>
                 <th className="px-4 py-2.5 font-semibold">Classification</th>
@@ -124,7 +124,7 @@ export function DocumentsSection({ engagementId }: { engagementId: string }): JS
             </thead>
             <tbody>
               {docs.data.items.map((d) => (
-                <tr key={d.id} className="border-b border-slate-50 last:border-0">
+                <tr key={d.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-2.5">
                     <button
                       onClick={() => setPreview(d)}
@@ -143,7 +143,7 @@ export function DocumentsSection({ engagementId }: { engagementId: string }): JS
                     <div className="flex justify-end gap-1">
                       <button
                         onClick={() => void download(d)}
-                        className="rounded p-1.5 text-ink-muted hover:bg-slate-100 hover:text-primary-600"
+                        className="rounded p-1.5 text-ink-muted hover:bg-surface-sunken hover:text-primary-600"
                         title="Download"
                       >
                         <Download className="h-4 w-4" />
@@ -151,7 +151,7 @@ export function DocumentsSection({ engagementId }: { engagementId: string }): JS
                       <button
                         onClick={() => archive.mutate(d)}
                         disabled={archive.isPending}
-                        className="rounded p-1.5 text-ink-muted hover:bg-slate-100 hover:text-ink"
+                        className="rounded p-1.5 text-ink-muted hover:bg-surface-sunken hover:text-ink"
                         title={d.status === 'archived' ? 'Restore' : 'Archive'}
                       >
                         {d.status === 'archived' ? <RotateCcw className="h-4 w-4" /> : <Archive className="h-4 w-4" />}

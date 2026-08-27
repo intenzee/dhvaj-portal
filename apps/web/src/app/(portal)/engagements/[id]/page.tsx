@@ -66,7 +66,7 @@ export default function EngagementDetailPage(): JSX.Element {
         actions={
           <Link
             href={`/entities/${e.entityId}`}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+            className="rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
           >
             Client 360 →
           </Link>
@@ -100,7 +100,7 @@ export default function EngagementDetailPage(): JSX.Element {
             <Fact label="Open review points" value={String(e.openReviewPointCount)} />
             <Fact label="Open tasks" value={String(e.openTaskCount)} />
           </CardBody>
-          <CardBody className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+          <CardBody className="flex flex-wrap gap-2 border-t border-line pt-3">
             {e.isWaitingForClient && <Badge tone="warn">Waiting for client</Badge>}
             {e.internallyOverdueTaskCount > 0 && (
               <Badge tone="danger">{e.internallyOverdueTaskCount} internally overdue</Badge>
@@ -140,7 +140,7 @@ export default function EngagementDetailPage(): JSX.Element {
           {tasks.data && tasks.data.items.length > 0 && (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                   <th className="px-4 py-2.5 font-semibold">Task</th>
                   <th className="px-4 py-2.5 font-semibold">Assignee</th>
                   <th className="px-4 py-2.5 font-semibold">Priority</th>
@@ -150,7 +150,7 @@ export default function EngagementDetailPage(): JSX.Element {
               </thead>
               <tbody>
                 {tasks.data.items.map((t) => (
-                  <tr key={t.id} className="border-b border-slate-50 last:border-0">
+                  <tr key={t.id} className="border-b border-line last:border-0">
                     <td className="px-4 py-2.5 text-ink">{t.title}</td>
                     <td className="px-4 py-2.5 text-ink-muted">{t.assignedToName ?? 'Unassigned'}</td>
                     <td className="px-4 py-2.5"><PriorityBadge priority={t.priority} /></td>
@@ -177,7 +177,7 @@ export default function EngagementDetailPage(): JSX.Element {
           {deps.data && deps.data.items.length > 0 && (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                   <th className="px-4 py-2.5 font-semibold">Requested</th>
                   <th className="px-4 py-2.5 font-semibold">Status</th>
                   <th className="px-4 py-2.5 font-semibold">Escalation</th>
@@ -186,7 +186,7 @@ export default function EngagementDetailPage(): JSX.Element {
               </thead>
               <tbody>
                 {deps.data.items.map((d) => (
-                  <tr key={d.id} className="border-b border-slate-50 last:border-0">
+                  <tr key={d.id} className="border-b border-line last:border-0">
                     <td className="px-4 py-2.5 text-ink">{d.requestedInfo}</td>
                     <td className="px-4 py-2.5"><StatusBadge status={d.status} /></td>
                     <td className="px-4 py-2.5 text-ink-muted">
@@ -217,7 +217,7 @@ export default function EngagementDetailPage(): JSX.Element {
           {compliance.data && compliance.data.items.length > 0 && (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                   <th className="px-4 py-2.5 font-semibold">Obligation</th>
                   <th className="px-4 py-2.5 font-semibold">Statutory</th>
                   <th className="px-4 py-2.5 font-semibold">Internal SLA</th>
@@ -226,7 +226,7 @@ export default function EngagementDetailPage(): JSX.Element {
               </thead>
               <tbody>
                 {compliance.data.items.map((c) => (
-                  <tr key={c.id} className="border-b border-slate-50 last:border-0">
+                  <tr key={c.id} className="border-b border-line last:border-0">
                     <td className="px-4 py-2.5 text-ink">{c.complianceRuleName}</td>
                     <td className={`px-4 py-2.5 ${c.isStatutoryOverdue ? 'font-medium text-danger-600' : 'text-ink-muted'}`}>
                       {formatDate(c.effectiveStatutoryDeadline)}

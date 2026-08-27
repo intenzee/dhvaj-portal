@@ -33,7 +33,7 @@ export function ClientDependenciesPanel(): JSX.Element {
       )}
       <ul>
         {(q.data?.items ?? []).map((d) => (
-          <li key={d.id} className="flex items-center gap-3 border-b border-slate-50 px-5 py-3 last:border-0">
+          <li key={d.id} className="flex items-center gap-3 border-b border-line px-5 py-3 last:border-0">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-ink">
                 {d.entityName} — {d.engagementCode}

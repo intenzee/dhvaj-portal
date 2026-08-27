@@ -5,7 +5,7 @@ import { formatCount } from '@/lib/format';
 import type { CardDef, CardTone } from '@/lib/dashboard-cards';
 
 const ICON_TINT: Record<CardTone, string> = {
-  neutral: 'bg-slate-100 text-slate-600',
+  neutral: 'bg-surface-sunken text-ink-muted',
   info: 'bg-primary-50 text-primary-600',
   warn: 'bg-warning-50 text-warning-600',
   danger: 'bg-danger-50 text-danger-600',
@@ -24,7 +24,7 @@ const VALUE_COLOR: Record<CardTone, string> = {
 export function StatCard({ card, value }: { card: CardDef; value: number }): JSX.Element {
   const Icon = card.icon;
   return (
-    <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-card">
+    <div className="flex flex-col rounded-xl border border-line-strong bg-surface p-4 shadow-card">
       <div className="flex items-start justify-between">
         <div className="text-[13px] font-medium text-ink-muted">{card.label}</div>
         <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg', ICON_TINT[card.tone])}>

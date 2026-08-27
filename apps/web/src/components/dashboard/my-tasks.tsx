@@ -25,7 +25,7 @@ export function MyTasksPanel(): JSX.Element {
         {(q.data?.items ?? []).map((t) => {
           const done = t.status === 'done';
           return (
-            <li key={t.id} className="flex items-start gap-2.5 border-b border-slate-50 px-5 py-3 last:border-0">
+            <li key={t.id} className="flex items-start gap-2.5 border-b border-line px-5 py-3 last:border-0">
               {done ? (
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success-500" />
               ) : (

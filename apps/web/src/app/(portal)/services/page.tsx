@@ -44,7 +44,7 @@ export default function ServicesPage(): JSX.Element {
         actions={
           <Link
             href="/services/components"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+            className="rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
           >
             Manage components →
           </Link>
@@ -55,7 +55,7 @@ export default function ServicesPage(): JSX.Element {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search services…"
-          className="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+          className="w-full max-w-sm rounded-lg border border-line-strong px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
         />
       </div>
       {q.isLoading && <Spinner />}

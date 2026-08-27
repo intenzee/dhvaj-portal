@@ -4,6 +4,31 @@
 
 :root {
   --font-sans: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+
+  /* Semantic surfaces / borders / ink — light theme (RGB channels). */
+  --canvas: 241 245 249; /* slate-100 — app background */
+  --surface: 255 255 255; /* white — cards/panels */
+  --surface-raised: 248 250 252; /* slate-50 — subtle raise */
+  --surface-sunken: 241 245 249; /* slate-100 — table heads / hovers */
+  --line: 241 245 249; /* slate-100 — hairlines */
+  --line-strong: 226 232 240; /* slate-200/300 — stronger borders */
+  --ink: 15 23 42; /* slate-900 */
+  --ink-muted: 71 85 105; /* slate-600 */
+  --ink-faint: 148 163 184; /* slate-400 */
+  color-scheme: light;
+}
+
+.dark {
+  --canvas: 3 7 18; /* slate-950 */
+  --surface: 17 24 39; /* slate-900-ish — cards */
+  --surface-raised: 30 41 59; /* slate-800 */
+  --surface-sunken: 30 41 59; /* slate-800 */
+  --line: 30 41 59; /* slate-800 */
+  --line-strong: 51 65 85; /* slate-700 */
+  --ink: 226 232 240; /* slate-200 */
+  --ink-muted: 148 163 184; /* slate-400 */
+  --ink-faint: 100 116 139; /* slate-500 */
+  color-scheme: dark;
 }
 
 html,
@@ -13,6 +38,54 @@ body {
 
 body {
   font-family: var(--font-sans);
+}
+
+/* ── Dark overrides for the fixed status/tint palette ─────────────────────
+ * The brand/status hues stay, but their very-light *-50/100 tint backgrounds
+ * and *-700 text (used by badges, stat tiles, links) are re-toned for a dark
+ * surface here — centralised so components need no per-tint dark: variants. */
+.dark .bg-primary-50 {
+  background-color: rgb(37 99 235 / 0.16);
+}
+.dark .bg-primary-100 {
+  background-color: rgb(37 99 235 / 0.26);
+}
+.dark .hover\:bg-primary-100:hover {
+  background-color: rgb(37 99 235 / 0.26);
+}
+.dark .bg-success-50 {
+  background-color: rgb(22 163 74 / 0.16);
+}
+.dark .bg-warning-50 {
+  background-color: rgb(245 158 11 / 0.16);
+}
+.dark .bg-danger-50 {
+  background-color: rgb(239 68 68 / 0.16);
+}
+.dark .text-primary-600 {
+  color: rgb(96 165 250);
+}
+.dark .text-primary-700 {
+  color: rgb(147 197 253);
+}
+.dark .hover\:text-primary-700:hover {
+  color: rgb(147 197 253);
+}
+.dark .text-success-700 {
+  color: rgb(134 239 172);
+}
+.dark .text-warning-700 {
+  color: rgb(252 211 77);
+}
+.dark .text-danger-700 {
+  color: rgb(252 165 165);
+}
+.dark .text-slate-700 {
+  color: rgb(203 213 225);
+}
+/* Card shadows are near-invisible on dark; a hairline ring reads better. */
+.dark .shadow-card {
+  box-shadow: 0 0 0 1px rgb(148 163 184 / 0.06);
 }
 
 /* Thin, unobtrusive scrollbars for dense panels. */

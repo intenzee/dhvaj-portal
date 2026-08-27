@@ -30,7 +30,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
           <div
             key={t.id}
             className={cn(
-              'pointer-events-auto flex items-start gap-2.5 rounded-lg border bg-white px-3.5 py-3 text-sm shadow-pop',
+              'pointer-events-auto flex items-start gap-2.5 rounded-lg border bg-surface px-3.5 py-3 text-sm shadow-pop',
               t.type === 'success' ? 'border-success-500/30' : 'border-danger-500/30',
             )}
           >

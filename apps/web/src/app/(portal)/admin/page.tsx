@@ -37,7 +37,7 @@ export default function AdministrationPage(): JSX.Element {
         title="Administration"
         subtitle="Manage portal users, role assignments and offices. Every change is audited."
       />
-      <div className="mb-4 flex gap-1 border-b border-slate-200">
+      <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
           <button
             key={t.id}

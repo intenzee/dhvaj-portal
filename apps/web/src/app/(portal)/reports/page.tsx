@@ -44,7 +44,7 @@ export default function ReportsPage(): JSX.Element {
         title="Reports & MIS"
         subtitle="Management rollups across everything you can see. Firm-wide for partners; scoped by the database."
       />
-      <div className="mb-4 flex gap-1 border-b border-slate-200">
+      <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -86,7 +86,7 @@ function MetricTile({
           ? 'text-success-700'
           : 'text-ink';
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">
+    <div className="rounded-xl border border-line-strong bg-surface p-4 shadow-card">
       <div className="text-[13px] font-medium text-ink-muted">{label}</div>
       <div className={cn('mt-1 text-3xl font-bold tabular-nums', color)}>{formatCount(value)}</div>
     </div>
@@ -109,7 +109,7 @@ function BarRow({ label, count, max }: { label: string; count: number; max: numb
       <span className="w-40 shrink-0 truncate text-sm text-ink" title={label}>
         {label}
       </span>
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
         <div className="h-full rounded-full bg-primary-500" style={{ width: `${pct}%` }} />
       </div>
       <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums text-ink">{count}</span>
@@ -216,7 +216,7 @@ function EngagementsReport(): JSX.Element {
           <div className="scroll-slim overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-faint">
                   <th className="py-2 pr-4 font-semibold">Partner</th>
                   <th className="py-2 pr-4 font-semibold">Active</th>
                   <th className="py-2 pr-4 font-semibold">Total</th>
@@ -225,7 +225,7 @@ function EngagementsReport(): JSX.Element {
               </thead>
               <tbody>
                 {r.byPartner.map((p) => (
-                  <tr key={p.partnerId} className="border-b border-slate-50 last:border-0">
+                  <tr key={p.partnerId} className="border-b border-line last:border-0">
                     <td className="py-2 pr-4 font-medium text-ink">{p.partnerName}</td>
                     <td className="py-2 pr-4 tabular-nums">{p.active}</td>
                     <td className="py-2 pr-4 tabular-nums">{p.total}</td>
@@ -284,7 +284,7 @@ function ComplianceReport(): JSX.Element {
           <div className="scroll-slim overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-faint">
                   <th className="py-2 pr-4 font-semibold">Category</th>
                   <th className="py-2 pr-4 font-semibold">Open</th>
                   <th className="py-2 pr-4 font-semibold">Overdue</th>
@@ -293,7 +293,7 @@ function ComplianceReport(): JSX.Element {
               </thead>
               <tbody>
                 {r.byCategory.map((c) => (
-                  <tr key={c.category} className="border-b border-slate-50 last:border-0">
+                  <tr key={c.category} className="border-b border-line last:border-0">
                     <td className="py-2 pr-4 font-medium text-ink">{humanize(c.category)}</td>
                     <td className="py-2 pr-4 tabular-nums">{c.open}</td>
                     <td className="py-2 pr-4 tabular-nums">
@@ -354,7 +354,7 @@ function UtilisationReportView(): JSX.Element {
         <div className="scroll-slim overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-faint">
                 <th className="py-2 pr-4 font-semibold">Employee</th>
                 <th className="py-2 pr-4 font-semibold">Office</th>
                 <th className="py-2 pr-4 font-semibold">EP</th>
@@ -366,7 +366,7 @@ function UtilisationReportView(): JSX.Element {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.employeeId} className="border-b border-slate-50 last:border-0">
+                <tr key={r.employeeId} className="border-b border-line last:border-0">
                   <td className="py-2 pr-4">
                     <span className="block font-medium text-ink">{r.employeeName}</span>
                     {r.gradeName && <span className="block text-xs text-ink-faint">{r.gradeName}</span>}

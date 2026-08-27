@@ -118,7 +118,7 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
         {items.length > 0 && (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                 <th className="px-4 py-2.5 font-semibold">Component</th>
                 <th className="px-4 py-2.5 font-semibold">Period</th>
                 <th className="px-4 py-2.5 font-semibold">Statutory</th>
@@ -131,7 +131,7 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
               {items.map((w) => {
                 const open = w.status === 'scheduled' || w.status === 'active';
                 return (
-                  <tr key={w.id} className="border-b border-slate-50 last:border-0">
+                  <tr key={w.id} className="border-b border-line last:border-0">
                     <td className="px-4 py-2.5 text-ink">{w.componentName}</td>
                     <td className="px-4 py-2.5 text-ink-muted">
                       {w.periodLabel}

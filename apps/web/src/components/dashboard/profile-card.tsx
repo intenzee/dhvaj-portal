@@ -21,7 +21,7 @@ export function ProfileCard(): JSX.Element {
 
   return (
     <Card className="flex flex-col">
-      <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
+      <div className="flex items-center gap-3 border-b border-line px-5 py-4">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-600 text-sm font-semibold text-white">
           {initials(principal.displayName)}
         </div>
@@ -37,7 +37,7 @@ export function ProfileCard(): JSX.Element {
         <Fact label="MFA" value={principal.mfaSatisfied ? 'Satisfied' : 'Required'} />
       </div>
 
-      <div className="border-t border-slate-100 px-5 py-3">
+      <div className="border-t border-line px-5 py-3">
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
           Quick Actions
         </div>

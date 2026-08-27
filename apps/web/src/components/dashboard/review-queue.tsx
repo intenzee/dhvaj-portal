@@ -35,7 +35,7 @@ export function ReviewQueuePanel(): JSX.Element {
             <li
               key={e.id}
               onClick={() => router.push(`/engagements/${e.id}`)}
-              className="flex cursor-pointer items-center gap-3 border-b border-slate-50 px-5 py-3 last:border-0 hover:bg-slate-50"
+              className="flex cursor-pointer items-center gap-3 border-b border-line px-5 py-3 last:border-0 hover:bg-surface-raised"
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-ink">

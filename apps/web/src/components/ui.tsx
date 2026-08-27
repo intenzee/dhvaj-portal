@@ -6,14 +6,14 @@ import { cn } from '@/lib/cn';
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
   return (
     <div
-      className={cn('rounded-xl border border-slate-200 bg-white shadow-card', className)}
+      className={cn('rounded-xl border border-line-strong bg-surface shadow-card', className)}
       {...props}
     />
   );
 }
 
 export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn('border-b border-slate-100 px-5 py-3.5', className)} {...props} />;
+  return <div className={cn('border-b border-line px-5 py-3.5', className)} {...props} />;
 }
 
 export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>): JSX.Element {
@@ -44,7 +44,7 @@ export function Panel({
 }): JSX.Element {
   return (
     <Card className={cn('flex flex-col', className)}>
-      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
+      <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
         <h3 className="text-[15px] font-semibold text-ink">{title}</h3>
         {action ??
           (linkHref && (
@@ -73,8 +73,8 @@ export function Button({
 }: ButtonProps): JSX.Element {
   const variants: Record<string, string> = {
     primary: 'bg-primary-600 text-white hover:bg-primary-700 disabled:bg-primary-600/50',
-    secondary: 'border border-slate-300 bg-white text-ink hover:bg-slate-50',
-    ghost: 'text-ink-muted hover:bg-slate-100',
+    secondary: 'border border-line-strong bg-surface text-ink hover:bg-surface-raised',
+    ghost: 'text-ink-muted hover:bg-surface-sunken',
     subtle: 'bg-primary-50 text-primary-700 hover:bg-primary-100',
   };
   const sizes: Record<string, string> = {
@@ -95,7 +95,7 @@ export function Button({
 }
 
 const TONES: Record<string, string> = {
-  neutral: 'bg-slate-100 text-slate-700',
+  neutral: 'bg-surface-sunken text-slate-700',
   info: 'bg-primary-50 text-primary-700',
   warn: 'bg-warning-50 text-warning-700',
   danger: 'bg-danger-50 text-danger-700',
@@ -126,7 +126,7 @@ export function Badge({
 export function Spinner({ label = 'Loading…' }: { label?: string }): JSX.Element {
   return (
     <div className="flex items-center gap-2 text-sm text-ink-muted" role="status">
-      <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-primary-600" />
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-line-strong border-t-primary-600" />
       {label}
     </div>
   );
@@ -134,7 +134,7 @@ export function Spinner({ label = 'Loading…' }: { label?: string }): JSX.Eleme
 
 export function EmptyState({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <div className="rounded-lg border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-ink-muted">
+    <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-sm text-ink-muted">
       {children}
     </div>
   );

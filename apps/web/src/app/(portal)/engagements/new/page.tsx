@@ -148,7 +148,7 @@ function EntityPicker({
 
   if (value) {
     return (
-      <div className="flex items-center justify-between rounded-lg border border-slate-300 px-3 py-2 text-sm">
+      <div className="flex items-center justify-between rounded-lg border border-line-strong px-3 py-2 text-sm">
         <span className="font-medium text-ink">{value.label}</span>
         <button className="text-xs text-primary-600 hover:underline" onClick={() => onChange(null)}>
           Change
@@ -159,7 +159,7 @@ function EntityPicker({
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2">
+      <div className="flex items-center gap-2 rounded-lg border border-line-strong px-3 py-2">
         <Search className="h-4 w-4 text-ink-faint" />
         <input
           value={term}
@@ -173,7 +173,7 @@ function EntityPicker({
         />
       </div>
       {open && debounced.length >= 2 && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-pop">
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-line-strong bg-surface py-1 shadow-pop">
           {q.isFetching && <div className="px-3 py-2 text-sm text-ink-faint">Searching…</div>}
           {q.data && q.data.items.length === 0 && (
             <div className="px-3 py-2 text-sm text-ink-faint">No clients found.</div>
@@ -185,7 +185,7 @@ function EntityPicker({
                 onChange({ id: e.id, label: e.legalName });
                 setOpen(false);
               }}
-              className="block w-full px-3 py-2 text-left hover:bg-slate-50"
+              className="block w-full px-3 py-2 text-left hover:bg-surface-raised"
             >
               <span className="block text-sm font-medium text-ink">{e.legalName}</span>
               <span className="block text-xs text-ink-faint">

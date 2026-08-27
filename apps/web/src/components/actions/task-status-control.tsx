@@ -34,7 +34,7 @@ export function TaskStatusControl({ task }: { task: MyTask }): JSX.Element {
       disabled={mutation.isPending}
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => mutation.mutate(e.target.value as TaskStatus)}
-      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-ink focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-50"
+      className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs font-medium text-ink focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-50"
     >
       {TASK_STATUSES.map((s) => (
         <option key={s} value={s}>

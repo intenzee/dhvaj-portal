@@ -23,6 +23,7 @@ import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { Spinner } from './ui';
 import { GlobalSearch } from './global-search';
+import { ThemeToggle } from './theme-toggle';
 
 const SHORTCUTS = [
   { label: 'Create Engagement', href: '/engagements/new', icon: PlusCircle },
@@ -55,7 +56,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   const nav = visibleNav(principal);
 
   return (
-    <div className="flex min-h-screen bg-slate-100 text-ink">
+    <div className="flex min-h-screen bg-canvas text-ink">
       {/* Sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-sidebar md:flex">
         <div className="flex items-center gap-2 px-5 py-4">
@@ -119,10 +120,11 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col md:ml-64">
-        <header className="sticky top-0 z-10 flex items-center gap-4 border-b border-slate-200 bg-white px-5 py-2.5">
+        <header className="sticky top-0 z-10 flex items-center gap-4 border-b border-line-strong bg-surface px-5 py-2.5">
           <GlobalSearch />
 
           <div className="ml-auto flex items-center gap-1.5">
+            <ThemeToggle />
             <NotificationBell />
             <IconButton title="Messages">
               <MessageSquare className="h-5 w-5" />
@@ -130,7 +132,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             <IconButton title="Help">
               <HelpCircle className="h-5 w-5" />
             </IconButton>
-            <div className="mx-1 h-8 w-px bg-slate-200" />
+            <div className="mx-1 h-8 w-px bg-line-strong" />
             <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-600 text-xs font-semibold text-white">
                 {initials(principal.displayName)}
@@ -143,7 +145,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               </div>
               <button
                 onClick={logout}
-                className="rounded-lg p-2 text-ink-faint hover:bg-slate-100 hover:text-ink"
+                className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
                 aria-label="Sign out"
                 title="Sign out"
               >
@@ -164,7 +166,7 @@ function IconButton({ title, children }: { title: string; children: ReactNode })
     <button
       title={title}
       aria-label={title}
-      className="relative rounded-lg p-2 text-ink-muted transition hover:bg-slate-100 hover:text-ink"
+      className="relative rounded-lg p-2 text-ink-muted transition hover:bg-surface-sunken hover:text-ink"
     >
       {children}
     </button>
@@ -183,7 +185,7 @@ function NotificationBell(): JSX.Element {
       href="/notifications"
       title={`${unread} unread notifications`}
       aria-label="Notifications"
-      className="relative rounded-lg p-2 text-ink-muted transition hover:bg-slate-100 hover:text-ink"
+      className="relative rounded-lg p-2 text-ink-muted transition hover:bg-surface-sunken hover:text-ink"
     >
       <Bell className="h-5 w-5" />
       {unread > 0 && (

@@ -89,7 +89,7 @@ function MyWorkInner(): JSX.Element {
     <div>
       <PageHeader title="My Work" subtitle="Everything assigned to you, across every engagement." />
 
-      <div className="mb-4 inline-flex rounded-lg border border-slate-200 bg-white p-1">
+      <div className="mb-4 inline-flex rounded-lg border border-line-strong bg-surface p-1">
         {(
           [
             ['tasks', 'My Tasks'],
@@ -101,7 +101,7 @@ function MyWorkInner(): JSX.Element {
             onClick={() => setTab(key)}
             className={cn(
               'rounded-md px-3 py-1.5 text-sm font-medium transition',
-              tab === key ? 'bg-primary-600 text-white' : 'text-ink-muted hover:bg-slate-100',
+              tab === key ? 'bg-primary-600 text-white' : 'text-ink-muted hover:bg-surface-sunken',
             )}
           >
             {label}

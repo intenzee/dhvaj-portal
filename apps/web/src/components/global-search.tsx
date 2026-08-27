@@ -97,7 +97,7 @@ export function GlobalSearch(): JSX.Element {
 
   return (
     <div ref={boxRef} className="relative hidden max-w-xl flex-1 sm:block">
-      <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus-within:border-primary-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary-500/20">
+      <div className="flex items-center gap-2 rounded-lg border border-line-strong bg-surface-raised px-3 py-2 text-sm focus-within:border-primary-500 focus-within:bg-surface focus-within:ring-2 focus-within:ring-primary-500/20">
         <Search className="h-4 w-4 text-ink-faint" />
         <input
           ref={inputRef}
@@ -113,13 +113,13 @@ export function GlobalSearch(): JSX.Element {
           placeholder="Search clients and engagements…"
           className="flex-1 bg-transparent text-ink placeholder:text-ink-faint focus:outline-none"
         />
-        <kbd className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
+        <kbd className="rounded border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
           Ctrl K
         </kbd>
       </div>
 
       {open && enabled && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1.5 max-h-96 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-pop">
+        <div className="absolute left-0 right-0 top-full z-20 mt-1.5 max-h-96 overflow-y-auto rounded-lg border border-line-strong bg-surface py-1 shadow-pop">
           {loading && results.length === 0 && (
             <div className="px-3 py-3 text-sm text-ink-faint">Searching…</div>
           )}
@@ -130,7 +130,7 @@ export function GlobalSearch(): JSX.Element {
             <button
               key={`${r.kind}-${r.id}`}
               onClick={() => go(r.href)}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50"
+              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-raised"
             >
               {r.kind === 'entity' ? (
                 <Building2 className="h-4 w-4 shrink-0 text-primary-600" />

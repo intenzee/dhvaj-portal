@@ -25,11 +25,11 @@ export function DataTable<T>({
   if (data.length === 0) return <EmptyState>{empty}</EmptyState>;
 
   return (
-    <div className="scroll-slim overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <div className="scroll-slim overflow-x-auto rounded-xl border border-line-strong bg-surface">
       <table className="w-full text-sm">
         <thead>
           {table.getHeaderGroups().map((hg) => (
-            <tr key={hg.id} className="border-b border-slate-100 bg-slate-50/70 text-left">
+            <tr key={hg.id} className="border-b border-line bg-surface-raised/70 text-left">
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
@@ -47,8 +47,8 @@ export function DataTable<T>({
               key={row.id}
               onClick={onRowClick ? () => onRowClick(row.original) : undefined}
               className={
-                'border-b border-slate-50 last:border-0 ' +
-                (onRowClick ? 'cursor-pointer hover:bg-slate-50' : '')
+                'border-b border-line last:border-0 ' +
+                (onRowClick ? 'cursor-pointer hover:bg-surface-raised' : '')
               }
             >
               {row.getVisibleCells().map((cell) => (

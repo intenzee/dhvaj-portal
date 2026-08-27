@@ -87,7 +87,7 @@ export function TeamSection({
               <button
                 onClick={() => remove.mutate(m.employeeId)}
                 disabled={remove.isPending}
-                className="rounded p-0.5 text-ink-faint hover:bg-slate-100 hover:text-danger-600"
+                className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
                 aria-label={`Remove ${m.employeeName}`}
                 title="Remove"
               >

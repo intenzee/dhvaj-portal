@@ -70,7 +70,7 @@ export default function NotificationsPage(): JSX.Element {
         }
       />
 
-      <div className="mb-4 flex gap-1 border-b border-slate-200">
+      <div className="mb-4 flex gap-1 border-b border-line-strong">
         {(['all', 'unread'] as Tab[]).map((t) => (
           <button
             key={t}
@@ -92,7 +92,7 @@ export default function NotificationsPage(): JSX.Element {
       ) : items.length === 0 ? (
         <EmptyState>{tab === 'unread' ? 'No unread notifications.' : 'No notifications yet.'}</EmptyState>
       ) : (
-        <Card className="divide-y divide-slate-100">
+        <Card className="divide-y divide-line">
           {items.map((n) => {
             const unread = n.status === 'unread';
             return (
@@ -127,7 +127,7 @@ export default function NotificationsPage(): JSX.Element {
                     <button
                       onClick={() => markRead.mutate(n.id)}
                       title="Mark read"
-                      className="rounded-lg p-1.5 text-ink-faint hover:bg-slate-100 hover:text-ink"
+                      className="rounded-lg p-1.5 text-ink-faint hover:bg-surface-sunken hover:text-ink"
                     >
                       <Check className="h-4 w-4" />
                     </button>
@@ -135,7 +135,7 @@ export default function NotificationsPage(): JSX.Element {
                   <button
                     onClick={() => dismiss.mutate(n.id)}
                     title="Dismiss"
-                    className="rounded-lg p-1.5 text-ink-faint hover:bg-slate-100 hover:text-ink"
+                    className="rounded-lg p-1.5 text-ink-faint hover:bg-surface-sunken hover:text-ink"
                   >
                     <X className="h-4 w-4" />
                   </button>

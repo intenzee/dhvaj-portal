@@ -70,7 +70,7 @@ export default function TasksPage(): JSX.Element {
               'rounded-full border px-3 py-1 text-xs font-medium transition',
               openOnly === val
                 ? 'border-primary-600 bg-primary-600 text-white'
-                : 'border-slate-200 bg-white text-ink-muted hover:bg-slate-50',
+                : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-raised',
             )}
           >
             {label}

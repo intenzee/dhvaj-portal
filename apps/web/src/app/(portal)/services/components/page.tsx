@@ -53,7 +53,7 @@ export default function ComponentCataloguePage(): JSX.Element {
           <div className="flex items-center gap-2">
             <Link
               href="/services"
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+              className="rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
             >
               ← Services
             </Link>
@@ -87,7 +87,7 @@ export default function ComponentCataloguePage(): JSX.Element {
         {items.length > 0 && (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line bg-surface-raised/70 text-left text-[11px] uppercase tracking-wide text-ink-faint">
                 <th className="px-4 py-2.5 font-semibold">Code</th>
                 <th className="px-4 py-2.5 font-semibold">Component</th>
                 <th className="px-4 py-2.5 font-semibold">Service</th>
@@ -100,7 +100,7 @@ export default function ComponentCataloguePage(): JSX.Element {
             </thead>
             <tbody>
               {items.map((c) => (
-                <tr key={c.id} className="border-b border-slate-50 last:border-0">
+                <tr key={c.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-2.5 font-medium text-primary-700">{c.code}</td>
                   <td className="px-4 py-2.5 text-ink">{c.name}</td>
                   <td className="px-4 py-2.5 text-ink-muted">{c.serviceCode}</td>

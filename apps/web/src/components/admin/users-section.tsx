@@ -236,9 +236,9 @@ function UserFormModal({
         </Field>
 
         <Field label="Roles" hint="Determines what the user can see and do. May be empty (no access).">
-          <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-slate-200 p-2">
+          <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-line-strong p-2">
             {ASSIGNABLE_ROLES.map((r) => (
-              <label key={r} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-50">
+              <label key={r} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-raised">
                 <input type="checkbox" checked={roles.includes(r)} onChange={() => toggleRole(r)} />
                 {roleLabel(r)}
               </label>

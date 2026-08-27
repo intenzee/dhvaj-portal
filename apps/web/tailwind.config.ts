@@ -7,9 +7,23 @@ import type { Config } from 'tailwindcss';
  */
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
+        // Theme-aware semantic surfaces & borders (CSS variables flipped by the
+        // `.dark` class — see globals.css). Channels are space-separated RGB so
+        // the `/<alpha-value>` opacity syntax keeps working (bg-surface/70 etc.).
+        canvas: 'rgb(var(--canvas) / <alpha-value>)',
+        surface: {
+          DEFAULT: 'rgb(var(--surface) / <alpha-value>)',
+          raised: 'rgb(var(--surface-raised) / <alpha-value>)',
+          sunken: 'rgb(var(--surface-sunken) / <alpha-value>)',
+        },
+        line: {
+          DEFAULT: 'rgb(var(--line) / <alpha-value>)',
+          strong: 'rgb(var(--line-strong) / <alpha-value>)',
+        },
         // Primary (corporate blue) + supporting accents.
         primary: {
           50: '#eff6ff',
@@ -34,9 +48,9 @@ const config: Config = {
           border: '#1c2740',
         },
         ink: {
-          DEFAULT: '#0f172a',
-          muted: '#475569',
-          faint: '#94a3b8',
+          DEFAULT: 'rgb(var(--ink) / <alpha-value>)',
+          muted: 'rgb(var(--ink-muted) / <alpha-value>)',
+          faint: 'rgb(var(--ink-faint) / <alpha-value>)',
         },
       },
       fontFamily: {

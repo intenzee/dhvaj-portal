@@ -108,7 +108,7 @@ export default function DocumentsPage(): JSX.Element {
           value={search}
           onChange={(e) => reset(() => setSearch(e.target.value))}
           placeholder="Search by title…"
-          className="w-full max-w-xs rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="w-full max-w-xs rounded-md border border-line-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
         <FilterChip label="All statuses" active={status === ''} onClick={() => reset(() => setStatus(''))} />
         {DOCUMENT_STATUSES.map((s) => (
@@ -160,7 +160,7 @@ function FilterChip({
         'rounded-full border px-3 py-1 text-xs font-medium transition',
         active
           ? 'border-primary-600 bg-primary-600 text-white'
-          : 'border-slate-200 bg-white text-ink-muted hover:bg-slate-50',
+          : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-raised',
       )}
     >
       {label}

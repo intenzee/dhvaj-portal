@@ -42,9 +42,9 @@ export function UpcomingDeadlinesPanel(): JSX.Element {
             <li
               key={r.id}
               onClick={() => router.push(`/engagements/${r.engagementId}`)}
-              className="flex cursor-pointer items-center gap-3 border-b border-slate-50 px-5 py-3 last:border-0 hover:bg-slate-50"
+              className="flex cursor-pointer items-center gap-3 border-b border-line px-5 py-3 last:border-0 hover:bg-surface-raised"
             >
-              <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg bg-slate-100 leading-none">
+              <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg bg-surface-sunken leading-none">
                 <span className="text-[10px] font-semibold uppercase text-ink-faint">
                   {MONTHS[d.getMonth()]}
                 </span>
