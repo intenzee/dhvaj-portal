@@ -63,29 +63,31 @@ export class NotificationsService {
     const recipients = [
       ...new Set(event.recipientEmployeeIds.filter((id): id is string => Boolean(id))),
     ];
-    let created = 0;
-    const delivered: string[] = [];
-    for (const employeeId of recipients) {
-      const { rows } = await client.query<{ recipient_user_id: string | null }>(
-        `SELECT hsdg.emit_notification($1,$2,$3,$4,$5,$6,$7,$8,$9) AS recipient_user_id`,
-        [
-          employeeId,
-          event.type,
-          event.title,
-          event.body ?? null,
-          event.engagementId ?? null,
-          event.objectType ?? null,
-          event.objectId ?? null,
-          event.dedupKey ?? null,
-          correlationId,
-        ],
-      );
-      const userId = rows[0]?.recipient_user_id ?? null;
-      if (userId) {
-        created += 1;
-        delivered.push(userId);
-      }
-    }
+    if (recipients.length === 0) return 0;
+    // One round-trip for ALL recipients of this event: emit_notification is
+    // called once per element of the array via unnest, rather than a JS loop of
+    // one query each. This keeps every emission (dedup + recipient resolution)
+    // identical while collapsing R sequential round-trips into 1 — the sweep,
+    // now run on a schedule over the whole catalogue, is the hot path.
+    const { rows } = await client.query<{ recipient_user_id: string | null }>(
+      `SELECT hsdg.emit_notification(e.employee_id, $2,$3,$4,$5,$6,$7,$8,$9) AS recipient_user_id
+       FROM unnest($1::uuid[]) AS e(employee_id)`,
+      [
+        recipients,
+        event.type,
+        event.title,
+        event.body ?? null,
+        event.engagementId ?? null,
+        event.objectType ?? null,
+        event.objectId ?? null,
+        event.dedupKey ?? null,
+        correlationId,
+      ],
+    );
+    const delivered = rows
+      .map((r) => r.recipient_user_id)
+      .filter((id): id is string => Boolean(id));
+    const created = delivered.length;
     // Fan out to external channels after the rows are staged. Best-effort: a
     // channel failure must never roll back the domain transaction.
     if (delivered.length > 0 && this.channels.length > 0) {

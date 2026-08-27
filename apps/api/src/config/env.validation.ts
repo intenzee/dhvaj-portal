@@ -100,6 +100,41 @@ export const envSchema = z.object({
   // operative deadline is "critical" — escalated beyond the engagement leads to
   // the firm (managing partner). Below the threshold it is plain "overdue".
   COMPLIANCE_CRITICAL_OVERDUE_DAYS: z.coerce.number().int().positive().max(365).default(7),
+
+  // Background scheduler (spec §17/§18/§24): when enabled, a cron authenticates
+  // as the firm-wide operator (managing partner) and runs the notification sweep
+  // and the rolling-horizon generation automatically. Off by default so nothing
+  // fires unexpectedly in dev/test; enable in the deployed environment.
+  SCHEDULER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Cron expressions (standard 5-field, evaluated in the server timezone). The
+  // sweep runs often (hourly) so escalations are timely; the horizon roll is a
+  // once-a-day housekeeping job.
+  SCHEDULER_SWEEP_CRON: z.string().default('0 * * * *'),
+  SCHEDULER_HORIZON_CRON: z.string().default('30 1 * * *'),
+
+  // Auto-generated deadline layers (spec §16/§17 step 8): when a STATUTORY
+  // obligation is generated, add the standard review milestones as separate
+  // calendar events — a manager review, and an EP review when the service
+  // requires full EP review. Each lead is counted in WORKING days back from the
+  // statutory date (manager reviews earlier, EP later/closer to filing).
+  COMPLIANCE_AUTO_LAYERS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  COMPLIANCE_MANAGER_REVIEW_LEAD_DAYS: z.coerce.number().int().nonnegative().max(60).default(5),
+  COMPLIANCE_EP_REVIEW_LEAD_DAYS: z.coerce.number().int().nonnegative().max(60).default(2),
+
+  // Auto-generated tasks (spec §17 step 10): when a STATUTORY obligation is
+  // generated, create the one material "complete this obligation" task, assigned
+  // to the accountable owner and due at the internal SLA date. Routine checklist
+  // items stay in Workflow (§21) — this is the single actionable task per filing.
+  COMPLIANCE_AUTO_TASKS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema>;

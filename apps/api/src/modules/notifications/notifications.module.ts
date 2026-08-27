@@ -33,6 +33,6 @@ import { TeamsChannel } from './channels/teams.channel';
       },
     },
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, NotificationsScanService],
 })
 export class NotificationsModule {}

@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { ClsModule } from 'nestjs-cls';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule, AppConfigService } from './config/config.module';
 import { buildLoggerConfig } from './common/logging/logger.config';
 import { clsOptions } from './common/context/request-context';
@@ -22,6 +23,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SchedulerModule } from './modules/scheduler/scheduler.module';
 
 /**
  * Composition root of the modular monolith.
@@ -70,6 +72,7 @@ import { ReportsModule } from './modules/reports/reports.module';
         throttlers: [{ ttl: 60_000, limit: config.isTest ? 1_000_000 : 100 }],
       }),
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     HealthModule,
     AuditModule,
@@ -86,6 +89,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     NotificationsModule,
     DashboardModule,
     ReportsModule,
+    SchedulerModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.
