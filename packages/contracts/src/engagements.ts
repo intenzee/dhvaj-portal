@@ -28,6 +28,39 @@ export const EP_OPTIONAL_STATUSES: EngagementStatus[] = [
   ENGAGEMENT_STATUS.cancelled,
 ];
 
+/**
+ * Lifecycle of ONE service carried by an engagement (multi-service, §9–§10).
+ * Independent of the parent engagement's status after creation — a firm can put
+ * just the GST service on hold while Accounting stays active.
+ */
+export const ENGAGEMENT_SERVICE_STATUS = {
+  prospect: 'prospect',
+  active: 'active',
+  onHold: 'on_hold',
+  completed: 'completed',
+  cancelled: 'cancelled',
+} as const;
+export type EngagementServiceStatus =
+  (typeof ENGAGEMENT_SERVICE_STATUS)[keyof typeof ENGAGEMENT_SERVICE_STATUS];
+export const ENGAGEMENT_SERVICE_STATUSES: EngagementServiceStatus[] =
+  Object.values(ENGAGEMENT_SERVICE_STATUS);
+
+/** One service line under a multi-service engagement (a row of engagement_services). */
+export interface EngagementServiceLine {
+  id: string;
+  serviceId: string;
+  serviceCode: string;
+  serviceName: string;
+  /** The primary/legacy service (mirrors engagements.service_id); exactly one per engagement. */
+  isPrimary: boolean;
+  status: EngagementServiceStatus;
+  officeId: string;
+  officeCode: string;
+  leadEmployeeId: string | null;
+  leadEmployeeName: string | null;
+  createdAt: string;
+}
+
 /** Role a team member plays on a specific engagement (EP/manager are separate). */
 export const TEAM_ROLE = {
   inCharge: 'in_charge',

@@ -1,6 +1,55 @@
 import type { PoolClient } from 'pg';
-import type { EngagementStatus, ReviewModelSlug } from '@hsdg/contracts';
+import type {
+  EngagementServiceLine,
+  EngagementServiceStatus,
+  EngagementStatus,
+  ReviewModelSlug,
+} from '@hsdg/contracts';
 import type { EngagementDetail, EngagementSummary } from './engagements.types';
+
+/** The service lines carried by an engagement (multi-service, §9–§10), primary first. */
+export async function selectEngagementServices(
+  client: PoolClient,
+  engagementId: string,
+): Promise<EngagementServiceLine[]> {
+  const { rows } = await client.query<{
+    id: string;
+    service_id: string;
+    service_code: string;
+    service_name: string;
+    is_primary: boolean;
+    status: EngagementServiceStatus;
+    office_id: string;
+    office_code: string;
+    lead_employee_id: string | null;
+    lead_employee_name: string | null;
+    created_at: Date;
+  }>(
+    `SELECT es.id, es.service_id, s.code AS service_code, s.name AS service_name,
+            es.is_primary, es.status, es.office_id, o.code AS office_code,
+            es.lead_employee_id, led.full_name AS lead_employee_name, es.created_at
+     FROM hsdg.engagement_services es
+     JOIN hsdg.services s ON s.id = es.service_id
+     JOIN hsdg.offices o ON o.id = es.office_id
+     LEFT JOIN hsdg.employees led ON led.id = es.lead_employee_id
+     WHERE es.engagement_id = $1
+     ORDER BY es.is_primary DESC, s.name`,
+    [engagementId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    serviceId: r.service_id,
+    serviceCode: r.service_code,
+    serviceName: r.service_name,
+    isPrimary: r.is_primary,
+    status: r.status,
+    officeId: r.office_id,
+    officeCode: r.office_code,
+    leadEmployeeId: r.lead_employee_id,
+    leadEmployeeName: r.lead_employee_name,
+    createdAt: r.created_at.toISOString(),
+  }));
+}
 
 /**
  * The one read shape for an engagement row, shared by the CRUD service and the
@@ -200,6 +249,7 @@ export async function selectEngagementDetail(
      ORDER BY t.assigned_at`,
     [id],
   );
+  const services = await selectEngagementServices(client, id);
   return {
     ...mapEngagement({ ...rows[0], team_count: String(team.rows.length) }),
     team: team.rows.map((m) => ({
@@ -210,5 +260,6 @@ export async function selectEngagementDetail(
       roleOnEngagement: m.role_on_engagement,
       assignedAt: m.assigned_at.toISOString(),
     })),
+    services,
   };
 }

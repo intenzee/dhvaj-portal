@@ -1,4 +1,9 @@
-import type { EngagementStatus, ReviewModelSlug, TeamRole } from '@hsdg/contracts';
+import type {
+  EngagementServiceLine,
+  EngagementStatus,
+  ReviewModelSlug,
+  TeamRole,
+} from '@hsdg/contracts';
 
 /** The service-workflow state instance an engagement currently sits in (Phase 6, §16-19). */
 export interface WorkflowStateRef {
@@ -82,6 +87,19 @@ export interface EngagementTeamMember {
 
 export interface EngagementDetail extends EngagementSummary {
   team: EngagementTeamMember[];
+  /**
+   * Every service carried by this engagement (multi-service, §9–§10). Always at
+   * least one — the primary row mirrors the top-level serviceId/serviceName,
+   * which remain for backward compatibility.
+   */
+  services: EngagementServiceLine[];
+}
+
+export interface AddServiceInput {
+  serviceId: string;
+  /** Servicing office for this service; defaults to the engagement's office. */
+  officeCode?: string;
+  leadEmployeeId?: string;
 }
 
 export interface EngagementFilter {

@@ -31,6 +31,7 @@ import type {
 } from './engagements.types';
 import { CreateEngagementDto } from './dto/create-engagement.dto';
 import { UpdateEngagementDto } from './dto/update-engagement.dto';
+import { AddServiceDto } from './dto/add-service.dto';
 import { EngagementListQueryDto } from './dto/engagement-list-query.dto';
 import { AssignTeamMemberDto, ReassignPartnerDto } from './dto/engagement-commands.dto';
 import {
@@ -154,6 +155,42 @@ export class EngagementsController {
     @Param('employeeId', new ParseUUIDPipe()) employeeId: string,
   ): Promise<EngagementDetail> {
     return this.engagements.removeTeamMember(rlsContextFromPrincipal(principal), id, employeeId);
+  }
+
+  // ── Services (multi-service engagements, §9–§10) ─────────────────────────
+
+  @Get(':id/services')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'List the service lines carried by an engagement' })
+  async listServices(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const detail = await this.engagements.getEngagementById(rlsContextFromPrincipal(principal), id);
+    if (!detail) throw new NotFoundException('Engagement not found.');
+    return detail.services;
+  }
+
+  @Post(':id/services')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Add a service line to an engagement (audited)' })
+  addService(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AddServiceDto,
+  ): Promise<EngagementDetail> {
+    return this.engagements.addService(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Delete(':id/services/:serviceLineId')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Remove (soft-cancel) a service line from an engagement (audited)' })
+  removeService(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('serviceLineId', new ParseUUIDPipe()) serviceLineId: string,
+  ): Promise<EngagementDetail> {
+    return this.engagements.removeService(rlsContextFromPrincipal(principal), id, serviceLineId);
   }
 
   // ── Lifecycle (Phase 6): explicit, guarded transitions — never a generic

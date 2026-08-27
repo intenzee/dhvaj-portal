@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
 import type {
+  AddServiceInput,
   AssignTeamMemberInput,
   CreateEngagementInput,
   EngagementDetail,
@@ -23,6 +24,27 @@ import type {
   EngagementSummary,
   UpdateEngagementInput,
 } from './engagements.types';
+
+/** Initial status of a service line, faithful to the parent engagement's stage
+ *  (mirrors the SQL hsdg.engagement_service_status_from used at backfill). */
+export function serviceStatusFromEngagement(status: EngagementStatus): string {
+  switch (status) {
+    case 'completed':
+    case 'closed':
+      return 'completed';
+    case 'on_hold':
+      return 'on_hold';
+    case 'declined':
+    case 'withdrawn':
+    case 'cancelled':
+      return 'cancelled';
+    case 'prospect':
+    case 'pending_acceptance':
+      return 'prospect';
+    default:
+      return 'active';
+  }
+}
 
 @Injectable()
 export class EngagementsService {
@@ -329,6 +351,94 @@ export class EngagementsService {
         objectType: 'engagement',
         objectId: id,
         after: { employeeId },
+      });
+      return after!;
+    });
+  }
+
+  /** Add a service line to an engagement (multi-service, §9–§10). The primary
+   *  service is created automatically by a DB trigger; this adds ADDITIONAL,
+   *  non-primary services. A duplicate (same client + service + FY + period) is
+   *  rejected by the service-grain unique index (clean 409). */
+  async addService(
+    ctx: RlsContext,
+    id: string,
+    input: AddServiceInput,
+  ): Promise<EngagementDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await selectEngagementDetail(client, id);
+      if (!before) throw new NotFoundException('Engagement not found.');
+      const officeId = input.officeCode
+        ? await this.resolveOfficeId(client, input.officeCode)
+        : before.officeId;
+      let serviceLineId: string;
+      try {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO hsdg.engagement_services
+             (engagement_id, service_id, office_id, lead_employee_id, is_primary, status)
+           VALUES ($1, $2, $3, $4, false, $5)
+           RETURNING id`,
+          [id, input.serviceId, officeId, input.leadEmployeeId ?? null,
+           serviceStatusFromEngagement(before.status)],
+        );
+        serviceLineId = rows[0]!.id;
+      } catch (err) {
+        throw translatePgError(err);
+      }
+      await this.bumpVersion(client, id);
+      const after = await selectEngagementDetail(client, id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'engagement.service_added',
+        objectType: 'engagement',
+        objectId: id,
+        after: { engagementServiceId: serviceLineId, serviceId: input.serviceId },
+      });
+      return after!;
+    });
+  }
+
+  /** Remove a service line — a SOFT cancel that preserves history (§24/§25);
+   *  the primary service cannot be removed (delete the engagement instead). Any
+   *  live component configurations under the line are cancelled with it;
+   *  completed/superseded ones are preserved. */
+  async removeService(
+    ctx: RlsContext,
+    id: string,
+    serviceLineId: string,
+  ): Promise<EngagementDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await selectEngagementDetail(client, id);
+      if (!before) throw new NotFoundException('Engagement not found.');
+      const line = before.services.find((s) => s.id === serviceLineId);
+      if (!line) throw new NotFoundException('Service not found on this engagement.');
+      if (line.isPrimary) {
+        throw new BadRequestException(
+          'The primary service cannot be removed; cancel or delete the engagement instead.',
+        );
+      }
+      if (line.status === 'cancelled') {
+        throw new ConflictException('That service is already removed.');
+      }
+      // Cancel live component configurations under this service line first
+      // (completed/superseded ones stay as history).
+      await client.query(
+        `UPDATE hsdg.engagement_components
+            SET status = 'cancelled'
+          WHERE engagement_service_id = $1
+            AND status NOT IN ('completed', 'cancelled', 'superseded')`,
+        [serviceLineId],
+      );
+      await client.query(
+        `UPDATE hsdg.engagement_services SET status = 'cancelled' WHERE id = $1`,
+        [serviceLineId],
+      );
+      await this.bumpVersion(client, id);
+      const after = await selectEngagementDetail(client, id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'engagement.service_removed',
+        objectType: 'engagement',
+        objectId: id,
+        after: { engagementServiceId: serviceLineId, serviceId: line.serviceId },
       });
       return after!;
     });

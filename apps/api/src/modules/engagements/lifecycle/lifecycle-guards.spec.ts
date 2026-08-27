@@ -58,6 +58,7 @@ function ctx(overrides: Partial<LifecycleGuardContext> = {}): LifecycleGuardCont
       internallyOverdueTaskCount: 0,
       clientOverdueCount: 0,
       team: [],
+      services: [],
     },
     action: LIFECYCLE_ACTION.accept,
     toStatus: 'accepted',

@@ -1,5 +1,20 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { translatePgError } from './engagements.service';
+import { serviceStatusFromEngagement, translatePgError } from './engagements.service';
+
+describe('serviceStatusFromEngagement (multi-service)', () => {
+  it('maps an engagement stage to a faithful initial service status', () => {
+    expect(serviceStatusFromEngagement('prospect')).toBe('prospect');
+    expect(serviceStatusFromEngagement('pending_acceptance')).toBe('prospect');
+    expect(serviceStatusFromEngagement('accepted')).toBe('active');
+    expect(serviceStatusFromEngagement('active')).toBe('active');
+    expect(serviceStatusFromEngagement('on_hold')).toBe('on_hold');
+    expect(serviceStatusFromEngagement('completed')).toBe('completed');
+    expect(serviceStatusFromEngagement('closed')).toBe('completed');
+    expect(serviceStatusFromEngagement('declined')).toBe('cancelled');
+    expect(serviceStatusFromEngagement('withdrawn')).toBe('cancelled');
+    expect(serviceStatusFromEngagement('cancelled')).toBe('cancelled');
+  });
+});
 
 describe('translatePgError (engagements)', () => {
   it('maps the identity unique violation to 409 with an identity message', () => {
