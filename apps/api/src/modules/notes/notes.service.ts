@@ -58,11 +58,7 @@ export class NotesService {
     private readonly audit: AuditService,
   ) {}
 
-  async list(
-    ctx: RlsContext,
-    engagementId: string,
-    filter: NoteFilter,
-  ): Promise<EngagementNote[]> {
+  async list(ctx: RlsContext, engagementId: string, filter: NoteFilter): Promise<EngagementNote[]> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertEngagementVisible(client, engagementId);
       const params: unknown[] = [engagementId];

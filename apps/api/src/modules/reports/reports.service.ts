@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import type { PoolClient } from 'pg';
 import type {
   ComplianceMisReport,
   EngagementMisReport,
+  ResourceGroupRow,
+  ResourceWorkloadReport,
   UtilisationReport,
   UtilisationRow,
 } from '@hsdg/contracts';
@@ -171,22 +174,56 @@ export class ReportsService {
   }
 
   async utilisation(ctx: RlsContext): Promise<UtilisationReport> {
+    return this.db.withRlsContext(ctx, async (client) => ({
+      rows: await this.utilisationRows(client),
+    }));
+  }
+
+  /**
+   * Resource Management view: the per-person utilisation rows plus office and
+   * grade rollups and headline totals. Same RLS scoping as `utilisation` — the
+   * database filters the rows; this only groups them.
+   */
+  async resourceWorkload(ctx: RlsContext): Promise<ResourceWorkloadReport> {
     return this.db.withRlsContext(ctx, async (client) => {
-      // Per-employee workload over engagements/tasks the caller can see. The
-      // inner subqueries are RLS-scoped, so counts reflect visible rows only; the
-      // outer WHERE drops employees with no visible involvement.
-      const { rows } = await client.query<{
-        employee_id: string;
-        employee_name: string;
-        grade_name: string | null;
-        office_code: string;
-        as_ep: string;
-        as_manager: string;
-        as_member: string;
-        open_tasks: string;
-        overdue_tasks: string;
-      }>(
-        `SELECT * FROM (
+      const rows = await this.utilisationRows(client);
+      const byOffice = groupWorkload(
+        rows,
+        (r) => r.officeCode,
+        (r) => r.officeCode,
+      );
+      const byGrade = groupWorkload(
+        rows,
+        (r) => r.gradeName ?? 'unassigned',
+        (r) => r.gradeName ?? 'Unassigned',
+      );
+      const totals = {
+        people: rows.length,
+        activeAssignments: rows.reduce((n, r) => n + r.asEp + r.asManager + r.asMember, 0),
+        openTasks: rows.reduce((n, r) => n + r.openTasks, 0),
+        overdueTasks: rows.reduce((n, r) => n + r.overdueTasks, 0),
+        overloaded: rows.filter((r) => r.overdueTasks > 0).length,
+      };
+      return { rows, byOffice, byGrade, totals };
+    });
+  }
+
+  /** Per-employee workload over engagements/tasks the caller can see (RLS-scoped). */
+  private async utilisationRows(client: PoolClient): Promise<UtilisationRow[]> {
+    // The inner subqueries are RLS-scoped, so counts reflect visible rows only;
+    // the outer WHERE drops employees with no visible involvement.
+    const { rows } = await client.query<{
+      employee_id: string;
+      employee_name: string;
+      grade_name: string | null;
+      office_code: string;
+      as_ep: string;
+      as_manager: string;
+      as_member: string;
+      open_tasks: string;
+      overdue_tasks: string;
+    }>(
+      `SELECT * FROM (
            SELECT emp.id AS employee_id, emp.full_name AS employee_name,
                   g.name AS grade_name, o.code AS office_code,
                   (SELECT count(*) FROM hsdg.engagements e
@@ -209,20 +246,46 @@ export class ReportsService {
          ) u
          WHERE (u.as_ep + u.as_manager + u.as_member + u.open_tasks) > 0
          ORDER BY (u.as_ep + u.as_manager + u.as_member) DESC, u.open_tasks DESC, u.employee_name`,
-      );
+    );
 
-      const mapped: UtilisationRow[] = rows.map((r) => ({
-        employeeId: r.employee_id,
-        employeeName: r.employee_name,
-        gradeName: r.grade_name,
-        officeCode: r.office_code,
-        asEp: Number(r.as_ep),
-        asManager: Number(r.as_manager),
-        asMember: Number(r.as_member),
-        openTasks: Number(r.open_tasks),
-        overdueTasks: Number(r.overdue_tasks),
-      }));
-      return { rows: mapped };
-    });
+    return rows.map((r) => ({
+      employeeId: r.employee_id,
+      employeeName: r.employee_name,
+      gradeName: r.grade_name,
+      officeCode: r.office_code,
+      asEp: Number(r.as_ep),
+      asManager: Number(r.as_manager),
+      asMember: Number(r.as_member),
+      openTasks: Number(r.open_tasks),
+      overdueTasks: Number(r.overdue_tasks),
+    }));
   }
+}
+
+/** Roll utilisation rows up into a stable, count-ordered group list. */
+function groupWorkload(
+  rows: UtilisationRow[],
+  keyOf: (r: UtilisationRow) => string,
+  labelOf: (r: UtilisationRow) => string,
+): ResourceGroupRow[] {
+  const groups = new Map<string, ResourceGroupRow>();
+  for (const r of rows) {
+    const key = keyOf(r);
+    const g = groups.get(key) ?? {
+      key,
+      label: labelOf(r),
+      people: 0,
+      activeAssignments: 0,
+      openTasks: 0,
+      overdueTasks: 0,
+    };
+    g.people += 1;
+    g.activeAssignments += r.asEp + r.asManager + r.asMember;
+    g.openTasks += r.openTasks;
+    g.overdueTasks += r.overdueTasks;
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort(
+    (a, b) => b.activeAssignments - a.activeAssignments || b.openTasks - a.openTasks,
+  );
 }

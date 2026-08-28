@@ -49,3 +49,37 @@ export interface UtilisationRow {
 export interface UtilisationReport {
   rows: UtilisationRow[];
 }
+
+/**
+ * A workload rollup for a group of people (an office or a grade), used by the
+ * Resource Management view. `activeAssignments` is the summed EP + manager +
+ * member involvement; the task figures are the group's open/overdue totals.
+ */
+export interface ResourceGroupRow {
+  key: string;
+  label: string;
+  people: number;
+  activeAssignments: number;
+  openTasks: number;
+  overdueTasks: number;
+}
+
+/**
+ * Resource Management view: firm capacity/workload over the people the caller
+ * can see. Reuses the per-person utilisation rows and rolls them up by office
+ * and grade. RLS-scoped exactly like the utilisation report — firm-wide for the
+ * Managing Partner, assignment-scoped for a partner/manager.
+ */
+export interface ResourceWorkloadReport {
+  rows: UtilisationRow[];
+  byOffice: ResourceGroupRow[];
+  byGrade: ResourceGroupRow[];
+  totals: {
+    people: number;
+    activeAssignments: number;
+    openTasks: number;
+    overdueTasks: number;
+    /** People carrying at least one overdue task. */
+    overloaded: number;
+  };
+}

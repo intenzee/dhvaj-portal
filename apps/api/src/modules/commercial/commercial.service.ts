@@ -8,7 +8,9 @@ import type { PoolClient } from 'pg';
 import {
   BILLING_FREQUENCY,
   INVOICE_STATUS,
+  type BillingSummary,
   type EngagementCommercial,
+  type GlobalInvoiceRecord,
   type InvoiceDetail,
   type InvoiceLineItem,
   type InvoiceRecord,
@@ -77,6 +79,26 @@ const INVOICE_BASE = `
          i.version, i.created_at, i.updated_at
   FROM hsdg.invoices i
   LEFT JOIN hsdg.employees ce ON ce.id = i.created_by_employee_id`;
+
+/** The firm-wide invoice list adds engagement/client context and an overdue flag. */
+interface GlobalInvoiceRow extends InvoiceRow {
+  engagement_code: string;
+  entity_id: string | null;
+  entity_name: string | null;
+  overdue: boolean;
+}
+
+const GLOBAL_INVOICE_BASE = `
+  SELECT i.id, i.engagement_id, i.invoice_number, i.status, i.currency,
+         i.issue_date::text, i.due_date::text, i.subtotal, i.tax_amount, i.total,
+         i.notes, i.created_by_employee_id, ce.full_name AS created_by_name,
+         i.version, i.created_at, i.updated_at,
+         eng.engagement_code, eng.entity_id, ent.legal_name AS entity_name,
+         (i.status = 'issued' AND i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE) AS overdue
+  FROM hsdg.invoices i
+  LEFT JOIN hsdg.employees ce ON ce.id = i.created_by_employee_id
+  JOIN hsdg.engagements eng ON eng.id = i.engagement_id
+  LEFT JOIN hsdg.entities ent ON ent.id = eng.entity_id`;
 
 /** Legal invoice status transitions (spec §31). */
 const INVOICE_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
@@ -201,6 +223,103 @@ export class CommercialService {
       return {
         items: rows.map(mapInvoice),
         total: rows[0] ? Number(rows[0].total_count) : 0,
+      };
+    });
+  }
+
+  // ── Firm-wide Billing & Collections (§31) ───────────────────────────────
+  // Read-only views across every engagement the caller can see. Access is the
+  // same as the per-engagement list — the invoices SELECT policy is
+  // is_engagement_member — so no extra scoping is needed here; RLS does it.
+
+  /** Invoices across all accessible engagements, with client/engagement context. */
+  async listAllInvoices(
+    ctx: RlsContext,
+    page: PageParams,
+    filter: { status?: InvoiceStatus; overdueOnly?: boolean; search?: string },
+  ): Promise<PageResult<GlobalInvoiceRecord>> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const params: unknown[] = [];
+      const conds: string[] = [];
+      if (filter.status) {
+        params.push(filter.status);
+        conds.push(`i.status = $${params.length}`);
+      }
+      if (filter.overdueOnly) {
+        conds.push(`i.status = 'issued' AND i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE`);
+      }
+      if (filter.search) {
+        params.push(`%${filter.search}%`);
+        conds.push(
+          `(i.invoice_number ILIKE $${params.length} OR ent.legal_name ILIKE $${params.length} OR eng.engagement_code ILIKE $${params.length})`,
+        );
+      }
+      const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+      params.push(page.limit, page.offset);
+      const { rows } = await client.query<GlobalInvoiceRow & { total_count: string }>(
+        `SELECT x.*, count(*) OVER() AS total_count
+         FROM (${GLOBAL_INVOICE_BASE} ${where}) x
+         ORDER BY x.overdue DESC, x.created_at DESC
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
+      );
+      return {
+        items: rows.map(mapGlobalInvoice),
+        total: rows[0] ? Number(rows[0].total_count) : 0,
+      };
+    });
+  }
+
+  /** Firm-wide billing rollup (counts + summed totals) over visible invoices. */
+  async billingSummary(ctx: RlsContext): Promise<BillingSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await client.query<{
+        draft_cnt: string;
+        draft_amt: string;
+        issued_cnt: string;
+        issued_amt: string;
+        paid_cnt: string;
+        paid_amt: string;
+        void_cnt: string;
+        void_amt: string;
+        outstanding_cnt: string;
+        outstanding_amt: string;
+        overdue_cnt: string;
+        overdue_amt: string;
+        currency: string | null;
+      }>(
+        `SELECT
+           count(*) FILTER (WHERE status = 'draft')                      AS draft_cnt,
+           COALESCE(sum(total) FILTER (WHERE status = 'draft'), 0)       AS draft_amt,
+           count(*) FILTER (WHERE status = 'issued')                     AS issued_cnt,
+           COALESCE(sum(total) FILTER (WHERE status = 'issued'), 0)      AS issued_amt,
+           count(*) FILTER (WHERE status = 'paid')                       AS paid_cnt,
+           COALESCE(sum(total) FILTER (WHERE status = 'paid'), 0)        AS paid_amt,
+           count(*) FILTER (WHERE status = 'void')                       AS void_cnt,
+           COALESCE(sum(total) FILTER (WHERE status = 'void'), 0)        AS void_amt,
+           count(*) FILTER (WHERE status = 'issued')                     AS outstanding_cnt,
+           COALESCE(sum(total) FILTER (WHERE status = 'issued'), 0)      AS outstanding_amt,
+           count(*) FILTER (WHERE status = 'issued'
+             AND due_date IS NOT NULL AND due_date < CURRENT_DATE)       AS overdue_cnt,
+           COALESCE(sum(total) FILTER (WHERE status = 'issued'
+             AND due_date IS NOT NULL AND due_date < CURRENT_DATE), 0)   AS overdue_amt,
+           (SELECT currency FROM hsdg.invoices
+             GROUP BY currency ORDER BY count(*) DESC LIMIT 1)           AS currency
+         FROM hsdg.invoices`,
+      );
+      const r = rows[0];
+      const bucket = (cnt: string, amt: string): BillingSummary['draft'] => ({
+        count: Number(cnt),
+        amount: amt,
+      });
+      return {
+        currency: r?.currency ?? 'INR',
+        draft: bucket(r?.draft_cnt ?? '0', r?.draft_amt ?? '0'),
+        issued: bucket(r?.issued_cnt ?? '0', r?.issued_amt ?? '0'),
+        paid: bucket(r?.paid_cnt ?? '0', r?.paid_amt ?? '0'),
+        void: bucket(r?.void_cnt ?? '0', r?.void_amt ?? '0'),
+        outstanding: bucket(r?.outstanding_cnt ?? '0', r?.outstanding_amt ?? '0'),
+        overdue: bucket(r?.overdue_cnt ?? '0', r?.overdue_amt ?? '0'),
       };
     });
   }
@@ -519,6 +638,16 @@ function mapInvoice(row: InvoiceRow): InvoiceRecord {
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function mapGlobalInvoice(row: GlobalInvoiceRow): GlobalInvoiceRecord {
+  return {
+    ...mapInvoice(row),
+    engagementCode: row.engagement_code,
+    entityId: row.entity_id,
+    entityName: row.entity_name,
+    overdue: row.overdue,
   };
 }
 

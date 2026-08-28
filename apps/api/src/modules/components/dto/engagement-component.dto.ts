@@ -209,7 +209,10 @@ export class SetInstanceStatusDto {
 
 /** §40 — record a registration produced by a registration-work instance. */
 export class RecordRegistrationDto {
-  @ApiProperty({ description: 'The registration number the authority issued.', example: '27ABCDE1234F1Z5' })
+  @ApiProperty({
+    description: 'The registration number the authority issued.',
+    example: '27ABCDE1234F1Z5',
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(64)

@@ -82,3 +82,39 @@ export interface InvoiceRecord {
 export interface InvoiceDetail extends InvoiceRecord {
   lines: InvoiceLineItem[];
 }
+
+/**
+ * An invoice flattened with its engagement/client context for the firm-wide
+ * Billing & Collections view (spec §31). Same RLS visibility as the
+ * per-engagement list — the caller sees an invoice only for an engagement they
+ * are on. `overdue` is derived: issued and past its due date.
+ */
+export interface GlobalInvoiceRecord extends InvoiceRecord {
+  engagementCode: string;
+  entityId: string | null;
+  entityName: string | null;
+  overdue: boolean;
+}
+
+/** A billing rollup bucket: how many invoices and their summed total. */
+export interface BillingBucket {
+  count: number;
+  /** Decimal string; sum of the invoices' totals in the bucket. */
+  amount: string;
+}
+
+/**
+ * Firm-wide billing rollup (spec §31), RLS-scoped exactly like the invoice
+ * list. Amounts are naive sums of invoice totals; `currency` is the dominant
+ * invoice currency in scope (most invoicing is single-currency). `outstanding`
+ * is issued-but-unpaid; `overdue` is the past-due subset of that.
+ */
+export interface BillingSummary {
+  currency: string;
+  draft: BillingBucket;
+  issued: BillingBucket;
+  paid: BillingBucket;
+  void: BillingBucket;
+  outstanding: BillingBucket;
+  overdue: BillingBucket;
+}

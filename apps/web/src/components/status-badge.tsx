@@ -28,6 +28,11 @@ const STATUS_TONE: Record<string, string> = {
   partially_received: 'info',
   received: 'success',
   waived: 'neutral',
+  // Invoice lifecycle (§31)
+  draft: 'neutral',
+  issued: 'info',
+  paid: 'success',
+  void: 'danger',
 };
 
 export function StatusBadge({ status }: { status: string | null | undefined }): JSX.Element {

@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -167,4 +168,27 @@ export class InvoiceListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(INVOICE_STATUSES)
   status?: InvoiceStatus;
+}
+
+const toBool = ({ value }: { value: unknown }): unknown =>
+  value === 'true' ? true : value === 'false' ? false : value;
+
+/** Query for the firm-wide Billing & Collections invoice list. */
+export class GlobalInvoiceListQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: INVOICE_STATUSES })
+  @IsOptional()
+  @IsIn(INVOICE_STATUSES)
+  status?: InvoiceStatus;
+
+  @ApiPropertyOptional({ description: 'Only issued invoices past their due date.' })
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  overdueOnly?: boolean;
+
+  @ApiPropertyOptional({ description: 'Case-insensitive number / client / engagement search.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  search?: string;
 }

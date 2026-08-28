@@ -2,13 +2,14 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { dateFromToday } from './date.helper';
 
 /**
  * Escalation ladder (§24) and calendar views (§22).
  *
- * "Today" is the machine clock (2026-08-27). A period_end + 0-day rule makes the
- * statutory date equal the reference date, so obligations can be placed at
- * precise distances from today to exercise every escalation band, the §22 view
+ * "Today" is the machine clock. A period_end + 0-day rule makes the statutory
+ * date equal the reference date, so obligations can be placed (via dateFromToday)
+ * at precise distances from today to exercise every escalation band, the §22 view
  * filters, and the §24 statutory-overdue notification (with critical → firm).
  */
 describe('Compliance escalation & calendar views (e2e)', () => {
@@ -111,13 +112,13 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const eng = await createEngagement(pa);
       const code = await createExactRule();
 
-      // Reference date ⇒ statutory date; distances from today (2026-08-27).
+      // Reference date ⇒ statutory date; distances measured from today.
       const cases: Record<string, string> = {
-        '2026-07-01': 'critical', // 57 days overdue (> 7)
-        '2026-08-24': 'overdue', // 3 days overdue (≤ 7)
-        '2026-08-27': 'due_today',
-        '2026-08-30': 'due_soon', // 3 days out (≤ 7 lead)
-        '2026-12-01': 'upcoming', // far future
+        [dateFromToday(-57)]: 'critical', // 57 days overdue (> 7)
+        [dateFromToday(-4)]: 'overdue', // 4 days overdue (≤ 7)
+        [dateFromToday(0)]: 'due_today',
+        [dateFromToday(3)]: 'due_soon', // 3 days out (≤ 7 lead)
+        [dateFromToday(95)]: 'upcoming', // far future
       };
       for (const date of Object.keys(cases)) {
         await generate(pa, eng, code, date).expect(201);
@@ -140,7 +141,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@hsdg.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
-      const gen = await generate(pa, eng, code, '2026-07-01').expect(201); // would be critical
+      const gen = await generate(pa, eng, code, dateFromToday(-57)).expect(201); // would be critical
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/compliance/${gen.body.id}/complete`)
         .set(bearer(pa))
@@ -163,7 +164,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@hsdg.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
-      const gen = await generate(pa, eng, code, '2026-08-24').expect(201);
+      const gen = await generate(pa, eng, code, dateFromToday(-4)).expect(201);
       const paEmp = await findEmployeeId('EMP003'); // Partner A
       const pbEmp = await findEmployeeId('EMP004'); // Partner B
 
@@ -187,7 +188,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@hsdg.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
-      await generate(pa, eng, code, '2026-07-01').expect(201); // critically overdue
+      await generate(pa, eng, code, dateFromToday(-57)).expect(201); // critically overdue
 
       // The operator (MP) runs the sweep — a fresh, newest-first notification.
       const scan = await request(app.getHttpServer())
@@ -221,7 +222,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@hsdg.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
-      await generate(pa, eng, code, '2026-08-27').expect(201); // due TODAY
+      await generate(pa, eng, code, dateFromToday(0)).expect(201); // due TODAY
 
       const scan = await scanAs(mp);
       expect(scan.body.complianceDueToday).toBeGreaterThanOrEqual(1);
@@ -236,7 +237,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@hsdg.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule('CLIENT_COMMITTED');
-      await generate(pa, eng, code, '2026-08-20').expect(201); // 7 days overdue
+      await generate(pa, eng, code, dateFromToday(-7)).expect(201); // 7 days overdue
 
       const scan = await scanAs(mp);
       expect(scan.body.clientCommitmentOverdue).toBeGreaterThanOrEqual(1);
@@ -251,7 +252,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const eng = await createEngagement(pa);
       // Non-statutory parent so no auto review layer collides with the manual one.
       const code = await createExactRule('HSDG_MILESTONE');
-      const gen = await generate(pa, eng, code, '2026-12-01').expect(201); // instance itself upcoming
+      const gen = await generate(pa, eng, code, dateFromToday(95)).expect(201); // instance itself upcoming
       const reviewer = await findEmployeeId('EMP005'); // Manager X — NOT an engagement lead
 
       // A manager-review layer whose own due date has already passed.
@@ -262,7 +263,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
           layerType: 'manager_review',
           label: 'Manager review',
           dueDateCategory: 'HSDG_MILESTONE',
-          dueDate: '2026-08-20',
+          dueDate: dateFromToday(-8),
           ownerEmployeeId: reviewer,
         })
         .expect(201);

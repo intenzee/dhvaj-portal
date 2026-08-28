@@ -42,8 +42,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Compliance', href: '/compliance', icon: CalendarClock, permission: PERMISSION.complianceRead, ready: true },
   { label: 'Documents', href: '/documents', icon: FileText, permission: PERMISSION.engagementRead, ready: true },
   { label: 'Reports & MIS', href: '/reports', icon: BarChart3, permission: PERMISSION.reportRead, ready: true },
-  { label: 'Resource Management', href: '/resources', icon: Users, permission: PERMISSION.employeeRead, ready: false },
-  { label: 'Billing & Collections', href: '/billing', icon: Wallet, ready: false },
+  { label: 'Resource Management', href: '/resources', icon: Users, permission: PERMISSION.employeeRead, ready: true },
+  { label: 'Billing & Collections', href: '/billing', icon: Wallet, permission: PERMISSION.reportRead, ready: true },
   { label: 'Administration', href: '/admin', icon: Settings, permission: PERMISSION.userManage, ready: true },
 ];
 

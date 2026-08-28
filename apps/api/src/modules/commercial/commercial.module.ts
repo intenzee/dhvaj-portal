@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { CommercialService } from './commercial.service';
 import { CommercialController } from './commercial.controller';
+import { InvoicesListController } from './invoices-list.controller';
 
 /**
  * Commercial Scope & Billing (spec §31): per-engagement commercial configuration
@@ -11,7 +12,7 @@ import { CommercialController } from './commercial.controller';
  */
 @Module({
   imports: [AuditModule],
-  controllers: [CommercialController],
+  controllers: [CommercialController, InvoicesListController],
   providers: [CommercialService],
   exports: [CommercialService],
 })

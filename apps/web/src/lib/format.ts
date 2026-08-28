@@ -22,6 +22,23 @@ export function formatCount(n: number | null | undefined): string {
   return n.toLocaleString('en-IN');
 }
 
+/**
+ * Format a decimal-string (or number) amount as money in the given currency.
+ * Amounts cross the wire as exact decimal strings; this is presentation only.
+ */
+export function formatMoney(
+  amount: string | number | null | undefined,
+  currency = 'INR',
+): string {
+  const n = typeof amount === 'number' ? amount : Number(amount ?? 0);
+  if (Number.isNaN(n)) return '—';
+  try {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(n);
+  } catch {
+    return `${currency} ${n.toFixed(2)}`;
+  }
+}
+
 /** Days from today until an ISO date (negative ⇒ overdue). Null-safe. */
 export function daysUntil(iso: string | null | undefined): number | null {
   if (!iso) return null;

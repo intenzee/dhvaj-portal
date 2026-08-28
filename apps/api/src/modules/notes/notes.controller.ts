@@ -29,7 +29,9 @@ export class NotesController {
 
   @Get(':id/notes')
   @RequirePermissions(PERMISSION.engagementRead)
-  @ApiOperation({ summary: 'List engagement notes (filter ?engagementServiceId=&engagementComponentId=).' })
+  @ApiOperation({
+    summary: 'List engagement notes (filter ?engagementServiceId=&engagementComponentId=).',
+  })
   list(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
