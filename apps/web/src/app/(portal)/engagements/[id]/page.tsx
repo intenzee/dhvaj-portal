@@ -31,6 +31,8 @@ import { ServicesSection } from '@/components/actions/services-section';
 import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
+import { InvoicesSection } from '@/components/actions/invoices-section';
+import { NotesSection } from '@/components/actions/notes-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
 import { ObligationExtensionActions } from '@/components/compliance/extension-modals';
 import { DeadlineLayersModal } from '@/components/compliance/deadline-layers-modal';
@@ -440,24 +442,11 @@ export default function EngagementDetailPage(): JSX.Element {
         </section>
       )}
 
-      {/* ── Invoices / Notes (deferred modules) ──────────────────────────── */}
-      {tab === 'invoices' && (
-        <Card>
-          <CardBody className="py-10 text-center text-sm text-ink-muted">
-            <div className="mb-1 text-base font-medium text-ink">Invoices — coming soon</div>
-            Billing &amp; collections is a planned module; this tab will surface the engagement’s
-            invoices and receipts.
-          </CardBody>
-        </Card>
-      )}
-      {tab === 'notes' && (
-        <Card>
-          <CardBody className="py-10 text-center text-sm text-ink-muted">
-            <div className="mb-1 text-base font-medium text-ink">Notes — coming soon</div>
-            A shared engagement notebook for the team is planned here.
-          </CardBody>
-        </Card>
-      )}
+      {/* ── Commercial & Billing (§31) ───────────────────────────────────── */}
+      {tab === 'invoices' && <InvoicesSection engagementId={e.id} />}
+
+      {/* ── Notes (§26) ──────────────────────────────────────────────────── */}
+      {tab === 'notes' && <NotesSection engagementId={e.id} />}
     </div>
   );
 }

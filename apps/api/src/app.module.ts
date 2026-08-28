@@ -24,6 +24,8 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
+import { CommercialModule } from './modules/commercial/commercial.module';
+import { NotesModule } from './modules/notes/notes.module';
 
 /**
  * Composition root of the modular monolith.
@@ -90,6 +92,8 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
     DashboardModule,
     ReportsModule,
     SchedulerModule,
+    CommercialModule,
+    NotesModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

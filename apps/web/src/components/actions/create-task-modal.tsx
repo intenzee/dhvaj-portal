@@ -26,12 +26,16 @@ export function CreateTaskModal({
   const [priority, setPriority] = useState('normal');
   const [dueDate, setDueDate] = useState('');
   const [assignee, setAssignee] = useState('');
+  const [outOfScope, setOutOfScope] = useState(false);
+  const [billable, setBillable] = useState(false);
 
   const reset = (): void => {
     setTitle('');
     setPriority('normal');
     setDueDate('');
     setAssignee('');
+    setOutOfScope(false);
+    setBillable(false);
   };
 
   const create = useMutation({
@@ -43,6 +47,8 @@ export function CreateTaskModal({
           priority,
           ...(dueDate ? { dueDate } : {}),
           ...(assignee ? { assignedToEmployeeId: assignee } : {}),
+          ...(outOfScope ? { isOutOfScope: true } : {}),
+          ...(billable ? { isBillable: true } : {}),
         },
       }),
     onSuccess: () => {
@@ -104,6 +110,24 @@ export function CreateTaskModal({
               ))}
             </Select>
           </Field>
+          <div className="space-y-1.5 rounded-lg border border-line bg-surface-sunken/40 p-3">
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={outOfScope}
+                onChange={(e) => setOutOfScope(e.target.checked)}
+              />
+              Out-of-scope of the mandate (needs lead approval before billing)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={billable}
+                onChange={(e) => setBillable(e.target.checked)}
+              />
+              Billable to the client
+            </label>
+          </div>
         </div>
       </Modal>
     </>

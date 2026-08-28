@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarPlus } from 'lucide-react';
+import { CalendarPlus, Stamp } from 'lucide-react';
 import {
   type ComponentInstanceRecord,
   type ComponentInstanceStatus,
@@ -15,6 +16,8 @@ import { can } from '@/lib/principal';
 import { PERMISSION } from '@hsdg/contracts';
 import { useToast } from '@/lib/toast';
 import { Card, EmptyState, Badge, Button } from '@/components/ui';
+import { Modal } from '@/components/modal';
+import { Field, Input } from '@/components/form';
 
 const STATUS_TONE: Record<ComponentInstanceStatus, string> = {
   scheduled: 'neutral',
@@ -36,6 +39,7 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
   const toast = useToast();
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
+  const [registerFor, setRegisterFor] = useState<ComponentInstanceRecord | null>(null);
 
   const work = useQuery({
     queryKey: ['engagement', engagementId, 'component-work'],
@@ -154,16 +158,28 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
                     </td>
                     {canManage && (
                       <td className="px-4 py-2.5 text-right">
-                        {open && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={complete.isPending}
-                            onClick={() => complete.mutate(w.id)}
-                          >
-                            Complete
-                          </Button>
-                        )}
+                        <div className="flex justify-end gap-2">
+                          {open && w.setsRegistrationType && (
+                            <Button
+                              size="sm"
+                              variant="subtle"
+                              onClick={() => setRegisterFor(w)}
+                              title="Record the registration number into the client master (§40)"
+                            >
+                              <Stamp className="h-4 w-4" /> Record reg.
+                            </Button>
+                          )}
+                          {open && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={complete.isPending}
+                              onClick={() => complete.mutate(w.id)}
+                            >
+                              Complete
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -173,6 +189,85 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
           </table>
         )}
       </Card>
+
+      {registerFor && (
+        <RecordRegistrationModal
+          engagementId={engagementId}
+          instance={registerFor}
+          onClose={() => setRegisterFor(null)}
+          onDone={() => {
+            setRegisterFor(null);
+            invalidate();
+            void qc.invalidateQueries({ queryKey: ['entities'] });
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function RecordRegistrationModal({
+  engagementId,
+  instance,
+  onClose,
+  onDone,
+}: {
+  engagementId: string;
+  instance: ComponentInstanceRecord;
+  onClose: () => void;
+  onDone: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const [number, setNumber] = useState('');
+  const [stateCode, setStateCode] = useState('');
+  const [validFrom, setValidFrom] = useState('');
+
+  const record = useMutation({
+    mutationFn: () =>
+      apiFetch(`/engagements/${engagementId}/component-work/${instance.id}/record-registration`, {
+        method: 'POST',
+        body: {
+          registrationNumber: number.trim(),
+          stateCode: stateCode.trim() || null,
+          validFrom: validFrom || null,
+          completeInstance: true,
+        },
+      }),
+    onSuccess: () => {
+      toast('Registration recorded to the client master.');
+      onDone();
+    },
+    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not record.', 'error'),
+  });
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Record registration"
+      description={`Writes the ${(instance.setsRegistrationType ?? '').toUpperCase()} number the authority issued into the client's Registration Master (§40), then completes this work item.`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => record.mutate()} disabled={!number.trim() || record.isPending}>
+            Record &amp; complete
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Registration number" required>
+          <Input value={number} onChange={(e) => setNumber(e.target.value.toUpperCase())} placeholder="e.g. 27ABCDE1234F1Z5" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="State code">
+            <Input value={stateCode} onChange={(e) => setStateCode(e.target.value)} placeholder="e.g. 27" />
+          </Field>
+          <Field label="Valid from">
+            <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+          </Field>
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -207,6 +207,31 @@ export class SetInstanceStatusDto {
   version?: number;
 }
 
+/** §40 — record a registration produced by a registration-work instance. */
+export class RecordRegistrationDto {
+  @ApiProperty({ description: 'The registration number the authority issued.', example: '27ABCDE1234F1Z5' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  registrationNumber!: string;
+
+  @ApiPropertyOptional({ description: 'State code (e.g. for a GSTIN).', example: '27' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  stateCode?: string | null;
+
+  @ApiPropertyOptional({ example: '2026-04-01' })
+  @IsOptional()
+  @IsDateString()
+  validFrom?: string | null;
+
+  @ApiPropertyOptional({ description: 'Also mark the work instance completed.', default: true })
+  @IsOptional()
+  @IsBoolean()
+  completeInstance?: boolean;
+}
+
 export class AddChecklistItemDto {
   @ApiProperty({ description: 'Checklist step label.', example: 'Reconcile ITC against GSTR-2B' })
   @IsString()

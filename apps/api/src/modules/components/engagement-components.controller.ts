@@ -31,6 +31,7 @@ import {
   ComponentWorkListQueryDto,
   ConfigureComponentDto,
   EngagementComponentListQueryDto,
+  RecordRegistrationDto,
   RemoveEngagementComponentDto,
   SetChecklistItemDto,
   SetInstanceStatusDto,
@@ -308,5 +309,28 @@ export class EngagementComponentsController {
     @Body() dto: SetInstanceStatusDto,
   ): Promise<ComponentInstanceRecord> {
     return this.instances.setStatus(rlsContextFromPrincipal(principal), id, instanceId, dto);
+  }
+
+  @Post(':id/component-work/:instanceId/record-registration')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Record the registration a registration-work instance produced (§40; audited).',
+    description:
+      'Writes the number the authority issued into the central Registration Master ' +
+      '(entity_registrations) and, by default, completes the work instance. Only valid for a ' +
+      'component whose catalogue entry is flagged as registration work.',
+  })
+  recordRegistration(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+    @Body() dto: RecordRegistrationDto,
+  ): Promise<ComponentInstanceRecord> {
+    return this.instances.recordRegistration(rlsContextFromPrincipal(principal), id, instanceId, {
+      registrationNumber: dto.registrationNumber,
+      stateCode: dto.stateCode ?? null,
+      validFrom: dto.validFrom ?? null,
+      completeInstance: dto.completeInstance ?? true,
+    });
   }
 }

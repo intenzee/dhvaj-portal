@@ -51,6 +51,33 @@ export class CreateTaskDto {
   @IsOptional()
   @IsDateString()
   dueDate?: string;
+
+  @ApiPropertyOptional({ description: '§31 — flag ad-hoc work as out-of-scope of the mandate.' })
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  isOutOfScope?: boolean;
+
+  @ApiPropertyOptional({ description: '§31 — mark the work billable to the client.' })
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  isBillable?: boolean;
+}
+
+/** §31 — a lead's approval of an out-of-scope request. */
+export class ApproveOutOfScopeDto {
+  @ApiPropertyOptional({ description: 'Whether the approved work is billable to the client.' })
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  isBillable?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  version?: number;
 }
 
 export class UpdateTaskDto {

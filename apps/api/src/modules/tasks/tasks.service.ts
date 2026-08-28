@@ -19,6 +19,7 @@ import { translatePgError as mapPgError } from '../../common/errors/pg-error.uti
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type {
+  ApproveOutOfScopeInput,
   CreateTaskInput,
   MyTaskRecord,
   TaskDetail,
@@ -45,6 +46,11 @@ interface TaskRow {
   completed_at: Date | null;
   completed_by_employee_id: string | null;
   completed_by_name: string | null;
+  is_out_of_scope: boolean;
+  is_billable: boolean;
+  out_of_scope_approved_at: Date | null;
+  out_of_scope_approved_by_employee_id: string | null;
+  out_of_scope_approved_by_name: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -62,11 +68,15 @@ const TASK_BASE = `
             WHERE d.task_id = t.id AND bt.status NOT IN ('done', 'cancelled'))::int
            AS blocked_by_open_count,
          t.completed_at, t.completed_by_employee_id, cbe.full_name AS completed_by_name,
+         t.is_out_of_scope, t.is_billable,
+         t.out_of_scope_approved_at, t.out_of_scope_approved_by_employee_id,
+         obe.full_name AS out_of_scope_approved_by_name,
          t.version, t.created_at, t.updated_at
   FROM hsdg.tasks t
   LEFT JOIN hsdg.employees ae ON ae.id = t.assigned_to_employee_id
   LEFT JOIN hsdg.employees ce ON ce.id = t.created_by_employee_id
-  LEFT JOIN hsdg.employees cbe ON cbe.id = t.completed_by_employee_id`;
+  LEFT JOIN hsdg.employees cbe ON cbe.id = t.completed_by_employee_id
+  LEFT JOIN hsdg.employees obe ON obe.id = t.out_of_scope_approved_by_employee_id`;
 
 /**
  * Engagement tasks (Phase 9). Members read; leads create/assign/remove; the
@@ -93,8 +103,9 @@ export class TasksService {
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO hsdg.tasks
              (engagement_id, title, description, assigned_to_employee_id, created_by_employee_id,
-              priority, due_date)
-           VALUES ($1,$2,$3,$4,$5,COALESCE($6,'normal'),$7) RETURNING id`,
+              priority, due_date, is_out_of_scope, is_billable)
+           VALUES ($1,$2,$3,$4,$5,COALESCE($6,'normal'),$7,COALESCE($8,false),COALESCE($9,false))
+           RETURNING id`,
           [
             engagementId,
             input.title,
@@ -103,6 +114,8 @@ export class TasksService {
             ctx.employeeId ?? null,
             input.priority ?? null,
             input.dueDate ?? null,
+            input.isOutOfScope ?? null,
+            input.isBillable ?? null,
           ],
         );
         id = rows[0]!.id;
@@ -244,6 +257,51 @@ export class TasksService {
           after!.title,
         );
       }
+      return after!;
+    });
+  }
+
+  /**
+   * §31 — a lead approves an out-of-scope request: it becomes approved work
+   * (optionally billable) WITHOUT touching the engagement's historical scope.
+   * Lead-only (a plain assignee may progress the task but not approve billing).
+   */
+  async approveOutOfScope(
+    ctx: RlsContext,
+    engagementId: string,
+    taskId: string,
+    input: ApproveOutOfScopeInput,
+  ): Promise<TaskRecord> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.selectTask(client, taskId, engagementId);
+      if (!before) throw new NotFoundException('Task not found.');
+      if (!before.isOutOfScope) {
+        throw new BadRequestException('This task is not flagged as out-of-scope.');
+      }
+      const { rows: leadRows } = await client.query<{ lead: boolean }>(
+        `SELECT hsdg.is_engagement_lead($1) AS lead`,
+        [engagementId],
+      );
+      if (!leadRows[0]?.lead) {
+        throw new ForbiddenException('Only an engagement lead may approve out-of-scope work.');
+      }
+      const sets: string[] = ['out_of_scope_approved_at = now()'];
+      const params: unknown[] = [];
+      params.push(ctx.employeeId ?? null);
+      sets.push(`out_of_scope_approved_by_employee_id = $${params.length}`);
+      if (input.isBillable !== undefined) {
+        params.push(input.isBillable);
+        sets.push(`is_billable = $${params.length}`);
+      }
+      await this.versionedUpdate(client, taskId, engagementId, sets, params, input.version, false);
+      const after = await this.selectTask(client, taskId, engagementId);
+      await this.audit.recordWith(client, ctx, {
+        action: 'task.out_of_scope_approved',
+        objectType: 'task',
+        objectId: taskId,
+        before: { isBillable: before.isBillable },
+        after: { isBillable: after!.isBillable, approvedAt: after!.outOfScopeApprovedAt },
+      });
       return after!;
     });
   }
@@ -544,6 +602,13 @@ function mapTask(row: TaskRow): TaskRecord {
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
     completedById: row.completed_by_employee_id,
     completedByName: row.completed_by_name,
+    isOutOfScope: row.is_out_of_scope,
+    isBillable: row.is_billable,
+    outOfScopeApprovedAt: row.out_of_scope_approved_at
+      ? row.out_of_scope_approved_at.toISOString()
+      : null,
+    outOfScopeApprovedById: row.out_of_scope_approved_by_employee_id,
+    outOfScopeApprovedByName: row.out_of_scope_approved_by_name,
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),

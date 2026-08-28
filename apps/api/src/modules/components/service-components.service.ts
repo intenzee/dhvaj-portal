@@ -27,6 +27,7 @@ interface ComponentRow {
   due_date_source: DueDateSource | null;
   compliance_rule_id: string | null;
   compliance_rule_code: string | null;
+  sets_registration_type: string | null;
   display_order: number;
   is_active: boolean;
   version: number;
@@ -39,6 +40,7 @@ const COMPONENT_BASE = `
          sc.default_applicability, sc.default_frequency,
          sc.due_date_category, sc.due_date_source,
          sc.compliance_rule_id, cr.code AS compliance_rule_code,
+         sc.sets_registration_type,
          sc.display_order, sc.is_active, sc.version, sc.created_at, sc.updated_at
   FROM hsdg.service_components sc
   JOIN hsdg.services s ON s.id = sc.service_id
@@ -249,6 +251,7 @@ function mapComponent(row: ComponentRow): ServiceComponentRecord {
     dueDateSource: row.due_date_source,
     complianceRuleId: row.compliance_rule_id,
     complianceRuleCode: row.compliance_rule_code,
+    setsRegistrationType: row.sets_registration_type,
     displayOrder: row.display_order,
     isActive: row.is_active,
     version: row.version,

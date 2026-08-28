@@ -10,6 +10,34 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Commercial & Billing, Notes, and Registration write-back (complete).**
+> The three remaining spec gaps are closed — every one additive, engagement-scoped
+> and audited, with a live-verified UI:
+>
+> - **§31 Commercial Scope & Billing** — a 1:1 `engagement_commercial` config
+>   (billing frequency, effective/end dates, retainer, scope notes), and
+>   `invoices` + `invoice_line_items` with a **generated invoice number** and a
+>   **draft → issued → paid / void** lifecycle. Invoice totals are kept
+>   authoritative by DB triggers (`subtotal` from the lines, `total = subtotal +
+>   tax`); issuing requires ≥1 line; a paid/void invoice is locked. The §31
+>   **out-of-scope path** lands on tasks (`is_out_of_scope` / `is_billable` + a
+>   lead **approve** action) so unpredictable work is captured without changing
+>   the original historical scope. New **Invoices** tab (commercial summary,
+>   create/issue/pay/void, per-line editing).
+> - **§26 Notes** — a shared `engagement_notes` notebook: any member reads/adds,
+>   author-or-lead edits/removes (RLS-enforced), pinnable, scopable to a service
+>   line or component. Real **Notes** tab replaces the placeholder.
+> - **§40 Registration write-back** — a catalogue component can be flagged
+>   `sets_registration_type`; completing its work instance records the issued
+>   number into the central Registration Master (`entity_registrations`) through
+>   a **lead-gated, coverage-checked SECURITY DEFINER** writer. A **Record
+>   registration** action on the component-work row drives it.
+>
+> api+web typecheck, web lint & production build pass; **117 unit + 299 e2e tests
+> green** (incl. a new `commercial.e2e-spec.ts` covering all three, and a
+> refreshed notifications unit test aligned to the batched-emit/durable-outbox
+> contract).
+>
 > **Status: Group engagements, creation wizard & tabbed workspace (complete).**
 > Three more spec areas closed:
 >
@@ -26,11 +54,10 @@ audit trail.
 > - **Tabbed engagement workspace (§26)** — the engagement page is a tabbed
 >   workspace (Overview / Services / Work / Compliance / Documents / Team /
 >   Activity / Invoices / Notes) with the status & lifecycle action bar always
->   visible; the **Activity** tab shows lifecycle history, and Invoices/Notes are
->   honest placeholders for the deferred modules.
+>   visible; the **Activity** tab shows lifecycle history. (Invoices & Notes are
+>   now live modules — see the Commercial & Billing / Notes status above.)
 >
-> §31 Commercial/Billing remains the deliberately deferred module. api+web
-> typecheck, lint, and API tests (112) pass; verified end-to-end in the browser.
+> api+web typecheck, lint, and API tests pass; verified end-to-end in the browser.
 >
 > **Status: Config-depth partials + dark mode (complete).** Four spec gaps
 > closed, each additive, plus a full UI theme:

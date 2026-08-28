@@ -84,6 +84,9 @@ export interface ServiceComponentRecord {
   dueDateSource: DueDateSource | null;
   complianceRuleId: string | null;
   complianceRuleCode: string | null;
+  /** When set, this component IS registration work: completing it writes this
+   *  registration type into the Registration Master (spec §40). */
+  setsRegistrationType: string | null;
   displayOrder: number;
   isActive: boolean;
   version: number;
@@ -196,6 +199,8 @@ export interface ComponentInstanceRecord {
   completedAt: string | null;
   completedById: string | null;
   completedByName: string | null;
+  /** When set, this instance is registration work producing this registration type (§40). */
+  setsRegistrationType: string | null;
   notes: string | null;
   version: number;
   createdAt: string;

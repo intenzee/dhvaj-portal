@@ -18,6 +18,7 @@ import { TasksService } from './tasks.service';
 import type { TaskDetail, TaskRecord } from './tasks.types';
 import {
   AddDependencyDto,
+  ApproveOutOfScopeDto,
   CreateTaskDto,
   TaskListQueryDto,
   UpdateTaskDto,
@@ -101,6 +102,23 @@ export class TasksController {
     @Body() dto: UpdateTaskStatusDto,
   ): Promise<TaskRecord> {
     return this.tasks.updateStatus(rlsContextFromPrincipal(principal), id, taskId, dto);
+  }
+
+  @Post(':id/tasks/:taskId/approve-out-of-scope')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Approve an out-of-scope request (§31; lead only, audited)',
+    description:
+      'Turns a task flagged out-of-scope into approved work — optionally billable — without ' +
+      'changing the engagement’s original historical scope.',
+  })
+  approveOutOfScope(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('taskId', new ParseUUIDPipe()) taskId: string,
+    @Body() dto: ApproveOutOfScopeDto,
+  ): Promise<TaskRecord> {
+    return this.tasks.approveOutOfScope(rlsContextFromPrincipal(principal), id, taskId, dto);
   }
 
   @Post(':id/tasks/:taskId/dependencies')

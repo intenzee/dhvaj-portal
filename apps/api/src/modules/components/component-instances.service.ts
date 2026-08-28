@@ -24,6 +24,18 @@ import {
   toISODate,
 } from '../compliance/compliance-calc';
 import { enumeratePeriods } from './component-periods';
+import { translatePgError } from '../../common/errors/pg-error.util';
+
+/** Registration write-back PG errors (§40): lead-gate + coverage check from the SECURITY DEFINER fn. */
+function translateInstanceError(err: unknown): Error {
+  return translatePgError(err, {
+    uniqueDefault: 'That registration number is already recorded.',
+    foreignKey: 'A referenced record does not exist.',
+    check: (message) =>
+      message && message.length <= 200 ? message : 'The engagement does not cover that entity.',
+    forbidden: 'Only an engagement lead may record a registration.',
+  });
+}
 
 interface InstanceRow {
   id: string;
@@ -44,6 +56,7 @@ interface InstanceRow {
   completed_at: Date | null;
   completed_by_employee_id: string | null;
   completed_by_name: string | null;
+  sets_registration_type: string | null;
   notes: string | null;
   version: number;
   created_at: Date;
@@ -94,6 +107,7 @@ const INSTANCE_BASE = `
          (ci.status IN ('scheduled','active') AND ci.statutory_deadline IS NOT NULL
             AND ci.statutory_deadline < CURRENT_DATE) AS is_overdue,
          ci.completed_at, ci.completed_by_employee_id, ce.full_name AS completed_by_name,
+         sc.sets_registration_type,
          ci.notes, ci.version, ci.created_at, ci.updated_at
   FROM hsdg.component_instances ci
   JOIN hsdg.engagement_components ec ON ec.id = ci.engagement_component_id
@@ -399,6 +413,89 @@ export class ComponentInstancesService {
     });
   }
 
+  /**
+   * §40 — record the registration a registration-work instance produced into the
+   * central Registration Master (entity_registrations), then optionally complete
+   * the instance. Only valid for a component whose catalogue entry declares
+   * `sets_registration_type`. The write goes through a lead-gated SECURITY
+   * DEFINER function so the master is updated even without firm-wide
+   * entity.manage — but only for an entity the engagement covers.
+   */
+  async recordRegistration(
+    ctx: RlsContext,
+    engagementId: string,
+    instanceId: string,
+    input: {
+      registrationNumber: string;
+      stateCode?: string | null;
+      validFrom?: string | null;
+      completeInstance?: boolean;
+    },
+  ): Promise<ComponentInstanceRecord> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const current = await this.selectOne(client, engagementId, instanceId);
+      const { rows } = await client.query<{
+        sets_registration_type: string | null;
+        entity_id: string;
+      }>(
+        `SELECT sc.sets_registration_type, e.entity_id
+         FROM hsdg.component_instances ci
+         JOIN hsdg.engagement_components ec ON ec.id = ci.engagement_component_id
+         JOIN hsdg.service_components sc ON sc.id = ec.service_component_id
+         JOIN hsdg.engagements e ON e.id = ci.engagement_id
+         WHERE ci.id = $1 AND ci.engagement_id = $2`,
+        [instanceId, engagementId],
+      );
+      const meta = rows[0];
+      if (!meta) throw new NotFoundException('Work instance not found.');
+      if (!meta.sets_registration_type) {
+        throw new BadRequestException(
+          'This component is not registration work — it produces no registration to record.',
+        );
+      }
+      let registrationId: string;
+      try {
+        const res = await client.query<{ record_engagement_registration: string }>(
+          `SELECT hsdg.record_engagement_registration($1, $2, $3, $4, $5, $6::date)
+             AS record_engagement_registration`,
+          [
+            engagementId,
+            meta.entity_id,
+            meta.sets_registration_type,
+            input.registrationNumber,
+            input.stateCode ?? null,
+            input.validFrom ?? null,
+          ],
+        );
+        registrationId = res.rows[0]!.record_engagement_registration;
+      } catch (err) {
+        throw translateInstanceError(err);
+      }
+      if (input.completeInstance) {
+        await client.query(
+          `UPDATE hsdg.component_instances
+           SET status = 'completed', completed_at = now(),
+               completed_by_employee_id = hsdg.ctx_employee_id(), version = version + 1
+           WHERE id = $1 AND engagement_id = $2 AND status NOT IN ('completed','waived','cancelled','superseded')`,
+          [instanceId, engagementId],
+        );
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'registration.recorded',
+        objectType: 'entity_registration',
+        objectId: registrationId,
+        after: {
+          engagementId,
+          entityId: meta.entity_id,
+          registrationType: meta.sets_registration_type,
+          fromInstance: instanceId,
+          completedInstance: Boolean(input.completeInstance),
+        },
+      });
+      return (await this.selectOne(client, engagementId, instanceId)) ?? current;
+    });
+  }
+
   // ── internals ──────────────────────────────────────────────────────────
 
   private async generateOne(
@@ -671,6 +768,7 @@ function mapInstance(row: InstanceRow): ComponentInstanceRecord {
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
     completedById: row.completed_by_employee_id,
     completedByName: row.completed_by_name,
+    setsRegistrationType: row.sets_registration_type,
     notes: row.notes,
     version: row.version,
     createdAt: row.created_at.toISOString(),

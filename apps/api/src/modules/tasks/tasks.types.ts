@@ -27,6 +27,14 @@ export interface TaskRecord {
   completedAt: string | null;
   completedById: string | null;
   completedByName: string | null;
+  /** §31 — captured as out-of-scope of the mandate (needs approval before billing). */
+  isOutOfScope: boolean;
+  /** §31 — this task's effort is billable to the client. */
+  isBillable: boolean;
+  /** §31 — when the out-of-scope work was approved by a lead (null = pending). */
+  outOfScopeApprovedAt: string | null;
+  outOfScopeApprovedById: string | null;
+  outOfScopeApprovedByName: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -81,6 +89,17 @@ export interface CreateTaskInput {
   assignedToEmployeeId?: string;
   priority?: TaskPriority;
   dueDate?: string;
+  /** §31 — flag ad-hoc work as out-of-scope of the current mandate. */
+  isOutOfScope?: boolean;
+  /** §31 — mark the work billable to the client. */
+  isBillable?: boolean;
+}
+
+/** §31 — a lead's decision on an out-of-scope request. */
+export interface ApproveOutOfScopeInput {
+  /** Whether the approved work is billable to the client. */
+  isBillable?: boolean;
+  version?: number;
 }
 
 export interface UpdateTaskInput {
