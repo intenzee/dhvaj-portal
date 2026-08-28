@@ -241,6 +241,53 @@ describe('Service Catalogue (e2e)', () => {
       expect(byCode.get('ITAT_REP')).toBe('TAX');
     });
 
+    it('exposes the §19 named workflow families (15), without the legacy generic filing family', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/workflow-families')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      const slugs = (res.body as Array<{ slug: string }>).map((f) => f.slug);
+      expect(slugs).toHaveLength(15);
+      expect(slugs).toEqual(
+        expect.arrayContaining([
+          'audit_workflow',
+          'assurance_workflow',
+          'recurring_compliance_workflow',
+          'tax_filing_workflow',
+          'tax_compliance_workflow',
+          'accounting_workflow',
+          'payroll_workflow',
+          'registration_workflow',
+          'corporate_compliance_workflow',
+          'litigation_workflow',
+          'advisory_workflow',
+          'valuation_workflow',
+          'cfo_workflow',
+          'governance_workflow',
+          'investigation_workflow',
+        ]),
+      );
+      expect(slugs).not.toContain('filing_workflow');
+    });
+
+    it('maps re-pointed services to their §19 workflow families', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/services?limit=100')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      const byCode = new Map(
+        (res.body.items as Array<{ code: string; workflowFamilySlug: string }>).map((s) => [
+          s.code,
+          s.workflowFamilySlug,
+        ]),
+      );
+      expect(byCode.get('GST_MONTHLY')).toBe('recurring_compliance_workflow');
+      expect(byCode.get('PAYROLL')).toBe('payroll_workflow');
+      expect(byCode.get('VALUATION')).toBe('valuation_workflow');
+      expect(byCode.get('FORENSIC')).toBe('investigation_workflow');
+      expect(byCode.get('STAT_AUDIT')).toBe('audit_workflow'); // unchanged
+    });
+
     it('seeds the §17 controlled fallback service under OTHER', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/services?serviceLine=OTHER')

@@ -444,7 +444,7 @@ describe('Engagement Core (e2e)', () => {
       it('walks prospect → pending_acceptance → accepted → active → completed → closed, audited and versioned throughout', async () => {
         const mgr = await token('manager.x@hsdg.in');
         const entityId = await findEntityId('Bharat');
-        const serviceId = await findServiceId('GST_MONTHLY'); // short filing_workflow chain
+        const serviceId = await findServiceId('GST_MONTHLY'); // recurring_compliance_workflow chain
         // Manager creates: defaults to manager, NOT EP (grade-aware defaulting).
         const created = await request(app.getHttpServer())
           .post('/api/v1/engagements')
@@ -521,7 +521,8 @@ describe('Engagement Core (e2e)', () => {
           .send({ version })
           .expect(201);
         expect(started.body.status).toBe('active');
-        expect(started.body.currentWorkflowState.slug).toBe('preparation'); // filing_workflow's initial state
+        // recurring_compliance_workflow's initial state (GST_MONTHLY's §19 family).
+        expect(started.body.currentWorkflowState.slug).toBe('data_collection');
         version = started.body.version;
 
         // 4. Cannot complete before sign-off (Phase 7 gate, which replaced the
@@ -532,8 +533,9 @@ describe('Engagement Core (e2e)', () => {
           .send({ version })
           .expect(400);
 
-        // Walk the workflow to its terminal state (preparation -> review -> filing -> completed).
-        for (let i = 0; i < 3; i += 1) {
+        // Walk the workflow to its terminal state
+        // (data_collection -> preparation -> review -> filing -> completed).
+        for (let i = 0; i < 4; i += 1) {
           const advanced = await request(app.getHttpServer())
             .post(`/api/v1/engagements/${id}/workflow-transitions`)
             .set(bearer(mp))
@@ -693,8 +695,8 @@ describe('Engagement Core (e2e)', () => {
 
     describe('authority (§9, §25 tests 14-19)', () => {
       /**
-       * Create (as `pa`), start, walk GST_MONTHLY's short filing_workflow to
-       * its terminal state, and complete — so reopen (completed/closed only)
+       * Create (as `pa`), start, walk GST_MONTHLY's recurring_compliance_workflow
+       * to its terminal state, and complete — so reopen (completed/closed only)
        * has a legal `from_status` to work with. Optionally assigns Manager X
        * so a manager-authority test can reach the guard instead of a 404.
        */
@@ -719,7 +721,7 @@ describe('Engagement Core (e2e)', () => {
           .send({ version: acceptedVersion })
           .expect(201);
         let version = started.body.version as number;
-        for (let i = 0; i < 3; i += 1) {
+        for (let i = 0; i < 4; i += 1) {
           const advanced = await request(app.getHttpServer())
             .post(`/api/v1/engagements/${acc.id}/workflow-transitions`)
             .set(bearer(pa))

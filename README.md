@@ -574,9 +574,10 @@ into Advisory), litigation is a service under Direct Tax rather than a separate
 line, and the §17 **Other Professional Services** fallback exists as a governed
 line — creating a service under it requires the Managing-Partner-only
 `service.manage_other` permission plus a recorded approval reference. The
-remaining catalogue-fidelity items are the fifteen named workflow families (§19)
-and the versioned checklist / PBC / document-requirement template masters
-(§18/§25).
+workflow families now match §19's fifteen named lifecycles (**ADR-0028**), with
+each service re-pointed to its family. The remaining catalogue-fidelity items are
+effective-dated workflow *versions* and the reusable, versioned checklist / PBC /
+document-requirement template masters (§18/§25).
 
 ## License
 
