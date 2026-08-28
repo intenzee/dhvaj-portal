@@ -135,6 +135,36 @@ describe('compliance-calc', () => {
       expect(statutoryDeadline).toBe('2026-06-20');
     });
 
+    it('EVENT_DATE + 30 days (limitation-style, e.g. appeal from order)', () => {
+      const ref = resolveReferenceDate('event_date', { eventDate: '2026-06-15' });
+      const { statutoryDeadline } = computeDeadlines(
+        {
+          referenceDate: ref,
+          offsetMonths: 0,
+          offsetDays: 30,
+          workingDayAdjustment: 'none',
+          internalSlaOffsetDays: 0,
+        },
+        NO_HOLIDAYS,
+      );
+      expect(statutoryDeadline).toBe('2026-07-15');
+    });
+
+    it('EVENT_DATE − 30 days (negative offset, §4 EVENT_DATE_MINUS_DAYS)', () => {
+      const ref = resolveReferenceDate('event_date', { eventDate: '2026-06-15' });
+      const { statutoryDeadline } = computeDeadlines(
+        {
+          referenceDate: ref,
+          offsetMonths: 0,
+          offsetDays: -30,
+          workingDayAdjustment: 'none',
+          internalSlaOffsetDays: 0,
+        },
+        NO_HOLIDAYS,
+      );
+      expect(statutoryDeadline).toBe('2026-05-16');
+    });
+
     it('internal SLA = statutory − buffer, pulled back to a working day (before statutory)', () => {
       // Statutory Thu 2026-01-15; SLA raw = Sat 2026-01-10 → previous → Fri 2026-01-09.
       const { statutoryDeadline, internalSlaDate } = computeDeadlines(

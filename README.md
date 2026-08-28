@@ -583,6 +583,14 @@ version it loaded (**ADR-0029**). This closes the §18/§25/§27 catalogue-fidel
 items; the deeper follow-ons (versioning the workflow state machine itself, a
 template-authoring UI) are called out in ADR-0029.
 
+Against the **Due-Date Classification** spec, the compliance engine (Phase 8)
+already implements the classification, calculation, deadline-layer, extension,
+override and escalation model; the rule coverage has now been completed for the
+event-triggered statutory obligations (appeals, allotments, incorporation,
+resolutions, FDI, amendments), taking bound statutory components to 32/46, with
+the remainder deliberately event/manual-driven (**ADR-0030**). The calendar-view,
+escalation and UX gaps are the next parts of that work.
+
 ## License
 
 UNLICENSED — proprietary to HSDG.

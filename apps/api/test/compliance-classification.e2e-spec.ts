@@ -574,4 +574,44 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
       expect(gen.body.statutoryDeadline).toBe('2026-04-11');
     });
   });
+
+  // ── Statutory-rule coverage completion (0038) ──────────────────────────────
+  describe('event-based statutory rule coverage (§7/§8/§11/§14)', () => {
+    it('binds the event-limitation rules to their components', async () => {
+      const expected: Record<string, string> = {
+        TXP_LIMITATION: 'IT_APPEAL_LIMITATION',
+        GAP_LIMITATION: 'GST_APPEAL_LIMITATION',
+        ITR_VERIFY: 'ITR_VERIFICATION_DUE',
+        ROCE_SHARE: 'PAS3_ALLOTMENT',
+        ROCE_BEN: 'BEN2_DECLARATION',
+        ROCE_FILING: 'ROC_EVENT_FILING',
+        INC_INITIAL: 'INC20A_COMMENCEMENT',
+        FEMA_FDI: 'FCGPR_REPORTING',
+        GSTR_AMEND: 'GST_AMENDMENT_LIMITATION',
+        GOV_MEETINGS: 'BOARD_MEETING_QUARTERLY',
+      };
+      for (const [code, ruleCode] of Object.entries(expected)) {
+        const res = await request(app.getHttpServer())
+          .get(`/api/v1/service-components/${code}`)
+          .set(bearer(mp))
+          .expect(200);
+        expect([code, res.body.complianceRuleCode]).toEqual([code, ruleCode]);
+      }
+    });
+
+    it('generates an event-based statutory deadline from the seeded limitation rule', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa, '2026-27', 'TAX_APPEAL');
+      // IT_APPEAL_LIMITATION: event_date + 30 (working-day 'next'). Order served
+      // Mon 2026-06-15 ⇒ Wed 2026-07-15 (a weekday, no nudge).
+      const gen = await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance`)
+        .set(bearer(pa))
+        .send({ complianceRuleCode: 'IT_APPEAL_LIMITATION', eventDate: '2026-06-15' })
+        .expect(201);
+      expect(gen.body.statutoryDeadline).toBe('2026-07-15');
+      expect(gen.body.dueDateCategory).toBe('STATUTORY_EVENT');
+      expect(gen.body.dueDateSource).toBe('LAW_RULE');
+    });
+  });
 });
