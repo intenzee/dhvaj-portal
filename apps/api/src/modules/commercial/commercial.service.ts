@@ -6,8 +6,11 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  AGING_BUCKET,
   BILLING_FREQUENCY,
   INVOICE_STATUS,
+  type AgingBucket,
+  type AgingBucketKey,
   type BillingSummary,
   type EngagementCommercial,
   type GlobalInvoiceRecord,
@@ -320,8 +323,46 @@ export class CommercialService {
         void: bucket(r?.void_cnt ?? '0', r?.void_amt ?? '0'),
         outstanding: bucket(r?.outstanding_cnt ?? '0', r?.outstanding_amt ?? '0'),
         overdue: bucket(r?.overdue_cnt ?? '0', r?.overdue_amt ?? '0'),
+        aging: await this.agingBuckets(client),
       };
     });
+  }
+
+  /**
+   * Receivables aging over the outstanding (issued, unpaid) invoices, bucketed
+   * by days past the due date. Runs under the caller's RLS context — same scope
+   * as the rest of the summary. Every band is returned (zero-filled) in order.
+   */
+  private async agingBuckets(client: PoolClient): Promise<AgingBucket[]> {
+    const { rows } = await client.query<{ bucket: AgingBucketKey; cnt: string; amt: string }>(
+      `SELECT
+         CASE
+           WHEN due_date IS NULL OR due_date >= CURRENT_DATE THEN 'not_due'
+           WHEN CURRENT_DATE - due_date <= 30 THEN 'd1_30'
+           WHEN CURRENT_DATE - due_date <= 60 THEN 'd31_60'
+           WHEN CURRENT_DATE - due_date <= 90 THEN 'd61_90'
+           ELSE 'd90_plus'
+         END AS bucket,
+         count(*)::text AS cnt,
+         COALESCE(sum(total), 0)::text AS amt
+       FROM hsdg.invoices
+       WHERE status = 'issued'
+       GROUP BY bucket`,
+    );
+    const by = new Map(rows.map((x) => [x.bucket, x]));
+    const order: { key: AgingBucketKey; label: string }[] = [
+      { key: AGING_BUCKET.notDue, label: 'Not yet due' },
+      { key: AGING_BUCKET.d1_30, label: '1–30 days' },
+      { key: AGING_BUCKET.d31_60, label: '31–60 days' },
+      { key: AGING_BUCKET.d61_90, label: '61–90 days' },
+      { key: AGING_BUCKET.d90Plus, label: '90+ days' },
+    ];
+    return order.map(({ key, label }) => ({
+      key,
+      label,
+      count: Number(by.get(key)?.cnt ?? '0'),
+      amount: by.get(key)?.amt ?? '0',
+    }));
   }
 
   async getInvoice(

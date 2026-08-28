@@ -165,6 +165,26 @@ describe('Billing & Collections (e2e)', () => {
       expect(typeof res.body.currency).toBe('string');
     });
 
+    it('partitions outstanding into aging buckets that reconcile', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      await makeInvoice(pa, eng, { issue: true }); // not yet due
+      await makeInvoice(pa, eng, { issue: true, overdue: true }); // 10 days overdue → 1–30
+
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/invoices/summary')
+        .set(bearer(pa))
+        .expect(200);
+      const aging = res.body.aging as Array<{ key: string; count: number }>;
+      // All five bands are present, in order.
+      expect(aging.map((b) => b.key)).toEqual(['not_due', 'd1_30', 'd31_60', 'd61_90', 'd90_plus']);
+      // The bands partition the outstanding bucket.
+      const sum = aging.reduce((n, b) => n + b.count, 0);
+      expect(sum).toBe(res.body.outstanding.count);
+      // The 10-day-overdue invoice lands in the 1–30 band.
+      expect(aging.find((b) => b.key === 'd1_30')!.count).toBeGreaterThanOrEqual(1);
+    });
+
     it('scopes the summary by RLS — a partner sees no more issued than the MP', async () => {
       const paTotal = await request(app.getHttpServer())
         .get('/api/v1/invoices/summary')

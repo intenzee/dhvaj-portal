@@ -103,6 +103,25 @@ export interface BillingBucket {
   amount: string;
 }
 
+/** The ordered receivables-aging buckets over outstanding (issued, unpaid) invoices. */
+export const AGING_BUCKET = {
+  notDue: 'not_due',
+  d1_30: 'd1_30',
+  d31_60: 'd31_60',
+  d61_90: 'd61_90',
+  d90Plus: 'd90_plus',
+} as const;
+export type AgingBucketKey = (typeof AGING_BUCKET)[keyof typeof AGING_BUCKET];
+
+/** One receivables-aging band: outstanding invoices by how far past due they are. */
+export interface AgingBucket {
+  key: AgingBucketKey;
+  label: string;
+  count: number;
+  /** Decimal string; sum of the band's invoice totals. */
+  amount: string;
+}
+
 /**
  * Firm-wide billing rollup (spec §31), RLS-scoped exactly like the invoice
  * list. Amounts are naive sums of invoice totals; `currency` is the dominant
@@ -117,4 +136,10 @@ export interface BillingSummary {
   void: BillingBucket;
   outstanding: BillingBucket;
   overdue: BillingBucket;
+  /**
+   * Receivables aging over the outstanding (issued, unpaid) invoices, split by
+   * days past the due date. The buckets partition `outstanding`: their counts
+   * sum to `outstanding.count`.
+   */
+  aging: AgingBucket[];
 }

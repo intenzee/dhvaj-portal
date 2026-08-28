@@ -10,6 +10,32 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Billing & Collections + Resource Management views (complete).** The
+> last two `ComingSoon` screens are now live — the portal navigation is fully
+> built. Both are additive, read-only projections over existing RLS-scoped tables
+> (the `/documents` and `/reports` precedent), so no migration, policy or write
+> path changed:
+>
+> - **Billing & Collections (§31)** — firm-wide `GET /invoices` +
+>   `GET /invoices/summary` (`report.read`), RLS-scoped exactly like the
+>   per-engagement invoice list. The list carries engagement/client context and a
+>   derived **overdue** flag (sorts overdue to the top; `?overdueOnly=` filter);
+>   the summary rolls up counts + totals (outstanding / overdue / paid / draft)
+>   and a **receivables-aging** partition (not-due / 1–30 / 31–60 / 61–90 / 90+).
+>   New **Billing** screen; writes stay on the audited per-engagement routes. See
+>   [ADR-0025](docs/adr/0025-billing-and-collections.md).
+> - **Resource Management** — `GET /resources/workload` (`employee.read`) reuses
+>   the utilisation rows (now a shared helper) and rolls them up by **office** and
+>   **grade** with headline totals (people / active assignments / open / overdue /
+>   overloaded). New **Resources** screen with a per-person workload table + CSV.
+>   See [ADR-0026](docs/adr/0026-resource-management.md).
+>
+> Also in this pass: fixed the API lint (4 prettier errors), a web jest
+> `.next/` haste collision, and made the date-sensitive escalation e2e spec
+> derive its dates from the clock; the e2e suite now **resets to a fresh schema
+> before it runs** (jest `globalSetup`) so local re-runs are repeatable, not just
+> the first. api+web typecheck, lint & build pass; **133 unit + 310 e2e green**.
+>
 > **Status: Commercial & Billing, Notes, and Registration write-back (complete).**
 > The three remaining spec gaps are closed — every one additive, engagement-scoped
 > and audited, with a live-verified UI:
@@ -508,6 +534,9 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/notifications/:id/{read,dismiss}` | `notification.read` | Mark one read / dismiss (404 if not mine) |
 | POST | `/notifications/scan` | `notification.scan` | Run the date-driven sweep (MP/worker; idempotent) |
 | GET | `/dashboard/summary` | `engagement.read` | RLS-scoped Home-dashboard counts; `?dueSoonDays=` (default 7) |
+| GET | `/invoices` | `report.read` | Firm-wide invoices across accessible engagements _(paginated)_; filter `?status=&overdueOnly=&search=` |
+| GET | `/invoices/summary` | `report.read` | Billing rollup: counts/totals (outstanding/overdue/paid/draft) + receivables aging |
+| GET | `/resources/workload` | `employee.read` | Per-person workload (EP/manager/member + open/overdue tasks) with office/grade rollups; RLS-scoped |
 
 ## Roadmap
 
@@ -530,6 +559,13 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 
 Each phase delivers **database + business logic + API + security + RLS + audit +
 tests + documentation** — not merely UI.
+
+The production-hardening follow-ons within Phase 13 have now closed the last
+`ComingSoon` screens — **Billing & Collections** (ADR-0025) and **Resource
+Management** (ADR-0026) — so every primary navigation item is live. Their natural
+next milestones (a Collections workflow — dunning, receipts, part-payments,
+multi-currency rollups; and capacity *planning* — availability/leave/allocation)
+are called out in those ADRs.
 
 ## License
 

@@ -16,7 +16,16 @@ import { humanize, formatDate, formatMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { cn } from '@/lib/cn';
-import { PageHeader, Spinner, Card, EmptyState, Badge } from '@/components/ui';
+import {
+  PageHeader,
+  Spinner,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardBody,
+  EmptyState,
+  Badge,
+} from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { Pagination } from '@/components/pagination';
@@ -113,6 +122,7 @@ function Billing(): JSX.Element {
       />
 
       {summary.data && <SummaryCards s={summary.data} />}
+      {summary.data && <AgingPanel s={summary.data} />}
 
       <div className="mb-3 mt-5 flex flex-wrap items-center gap-2">
         <input
@@ -186,6 +196,46 @@ function SummaryCards({ s }: { s: BillingSummary }): JSX.Element {
         </div>
       ))}
     </div>
+  );
+}
+
+function AgingPanel({ s }: { s: BillingSummary }): JSX.Element {
+  const maxAmt = Math.max(1, ...s.aging.map((b) => Number(b.amount)));
+  const overdueTone = (key: string): string =>
+    key === 'not_due'
+      ? 'bg-primary-500'
+      : key === 'd90_plus'
+        ? 'bg-danger-500'
+        : key === 'd61_90'
+          ? 'bg-warning-600'
+          : 'bg-warning-500';
+  return (
+    <Card className="mt-3">
+      <CardHeader className="flex items-center justify-between">
+        <CardTitle>Receivables aging</CardTitle>
+        <span className="text-xs text-ink-faint">
+          Outstanding {formatMoney(s.outstanding.amount, s.currency)} · {s.outstanding.count} invoices
+        </span>
+      </CardHeader>
+      <CardBody>
+        <div className="space-y-1">
+          {s.aging.map((b) => {
+            const pct = Math.max(b.count > 0 ? 2 : 0, Math.round((Number(b.amount) / maxAmt) * 100));
+            return (
+              <div key={b.key} className="flex items-center gap-3 py-1">
+                <span className="w-24 shrink-0 text-sm text-ink">{b.label}</span>
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
+                  <div className={cn('h-full rounded-full', overdueTone(b.key))} style={{ width: `${pct}%` }} />
+                </div>
+                <span className="w-40 shrink-0 text-right text-xs tabular-nums text-ink-muted">
+                  {formatMoney(b.amount, s.currency)} · {b.count}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 
