@@ -51,6 +51,8 @@ export interface ServiceSummary {
   defaultRecurrence: Recurrence;
   isActive: boolean;
   version: number;
+  /** Authorised-approval reference recorded for OTHER-line services (spec §17). */
+  approvalReference: string | null;
 }
 
 /** Full service view: the summary plus the workflow family's states. */
@@ -73,6 +75,7 @@ export interface CreateServiceInput {
   workflowFamily: string;
   defaultRecurrence?: Recurrence;
   isActive?: boolean;
+  approvalReference?: string;
 }
 
 export interface UpdateServiceInput {

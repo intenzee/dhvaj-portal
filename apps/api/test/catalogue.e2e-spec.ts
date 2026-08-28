@@ -208,4 +208,131 @@ describe('Service Catalogue (e2e)', () => {
       expect(res.body.version).toBe(1);
     });
   });
+
+  // ── Frozen §3 master + §17 controlled fallback (0035 reconciliation) ───────
+  describe('service-line master reconciliation (spec §3 / §17)', () => {
+    it('exposes the advisory-family lines as co-equal top-level lines, without LITIGATION', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/service-lines')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      const codes = (res.body as Array<{ code: string }>).map((l) => l.code);
+      expect(codes).toEqual(expect.arrayContaining(['FEMA', 'VAL', 'CFO', 'GOV', 'FOR', 'OTHER']));
+      // Litigation is a SERVICE under Direct Tax in the master, not a line.
+      expect(codes).not.toContain('LITIGATION');
+    });
+
+    it('re-parents the folded services to their own lines and ITAT_REP to TAX', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/services?limit=100')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      const byCode = new Map(
+        (res.body.items as Array<{ code: string; serviceLineCode: string }>).map((s) => [
+          s.code,
+          s.serviceLineCode,
+        ]),
+      );
+      expect(byCode.get('VALUATION')).toBe('VAL');
+      expect(byCode.get('FEMA')).toBe('FEMA');
+      expect(byCode.get('VIRTUAL_CFO')).toBe('CFO');
+      expect(byCode.get('GOVERNANCE')).toBe('GOV');
+      expect(byCode.get('FORENSIC')).toBe('FOR');
+      expect(byCode.get('ITAT_REP')).toBe('TAX');
+    });
+
+    it('seeds the §17 controlled fallback service under OTHER', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/services?serviceLine=OTHER')
+        .set(bearer(await token('mp@hsdg.in')))
+        .expect(200);
+      const codes = (res.body.items as Array<{ code: string }>).map((s) => s.code);
+      expect(codes).toContain('OTHER_PROF');
+    });
+
+    it('forbids an admin (no service.manage_other) from creating under OTHER (403)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('admin@hsdg.in')))
+        .send({
+          serviceLineCode: 'OTHER',
+          code: code('OTH'),
+          name: 'Bespoke Assignment',
+          requiredReviewModel: 'key_matter_review',
+          workflowFamily: 'advisory_workflow',
+          approvalReference: 'MP-APPROVAL-1',
+        })
+        .expect(403);
+    });
+
+    it('requires an approval reference when the MP creates under OTHER (400)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('mp@hsdg.in')))
+        .send({
+          serviceLineCode: 'OTHER',
+          code: code('OTH'),
+          name: 'Bespoke Assignment',
+          requiredReviewModel: 'key_matter_review',
+          workflowFamily: 'advisory_workflow',
+        })
+        .expect(400);
+    });
+
+    it('lets the MP create a service under OTHER with a recorded approval reference', async () => {
+      const svcCode = code('OTH');
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('mp@hsdg.in')))
+        .send({
+          serviceLineCode: 'OTHER',
+          code: svcCode,
+          name: 'Bespoke Assignment',
+          requiredReviewModel: 'key_matter_review',
+          workflowFamily: 'advisory_workflow',
+          approvalReference: 'MP-APPROVAL-2026-014',
+        })
+        .expect(201);
+      expect(res.body.code).toBe(svcCode);
+      expect(res.body.serviceLineCode).toBe('OTHER');
+      expect(res.body.approvalReference).toBe('MP-APPROVAL-2026-014');
+    });
+
+    it('does not store an approval reference for a non-OTHER service (OTHER-only concept)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('admin@hsdg.in')))
+        .send({
+          serviceLineCode: 'AUDIT',
+          code: code('AUD'),
+          name: 'Regular Audit Service',
+          requiredReviewModel: 'manager_review',
+          workflowFamily: 'audit_workflow',
+          approvalReference: 'SHOULD-BE-IGNORED',
+        })
+        .expect(201);
+      expect(res.body.approvalReference).toBeNull();
+    });
+
+    it('refuses to re-parent an existing service into OTHER via update (400)', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/services')
+        .set(bearer(await token('admin@hsdg.in')))
+        .send({
+          serviceLineCode: 'AUDIT',
+          code: code('MOV'),
+          name: 'Movable Service',
+          requiredReviewModel: 'manager_review',
+          workflowFamily: 'audit_workflow',
+        })
+        .expect(201);
+      // Even the Managing Partner (who holds service.manage_other) cannot move a
+      // service into the fallback line — the only path there is create-with-approval.
+      await request(app.getHttpServer())
+        .patch(`/api/v1/services/${created.body.id}`)
+        .set(bearer(await token('mp@hsdg.in')))
+        .send({ serviceLineCode: 'OTHER', version: created.body.version as number })
+        .expect(400);
+    });
+  });
 });

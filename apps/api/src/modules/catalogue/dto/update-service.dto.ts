@@ -1,13 +1,23 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { RECURRENCES, type Recurrence } from '@hsdg/contracts';
 
 /** All fields optional — a partial update. */
 export class UpdateServiceDto {
   @ApiPropertyOptional()
   @IsOptional()
-  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @Matches(/^[A-Z0-9_]{2,30}$/, { message: 'serviceLineCode must be UPPER_SNAKE (A-Z, 0-9, _)' })
   serviceLineCode?: string;
 
   @ApiPropertyOptional()

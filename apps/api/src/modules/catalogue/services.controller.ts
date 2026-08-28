@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -14,7 +16,7 @@ import { PERMISSION, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
-import { CatalogueService } from './catalogue.service';
+import { CatalogueService, OTHER_SERVICE_LINE_CODE } from './catalogue.service';
 import type { ServiceDetail, ServiceFilter, ServiceSummary } from './catalogue.types';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -66,6 +68,7 @@ export class ServicesController {
     @CurrentPrincipal() principal: Principal,
     @Body() dto: CreateServiceDto,
   ): Promise<ServiceDetail> {
+    this.assertOtherLineAuthorised(principal, dto.serviceLineCode);
     return this.catalogue.createService(rlsContextFromPrincipal(principal), dto);
   }
 
@@ -77,6 +80,33 @@ export class ServicesController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateServiceDto,
   ): Promise<ServiceDetail> {
+    // A service under OTHER must always carry a recorded approval reference (§17).
+    // The only way to satisfy that is the create path, so re-parenting an
+    // existing service INTO the fallback line is not supported — this keeps the
+    // invariant "every OTHER service was created with approval" unbreakable.
+    if (dto.serviceLineCode === OTHER_SERVICE_LINE_CODE) {
+      throw new BadRequestException(
+        'A service cannot be moved into "Other Professional Services". Create it under ' +
+          'that line instead, with an approval reference (spec §17).',
+      );
+    }
     return this.catalogue.updateService(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  /**
+   * §17 control: the OTHER "Other Professional Services" line is a governed
+   * fallback. Creating a service under it requires the dedicated
+   * `service.manage_other` permission (held by the Managing Partner); the
+   * recorded authorised-approval reference itself is enforced in the service
+   * layer (and required by the DB write).
+   */
+  private assertOtherLineAuthorised(principal: Principal, serviceLineCode: string): void {
+    if (serviceLineCode !== OTHER_SERVICE_LINE_CODE) return;
+    if (!principal.permissions.includes(PERMISSION.serviceManageOther)) {
+      throw new ForbiddenException(
+        'Creating a service under "Other Professional Services" requires authorised ' +
+          'catalogue approval (service.manage_other).',
+      );
+    }
   }
 }

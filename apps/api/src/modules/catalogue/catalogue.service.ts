@@ -24,8 +24,12 @@ import type {
   WorkflowStateRecord,
 } from './catalogue.types';
 
+/** The §17 controlled fallback line. Services here need explicit approval. */
+export const OTHER_SERVICE_LINE_CODE = 'OTHER';
+
 const SERVICE_SELECT = `
   SELECT s.id, s.code, s.name, s.description, s.default_recurrence, s.is_active, s.version,
+         s.approval_reference,
          s.service_line_id, sl.code AS line_code, sl.name AS line_name,
          s.required_review_model_id, rm.slug AS review_slug, rm.rank AS review_rank,
          s.workflow_family_id, wf.slug AS workflow_slug
@@ -42,6 +46,7 @@ interface ServiceRow {
   default_recurrence: ServiceSummary['defaultRecurrence'];
   is_active: boolean;
   version: number;
+  approval_reference: string | null;
   service_line_id: string;
   line_code: string;
   line_name: string;
@@ -237,13 +242,19 @@ export class CatalogueService {
 
   async createService(ctx: RlsContext, input: CreateServiceInput): Promise<ServiceDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const lineId = await this.resolveId(
-        client,
-        'hsdg.service_lines',
-        'code',
-        input.serviceLineCode,
-        'service line',
-      );
+      const line = await this.resolveServiceLine(client, input.serviceLineCode);
+      const lineId = line.id;
+      // §17 fallback control (defence in depth; the controller also enforces the
+      // service.manage_other permission): a service under OTHER must carry an
+      // authorised approval reference — and the reference is an OTHER-only
+      // concept, so it is never stored for any other line.
+      const isOther = line.code === OTHER_SERVICE_LINE_CODE;
+      const approvalReference = isOther ? input.approvalReference?.trim() || null : null;
+      if (isOther && !approvalReference) {
+        throw new BadRequestException(
+          'A service under "Other Professional Services" requires an approval reference (spec §17).',
+        );
+      }
       const reviewId = await this.resolveId(
         client,
         'hsdg.review_models',
@@ -264,8 +275,8 @@ export class CatalogueService {
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO hsdg.services
              (service_line_id, code, name, description, required_review_model_id,
-              workflow_family_id, default_recurrence, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+              workflow_family_id, default_recurrence, is_active, approval_reference)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
           [
             lineId,
             input.code,
@@ -275,6 +286,7 @@ export class CatalogueService {
             workflowId,
             input.defaultRecurrence ?? 'annual',
             input.isActive ?? true,
+            approvalReference,
           ],
         );
         id = rows[0]!.id;
@@ -411,6 +423,19 @@ export class CatalogueService {
     return rows[0].id;
   }
 
+  /** Resolve a service line by code, returning its id and canonical code. */
+  private async resolveServiceLine(
+    client: PoolClient,
+    code: string,
+  ): Promise<{ id: string; code: string }> {
+    const { rows } = await client.query<{ id: string; code: string }>(
+      `SELECT id, code FROM hsdg.service_lines WHERE code = $1`,
+      [code],
+    );
+    if (!rows[0]) throw new BadRequestException(`Unknown service line "${code}".`);
+    return rows[0];
+  }
+
   private async selectServiceLine(
     client: PoolClient,
     id: string,
@@ -516,6 +541,7 @@ function mapService(row: ServiceRow): ServiceSummary {
     defaultRecurrence: row.default_recurrence,
     isActive: row.is_active,
     version: row.version,
+    approvalReference: row.approval_reference,
   };
 }
 

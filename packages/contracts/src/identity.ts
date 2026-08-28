@@ -70,6 +70,7 @@ export const PERMISSION = {
   entityManage: 'entity.manage',
   serviceRead: 'service.read',
   serviceManage: 'service.manage',
+  serviceManageOther: 'service.manage_other',
   engagementRead: 'engagement.read',
   engagementManage: 'engagement.manage',
   complianceRead: 'compliance.read',

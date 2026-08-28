@@ -567,6 +567,17 @@ next milestones (a Collections workflow — dunning, receipts, part-payments,
 multi-currency rollups; and capacity *planning* — availability/leave/allocation)
 are called out in those ADRs.
 
+The service-line master has been reconciled to the Service Catalogue Master's
+frozen §3 (**ADR-0027**): the advisory-family lines — **FEMA, Valuation, Virtual
+CFO, Governance, Forensic** — are now co-equal top-level lines (no longer folded
+into Advisory), litigation is a service under Direct Tax rather than a separate
+line, and the §17 **Other Professional Services** fallback exists as a governed
+line — creating a service under it requires the Managing-Partner-only
+`service.manage_other` permission plus a recorded approval reference. The
+remaining catalogue-fidelity items are the fifteen named workflow families (§19)
+and the versioned checklist / PBC / document-requirement template masters
+(§18/§25).
+
 ## License
 
 UNLICENSED — proprietary to HSDG.
