@@ -55,6 +55,9 @@ interface EngagementComponentRow {
   end_date: string | null;
   notes: string | null;
   compliance_rule_version_id: string | null;
+  checklist_template_version_id: string | null;
+  pbc_template_version_id: string | null;
+  document_requirement_template_version_id: string | null;
   superseded_by_id: string | null;
   version: number;
   created_at: Date;
@@ -107,6 +110,8 @@ const EC_BASE = `
          ec.reviewer_employee_id, re.full_name AS reviewer_name,
          ec.ep_review_required, ec.status, ec.start_date::text, ec.end_date::text, ec.notes,
          ec.compliance_rule_version_id, ec.superseded_by_id, ec.version,
+         ec.checklist_template_version_id, ec.pbc_template_version_id,
+         ec.document_requirement_template_version_id,
          ec.created_at, ec.updated_at
   FROM hsdg.engagement_components ec
   JOIN hsdg.service_components sc ON sc.id = ec.service_component_id
@@ -327,6 +332,9 @@ export class EngagementComponentsService {
          WHERE sc.id = $2 AND sc.checklist_template IS NOT NULL`,
         [id, component.id],
       );
+      // §28: snapshot the active version of each catalogue template the component
+      // links, so the configuration records the definition it loaded.
+      await this.snapshotComponentTemplateVersions(client, id);
       const record = (await this.selectOne(client, id))!;
       await this.audit.recordWith(client, ctx, {
         action: 'component.configured',
@@ -543,6 +551,8 @@ export class EngagementComponentsService {
         `UPDATE hsdg.engagement_components SET superseded_by_id = $2 WHERE id = $1`,
         [componentId, newId],
       );
+      // Re-load the current template versions onto the superseding configuration.
+      await this.snapshotComponentTemplateVersions(client, newId);
       const supersededWork = await this.closePendingInstances(client, componentId, 'superseded');
 
       const newRecord = (await this.selectOne(client, newId))!;
@@ -800,6 +810,34 @@ export class EngagementComponentsService {
     return rows[0];
   }
 
+  /**
+   * §28 — record which catalogue-template VERSION each of the component's linked
+   * templates was on when this configuration was created. Resolves the version
+   * effective today (latest effective_from ≤ CURRENT_DATE, still open); leaves a
+   * snapshot NULL when the component links no template of that kind. Idempotent.
+   */
+  private async snapshotComponentTemplateVersions(
+    client: PoolClient,
+    engagementComponentId: string,
+  ): Promise<void> {
+    const activeVersion = (templateCol: string): string => `(
+      SELECT v.id FROM hsdg.catalogue_template_versions v
+      WHERE v.catalogue_template_id = ${templateCol}
+        AND v.effective_from <= CURRENT_DATE
+        AND (v.effective_to IS NULL OR v.effective_to >= CURRENT_DATE)
+      ORDER BY v.effective_from DESC
+      LIMIT 1)`;
+    await client.query(
+      `UPDATE hsdg.engagement_components ec
+       SET checklist_template_version_id = ${activeVersion('sc.checklist_template_id')},
+           pbc_template_version_id = ${activeVersion('sc.pbc_template_id')},
+           document_requirement_template_version_id = ${activeVersion('sc.document_requirement_template_id')}
+       FROM hsdg.service_components sc
+       WHERE ec.id = $1 AND sc.id = ec.service_component_id`,
+      [engagementComponentId],
+    );
+  }
+
   private async selectOne(
     client: PoolClient,
     id: string,
@@ -914,6 +952,9 @@ function mapEngagementComponent(row: EngagementComponentRow): EngagementComponen
     endDate: row.end_date,
     notes: row.notes,
     complianceRuleVersionId: row.compliance_rule_version_id,
+    checklistTemplateVersionId: row.checklist_template_version_id,
+    pbcTemplateVersionId: row.pbc_template_version_id,
+    documentRequirementTemplateVersionId: row.document_requirement_template_version_id,
     supersededById: row.superseded_by_id,
     version: row.version,
     createdAt: row.created_at.toISOString(),

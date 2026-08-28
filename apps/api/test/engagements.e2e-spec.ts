@@ -523,6 +523,8 @@ describe('Engagement Core (e2e)', () => {
         expect(started.body.status).toBe('active');
         // recurring_compliance_workflow's initial state (GST_MONTHLY's §19 family).
         expect(started.body.currentWorkflowState.slug).toBe('data_collection');
+        // §25: the workflow family's active version is snapshotted at start.
+        expect(started.body.workflowVersion.version).toBe(1);
         version = started.body.version;
 
         // 4. Cannot complete before sign-off (Phase 7 gate, which replaced the

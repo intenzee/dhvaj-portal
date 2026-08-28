@@ -64,6 +64,8 @@ export interface EngagementSummary {
   version: number;
   /** Independent of lifecycle status (§17) — null until the service workflow is initialised (on 'start'). */
   currentWorkflowState: WorkflowStateRef | null;
+  /** §25 snapshot of the workflow family's effective-dated version taken at 'start'. */
+  workflowVersion: { id: string; version: number } | null;
   onHoldReason: string | null;
   onHoldPreviousStatus: EngagementStatus | null;
   onHoldAt: string | null;

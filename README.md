@@ -575,9 +575,13 @@ line, and the §17 **Other Professional Services** fallback exists as a governed
 line — creating a service under it requires the Managing-Partner-only
 `service.manage_other` permission plus a recorded approval reference. The
 workflow families now match §19's fifteen named lifecycles (**ADR-0028**), with
-each service re-pointed to its family. The remaining catalogue-fidelity items are
-effective-dated workflow *versions* and the reusable, versioned checklist / PBC /
-document-requirement template masters (§18/§25).
+each service re-pointed to its family. The configuration layers a service loads —
+checklist, PBC, document-requirement — are now **reusable, effective-dated
+template masters** with append-only versions, and workflow families carry
+effective-dated versions; a configuration snapshots the template and workflow
+version it loaded (**ADR-0029**). This closes the §18/§25/§27 catalogue-fidelity
+items; the deeper follow-ons (versioning the workflow state machine itself, a
+template-authoring UI) are called out in ADR-0029.
 
 ## License
 

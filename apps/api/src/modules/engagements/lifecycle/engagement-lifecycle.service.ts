@@ -123,6 +123,19 @@ export class EngagementLifecycleService {
           );
         }
         sets.push(`current_workflow_state_id = $${params.push(initial[0].id)}`);
+        // §25: snapshot the workflow family's active effective-dated version, so
+        // the engagement records the definition it started under even if the
+        // family is later re-versioned. NULL when no version exists yet.
+        sets.push(
+          `workflow_version_id = (
+             SELECT wv.id FROM hsdg.workflow_versions wv
+             JOIN hsdg.services s ON s.workflow_family_id = wv.workflow_family_id
+             WHERE s.id = $${params.push(before.serviceId)}
+               AND wv.effective_from <= CURRENT_DATE
+               AND (wv.effective_to IS NULL OR wv.effective_to >= CURRENT_DATE)
+             ORDER BY wv.effective_from DESC
+             LIMIT 1)`,
+        );
       }
       if (action === LIFECYCLE_ACTION.putOnHold) {
         sets.push(`on_hold_reason = $${params.push(input.reason ?? null)}`);

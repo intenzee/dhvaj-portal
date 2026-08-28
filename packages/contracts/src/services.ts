@@ -11,6 +11,18 @@ export const RECURRENCE = {
 export type Recurrence = (typeof RECURRENCE)[keyof typeof RECURRENCE];
 export const RECURRENCES: Recurrence[] = Object.values(RECURRENCE);
 
+/**
+ * Reusable catalogue template kinds (§18/§25/§27). One versioned master backs
+ * all three; the type discriminates the item shape a version's `body` carries.
+ */
+export const TEMPLATE_TYPE = {
+  checklist: 'checklist',
+  pbc: 'pbc',
+  documentRequirement: 'document_requirement',
+} as const;
+export type TemplateType = (typeof TEMPLATE_TYPE)[keyof typeof TEMPLATE_TYPE];
+export const TEMPLATE_TYPES: TemplateType[] = Object.values(TEMPLATE_TYPE);
+
 /** Review-model slugs (also rows in review_models, with a rank). */
 export const REVIEW_MODEL = {
   managerReview: 'manager_review',

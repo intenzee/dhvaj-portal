@@ -1,4 +1,4 @@
-import type { Recurrence } from '@hsdg/contracts';
+import type { Recurrence, TemplateType } from '@hsdg/contracts';
 
 export interface ReviewModelRecord {
   id: string;
@@ -103,4 +103,64 @@ export interface UpdateServiceLineInput {
   displayOrder?: number;
   isActive?: boolean;
   version?: number;
+}
+
+// ── Reusable, versioned catalogue templates (§18/§25/§27) ────────────────────
+
+/** One item in a template version's body (shape is loose across the 3 types). */
+export interface TemplateItem {
+  label: string;
+  sequence?: number;
+  mandatory?: boolean;
+  description?: string | null;
+}
+
+/** A template's identity (the reusable master). */
+export interface CatalogueTemplateRecord {
+  id: string;
+  templateType: TemplateType;
+  code: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** An effective-dated, append-only version of a template. */
+export interface CatalogueTemplateVersionRecord {
+  id: string;
+  version: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  items: TemplateItem[];
+  notes: string | null;
+  createdAt: Date;
+}
+
+/** A template plus its versions (newest effective first). */
+export interface CatalogueTemplateDetail extends CatalogueTemplateRecord {
+  versions: CatalogueTemplateVersionRecord[];
+}
+
+export interface TemplateFilter {
+  templateType?: TemplateType;
+  active?: boolean;
+  search?: string;
+}
+
+export interface CreateTemplateInput {
+  templateType: TemplateType;
+  code: string;
+  name: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface AddTemplateVersionInput {
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  items?: TemplateItem[];
+  notes?: string;
 }

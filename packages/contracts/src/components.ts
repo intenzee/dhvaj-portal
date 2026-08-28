@@ -118,6 +118,10 @@ export interface EngagementComponentRecord {
   endDate: string | null;
   notes: string | null;
   complianceRuleVersionId: string | null;
+  /** §25/§28 snapshots of the catalogue-template versions this configuration loaded (null when the component links none). */
+  checklistTemplateVersionId: string | null;
+  pbcTemplateVersionId: string | null;
+  documentRequirementTemplateVersionId: string | null;
   /** When superseded (e.g. by a frequency change), the id of the version that replaced this. */
   supersededById: string | null;
   version: number;

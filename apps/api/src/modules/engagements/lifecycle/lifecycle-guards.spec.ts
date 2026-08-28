@@ -44,6 +44,7 @@ function ctx(overrides: Partial<LifecycleGuardContext> = {}): LifecycleGuardCont
       teamCount: 0,
       version: 1,
       currentWorkflowState: null,
+      workflowVersion: null,
       onHoldReason: null,
       onHoldPreviousStatus: null,
       onHoldAt: null,

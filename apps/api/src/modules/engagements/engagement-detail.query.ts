@@ -109,6 +109,7 @@ export const ENGAGEMENT_BASE = `
          eng.current_workflow_state_id, ws.slug AS workflow_state_slug, ws.name AS workflow_state_name,
          ws.sequence AS workflow_state_sequence, ws.is_initial AS workflow_state_is_initial,
          ws.is_terminal AS workflow_state_is_terminal,
+         eng.workflow_version_id, wv.version AS workflow_version_number,
          eng.on_hold_reason, eng.on_hold_previous_status, eng.on_hold_at, eng.on_hold_expected_resume_date,
          -- Review state (Phase 7): effective model = review-plan escalation, else the service default.
          COALESCE(rmplan.slug, rmreq.slug) AS effective_review_model_slug,
@@ -146,6 +147,7 @@ export const ENGAGEMENT_BASE = `
   LEFT JOIN hsdg.employees ep ON ep.id = eng.engagement_partner_id
   LEFT JOIN hsdg.employees mgr ON mgr.id = eng.engagement_manager_id
   LEFT JOIN hsdg.workflow_states ws ON ws.id = eng.current_workflow_state_id
+  LEFT JOIN hsdg.workflow_versions wv ON wv.id = eng.workflow_version_id
   LEFT JOIN LATERAL (
     SELECT r.id, r.reviewer_employee_id, r.created_at
     FROM hsdg.engagement_reviews r
@@ -190,6 +192,8 @@ export interface EngagementRow {
   workflow_state_sequence: number | null;
   workflow_state_is_initial: boolean | null;
   workflow_state_is_terminal: boolean | null;
+  workflow_version_id: string | null;
+  workflow_version_number: number | null;
   on_hold_reason: string | null;
   on_hold_previous_status: string | null;
   on_hold_at: Date | null;
@@ -254,6 +258,9 @@ export function mapEngagement(row: EngagementRow & { team_count: string }): Enga
           isInitial: row.workflow_state_is_initial!,
           isTerminal: row.workflow_state_is_terminal!,
         }
+      : null,
+    workflowVersion: row.workflow_version_id
+      ? { id: row.workflow_version_id, version: row.workflow_version_number! }
       : null,
     onHoldReason: row.on_hold_reason,
     onHoldPreviousStatus: (row.on_hold_previous_status as EngagementStatus | null) ?? null,
