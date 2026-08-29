@@ -79,13 +79,15 @@ async function provision() {
            END IF;
          END $$;`,
       );
-      // NOBYPASSRLS is the critical property for the runtime role. ALTER ROLE
-      // is a utility statement (no bind params), so the password is inlined as
-      // an escaped literal — safe here because the passwords are alphanumeric.
+      // A freshly created role is already the least-privilege posture we want:
+      // NOSUPERUSER, NOBYPASSRLS, NOCREATEDB, NOCREATEROLE. We must NOT restate
+      // those attributes — on a managed Postgres (Neon) the owner role is not a
+      // superuser, and changing the SUPERUSER/BYPASSRLS attributes requires one.
+      // So only (re)assert LOGIN + the password (a utility statement, no bind
+      // params — the password is inlined as an escaped literal; safe here since
+      // the passwords are alphanumeric).
       const lit = `'${pw.replace(/'/g, "''")}'`;
-      await db.query(
-        `ALTER ROLE ${role} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD ${lit}`,
-      );
+      await db.query(`ALTER ROLE ${role} WITH LOGIN PASSWORD ${lit}`);
       await db.query(`GRANT CONNECT ON DATABASE "${DB_NAME}" TO ${role}`);
       await db.query(`ALTER ROLE ${role} IN DATABASE "${DB_NAME}" SET search_path = hsdg, public`);
     };
