@@ -1,0 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────────
+# HSDG Portal — Render blueprint (free tier, temporary demo).
+#
+# Deploys two Docker services from this repo:
+#   • hsdg-api  — the NestJS API. On boot it provisions the two DB roles on the
+#                 external Postgres (Neon), migrates + seeds (idempotent), then
+#                 serves as the least-privilege app role. See scripts/deploy/start.mjs.
+#   • hsdg-web  — the Next.js portal (talks to the API from the browser).
+#
+# The database is NOT defined here — create a free Neon project and paste its
+# connection string into DATABASE_ADMIN_URL (see DEPLOY.md). Redis is not used.
+#
+# Auth runs in dev-persona mode (AUTH_PROVIDER=dev): anyone with the URL picks a
+# persona and is in — appropriate only for a synthetic-data demo.
+#
+# NOTE: the two service URLs below assume the names hsdg-api / hsdg-web are free.
+# If Render assigns different URLs, update CORS_ORIGINS (api) and
+# NEXT_PUBLIC_API_URL (web) to the real URLs and redeploy — see DEPLOY.md.
+# ─────────────────────────────────────────────────────────────────────────
+services:
+  - type: web
+    name: hsdg-api
+    runtime: docker
+    repo: https://github.com/intenzee/hsdg
+    branch: main
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: .
+    dockerCommand: node scripts/deploy/start.mjs
+    plan: free
+    region: singapore
+    healthCheckPath: /api/v1/health/live
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Dev-persona sign-in (no Microsoft/Entra needed for the demo).
+      - key: AUTH_PROVIDER
+        value: dev
+      - key: AUTH_JWT_SECRET
+        generateValue: true
+      # Passwords for the two DB roles this deploy provisions (auto-generated,
+      # stable for the service so the app reconnects across restarts).
+      - key: DB_MIGRATOR_PASSWORD
+        generateValue: true
+      - key: DB_APP_PASSWORD
+        generateValue: true
+      # Paste your Neon connection string here (the owner/admin string Neon gives
+      # you). The deploy derives the migrator/app URLs from it.
+      - key: DATABASE_ADMIN_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: 'true'
+      # Where the browser app is served from (for CORS). Update if the web URL
+      # differs from the assumed name.
+      - key: CORS_ORIGINS
+        value: https://hsdg-web.onrender.com
+      - key: SWAGGER_ENABLED
+        value: 'true'
+      - key: STORAGE_PROVIDER
+        value: local
+
+  - type: web
+    name: hsdg-web
+    runtime: docker
+    repo: https://github.com/intenzee/hsdg
+    branch: main
+    dockerfilePath: apps/web/Dockerfile
+    dockerContext: .
+    plan: free
+    region: singapore
+    autoDeploy: true
+    envVars:
+      # Baked into the browser bundle AT BUILD TIME. If the API URL differs from
+      # the assumed name, change this and let the web service rebuild.
+      - key: NEXT_PUBLIC_API_URL
+        value: https://hsdg-api.onrender.com/api/v1

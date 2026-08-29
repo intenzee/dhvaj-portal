@@ -47,6 +47,13 @@ COPY --from=builder /app/packages/contracts/package.json ./packages/contracts/pa
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 
+# Deploy entrypoint + SQL assets it applies at boot (migrations + seeds). These
+# come straight from the build context (they are not part of the compiled app).
+# The entrypoint provisions the two DB roles on a managed Postgres, migrates and
+# seeds (idempotent), then launches the API. See scripts/deploy/start.mjs.
+COPY db ./db
+COPY scripts/deploy ./scripts/deploy
+
 # Run unprivileged (the node image ships a `node` user, uid 1000).
 USER node
 
@@ -57,4 +64,7 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+# Default: run the app directly (compose/local, where migrations are a separate
+# step). On a managed host set the start command to the deploy entrypoint:
+#   node scripts/deploy/start.mjs
 CMD ["node", "apps/api/dist/main.js"]
