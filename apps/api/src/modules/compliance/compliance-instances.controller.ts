@@ -11,6 +11,7 @@ import type {
   ComplianceCalendarRecord,
   ComplianceInstanceDetail,
   ComplianceInstanceRecord,
+  EventRuleOptionRecord,
 } from './compliance.types';
 import {
   AddDeadlineLayerDto,
@@ -56,6 +57,22 @@ export class ComplianceInstancesController {
     return this.instances
       .list(rlsContextFromPrincipal(principal), id, query, filter)
       .then((result) => paginate(result, query));
+  }
+
+  @Get(':id/compliance/event-rules')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'List the event-triggered rules that need an explicit event date',
+    description:
+      'The event-limitation rules on the engagement’s service (calc basis event_date) — ' +
+      'appeals, allotments, incorporation, FDI, amendments. Bulk generate-for-service skips ' +
+      'these (no date to compute from); each is generated here with a recorded event date.',
+  })
+  eventRules(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<EventRuleOptionRecord[]> {
+    return this.instances.listEventRules(rlsContextFromPrincipal(principal), id);
   }
 
   @Get(':id/compliance/:instanceId')

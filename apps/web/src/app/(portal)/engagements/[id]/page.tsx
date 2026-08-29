@@ -34,6 +34,7 @@ import { DocumentsSection } from '@/components/actions/documents-section';
 import { InvoicesSection } from '@/components/actions/invoices-section';
 import { NotesSection } from '@/components/actions/notes-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
+import { RecordEventButton } from '@/components/compliance/record-event-modal';
 import { ObligationExtensionActions } from '@/components/compliance/extension-modals';
 import { DeadlineLayersModal } from '@/components/compliance/deadline-layers-modal';
 
@@ -314,7 +315,10 @@ export default function EngagementDetailPage(): JSX.Element {
         <section>
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-ink">Compliance obligations</h2>
-            <GenerateComplianceButton engagementId={e.id} />
+            <div className="flex gap-2">
+              <RecordEventButton engagementId={e.id} />
+              <GenerateComplianceButton engagementId={e.id} />
+            </div>
           </div>
           <Card className="overflow-hidden p-0">
             {compliance.data && compliance.data.items.length === 0 && (

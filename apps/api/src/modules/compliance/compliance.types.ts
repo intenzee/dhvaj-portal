@@ -224,6 +224,20 @@ export interface BulkGenerateResult {
   skipped: Array<{ rule: string; reason: string }>;
 }
 
+/**
+ * An event-triggered rule on the engagement's service that needs an explicit
+ * event date to generate (§7/§8/§11 limitations) — the options the "record event"
+ * flow offers, since bulk generate-for-service can only skip these.
+ */
+export interface EventRuleOptionRecord {
+  code: string;
+  name: string;
+  dueDateCategory: DueDateCategory;
+  dueDateSource: DueDateSource | null;
+  /** Days added to the event date by the in-force version (the limitation period). */
+  offsetDays: number;
+}
+
 // ── Inputs ──────────────────────────────────────────────────────────────────
 
 export interface CreateComplianceRuleInput {

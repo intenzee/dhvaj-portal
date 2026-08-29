@@ -596,7 +596,13 @@ ladder carries its distinct action (notify owner → alert manager → escalate 
 partner → escalate to firm), defined once in `@hsdg/contracts` and shared by the
 API, the calendar legend and the notifications (§24). The web Compliance Calendar
 gains an obligations/events toggle, the clock views and the escalation legend. A
-verification guide lives in `docs/compliance-rules-verification.md` (§25).
+verification guide lives in `docs/compliance-rules-verification.md` (§25). Finally,
+the engagement Compliance tab gained a **Record event** flow (**ADR-0032**): it
+lists the service's event-triggered rules
+(`GET /engagements/:id/compliance/event-rules`) and generates the chosen
+limitation obligation (appeal, allotment, incorporation, FDI, amendment) from a
+recorded event date — the last piece bulk generation could only skip — so every
+classified obligation in the spec is now reachable from the UI.
 
 ## License
 

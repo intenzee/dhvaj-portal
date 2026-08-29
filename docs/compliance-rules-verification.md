@@ -71,6 +71,10 @@ curl -s -X POST http://localhost:3001/api/v1/auth/dev-token \
   `POST /engagements/{id}/compliance { "complianceRuleCode": "IT_APPEAL_LIMITATION",
   "eventDate": "2026-06-15" }` → `statutoryDeadline: "2026-07-15"` (order + 30 d),
   a distinct `internalSlaDate`, `isExtended: false`.
+- In the web app this is the **Record event** button on the engagement's
+  Compliance tab: it lists the service's event rules
+  (`GET /engagements/{id}/compliance/event-rules`) and generates the chosen one
+  from the recorded date — the recurring **Generate** action still skips these.
 - Recurring generation (roll horizon on a GST/TDS engagement) still produces real
   statutory + internal-SLA dates — event rules never enter the recurring sweep.
 
@@ -119,6 +123,12 @@ At `http://localhost:3000/compliance`:
 - The **escalation ladder legend** (§24) shows each band's colour, its distinct
   action, and who it reaches — sourced from the shared `ESCALATION_LADDER` so the
   legend, the API classification, and the notifications never drift.
+
+On an engagement's **Compliance** tab:
+- **Generate** creates all recurring/computable obligations for the service (bulk).
+- **Record event** creates an event-triggered obligation (appeal/allotment/
+  incorporation/FDI/amendment) from a recorded event date — the piece bulk
+  generation cannot compute.
 
 ## 6. Automated coverage
 

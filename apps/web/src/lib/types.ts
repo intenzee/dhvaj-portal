@@ -212,6 +212,19 @@ export interface ComplianceEventRow {
   escalationAction: string;
 }
 
+/**
+ * An event-triggered rule on the engagement's service that needs an explicit
+ * event date to generate (appeal/allotment/incorporation limitations, §7/§8/§11).
+ */
+export interface EventRuleOption {
+  code: string;
+  name: string;
+  dueDateCategory: string;
+  dueDateSource: string | null;
+  /** Days added to the event date (the limitation period). */
+  offsetDays: number;
+}
+
 /** One additional deadline layer on an obligation (§16). */
 export interface ComplianceDeadlineLayer {
   id: string;

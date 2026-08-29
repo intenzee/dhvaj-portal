@@ -49,6 +49,7 @@ import type {
   ComplianceOverrideRecord,
   CompleteDeadlineLayerInput,
   CompleteInstanceInput,
+  EventRuleOptionRecord,
   GenerateInstanceInput,
   InstanceGovernmentExtension,
   OverrideInstanceInput,
@@ -481,6 +482,51 @@ export class ComplianceInstancesService {
       }
     }
     return { generated, skipped };
+  }
+
+  /**
+   * The event-triggered rules on the engagement's service that need an explicit
+   * event date (calc basis `event_date`) — the options the "record event" flow
+   * offers. Bulk generate-for-service can only SKIP these (no date to compute
+   * from), so they are surfaced here to be generated one at a time with the
+   * recorded event. Uses the in-force version (latest effective) for the offset.
+   */
+  async listEventRules(ctx: RlsContext, engagementId: string): Promise<EventRuleOptionRecord[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const eng = await client.query<{ service_id: string }>(
+        `SELECT service_id FROM hsdg.engagements WHERE id = $1`,
+        [engagementId],
+      );
+      if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
+      const { rows } = await client.query<{
+        code: string;
+        name: string;
+        due_date_category: DueDateCategory;
+        due_date_source: DueDateSource | null;
+        offset_days: number;
+      }>(
+        `SELECT cr.code, cr.name, cr.due_date_category, cr.due_date_source, crv.offset_days
+         FROM hsdg.compliance_rules cr
+         JOIN LATERAL (
+           SELECT offset_days, calculation_basis
+           FROM hsdg.compliance_rule_versions v
+           WHERE v.compliance_rule_id = cr.id
+           ORDER BY v.effective_from DESC, v.version DESC
+           LIMIT 1
+         ) crv ON true
+         WHERE cr.service_id = $1 AND cr.is_active = true
+           AND crv.calculation_basis = 'event_date'
+         ORDER BY cr.code`,
+        [eng.rows[0].service_id],
+      );
+      return rows.map((r) => ({
+        code: r.code,
+        name: r.name,
+        dueDateCategory: r.due_date_category,
+        dueDateSource: r.due_date_source,
+        offsetDays: r.offset_days,
+      }));
+    });
   }
 
   async list(

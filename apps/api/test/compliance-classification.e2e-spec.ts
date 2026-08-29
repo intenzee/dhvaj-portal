@@ -613,5 +613,38 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
       expect(gen.body.dueDateCategory).toBe('STATUTORY_EVENT');
       expect(gen.body.dueDateSource).toBe('LAW_RULE');
     });
+
+    it('lists the service’s event-triggered rules for the record-event flow', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa, '2026-27', 'TAX_APPEAL');
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/engagements/${eng}/compliance/event-rules`)
+        .set(bearer(pa))
+        .expect(200);
+      const rules = res.body as Array<{
+        code: string;
+        offsetDays: number;
+        dueDateCategory: string;
+      }>;
+      const appeal = rules.find((r) => r.code === 'IT_APPEAL_LIMITATION');
+      expect(appeal).toBeDefined();
+      expect(appeal!.offsetDays).toBe(30);
+      expect(appeal!.dueDateCategory).toBe('STATUTORY_EVENT');
+    });
+
+    it('excludes recurring (non-event) rules from the record-event options', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      // ITR_FILING carries both an event rule (ITR_VERIFICATION_DUE, event_date)
+      // and a recurring one (ITR_FILING_DUE, fy_end) — only the event rule is an
+      // option, since bulk generate-for-service already handles the recurring one.
+      const eng = await createEngagement(pa, '2026-27', 'ITR_FILING');
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/engagements/${eng}/compliance/event-rules`)
+        .set(bearer(pa))
+        .expect(200);
+      const codes = (res.body as Array<{ code: string }>).map((r) => r.code);
+      expect(codes).toContain('ITR_VERIFICATION_DUE');
+      expect(codes).not.toContain('ITR_FILING_DUE');
+    });
   });
 });
