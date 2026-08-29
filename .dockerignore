@@ -13,7 +13,9 @@
 **/.env
 **/.env.*
 
-# Docs and infra not needed by the API runtime.
+# Docs and infra not needed by either image. NOTE: both the API and the web
+# Dockerfiles build from the repo root with this single .dockerignore, so do
+# NOT exclude apps/* here — excluding apps/web breaks the web build's
+# `COPY apps/web` (the file each image doesn't need is simply never COPY'd).
 docs
 infra
-apps/web
