@@ -6,6 +6,7 @@ import type {
   DeadlineLayerType,
   DueDateCategory,
   DueDateSource,
+  EscalationAction,
   EscalationLevel,
   WorkingDayAdjustment,
 } from '@hsdg/contracts';
@@ -176,6 +177,8 @@ export interface ComplianceCalendarRecord extends ComplianceInstanceRecord {
   serviceCode: string;
   /** Escalation band (§24), derived from the operative date and today. */
   escalation: EscalationLevel;
+  /** The distinct §24 action this band triggers (who is told, what happens). */
+  escalationAction: EscalationAction;
 }
 
 /** The kind of a flattened calendar event (§16). */
@@ -200,11 +203,19 @@ export interface ComplianceCalendarEventRecord {
   complianceRuleName: string;
   label: string;
   dueDateCategory: DueDateCategory;
+  /** Due-date SOURCE (§3) of the governing rule — completes the event model (§23). */
+  dueDateSource: DueDateSource | null;
   dueDate: string;
+  /** Accountable owner for this event (layer owner; null for statutory/SLA events). */
+  ownerName: string | null;
   status: ComplianceStatus;
   isOverdue: boolean;
+  /** True on a statutory event carrying a government-extension overlay (§19/§24). */
+  isExtended: boolean;
   /** Escalation band (§24). */
   escalation: EscalationLevel;
+  /** The distinct §24 action this band triggers. */
+  escalationAction: EscalationAction;
 }
 
 /** Result of a bulk generate-for-service call. */

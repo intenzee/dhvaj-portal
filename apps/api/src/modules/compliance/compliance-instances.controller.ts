@@ -314,8 +314,12 @@ export class ComplianceCalendarController {
       overdueOnly?: boolean;
       openOnly?: boolean;
       engagementId?: string;
+      kind?: 'statutory' | 'internal_sla' | 'layer';
+      serviceCode?: string;
     } = {};
     if (query.engagementId) filter.engagementId = query.engagementId;
+    if (query.kind) filter.kind = query.kind;
+    if (query.serviceCode) filter.serviceCode = query.serviceCode;
     if (query.dueFrom) filter.dueFrom = query.dueFrom;
     if (query.dueTo) filter.dueTo = query.dueTo;
     if (query.overdueOnly !== undefined) filter.overdueOnly = query.overdueOnly;

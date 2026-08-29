@@ -588,8 +588,15 @@ already implements the classification, calculation, deadline-layer, extension,
 override and escalation model; the rule coverage has now been completed for the
 event-triggered statutory obligations (appeals, allotments, incorporation,
 resolutions, FDI, amendments), taking bound statutory components to 32/46, with
-the remainder deliberately event/manual-driven (**ADR-0030**). The calendar-view,
-escalation and UX gaps are the next parts of that work.
+the remainder deliberately event/manual-driven (**ADR-0030**). The calendar engine
+was then completed (**ADR-0031**): the `/compliance/events` fan-out scopes by clock
+(an Internal-SLA view) and by service (§22); every event is field-complete —
+due-date source, layer owner, extension flag (§23); and each band on the escalation
+ladder carries its distinct action (notify owner → alert manager → escalate to
+partner → escalate to firm), defined once in `@hsdg/contracts` and shared by the
+API, the calendar legend and the notifications (§24). The web Compliance Calendar
+gains an obligations/events toggle, the clock views and the escalation legend. A
+verification guide lives in `docs/compliance-rules-verification.md` (§25).
 
 ## License
 

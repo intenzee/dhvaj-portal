@@ -10,6 +10,7 @@ import { ClsService } from 'nestjs-cls';
 import {
   COMPLIANCE_CLOCK,
   COMPLIANCE_STATUS,
+  escalationAction,
   type CalculationBasis,
   type ComplianceClock,
   type ComplianceStatus,
@@ -190,7 +191,10 @@ interface EventRow {
   rule_name: string;
   label: string;
   due_date_category: DueDateCategory;
+  due_date_source: DueDateSource | null;
   due_date: string;
+  owner_name: string | null;
+  is_extended: boolean;
   status: ComplianceStatus;
   engagement_code: string;
   entity_name: string;
@@ -208,24 +212,27 @@ const EVENTS_UNION = `
   SELECT ci.id AS compliance_instance_id, NULL::uuid AS deadline_layer_id,
          'statutory'::text AS kind, NULL::text AS layer_type, ci.engagement_id,
          cr.code AS rule_code, cr.name AS rule_name, cr.name AS label,
-         cr.due_date_category AS due_date_category,
+         cr.due_date_category AS due_date_category, cr.due_date_source AS due_date_source,
          COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline) AS due_date,
+         NULL::text AS owner_name, (ci.government_extension_id IS NOT NULL) AS is_extended,
          ci.status AS status
   FROM hsdg.compliance_instances ci
   JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
   LEFT JOIN hsdg.government_extensions ge ON ge.id = ci.government_extension_id
   UNION ALL
   SELECT ci.id, NULL::uuid, 'internal_sla'::text, NULL::text, ci.engagement_id,
-         cr.code, cr.name, 'Internal SLA'::text, 'HSDG_RECURRING'::text,
-         COALESCE(ci.internal_sla_override, ci.internal_sla_date), ci.status
+         cr.code, cr.name, 'Internal SLA'::text, 'HSDG_RECURRING'::text, 'HSDG_POLICY'::text,
+         COALESCE(ci.internal_sla_override, ci.internal_sla_date), NULL::text, false, ci.status
   FROM hsdg.compliance_instances ci
   JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
   UNION ALL
   SELECT d.compliance_instance_id, d.id, 'layer'::text, d.layer_type, d.engagement_id,
-         cr.code, cr.name, d.label, d.due_date_category, d.due_date, d.status
+         cr.code, cr.name, d.label, d.due_date_category, NULL::text, d.due_date,
+         oe.full_name, false, d.status
   FROM hsdg.compliance_instance_deadlines d
   JOIN hsdg.compliance_instances ci ON ci.id = d.compliance_instance_id
-  JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id`;
+  JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+  LEFT JOIN hsdg.employees oe ON oe.id = d.owner_employee_id`;
 
 /**
  * The per-engagement compliance engine (Phase 8, ADR-0013).
@@ -607,6 +614,7 @@ export class ComplianceInstancesService {
           entityName: r.entity_name,
           serviceCode: r.service_code,
           escalation: r.escalation,
+          escalationAction: escalationAction(r.escalation).action,
         })),
         total: Number(totalRes.rows[0]?.total ?? 0),
       };
@@ -1050,6 +1058,8 @@ export class ComplianceInstancesService {
       overdueOnly?: boolean;
       openOnly?: boolean;
       engagementId?: string;
+      kind?: ComplianceEventKind;
+      serviceCode?: string;
     } = {},
   ): Promise<PageResult<ComplianceCalendarEventRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
@@ -1058,6 +1068,16 @@ export class ComplianceInstancesService {
       if (filter.engagementId) {
         params.push(filter.engagementId);
         conditions.push(`ev.engagement_id = $${params.length}`);
+      }
+      // §22 views: the Internal-SLA view (kind=internal_sla), the statutory view,
+      // or the component/service view (serviceCode) over the same event stream.
+      if (filter.kind) {
+        params.push(filter.kind);
+        conditions.push(`ev.kind = $${params.length}`);
+      }
+      if (filter.serviceCode) {
+        params.push(filter.serviceCode);
+        conditions.push(`s.code = $${params.length}`);
       }
       if (filter.dueFrom) {
         params.push(filter.dueFrom);
@@ -1076,7 +1096,8 @@ export class ComplianceInstancesService {
         `WITH ev AS (${EVENTS_UNION})
          SELECT ev.compliance_instance_id, ev.deadline_layer_id, ev.kind, ev.layer_type,
                 ev.engagement_id, ev.rule_code, ev.rule_name, ev.label, ev.due_date_category,
-                ev.due_date::text AS due_date, ev.status,
+                ev.due_date_source, ev.due_date::text AS due_date, ev.owner_name, ev.is_extended,
+                ev.status,
                 eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
                 (ev.status = 'open' AND ev.due_date < CURRENT_DATE) AS is_overdue,
                 ${this.escalationCase('ev.status', 'ev.due_date')} AS escalation
@@ -1090,8 +1111,12 @@ export class ComplianceInstancesService {
         params,
       );
       const totalRes = await client.query<{ total: string }>(
+        // Mirror the main query's joins — ${where} can reference the service (s).
         `WITH ev AS (${EVENTS_UNION})
-         SELECT count(*) AS total FROM ev ${where}`,
+         SELECT count(*) AS total FROM ev
+         JOIN hsdg.engagements eng ON eng.id = ev.engagement_id
+         JOIN hsdg.services s ON s.id = eng.service_id
+         ${where}`,
         params.slice(0, params.length - 2),
       );
       return {
@@ -1494,9 +1519,13 @@ function mapEvent(row: EventRow): ComplianceCalendarEventRecord {
     complianceRuleName: row.rule_name,
     label: row.label,
     dueDateCategory: row.due_date_category,
+    dueDateSource: row.due_date_source,
     dueDate: row.due_date,
+    ownerName: row.owner_name,
     status: row.status,
     isOverdue: row.is_overdue,
+    isExtended: row.is_extended,
     escalation: row.escalation,
+    escalationAction: escalationAction(row.escalation).action,
   };
 }

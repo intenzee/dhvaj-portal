@@ -167,3 +167,99 @@ export const ESCALATION_LEVEL = {
 } as const;
 export type EscalationLevel = (typeof ESCALATION_LEVEL)[keyof typeof ESCALATION_LEVEL];
 export const ESCALATION_LEVELS: EscalationLevel[] = Object.values(ESCALATION_LEVEL);
+
+/**
+ * The DISTINCT action each escalation band takes (spec §24 — Status and
+ * Escalation). A band is not just a colour: each one triggers a specific action
+ * addressed to a specific tier of accountability, so the calendar legend and the
+ * notification engine agree on who is told and what happens.
+ */
+export const ESCALATION_ACTION = {
+  /** Closed obligation — no action. */
+  none: 'none',
+  /** Far enough out to only watch — no notification. */
+  monitor: 'monitor',
+  /** Due soon — remind the obligation's owner. */
+  notifyOwner: 'notify_owner',
+  /** Due today — alert the owner and their manager. */
+  alertManager: 'alert_manager',
+  /** Overdue — escalate to the manager and the engagement partner. */
+  escalatePartner: 'escalate_partner',
+  /** Critically overdue — escalate to the engagement partner and the firm. */
+  escalateFirm: 'escalate_firm',
+} as const;
+export type EscalationAction = (typeof ESCALATION_ACTION)[keyof typeof ESCALATION_ACTION];
+
+/** UI tone for an escalation band's badge/legend swatch. */
+export type EscalationTone = 'neutral' | 'info' | 'warn' | 'danger';
+
+/**
+ * The full descriptor of an escalation band (§24): its distinct action, the
+ * accountability tier it reaches, a legend label, and a UI tone. Shared so the
+ * API, the calendar legend, and the escalation notifications never drift.
+ */
+export interface EscalationDescriptor {
+  level: EscalationLevel;
+  action: EscalationAction;
+  /** Who the obligation escalates to at this band (ordered, most-local first). */
+  recipients: string[];
+  /** Short human label for the calendar legend and badges. */
+  label: string;
+  tone: EscalationTone;
+}
+
+const ESCALATION_DESCRIPTORS: Record<EscalationLevel, EscalationDescriptor> = {
+  none: { level: 'none', action: 'none', recipients: [], label: 'Closed', tone: 'neutral' },
+  upcoming: {
+    level: 'upcoming',
+    action: 'monitor',
+    recipients: [],
+    label: 'Upcoming',
+    tone: 'neutral',
+  },
+  due_soon: {
+    level: 'due_soon',
+    action: 'notify_owner',
+    recipients: ['Owner'],
+    label: 'Due soon',
+    tone: 'info',
+  },
+  due_today: {
+    level: 'due_today',
+    action: 'alert_manager',
+    recipients: ['Owner', 'Manager'],
+    label: 'Due today',
+    tone: 'warn',
+  },
+  overdue: {
+    level: 'overdue',
+    action: 'escalate_partner',
+    recipients: ['Manager', 'Engagement partner'],
+    label: 'Overdue',
+    tone: 'danger',
+  },
+  critical: {
+    level: 'critical',
+    action: 'escalate_firm',
+    recipients: ['Engagement partner', 'Firm (Managing Partner)'],
+    label: 'Critical',
+    tone: 'danger',
+  },
+};
+
+/** The distinct §24 action + accountability tier for an escalation band. */
+export function escalationAction(level: EscalationLevel): EscalationDescriptor {
+  return ESCALATION_DESCRIPTORS[level];
+}
+
+/**
+ * The OPEN escalation ladder, in ascending urgency — the calendar legend and any
+ * "escalation policy" view iterate this (closed obligations are excluded).
+ */
+export const ESCALATION_LADDER: EscalationDescriptor[] = [
+  ESCALATION_DESCRIPTORS.upcoming,
+  ESCALATION_DESCRIPTORS.due_soon,
+  ESCALATION_DESCRIPTORS.due_today,
+  ESCALATION_DESCRIPTORS.overdue,
+  ESCALATION_DESCRIPTORS.critical,
+];

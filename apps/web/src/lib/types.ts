@@ -181,6 +181,35 @@ export interface ComplianceRow {
   isExtended: boolean;
   /** Escalation band (§24): none | upcoming | due_soon | due_today | overdue | critical. */
   escalation: string;
+  /** The distinct §24 action this band triggers (notify_owner, escalate_partner, …). */
+  escalationAction: string;
+}
+
+/**
+ * One flattened compliance calendar EVENT (§16/§22) — an obligation fanned out
+ * into its statutory event, internal-SLA event, or a deadline-layer milestone.
+ */
+export interface ComplianceEventRow {
+  eventId: string;
+  kind: 'statutory' | 'internal_sla' | 'layer';
+  complianceInstanceId: string;
+  layerType: string | null;
+  engagementId: string;
+  engagementCode: string;
+  entityName: string;
+  serviceCode: string;
+  complianceRuleCode: string;
+  complianceRuleName: string;
+  label: string;
+  dueDateCategory: string;
+  dueDateSource: string | null;
+  dueDate: string;
+  ownerName: string | null;
+  status: ComplianceStatus;
+  isOverdue: boolean;
+  isExtended: boolean;
+  escalation: string;
+  escalationAction: string;
 }
 
 /** One additional deadline layer on an obligation (§16). */

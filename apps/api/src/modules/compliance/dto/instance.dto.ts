@@ -277,12 +277,30 @@ export class WaiveDeadlineLayerDto {
   version?: number;
 }
 
+/** The event kinds the flattened calendar stream can be scoped to (§16/§22). */
+export const COMPLIANCE_EVENT_KINDS = ['statutory', 'internal_sla', 'layer'] as const;
+export type ComplianceEventKindFilter = (typeof COMPLIANCE_EVENT_KINDS)[number];
+
 /** Filters for the flattened calendar-events stream (§16). */
 export class ComplianceEventsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ description: 'Only events for this engagement.' })
   @IsOptional()
   @IsUUID()
   engagementId?: string;
+
+  @ApiPropertyOptional({
+    enum: COMPLIANCE_EVENT_KINDS,
+    description:
+      'View by clock (§22): statutory, internal_sla (Internal-SLA view), or layer (milestones).',
+  })
+  @IsOptional()
+  @IsIn(COMPLIANCE_EVENT_KINDS)
+  kind?: ComplianceEventKindFilter;
+
+  @ApiPropertyOptional({ description: 'Component/service view (§22): filter by service code.' })
+  @IsOptional()
+  @IsString()
+  serviceCode?: string;
 
   @ApiPropertyOptional({ description: 'Event due date on/after this date.' })
   @IsOptional()

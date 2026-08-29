@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { escalationAction, type EscalationLevel } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { dateFromToday } from './date.helper';
@@ -278,6 +279,182 @@ describe('Compliance escalation & calendar views (e2e)', () => {
           (n) => n.type === 'deadline_layer_overdue' && n.engagementId === eng,
         ),
       ).toBe(true);
+    });
+  });
+
+  // ── Parts 2/3: the point-in-time calendar picture (§16/§22/§23/§24) ────────
+  // The event fan-out is field-complete (source, owner, extension), views can be
+  // scoped by clock and by service, and every event carries its DISTINCT §24
+  // escalation action — the "picture in time" the calendar renders.
+  describe('point-in-time calendar picture (§16/§22/§23/§24)', () => {
+    interface EventRow {
+      eventId: string;
+      kind: 'statutory' | 'internal_sla' | 'layer';
+      layerType: string | null;
+      complianceInstanceId: string;
+      serviceCode: string;
+      dueDate: string;
+      dueDateSource: string | null;
+      ownerName: string | null;
+      isExtended: boolean;
+      escalation: EscalationLevel;
+      escalationAction: string;
+    }
+
+    /** A period_end + 0-day rule with an explicit §2 category and §3 source. */
+    const createSourcedRule = async (category: string, source: string | null): Promise<string> => {
+      const code = `PIT_${unique()}`;
+      const rule = await request(app.getHttpServer())
+        .post('/api/v1/compliance-rules')
+        .set(bearer(mp))
+        .send({
+          code,
+          name: code,
+          dueDateCategory: category,
+          ...(source ? { dueDateSource: source } : {}),
+        })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/v1/compliance-rules/${rule.body.id}/versions`)
+        .set(bearer(mp))
+        .send({
+          effectiveFrom: '2017-04-01',
+          calculationBasis: 'period_end',
+          offsetDays: 0,
+          workingDayAdjustment: 'none',
+          internalSlaOffsetDays: 3,
+        })
+        .expect(201);
+      return code;
+    };
+
+    const employeeName = async (empCode: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/employees?limit=100')
+        .set(bearer(mp));
+      return (res.body.items as Array<{ employeeCode: string; fullName: string }>).find(
+        (e) => e.employeeCode === empCode,
+      )!.fullName;
+    };
+
+    const eventsFor = async (t: string, query: string): Promise<EventRow[]> => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/compliance/events?${query}&limit=100`)
+        .set(bearer(t))
+        .expect(200);
+      return res.body.items as EventRow[];
+    };
+
+    it('fans one obligation into a field-complete event picture (§16/§23)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const code = await createSourcedRule('STATUTORY_RULE', 'LAW_RULE');
+      // A STATUTORY obligation 3 days out ⇒ due_soon. Generation auto-materialises
+      // the standard §16 review layer(s); with no manager staffed, the engagement
+      // partner (Partner A) owns the manager review.
+      const gen = await generate(pa, eng, code, dateFromToday(3)).expect(201);
+      const partnerName = await employeeName('EMP003'); // Partner A — the EP
+
+      const events = (await eventsFor(pa, `engagementId=${eng}`)).filter(
+        (e) => e.complianceInstanceId === gen.body.id,
+      );
+      const statutory = events.find((e) => e.kind === 'statutory')!;
+      const sla = events.find((e) => e.kind === 'internal_sla')!;
+      const layer = events.find((e) => e.kind === 'layer' && e.layerType === 'manager_review')!;
+
+      // §23 field completeness — source flows to statutory, HSDG_POLICY to the SLA.
+      expect(statutory.dueDateSource).toBe('LAW_RULE');
+      expect(statutory.ownerName).toBeNull();
+      expect(statutory.isExtended).toBe(false);
+      expect(sla.dueDateSource).toBe('HSDG_POLICY');
+      // §16 standard review layer is auto-materialised and carries its OWNER.
+      expect(layer).toBeDefined();
+      expect(layer.ownerName).toBe(partnerName);
+
+      // §24 — the statutory event is in the "due soon" band and its distinct
+      // action is to notify the owner; every event agrees with the shared policy.
+      expect(statutory.escalation).toBe('due_soon');
+      expect(statutory.escalationAction).toBe(escalationAction('due_soon').action);
+      for (const e of events) {
+        expect(e.escalationAction).toBe(escalationAction(e.escalation).action);
+      }
+    });
+
+    it('scopes the event stream by clock (Internal-SLA view) and by service (§22)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const code = await createSourcedRule('STATUTORY_RULE', 'LAW_RULE');
+      await generate(pa, eng, code, dateFromToday(-4)).expect(201); // overdue
+
+      // Internal-SLA view: only the SLA clock, nothing else.
+      const sla = await eventsFor(pa, `engagementId=${eng}&kind=internal_sla`);
+      expect(sla.length).toBeGreaterThanOrEqual(1);
+      expect(sla.every((e) => e.kind === 'internal_sla')).toBe(true);
+
+      // Statutory view: only statutory events.
+      const stat = await eventsFor(pa, `engagementId=${eng}&kind=statutory`);
+      expect(stat.every((e) => e.kind === 'statutory')).toBe(true);
+
+      // Component/service view over the same stream.
+      const matched = await eventsFor(pa, `engagementId=${eng}&serviceCode=ITR_FILING`);
+      expect(matched.length).toBeGreaterThanOrEqual(1);
+      const none = await eventsFor(pa, `engagementId=${eng}&serviceCode=NONEXISTENT`);
+      expect(none.length).toBe(0);
+    });
+
+    it('carries the distinct §24 action on the firm-wide calendar row', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const code = await createSourcedRule('STATUTORY_RULE', 'LAW_RULE');
+      const gen = await generate(pa, eng, code, dateFromToday(-57)).expect(201); // critical
+
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/compliance?status=open&limit=100')
+        .set(bearer(mp))
+        .expect(200);
+      const row = (
+        res.body.items as Array<{
+          id: string;
+          escalation: EscalationLevel;
+          escalationAction: string;
+        }>
+      ).find((r) => r.id === gen.body.id)!;
+      expect(row.escalation).toBe('critical');
+      expect(row.escalationAction).toBe(escalationAction('critical').action);
+    });
+
+    it('flips isExtended on the statutory event when a government extension applies (§19/§23)', async () => {
+      const pa = await token('partner.a@hsdg.in');
+      const eng = await createEngagement(pa);
+      const code = await createSourcedRule('STATUTORY_FIXED', 'LAW_RULE');
+      const statDate = dateFromToday(10);
+      const gen = await generate(pa, eng, code, statDate).expect(201);
+      expect(gen.body.statutoryDeadline).toBe(statDate);
+
+      const revised = dateFromToday(40);
+      const ext = await request(app.getHttpServer())
+        .post('/api/v1/compliance-extensions')
+        .set(bearer(mp))
+        .send({
+          complianceRuleCode: code,
+          originalDueDate: statDate,
+          revisedDueDate: revised,
+          notificationReference: `PIT-EXT/${unique()}`,
+          applicablePopulation: 'All filers',
+          effectiveDate: dateFromToday(1),
+        })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/v1/engagements/${eng}/compliance/${gen.body.id}/apply-extension`)
+        .set(bearer(pa))
+        .send({ governmentExtensionId: ext.body.id, version: gen.body.version })
+        .expect(201);
+
+      const events = await eventsFor(pa, `engagementId=${eng}&kind=statutory`);
+      const statutory = events.find((e) => e.complianceInstanceId === gen.body.id)!;
+      // The event now shows the extension: operative date is the revised date.
+      expect(statutory.isExtended).toBe(true);
+      expect(statutory.dueDate).toBe(revised);
     });
   });
 });
