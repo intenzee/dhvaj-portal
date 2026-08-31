@@ -3,6 +3,7 @@ import { AuditModule } from '../audit/audit.module';
 import { EntitiesService } from './entities.service';
 import { EntitiesController } from './entities.controller';
 import { EntityTypesController } from './entity-types.controller';
+import { IndustriesController } from './industries.controller';
 
 /**
  * Entity master: client entities, their statutory registrations and contacts.
@@ -10,7 +11,7 @@ import { EntityTypesController } from './entity-types.controller';
  */
 @Module({
   imports: [AuditModule],
-  controllers: [EntitiesController, EntityTypesController],
+  controllers: [EntitiesController, EntityTypesController, IndustriesController],
   providers: [EntitiesService],
   exports: [EntitiesService],
 })

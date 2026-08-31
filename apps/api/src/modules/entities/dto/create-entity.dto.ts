@@ -4,16 +4,34 @@ import {
   IsArray,
   IsDateString,
   IsIn,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
-import { ENTITY_STATUSES, PAN_REGEX, type EntityStatus } from '@hsdg/contracts';
+import {
+  ACCOUNTING_FRAMEWORKS,
+  ENTITY_STATUSES,
+  LEGAL_STATUSES,
+  LISTING_STATUSES,
+  PAN_REGEX,
+  type AccountingFramework,
+  type EntityStatus,
+  type LegalStatus,
+  type ListingStatus,
+} from '@hsdg/contracts';
 import { RegistrationDto } from './add-registration.dto';
 import { ContactDto } from './add-contact.dto';
+import { AddressDto } from './add-address.dto';
+import { BusinessActivityDto } from './add-business-activity.dto';
+import { ListingDto } from './add-listing.dto';
+import { RegulatoryAttributeDto } from './add-regulatory-attribute.dto';
+import { AddFinancialProfileDto } from './add-financial-profile.dto';
+import { ActivitiesDto } from './activities.dto';
 
 export class CreateEntityDto {
   @ApiProperty({ example: 'Acme Manufacturing Pvt Ltd' })
@@ -26,6 +44,16 @@ export class CreateEntityDto {
   @IsString()
   displayName?: string;
 
+  @ApiPropertyOptional({ example: 'Acme Corp', description: 'Trade / brand name.' })
+  @IsOptional()
+  @IsString()
+  tradeName?: string;
+
+  @ApiPropertyOptional({ description: 'Internal short name.' })
+  @IsOptional()
+  @IsString()
+  shortName?: string;
+
   @ApiProperty({ example: 'private_limited', description: 'Entity type slug.' })
   @IsString()
   typeSlug!: string;
@@ -33,6 +61,67 @@ export class CreateEntityDto {
   @ApiProperty({ example: 'NORTH', description: 'Home office code.' })
   @IsString()
   officeCode!: string;
+
+  @ApiPropertyOptional({ description: 'Owning client relationship id (§2).' })
+  @IsOptional()
+  @IsUUID()
+  clientId?: string;
+
+  @ApiPropertyOptional({ example: 'IN', description: 'ISO-3166 alpha-2; default IN.' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @Matches(/^[A-Z]{2}$/, { message: 'countryOfIncorporation must be a 2-letter code' })
+  countryOfIncorporation?: string;
+
+  @ApiPropertyOptional({ enum: LEGAL_STATUSES })
+  @IsOptional()
+  @IsIn(LEGAL_STATUSES)
+  legalStatus?: LegalStatus;
+
+  @ApiPropertyOptional({ enum: LISTING_STATUSES, default: 'unlisted' })
+  @IsOptional()
+  @IsIn(LISTING_STATUSES)
+  listingStatus?: ListingStatus;
+
+  @ApiPropertyOptional({ enum: ACCOUNTING_FRAMEWORKS, default: 'not_assessed' })
+  @IsOptional()
+  @IsIn(ACCOUNTING_FRAMEWORKS)
+  currentAccountingFramework?: AccountingFramework;
+
+  @ApiPropertyOptional({ description: 'Registrar of Companies (company/LLP).' })
+  @IsOptional()
+  @IsString()
+  roc?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  authorisedCapital?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  paidUpCapital?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  llpContribution?: number;
+
+  @ApiPropertyOptional({ description: 'Business description (§18).' })
+  @IsOptional()
+  @IsString()
+  businessDescription?: string;
+
+  @ApiPropertyOptional({ type: ActivitiesDto, description: 'Business-activity flags (§18).' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ActivitiesDto)
+  activities?: ActivitiesDto;
 
   @ApiPropertyOptional({ example: 'AAACA1234A', description: 'PAN (unique when set).' })
   @IsOptional()
@@ -68,4 +157,39 @@ export class CreateEntityDto {
   @ValidateNested({ each: true })
   @Type(() => ContactDto)
   contacts?: ContactDto[];
+
+  @ApiPropertyOptional({ type: [AddressDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AddressDto)
+  addresses?: AddressDto[];
+
+  @ApiPropertyOptional({ type: [BusinessActivityDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BusinessActivityDto)
+  businessActivities?: BusinessActivityDto[];
+
+  @ApiPropertyOptional({ type: [ListingDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ListingDto)
+  listings?: ListingDto[];
+
+  @ApiPropertyOptional({ type: [RegulatoryAttributeDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RegulatoryAttributeDto)
+  regulatoryAttributes?: RegulatoryAttributeDto[];
+
+  @ApiPropertyOptional({ type: [AddFinancialProfileDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AddFinancialProfileDto)
+  financialProfiles?: AddFinancialProfileDto[];
 }

@@ -114,6 +114,10 @@ export interface EntityRow {
   pan: string | null;
   primaryContactName: string | null;
   registrationCount: number;
+  legalStatus?: string | null;
+  regulatoryProfileStatus?: string;
+  listingStatus?: string;
+  clientId?: string | null;
 }
 
 export interface EntityType {
@@ -136,24 +140,166 @@ export interface Registration {
   id: string;
   registrationType: string;
   registrationNumber: string;
-  status?: string;
+  status: string;
+  stateCode?: string | null;
+  validFrom?: string | null;
+  validTo?: string | null;
+  jurisdiction?: string | null;
+  registrationDate?: string | null;
+  issuingAuthority?: string | null;
+  source?: string;
+  isPrincipal?: boolean;
+  applicability?: string;
+  verified?: boolean;
+  verifiedBy?: string | null;
+  verifiedAt?: string | null;
+  documentRef?: string | null;
 }
 export interface Contact {
   id: string;
   fullName: string;
   designation: string | null;
   email: string | null;
+  phone?: string | null;
   isPrimary: boolean;
   isSignatory: boolean;
+  department?: string | null;
+  contactType?: string | null;
+  isPortalUser?: boolean;
+  portalRole?: string | null;
+}
+export interface FinancialProfile {
+  id: string;
+  financialYear: string;
+  turnover: number | null;
+  netWorth: number | null;
+  netProfit: number | null;
+  totalBorrowings: number | null;
+  paidUpCapital: number | null;
+  source: string;
+  verified: boolean;
+  isCurrent: boolean;
+  supersedesId: string | null;
+  createdAt: string;
+}
+export interface Address {
+  id: string;
+  addressType: string;
+  line1: string;
+  line2: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  country: string;
+  isPrimary: boolean;
+}
+export interface EntityRelationship {
+  id: string;
+  toEntityId: string;
+  toEntityLegalName: string;
+  toEntityCode: string;
+  relationshipType: string;
+  shareholdingPct: number | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  status: string;
+  notes: string | null;
+}
+export interface BusinessActivity {
+  id: string;
+  industryId: string;
+  industrySlug: string;
+  industryName: string;
+  nicCodeId: string | null;
+  nicCode: string | null;
+  isPrimary: boolean;
+  notes: string | null;
+}
+export interface Listing {
+  id: string;
+  exchange: string;
+  securityType: string;
+  listingDate: string | null;
+  status: string;
+  symbol: string | null;
+  notes: string | null;
+}
+export interface RegulatoryAttribute {
+  id: string;
+  attributeCode: string;
+  attributeName: string;
+  valueText: string | null;
+  valueNumber: number | null;
+  valueBoolean: boolean | null;
+  valueDate: string | null;
+  effectiveFrom: string | null;
+  source: string;
+  notes: string | null;
+}
+export interface MissingInfoItem {
+  code: string;
+  label: string;
+  severity: 'required' | 'recommended';
 }
 export interface EntityDetail extends EntityRow {
   displayName: string | null;
+  tradeName: string | null;
+  shortName: string | null;
   typeSlug: string;
+  typeCategory: string;
   officeCode: string;
+  countryOfIncorporation: string;
+  currentAccountingFramework: string;
   incorporationDate: string | null;
+  roc: string | null;
+  authorisedCapital: number | null;
+  paidUpCapital: number | null;
+  llpContribution: number | null;
+  businessDescription: string | null;
+  groupId: string | null;
+  parentEntityId: string | null;
   version: number;
+  activities: {
+    manufacturing: boolean;
+    trading: boolean;
+    services: boolean;
+    import: boolean;
+    export: boolean;
+    ecommerce: boolean;
+    regulated: boolean;
+  };
   registrations: Registration[];
   contacts: Contact[];
+  financialProfiles: FinancialProfile[];
+  addresses: Address[];
+  relationships: EntityRelationship[];
+  businessActivities: BusinessActivity[];
+  listings: Listing[];
+  regulatoryAttributes: RegulatoryAttribute[];
+  missingInfo: MissingInfoItem[];
+}
+
+export interface Industry {
+  id: string;
+  slug: string;
+  name: string;
+  sector: string | null;
+}
+
+export interface ClientRow {
+  id: string;
+  clientCode: string;
+  name: string;
+  shortName: string | null;
+  clientKind: string;
+  status: string;
+  officeCode: string;
+  groupId: string | null;
+  entityCount: number;
+  version: number;
+}
+export interface ClientDetail extends ClientRow {
+  entities: { id: string; entityCode: string; legalName: string }[];
 }
 
 export interface ComplianceRow {

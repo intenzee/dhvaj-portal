@@ -10,6 +10,52 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Add Client / Entity Master — spec §1–§36 fully delivered (Phases A–C complete).**
+> The [Add Client / Entity Master developer spec](docs/entity-master-roadmap.md)
+> is built end-to-end across three phases, on one principle throughout: the master
+> **captures facts; it never decides statutory applicability** (§32/§35), and
+> **missing information is never Not Applicable** (§5). Design decisions in
+> [ADR-0033](docs/adr/0033-client-layer-and-entity-master-completion.md).
+>
+> - **Phase A — data foundation.** Ten additive migrations
+>   (`1760400000000`–`1761300000000`), all round-tripping up/down clean: a new
+>   **`clients`** commercial-relationship layer above entities/groups (§2, every
+>   existing entity backfilled 1:1); the entities master widened with identity,
+>   constitution, the §29 status split (`legal_status` + `regulatory_profile_status`,
+>   independent of lifecycle), listing status, business-activity flags and
+>   accounting framework; the `industries` / `nic_codes` reference masters; and six
+>   new office-scoped, FORCE-RLS child tables — **`entity_addresses`**,
+>   **`entity_relationships`** (structured holding/subsidiary/associate/JV),
+>   **`entity_financial_profiles`** (year-wise, append-only), **`entity_business_activities`**,
+>   **`entity_listings`**, and **`entity_regulatory_attributes`** (an extensible
+>   coded fact store the future engine reads). `entity_registrations` /
+>   `entity_contacts` gained their full §10/§24 lifecycle & verification fields —
+>   status widened with `pending`/`expired`, plus a separate `applicability` axis
+>   so "pending" is never read as "not required" (§12).
+> - **Phase B — API & lifecycle.** Full CRUD for entities and every child, a new
+>   **`clients`** module (§2), and three audited lifecycle capabilities:
+>   **progressive completion** — create on minimum identity with a server-computed
+>   **Missing/Pending** list (§5/§27); the **registration obtained-later** flow
+>   (`PATCH …/registrations/:id` → **verify**, flagging a complete profile
+>   **Needs Reassessment**, §34/§11/§28); and **append-only year-wise financials**
+>   that supersede rather than overwrite (§16). Wizard submit is **atomic** — the
+>   entity and all its children go in one `POST /entities` transaction that rolls
+>   back entirely if any child is invalid (§4).
+> - **Phase C — wizard UI & regulatory surface.** The **12-step Add Client wizard**
+>   (`/entities/new`) captures the whole spec with type-conditional fields,
+>   duplicate detection and a live Missing/Pending review panel. The **entity
+>   detail page** surfaces every fact — identity/constitution, the Missing/Pending
+>   banner, registrations (status + verified), contacts, year-wise financials,
+>   addresses, relationships, activities, listings and regulatory facts — plus a
+>   **read-only Regulatory Profile** (§20–§22) listing all fifteen statutory
+>   results as *Not Assessed* with an expandable *View Basis*, making explicit that
+>   applicability is **calculated downstream**, never decided in the UI (§32/§35).
+>
+> Shared vocabulary lives in `@hsdg/contracts`. **Not** built (deliberately, §32):
+> the statutory Regulatory Applicability Engine itself — Add Client only feeds and
+> displays it. api+web typecheck, lint and production build clean; **api 124 unit +
+> 354 e2e, web 16 unit — all green.**
+>
 > **Status: Billing & Collections + Resource Management views (complete).** The
 > last two `ComingSoon` screens are now live — the portal navigation is fully
 > built. Both are additive, read-only projections over existing RLS-scoped tables

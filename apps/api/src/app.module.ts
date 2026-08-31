@@ -14,6 +14,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { OrganisationModule } from './modules/organisation/organisation.module';
 import { EntitiesModule } from './modules/entities/entities.module';
+import { ClientsModule } from './modules/clients/clients.module';
 import { CatalogueModule } from './modules/catalogue/catalogue.module';
 import { EngagementsModule } from './modules/engagements/engagements.module';
 import { ComponentsModule } from './modules/components/components.module';
@@ -82,6 +83,7 @@ import { NotesModule } from './modules/notes/notes.module';
     AuthModule,
     OrganisationModule,
     EntitiesModule,
+    ClientsModule,
     CatalogueModule,
     EngagementsModule,
     ComponentsModule,

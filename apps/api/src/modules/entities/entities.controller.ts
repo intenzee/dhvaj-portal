@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -25,7 +26,14 @@ import { CreateEntityDto } from './dto/create-entity.dto';
 import { UpdateEntityDto } from './dto/update-entity.dto';
 import { EntityListQueryDto } from './dto/entity-list-query.dto';
 import { RegistrationDto } from './dto/add-registration.dto';
+import { UpdateRegistrationDto } from './dto/update-registration.dto';
 import { ContactDto } from './dto/add-contact.dto';
+import { AddFinancialProfileDto } from './dto/add-financial-profile.dto';
+import { AddressDto, UpdateAddressDto } from './dto/add-address.dto';
+import { RelationshipDto, UpdateRelationshipDto } from './dto/add-relationship.dto';
+import { BusinessActivityDto } from './dto/add-business-activity.dto';
+import { ListingDto, UpdateListingDto } from './dto/add-listing.dto';
+import { RegulatoryAttributeDto } from './dto/add-regulatory-attribute.dto';
 
 @ApiTags('entities')
 @Controller('entities')
@@ -120,6 +128,38 @@ export class EntitiesController {
     return this.entities.addRegistration(rlsContextFromPrincipal(principal), id, dto);
   }
 
+  @Patch(':id/registrations/:registrationId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Update a registration — the §34 "obtained later" flow (audited)',
+    description:
+      'Enter the issued number, effective dates and jurisdiction, flip Pending → Active; a complete regulatory profile is flagged Needs Reassessment.',
+  })
+  updateRegistration(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('registrationId', new ParseUUIDPipe()) registrationId: string,
+    @Body() dto: UpdateRegistrationDto,
+  ): Promise<EntityDetail> {
+    return this.entities.updateRegistration(
+      rlsContextFromPrincipal(principal),
+      id,
+      registrationId,
+      dto,
+    );
+  }
+
+  @Post(':id/registrations/:registrationId/verify')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Mark a registration Verified after review (§11, audited)' })
+  verifyRegistration(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('registrationId', new ParseUUIDPipe()) registrationId: string,
+  ): Promise<EntityDetail> {
+    return this.entities.verifyRegistration(rlsContextFromPrincipal(principal), id, registrationId);
+  }
+
   @Post(':id/contacts')
   @RequirePermissions(PERMISSION.entityManage)
   @ApiOperation({ summary: 'Add a contact/signatory to an entity (audited)' })
@@ -129,5 +169,174 @@ export class EntitiesController {
     @Body() dto: ContactDto,
   ): Promise<EntityDetail> {
     return this.entities.addContact(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Post(':id/financial-profiles')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Record year-wise financial figures (§16, append-only, audited)',
+    description:
+      'Recording a year that already has a current figure set supersedes it; the prior figures are retained, never overwritten.',
+  })
+  addFinancialProfile(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AddFinancialProfileDto,
+  ): Promise<EntityDetail> {
+    return this.entities.addFinancialProfile(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  // ── Addresses (§8/§31) ─────────────────────────────────────────────────────
+  @Post(':id/addresses')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Add an address to an entity (audited)' })
+  addAddress(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AddressDto,
+  ): Promise<EntityDetail> {
+    return this.entities.addAddress(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Patch(':id/addresses/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Update an entity address (audited)' })
+  updateAddress(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+    @Body() dto: UpdateAddressDto,
+  ): Promise<EntityDetail> {
+    return this.entities.updateAddress(rlsContextFromPrincipal(principal), id, childId, dto);
+  }
+
+  @Delete(':id/addresses/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Remove an entity address (audited)' })
+  removeAddress(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+  ): Promise<EntityDetail> {
+    return this.entities.removeAddress(rlsContextFromPrincipal(principal), id, childId);
+  }
+
+  // ── Relationships (§13) ────────────────────────────────────────────────────
+  @Post(':id/relationships')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Add an ownership/group relationship (audited)',
+    description: 'Both endpoints must be within the caller’s scope (RLS-enforced).',
+  })
+  addRelationship(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: RelationshipDto,
+  ): Promise<EntityDetail> {
+    return this.entities.addRelationship(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Patch(':id/relationships/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Update an ownership/group relationship (audited)' })
+  updateRelationship(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+    @Body() dto: UpdateRelationshipDto,
+  ): Promise<EntityDetail> {
+    return this.entities.updateRelationship(rlsContextFromPrincipal(principal), id, childId, dto);
+  }
+
+  @Delete(':id/relationships/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Remove an ownership/group relationship (audited)' })
+  removeRelationship(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+  ): Promise<EntityDetail> {
+    return this.entities.removeRelationship(rlsContextFromPrincipal(principal), id, childId);
+  }
+
+  // ── Business activities (§18) ──────────────────────────────────────────────
+  @Post(':id/business-activities')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Add an industry/NIC activity classification (audited)' })
+  addBusinessActivity(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: BusinessActivityDto,
+  ): Promise<EntityDetail> {
+    return this.entities.addBusinessActivity(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Delete(':id/business-activities/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Remove an industry/NIC activity classification (audited)' })
+  removeBusinessActivity(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+  ): Promise<EntityDetail> {
+    return this.entities.removeBusinessActivity(rlsContextFromPrincipal(principal), id, childId);
+  }
+
+  // ── Listings (§15) ─────────────────────────────────────────────────────────
+  @Post(':id/listings')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Add a listing line (exchange × security) (audited)' })
+  addListing(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ListingDto,
+  ): Promise<EntityDetail> {
+    return this.entities.addListing(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Patch(':id/listings/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Update a listing line (audited)' })
+  updateListing(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+    @Body() dto: UpdateListingDto,
+  ): Promise<EntityDetail> {
+    return this.entities.updateListing(rlsContextFromPrincipal(principal), id, childId, dto);
+  }
+
+  @Delete(':id/listings/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Remove a listing line (audited)' })
+  removeListing(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+  ): Promise<EntityDetail> {
+    return this.entities.removeListing(rlsContextFromPrincipal(principal), id, childId);
+  }
+
+  // ── Regulatory attributes (§19) ────────────────────────────────────────────
+  @Post(':id/regulatory-attributes')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Record a structured regulatory fact — never a conclusion (audited)' })
+  addRegulatoryAttribute(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: RegulatoryAttributeDto,
+  ): Promise<EntityDetail> {
+    return this.entities.addRegulatoryAttribute(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Delete(':id/regulatory-attributes/:childId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Remove a structured regulatory fact (audited)' })
+  removeRegulatoryAttribute(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('childId', new ParseUUIDPipe()) childId: string,
+  ): Promise<EntityDetail> {
+    return this.entities.removeRegulatoryAttribute(rlsContextFromPrincipal(principal), id, childId);
   }
 }
