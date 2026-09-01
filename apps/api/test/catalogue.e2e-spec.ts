@@ -34,7 +34,7 @@ describe('Service Catalogue (e2e)', () => {
     it('lists review models ranked', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/review-models')
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .expect(200);
       const ranks = (res.body as Array<{ rank: number }>).map((r) => r.rank);
       expect(ranks).toEqual([...ranks].sort((a, b) => a - b)); // ascending
@@ -44,7 +44,7 @@ describe('Service Catalogue (e2e)', () => {
     it('lists workflow families with ordered states', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/workflow-families')
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .expect(200);
       const audit = (res.body as Array<{ slug: string; states: Array<{ slug: string }> }>).find(
         (f) => f.slug === 'audit_workflow',
@@ -64,7 +64,7 @@ describe('Service Catalogue (e2e)', () => {
     it('lists services with the required review model', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/services?limit=100')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const statAudit = (
         res.body.items as Array<{ code: string; requiredReviewModelSlug: string }>
@@ -75,7 +75,7 @@ describe('Service Catalogue (e2e)', () => {
     it('filters services by line and active flag (combined query DTO)', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/services?serviceLine=GST&active=true')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const codes = (res.body.items as Array<{ code: string }>).map((s) => s.code);
       // The filter returns the GST line (which the §8 catalogue expansion grows),
@@ -89,7 +89,7 @@ describe('Service Catalogue (e2e)', () => {
     it('rejects an unknown query param (400)', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/services?bogus=1')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(400);
     });
   });
@@ -98,7 +98,7 @@ describe('Service Catalogue (e2e)', () => {
     it('forbids a Senior (no service.manage) from creating a service (403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({
           serviceLineCode: 'AUDIT',
           code: code('SVC'),
@@ -114,7 +114,7 @@ describe('Service Catalogue (e2e)', () => {
       const correlationId = `corr-svc-${Date.now()}`;
       const created = await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .set('x-correlation-id', correlationId)
         .send({
           serviceLineCode: 'ADVISORY',
@@ -130,7 +130,7 @@ describe('Service Catalogue (e2e)', () => {
 
       const audit = await request(app.getHttpServer())
         .get('/api/v1/audit?limit=100')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const event = (
         audit.body.items as Array<{ action: string; objectId: string; correlationId: string }>
@@ -139,7 +139,7 @@ describe('Service Catalogue (e2e)', () => {
     });
 
     it('rejects a duplicate service code (409)', async () => {
-      const admin = await token('admin@hsdg.in');
+      const admin = await token('admin@dhvaj.in');
       const body = {
         serviceLineCode: 'AUDIT',
         code: code('DUP'),
@@ -162,7 +162,7 @@ describe('Service Catalogue (e2e)', () => {
     it('rejects an unknown review model (400)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .send({
           serviceLineCode: 'AUDIT',
           code: code('BAD'),
@@ -174,7 +174,7 @@ describe('Service Catalogue (e2e)', () => {
     });
 
     it('enforces optimistic concurrency on service update (stale version ⇒ 409)', async () => {
-      const admin = await token('admin@hsdg.in');
+      const admin = await token('admin@dhvaj.in');
       const created = await request(app.getHttpServer())
         .post('/api/v1/services')
         .set(bearer(admin))
@@ -202,7 +202,7 @@ describe('Service Catalogue (e2e)', () => {
     it('creates a service line (audited)', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/service-lines')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .send({ code: code('LINE').replace(/_/g, ''), name: 'Valuation' })
         .expect(201);
       expect(res.body.version).toBe(1);
@@ -214,7 +214,7 @@ describe('Service Catalogue (e2e)', () => {
     it('exposes the advisory-family lines as co-equal top-level lines, without LITIGATION', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/service-lines')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const codes = (res.body as Array<{ code: string }>).map((l) => l.code);
       expect(codes).toEqual(expect.arrayContaining(['FEMA', 'VAL', 'CFO', 'GOV', 'FOR', 'OTHER']));
@@ -225,7 +225,7 @@ describe('Service Catalogue (e2e)', () => {
     it('re-parents the folded services to their own lines and ITAT_REP to TAX', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/services?limit=100')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const byCode = new Map(
         (res.body.items as Array<{ code: string; serviceLineCode: string }>).map((s) => [
@@ -244,7 +244,7 @@ describe('Service Catalogue (e2e)', () => {
     it('exposes the §19 named workflow families (15), without the legacy generic filing family', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/workflow-families')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const slugs = (res.body as Array<{ slug: string }>).map((f) => f.slug);
       expect(slugs).toHaveLength(15);
@@ -273,7 +273,7 @@ describe('Service Catalogue (e2e)', () => {
     it('maps re-pointed services to their §19 workflow families', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/services?limit=100')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const byCode = new Map(
         (res.body.items as Array<{ code: string; workflowFamilySlug: string }>).map((s) => [
@@ -291,7 +291,7 @@ describe('Service Catalogue (e2e)', () => {
     it('seeds the §17 controlled fallback service under OTHER', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/services?serviceLine=OTHER')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const codes = (res.body.items as Array<{ code: string }>).map((s) => s.code);
       expect(codes).toContain('OTHER_PROF');
@@ -300,7 +300,7 @@ describe('Service Catalogue (e2e)', () => {
     it('forbids an admin (no service.manage_other) from creating under OTHER (403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .send({
           serviceLineCode: 'OTHER',
           code: code('OTH'),
@@ -315,7 +315,7 @@ describe('Service Catalogue (e2e)', () => {
     it('requires an approval reference when the MP creates under OTHER (400)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({
           serviceLineCode: 'OTHER',
           code: code('OTH'),
@@ -330,7 +330,7 @@ describe('Service Catalogue (e2e)', () => {
       const svcCode = code('OTH');
       const res = await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({
           serviceLineCode: 'OTHER',
           code: svcCode,
@@ -348,7 +348,7 @@ describe('Service Catalogue (e2e)', () => {
     it('does not store an approval reference for a non-OTHER service (OTHER-only concept)', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .send({
           serviceLineCode: 'AUDIT',
           code: code('AUD'),
@@ -364,7 +364,7 @@ describe('Service Catalogue (e2e)', () => {
     it('refuses to re-parent an existing service into OTHER via update (400)', async () => {
       const created = await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .send({
           serviceLineCode: 'AUDIT',
           code: code('MOV'),
@@ -377,7 +377,7 @@ describe('Service Catalogue (e2e)', () => {
       // service into the fallback line — the only path there is create-with-approval.
       await request(app.getHttpServer())
         .patch(`/api/v1/services/${created.body.id}`)
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ serviceLineCode: 'OTHER', version: created.body.version as number })
         .expect(400);
     });

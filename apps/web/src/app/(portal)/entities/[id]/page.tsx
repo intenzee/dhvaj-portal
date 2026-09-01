@@ -82,7 +82,7 @@ export default function EntityDetailPage(): JSX.Element {
               ))}
             </div>
             <p className="mt-2 text-xs text-ink-faint">
-              Missing information is not the same as Not Applicable — complete it as HSDG obtains it.
+              Missing information is not the same as Not Applicable — complete it as Dhvaj obtains it.
             </p>
           </CardBody>
         </Card>

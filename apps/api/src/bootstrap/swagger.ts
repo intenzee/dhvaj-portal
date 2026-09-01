@@ -10,9 +10,9 @@ import { API_VERSION } from '@hsdg/contracts';
  */
 export function setupSwagger(app: INestApplication, globalPrefix: string): void {
   const config = new DocumentBuilder()
-    .setTitle('HSDG Portal API')
+    .setTitle('Dhvaj Portal API')
     .setDescription(
-      'Practice-management and professional-work operating system for HSDG. ' +
+      'Practice-management and professional-work operating system for Dhvaj. ' +
         'Modular monolith over PostgreSQL (system of record) with Row Level Security.',
     )
     .setVersion(API_VERSION)

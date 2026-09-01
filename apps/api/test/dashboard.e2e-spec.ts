@@ -32,7 +32,7 @@ describe('Dashboard summary (e2e)', () => {
   });
 
   it('returns the full set of scoped counts to any authenticated user', async () => {
-    const sy = await token('senior.y@hsdg.in');
+    const sy = await token('senior.y@dhvaj.in');
     const res = await request(app.getHttpServer())
       .get('/api/v1/dashboard/summary')
       .set(bearer(sy))
@@ -56,8 +56,8 @@ describe('Dashboard summary (e2e)', () => {
   });
 
   it('is RLS-scoped: the Managing Partner sees at least as many active engagements as a single partner', async () => {
-    const mp = await token('mp@hsdg.in');
-    const pb = await token('partner.b@hsdg.in');
+    const mp = await token('mp@dhvaj.in');
+    const pb = await token('partner.b@dhvaj.in');
     const mpRes = await request(app.getHttpServer())
       .get('/api/v1/dashboard/summary')
       .set(bearer(mp))
@@ -71,7 +71,7 @@ describe('Dashboard summary (e2e)', () => {
   });
 
   it('accepts a due-soon window override', async () => {
-    const mp = await token('mp@hsdg.in');
+    const mp = await token('mp@dhvaj.in');
     const res = await request(app.getHttpServer())
       .get('/api/v1/dashboard/summary?dueSoonDays=30')
       .set(bearer(mp))

@@ -78,7 +78,7 @@ describe('Billing & Collections (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
   afterAll(async () => {
     await app?.close();
@@ -86,13 +86,13 @@ describe('Billing & Collections (e2e)', () => {
 
   describe('permission gating', () => {
     it('lets a manager (report.read) read the firm-wide invoice list and summary', async () => {
-      const t = await token('manager.x@hsdg.in');
+      const t = await token('manager.x@dhvaj.in');
       await request(app.getHttpServer()).get('/api/v1/invoices').set(bearer(t)).expect(200);
       await request(app.getHttpServer()).get('/api/v1/invoices/summary').set(bearer(t)).expect(200);
     });
 
     it('forbids a senior (no report.read) from billing (403)', async () => {
-      const t = await token('senior.y@hsdg.in');
+      const t = await token('senior.y@dhvaj.in');
       await request(app.getHttpServer()).get('/api/v1/invoices').set(bearer(t)).expect(403);
       await request(app.getHttpServer()).get('/api/v1/invoices/summary').set(bearer(t)).expect(403);
     });
@@ -100,7 +100,7 @@ describe('Billing & Collections (e2e)', () => {
 
   describe('cross-engagement list', () => {
     it('lists an issued invoice with engagement + client context', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const inv = await makeInvoice(pa, eng, { issue: true });
 
@@ -118,7 +118,7 @@ describe('Billing & Collections (e2e)', () => {
     });
 
     it('flags an overdue invoice and filters to it with ?overdueOnly=true', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const inv = await makeInvoice(pa, eng, { issue: true, overdue: true });
 
@@ -135,8 +135,8 @@ describe('Billing & Collections (e2e)', () => {
     });
 
     it('is RLS-scoped — a partner in another office never sees the invoice', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const pb = await token('partner.b@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const pb = await token('partner.b@dhvaj.in');
       const eng = await createEngagement(pa);
       const inv = await makeInvoice(pa, eng, { issue: true });
 
@@ -150,7 +150,7 @@ describe('Billing & Collections (e2e)', () => {
 
   describe('summary rollup', () => {
     it('counts a fresh issued invoice as outstanding and reconciles buckets', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       await makeInvoice(pa, eng, { issue: true });
 
@@ -166,7 +166,7 @@ describe('Billing & Collections (e2e)', () => {
     });
 
     it('partitions outstanding into aging buckets that reconcile', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       await makeInvoice(pa, eng, { issue: true }); // not yet due
       await makeInvoice(pa, eng, { issue: true, overdue: true }); // 10 days overdue → 1–30
@@ -188,7 +188,7 @@ describe('Billing & Collections (e2e)', () => {
     it('scopes the summary by RLS — a partner sees no more issued than the MP', async () => {
       const paTotal = await request(app.getHttpServer())
         .get('/api/v1/invoices/summary')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
       const mpTotal = await request(app.getHttpServer())
         .get('/api/v1/invoices/summary')

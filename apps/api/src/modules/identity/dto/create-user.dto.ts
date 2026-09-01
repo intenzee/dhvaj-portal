@@ -12,7 +12,7 @@ import {
 import { ASSIGNABLE_ROLES, type RoleSlug } from '@hsdg/contracts';
 
 export class CreateUserDto {
-  @ApiProperty({ example: 'ravi.kumar@hsdg.in', description: 'Login email (unique).' })
+  @ApiProperty({ example: 'ravi.kumar@dhvaj.in', description: 'Login email (unique).' })
   @IsEmail()
   email!: string;
 

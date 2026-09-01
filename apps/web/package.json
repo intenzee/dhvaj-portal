@@ -17,12 +17,15 @@
     "@tanstack/react-query": "^5.62.7",
     "@tanstack/react-table": "^8.20.6",
     "clsx": "^2.1.1",
+    "docx": "^9.0.2",
     "lucide-react": "^0.469.0",
+    "mammoth": "^1.8.0",
     "next": "^14.2.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.54.2",
     "tailwind-merge": "^2.6.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {

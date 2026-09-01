@@ -100,7 +100,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -109,7 +109,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
 
   describe('escalation bands (§24)', () => {
     it('classifies each obligation into the right band from its operative date', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
 
@@ -139,7 +139,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     });
 
     it('a completed obligation escalates to "none"', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
       const gen = await generate(pa, eng, code, dateFromToday(-57)).expect(201); // would be critical
@@ -162,7 +162,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
 
   describe('calendar views (§22)', () => {
     it('filters the firm-wide calendar by service and by engagement partner', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
       const gen = await generate(pa, eng, code, dateFromToday(-4)).expect(201);
@@ -186,7 +186,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
 
   describe('statutory-overdue escalation notifications (§24)', () => {
     it('emits a statutory-deadline-overdue notification to the engagement lead', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
       await generate(pa, eng, code, dateFromToday(-57)).expect(201); // critically overdue
@@ -213,14 +213,14 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     it('forbids a non-operator from running the sweep (403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/notifications/scan')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(403);
     });
   });
 
   describe('§24 finer escalation routing', () => {
     it('Due Today → a compliance-due-today notification to the lead', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
       await generate(pa, eng, code, dateFromToday(0)).expect(201); // due TODAY
@@ -235,7 +235,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     });
 
     it('Client-commitment overdue → a distinct client-commitment notification, not a statutory breach', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule('CLIENT_COMMITTED');
       await generate(pa, eng, code, dateFromToday(-7)).expect(201); // 7 days overdue
@@ -249,7 +249,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     });
 
     it('Review overdue → the layer OWNER (reviewer) is notified, leads escalated', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       // Non-statutory parent so no auto review layer collides with the manual one.
       const code = await createExactRule('HSDG_MILESTONE');
@@ -273,7 +273,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       expect(scan.body.deadlineLayerOverdue).toBeGreaterThanOrEqual(1);
 
       // The reviewer (layer owner), though not an engagement lead, is notified.
-      const mx = await token('manager.x@hsdg.in');
+      const mx = await token('manager.x@dhvaj.in');
       expect(
         (await notificationsFor(mx)).some(
           (n) => n.type === 'deadline_layer_overdue' && n.engagementId === eng,
@@ -346,7 +346,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     };
 
     it('fans one obligation into a field-complete event picture (§16/§23)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createSourcedRule('STATUTORY_RULE', 'LAW_RULE');
       // A STATUTORY obligation 3 days out ⇒ due_soon. Generation auto-materialises
@@ -381,7 +381,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     });
 
     it('scopes the event stream by clock (Internal-SLA view) and by service (§22)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createSourcedRule('STATUTORY_RULE', 'LAW_RULE');
       await generate(pa, eng, code, dateFromToday(-4)).expect(201); // overdue
@@ -403,7 +403,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     });
 
     it('carries the distinct §24 action on the firm-wide calendar row', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createSourcedRule('STATUTORY_RULE', 'LAW_RULE');
       const gen = await generate(pa, eng, code, dateFromToday(-57)).expect(201); // critical
@@ -424,7 +424,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
     });
 
     it('flips isExtended on the statutory event when a government extension applies (§19/§23)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createSourcedRule('STATUTORY_FIXED', 'LAW_RULE');
       const statDate = dateFromToday(10);

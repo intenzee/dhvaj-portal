@@ -6,7 +6,7 @@ import type { Principal } from './principal';
 describe('PermissionsGuard', () => {
   const principal = (permissions: string[]): Principal => ({
     userId: 'u1',
-    email: 'p@hsdg.in',
+    email: 'p@dhvaj.in',
     displayName: 'P',
     officeId: 'o1',
     officeCode: 'NORTH',

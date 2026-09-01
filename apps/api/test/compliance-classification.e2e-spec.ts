@@ -94,7 +94,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -104,7 +104,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
   // ── 1. Due-date CATEGORY + SOURCE on rules and instances ─────────────────
   describe('frozen due-date category (§2) and source (§3)', () => {
     it('stores category + source on a rule and surfaces them on generated instances', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `CLS_${unique()}`;
       await createRule(code, gstVersion, {
         category: 'gst',
@@ -208,7 +208,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
       // A partner (no compliance.manage) cannot import one.
       await request(app.getHttpServer())
         .post('/api/v1/compliance-extensions')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .send({
           complianceRuleCode: code,
           originalDueDate: '2026-01-20',
@@ -241,7 +241,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
   // ── 3. Applying an extension: overlay, precedence, calendar ──────────────
   describe('applying an extension overlay (§19/§20/§24)', () => {
     it('overlays the revised date, retains the original, and is audited', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `APX_${unique()}`;
       await createRule(code, gstVersion, { dueDateCategory: 'STATUTORY_FIXED' });
       const eng = await createEngagement(pa, '2020-21');
@@ -307,7 +307,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
     });
 
     it('manual override (§20) takes precedence over a government extension (§19)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `PREC_${unique()}`;
       await createRule(code, gstVersion);
       const eng = await createEngagement(pa, '2020-21');
@@ -347,7 +347,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
     });
 
     it('rejects applying an extension that targets a different rule (400)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const codeA = `XRA_${unique()}`;
       const codeB = `XRB_${unique()}`;
       await createRule(codeA, gstVersion);
@@ -378,7 +378,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
     });
 
     it('surfaces the revised (operative) date on the firm-wide calendar, not the original', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `CALX_${unique()}`;
       await createRule(code, gstVersion);
       const eng = await createEngagement(pa, '2020-21');
@@ -528,7 +528,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
   // ── §4 calculation methods ───────────────────────────────────────────────
   describe('calculation methods (§4)', () => {
     it('computes a working-days offset (WORKING_DAYS) end to end', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `WDAYS_${unique()}`;
       // period_end + 2 WORKING days, no weekend nudge.
       await createRule(code, {
@@ -556,7 +556,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
     });
 
     it('accepts the period_start basis', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `PSTART_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2017-04-01',
@@ -600,7 +600,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
     });
 
     it('generates an event-based statutory deadline from the seeded limitation rule', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa, '2026-27', 'TAX_APPEAL');
       // IT_APPEAL_LIMITATION: event_date + 30 (working-day 'next'). Order served
       // Mon 2026-06-15 ⇒ Wed 2026-07-15 (a weekday, no nudge).
@@ -615,7 +615,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
     });
 
     it('lists the service’s event-triggered rules for the record-event flow', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa, '2026-27', 'TAX_APPEAL');
       const res = await request(app.getHttpServer())
         .get(`/api/v1/engagements/${eng}/compliance/event-rules`)
@@ -633,7 +633,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
     });
 
     it('excludes recurring (non-event) rules from the record-event options', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       // ITR_FILING carries both an event rule (ITR_VERIFICATION_DUE, event_date)
       // and a recurring one (ITR_FILING_DUE, fy_end) — only the event rule is an
       // option, since bulk generate-for-service already handles the recurring one.

@@ -82,7 +82,7 @@ describe('Auto-generated tasks (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -90,7 +90,7 @@ describe('Auto-generated tasks (e2e)', () => {
   });
 
   it('creates the one material task for a statutory obligation, due at the internal SLA', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const eng = await createEngagement(pa);
     const code = await createRule('STATUTORY_RULE');
     await request(app.getHttpServer())
@@ -109,7 +109,7 @@ describe('Auto-generated tasks (e2e)', () => {
   });
 
   it('creates no task for a non-statutory (advisory/internal) obligation', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const eng = await createEngagement(pa);
     const code = await createRule('HSDG_MILESTONE');
     await request(app.getHttpServer())

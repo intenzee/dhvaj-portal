@@ -5,7 +5,7 @@ Infrastructure-as-code (Bicep) and the deploy runbook for the HSDG Portal.
 - **Cloud:** Azure · **Region:** Central India (`centralindia`, India data residency)
 - **Environments:** `staging` and `prod` (separate resource groups, `rg-hsdg-<env>`)
 - **Subscription:** `518dda8a-a074-45ba-8928-755766eafb50`
-- **Directory (tenant):** HSDG and Associates (hsdg.in)
+- **Directory (tenant):** Dhvaj and Associates (hsdg.in)
 
 ## What gets provisioned (`main.bicep` → `core.bicep`)
 

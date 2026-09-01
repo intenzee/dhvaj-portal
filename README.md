@@ -413,15 +413,15 @@ The dev auth provider mints tokens for seeded users (non-production only):
 ```bash
 # Mint a token for the Managing Partner, then call a protected endpoint
 TOKEN=$(curl -s -X POST http://localhost:3001/api/v1/auth/dev-token \
-  -H 'content-type: application/json' -d '{"email":"mp@hsdg.in"}' \
+  -H 'content-type: application/json' -d '{"email":"mp@dhvaj.in"}' \
   | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).accessToken))")
 
 curl -s http://localhost:3001/api/v1/users -H "authorization: Bearer $TOKEN"
 ```
 
-Seeded users: `mp@hsdg.in` (Managing Partner), `admin@hsdg.in`,
-`partner.a@hsdg.in` (North), `partner.b@hsdg.in` (South), `manager.x@hsdg.in`,
-`senior.y@hsdg.in`. Partners in different offices demonstrate RLS scoping.
+Seeded users: `mp@dhvaj.in` (Managing Partner), `admin@dhvaj.in`,
+`partner.a@dhvaj.in` (North), `partner.b@dhvaj.in` (South), `manager.x@dhvaj.in`,
+`senior.y@dhvaj.in`. Partners in different offices demonstrate RLS scoping.
 
 ### Running the web portal (Phase 12)
 

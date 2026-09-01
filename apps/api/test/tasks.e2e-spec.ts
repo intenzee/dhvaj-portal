@@ -70,7 +70,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -80,7 +80,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
   // ── ACCEPTANCE ────────────────────────────────────────────────────────────
   describe('waiting-for-client vs internally-overdue are distinct', () => {
     it('requesting client info makes the engagement waiting-for-client, separate from task overdue', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
 
       let detail = await getEngagement(pa, eng);
@@ -134,7 +134,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
   // ── Tasks: assignment, status by assignee, dependencies ──────────────────
   describe('tasks', () => {
     it('lets a lead assign a task to a team member, who then progresses it (task.update)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const seniorY = await findEmployeeId('EMP006');
       // Add Senior Y to the team so they can be assigned + see the task.
@@ -152,7 +152,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
       expect(task.body.assignedToName).toBe('Senior Y');
 
       // The senior (assignee, not a lead) progresses their own task.
-      const sy = await token('senior.y@hsdg.in');
+      const sy = await token('senior.y@dhvaj.in');
       const inProgress = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/tasks/${task.body.id}/status`)
         .set(bearer(sy))
@@ -178,7 +178,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
     });
 
     it('cannot assign a task to someone not on the engagement (400)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const partnerB = await findEmployeeId('EMP004'); // not on this engagement
       await request(app.getHttpServer())
@@ -189,7 +189,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
     });
 
     it('blocks completing a task while a blocker is unfinished, and rejects dependency cycles', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const a = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/tasks`)
@@ -240,7 +240,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
   // ── Client dependencies: my view + partial receipt ───────────────────────
   describe('client dependencies', () => {
     it('surfaces open dependencies on the firm-wide view, and partial receipt keeps it open', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const dep = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/client-dependencies`)
@@ -273,7 +273,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
       expect(row!.entityName).toBe('Bharat Textiles LLP');
 
       // An unrelated partner does not see it.
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
       const notMine = await request(app.getHttpServer())
         .get('/api/v1/work/client-dependencies?limit=100')
         .set(bearer(pb))
@@ -287,19 +287,19 @@ describe('Tasks & Client Dependencies (e2e)', () => {
   // ── Authority & RLS ──────────────────────────────────────────────────────
   describe('authority & RLS', () => {
     it('forbids a Senior (no engagement.manage) from creating a task (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/tasks`)
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ title: 'unauthorised' })
         .expect(403);
     });
 
     it('does not let an unassigned partner see another engagement’s tasks or client deps (404)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
       await request(app.getHttpServer())
         .get(`/api/v1/engagements/${eng}/tasks`)
         .set(bearer(pb))
@@ -311,7 +311,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
     });
 
     it('does not let a non-assignee non-lead update a task (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const seniorY = await findEmployeeId('EMP006');
       await request(app.getHttpServer())
@@ -327,7 +327,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
         .expect(201);
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/tasks/${task.body.id}/status`)
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ status: 'in_progress' })
         .expect(403);
     });

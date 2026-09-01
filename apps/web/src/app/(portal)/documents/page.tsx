@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Download } from 'lucide-react';
 import { DOCUMENT_STATUSES, type Paginated } from '@hsdg/contracts';
@@ -15,14 +15,17 @@ import { PageHeader, Spinner, Card, Button } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { Pagination } from '@/components/pagination';
+import { DocumentPreview } from '@/components/document-preview';
 
 const PAGE_SIZE = 25;
 
 export default function DocumentsPage(): JSX.Element {
   const toast = useToast();
+  const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>('');
   const [offset, setOffset] = useState(0);
+  const [preview, setPreview] = useState<GlobalDocumentRow | null>(null);
 
   const reset = (fn: () => void): void => {
     fn();
@@ -54,12 +57,19 @@ export default function DocumentsPage(): JSX.Element {
     {
       header: 'Document',
       cell: ({ row }) => (
-        <div>
-          <span className="block font-medium text-ink">{row.original.title}</span>
+        <button
+          className="block text-left"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPreview(row.original);
+          }}
+          title="Open (view / edit)"
+        >
+          <span className="block font-medium text-primary-700 hover:underline">{row.original.title}</span>
           <span className="block text-xs text-ink-faint">
             {humanize(row.original.documentType)} · v{row.original.currentVersionNo}
           </span>
-        </div>
+        </button>
       ),
     },
     {
@@ -138,6 +148,15 @@ export default function DocumentsPage(): JSX.Element {
           offset={offset}
           onOffsetChange={setOffset}
           unit="documents"
+        />
+      )}
+
+      {preview && (
+        <DocumentPreview
+          engagementId={preview.engagementId}
+          doc={preview}
+          onClose={() => setPreview(null)}
+          onSaved={() => void qc.invalidateQueries({ queryKey: ['documents', 'global'] })}
         />
       )}
     </div>

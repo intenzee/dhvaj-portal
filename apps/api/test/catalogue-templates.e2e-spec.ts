@@ -32,7 +32,7 @@ describe('Catalogue Templates (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -127,7 +127,7 @@ describe('Catalogue Templates (e2e)', () => {
     it('forbids a Senior (no service.manage) from creating a template (403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/catalogue-templates')
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ templateType: 'checklist', code: code('CHK'), name: 'X' })
         .expect(403);
     });
@@ -135,7 +135,7 @@ describe('Catalogue Templates (e2e)', () => {
 
   describe('configuration snapshot (§28)', () => {
     it('snapshots the active template versions when the linked component is configured', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
       const serviceId = await findId('/api/v1/services?search=BOOKKEEPING&limit=100');
       const eng = await request(app.getHttpServer())

@@ -35,7 +35,7 @@ describe('Resource Management (e2e)', () => {
   it('returns per-person rows with office/grade rollups and totals for the MP', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/resources/workload')
-      .set(bearer(await token('mp@hsdg.in')))
+      .set(bearer(await token('mp@dhvaj.in')))
       .expect(200);
 
     expect(Array.isArray(res.body.rows)).toBe(true);
@@ -67,11 +67,11 @@ describe('Resource Management (e2e)', () => {
   it('is RLS-scoped — a partner sees no more people than the MP', async () => {
     const mp = await request(app.getHttpServer())
       .get('/api/v1/resources/workload')
-      .set(bearer(await token('mp@hsdg.in')))
+      .set(bearer(await token('mp@dhvaj.in')))
       .expect(200);
     const pa = await request(app.getHttpServer())
       .get('/api/v1/resources/workload')
-      .set(bearer(await token('partner.a@hsdg.in')))
+      .set(bearer(await token('partner.a@dhvaj.in')))
       .expect(200);
     expect(pa.body.totals.people).toBeLessThanOrEqual(mp.body.totals.people);
   });

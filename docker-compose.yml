@@ -46,6 +46,35 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # OnlyOffice Document Server — the in-app Office editor (Excel/Word/PDF).
+  # Heavy (~1.5–2 GB), so it is NOT part of `npm run db:up`; start it on demand
+  # with `npm run oo:up` (and `npm run oo:down` to stop). The API and browser
+  # reach it as follows:
+  #   - browser  → http://localhost:8080         (loads the editor script)
+  #   - DS → API → http://host.docker.internal:3001 (fetch file + save callback)
+  # JWT is enabled and the secret is shared with the API (ONLYOFFICE_JWT_SECRET).
+  # The dev secret below is INSECURE — override it (both sides) in production.
+  onlyoffice:
+    image: onlyoffice/documentserver:8.1
+    container_name: hsdg-onlyoffice
+    environment:
+      JWT_ENABLED: 'true'
+      JWT_SECRET: 'dev-onlyoffice-shared-secret-change-me'
+      JWT_HEADER: 'Authorization'
+      JWT_IN_BODY: 'true'
+    ports:
+      - '8080:80'
+    extra_hosts:
+      # Lets the container reach the host-run API on Linux (automatic on Docker
+      # Desktop for Mac/Windows, harmless there).
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - hsdg-onlyoffice-data:/var/www/onlyoffice/Data
+      - hsdg-onlyoffice-logs:/var/log/onlyoffice
+    restart: unless-stopped
+
 volumes:
   hsdg-pgdata:
   hsdg-redisdata:
+  hsdg-onlyoffice-data:
+  hsdg-onlyoffice-logs:

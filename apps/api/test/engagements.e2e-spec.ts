@@ -51,7 +51,7 @@ describe('Engagement Core (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -73,14 +73,14 @@ describe('Engagement Core (e2e)', () => {
       // engagement_code exactly, making this independent of page/volume.
       const res = await request(app.getHttpServer())
         .get('/api/v1/engagements?search=ENG00001&limit=100')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
       expect(codes(res.body.items)).toContain('ENG00001');
     });
 
     it('gives a cross-office team member the engagement + client + roster', async () => {
       // Senior Y (South office) is on the North Acme engagement's team.
-      const sy = await token('senior.y@hsdg.in');
+      const sy = await token('senior.y@dhvaj.in');
       const list = await request(app.getHttpServer())
         .get('/api/v1/engagements?search=ENG00001&limit=100')
         .set(bearer(sy))
@@ -109,14 +109,14 @@ describe('Engagement Core (e2e)', () => {
       );
       await request(app.getHttpServer())
         .get(`/api/v1/engagements/${acme.id}`)
-        .set(bearer(await token('partner.b@hsdg.in')))
+        .set(bearer(await token('partner.b@dhvaj.in')))
         .expect(404);
     });
 
     it('supports ?mine=true', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/engagements?mine=true&search=ENG00001&limit=100')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
       expect(codes(res.body.items)).toContain('ENG00001');
     });
@@ -125,14 +125,14 @@ describe('Engagement Core (e2e)', () => {
       // Checkpoint role separation: technical admin has no engagement access.
       await request(app.getHttpServer())
         .get('/api/v1/engagements')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .expect(403);
     });
   });
 
   describe('creation & management (audited)', () => {
     it('lets a Partner create their own engagement (becomes EP), audited', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat'); // North client
       const serviceId = await findServiceId('ITR_FILING');
       const correlationId = `corr-eng-${Date.now()}`;
@@ -162,7 +162,7 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('enforces engagement identity uniqueness (409)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('GST_MONTHLY');
       const body = { entityId, serviceId, financialYear: '2023-24', periodLabel: uniquePeriod() };
@@ -183,13 +183,13 @@ describe('Engagement Core (e2e)', () => {
       const serviceId = await findServiceId('ITR_FILING');
       await request(app.getHttpServer())
         .post('/api/v1/engagements')
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ entityId, serviceId, financialYear: '2022-23' })
         .expect(403);
     });
 
     it('assigns and removes a team member (audited)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('BOOKKEEPING');
       const created = await request(app.getHttpServer())
@@ -224,7 +224,7 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('reassigns the EP only with firm-wide authority (governance)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('TAX_ADVISORY');
       const created = await request(app.getHttpServer())
@@ -257,7 +257,7 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('enforces optimistic concurrency on update (stale version ⇒ 409)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('ROC_ANNUAL');
       const created = await request(app.getHttpServer())
@@ -284,7 +284,7 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('rejects "status" on the generic PATCH — lifecycle moves only through transition endpoints (Phase 6)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('ROC_ANNUAL');
       const created = await request(app.getHttpServer())
@@ -340,7 +340,7 @@ describe('Engagement Core (e2e)', () => {
       const serviceId = await findServiceId('GST_MONTHLY');
       const created = await request(app.getHttpServer())
         .post('/api/v1/engagements')
-        .set(bearer(await token('manager.x@hsdg.in')))
+        .set(bearer(await token('manager.x@dhvaj.in')))
         .send({
           entityId,
           serviceId,
@@ -356,7 +356,7 @@ describe('Engagement Core (e2e)', () => {
 
   describe('concurrency consistency (checkpoint)', () => {
     it('bumps the engagement version when the team changes', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('INT_AUDIT');
       const created = await request(app.getHttpServer())
@@ -380,7 +380,7 @@ describe('Engagement Core (e2e)', () => {
     });
 
     it('reassign honours optimistic concurrency (stale version ⇒ 409)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('TAX_ADVISORY');
       const created = await request(app.getHttpServer())
@@ -442,7 +442,7 @@ describe('Engagement Core (e2e)', () => {
 
     describe('the primary chain + side states', () => {
       it('walks prospect → pending_acceptance → accepted → active → completed → closed, audited and versioned throughout', async () => {
-        const mgr = await token('manager.x@hsdg.in');
+        const mgr = await token('manager.x@dhvaj.in');
         const entityId = await findEntityId('Bharat');
         const serviceId = await findServiceId('GST_MONTHLY'); // recurring_compliance_workflow chain
         // Manager creates: defaults to manager, NOT EP (grade-aware defaulting).
@@ -595,7 +595,7 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('invalid transition is rejected (400) — e.g. "start" on a fresh prospect', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const entityId = await findEntityId('Bharat');
         const serviceId = await findServiceId('TAX_ADVISORY');
         const created = await request(app.getHttpServer())
@@ -611,7 +611,7 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('declines a pending-acceptance engagement', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const entityId = await findEntityId('Bharat');
         const serviceId = await findServiceId('TAX_ADVISORY');
         const created = await request(app.getHttpServer())
@@ -633,7 +633,7 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('active -> on_hold -> resume returns to the recorded previous status, not always "active"', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const acc = await createAccepted(pa, 'INT_AUDIT');
         const started = await request(app.getHttpServer())
           .post(`/api/v1/engagements/${acc.id}/start`)
@@ -664,7 +664,7 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('put-on-hold requires a reason (400 without one)', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const acc = await createAccepted(pa, 'ROC_ANNUAL');
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${acc.id}/start`)
@@ -679,7 +679,7 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('withdraws an active engagement', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const acc = await createAccepted(pa, 'ADVISORY_GEN');
         const started = await request(app.getHttpServer())
           .post(`/api/v1/engagements/${acc.id}/start`)
@@ -748,7 +748,7 @@ describe('Engagement Core (e2e)', () => {
       };
 
       it('the EP itself cannot reopen (MP-only governance action)', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const eng = await completeEngagement(pa);
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${eng.id}/reopen`)
@@ -758,37 +758,37 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('a Manager assigned to the engagement cannot reopen (MP-only governance action)', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const eng = await completeEngagement(pa, true);
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${eng.id}/reopen`)
-          .set(bearer(await token('manager.x@hsdg.in')))
+          .set(bearer(await token('manager.x@dhvaj.in')))
           .send({ reason: 'manager attempted reopen' })
           .expect(403);
       });
 
       it('the platform admin cannot reopen — no business-firm-wide governance merely from the admin role', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const eng = await completeEngagement(pa);
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${eng.id}/reopen`)
-          .set(bearer(await token('admin@hsdg.in')))
+          .set(bearer(await token('admin@dhvaj.in')))
           .send({ reason: 'admin attempted reopen' })
           .expect(403);
       });
 
       it('a Senior (no engagement.manage) cannot perform any lifecycle action', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const acc = await createAccepted(pa, 'STAT_AUDIT');
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${acc.id}/start`)
-          .set(bearer(await token('senior.y@hsdg.in')))
+          .set(bearer(await token('senior.y@dhvaj.in')))
           .send({})
           .expect(403);
       });
 
       it('the Managing Partner can reopen a completed engagement (permitted governance action)', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const eng = await completeEngagement(pa);
 
         // Reopen requires a reason (§12, §25 test 38).
@@ -851,7 +851,7 @@ describe('Engagement Core (e2e)', () => {
 
     describe('service workflow independence (§16-19, §25 tests 33-36)', () => {
       it('gets the correct workflow family + initial state on start, advances independently of lifecycle, and rejects an unconfigured action', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const acc = await createAccepted(pa, 'STAT_AUDIT');
         const started = await request(app.getHttpServer())
           .post(`/api/v1/engagements/${acc.id}/start`)
@@ -885,7 +885,7 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('cannot advance the workflow while the engagement is not active', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const acc = await createAccepted(pa, 'STAT_AUDIT'); // still 'accepted', not started
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${acc.id}/workflow-transitions`)
@@ -897,9 +897,9 @@ describe('Engagement Core (e2e)', () => {
 
     describe('RLS-backed access (§25 tests 28-32)', () => {
       it('an unrelated partner cannot see or act on lifecycle history for an engagement they are not assigned to', async () => {
-        const pa = await token('partner.a@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
         const acc = await createAccepted(pa, 'GST_MONTHLY');
-        const pb = await token('partner.b@hsdg.in');
+        const pb = await token('partner.b@dhvaj.in');
         await request(app.getHttpServer())
           .get(`/api/v1/engagements/${acc.id}/lifecycle-history`)
           .set(bearer(pb))
@@ -912,9 +912,9 @@ describe('Engagement Core (e2e)', () => {
       });
 
       it('a manager shared across two partners can operate lifecycle transitions on both engagements', async () => {
-        const pa = await token('partner.a@hsdg.in');
-        const pb = await token('partner.b@hsdg.in');
-        const mgr = await token('manager.x@hsdg.in');
+        const pa = await token('partner.a@dhvaj.in');
+        const pb = await token('partner.b@dhvaj.in');
+        const mgr = await token('manager.x@dhvaj.in');
         const managerXId = await findEmployeeId('EMP005');
 
         const engA = await createAccepted(pa, 'TAX_ADVISORY', 'Bharat'); // North client

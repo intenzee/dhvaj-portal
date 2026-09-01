@@ -217,7 +217,12 @@ export function DocumentsSection({ engagementId }: { engagementId: string }): JS
       </Modal>
 
       {preview && (
-        <DocumentPreview engagementId={engagementId} doc={preview} onClose={() => setPreview(null)} />
+        <DocumentPreview
+          engagementId={engagementId}
+          doc={preview}
+          onClose={() => setPreview(null)}
+          onSaved={invalidate}
+        />
       )}
     </section>
   );

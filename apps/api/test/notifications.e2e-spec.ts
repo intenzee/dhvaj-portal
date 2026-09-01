@@ -103,7 +103,7 @@ describe('Notifications (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -113,8 +113,8 @@ describe('Notifications (e2e)', () => {
   // ── Task assignment → the assignee is notified (portal) ───────────────────
   describe('task assignment', () => {
     it('notifies the assignee, is recipient-scoped, and supports read + unread-count', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const sy = await token('senior.y@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const sy = await token('senior.y@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       const seniorY = await findEmployeeId('EMP006');
       await request(app.getHttpServer())
@@ -150,7 +150,7 @@ describe('Notifications (e2e)', () => {
       expect(after).toBe(before + 1);
 
       // An unrelated partner never sees Senior Y's notification…
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
       expect((await myNotifications(pb)).some((n) => n.id === hit!.id)).toBe(false);
       // …and cannot mark it read (RLS scopes the UPDATE → 404, no leak).
       await request(app.getHttpServer())
@@ -175,7 +175,7 @@ describe('Notifications (e2e)', () => {
     });
 
     it('does not notify on self-assignment', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const partnerA = await findEmployeeId('EMP003');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       await request(app.getHttpServer())
@@ -193,8 +193,8 @@ describe('Notifications (e2e)', () => {
   // ── Review-driven emissions to the accountable EP ─────────────────────────
   describe('review engine emissions', () => {
     it('notifies the EP that sign-off is pending when a manager clears a full-EP-review engagement', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const mgr = await token('manager.x@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const mgr = await token('manager.x@dhvaj.in');
       const eng = await setupActive({
         epToken: pa,
         serviceCode: 'STAT_AUDIT',
@@ -214,8 +214,8 @@ describe('Notifications (e2e)', () => {
     });
 
     it('flags a high-risk exception to the EP when a key-matter review point is raised', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const mgr = await token('manager.x@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const mgr = await token('manager.x@dhvaj.in');
       const eng = await setupActive({
         epToken: pa,
         serviceCode: 'STAT_AUDIT',
@@ -246,8 +246,8 @@ describe('Notifications (e2e)', () => {
   // ── EP change and reopen ──────────────────────────────────────────────────
   describe('engagement events', () => {
     it('notifies the incoming EP when the partner is reassigned', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const pb = await token('partner.b@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const pb = await token('partner.b@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       const partnerB = await findEmployeeId('EMP004');
 
@@ -262,7 +262,7 @@ describe('Notifications (e2e)', () => {
     });
 
     it('notifies the EP when a completed engagement is reopened', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       // ITR is manager_review: the EP (a lead) may review, sign off, and complete.
       const reviewed = await request(app.getHttpServer())
@@ -298,7 +298,7 @@ describe('Notifications (e2e)', () => {
   // ── The date-driven scan ──────────────────────────────────────────────────
   describe('date-driven scan', () => {
     it('emits client-dependency reminders, is idempotent, and is operator-only', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       const partnerA = await findEmployeeId('EMP003');
 

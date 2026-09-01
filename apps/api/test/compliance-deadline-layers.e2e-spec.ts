@@ -89,7 +89,7 @@ describe('Compliance deadline layers & events (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -98,7 +98,7 @@ describe('Compliance deadline layers & events (e2e)', () => {
 
   describe('adding, completing and removing layers', () => {
     it('attaches several distinct-category deadline layers, ordered by due date', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const { engagementId, instanceId } = await obligationFor(pa);
       const add = (body: Record<string, unknown>) =>
         request(app.getHttpServer())
@@ -144,7 +144,7 @@ describe('Compliance deadline layers & events (e2e)', () => {
     });
 
     it('enforces one of each standard layer per obligation, but allows repeated custom layers', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const { engagementId, instanceId } = await obligationFor(pa);
       const add = (body: Record<string, unknown>) =>
         request(app.getHttpServer())
@@ -181,7 +181,7 @@ describe('Compliance deadline layers & events (e2e)', () => {
     });
 
     it('completes a layer, waives another, and removes a third', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const { engagementId, instanceId } = await obligationFor(pa);
       const base = `/api/v1/engagements/${engagementId}/compliance/${instanceId}/deadlines`;
       const add = (body: Record<string, unknown>) =>
@@ -246,7 +246,7 @@ describe('Compliance deadline layers & events (e2e)', () => {
 
   describe('flattened calendar events (§16)', () => {
     it('fans one obligation into statutory + internal-SLA + per-layer events', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const { engagementId, instanceId } = await obligationFor(pa);
       const base = `/api/v1/engagements/${engagementId}/compliance/${instanceId}/deadlines`;
       await request(app.getHttpServer())
@@ -293,9 +293,9 @@ describe('Compliance deadline layers & events (e2e)', () => {
     });
 
     it('scopes the events stream by RLS — an unrelated partner sees none of them', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const { instanceId } = await obligationFor(pa);
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
       const res = await request(app.getHttpServer())
         .get('/api/v1/compliance/events?dueFrom=2027-01-01&dueTo=2027-12-31&limit=100')
         .set(bearer(pb))
@@ -310,11 +310,11 @@ describe('Compliance deadline layers & events (e2e)', () => {
 
   describe('authority & RLS', () => {
     it('forbids a Senior (no engagement.manage) from adding a layer (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const { engagementId, instanceId } = await obligationFor(pa);
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${engagementId}/compliance/${instanceId}/deadlines`)
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({
           layerType: 'manager_review',
           label: 'MR',

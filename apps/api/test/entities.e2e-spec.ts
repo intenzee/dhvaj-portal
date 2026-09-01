@@ -38,7 +38,7 @@ describe('Entity Master (e2e)', () => {
     it('gives the Managing Partner all clients', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/entities')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(res.body.total).toBeGreaterThanOrEqual(4);
     });
@@ -46,7 +46,7 @@ describe('Entity Master (e2e)', () => {
     it('scopes a Partner to their office', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/entities?limit=100')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
       const names = (res.body.items as Array<{ legalName: string }>).map((e) => e.legalName);
       expect(names).toContain('Acme Manufacturing Pvt Ltd'); // North
@@ -57,7 +57,7 @@ describe('Entity Master (e2e)', () => {
       // Checkpoint role separation: technical admin has no client-data access.
       await request(app.getHttpServer())
         .get('/api/v1/entities')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .expect(403);
     });
 
@@ -65,7 +65,7 @@ describe('Entity Master (e2e)', () => {
     it('supports the search filter (200, not 400)', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/entities?search=Acme')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(res.body.items.length).toBeGreaterThanOrEqual(1);
       expect(res.body.items[0].legalName).toMatch(/Acme/);
@@ -74,18 +74,18 @@ describe('Entity Master (e2e)', () => {
     it('rejects a genuinely unknown query param (400)', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/entities?bogus=1')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(400);
     });
 
     it('returns entity detail with registrations and contacts', async () => {
       const list = await request(app.getHttpServer())
         .get('/api/v1/entities?search=Acme')
-        .set(bearer(await token('mp@hsdg.in')));
+        .set(bearer(await token('mp@dhvaj.in')));
       const id = list.body.items[0].id as string;
       const res = await request(app.getHttpServer())
         .get(`/api/v1/entities/${id}`)
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(res.body.pan).toBe('AAACA1234A');
       expect(res.body.registrations.length).toBeGreaterThanOrEqual(1);
@@ -95,13 +95,13 @@ describe('Entity Master (e2e)', () => {
     it('404s for a cross-office entity by id (scope not leaked)', async () => {
       const all = await request(app.getHttpServer())
         .get('/api/v1/entities?limit=100')
-        .set(bearer(await token('mp@hsdg.in')));
+        .set(bearer(await token('mp@dhvaj.in')));
       const south = (all.body.items as Array<{ legalName: string; id: string }>).find(
         (e) => e.legalName === 'Coastal Foods Pvt Ltd',
       )!;
       await request(app.getHttpServer())
         .get(`/api/v1/entities/${south.id}`)
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(404);
     });
   });
@@ -110,7 +110,7 @@ describe('Entity Master (e2e)', () => {
     it('finds an exact PAN match and a fuzzy name match', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/entities/duplicate-check?legalName=Acme%20Manufactring&pan=AAACA1234A')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const reasons = (res.body as Array<{ matchReason: string }>).map((r) => r.matchReason);
       expect(reasons).toContain('pan');
@@ -122,7 +122,7 @@ describe('Entity Master (e2e)', () => {
     it('forbids a Manager (no entity.manage) from creating (403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/entities')
-        .set(bearer(await token('manager.x@hsdg.in')))
+        .set(bearer(await token('manager.x@dhvaj.in')))
         .send({ legalName: 'X Ltd', typeSlug: 'private_limited', officeCode: 'NORTH' })
         .expect(403);
     });
@@ -132,7 +132,7 @@ describe('Entity Master (e2e)', () => {
       const correlationId = `corr-ent-${Date.now()}`;
       const created = await request(app.getHttpServer())
         .post('/api/v1/entities')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .set('x-correlation-id', correlationId)
         .send({
           legalName: 'Nova Systems Pvt Ltd',
@@ -151,7 +151,7 @@ describe('Entity Master (e2e)', () => {
 
       const audit = await request(app.getHttpServer())
         .get('/api/v1/audit?limit=100')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const event = (
         audit.body.items as Array<{ action: string; objectId: string; correlationId: string }>
@@ -160,7 +160,7 @@ describe('Entity Master (e2e)', () => {
     });
 
     it('blocks a duplicate PAN globally (409)', async () => {
-      const partner = await token('partner.a@hsdg.in');
+      const partner = await token('partner.a@dhvaj.in');
       const pan = uniquePan();
       const body = { legalName: 'First Co', typeSlug: 'private_limited', officeCode: 'NORTH', pan };
       await request(app.getHttpServer())
@@ -178,7 +178,7 @@ describe('Entity Master (e2e)', () => {
     it('forbids a Partner creating a client for another office (RLS ⇒ 403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/entities')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .send({ legalName: 'Sneaky Ltd', typeSlug: 'private_limited', officeCode: 'SOUTH' })
         .expect(403);
     });
@@ -186,7 +186,7 @@ describe('Entity Master (e2e)', () => {
     it('validates PAN format (400)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/entities')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .send({
           legalName: 'Bad PAN Co',
           typeSlug: 'private_limited',
@@ -197,7 +197,7 @@ describe('Entity Master (e2e)', () => {
     });
 
     it('enforces optimistic concurrency on update (stale version ⇒ 409)', async () => {
-      const partner = await token('partner.a@hsdg.in');
+      const partner = await token('partner.a@dhvaj.in');
       const created = await request(app.getHttpServer())
         .post('/api/v1/entities')
         .set(bearer(partner))
@@ -217,7 +217,7 @@ describe('Entity Master (e2e)', () => {
     });
 
     it('adds a registration to an existing entity (audited)', async () => {
-      const partner = await token('partner.a@hsdg.in');
+      const partner = await token('partner.a@dhvaj.in');
       const created = await request(app.getHttpServer())
         .post('/api/v1/entities')
         .set(bearer(partner))

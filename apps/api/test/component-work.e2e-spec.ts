@@ -67,7 +67,7 @@ describe('Component Work Generation (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -75,7 +75,7 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('generates 12 monthly instances for the FY, idempotently', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, 'GSTR1'); // monthly
 
@@ -136,7 +136,7 @@ describe('Component Work Generation (e2e)', () => {
       })
       .expect(201);
 
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, compCode);
 
@@ -152,7 +152,7 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('completes an instance (status + completedAt)', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, 'GSTR1');
     await request(app.getHttpServer())
@@ -177,7 +177,7 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('bulk-generates work for all live components on the engagement', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     await configure(pa, engId, 'GSTR1'); // monthly → 12
     await configure(pa, engId, 'GSTR3B'); // monthly → 12
@@ -190,7 +190,7 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('reconciles work to the active window — narrowing removes, widening revives', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, 'ITC_RECON'); // monthly
     const gen = (): request.Test =>
@@ -231,7 +231,7 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('removing a scope cancels its pending work but preserves completed work', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, 'GSTR1'); // monthly → 12
     await request(app.getHttpServer())
@@ -268,7 +268,7 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('changing frequency with existing work supersedes the config + pending work, versions a new one', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, 'GSTR1'); // monthly
     await request(app.getHttpServer())
@@ -322,7 +322,7 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('changing frequency with no work yet updates in place (no supersede), and rejects a no-op', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, 'GSTR1'); // monthly, no work generated
 
@@ -344,18 +344,18 @@ describe('Component Work Generation (e2e)', () => {
   });
 
   it('blocks generation without engagement.manage and hides another’s work (403/404)', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     const componentId = await configure(pa, engId, 'GSTR1');
 
     // Senior lacks engagement.manage → 403 on generate.
     await request(app.getHttpServer())
       .post(`/api/v1/engagements/${engId}/components/${componentId}/instances/generate`)
-      .set(bearer(await token('senior.y@hsdg.in')))
+      .set(bearer(await token('senior.y@dhvaj.in')))
       .expect(403);
 
     // Unassigned partner cannot see the work (RLS) → empty list.
-    const pb = await token('partner.b@hsdg.in');
+    const pb = await token('partner.b@dhvaj.in');
     const list = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/component-work?limit=50`)
       .set(bearer(pb))

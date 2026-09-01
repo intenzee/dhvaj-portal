@@ -59,7 +59,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
   afterAll(async () => {
     await app.close();
@@ -67,7 +67,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
 
   describe('Commercial configuration (§31)', () => {
     it('returns a default then persists an upsert', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa);
 
       const def = await request(app.getHttpServer())
@@ -90,7 +90,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
 
   describe('Invoices (§31)', () => {
     it('derives totals from lines and enforces the lifecycle', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa);
 
       // Create a draft with two lines + tax; the DB computes the totals.
@@ -151,7 +151,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
     });
 
     it('refuses to issue an invoice with no lines', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa);
       const created = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${engId}/invoices`)
@@ -166,14 +166,14 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
     });
 
     it('does not let an unassigned partner see another’s invoices (404)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa);
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${engId}/invoices`)
         .set(bearer(pa))
         .send({ lines: [{ description: 'X', unitAmount: '1' }] })
         .expect(201);
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
       const list = await request(app.getHttpServer())
         .get(`/api/v1/engagements/${engId}/invoices`)
         .set(bearer(pb))
@@ -184,7 +184,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
 
   describe('Notes (§26)', () => {
     it('adds, pins, lists and removes a note', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa);
 
       const note = await request(app.getHttpServer())
@@ -216,7 +216,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
 
   describe('Registration write-back (§40)', () => {
     it('records a registration-work number into the client Registration Master', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('GST_REGISTRATION');
       const engRes = await request(app.getHttpServer())
@@ -271,7 +271,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
 
   describe('Out-of-scope task (§31)', () => {
     it('creates an out-of-scope task and a lead approves it billable', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa);
 
       const task = await request(app.getHttpServer())

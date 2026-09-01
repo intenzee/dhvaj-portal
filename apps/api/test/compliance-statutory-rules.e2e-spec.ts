@@ -58,8 +58,8 @@ describe('Seeded statutory compliance rules (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
-    pa = await token('partner.a@hsdg.in');
+    mp = await token('mp@dhvaj.in');
+    pa = await token('partner.a@dhvaj.in');
     eng = await createEngagement(pa);
   });
 

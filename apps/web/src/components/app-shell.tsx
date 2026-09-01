@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -15,6 +15,8 @@ import {
   ClipboardCheck,
   CalendarClock,
   Upload,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { visibleNav } from '@/lib/nav';
@@ -34,11 +36,53 @@ const SHORTCUTS = [
   { label: 'Upload Document', href: '/documents', icon: Upload },
 ];
 
+const SIDEBAR_KEY = 'dhvaj-sidebar-collapsed';
+
+/** Persisted collapse state for the sidebar, with a keyboard shortcut (⌘/Ctrl+B). */
+function useSidebarCollapsed(): [boolean, () => void] {
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Restore the saved preference after mount (avoids an SSR hydration mismatch).
+  useEffect(() => {
+    try {
+      setCollapsed(window.localStorage.getItem(SIDEBAR_KEY) === '1');
+    } catch {
+      /* storage unavailable — keep the expanded default */
+    }
+  }, []);
+
+  const toggle = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        toggle();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggle]);
+
+  return [collapsed, toggle];
+}
+
 /** The single portal shell — permission-driven nav, one app for every role (§22). */
 export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   const { principal, loading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [collapsed, toggleSidebar] = useSidebarCollapsed();
 
   useEffect(() => {
     if (!loading && !principal) router.replace('/login');
@@ -47,7 +91,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Spinner label="Loading HSDG Portal…" />
+        <Spinner label="Loading Dhvaj Portal…" />
       </div>
     );
   }
@@ -58,13 +102,18 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   return (
     <div className="flex min-h-screen bg-canvas text-ink">
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-sidebar md:flex">
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-20 w-64 flex-col bg-sidebar',
+          collapsed ? 'hidden' : 'hidden md:flex',
+        )}
+      >
         <div className="flex items-center gap-2 px-5 py-4">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600 text-sm font-black text-white">
             H
           </div>
           <div className="text-lg font-bold tracking-tight text-white">
-            HSDG <span className="font-medium text-sidebar-muted">Portal</span>
+            Dhvaj <span className="font-medium text-sidebar-muted">Portal</span>
           </div>
         </div>
 
@@ -119,8 +168,22 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
       </aside>
 
       {/* Main column */}
-      <div className="flex min-w-0 flex-1 flex-col md:ml-64">
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 flex-col transition-[margin] duration-200',
+          collapsed ? 'md:ml-0' : 'md:ml-64',
+        )}
+      >
         <header className="sticky top-0 z-10 flex items-center gap-4 border-b border-line-strong bg-surface px-5 py-2.5">
+          <button
+            onClick={toggleSidebar}
+            className="rounded-lg p-2 text-ink-muted transition hover:bg-surface-sunken hover:text-ink"
+            title={`${collapsed ? 'Show' : 'Hide'} sidebar (⌘/Ctrl+B)`}
+            aria-label={collapsed ? 'Show sidebar' : 'Hide sidebar'}
+            aria-pressed={collapsed}
+          >
+            {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+          </button>
           <GlobalSearch />
 
           <div className="ml-auto flex items-center gap-1.5">

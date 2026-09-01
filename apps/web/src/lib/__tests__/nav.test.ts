@@ -4,7 +4,7 @@ import type { Principal } from '../principal';
 
 const principal = (permissions: string[]): Principal => ({
   userId: 'u',
-  email: 'x@hsdg.in',
+  email: 'x@dhvaj.in',
   displayName: 'X',
   officeId: 'o',
   officeCode: 'NORTH',

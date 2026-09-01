@@ -73,7 +73,7 @@ describe('Compliance scheduler (e2e)', () => {
     await seedIdentityFixtures();
     app = await createTestApp();
     scheduler = app.get(ComplianceSchedulerService);
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -81,7 +81,7 @@ describe('Compliance scheduler (e2e)', () => {
   });
 
   it('runs the sweep as the resolved managing-partner operator (no HTTP principal)', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const eng = await createEngagement(pa);
     const code = await createExactRule();
     await request(app.getHttpServer())

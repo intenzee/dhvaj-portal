@@ -38,7 +38,7 @@ describe('Notification delivery outbox (e2e)', () => {
     await seedIdentityFixtures();
     app = await createTestApp();
     outbox = app.get(NotificationOutboxService);
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -47,7 +47,7 @@ describe('Notification delivery outbox (e2e)', () => {
 
   it('enqueues external deliveries on emit and drains them to sent', async () => {
     // Emit at least one notification: a critically-overdue statutory obligation.
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const entityId = await findId('/api/v1/entities?search=Bharat&limit=1');
     const serviceId = await findId('/api/v1/services?search=ITR_FILING&limit=1');
     const eng = (

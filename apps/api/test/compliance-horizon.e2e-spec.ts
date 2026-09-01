@@ -73,7 +73,7 @@ describe('Rolling recurring-work horizon (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -89,7 +89,7 @@ describe('Rolling recurring-work horizon (e2e)', () => {
   });
 
   it('bounds generation to the horizon, then rolls forward idempotently', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     await configure(pa, engId, 'GSTR1'); // monthly
 
@@ -112,7 +112,7 @@ describe('Rolling recurring-work horizon (e2e)', () => {
   });
 
   it('shrinking the horizon never cancels already-created future work', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const engId = await createEngagement(pa);
     await configure(pa, engId, 'GSTR1');
     await roll(pa, { horizonMonths: 12, engagementId: engId }).expect(201); // full FY (12)
@@ -126,6 +126,6 @@ describe('Rolling recurring-work horizon (e2e)', () => {
   });
 
   it('forbids a Senior (no engagement.manage) from rolling the horizon (403)', async () => {
-    await roll(await token('senior.y@hsdg.in'), { horizonMonths: 3 }).expect(403);
+    await roll(await token('senior.y@dhvaj.in'), { horizonMonths: 3 }).expect(403);
   });
 });

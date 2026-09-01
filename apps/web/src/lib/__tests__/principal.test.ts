@@ -3,7 +3,7 @@ import { can, hasRole, roleLabel, type Principal } from '../principal';
 
 const base: Principal = {
   userId: 'u1',
-  email: 'p@hsdg.in',
+  email: 'p@dhvaj.in',
   displayName: 'Partner A',
   officeId: 'o1',
   officeCode: 'NORTH',

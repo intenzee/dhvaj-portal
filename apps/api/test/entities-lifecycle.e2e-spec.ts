@@ -34,7 +34,7 @@ describe('Entity Master lifecycle (e2e)', () => {
   });
 
   it('creates on minimum identity and surfaces missing info (§5/§27)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const res = await create(t, {
       legalName: 'Minimal Identity Pvt Ltd',
       typeSlug: 'private_limited',
@@ -54,7 +54,7 @@ describe('Entity Master lifecycle (e2e)', () => {
   });
 
   it('round-trips the new identity/constitution/regulatory fields', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const res = await create(t, {
       legalName: 'Fielded Co Pvt Ltd',
       tradeName: 'Fielded',
@@ -75,7 +75,7 @@ describe('Entity Master lifecycle (e2e)', () => {
   });
 
   it('registration obtained later: pending → active + verified (§34/§11)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const created = await create(t, {
       legalName: 'GST Later Pvt Ltd',
       typeSlug: 'private_limited',
@@ -123,7 +123,7 @@ describe('Entity Master lifecycle (e2e)', () => {
   });
 
   it('financials are append-only per year — superseded, never overwritten (§16)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const created = await create(t, {
       legalName: 'Finance History Pvt Ltd',
       typeSlug: 'private_limited',
@@ -162,7 +162,7 @@ describe('Entity Master lifecycle (e2e)', () => {
   });
 
   it('flags a complete regulatory profile Needs Reassessment on master change (§28)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const created = await create(t, {
       legalName: 'Reassess Co Pvt Ltd',
       typeSlug: 'private_limited',

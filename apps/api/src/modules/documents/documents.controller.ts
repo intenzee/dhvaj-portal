@@ -15,6 +15,7 @@ import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { DocumentsService } from './documents.service';
+import { OnlyOfficeService, type EditorSession } from './onlyoffice/onlyoffice.service';
 import type { DocumentDetail, DocumentRecord } from './documents.types';
 import {
   AddVersionDto,
@@ -33,7 +34,21 @@ import {
 @ApiTags('engagement-documents')
 @Controller('engagements')
 export class DocumentsController {
-  constructor(private readonly documents: DocumentsService) {}
+  constructor(
+    private readonly documents: DocumentsService,
+    private readonly onlyoffice: OnlyOfficeService,
+  ) {}
+
+  @Post(':id/documents/:docId/onlyoffice/session')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Build an embedded OnlyOffice editor session for a document' })
+  onlyofficeSession(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+  ): Promise<EditorSession> {
+    return this.onlyoffice.buildSession(principal, id, docId);
+  }
 
   @Get(':id/documents')
   @RequirePermissions(PERMISSION.engagementRead)

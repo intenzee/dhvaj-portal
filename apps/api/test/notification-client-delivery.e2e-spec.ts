@@ -37,7 +37,7 @@ describe('Client-facing PBC delivery (e2e)', () => {
     await seedIdentityFixtures();
     app = await createTestApp();
     outbox = app.get(NotificationOutboxService);
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -45,7 +45,7 @@ describe('Client-facing PBC delivery (e2e)', () => {
   });
 
   it('enqueues a client email delivery when a PBC is escalation-overdue', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const entityId = await findId(mp, '/api/v1/entities?search=Acme&limit=1');
     const serviceId = await findId(mp, '/api/v1/services?search=STAT_AUDIT&limit=1');
     const eng = (

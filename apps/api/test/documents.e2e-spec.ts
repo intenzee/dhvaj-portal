@@ -73,7 +73,7 @@ describe('Documents (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -83,7 +83,7 @@ describe('Documents (e2e)', () => {
   // ── ACCEPTANCE ────────────────────────────────────────────────────────────
   describe('upload, download, versioning', () => {
     it('uploads a document, downloads the exact bytes, and audits the download', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const content = 'Engagement letter — signed FY26-27';
 
@@ -120,7 +120,7 @@ describe('Documents (e2e)', () => {
     });
 
     it('adds a new version that supersedes, while the earlier version is retained and downloadable', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const created = await uploadDoc(pa, eng, {
         title: 'Working paper',
@@ -168,7 +168,7 @@ describe('Documents (e2e)', () => {
     });
 
     it('archives and restores a document (both audited)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const created = await uploadDoc(pa, eng, {
         title: 'Superseded note',
@@ -206,7 +206,7 @@ describe('Documents (e2e)', () => {
   // ── Authority & RLS ──────────────────────────────────────────────────────
   describe('authority & RLS', () => {
     it('lets a team member (Senior) download, but forbids them uploading (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const seniorY = await findEmployeeId('EMP006');
       await request(app.getHttpServer())
@@ -223,7 +223,7 @@ describe('Documents (e2e)', () => {
       }).expect(201);
       const docId = created.body.id as string;
 
-      const sy = await token('senior.y@hsdg.in');
+      const sy = await token('senior.y@dhvaj.in');
       // Member can download.
       const dl = await request(app.getHttpServer())
         .get(`/api/v1/engagements/${eng}/documents/${docId}/download`)
@@ -241,7 +241,7 @@ describe('Documents (e2e)', () => {
     });
 
     it('does not let an unassigned partner list, read, or download — a document id cannot bypass access (404)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const created = await uploadDoc(pa, eng, {
         title: 'Confidential',
@@ -252,7 +252,7 @@ describe('Documents (e2e)', () => {
       }).expect(201);
       const docId = created.body.id as string;
 
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
       await request(app.getHttpServer())
         .get(`/api/v1/engagements/${eng}/documents`)
         .set(bearer(pb))
@@ -269,7 +269,7 @@ describe('Documents (e2e)', () => {
     });
 
     it('rejects an over-size upload (413)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       // Size just over DOCUMENT_MAX_BYTES (but under the JSON body ceiling) so the
       // request reaches the app-level size guard rather than the body parser.
@@ -285,7 +285,7 @@ describe('Documents (e2e)', () => {
 
   describe('cross-engagement list (GET /documents)', () => {
     it('lists the caller’s documents across engagements with client/engagement context', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const title = `Global doc ${unique()}`;
       const created = await uploadDoc(pa, eng, {
@@ -316,7 +316,7 @@ describe('Documents (e2e)', () => {
     });
 
     it('does NOT surface a document on an engagement the caller is not assigned to', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const title = `Private doc ${unique()}`;
       await uploadDoc(pa, eng, {
@@ -327,7 +327,7 @@ describe('Documents (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .get(`/api/v1/documents?search=${encodeURIComponent(title)}&limit=50`)
-        .set(bearer(await token('partner.b@hsdg.in')))
+        .set(bearer(await token('partner.b@dhvaj.in')))
         .expect(200);
       expect(res.body.items).toHaveLength(0);
     });
@@ -335,7 +335,7 @@ describe('Documents (e2e)', () => {
     it('forbids a caller without engagement.read (403)', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/documents')
-        .set(bearer(await token('admin@hsdg.in')))
+        .set(bearer(await token('admin@dhvaj.in')))
         .expect(403);
     });
   });

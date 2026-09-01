@@ -42,9 +42,9 @@ describe('Identity & Security (e2e)', () => {
     it('returns the principal for a valid token', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/auth/me')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
-      expect(res.body.principal.email).toBe('partner.a@hsdg.in');
+      expect(res.body.principal.email).toBe('partner.a@dhvaj.in');
       expect(res.body.principal.effectiveRole).toBe('partner');
       expect(res.body.context.role).toBe('partner');
     });
@@ -54,14 +54,14 @@ describe('Identity & Security (e2e)', () => {
     it('allows a non-MFA user without an MFA claim', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/auth/me')
-        .set(bearer(await token('manager.x@hsdg.in', false)))
+        .set(bearer(await token('manager.x@dhvaj.in', false)))
         .expect(200);
     });
 
     it('blocks an MFA-required user whose token lacks MFA (401)', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/auth/me')
-        .set(bearer(await token('partner.a@hsdg.in', false)))
+        .set(bearer(await token('partner.a@dhvaj.in', false)))
         .expect(401);
       expect(res.body.message).toMatch(/multi-factor/i);
     });
@@ -71,14 +71,14 @@ describe('Identity & Security (e2e)', () => {
     it('allows a Partner (has user.read) to list users', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/users')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
     });
 
     it('forbids a Senior (lacks user.read) from listing users (403)', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/users')
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .expect(403);
     });
   });
@@ -87,17 +87,17 @@ describe('Identity & Security (e2e)', () => {
     it('scopes a Partner to their office', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/users?limit=100')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
       const emails = (res.body.items as Array<{ email: string }>).map((u) => u.email);
-      expect(emails).toContain('partner.a@hsdg.in');
-      expect(emails).not.toContain('partner.b@hsdg.in');
+      expect(emails).toContain('partner.a@dhvaj.in');
+      expect(emails).not.toContain('partner.b@dhvaj.in');
     });
 
     it('gives the Managing Partner every user', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/users?limit=100')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(res.body.total).toBeGreaterThanOrEqual(6);
       expect(res.body.items.length).toBeGreaterThanOrEqual(6);
@@ -106,13 +106,13 @@ describe('Identity & Security (e2e)', () => {
     it('returns 404 for a cross-office user fetched by id (scope not leaked)', async () => {
       const list = await request(app.getHttpServer())
         .get('/api/v1/users?limit=100')
-        .set(bearer(await token('mp@hsdg.in')));
+        .set(bearer(await token('mp@dhvaj.in')));
       const partnerB = (list.body.items as Array<{ email: string; id: string }>).find(
-        (u) => u.email === 'partner.b@hsdg.in',
+        (u) => u.email === 'partner.b@dhvaj.in',
       )!;
       await request(app.getHttpServer())
         .get(`/api/v1/users/${partnerB.id}`)
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(404);
     });
   });
@@ -121,7 +121,7 @@ describe('Identity & Security (e2e)', () => {
     it('lets the Managing Partner read the audit trail', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/audit')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(Array.isArray(res.body.items)).toBe(true);
       expect(typeof res.body.total).toBe('number');
@@ -130,7 +130,7 @@ describe('Identity & Security (e2e)', () => {
     it('forbids a Manager from reading the audit trail (403)', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/audit')
-        .set(bearer(await token('manager.x@hsdg.in')))
+        .set(bearer(await token('manager.x@dhvaj.in')))
         .expect(403);
     });
 
@@ -140,12 +140,12 @@ describe('Identity & Security (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/v1/auth/dev-token')
         .set('x-correlation-id', correlationId)
-        .send({ email: 'partner.a@hsdg.in' })
+        .send({ email: 'partner.a@dhvaj.in' })
         .expect(201);
 
       const audit = await request(app.getHttpServer())
         .get('/api/v1/audit?limit=100')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
 
       const matched = (audit.body.items as Array<{ correlationId: string | null }>).some(

@@ -17,12 +17,12 @@ ON CONFLICT (code) DO NOTHING;
 INSERT INTO hsdg.users (email, display_name, primary_office_id, mfa_required)
 SELECT v.email, v.display_name, o.id, v.mfa_required
 FROM (VALUES
-  ('mp@hsdg.in',       'Managing Partner', 'NORTH', true),
-  ('admin@hsdg.in',    'Firm Admin',       'NORTH', true),
-  ('partner.a@hsdg.in','Partner A',        'NORTH', true),
-  ('partner.b@hsdg.in','Partner B',        'SOUTH', true),
-  ('manager.x@hsdg.in','Manager X',        'NORTH', false),
-  ('senior.y@hsdg.in', 'Senior Y',         'SOUTH', false)
+  ('mp@dhvaj.in',       'Managing Partner', 'NORTH', true),
+  ('admin@dhvaj.in',    'Firm Admin',       'NORTH', true),
+  ('partner.a@dhvaj.in','Partner A',        'NORTH', true),
+  ('partner.b@dhvaj.in','Partner B',        'SOUTH', true),
+  ('manager.x@dhvaj.in','Manager X',        'NORTH', false),
+  ('senior.y@dhvaj.in', 'Senior Y',         'SOUTH', false)
 ) AS v(email, display_name, office_code, mfa_required)
 JOIN hsdg.offices o ON o.code = v.office_code
 ON CONFLICT (email) DO NOTHING;
@@ -31,12 +31,12 @@ ON CONFLICT (email) DO NOTHING;
 INSERT INTO hsdg.user_roles (user_id, role_id)
 SELECT u.id, r.id
 FROM (VALUES
-  ('mp@hsdg.in',        'managing_partner'),
-  ('admin@hsdg.in',     'admin'),
-  ('partner.a@hsdg.in', 'partner'),
-  ('partner.b@hsdg.in', 'partner'),
-  ('manager.x@hsdg.in', 'manager'),
-  ('senior.y@hsdg.in',  'senior')
+  ('mp@dhvaj.in',        'managing_partner'),
+  ('admin@dhvaj.in',     'admin'),
+  ('partner.a@dhvaj.in', 'partner'),
+  ('partner.b@dhvaj.in', 'partner'),
+  ('manager.x@dhvaj.in', 'manager'),
+  ('senior.y@dhvaj.in',  'senior')
 ) AS v(email, role_slug)
 JOIN hsdg.users u ON u.email = v.email::citext
 JOIN hsdg.roles r ON r.slug = v.role_slug
@@ -50,12 +50,12 @@ INSERT INTO hsdg.employees
   (employee_code, full_name, user_id, grade_id, primary_office_id, employment_status, date_of_joining)
 SELECT v.code, v.full_name, u.id, g.id, o.id, v.status, v.doj::date
 FROM (VALUES
-  ('EMP001', 'Managing Partner', 'mp@hsdg.in',        'partner', 'NORTH', 'active', '2010-04-01'),
-  ('EMP002', 'Firm Admin',       'admin@hsdg.in',     'manager', 'NORTH', 'active', '2015-06-01'),
-  ('EMP003', 'Partner A',        'partner.a@hsdg.in', 'partner', 'NORTH', 'active', '2012-07-01'),
-  ('EMP004', 'Partner B',        'partner.b@hsdg.in', 'partner', 'SOUTH', 'active', '2013-09-01'),
-  ('EMP005', 'Manager X',        'manager.x@hsdg.in', 'manager', 'NORTH', 'active', '2018-01-15'),
-  ('EMP006', 'Senior Y',         'senior.y@hsdg.in',  'senior',  'SOUTH', 'active', '2020-08-01'),
+  ('EMP001', 'Managing Partner', 'mp@dhvaj.in',        'partner', 'NORTH', 'active', '2010-04-01'),
+  ('EMP002', 'Firm Admin',       'admin@dhvaj.in',     'manager', 'NORTH', 'active', '2015-06-01'),
+  ('EMP003', 'Partner A',        'partner.a@dhvaj.in', 'partner', 'NORTH', 'active', '2012-07-01'),
+  ('EMP004', 'Partner B',        'partner.b@dhvaj.in', 'partner', 'SOUTH', 'active', '2013-09-01'),
+  ('EMP005', 'Manager X',        'manager.x@dhvaj.in', 'manager', 'NORTH', 'active', '2018-01-15'),
+  ('EMP006', 'Senior Y',         'senior.y@dhvaj.in',  'senior',  'SOUTH', 'active', '2020-08-01'),
   ('EMP007', 'Article North',    NULL,                'article', 'NORTH', 'active', '2023-05-01'),
   ('EMP008', 'Article South',    NULL,                'article', 'SOUTH', 'active', '2023-05-01')
 ) AS v(code, full_name, email, grade_slug, office_code, status, doj)

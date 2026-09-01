@@ -13,12 +13,12 @@ import { Button, Card, CardBody } from '@/components/ui';
  * production), with quick-select personas for each role.
  */
 const SEEDED = [
-  { email: 'mp@hsdg.in', label: 'Managing Partner' },
-  { email: 'partner.a@hsdg.in', label: 'Partner A (North)' },
-  { email: 'partner.b@hsdg.in', label: 'Partner B (South)' },
-  { email: 'manager.x@hsdg.in', label: 'Manager X' },
-  { email: 'senior.y@hsdg.in', label: 'Senior Y' },
-  { email: 'admin@hsdg.in', label: 'Administrator' },
+  { email: 'mp@dhvaj.in', label: 'Managing Partner' },
+  { email: 'partner.a@dhvaj.in', label: 'Partner A (North)' },
+  { email: 'partner.b@dhvaj.in', label: 'Partner B (South)' },
+  { email: 'manager.x@dhvaj.in', label: 'Manager X' },
+  { email: 'senior.y@dhvaj.in', label: 'Senior Y' },
+  { email: 'admin@dhvaj.in', label: 'Administrator' },
 ];
 
 export default function LoginPage(): JSX.Element {
@@ -53,7 +53,7 @@ export default function LoginPage(): JSX.Element {
               H
             </div>
             <div className="text-2xl font-bold tracking-tight text-ink">
-              HSDG <span className="text-ink-faint">Portal</span>
+              Dhvaj <span className="text-ink-faint">Portal</span>
             </div>
           </div>
           <p className="mb-6 text-sm text-ink-muted">Sign in to the practice portal.</p>

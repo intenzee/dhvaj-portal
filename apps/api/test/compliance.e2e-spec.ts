@@ -84,7 +84,7 @@ describe('Compliance Engine (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -94,7 +94,7 @@ describe('Compliance Engine (e2e)', () => {
   // ── HEADLINE ACCEPTANCE ──────────────────────────────────────────────────
   describe('changing a future rule leaves historical instances unchanged', () => {
     it('an instance keeps its snapshotted version + deadline after a new future version is added', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `ITR_${unique()}`;
       // v1: FY end + 7 months, no working-day adjustment ⇒ deterministic.
       await createRule(code, {
@@ -145,7 +145,7 @@ describe('Compliance Engine (e2e)', () => {
     });
 
     it('a future-period engagement picks up the newer version (selection by reference date)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `ITR2_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2020-04-01',
@@ -182,7 +182,7 @@ describe('Compliance Engine (e2e)', () => {
   // ── Two clocks + overdue + override ──────────────────────────────────────
   describe('two clocks, overdue detection, and audited overrides', () => {
     it('computes a period-end deadline, flags it overdue, then an override clears it (audited)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `GST_${unique()}`;
       // GST: period end + 20 days.
       await createRule(
@@ -244,7 +244,7 @@ describe('Compliance Engine (e2e)', () => {
     });
 
     it('applies working-day adjustment (next) over a weekend + holiday', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       // Seed a holiday on Mon 2026-06-22 (tolerate 409 if a prior run added it —
       // the holiday calendar is a fixed-date firm-wide table on a shared dev DB).
       const holiday = await request(app.getHttpServer())
@@ -273,7 +273,7 @@ describe('Compliance Engine (e2e)', () => {
   // ── Conditional applicability ────────────────────────────────────────────
   describe('conditional rules', () => {
     it('applies only when the supplied context satisfies the condition', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `COND_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2017-07-01',
@@ -301,7 +301,7 @@ describe('Compliance Engine (e2e)', () => {
   // ── Complete / duplicate ─────────────────────────────────────────────────
   describe('instance lifecycle', () => {
     it('completes an obligation and prevents a duplicate for the same period (409)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `DUP_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2017-07-01',
@@ -343,13 +343,13 @@ describe('Compliance Engine (e2e)', () => {
     it('forbids a Partner (no compliance.manage) from configuring rules (403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/compliance-rules')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .send({ code: `X_${unique()}`, name: 'x' })
         .expect(403);
     });
 
     it('lets the platform admin configure rules but NOT manage engagement compliance', async () => {
-      const admin = await token('admin@hsdg.in');
+      const admin = await token('admin@dhvaj.in');
       const code = `ADM_${unique()}`;
       // admin has compliance.manage (config authority).
       const rule = await request(app.getHttpServer())
@@ -363,7 +363,7 @@ describe('Compliance Engine (e2e)', () => {
         .send({ effectiveFrom: '2020-04-01', calculationBasis: 'fy_end', offsetMonths: 7 })
         .expect(201);
       // …but no engagement.manage ⇒ cannot generate on an engagement.
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa, '2026-27');
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/compliance`)
@@ -373,7 +373,7 @@ describe('Compliance Engine (e2e)', () => {
     });
 
     it('forbids a Senior (no engagement.manage) from generating an instance (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `SEN_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2020-04-01',
@@ -383,13 +383,13 @@ describe('Compliance Engine (e2e)', () => {
       const eng = await createEngagement(pa, '2026-27');
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/compliance`)
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ complianceRuleCode: code })
         .expect(403);
     });
 
     it('does not let an unassigned partner generate/list compliance on another’s engagement (404)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `RLS_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2020-04-01',
@@ -397,7 +397,7 @@ describe('Compliance Engine (e2e)', () => {
         offsetMonths: 7,
       });
       const eng = await createEngagement(pa, '2026-27');
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
       await request(app.getHttpServer())
         .get(`/api/v1/engagements/${eng}/compliance`)
         .set(bearer(pb))
@@ -413,7 +413,7 @@ describe('Compliance Engine (e2e)', () => {
   // ── Version selection for DERIVED reference dates (fixed_date / event_date) ──
   describe('version selection for derived reference dates', () => {
     it('fixed_date: picks the version in force at FY end and uses its month/day', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `FIX_${unique()}`;
       // v1: 31 Oct; v2 (future): 30 Nov.
       const ruleId = await createRule(code, {
@@ -457,7 +457,7 @@ describe('Compliance Engine (e2e)', () => {
     });
 
     it('event_date: selects the version as of the event date and rejects both dates', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `EVT_${unique()}`;
       const ruleId = await createRule(code, {
         effectiveFrom: '2020-04-01',
@@ -507,7 +507,7 @@ describe('Compliance Engine (e2e)', () => {
   // ── Bulk generation, list filter, firm-wide calendar ─────────────────────
   describe('bulk generation, status filter, and the firm-wide calendar', () => {
     it('generates obligations for every derivable rule on the service, skipping the rest', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       // Two fy_end rules on ROC_ANNUAL (derivable) + one period_end rule (needs a date ⇒ skipped).
       const okA = `BULKA_${unique()}`;
       const okB = `BULKB_${unique()}`;
@@ -543,7 +543,7 @@ describe('Compliance Engine (e2e)', () => {
     });
 
     it('filters the per-engagement list by status', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `LST_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2020-04-01',
@@ -575,7 +575,7 @@ describe('Compliance Engine (e2e)', () => {
     });
 
     it('exposes an RLS-scoped firm-wide calendar with overdue filtering', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const code = `CAL_${unique()}`;
       await createRule(code, {
         effectiveFrom: '2017-07-01',
@@ -606,7 +606,7 @@ describe('Compliance Engine (e2e)', () => {
       // An unrelated partner does NOT see it on their calendar (RLS-scoped).
       const pbCal = await request(app.getHttpServer())
         .get(`/api/v1/compliance${window}`)
-        .set(bearer(await token('partner.b@hsdg.in')))
+        .set(bearer(await token('partner.b@dhvaj.in')))
         .expect(200);
       expect((pbCal.body.items as Array<{ id: string }>).some((i) => i.id === gen.body.id)).toBe(
         false,

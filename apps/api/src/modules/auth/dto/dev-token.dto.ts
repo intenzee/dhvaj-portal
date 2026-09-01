@@ -3,7 +3,7 @@ import { IsBoolean, IsEmail, IsOptional } from 'class-validator';
 
 /** Request body for minting a development access token. */
 export class DevTokenDto {
-  @ApiProperty({ example: 'partner.a@hsdg.in', description: 'A seeded user email.' })
+  @ApiProperty({ example: 'partner.a@dhvaj.in', description: 'A seeded user email.' })
   @IsEmail()
   email!: string;
 

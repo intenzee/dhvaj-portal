@@ -21,6 +21,8 @@
     "test:e2e": "npm run test:e2e --workspaces --if-present",
     "db:up": "docker compose up -d postgres redis",
     "db:down": "docker compose down",
+    "oo:up": "docker compose up -d onlyoffice",
+    "oo:down": "docker compose stop onlyoffice",
     "db:migrate": "npm run migrate:up --workspace @hsdg/api",
     "db:migrate:create": "npm run migrate:create --workspace @hsdg/api",
     "db:seed:dev": "PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d hsdg -v ON_ERROR_STOP=1 -f db/seeds/dev_identity.sql",

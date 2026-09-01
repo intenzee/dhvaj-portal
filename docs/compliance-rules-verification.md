@@ -60,7 +60,7 @@ For the API, mint a token and authorise Swagger (`http://localhost:3001/api/docs
 
 ```bash
 curl -s -X POST http://localhost:3001/api/v1/auth/dev-token \
-  -H 'Content-Type: application/json' -d '{"email":"mp@hsdg.in"}'
+  -H 'Content-Type: application/json' -d '{"email":"mp@dhvaj.in"}'
 ```
 
 ## 3. Part 1 — event-based statutory rules

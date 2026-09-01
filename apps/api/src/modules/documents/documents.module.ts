@@ -4,6 +4,8 @@ import { StorageModule } from './storage/storage.module';
 import { DocumentsService } from './documents.service';
 import { DocumentsController } from './documents.controller';
 import { DocumentsListController } from './documents-list.controller';
+import { OnlyOfficeController } from './onlyoffice/onlyoffice.controller';
+import { OnlyOfficeService } from './onlyoffice/onlyoffice.service';
 
 /**
  * Documents (Phase 10). Engagement-scoped professional evidence: metadata +
@@ -14,8 +16,8 @@ import { DocumentsListController } from './documents-list.controller';
  */
 @Module({
   imports: [AuditModule, StorageModule],
-  controllers: [DocumentsController, DocumentsListController],
-  providers: [DocumentsService],
+  controllers: [DocumentsController, DocumentsListController, OnlyOfficeController],
+  providers: [DocumentsService, OnlyOfficeService],
   exports: [DocumentsService],
 })
 export class DocumentsModule {}

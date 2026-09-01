@@ -90,7 +90,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -99,7 +99,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
 
   describe('effective review model surfaced on the engagement', () => {
     it('inherits the service default (manager_review for ITR, full_ep_review for statutory audit)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const itr = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       const itrDetail = await request(app.getHttpServer())
         .get(`/api/v1/engagements/${itr.id}`)
@@ -123,8 +123,8 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── ACCEPTANCE SCENARIO 1 ────────────────────────────────────────────────
   describe('Scenario 1 — ITR: manager reviews AND completes (EP stays accountable)', () => {
     it('lets the manager review, sign off, and complete a manager_review service', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const mgr = await token('manager.x@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const mgr = await token('manager.x@dhvaj.in');
       const eng = await setupActive({
         epToken: pa,
         serviceCode: 'ITR_FILING',
@@ -163,8 +163,8 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── ACCEPTANCE SCENARIO 2 ────────────────────────────────────────────────
   describe('Scenario 2 — Statutory Audit: manager cannot complete without EP sign-off', () => {
     it('blocks the manager at sign-off (403) and at completion (400); the EP unblocks it', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const mgr = await token('manager.x@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const mgr = await token('manager.x@dhvaj.in');
       const eng = await setupActive({
         epToken: pa,
         serviceCode: 'STAT_AUDIT',
@@ -223,7 +223,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── Review points & resolution ───────────────────────────────────────────
   describe('review points block sign-off until resolved', () => {
     it('raises a point on an EP review, blocks sign-off, then clears after resolution', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'STAT_AUDIT' });
 
       const reviewed = await request(app.getHttpServer())
@@ -290,8 +290,8 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── Review plan escalation (§2.1 / §2.4) ─────────────────────────────────
   describe('review plan is escalate-only', () => {
     it('lets the EP raise ITR to full EP review (then the manager can no longer sign off)', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const mgr = await token('manager.x@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const mgr = await token('manager.x@dhvaj.in');
       const eng = await setupActive({
         epToken: pa,
         serviceCode: 'ITR_FILING',
@@ -316,7 +316,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
     });
 
     it('rejects weakening the review plan below the service requirement (400)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       // Statutory audit requires full_ep_review; manager_review is weaker.
       const eng = await setupActive({ epToken: pa, serviceCode: 'STAT_AUDIT' });
       await request(app.getHttpServer())
@@ -327,8 +327,8 @@ describe('Review & Sign-off Engine (e2e)', () => {
     });
 
     it('forbids a non-EP lead (the manager) from setting the review plan (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const mgr = await token('manager.x@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const mgr = await token('manager.x@dhvaj.in');
       const eng = await setupActive({
         epToken: pa,
         serviceCode: 'ITR_FILING',
@@ -346,7 +346,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── Sign-off is terminal to further review changes ───────────────────────
   describe('sign-off is terminal to review changes (no silent gate bypass)', () => {
     it('blocks recording a new review once signed off (409)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       const signed = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng.id}/sign-off`)
@@ -366,8 +366,8 @@ describe('Review & Sign-off Engine (e2e)', () => {
     });
 
     it('blocks escalating the review plan once signed off — so a manager sign-off cannot be silently invalidated (400)', async () => {
-      const pa = await token('partner.a@hsdg.in');
-      const mgr = await token('manager.x@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
+      const mgr = await token('manager.x@dhvaj.in');
       const eng = await setupActive({
         epToken: pa,
         serviceCode: 'ITR_FILING',
@@ -393,7 +393,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── Reopen invalidates the sign-off ──────────────────────────────────────
   describe('reopening a completed engagement invalidates its sign-off', () => {
     it('requires a fresh sign-off before it can complete again', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
 
       const signed = await request(app.getHttpServer())
@@ -439,7 +439,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── Sign-off history (deliverable 8) ─────────────────────────────────────
   describe('sign-off history', () => {
     it('lists every review + sign-off, newest first, with review points', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'STAT_AUDIT' });
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng.id}/reviews`)
@@ -484,27 +484,27 @@ describe('Review & Sign-off Engine (e2e)', () => {
   // ── Role / RLS negatives ─────────────────────────────────────────────────
   describe('authority & RLS', () => {
     it('forbids a Senior (no engagement.manage) from recording a review (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'STAT_AUDIT' });
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng.id}/reviews`)
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ reviewType: 'manager_review', outcome: 'cleared' })
         .expect(403);
     });
 
     it('does not let an unassigned partner sign off another partner’s engagement (404)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const eng = await setupActive({ epToken: pa, serviceCode: 'ITR_FILING' });
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng.id}/sign-off`)
-        .set(bearer(await token('partner.b@hsdg.in')))
+        .set(bearer(await token('partner.b@dhvaj.in')))
         .send({})
         .expect(404);
     });
 
     it('cannot record a review on an engagement that is not active (400)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const entityId = await findEntityId('Bharat');
       const serviceId = await findServiceId('ITR_FILING');
       // Created at 'accepted' but never started.

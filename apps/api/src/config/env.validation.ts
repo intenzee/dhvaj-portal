@@ -80,6 +80,26 @@ export const envSchema = z.object({
     .positive()
     .default(10 * 1024 * 1024),
 
+  // ── OnlyOffice Document Server (in-app Office editing) ────────────────────
+  // Embeds the OnlyOffice editor for Excel/Word/PDF with full desktop fidelity.
+  // Off in production unless explicitly enabled; on by default in dev so the
+  // feature works out of the box once `npm run oo:up` is running.
+  ONLYOFFICE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  // Browser-facing base URL of the Document Server (used to load its editor
+  // script) — must be reachable from the user's browser.
+  ONLYOFFICE_DS_PUBLIC_URL: z.string().url().default('http://localhost:8080'),
+  // URL the Document Server uses to reach THIS api for the file download and the
+  // save callback. From inside the DS container the host API is host.docker.internal.
+  ONLYOFFICE_API_INTERNAL_URL: z.string().url().default('http://host.docker.internal:3001'),
+  // Shared secret between this API and the Document Server (its JWT_SECRET),
+  // signing the editor config and the save callback. The dev default is
+  // INSECURE and MUST be overridden (on both sides) in production; empty string
+  // disables DS-side JWT (dev only).
+  ONLYOFFICE_JWT_SECRET: z.string().default('dev-onlyoffice-shared-secret-change-me'),
+
   // ── Notifications (Phase 11) ─────────────────────────────────────────────
   // Enabled delivery channels (comma-separated). `portal` (the in-app row) is
   // always on; add `email` and/or `teams` to fan out to those (stub transports

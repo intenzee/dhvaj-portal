@@ -66,7 +66,7 @@ describe('Service Components & Configuration (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -98,7 +98,7 @@ describe('Service Components & Configuration (e2e)', () => {
 
       await request(app.getHttpServer())
         .post('/api/v1/service-components')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .send({ serviceCode: 'GST_MONTHLY', code: `C_${unique()}`, name: 'Nope' })
         .expect(403);
     });
@@ -108,7 +108,7 @@ describe('Service Components & Configuration (e2e)', () => {
 
   describe('component discovery', () => {
     it('categorises the catalogue for the engagement’s service', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa, 'GST_MONTHLY');
       const res = await request(app.getHttpServer())
         .get(`/api/v1/engagements/${engId}/components/discovery`)
@@ -155,7 +155,7 @@ describe('Service Components & Configuration (e2e)', () => {
         })
         .expect(201);
 
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa, 'GST_MONTHLY');
       const res = await request(app.getHttpServer())
         .get(`/api/v1/engagements/${engId}/components/discovery`)
@@ -173,7 +173,7 @@ describe('Service Components & Configuration (e2e)', () => {
 
   describe('component configuration', () => {
     it('selects, dedupes, amends, removes, then re-adds a component', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa, 'GST_MONTHLY');
 
       // Select GSTR1 — applicability defaults from the catalogue (mandatory).
@@ -229,19 +229,19 @@ describe('Service Components & Configuration (e2e)', () => {
 
   describe('access control', () => {
     it('blocks a role without engagement.manage from configuring (403)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa, 'GST_MONTHLY');
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${engId}/components`)
-        .set(bearer(await token('senior.y@hsdg.in')))
+        .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ serviceComponentCode: 'GSTR1' })
         .expect(403);
     });
 
     it('does not let an unassigned partner discover or configure another’s engagement (404)', async () => {
-      const pa = await token('partner.a@hsdg.in');
+      const pa = await token('partner.a@dhvaj.in');
       const engId = await createEngagement(pa, 'GST_MONTHLY');
-      const pb = await token('partner.b@hsdg.in');
+      const pb = await token('partner.b@dhvaj.in');
 
       await request(app.getHttpServer())
         .get(`/api/v1/engagements/${engId}/components/discovery`)

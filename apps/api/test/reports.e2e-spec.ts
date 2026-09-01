@@ -33,12 +33,12 @@ describe('Reports & MIS (e2e)', () => {
     it('lets a manager (report.read) read the engagement MIS', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/reports/engagements')
-        .set(bearer(await token('manager.x@hsdg.in')))
+        .set(bearer(await token('manager.x@dhvaj.in')))
         .expect(200);
     });
 
     it('forbids a senior (no report.read) from every report (403)', async () => {
-      const t = await token('senior.y@hsdg.in');
+      const t = await token('senior.y@dhvaj.in');
       for (const path of ['engagements', 'compliance', 'utilisation']) {
         await request(app.getHttpServer())
           .get(`/api/v1/reports/${path}`)
@@ -52,7 +52,7 @@ describe('Reports & MIS (e2e)', () => {
     it('returns totals and breakdowns for the Managing Partner', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/reports/engagements')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(typeof res.body.totals.total).toBe('number');
       expect(res.body.totals.total).toBeGreaterThan(0);
@@ -68,11 +68,11 @@ describe('Reports & MIS (e2e)', () => {
     it('scopes the totals by RLS — a partner sees no more than the MP', async () => {
       const mp = await request(app.getHttpServer())
         .get('/api/v1/reports/engagements')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const pa = await request(app.getHttpServer())
         .get('/api/v1/reports/engagements')
-        .set(bearer(await token('partner.a@hsdg.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
       expect(pa.body.totals.total).toBeLessThanOrEqual(mp.body.totals.total);
       expect(pa.body.totals.total).toBeGreaterThan(0);
@@ -83,7 +83,7 @@ describe('Reports & MIS (e2e)', () => {
     it('returns totals and by-category rollups, honouring dueSoonDays', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/reports/compliance?dueSoonDays=45')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(res.body.dueSoonWindowDays).toBe(45);
       expect(typeof res.body.totals.open).toBe('number');
@@ -104,7 +104,7 @@ describe('Reports & MIS (e2e)', () => {
     it('returns per-employee workload rows for the Managing Partner', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/reports/utilisation')
-        .set(bearer(await token('mp@hsdg.in')))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(Array.isArray(res.body.rows)).toBe(true);
       // Every listed employee has some visible involvement (the report filters zeros).

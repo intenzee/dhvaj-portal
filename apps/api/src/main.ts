@@ -70,7 +70,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(port);
 
   logger.log(
-    `HSDG API listening on http://localhost:${port}/${globalPrefix}/${API_VERSION}`,
+    `Dhvaj API listening on http://localhost:${port}/${globalPrefix}/${API_VERSION}`,
     'Bootstrap',
   );
   if (serveDocs) {

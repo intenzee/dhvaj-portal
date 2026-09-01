@@ -47,28 +47,28 @@ describe('RLS (database-level, independent of the application)', () => {
 
   it('scopes a Partner to their own office (North sees North, not South)', async () => {
     const rows = await underContext<{ email: string }>(
-      { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
+      { userId: userIds['partner.a@dhvaj.in'], role: 'partner', officeId: officeIds['NORTH'] },
       'SELECT email FROM hsdg.users',
     );
     const emails = rows.map((r) => r.email);
-    expect(emails).toContain('partner.a@hsdg.in');
-    expect(emails).toContain('manager.x@hsdg.in');
+    expect(emails).toContain('partner.a@dhvaj.in');
+    expect(emails).toContain('manager.x@dhvaj.in');
     // Cross-office identities are invisible.
-    expect(emails).not.toContain('partner.b@hsdg.in');
-    expect(emails).not.toContain('senior.y@hsdg.in');
+    expect(emails).not.toContain('partner.b@dhvaj.in');
+    expect(emails).not.toContain('senior.y@dhvaj.in');
   });
 
   it('denies a Partner reading a cross-office user even by direct id', async () => {
     const rows = await underContext(
-      { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
-      `SELECT id FROM hsdg.users WHERE id = '${userIds['partner.b@hsdg.in']}'`,
+      { userId: userIds['partner.a@dhvaj.in'], role: 'partner', officeId: officeIds['NORTH'] },
+      `SELECT id FROM hsdg.users WHERE id = '${userIds['partner.b@dhvaj.in']}'`,
     );
     expect(rows).toHaveLength(0);
   });
 
   it('grants the Managing Partner firm-wide visibility (all users)', async () => {
     const rows = await underContext(
-      { userId: userIds['mp@hsdg.in'], role: 'managing_partner', officeId: officeIds['NORTH'] },
+      { userId: userIds['mp@dhvaj.in'], role: 'managing_partner', officeId: officeIds['NORTH'] },
       'SELECT id FROM hsdg.users',
     );
     expect(rows.length).toBeGreaterThanOrEqual(6);
@@ -97,7 +97,7 @@ describe('RLS (database-level, independent of the application)', () => {
     const none = await underContext({}, 'SELECT slug FROM hsdg.roles');
     expect(none).toHaveLength(0);
     const some = await underContext(
-      { userId: userIds['manager.x@hsdg.in'], role: 'manager', officeId: officeIds['NORTH'] },
+      { userId: userIds['manager.x@dhvaj.in'], role: 'manager', officeId: officeIds['NORTH'] },
       'SELECT slug FROM hsdg.roles',
     );
     expect(some.length).toBeGreaterThan(0);
@@ -114,7 +114,7 @@ describe('RLS (database-level, independent of the application)', () => {
 
     it('scopes a Partner to their office (North sees North employees only)', async () => {
       const rows = await underContext<{ employee_code: string }>(
-        { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
+        { userId: userIds['partner.a@dhvaj.in'], role: 'partner', officeId: officeIds['NORTH'] },
         'SELECT employee_code FROM hsdg.employees',
       );
       const codes = rows.map((r) => r.employee_code);
@@ -125,7 +125,7 @@ describe('RLS (database-level, independent of the application)', () => {
 
     it('grants the Managing Partner every employee', async () => {
       const rows = await underContext(
-        { userId: userIds['mp@hsdg.in'], role: 'managing_partner', officeId: officeIds['NORTH'] },
+        { userId: userIds['mp@dhvaj.in'], role: 'managing_partner', officeId: officeIds['NORTH'] },
         'SELECT id FROM hsdg.employees',
       );
       expect(rows.length).toBeGreaterThanOrEqual(8);
@@ -146,7 +146,7 @@ describe('RLS (database-level, independent of the application)', () => {
 
     it('scopes a Partner to their office (North sees North clients only)', async () => {
       const rows = await underContext<{ legal_name: string }>(
-        { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
+        { userId: userIds['partner.a@dhvaj.in'], role: 'partner', officeId: officeIds['NORTH'] },
         'SELECT legal_name FROM hsdg.entities',
       );
       const names = rows.map((r) => r.legal_name);
@@ -156,7 +156,7 @@ describe('RLS (database-level, independent of the application)', () => {
 
     it('hides a cross-office client’s registrations from an office-scoped role', async () => {
       const rows = await underContext<{ registration_number: string }>(
-        { userId: userIds['partner.a@hsdg.in'], role: 'partner', officeId: officeIds['NORTH'] },
+        { userId: userIds['partner.a@dhvaj.in'], role: 'partner', officeId: officeIds['NORTH'] },
         'SELECT registration_number FROM hsdg.entity_registrations',
       );
       const numbers = rows.map((r) => r.registration_number);
@@ -181,7 +181,7 @@ describe('RLS (database-level, independent of the application)', () => {
 
     it('is firm-wide config: any authenticated role sees all services', async () => {
       const rows = await underContext(
-        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        { userId: userIds['senior.y@dhvaj.in'], role: 'senior', officeId: officeIds['SOUTH'] },
         'SELECT id FROM hsdg.services',
       );
       expect(rows.length).toBeGreaterThanOrEqual(11);
@@ -418,12 +418,12 @@ describe('RLS (database-level, independent of the application)', () => {
 
     it('lifecycle transitions and workflow transitions are firm-wide config: any authenticated role reads them', async () => {
       const rows = await underContext(
-        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        { userId: userIds['senior.y@dhvaj.in'], role: 'senior', officeId: officeIds['SOUTH'] },
         'SELECT action FROM hsdg.engagement_lifecycle_transitions',
       );
       expect(rows.length).toBeGreaterThanOrEqual(14);
       const wf = await underContext(
-        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        { userId: userIds['senior.y@dhvaj.in'], role: 'senior', officeId: officeIds['SOUTH'] },
         'SELECT id FROM hsdg.workflow_transitions',
       );
       expect(wf.length).toBeGreaterThanOrEqual(1);
@@ -496,14 +496,14 @@ describe('RLS (database-level, independent of the application)', () => {
       const acmeId = await acmeEngagementId();
       await app.query('BEGIN');
       try {
-        await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', userIds['mp@hsdg.in']]);
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', userIds['mp@dhvaj.in']]);
         await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', 'managing_partner']);
         await app.query('SELECT set_config($1,$2,true)', ['hsdg.office_id', officeIds['NORTH']]);
         await app.query(
           `INSERT INTO hsdg.audit_events (actor_user_id, actor_role, action, object_type, object_id, before_state, after_state)
            VALUES ($1, 'partner', 'engagement.status_changed', 'engagement', $2, $3::jsonb, $4::jsonb)`,
           [
-            userIds['partner.a@hsdg.in'],
+            userIds['partner.a@dhvaj.in'],
             acmeId,
             JSON.stringify({ status: 'accepted', version: 1 }),
             JSON.stringify({ status: 'active', version: 2 }),
@@ -571,7 +571,7 @@ describe('RLS (database-level, independent of the application)', () => {
 
     it('review models expose requires_ep_signoff and are read-only to the app role', async () => {
       const rows = await underContext<{ slug: string; requires_ep_signoff: boolean }>(
-        { userId: userIds['senior.y@hsdg.in'], role: 'senior', officeId: officeIds['SOUTH'] },
+        { userId: userIds['senior.y@dhvaj.in'], role: 'senior', officeId: officeIds['SOUTH'] },
         `SELECT slug, requires_ep_signoff FROM hsdg.review_models ORDER BY rank`,
       );
       const byslug = Object.fromEntries(rows.map((r) => [r.slug, r.requires_ep_signoff]));
@@ -613,7 +613,7 @@ describe('RLS (database-level, independent of the application)', () => {
           );
 
         // MP (firm-wide lead) records a review on the Acme engagement.
-        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        await setCtx(userIds['mp@dhvaj.in'], 'managing_partner', 'NORTH', mpEmp);
         await app.query(
           `INSERT INTO hsdg.engagement_reviews
              (engagement_id, review_type, reviewer_employee_id, reviewer_role, outcome)
@@ -622,14 +622,14 @@ describe('RLS (database-level, independent of the application)', () => {
         );
 
         // Unassigned Partner B (South) cannot see it.
-        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        await setCtx(userIds['partner.b@dhvaj.in'], 'partner', 'SOUTH', partnerB);
         const asB = await app.query(
           `SELECT id FROM hsdg.engagement_reviews WHERE engagement_id = '${acmeId}'`,
         );
         expect(asB.rows).toHaveLength(0);
 
         // Senior Y — on Acme's team — can.
-        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        await setCtx(userIds['senior.y@dhvaj.in'], 'senior', 'SOUTH', seniorY);
         const asY = await app.query(
           `SELECT id FROM hsdg.engagement_reviews WHERE engagement_id = '${acmeId}'`,
         );
@@ -655,7 +655,7 @@ describe('RLS (database-level, independent of the application)', () => {
       try {
         await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', 'managing_partner']);
         await app.query('SELECT set_config($1,$2,true)', ['hsdg.office_id', officeIds['NORTH']]);
-        await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', userIds['mp@hsdg.in']]);
+        await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', userIds['mp@dhvaj.in']]);
         await expect(
           app.query(
             `UPDATE hsdg.engagements SET review_model_id = '${managerReview}' WHERE id = '${acmeId}'`,
@@ -719,12 +719,12 @@ describe('RLS (database-level, independent of the application)', () => {
       const seniorEmp = await emp('EMP006');
       await app.query('BEGIN');
       try {
-        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        await setCtx(userIds['mp@dhvaj.in'], 'managing_partner', 'NORTH', mpEmp);
         const code = `RLS_${Date.now()}`;
         await app.query(`INSERT INTO hsdg.compliance_rules (code, name) VALUES ($1, 'x')`, [code]);
 
         // A senior (office-scoped) can still read firm-wide config.
-        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorEmp);
+        await setCtx(userIds['senior.y@dhvaj.in'], 'senior', 'SOUTH', seniorEmp);
         const seen = await app.query(`SELECT id FROM hsdg.compliance_rules WHERE code = $1`, [
           code,
         ]);
@@ -764,7 +764,7 @@ describe('RLS (database-level, independent of the application)', () => {
       const seniorY = await emp('EMP006'); // on Acme's team
       await app.query('BEGIN');
       try {
-        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        await setCtx(userIds['mp@dhvaj.in'], 'managing_partner', 'NORTH', mpEmp);
         const rule = await app.query<{ id: string }>(
           `INSERT INTO hsdg.compliance_rules (code, name) VALUES ('INST_${Date.now()}', 'x') RETURNING id`,
         );
@@ -781,13 +781,13 @@ describe('RLS (database-level, independent of the application)', () => {
           [acmeId, ruleId, ver.rows[0]!.id],
         );
 
-        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        await setCtx(userIds['partner.b@dhvaj.in'], 'partner', 'SOUTH', partnerB);
         const asB = await app.query(
           `SELECT id FROM hsdg.compliance_instances WHERE engagement_id = '${acmeId}'`,
         );
         expect(asB.rows).toHaveLength(0);
 
-        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        await setCtx(userIds['senior.y@dhvaj.in'], 'senior', 'SOUTH', seniorY);
         const asY = await app.query(
           `SELECT id FROM hsdg.compliance_instances WHERE engagement_id = '${acmeId}'`,
         );
@@ -848,7 +848,7 @@ describe('RLS (database-level, independent of the application)', () => {
       await app.query('BEGIN');
       try {
         // MP (firm-wide lead) creates a task assigned to Senior Y.
-        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        await setCtx(userIds['mp@dhvaj.in'], 'managing_partner', 'NORTH', mpEmp);
         const task = await app.query<{ id: string }>(
           `INSERT INTO hsdg.tasks (engagement_id, title, assigned_to_employee_id)
            VALUES ($1, 'RLS task', $2) RETURNING id`,
@@ -857,7 +857,7 @@ describe('RLS (database-level, independent of the application)', () => {
         const taskId = task.rows[0]!.id;
 
         // Unassigned Partner B sees nothing.
-        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        await setCtx(userIds['partner.b@dhvaj.in'], 'partner', 'SOUTH', partnerB);
         const asB = await app.query(`SELECT id FROM hsdg.tasks WHERE id = '${taskId}'`);
         expect(asB.rows).toHaveLength(0);
         // …and cannot update it (RLS UPDATE: lead or assignee).
@@ -867,7 +867,7 @@ describe('RLS (database-level, independent of the application)', () => {
         expect(bUpd.rowCount).toBe(0);
 
         // Senior Y (the assignee, NOT a lead) sees AND can update it.
-        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        await setCtx(userIds['senior.y@dhvaj.in'], 'senior', 'SOUTH', seniorY);
         const asY = await app.query(`SELECT id FROM hsdg.tasks WHERE id = '${taskId}'`);
         expect(asY.rows).toHaveLength(1);
         const yUpd = await app.query(
@@ -959,7 +959,7 @@ describe('RLS (database-level, independent of the application)', () => {
       await app.query('BEGIN');
       try {
         // MP (firm-wide lead) creates a document + its first version.
-        await setCtx(userIds['mp@hsdg.in'], 'managing_partner', 'NORTH', mpEmp);
+        await setCtx(userIds['mp@dhvaj.in'], 'managing_partner', 'NORTH', mpEmp);
         const doc = await app.query<{ id: string }>(
           `INSERT INTO hsdg.documents (engagement_id, title) VALUES ($1, 'RLS doc') RETURNING id`,
           [acmeId],
@@ -973,7 +973,7 @@ describe('RLS (database-level, independent of the application)', () => {
         );
 
         // Unassigned Partner B sees neither the document nor its version/reference.
-        await setCtx(userIds['partner.b@hsdg.in'], 'partner', 'SOUTH', partnerB);
+        await setCtx(userIds['partner.b@dhvaj.in'], 'partner', 'SOUTH', partnerB);
         expect(
           (await app.query(`SELECT id FROM hsdg.documents WHERE id = '${docId}'`)).rows,
         ).toHaveLength(0);
@@ -986,7 +986,7 @@ describe('RLS (database-level, independent of the application)', () => {
         ).toHaveLength(0);
 
         // Senior Y — on Acme's team — sees both.
-        await setCtx(userIds['senior.y@hsdg.in'], 'senior', 'SOUTH', seniorY);
+        await setCtx(userIds['senior.y@dhvaj.in'], 'senior', 'SOUTH', seniorY);
         expect(
           (await app.query(`SELECT id FROM hsdg.documents WHERE id = '${docId}'`)).rows,
         ).toHaveLength(1);
@@ -1025,7 +1025,7 @@ describe('RLS (database-level, independent of the application)', () => {
         app.query(
           `INSERT INTO hsdg.notifications (recipient_user_id, type, title)
            VALUES ($1, 'task_assigned', 'x')`,
-          [userIds['senior.y@hsdg.in']],
+          [userIds['senior.y@dhvaj.in']],
         ),
       ).rejects.toThrow(/row-level security/i);
     });
@@ -1038,7 +1038,7 @@ describe('RLS (database-level, independent of the application)', () => {
         // the employee → user and writes bypassing RLS.
         await app.query('SELECT set_config($1,$2,true),set_config($3,$4,true)', [
           'hsdg.user_id',
-          userIds['mp@hsdg.in'],
+          userIds['mp@dhvaj.in'],
           'hsdg.role',
           'managing_partner',
         ]);
@@ -1046,7 +1046,7 @@ describe('RLS (database-level, independent of the application)', () => {
           `SELECT hsdg.emit_notification($1,'task_assigned','RLS notify',NULL,NULL,NULL,NULL,NULL,NULL) AS recipient`,
           [seniorY],
         );
-        expect(created.rows[0]!.recipient).toBe(userIds['senior.y@hsdg.in']);
+        expect(created.rows[0]!.recipient).toBe(userIds['senior.y@dhvaj.in']);
 
         // The sender (MP) does not see someone else's notification…
         const asMp = await app.query(
@@ -1057,7 +1057,7 @@ describe('RLS (database-level, independent of the application)', () => {
         // …but the recipient (Senior Y) does.
         await app.query('SELECT set_config($1,$2,true),set_config($3,$4,true)', [
           'hsdg.user_id',
-          userIds['senior.y@hsdg.in'],
+          userIds['senior.y@dhvaj.in'],
           'hsdg.role',
           'senior',
         ]);

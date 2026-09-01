@@ -80,7 +80,7 @@ describe('Auto-generated deadline layers (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    mp = await token('mp@hsdg.in');
+    mp = await token('mp@dhvaj.in');
   });
 
   afterAll(async () => {
@@ -88,7 +88,7 @@ describe('Auto-generated deadline layers (e2e)', () => {
   });
 
   it('adds a manager-review milestone (only) for a statutory obligation on a manager-review service', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const eng = await createEngagement(pa, 'ITR_FILING'); // manager_review model
     const code = await createRule('STATUTORY_RULE');
     const gen = await request(app.getHttpServer())
@@ -104,7 +104,7 @@ describe('Auto-generated deadline layers (e2e)', () => {
   });
 
   it('adds manager + EP review milestones for a full-EP-review service', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const eng = await createEngagement(pa, 'TAX_AUDIT'); // full_ep_review model
     const code = await createRule('STATUTORY_RULE');
     const gen = await request(app.getHttpServer())
@@ -123,7 +123,7 @@ describe('Auto-generated deadline layers (e2e)', () => {
   });
 
   it('adds no milestones for a non-statutory (advisory/internal) obligation', async () => {
-    const pa = await token('partner.a@hsdg.in');
+    const pa = await token('partner.a@dhvaj.in');
     const eng = await createEngagement(pa, 'ITR_FILING');
     const code = await createRule('HSDG_MILESTONE');
     const gen = await request(app.getHttpServer())

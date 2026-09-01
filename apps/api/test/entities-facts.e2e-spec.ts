@@ -32,7 +32,7 @@ describe('Client & entity facts (e2e)', () => {
 
   describe('clients (§2)', () => {
     it('creates, lists, reads and updates a client (RLS + audit + version)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const created = await post(t, '/api/v1/clients', {
         name: 'Shubham Group',
         clientKind: 'group',
@@ -63,14 +63,14 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('forbids a Manager (no entity.manage) from creating a client (403)', async () => {
-      await post(await token('manager.x@hsdg.in'), '/api/v1/clients', {
+      await post(await token('manager.x@dhvaj.in'), '/api/v1/clients', {
         name: 'Nope',
         officeCode: 'NORTH',
       }).expect(403);
     });
 
     it('links an entity to a client on create, exposed on the entity (§2)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const client = await post(t, '/api/v1/clients', {
         name: `Linked Client ${Date.now()}`,
         officeCode: 'NORTH',
@@ -103,7 +103,7 @@ describe('Client & entity facts (e2e)', () => {
     };
 
     it('adds, updates and removes an address (§8)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const id = await newEntity(t);
       const added = await post(t, `/api/v1/entities/${id}/addresses`, {
         addressType: 'registered',
@@ -128,7 +128,7 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('wires a structured relationship between two accessible entities (§13)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const parent = await newEntity(t);
       const child = await newEntity(t);
       const res = await post(t, `/api/v1/entities/${parent}/relationships`, {
@@ -143,10 +143,10 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('rejects a relationship to an entity outside scope (RLS ⇒ 400/403)', async () => {
-      const north = await token('partner.a@hsdg.in');
+      const north = await token('partner.a@dhvaj.in');
       const parent = await newEntity(north);
       // A South entity id the North partner cannot see.
-      const mp = await token('mp@hsdg.in');
+      const mp = await token('mp@dhvaj.in');
       const all = await request(app.getHttpServer())
         .get('/api/v1/entities?limit=100')
         .set(bearer(mp));
@@ -161,7 +161,7 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('adds a business activity by industry slug + NIC, and removes it (§18)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const id = await newEntity(t);
       const res = await post(t, `/api/v1/entities/${id}/business-activities`, {
         industrySlug: 'manufacturing',
@@ -177,7 +177,7 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('rejects an unknown industry slug (400)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const id = await newEntity(t);
       await post(t, `/api/v1/entities/${id}/business-activities`, {
         industrySlug: 'no_such_industry',
@@ -185,7 +185,7 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('adds a listing line (§15)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const id = await newEntity(t);
       const res = await post(t, `/api/v1/entities/${id}/listings`, {
         exchange: 'nse',
@@ -197,7 +197,7 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('records a structured regulatory FACT — never a conclusion (§19)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const id = await newEntity(t);
       const res = await post(t, `/api/v1/entities/${id}/regulatory-attributes`, {
         attributeCode: 'regulated_sector',
@@ -209,7 +209,7 @@ describe('Client & entity facts (e2e)', () => {
     });
 
     it('rejects an unknown regulatory attribute code (400)', async () => {
-      const t = await token('partner.a@hsdg.in');
+      const t = await token('partner.a@dhvaj.in');
       const id = await newEntity(t);
       await post(t, `/api/v1/entities/${id}/regulatory-attributes`, {
         attributeCode: 'made_up_code',
@@ -219,7 +219,7 @@ describe('Client & entity facts (e2e)', () => {
   });
 
   it('serves the industries reference list for the wizard (§18)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const res = await request(app.getHttpServer())
       .get('/api/v1/industries')
       .set(bearer(t))
@@ -229,7 +229,7 @@ describe('Client & entity facts (e2e)', () => {
   });
 
   it('updates business-activity flags on an entity (§18)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const created = await post(t, '/api/v1/entities', {
       legalName: `Flags Co ${Date.now()}`,
       typeSlug: 'private_limited',
@@ -246,7 +246,7 @@ describe('Client & entity facts (e2e)', () => {
   });
 
   it('atomic wizard submit: entity + all children in one transaction (§4)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const res = await post(t, '/api/v1/entities', {
       legalName: `Wizard Co ${Date.now()}`,
       typeSlug: 'private_limited',
@@ -272,7 +272,7 @@ describe('Client & entity facts (e2e)', () => {
   });
 
   it('rolls back the whole wizard submit if one child is invalid (§4 atomicity)', async () => {
-    const t = await token('partner.a@hsdg.in');
+    const t = await token('partner.a@dhvaj.in');
     const legalName = `Rollback Co ${Date.now()}`;
     await post(t, '/api/v1/entities', {
       legalName,

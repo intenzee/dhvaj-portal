@@ -11,8 +11,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'HSDG Portal',
-  description: 'HSDG practice-management and professional-work operating system.',
+  title: 'Dhvaj Portal',
+  description: 'Dhvaj practice-management and professional-work operating system.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }): JSX.Element {

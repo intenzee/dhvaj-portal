@@ -20,7 +20,7 @@ describe('extractBearerToken', () => {
 describe('AuthGuard', () => {
   const principal = (over: Partial<Principal> = {}): Principal => ({
     userId: 'u1',
-    email: 'p@hsdg.in',
+    email: 'p@dhvaj.in',
     displayName: 'P',
     officeId: 'o1',
     officeCode: 'NORTH',
