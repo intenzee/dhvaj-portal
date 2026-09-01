@@ -4,11 +4,13 @@ import {
   PERMISSION,
   type ComplianceMisReport,
   type EngagementMisReport,
+  type FirmTimeReport,
   type UtilisationReport,
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { ReportsService } from './reports.service';
+import { TimeTrackingService } from '../engagements/time/time-tracking.service';
 
 /**
  * Reports & MIS (management aggregations). Gated by `report.read` (Managing
@@ -18,7 +20,10 @@ import { ReportsService } from './reports.service';
 @ApiTags('reports')
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(
+    private readonly reports: ReportsService,
+    private readonly time: TimeTrackingService,
+  ) {}
 
   @Get('engagements')
   @RequirePermissions(PERMISSION.reportRead)
@@ -47,5 +52,15 @@ export class ReportsController {
   })
   utilisation(@CurrentPrincipal() principal: Principal): Promise<UtilisationReport> {
     return this.reports.utilisation(rlsContextFromPrincipal(principal));
+  }
+
+  @Get('time')
+  @RequirePermissions(PERMISSION.reportRead)
+  @ApiOperation({
+    summary: 'Time tracking: hours logged per person across all visible engagements',
+    description: 'Manual-stopwatch totals (ADR-0034), RLS-scoped like the other MIS reports.',
+  })
+  timeReport(@CurrentPrincipal() principal: Principal): Promise<FirmTimeReport> {
+    return this.time.firmReport(rlsContextFromPrincipal(principal));
   }
 }

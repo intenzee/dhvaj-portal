@@ -26,6 +26,7 @@ import { cn } from '@/lib/cn';
 import { Spinner } from './ui';
 import { GlobalSearch } from './global-search';
 import { ThemeToggle } from './theme-toggle';
+import { RunningTimerBanner } from './time/running-timer-banner';
 
 const SHORTCUTS = [
   { label: 'Create Engagement', href: '/engagements/new', icon: PlusCircle },
@@ -187,6 +188,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
           <GlobalSearch />
 
           <div className="ml-auto flex items-center gap-1.5">
+            <RunningTimerBanner />
             <ThemeToggle />
             <NotificationBell />
             <IconButton title="Messages">

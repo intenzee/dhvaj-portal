@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { ReportsController } from './reports.controller';
 import { ResourcesController } from './resources.controller';
+import { EngagementsModule } from '../engagements/engagements.module';
 
 /**
  * Reports & MIS: management aggregations over the RLS-protected read models
@@ -10,6 +11,7 @@ import { ResourcesController } from './resources.controller';
  * reuses the utilisation rollup under the `employee.read` permission.
  */
 @Module({
+  imports: [EngagementsModule],
   controllers: [ReportsController, ResourcesController],
   providers: [ReportsService],
 })

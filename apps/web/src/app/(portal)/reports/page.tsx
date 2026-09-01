@@ -7,17 +7,18 @@ import {
   PERMISSION,
   type ComplianceMisReport,
   type EngagementMisReport,
+  type FirmTimeReport,
   type UtilisationReport,
 } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
-import { humanize, formatCount } from '@/lib/format';
+import { humanize, formatCount, formatDuration } from '@/lib/format';
 import { downloadCsv } from '@/lib/csv';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { cn } from '@/lib/cn';
 import { PageHeader, Card, CardHeader, CardTitle, CardBody, Spinner, EmptyState, Button, Badge } from '@/components/ui';
 
-type Tab = 'engagements' | 'compliance' | 'utilisation';
+type Tab = 'engagements' | 'compliance' | 'utilisation' | 'time';
 
 export default function ReportsPage(): JSX.Element {
   const { principal } = useAuth();
@@ -36,6 +37,7 @@ export default function ReportsPage(): JSX.Element {
     { id: 'engagements', label: 'Engagements' },
     { id: 'compliance', label: 'Compliance' },
     { id: 'utilisation', label: 'Utilisation' },
+    { id: 'time', label: 'Time' },
   ];
 
   return (
@@ -62,6 +64,7 @@ export default function ReportsPage(): JSX.Element {
       {tab === 'engagements' && <EngagementsReport />}
       {tab === 'compliance' && <ComplianceReport />}
       {tab === 'utilisation' && <UtilisationReportView />}
+      {tab === 'time' && <TimeReportView />}
     </div>
   );
 }
@@ -301,6 +304,94 @@ function ComplianceReport(): JSX.Element {
                     </td>
                     <td className="py-2 pr-4 tabular-nums">
                       {c.dueSoon > 0 ? <span className="font-medium text-warning-700">{c.dueSoon}</span> : c.dueSoon}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+// ── Time tracking ────────────────────────────────────────────────────────────
+
+function TimeReportView(): JSX.Element {
+  const q = useQuery({
+    queryKey: ['reports', 'time'],
+    queryFn: () => apiFetch<FirmTimeReport>('/reports/time'),
+    refetchInterval: 60_000,
+  });
+  if (q.isLoading) return <Spinner label="Loading time report…" />;
+  if (!q.data) return <EmptyState>No data.</EmptyState>;
+  const r = q.data;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <MetricTile label="People logging time" value={r.totals.people} />
+        <div className="rounded-xl border border-line-strong bg-surface p-4 shadow-card">
+          <div className="text-[13px] font-medium text-ink-muted">Total time logged</div>
+          <div className="mt-1 text-3xl font-bold tabular-nums text-ink">
+            {formatDuration(r.totals.totalSeconds)}
+          </div>
+        </div>
+        <MetricTile label="Timers running now" value={r.totals.running} tone="success" />
+      </div>
+
+      <Section
+        title="Time by person"
+        action={
+          <ExportButton
+            onClick={() =>
+              downloadCsv(
+                'time-by-person',
+                ['Employee', 'Grade', 'Office', 'Engagements', 'Sessions', 'Total seconds', 'Running'],
+                r.rows.map((x) => [
+                  x.employeeName,
+                  x.gradeName ?? '',
+                  x.officeCode ?? '',
+                  x.engagementCount,
+                  x.entryCount,
+                  x.totalSeconds,
+                  x.hasRunning ? 'yes' : 'no',
+                ]),
+              )
+            }
+          />
+        }
+      >
+        {r.rows.length === 0 ? (
+          <EmptyState>No time logged in your scope yet.</EmptyState>
+        ) : (
+          <div className="scroll-slim overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                  <th className="py-2 pr-4 font-semibold">Employee</th>
+                  <th className="py-2 pr-4 font-semibold">Office</th>
+                  <th className="py-2 pr-4 font-semibold">Engagements</th>
+                  <th className="py-2 pr-4 font-semibold">Sessions</th>
+                  <th className="py-2 pr-4 font-semibold text-right">Total time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.rows.map((x) => (
+                  <tr key={x.employeeId} className="border-b border-line last:border-0">
+                    <td className="py-2 pr-4">
+                      <span className="flex items-center gap-2 font-medium text-ink">
+                        {x.employeeName}
+                        {x.hasRunning && <Badge tone="success">Running</Badge>}
+                      </span>
+                      {x.gradeName && <span className="block text-xs text-ink-faint">{x.gradeName}</span>}
+                    </td>
+                    <td className="py-2 pr-4">{x.officeCode ?? '—'}</td>
+                    <td className="py-2 pr-4 tabular-nums">{x.engagementCount}</td>
+                    <td className="py-2 pr-4 tabular-nums">{x.entryCount}</td>
+                    <td className="py-2 pr-4 text-right font-medium tabular-nums text-ink">
+                      {formatDuration(x.totalSeconds)}
                     </td>
                   </tr>
                 ))}

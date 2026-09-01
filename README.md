@@ -264,6 +264,19 @@ audit trail.
 > **CSV export**. Every figure is **RLS-scoped** exactly like the dashboard —
 > firm-wide for the MP, assignment-scoped for a partner — computed in the database.
 >
+> **Engagement time tracking (ADR-0034).** A **manual stopwatch** per person per
+> engagement: staff click _Start working_ and the portal records a running session
+> that **never auto-stops on inactivity** — much of the work happens outside the
+> portal — until they _Stop_ it or the engagement is closed. **One running timer
+> per person, firm-wide** (a DB partial-unique invariant; a second start is
+> rejected). A running timer stays visible in a **top-bar banner** everywhere; the
+> engagement **Time** tab shows a live clock and **per-person totals**; the
+> **firm-wide `report.read` view** (`/reports/time`) rolls up hours per person. A
+> **terminal-state safety net** in the lifecycle service force-stops any timer
+> still running when an engagement is completed / closed / cancelled / withdrawn /
+> declined, in the same transaction as the status change. Reuses `engagement.read`
+> (RLS does the real gating) — no new permission.
+>
 > <details><summary>Earlier phases</summary>
 >
 > **Phase 12 — Dashboard / Frontend Foundation.** The first frontend: a
@@ -547,6 +560,10 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | POST | `/engagements/:id/sign-off` | `engagement.manage` | Terminal sign-off; authority set by the effective review model (audited) |
 | POST | `/engagements/:id/review-points/:pointId/resolve` | `engagement.manage` | Resolve an open review point (audited) |
 | POST | `/engagements/:id/review-plan` | `engagement.manage` | Escalate the review model (escalate-only; audited) |
+| GET | `/engagements/time/active` | `engagement.read` | The caller's currently running timer, if any (ADR-0034) |
+| GET | `/engagements/:id/time` | `engagement.read` | Time entries + per-person totals; visible to everyone assigned |
+| POST | `/engagements/:id/time/start` | `engagement.read` | Start working — begin a timer (audited; 409 if one already runs) |
+| POST | `/engagements/:id/time/stop` | `engagement.read` | Stop your running timer (audited) |
 | GET | `/compliance-rules` | `compliance.read` | Compliance rules with version history _(paginated)_; filter `?category=&serviceCode=&activeOnly=` |
 | GET | `/compliance-rules/:idOrCode` | `compliance.read` | One rule with all versions |
 | POST | `/compliance-rules` | `compliance.manage` | Create a rule (firm-wide config; audited) |
@@ -583,6 +600,7 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | GET | `/invoices` | `report.read` | Firm-wide invoices across accessible engagements _(paginated)_; filter `?status=&overdueOnly=&search=` |
 | GET | `/invoices/summary` | `report.read` | Billing rollup: counts/totals (outstanding/overdue/paid/draft) + receivables aging |
 | GET | `/resources/workload` | `employee.read` | Per-person workload (EP/manager/member + open/overdue tasks) with office/grade rollups; RLS-scoped |
+| GET | `/reports/time` | `report.read` | Firm-wide time tracking: hours logged per person across visible engagements (ADR-0034); RLS-scoped |
 
 ## Roadmap
 

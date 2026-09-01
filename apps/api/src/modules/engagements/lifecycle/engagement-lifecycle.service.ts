@@ -8,6 +8,7 @@ import { ClsService } from 'nestjs-cls';
 import {
   LIFECYCLE_ACTION,
   NOTIFICATION_TYPE,
+  STOPPED_REASON,
   type EngagementStatus,
   type LifecycleAction,
 } from '@hsdg/contracts';
@@ -19,9 +20,22 @@ import { AuditService } from '../../audit/audit.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { selectEngagementDetail } from '../engagement-detail.query';
 import { translatePgError } from '../engagements.service';
+import { TimeTrackingService } from '../time/time-tracking.service';
 import type { EngagementDetail, LifecycleHistoryRecord } from '../engagements.types';
 import { LIFECYCLE_GUARDS } from './lifecycle-guards';
 import type { LifecycleTransitionInput } from './lifecycle.types';
+
+/**
+ * Statuses at which no work can continue, so any timer still running on the
+ * engagement is force-stopped (the safety net; §time-tracking / ADR-0034).
+ */
+const TERMINAL_STATUSES: EngagementStatus[] = [
+  'completed',
+  'closed',
+  'cancelled',
+  'withdrawn',
+  'declined',
+];
 
 interface TransitionRow {
   action: string;
@@ -59,6 +73,7 @@ export class EngagementLifecycleService {
     private readonly audit: AuditService,
     private readonly cls: ClsService,
     private readonly notifications: NotificationsService,
+    private readonly time: TimeTrackingService,
   ) {}
 
   async transition(
@@ -194,6 +209,14 @@ export class EngagementLifecycleService {
            WHERE engagement_id = $1 AND review_type = 'sign_off' AND superseded_at IS NULL`,
           [id, `engagement reopened: ${input.reason ?? ''}`.slice(0, 500)],
         );
+      }
+
+      // Safety net (ADR-0034): work can't continue on a terminal engagement, so
+      // force-stop any timer still running on it — even a teammate's — in this
+      // same transaction. The person closing is a lead (engagement.manage), so
+      // the time-entry UPDATE RLS policy permits stopping others' entries.
+      if (TERMINAL_STATUSES.includes(toStatus)) {
+        await this.time.stopAllRunningWith(client, ctx, id, STOPPED_REASON.engagementClosed);
       }
 
       const after = await selectEngagementDetail(client, id);

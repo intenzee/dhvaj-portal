@@ -10,6 +10,15 @@ import type { EngagementDetail } from '@/lib/types';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Textarea } from '@/components/form';
+import { LiveClock, invalidateTime, useActiveTimer } from '@/components/time/timer-shared';
+
+/**
+ * Actions that end the engagement — closing while your timer runs prompts a stop.
+ * Must mirror the server's TERMINAL_STATUSES in engagement-lifecycle.service.ts
+ * (which force-stops timers): complete→completed, close→closed, cancel→cancelled,
+ * withdraw→withdrawn, decline→declined.
+ */
+const CLOSING_ACTIONS = new Set(['complete', 'close', 'cancel', 'withdraw', 'decline']);
 
 interface ActionDef {
   action: string;
@@ -55,6 +64,10 @@ export function LifecycleActions({ engagement }: { engagement: EngagementDetail 
   const { principal } = useAuth();
   const [reasonFor, setReasonFor] = useState<ActionDef | null>(null);
   const [reason, setReason] = useState('');
+  const [timerPromptFor, setTimerPromptFor] = useState<ActionDef | null>(null);
+
+  const active = useActiveTimer();
+  const runningHere = active.data?.entry.engagementId === engagement.id ? active.data : null;
 
   const run = useMutation({
     mutationFn: (input: { action: string; reason?: string }) =>
@@ -66,13 +79,36 @@ export function LifecycleActions({ engagement }: { engagement: EngagementDetail 
       toast(`Engagement ${input.action.replace(/-/g, ' ')} done.`);
       qc.invalidateQueries({ queryKey: ['engagement', engagement.id] });
       qc.invalidateQueries({ queryKey: ['engagements'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      // A terminal transition force-stops running timers server-side, so refresh
+      // the timer/report views too.
+      invalidateTime(qc, engagement.id);
       setReasonFor(null);
       setReason('');
     },
     onError: (err) =>
       toast(err instanceof ApiError ? err.message : 'That transition was rejected.', 'error'),
   });
+
+  const stopTimer = useMutation({
+    mutationFn: () =>
+      apiFetch(`/engagements/${engagement.id}/time/stop`, { method: 'POST', body: {} }),
+    onSuccess: () => invalidateTime(qc, engagement.id),
+  });
+
+  // Move an action forward: reason-required actions open the reason modal first.
+  const proceed = (a: ActionDef): void => {
+    if (a.needsReason) setReasonFor(a);
+    else run.mutate({ action: a.action });
+  };
+
+  // Clicking a closing action while your timer runs here prompts you to stop it.
+  const onAction = (a: ActionDef): void => {
+    if (CLOSING_ACTIONS.has(a.action) && runningHere) {
+      setTimerPromptFor(a);
+      return;
+    }
+    proceed(a);
+  };
 
   const isMp = hasRole(principal, 'managing_partner');
   const available = (ACTIONS[engagement.status] ?? []).filter((a) => !a.mpOnly || isMp);
@@ -86,8 +122,8 @@ export function LifecycleActions({ engagement }: { engagement: EngagementDetail 
             key={a.action}
             size="sm"
             variant={a.variant ?? 'secondary'}
-            disabled={run.isPending}
-            onClick={() => (a.needsReason ? setReasonFor(a) : run.mutate({ action: a.action }))}
+            disabled={run.isPending || stopTimer.isPending}
+            onClick={() => onAction(a)}
           >
             {a.label}
           </Button>
@@ -116,6 +152,54 @@ export function LifecycleActions({ engagement }: { engagement: EngagementDetail 
         <Field label="Reason" required>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why…" />
         </Field>
+      </Modal>
+
+      {/* Running-timer prompt on close (ADR-0034). */}
+      <Modal
+        open={!!timerPromptFor}
+        onClose={() => setTimerPromptFor(null)}
+        title="You have a timer running"
+        description="Stop your timer before this engagement is closed?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setTimerPromptFor(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={run.isPending || stopTimer.isPending}
+              onClick={() => {
+                const a = timerPromptFor;
+                setTimerPromptFor(null);
+                if (a) proceed(a);
+              }}
+            >
+              Continue without stopping
+            </Button>
+            <Button
+              disabled={run.isPending || stopTimer.isPending}
+              onClick={async () => {
+                const a = timerPromptFor;
+                setTimerPromptFor(null);
+                await stopTimer.mutateAsync().catch(() => undefined);
+                if (a) proceed(a);
+              }}
+            >
+              Stop timer &amp; continue
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-muted">
+          Your timer has been running for{' '}
+          {runningHere && (
+            <span className="font-mono font-semibold text-ink">
+              <LiveClock startedAt={runningHere.entry.startedAt} />
+            </span>
+          )}
+          . Closing the engagement stops any running timers automatically, but you can stop yours
+          now to record it as a manual stop.
+        </p>
       </Modal>
     </>
   );

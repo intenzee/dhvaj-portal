@@ -39,6 +39,37 @@ export function formatMoney(
   }
 }
 
+/**
+ * A compact human duration from seconds, e.g. "1h 23m", "45m", "12s". For
+ * totals in tables — reads at a glance rather than a running clock.
+ */
+export function formatDuration(seconds: number | null | undefined): string {
+  const s = Math.max(0, Math.floor(seconds ?? 0));
+  if (s < 60) return `${s}s`;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  return `${h}h${m > 0 ? ` ${m}m` : ''}`;
+}
+
+/** A ticking clock from seconds, e.g. "1:23:45" / "07:12" — for a live timer. */
+export function formatClock(seconds: number | null | undefined): string {
+  const s = Math.max(0, Math.floor(seconds ?? 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+/** Seconds elapsed since an ISO timestamp (for a running timer). Null-safe. */
+export function secondsSince(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, Math.floor((Date.now() - t) / 1000));
+}
+
 /** Days from today until an ISO date (negative ⇒ overdue). Null-safe. */
 export function daysUntil(iso: string | null | undefined): number | null {
   if (!iso) return null;

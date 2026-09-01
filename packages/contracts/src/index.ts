@@ -16,6 +16,7 @@ export * from './entities';
 export * from './services';
 export * from './components';
 export * from './engagements';
+export * from './time';
 export * from './commercial';
 export * from './notes';
 export * from './reviews';

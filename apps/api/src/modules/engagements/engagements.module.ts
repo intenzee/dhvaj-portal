@@ -7,6 +7,8 @@ import { EngagementLifecycleService } from './lifecycle/engagement-lifecycle.ser
 import { EngagementWorkflowService } from './lifecycle/engagement-workflow.service';
 import { EngagementReviewsService } from './reviews/engagement-reviews.service';
 import { EngagementReviewsController } from './reviews/engagement-reviews.controller';
+import { TimeTrackingService } from './time/time-tracking.service';
+import { TimeTrackingController } from './time/time-tracking.controller';
 
 /**
  * Engagement core: the central transactional object. Assignment-based access
@@ -18,18 +20,20 @@ import { EngagementReviewsController } from './reviews/engagement-reviews.contro
  */
 @Module({
   imports: [AuditModule, NotificationsModule],
-  controllers: [EngagementsController, EngagementReviewsController],
+  controllers: [EngagementsController, EngagementReviewsController, TimeTrackingController],
   providers: [
     EngagementsService,
     EngagementLifecycleService,
     EngagementWorkflowService,
     EngagementReviewsService,
+    TimeTrackingService,
   ],
   exports: [
     EngagementsService,
     EngagementLifecycleService,
     EngagementWorkflowService,
     EngagementReviewsService,
+    TimeTrackingService,
   ],
 })
 export class EngagementsModule {}

@@ -31,6 +31,7 @@ import { ServicesSection } from '@/components/actions/services-section';
 import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
+import { TimeSection } from '@/components/actions/time-section';
 import { InvoicesSection } from '@/components/actions/invoices-section';
 import { NotesSection } from '@/components/actions/notes-section';
 import { GenerateComplianceButton } from '@/components/actions/generate-compliance-button';
@@ -45,6 +46,7 @@ type TabKey =
   | 'compliance'
   | 'documents'
   | 'team'
+  | 'time'
   | 'activity'
   | 'invoices'
   | 'notes';
@@ -56,6 +58,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'compliance', label: 'Compliance' },
   { key: 'documents', label: 'Documents' },
   { key: 'team', label: 'Team' },
+  { key: 'time', label: 'Time' },
   { key: 'activity', label: 'Activity' },
   { key: 'invoices', label: 'Invoices' },
   { key: 'notes', label: 'Notes' },
@@ -405,6 +408,9 @@ export default function EngagementDetailPage(): JSX.Element {
 
       {/* ── Team ─────────────────────────────────────────────────────────── */}
       {tab === 'team' && <TeamSection engagementId={e.id} team={e.team} />}
+
+      {/* ── Time (manual stopwatch + per-person totals) ──────────────────── */}
+      {tab === 'time' && <TimeSection engagementId={e.id} />}
 
       {/* ── Activity (lifecycle history) ─────────────────────────────────── */}
       {tab === 'activity' && (
