@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarPlus, Stamp } from 'lucide-react';
+import { CalendarPlus, Stamp, FolderOpen } from 'lucide-react';
 import {
   type ComponentInstanceRecord,
   type ComponentInstanceStatus,
@@ -18,6 +18,8 @@ import { useToast } from '@/lib/toast';
 import { Card, EmptyState, Badge, Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input } from '@/components/form';
+import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
+import { CompletionBar } from '@/components/completion';
 
 const STATUS_TONE: Record<ComponentInstanceStatus, string> = {
   scheduled: 'neutral',
@@ -40,6 +42,7 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
   const [registerFor, setRegisterFor] = useState<ComponentInstanceRecord | null>(null);
+  const [docsFor, setDocsFor] = useState<ComponentInstanceRecord | null>(null);
 
   const work = useQuery({
     queryKey: ['engagement', engagementId, 'component-work'],
@@ -110,6 +113,10 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
           </Button>
         )}
       </div>
+      {items.length > 0 && (
+        <ComponentProgressGrid items={items} onOpenDocs={(w) => setDocsFor(w)} />
+      )}
+
       <Card className="overflow-hidden p-0">
         {work.isSuccess && items.length === 0 && (
           <div className="p-5">
@@ -128,7 +135,7 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
                 <th className="px-4 py-2.5 font-semibold">Statutory</th>
                 <th className="px-4 py-2.5 font-semibold">Internal SLA</th>
                 <th className="px-4 py-2.5 font-semibold">Status</th>
-                {canManage && <th className="px-4 py-2.5" />}
+                <th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -136,7 +143,16 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
                 const open = w.status === 'scheduled' || w.status === 'active';
                 return (
                   <tr key={w.id} className="border-b border-line last:border-0">
-                    <td className="px-4 py-2.5 text-ink">{w.componentName}</td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setDocsFor(w)}
+                        className="text-left font-medium text-primary-700 hover:underline"
+                        title="Open documents for this period"
+                      >
+                        {w.componentName}
+                      </button>
+                    </td>
                     <td className="px-4 py-2.5 text-ink-muted">
                       {w.periodLabel}
                       {w.isFuture && (
@@ -156,32 +172,38 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
                     <td className="px-4 py-2.5">
                       <Badge tone={STATUS_TONE[w.status] ?? 'neutral'}>{humanize(w.status)}</Badge>
                     </td>
-                    {canManage && (
-                      <td className="px-4 py-2.5 text-right">
-                        <div className="flex justify-end gap-2">
-                          {open && w.setsRegistrationType && (
-                            <Button
-                              size="sm"
-                              variant="subtle"
-                              onClick={() => setRegisterFor(w)}
-                              title="Record the registration number into the client master (§40)"
-                            >
-                              <Stamp className="h-4 w-4" /> Record reg.
-                            </Button>
-                          )}
-                          {open && (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={complete.isPending}
-                              onClick={() => complete.mutate(w.id)}
-                            >
-                              Complete
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    )}
+                    <td className="px-4 py-2.5 text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setDocsFor(w)}
+                          title="Open documents for this period"
+                        >
+                          <FolderOpen className="h-4 w-4" /> Documents
+                        </Button>
+                        {canManage && open && w.setsRegistrationType && (
+                          <Button
+                            size="sm"
+                            variant="subtle"
+                            onClick={() => setRegisterFor(w)}
+                            title="Record the registration number into the client master (§40)"
+                          >
+                            <Stamp className="h-4 w-4" /> Record reg.
+                          </Button>
+                        )}
+                        {canManage && open && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={complete.isPending}
+                            onClick={() => complete.mutate(w.id)}
+                          >
+                            Complete
+                          </Button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -189,6 +211,16 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
           </table>
         )}
       </Card>
+
+      {docsFor && (
+        <ScopedDocumentsModal
+          engagementId={engagementId}
+          scope={{ componentInstanceId: docsFor.id }}
+          title={docsFor.componentName}
+          subtitle={docsFor.periodLabel}
+          onClose={() => setDocsFor(null)}
+        />
+      )}
 
       {registerFor && (
         <RecordRegistrationModal
@@ -203,6 +235,104 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
         />
       )}
     </section>
+  );
+}
+
+/** Short period chip label: "Apr 2026" → "Apr", "Q1 2026-27" → "Q1", else as-is. */
+function shortPeriod(label: string): string {
+  const first = label.split(' ')[0] ?? label;
+  return first;
+}
+
+/** Tailwind classes for a period cell, by the instance's status. */
+function cellClass(w: ComponentInstanceRecord): string {
+  if (w.status === 'completed') return 'bg-success-600 text-white border-success-600';
+  if (w.status === 'waived') return 'bg-warning-50 text-warning-700 border-warning-500/40';
+  if (w.isOverdue) return 'bg-danger-600 text-white border-danger-600';
+  if (w.isFuture) return 'bg-surface-sunken text-ink-faint border-line';
+  return 'bg-primary-50 text-primary-700 border-primary-500/40'; // active/current
+}
+
+/**
+ * A calendar-style progress grid for recurring components (spec §21). One row
+ * per component (e.g. GST), one clickable chip per period (month/quarter),
+ * coloured by status so "which months are done and what's left" is legible at a
+ * glance. Clicking a chip opens that period's documents.
+ */
+function ComponentProgressGrid({
+  items,
+  onOpenDocs,
+}: {
+  items: ComponentInstanceRecord[];
+  onOpenDocs: (w: ComponentInstanceRecord) => void;
+}): JSX.Element {
+  // Group by component, each sorted chronologically by period start.
+  const groups = new Map<string, ComponentInstanceRecord[]>();
+  for (const w of items) {
+    const arr = groups.get(w.componentName) ?? [];
+    arr.push(w);
+    groups.set(w.componentName, arr);
+  }
+  const rows = [...groups.entries()]
+    .map(([name, list]) => ({
+      name,
+      list: [...list].sort((a, b) => a.periodStart.localeCompare(b.periodStart)),
+    }))
+    // Only worth a grid when there's more than one period (recurring work).
+    .filter((g) => g.list.length > 1);
+
+  if (rows.length === 0) return <></>;
+
+  return (
+    <Card className="mb-3 p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Progress</h3>
+        <div className="flex flex-wrap items-center gap-3 text-[11px] text-ink-faint">
+          <Legend className="bg-success-600" label="Done" />
+          <Legend className="bg-primary-50 border border-primary-500/40" label="In progress" />
+          <Legend className="bg-danger-600" label="Overdue" />
+          <Legend className="bg-surface-sunken border border-line" label="Upcoming" />
+        </div>
+      </div>
+      <div className="space-y-3">
+        {rows.map((g) => {
+          const done = g.list.filter((w) => w.status === 'completed').length;
+          const total = g.list.filter((w) => w.status !== 'cancelled').length;
+          return (
+            <div key={g.name} className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="w-40 shrink-0">
+                <div className="truncate text-sm font-medium text-ink" title={g.name}>
+                  {g.name}
+                </div>
+                <CompletionBar done={done} total={total} className="mt-1" />
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {g.list.map((w) => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={() => onOpenDocs(w)}
+                    className={`min-w-[3rem] rounded-md border px-2 py-1 text-center text-[11px] font-medium transition hover:opacity-90 ${cellClass(w)}`}
+                    title={`${w.periodLabel} — ${humanize(w.status)}. Click for documents.`}
+                  >
+                    {shortPeriod(w.periodLabel)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function Legend({ className, label }: { className: string; label: string }): JSX.Element {
+  return (
+    <span className="flex items-center gap-1">
+      <span className={`inline-block h-3 w-3 rounded ${className}`} />
+      {label}
+    </span>
   );
 }
 

@@ -4,7 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import type { Paginated } from '@hsdg/contracts';
+import { FolderOpen } from 'lucide-react';
+import { TASK_STATUS, type Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate, humanize } from '@/lib/format';
 import type { EngagementDetail, MyTask, ComplianceRow, MyClientDependency } from '@/lib/types';
@@ -31,6 +32,8 @@ import { ServicesSection } from '@/components/actions/services-section';
 import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
+import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
+import { CompletionBar } from '@/components/completion';
 import { TimeSection } from '@/components/actions/time-section';
 import { InvoicesSection } from '@/components/actions/invoices-section';
 import { NotesSection } from '@/components/actions/notes-section';
@@ -78,6 +81,7 @@ export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<TabKey>('overview');
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
+  const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
 
   const eng = useQuery({
     queryKey: ['engagement', id],
@@ -224,8 +228,18 @@ export default function EngagementDetailPage(): JSX.Element {
       {tab === 'work' && (
         <div>
           <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-ink">Tasks</h2>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <h2 className="text-sm font-semibold text-ink">Tasks</h2>
+                {tasks.data && tasks.data.items.length > 0 && (
+                  <CompletionBar
+                    done={tasks.data.items.filter((t) => t.status === TASK_STATUS.done).length}
+                    total={
+                      tasks.data.items.filter((t) => t.status !== TASK_STATUS.cancelled).length
+                    }
+                  />
+                )}
+              </div>
               <CreateTaskModal engagementId={e.id} team={e.team} />
             </div>
             <Card className="overflow-hidden p-0">
@@ -243,12 +257,22 @@ export default function EngagementDetailPage(): JSX.Element {
                       <th className="px-4 py-2.5 font-semibold">Priority</th>
                       <th className="px-4 py-2.5 font-semibold">Due</th>
                       <th className="px-4 py-2.5 font-semibold">Status</th>
+                      <th className="px-4 py-2.5" />
                     </tr>
                   </thead>
                   <tbody>
                     {tasks.data.items.map((t) => (
                       <tr key={t.id} className="border-b border-line last:border-0">
-                        <td className="px-4 py-2.5 text-ink">{t.title}</td>
+                        <td className="px-4 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setDocsForTask(t)}
+                            className="text-left font-medium text-primary-700 hover:underline"
+                            title="Open documents for this task"
+                          >
+                            {t.title}
+                          </button>
+                        </td>
                         <td className="px-4 py-2.5 text-ink-muted">
                           {t.assignedToName ?? 'Unassigned'}
                         </td>
@@ -260,6 +284,16 @@ export default function EngagementDetailPage(): JSX.Element {
                         </td>
                         <td className="px-4 py-2.5">
                           <TaskStatusControl task={t} />
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setDocsForTask(t)}
+                            className="inline-flex items-center gap-1 rounded p-1.5 text-ink-muted hover:bg-surface-sunken hover:text-primary-600"
+                            title="Documents"
+                          >
+                            <FolderOpen className="h-4 w-4" />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -405,6 +439,17 @@ export default function EngagementDetailPage(): JSX.Element {
 
       {/* ── Documents ────────────────────────────────────────────────────── */}
       {tab === 'documents' && <DocumentsSection engagementId={e.id} />}
+
+      {/* Per-task documents pop-up (opened from the Work tab). */}
+      {docsForTask && (
+        <ScopedDocumentsModal
+          engagementId={e.id}
+          scope={{ taskId: docsForTask.id }}
+          title={docsForTask.title}
+          subtitle="Task documents"
+          onClose={() => setDocsForTask(null)}
+        />
+      )}
 
       {/* ── Team ─────────────────────────────────────────────────────────── */}
       {tab === 'team' && <TeamSection engagementId={e.id} team={e.team} />}

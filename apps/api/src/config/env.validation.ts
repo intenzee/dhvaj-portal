@@ -100,6 +100,59 @@ export const envSchema = z.object({
   // disables DS-side JWT (dev only).
   ONLYOFFICE_JWT_SECRET: z.string().default('dev-onlyoffice-shared-secret-change-me'),
 
+  // ── Microsoft 365 / SharePoint Online (genuine Office web editing) ────────
+  // When enabled, Office files (Word/Excel/PowerPoint) open in Microsoft's real
+  // Office-for-the-web editor with co-authoring. The bytes live in a single
+  // locked-down SharePoint document library inside the firm's own M365 tenant.
+  // End users are NOT members of that site, so they cannot browse it — the API
+  // RLS-checks access, then mints a SHORT-LIVED ANONYMOUS ("Anyone with the
+  // link") sharing link to just one file (via Microsoft Graph) so it opens in
+  // real Office 365 for the web with NO per-user Microsoft sign-in — the portal
+  // is the single gatekeeper. PostgreSQL stays the record of truth; SharePoint
+  // is only the editing/viewing surface (see the `documents/m365` bridge).
+  // OnlyOffice remains the automatic fallback when this is off/unavailable.
+  //
+  // OFF by default: the feature is inert until the SharePoint site + Entra app
+  // registration are provisioned and these values are supplied. Secrets have no
+  // defaults. Storage is covered by the M365 Enterprise licences (no separate
+  // Azure subscription needed).
+  M365_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Directory (tenant) id of the firm's Microsoft 365 tenant.
+  M365_TENANT_ID: z.string().optional(),
+  // Application (client) id of the Entra app registration used for app-only
+  // Graph calls (byte upload/download + sharing-link creation).
+  M365_CLIENT_ID: z.string().optional(),
+  // Client secret for that app registration (a certificate is preferable in
+  // production; this scaffold uses the client-credentials secret flow).
+  M365_CLIENT_SECRET: z.string().optional(),
+  // The locked-down SharePoint site id whose document library holds live editing
+  // copies. Used to resolve the drive id when M365_DRIVE_ID is not pinned.
+  M365_SITE_ID: z.string().optional(),
+  // The document-library drive id the portal writes into. Preferred: pin it to
+  // skip a per-boot site→drive lookup. If blank, it is resolved from M365_SITE_ID.
+  M365_DRIVE_ID: z.string().optional(),
+  // How long a minted anonymous sharing link stays valid, in minutes. The link
+  // opens the file in Office 365 for the web with NO per-user login, so the
+  // portal keeps it SHORT-LIVED to limit the value of a copied URL — the user
+  // simply gets a fresh link the next time they open the document. 0 disables
+  // expiry (not recommended). Default: 120 minutes.
+  M365_LINK_EXPIRY_MINUTES: z.coerce.number().int().min(0).default(120),
+  // Allow anonymous EDIT links (co-authoring + commit) for users who may manage
+  // the engagement. When on, editable files open editable in Office for the web;
+  // if the tenant/site refuses anonymous edit links the bridge transparently
+  // falls back to a VIEW link so the file still opens. Set to false to force
+  // view-only everywhere.
+  M365_ALLOW_ANON_EDIT: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  // Microsoft Graph + login endpoints (overridable for national clouds).
+  M365_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
+  M365_LOGIN_BASE_URL: z.string().url().default('https://login.microsoftonline.com'),
+
   // ── Notifications (Phase 11) ─────────────────────────────────────────────
   // Enabled delivery channels (comma-separated). `portal` (the in-app row) is
   // always on; add `email` and/or `teams` to fan out to those (stub transports

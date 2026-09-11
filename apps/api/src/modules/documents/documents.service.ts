@@ -37,6 +37,8 @@ import type {
 interface DocumentRow {
   id: string;
   engagement_id: string;
+  task_id: string | null;
+  component_instance_id: string | null;
   title: string;
   document_type: DocumentType;
   classification: DocumentClassification;
@@ -49,6 +51,7 @@ interface DocumentRow {
   retention_until: string | null;
   archived_at: Date | null;
   archived_by_employee_id: string | null;
+  deleted_at: Date | null;
   created_by_employee_id: string | null;
   created_by_name: string | null;
   version: number;
@@ -71,11 +74,12 @@ interface VersionRow {
 }
 
 const DOC_BASE = `
-  SELECT d.id, d.engagement_id, d.title, d.document_type, d.classification, d.sensitivity,
+  SELECT d.id, d.engagement_id, d.task_id, d.component_instance_id,
+         d.title, d.document_type, d.classification, d.sensitivity,
          d.status, d.current_version_no,
          cv.filename AS current_filename, cv.content_type AS current_content_type,
          cv.size_bytes AS current_size_bytes,
-         d.retention_until::text, d.archived_at, d.archived_by_employee_id,
+         d.retention_until::text, d.archived_at, d.archived_by_employee_id, d.deleted_at,
          d.created_by_employee_id, ce.full_name AS created_by_name,
          d.version, d.created_at, d.updated_at
   FROM hsdg.documents d
@@ -84,11 +88,12 @@ const DOC_BASE = `
 
 /** Like {@link DOC_BASE} but with engagement/client context, for the cross-engagement view. */
 const GLOBAL_DOC_BASE = `
-  SELECT d.id, d.engagement_id, d.title, d.document_type, d.classification, d.sensitivity,
+  SELECT d.id, d.engagement_id, d.task_id, d.component_instance_id,
+         d.title, d.document_type, d.classification, d.sensitivity,
          d.status, d.current_version_no,
          cv.filename AS current_filename, cv.content_type AS current_content_type,
          cv.size_bytes AS current_size_bytes,
-         d.retention_until::text, d.archived_at, d.archived_by_employee_id,
+         d.retention_until::text, d.archived_at, d.archived_by_employee_id, d.deleted_at,
          d.created_by_employee_id, ce.full_name AS created_by_name,
          d.version, d.created_at, d.updated_at,
          eng.engagement_code, ent.legal_name AS entity_name
@@ -139,12 +144,13 @@ export class DocumentsService {
     try {
       return await this.db.withRlsContext(ctx, async (client) => {
         await this.requireEngagement(client, engagementId);
+        await this.validateWorkLink(client, engagementId, input.taskId, input.componentInstanceId);
         try {
           await client.query(
             `INSERT INTO hsdg.documents
                (id, engagement_id, title, document_type, classification, sensitivity,
-                retention_until, created_by_employee_id)
-             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8)`,
+                retention_until, created_by_employee_id, task_id, component_instance_id)
+             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8,$9,$10)`,
             [
               documentId,
               engagementId,
@@ -154,6 +160,8 @@ export class DocumentsService {
               input.sensitivity ?? null,
               input.retentionUntil ?? null,
               ctx.employeeId ?? null,
+              input.taskId ?? null,
+              input.componentInstanceId ?? null,
             ],
           );
           const versionId = await this.insertVersion(client, {
@@ -253,12 +261,26 @@ export class DocumentsService {
       documentType?: DocumentType;
       classification?: DocumentClassification;
       search?: string;
+      taskId?: string;
+      componentInstanceId?: string;
+      /** Show soft-deleted documents instead of live ones (managing partner only). */
+      deleted?: boolean;
     },
   ): Promise<PageResult<DocumentRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.requireEngagement(client, engagementId);
       const params: unknown[] = [engagementId];
       const conds = ['d.engagement_id = $1'];
+      // Live documents by default; the deleted view lists only soft-deleted rows.
+      conds.push(filter.deleted ? 'd.deleted_at IS NOT NULL' : 'd.deleted_at IS NULL');
+      if (filter.taskId) {
+        params.push(filter.taskId);
+        conds.push(`d.task_id = $${params.length}`);
+      }
+      if (filter.componentInstanceId) {
+        params.push(filter.componentInstanceId);
+        conds.push(`d.component_instance_id = $${params.length}`);
+      }
       if (filter.status) {
         params.push(filter.status);
         conds.push(`d.status = $${params.length}`);
@@ -309,7 +331,8 @@ export class DocumentsService {
   ): Promise<PageResult<GlobalDocumentRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const params: unknown[] = [];
-      const conds: string[] = [];
+      // Soft-deleted documents are hidden from the cross-engagement view too.
+      const conds: string[] = ['d.deleted_at IS NULL'];
       if (filter.status) {
         params.push(filter.status);
         conds.push(`d.status = $${params.length}`);
@@ -345,7 +368,10 @@ export class DocumentsService {
   async getOne(ctx: RlsContext, engagementId: string, documentId: string): Promise<DocumentDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const detail = await this.selectDetail(client, documentId, engagementId);
-      if (!detail) throw new NotFoundException('Document not found.');
+      // A soft-deleted document behaves as gone to every read path (open,
+      // download, M365/OnlyOffice session) — only a managing partner's restore
+      // brings it back. Treat it as not found here.
+      if (!detail || detail.deletedAt) throw new NotFoundException('Document not found.');
       return detail;
     });
   }
@@ -451,6 +477,75 @@ export class DocumentsService {
   }
 
   /**
+   * SOFT-delete a document (§20 — professional evidence is never physically
+   * removed). The row, its version chain and its audit trail are all retained;
+   * the document simply becomes invisible to every list/view/open until a
+   * managing partner restores it. Authority (managing partner only) is enforced
+   * in the controller; RLS additionally requires the caller to be a lead / the
+   * business-firm-wide managing partner for the UPDATE. Audited. Idempotent-ish:
+   * deleting an already-deleted document is a no-op error.
+   */
+  async softDelete(
+    ctx: RlsContext,
+    engagementId: string,
+    documentId: string,
+    reason: string,
+  ): Promise<void> {
+    await this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.selectDocument(client, documentId, engagementId);
+      if (!before) throw new NotFoundException('Document not found.');
+      if (before.deletedAt) throw new BadRequestException('Document is already deleted.');
+      const updated = await client.query(
+        `UPDATE hsdg.documents
+           SET deleted_at = now(), deleted_by_employee_id = $1, version = version + 1
+         WHERE id = $2 AND engagement_id = $3 AND deleted_at IS NULL`,
+        [ctx.employeeId ?? null, documentId, engagementId],
+      );
+      if ((updated.rowCount ?? 0) === 0) throw new NotFoundException('Document not found.');
+      await this.audit.recordWith(client, ctx, {
+        action: 'document.deleted',
+        objectType: 'document',
+        objectId: documentId,
+        before: { engagementId, title: before.title, status: before.status },
+        reason,
+      });
+    });
+  }
+
+  /**
+   * Restore a soft-deleted document (managing partner only; enforced in the
+   * controller). Clears the deleted marker so the document reappears everywhere.
+   */
+  async restoreDeleted(
+    ctx: RlsContext,
+    engagementId: string,
+    documentId: string,
+    reason: string,
+  ): Promise<DocumentRecord> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.selectDocument(client, documentId, engagementId);
+      if (!before) throw new NotFoundException('Document not found.');
+      if (!before.deletedAt) throw new BadRequestException('Document is not deleted.');
+      await client.query(
+        `UPDATE hsdg.documents
+           SET deleted_at = NULL, deleted_by_employee_id = NULL, version = version + 1
+         WHERE id = $1 AND engagement_id = $2`,
+        [documentId, engagementId],
+      );
+      const after = await this.selectDocument(client, documentId, engagementId);
+      await this.audit.recordWith(client, ctx, {
+        action: 'document.undeleted',
+        objectType: 'document',
+        objectId: documentId,
+        before: { deletedAt: before.deletedAt },
+        after: { status: after!.status },
+        reason,
+      });
+      return after!;
+    });
+  }
+
+  /**
    * Fetch the bytes of a document version, audited. If `versionId` is omitted the
    * current version is served. RLS scopes the metadata read to engagement
    * members, so a non-member gets 404 (existence not leaked) and can never reach
@@ -508,6 +603,36 @@ export class DocumentsService {
   private async requireEngagement(client: PoolClient, engagementId: string): Promise<void> {
     const eng = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [engagementId]);
     if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
+  }
+
+  /**
+   * A document may only be filed under a task or component-work period that
+   * belongs to its OWN engagement (the DB uses single-column FKs, so this is
+   * enforced here rather than by a composite key). Rejects a cross-engagement
+   * link with a clear 400.
+   */
+  private async validateWorkLink(
+    client: PoolClient,
+    engagementId: string,
+    taskId: string | null | undefined,
+    componentInstanceId: string | null | undefined,
+  ): Promise<void> {
+    if (taskId) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM hsdg.tasks WHERE id = $1 AND engagement_id = $2`,
+        [taskId, engagementId],
+      );
+      if (!rows[0]) throw new BadRequestException('That task is not part of this engagement.');
+    }
+    if (componentInstanceId) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM hsdg.component_instances WHERE id = $1 AND engagement_id = $2`,
+        [componentInstanceId, engagementId],
+      );
+      if (!rows[0]) {
+        throw new BadRequestException('That component-work item is not part of this engagement.');
+      }
+    }
   }
 
   private async insertVersion(
@@ -627,6 +752,8 @@ function mapDocument(row: DocumentRow): DocumentRecord {
   return {
     id: row.id,
     engagementId: row.engagement_id,
+    taskId: row.task_id,
+    componentInstanceId: row.component_instance_id,
     title: row.title,
     documentType: row.document_type,
     classification: row.classification,
@@ -639,6 +766,7 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     retentionUntil: row.retention_until,
     archivedAt: row.archived_at ? row.archived_at.toISOString() : null,
     archivedById: row.archived_by_employee_id,
+    deletedAt: row.deleted_at ? row.deleted_at.toISOString() : null,
     createdById: row.created_by_employee_id,
     createdByName: row.created_by_name,
     version: row.version,

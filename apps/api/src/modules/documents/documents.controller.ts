@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -10,20 +12,35 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type Paginated } from '@hsdg/contracts';
+import { PERMISSION, ROLE, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { DocumentsService } from './documents.service';
 import { OnlyOfficeService, type EditorSession } from './onlyoffice/onlyoffice.service';
+import { M365Service, type M365EditorSession } from './m365/m365.service';
 import type { DocumentDetail, DocumentRecord } from './documents.types';
 import {
   AddVersionDto,
   ArchiveDocumentDto,
   CreateDocumentDto,
+  DeleteDocumentDto,
   DocumentListQueryDto,
   UpdateDocumentDto,
 } from './dto/document.dto';
+
+/**
+ * Roles permitted to delete/restore a document. Only the managing partner — the
+ * one business-firm-wide authority (platform `admin` is intentionally excluded
+ * from engagement data, so it could not see documents anyway).
+ */
+const DOCUMENT_DELETE_ROLES: readonly string[] = [ROLE.managingPartner];
+
+/** True when the principal may soft-delete / restore documents (managing partner). */
+function canDeleteDocuments(principal: Principal): boolean {
+  const held = [principal.effectiveRole, ...principal.roles].filter(Boolean) as string[];
+  return held.some((r) => DOCUMENT_DELETE_ROLES.includes(r));
+}
 
 /**
  * Engagement documents (Phase 10). Reads/downloads need `engagement.read`
@@ -37,6 +54,7 @@ export class DocumentsController {
   constructor(
     private readonly documents: DocumentsService,
     private readonly onlyoffice: OnlyOfficeService,
+    private readonly m365: M365Service,
   ) {}
 
   @Post(':id/documents/:docId/onlyoffice/session')
@@ -48,6 +66,28 @@ export class DocumentsController {
     @Param('docId', new ParseUUIDPipe()) docId: string,
   ): Promise<EditorSession> {
     return this.onlyoffice.buildSession(principal, id, docId);
+  }
+
+  @Post(':id/documents/:docId/m365/session')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Build an embedded Microsoft 365 (SharePoint Online) editor session' })
+  m365Session(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+  ): Promise<M365EditorSession> {
+    return this.m365.buildSession(principal, id, docId);
+  }
+
+  @Post(':id/documents/:docId/m365/commit')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Commit the live Microsoft 365 copy as a new audited version' })
+  m365Commit(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+  ): Promise<DocumentDetail> {
+    return this.m365.commit(principal, id, docId);
   }
 
   @Get(':id/documents')
@@ -65,11 +105,19 @@ export class DocumentsController {
       documentType?: DocumentListQueryDto['documentType'];
       classification?: DocumentListQueryDto['classification'];
       search?: string;
+      taskId?: string;
+      componentInstanceId?: string;
+      deleted?: boolean;
     } = {};
     if (query.status) filter.status = query.status;
     if (query.documentType) filter.documentType = query.documentType;
     if (query.classification) filter.classification = query.classification;
     if (query.search) filter.search = query.search;
+    if (query.taskId) filter.taskId = query.taskId;
+    if (query.componentInstanceId) filter.componentInstanceId = query.componentInstanceId;
+    // The deleted view is a managing-partner-only tool for restoring; ignore the
+    // flag for everyone else so soft-deleted docs stay hidden.
+    if (query.deleted && canDeleteDocuments(principal)) filter.deleted = true;
     return this.documents
       .list(rlsContextFromPrincipal(principal), id, query, filter)
       .then((result) => paginate(result, query));
@@ -145,6 +193,40 @@ export class DocumentsController {
     @Body() dto: ArchiveDocumentDto,
   ): Promise<DocumentRecord> {
     return this.documents.restore(rlsContextFromPrincipal(principal), id, docId, dto);
+  }
+
+  @Post(':id/documents/:docId/delete')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary:
+      'Soft-delete a document — hidden everywhere, retained for audit, restorable (managing partner only; audited)',
+  })
+  async delete(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+    @Body() dto: DeleteDocumentDto,
+  ): Promise<void> {
+    if (!canDeleteDocuments(principal)) {
+      throw new ForbiddenException('Only the managing partner may delete a document.');
+    }
+    await this.documents.softDelete(rlsContextFromPrincipal(principal), id, docId, dto.reason);
+  }
+
+  @Post(':id/documents/:docId/undelete')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Restore a soft-deleted document (managing partner only; audited)' })
+  undelete(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+    @Body() dto: DeleteDocumentDto,
+  ): Promise<DocumentRecord> {
+    if (!canDeleteDocuments(principal)) {
+      throw new ForbiddenException('Only the managing partner may restore a document.');
+    }
+    return this.documents.restoreDeleted(rlsContextFromPrincipal(principal), id, docId, dto.reason);
   }
 
   @Get(':id/documents/:docId/download')

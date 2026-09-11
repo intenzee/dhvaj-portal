@@ -10,6 +10,28 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Documents clubbed with the work + Microsoft 365 no-login viewing (complete).**
+> Documents are no longer only engagement-level — a document can be filed under a
+> **task** or a **component-work period** (e.g. the GST return for a month) via the
+> additive migration `1761600000000_document_task_component_links.sql`
+> (`documents.task_id` / `documents.component_instance_id`, single-column FKs
+> `ON DELETE SET NULL`; same-engagement integrity enforced in `DocumentsService`).
+> Clicking a task (Work / My Work) or a component period (Services → Component
+> work) opens a **scoped pop-up** showing only that item's files. A reusable
+> `DocumentsPanel` gives a **list + live side-preview** (PDF/image/text inline),
+> **edit everywhere** (routes to Microsoft 365 → OnlyOffice → built-in editors),
+> upload, archive, and — for the **managing partner only** — a **soft delete**
+> (`documents.deleted_at`): hidden everywhere, retained for audit, restorable
+> (§20 — professional evidence is never hard-deleted; DB `DELETE` stays revoked).
+> Completion is visible at a glance: a `done/total` bar on task lists and a
+> **monthly progress grid** for recurring components (done / overdue / upcoming).
+>
+> **Microsoft 365 viewing** opens Office files in genuine Office-for-the-web with
+> **no per-user Microsoft sign-in**, backed by one enterprise identity: the API
+> RLS-checks access then mints a short-lived **anonymous** SharePoint sharing link
+> (`M365_ENABLED`, off until provisioned — see
+> [the provisioning checklist](docs/microsoft-365-sharepoint-provisioning.md)).
+
 > **Status: Add Client / Entity Master — spec §1–§36 fully delivered (Phases A–C complete).**
 > The [Add Client / Entity Master developer spec](docs/entity-master-roadmap.md)
 > is built end-to-end across three phases, on one principle throughout: the master

@@ -6,6 +6,8 @@ import { DocumentsController } from './documents.controller';
 import { DocumentsListController } from './documents-list.controller';
 import { OnlyOfficeController } from './onlyoffice/onlyoffice.controller';
 import { OnlyOfficeService } from './onlyoffice/onlyoffice.service';
+import { M365Service } from './m365/m365.service';
+import { GraphClient } from './m365/graph-client';
 
 /**
  * Documents (Phase 10). Engagement-scoped professional evidence: metadata +
@@ -17,7 +19,7 @@ import { OnlyOfficeService } from './onlyoffice/onlyoffice.service';
 @Module({
   imports: [AuditModule, StorageModule],
   controllers: [DocumentsController, DocumentsListController, OnlyOfficeController],
-  providers: [DocumentsService, OnlyOfficeService],
+  providers: [DocumentsService, OnlyOfficeService, M365Service, GraphClient],
   exports: [DocumentsService],
 })
 export class DocumentsModule {}

@@ -19,6 +19,8 @@ import { SpreadsheetEditor } from '@/components/document-editor/spreadsheet-edit
 import { WordEditor } from '@/components/document-editor/word-editor';
 import { TextEditor } from '@/components/document-editor/text-editor';
 import { OnlyOfficeEditor } from '@/components/document-editor/onlyoffice-editor';
+import { M365Editor } from '@/components/document-editor/m365-editor';
+import { isM365Enabled } from '@/lib/m365';
 import type { EditorHandle } from '@/components/document-editor/types';
 import type { DocumentRow } from '@/lib/types';
 
@@ -58,34 +60,42 @@ export function DocumentPreview({
   doc,
   onClose,
   canEdit = true,
+  initialMode = 'view',
   onSaved,
 }: {
   engagementId: string;
   doc: DocumentRow;
   onClose: () => void;
   canEdit?: boolean;
+  /** Open straight into edit mode (built-in editors) instead of view. */
+  initialMode?: 'view' | 'edit';
   onSaved?: () => void;
 }): JSX.Element {
   const toast = useToast();
   const [state, setState] = useState<Loaded>({ loading: true });
-  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [mode, setMode] = useState<'view' | 'edit'>(initialMode);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const editorRef = useRef<EditorHandle>(null);
   const downloadPath = `/engagements/${engagementId}/documents/${doc.id}/download`;
 
-  // Prefer the OnlyOffice editor (full Office fidelity) for Office/PDF files;
-  // fall back to the built-in viewers if it is disabled or unreachable.
+  // Editor precedence for Office/PDF files: Microsoft 365 (SharePoint Online,
+  // when enabled) → OnlyOffice → built-in viewers. Each falls through to the
+  // next if disabled or unreachable.
+  const [m365Failed, setM365Failed] = useState(false);
   const [ooFailed, setOoFailed] = useState(false);
   const guessName = doc.currentFilename ?? doc.title;
   const officeKind = ['excel', 'word', 'pdf', 'csv'].includes(detectKind(null, guessName));
-  const useOnlyOffice = officeKind && !ooFailed;
+  const useM365 = officeKind && isM365Enabled && !m365Failed;
+  const useOnlyOffice = officeKind && !useM365 && !ooFailed;
+  // Either embedded editor fetches/holds the bytes itself and saves out-of-band.
+  const liveEditor = useM365 || useOnlyOffice;
 
   useEffect(() => {
-    // When OnlyOffice handles the file, the DS fetches the bytes itself — we skip
-    // the local blob download entirely.
-    if (useOnlyOffice) {
+    // When an embedded editor (Microsoft 365 or OnlyOffice) handles the file, it
+    // holds the bytes itself — we skip the local blob download entirely.
+    if (liveEditor) {
       setState({ loading: false });
       return;
     }
@@ -107,17 +117,19 @@ export function DocumentPreview({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [downloadPath, reloadKey, useOnlyOffice]);
+  }, [downloadPath, reloadKey, liveEditor]);
 
   const requestClose = useCallback(() => {
-    if (!useOnlyOffice && mode === 'edit' && dirty && !window.confirm('Discard unsaved changes?')) return;
-    // OnlyOffice force-saves on teardown; nudge the list to pick up the new version.
-    if (useOnlyOffice && onSaved) {
+    if (!liveEditor && mode === 'edit' && dirty && !window.confirm('Discard unsaved changes?')) return;
+    // Embedded editors save out-of-band (OnlyOffice force-saves on teardown; the
+    // Microsoft 365 editor autosaves + commits) — nudge the list to pick up any
+    // new version.
+    if (liveEditor && onSaved) {
       onSaved();
       window.setTimeout(onSaved, 2500);
     }
     onClose();
-  }, [useOnlyOffice, mode, dirty, onClose, onSaved]);
+  }, [liveEditor, mode, dirty, onClose, onSaved]);
 
   // Close on Escape (respecting unsaved edits).
   useEffect(() => {
@@ -178,8 +190,9 @@ export function DocumentPreview({
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-ink">
               {doc.title}
+              {useM365 && <span className="ml-2 text-xs font-normal text-primary-600">Microsoft 365 editor</span>}
               {useOnlyOffice && <span className="ml-2 text-xs font-normal text-primary-600">Live editor — saves on close</span>}
-              {!useOnlyOffice && mode === 'edit' && (
+              {!liveEditor && mode === 'edit' && (
                 <span className="ml-2 text-xs font-normal text-primary-600">Editing{dirty ? ' • unsaved' : ''}</span>
               )}
             </div>
@@ -188,12 +201,12 @@ export function DocumentPreview({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {!useOnlyOffice && mode === 'view' && editable && (
+            {!liveEditor && mode === 'view' && editable && (
               <Button size="sm" variant="secondary" onClick={() => setMode('edit')}>
                 <Pencil className="h-4 w-4" /> Edit
               </Button>
             )}
-            {!useOnlyOffice && mode === 'edit' && (
+            {!liveEditor && mode === 'edit' && (
               <>
                 <Button size="sm" variant="secondary" onClick={requestClose} disabled={saving}>
                   Cancel
@@ -204,7 +217,7 @@ export function DocumentPreview({
                 </Button>
               </>
             )}
-            {(useOnlyOffice || mode === 'view') && (
+            {(liveEditor || mode === 'view') && (
               <Button size="sm" variant="secondary" onClick={() => void download()}>
                 <Download className="h-4 w-4" /> Download
               </Button>
@@ -220,6 +233,14 @@ export function DocumentPreview({
         </div>
 
         <div className="min-h-0 flex-1 overflow-hidden bg-surface-raised">
+          {useM365 && (
+            <M365Editor
+              engagementId={engagementId}
+              docId={doc.id}
+              onUnsupported={() => setM365Failed(true)}
+              onSaved={onSaved}
+            />
+          )}
           {useOnlyOffice && (
             <OnlyOfficeEditor
               engagementId={engagementId}
@@ -228,7 +249,7 @@ export function DocumentPreview({
               onClose={requestClose}
             />
           )}
-          {!useOnlyOffice && state.loading && (
+          {!liveEditor && state.loading && (
             <div className="flex h-full items-center justify-center">
               <Spinner label="Loading…" />
             </div>

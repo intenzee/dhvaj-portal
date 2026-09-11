@@ -1,13 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBase64,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
   ValidateIf,
@@ -66,6 +68,18 @@ export class CreateDocumentDto {
   @ApiProperty({ description: 'File bytes, base64-encoded.' })
   @IsBase64()
   contentBase64!: string;
+
+  @ApiPropertyOptional({ description: 'File under a specific task (same engagement).' })
+  @IsOptional()
+  @IsUUID()
+  taskId?: string;
+
+  @ApiPropertyOptional({
+    description: 'File under a specific component-work period (same engagement).',
+  })
+  @IsOptional()
+  @IsUUID()
+  componentInstanceId?: string;
 }
 
 export class AddVersionDto {
@@ -169,4 +183,30 @@ export class DocumentListQueryDto extends PaginationQueryDto {
   @IsString()
   @MaxLength(200)
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Only documents filed under this task.' })
+  @IsOptional()
+  @IsUUID()
+  taskId?: string;
+
+  @ApiPropertyOptional({ description: 'Only documents filed under this component-work period.' })
+  @IsOptional()
+  @IsUUID()
+  componentInstanceId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Show soft-deleted documents (managing partner only) instead of live ones.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  deleted?: boolean;
+}
+
+export class DeleteDocumentDto {
+  @ApiProperty({ description: 'Reason for permanent deletion (audited).' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  reason!: string;
 }

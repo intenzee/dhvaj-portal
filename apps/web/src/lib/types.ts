@@ -495,12 +495,17 @@ export interface EmployeeRow {
 export interface DocumentRow {
   id: string;
   title: string;
+  taskId: string | null;
+  componentInstanceId: string | null;
   documentType: string;
   classification: string;
   status: string;
   currentVersionNo: number;
   currentFilename: string | null;
+  currentContentType: string | null;
+  currentSizeBytes: number | null;
   createdByName: string | null;
+  deletedAt: string | null;
   version: number;
   updatedAt: string;
 }

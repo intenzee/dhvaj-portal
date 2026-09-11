@@ -1,11 +1,12 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { Paginated } from '@hsdg/contracts';
+import { FolderOpen } from 'lucide-react';
+import { TASK_STATUS, type Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { formatDate, deadlineLabel } from '@/lib/format';
 import type { MyTask, MyClientDependency } from '@/lib/types';
@@ -14,34 +15,11 @@ import { StatusBadge, PriorityBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
+import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
+import { CompletionBar } from '@/components/completion';
 import { cn } from '@/lib/cn';
 
 type Tab = 'tasks' | 'client-dependencies';
-
-const taskColumns: ColumnDef<MyTask, unknown>[] = [
-  { header: 'Task', accessorKey: 'title' },
-  {
-    header: 'Engagement',
-    cell: ({ row }) => (
-      <span className="text-ink-muted">
-        {row.original.engagementCode} · {row.original.entityName}
-      </span>
-    ),
-  },
-  { header: 'Priority', cell: ({ row }) => <PriorityBadge priority={row.original.priority} /> },
-  {
-    header: 'Due',
-    cell: ({ row }) =>
-      row.original.dueDate ? (
-        <span className={row.original.isOverdue ? 'font-medium text-danger-600' : ''}>
-          {formatDate(row.original.dueDate)}
-        </span>
-      ) : (
-        <span className="text-ink-faint">—</span>
-      ),
-  },
-  { header: 'Status', cell: ({ row }) => <TaskStatusControl task={row.original} /> },
-];
 
 const depColumns: ColumnDef<MyClientDependency, unknown>[] = [
   { header: 'Requested', accessorKey: 'requestedInfo' },
@@ -72,6 +50,61 @@ function MyWorkInner(): JSX.Element {
   const params = useSearchParams();
   const [tab, setTab] = useState<Tab>(
     params.get('tab') === 'client-dependencies' ? 'client-dependencies' : 'tasks',
+  );
+  const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
+
+  const taskColumns = useMemo<ColumnDef<MyTask, unknown>[]>(
+    () => [
+      {
+        header: 'Task',
+        cell: ({ row }) => (
+          <button
+            type="button"
+            onClick={() => setDocsForTask(row.original)}
+            className="text-left font-medium text-primary-700 hover:underline"
+            title="Open documents for this task"
+          >
+            {row.original.title}
+          </button>
+        ),
+      },
+      {
+        header: 'Engagement',
+        cell: ({ row }) => (
+          <span className="text-ink-muted">
+            {row.original.engagementCode} · {row.original.entityName}
+          </span>
+        ),
+      },
+      { header: 'Priority', cell: ({ row }) => <PriorityBadge priority={row.original.priority} /> },
+      {
+        header: 'Due',
+        cell: ({ row }) =>
+          row.original.dueDate ? (
+            <span className={row.original.isOverdue ? 'font-medium text-danger-600' : ''}>
+              {formatDate(row.original.dueDate)}
+            </span>
+          ) : (
+            <span className="text-ink-faint">—</span>
+          ),
+      },
+      { header: 'Status', cell: ({ row }) => <TaskStatusControl task={row.original} /> },
+      {
+        header: '',
+        id: 'documents',
+        cell: ({ row }) => (
+          <button
+            type="button"
+            onClick={() => setDocsForTask(row.original)}
+            className="inline-flex items-center gap-1 rounded p-1.5 text-ink-muted hover:bg-surface-sunken hover:text-primary-600"
+            title="Documents"
+          >
+            <FolderOpen className="h-4 w-4" />
+          </button>
+        ),
+      },
+    ],
+    [],
   );
 
   const tasks = useQuery({
@@ -110,10 +143,33 @@ function MyWorkInner(): JSX.Element {
       </div>
 
       {tab === 'tasks' && (
-        <Card className="p-0">
-          {tasks.isLoading && <div className="p-4"><Spinner /></div>}
-          {tasks.data && <DataTable columns={taskColumns} data={tasks.data.items} empty="No open tasks assigned to you." />}
-        </Card>
+        <>
+          {tasks.data && tasks.data.items.length > 0 && (
+            <div className="mb-3 flex items-center gap-3">
+              <span className="text-sm text-ink-muted">Your progress:</span>
+              <CompletionBar
+                done={tasks.data.items.filter((t) => t.status === TASK_STATUS.done).length}
+                total={
+                  tasks.data.items.filter((t) => t.status !== TASK_STATUS.cancelled).length
+                }
+              />
+            </div>
+          )}
+          <Card className="p-0">
+            {tasks.isLoading && (
+              <div className="p-4">
+                <Spinner />
+              </div>
+            )}
+            {tasks.data && (
+              <DataTable
+                columns={taskColumns}
+                data={tasks.data.items}
+                empty="No open tasks assigned to you."
+              />
+            )}
+          </Card>
+        </>
       )}
       {tab === 'client-dependencies' && (
         <Card className="p-0">
@@ -135,6 +191,16 @@ function MyWorkInner(): JSX.Element {
         </Link>
         .
       </p>
+
+      {docsForTask && (
+        <ScopedDocumentsModal
+          engagementId={docsForTask.engagementId}
+          scope={{ taskId: docsForTask.id }}
+          title={docsForTask.title}
+          subtitle={`${docsForTask.engagementCode} · ${docsForTask.entityName}`}
+          onClose={() => setDocsForTask(null)}
+        />
+      )}
     </div>
   );
 }

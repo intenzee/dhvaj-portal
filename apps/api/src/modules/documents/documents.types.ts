@@ -24,6 +24,10 @@ export interface DocumentVersionRecord {
 export interface DocumentRecord {
   id: string;
   engagementId: string;
+  /** Optional task this document is filed under (same engagement); null = engagement-level. */
+  taskId: string | null;
+  /** Optional component-work period (e.g. GST for a month) this document is filed under. */
+  componentInstanceId: string | null;
   title: string;
   documentType: DocumentType;
   classification: DocumentClassification;
@@ -36,6 +40,8 @@ export interface DocumentRecord {
   retentionUntil: string | null;
   archivedAt: string | null;
   archivedById: string | null;
+  /** When set, the document is soft-deleted (hidden everywhere; restorable by a managing partner). */
+  deletedAt: string | null;
   createdById: string | null;
   createdByName: string | null;
   version: number;
@@ -65,6 +71,10 @@ export interface DocumentDownload {
 
 export interface CreateDocumentInput {
   title: string;
+  /** File the document under a specific task (same engagement). */
+  taskId?: string | null;
+  /** File the document under a specific component-work period (same engagement). */
+  componentInstanceId?: string | null;
   documentType?: DocumentType;
   classification?: DocumentClassification;
   sensitivity?: DocumentSensitivity;
