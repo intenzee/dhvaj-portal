@@ -21,6 +21,7 @@ import type { ServiceRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, EmptyState, Badge, Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { ComponentChecklistConfigModal } from '@/components/actions/component-checklist-config-modal';
 
 /** Firm-wide component catalogue management (spec §11/§13; gated service.manage). */
 export default function ComponentCataloguePage(): JSX.Element {
@@ -29,6 +30,7 @@ export default function ComponentCataloguePage(): JSX.Element {
   const [serviceCode, setServiceCode] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ServiceComponentRecord | null>(null);
+  const [checklistFor, setChecklistFor] = useState<ServiceComponentRecord | null>(null);
 
   const services = useQuery({
     queryKey: ['services', 'all'],
@@ -120,9 +122,19 @@ export default function ComponentCataloguePage(): JSX.Element {
                   </td>
                   {canManage && (
                     <td className="px-4 py-2.5 text-right">
-                      <Button size="sm" variant="secondary" onClick={() => setEditing(c)}>
-                        Edit
-                      </Button>
+                      <div className="flex justify-end gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setChecklistFor(c)}
+                          title="Required-documents checklist"
+                        >
+                          Checklist
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => setEditing(c)}>
+                          Edit
+                        </Button>
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -139,6 +151,13 @@ export default function ComponentCataloguePage(): JSX.Element {
         />
       )}
       {editing && <ComponentFormModal component={editing} onClose={() => setEditing(null)} />}
+      {checklistFor && (
+        <ComponentChecklistConfigModal
+          componentId={checklistFor.id}
+          componentName={checklistFor.name}
+          onClose={() => setChecklistFor(null)}
+        />
+      )}
     </div>
   );
 }

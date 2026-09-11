@@ -80,6 +80,13 @@ export class CreateDocumentDto {
   @IsOptional()
   @IsUUID()
   componentInstanceId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tag the document as satisfying a checklist requirement of that component.',
+  })
+  @IsOptional()
+  @IsUUID()
+  docRequirementId?: string;
 }
 
 export class AddVersionDto {

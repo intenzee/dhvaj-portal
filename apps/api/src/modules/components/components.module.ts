@@ -3,9 +3,11 @@ import { AuditModule } from '../audit/audit.module';
 import { ServiceComponentsService } from './service-components.service';
 import { EngagementComponentsService } from './engagement-components.service';
 import { ComponentInstancesService } from './component-instances.service';
+import { ComponentDocRequirementsService } from './component-doc-requirements.service';
 import { ServiceComponentsController } from './service-components.controller';
 import { EngagementComponentsController } from './engagement-components.controller';
 import { ComplianceHorizonController } from './compliance-horizon.controller';
+import { ComponentDocRequirementsController } from './component-doc-requirements.controller';
 
 /**
  * Service Components & Component Configuration (spec §11–§13, §16, §24, §36).
@@ -24,8 +26,14 @@ import { ComplianceHorizonController } from './compliance-horizon.controller';
     ServiceComponentsController,
     EngagementComponentsController,
     ComplianceHorizonController,
+    ComponentDocRequirementsController,
   ],
-  providers: [ServiceComponentsService, EngagementComponentsService, ComponentInstancesService],
+  providers: [
+    ServiceComponentsService,
+    EngagementComponentsService,
+    ComponentInstancesService,
+    ComponentDocRequirementsService,
+  ],
   exports: [ServiceComponentsService, EngagementComponentsService, ComponentInstancesService],
 })
 export class ComponentsModule {}

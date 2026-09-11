@@ -312,10 +312,20 @@ function ComponentProgressGrid({
                     key={w.id}
                     type="button"
                     onClick={() => onOpenDocs(w)}
-                    className={`min-w-[3rem] rounded-md border px-2 py-1 text-center text-[11px] font-medium transition hover:opacity-90 ${cellClass(w)}`}
-                    title={`${w.periodLabel} — ${humanize(w.status)}. Click for documents.`}
+                    className={`relative min-w-[3rem] rounded-md border px-2 py-1 text-center text-[11px] font-medium transition hover:opacity-90 ${cellClass(w)}`}
+                    title={`${w.periodLabel} — ${humanize(w.status)}${
+                      w.requiredDocsMissing > 0
+                        ? ` · ${w.requiredDocsMissing} required doc(s) missing`
+                        : ''
+                    }. Click for documents.`}
                   >
                     {shortPeriod(w.periodLabel)}
+                    {w.requiredDocsMissing > 0 && (
+                      <span
+                        className="absolute -right-1 -top-1 inline-flex h-3 w-3 items-center justify-center rounded-full bg-danger-600 ring-2 ring-surface"
+                        aria-label={`${w.requiredDocsMissing} required documents missing`}
+                      />
+                    )}
                   </button>
                 ))}
               </div>

@@ -25,6 +25,10 @@ audit trail.
 > (§20 — professional evidence is never hard-deleted; DB `DELETE` stays revoked).
 > Completion is visible at a glance: a `done/total` bar on task lists and a
 > **monthly progress grid** for recurring components (done / overdue / upcoming).
+> Each service component can define a **required-documents checklist** (migration
+> `1761700000000`, e.g. GST → GSTR-1, GSTR-3B): the period pop-up shows
+> satisfied/missing items and uploads can be filed against a specific item, and
+> the month grid flags any period missing mandatory evidence.
 >
 > **Microsoft 365 viewing** opens Office files in genuine Office-for-the-web with
 > **no per-user Microsoft sign-in**, backed by one enterprise identity: the API

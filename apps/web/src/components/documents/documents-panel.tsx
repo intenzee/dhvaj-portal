@@ -11,8 +11,17 @@ import {
   Pencil,
   Maximize2,
   FileText,
+  CheckCircle2,
+  Circle,
+  Upload as UploadIcon,
 } from 'lucide-react';
-import { DOCUMENT_TYPES, DOCUMENT_CLASSIFICATIONS, ROLE, type Paginated } from '@hsdg/contracts';
+import {
+  DOCUMENT_TYPES,
+  DOCUMENT_CLASSIFICATIONS,
+  ROLE,
+  type Paginated,
+  type ComponentDocChecklistItem,
+} from '@hsdg/contracts';
 import { apiFetch, ApiError, downloadFile, fetchBlob } from '@/lib/api';
 import { humanize, formatDate } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
@@ -77,6 +86,7 @@ export function DocumentsPanel({
   const componentInstanceId = scope?.componentInstanceId;
 
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadReq, setUploadReq] = useState<{ id: string; name: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [full, setFull] = useState<{ doc: DocumentRow; mode: 'view' | 'edit' } | null>(null);
   const [deleteFor, setDeleteFor] = useState<DocumentRow | null>(null);
@@ -106,6 +116,17 @@ export function DocumentsPanel({
     },
   });
 
+  // Required-documents checklist — only for a component-work period.
+  const checklistKey = ['engagement', engagementId, 'component-work', componentInstanceId, 'checklist'];
+  const checklist = useQuery({
+    queryKey: checklistKey,
+    queryFn: () =>
+      apiFetch<ComponentDocChecklistItem[]>(
+        `/engagements/${engagementId}/component-work/${componentInstanceId}/checklist`,
+      ),
+    enabled: !!componentInstanceId && !showDeleted,
+  });
+
   const items = docs.data?.items ?? [];
   const selected = items.find((d) => d.id === selectedId) ?? null;
 
@@ -121,7 +142,14 @@ export function DocumentsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs.data]);
 
-  const invalidate = (): void => void qc.invalidateQueries({ queryKey });
+  const invalidate = (): void => {
+    void qc.invalidateQueries({ queryKey });
+    if (componentInstanceId) {
+      void qc.invalidateQueries({ queryKey: checklistKey });
+      // Refresh the component-work list so the grid's missing-docs flag updates.
+      void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'component-work'] });
+    }
+  };
 
   const archive = useMutation({
     mutationFn: (d: DocumentRow) =>
@@ -191,6 +219,17 @@ export function DocumentsPanel({
           )}
         </div>
       </div>
+
+      {componentInstanceId && !showDeleted && checklist.data && checklist.data.length > 0 && (
+        <ChecklistStrip
+          items={checklist.data}
+          canManage={canManage}
+          onUploadFor={(req) => {
+            setUploadReq(req);
+            setUploadOpen(true);
+          }}
+        />
+      )}
 
       <Card className="grid grid-cols-1 gap-0 overflow-hidden p-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
         {/* ── List pane ─────────────────────────────────────────────────── */}
@@ -273,9 +312,14 @@ export function DocumentsPanel({
           engagementId={engagementId}
           scope={scope}
           scopeLabel={scopeLabel}
-          onClose={() => setUploadOpen(false)}
+          requirement={uploadReq}
+          onClose={() => {
+            setUploadOpen(false);
+            setUploadReq(null);
+          }}
           onDone={() => {
             setUploadOpen(false);
+            setUploadReq(null);
             invalidate();
           }}
         />
@@ -503,23 +547,91 @@ function PreviewPane({
   );
 }
 
+/** Required-documents checklist for a component-work period: satisfied vs missing. */
+function ChecklistStrip({
+  items,
+  canManage,
+  onUploadFor,
+}: {
+  items: ComponentDocChecklistItem[];
+  canManage: boolean;
+  onUploadFor: (req: { id: string; name: string }) => void;
+}): JSX.Element {
+  const done = items.filter((i) => i.satisfied).length;
+  const missingMandatory = items.filter((i) => i.isMandatory && !i.satisfied).length;
+  return (
+    <Card className="mb-2 p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+          Required documents
+        </h3>
+        <span className="text-xs text-ink-muted">
+          {done}/{items.length} filed
+          {missingMandatory > 0 && (
+            <span className="ml-2 font-medium text-danger-600">
+              {missingMandatory} mandatory missing
+            </span>
+          )}
+        </span>
+      </div>
+      <ul className="flex flex-wrap gap-1.5">
+        {items.map((i) => (
+          <li key={i.requirementId}>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${
+                i.satisfied
+                  ? 'border-success-600/30 bg-success-50 text-success-700'
+                  : i.isMandatory
+                    ? 'border-danger-600/30 bg-danger-50 text-danger-700'
+                    : 'border-line bg-surface text-ink-muted'
+              }`}
+              title={i.description ?? undefined}
+            >
+              {i.satisfied ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <Circle className="h-3.5 w-3.5" />
+              )}
+              {i.name}
+              {i.isMandatory && !i.satisfied && <span className="font-medium">*</span>}
+              {i.documentCount > 1 && <span className="text-ink-faint">×{i.documentCount}</span>}
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => onUploadFor({ id: i.requirementId, name: i.name })}
+                  className="ml-0.5 rounded p-0.5 hover:bg-surface-sunken"
+                  title={`Upload for ${i.name}`}
+                >
+                  <UploadIcon className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 function UploadModal({
   engagementId,
   scope,
   scopeLabel,
+  requirement,
   onClose,
   onDone,
 }: {
   engagementId: string;
   scope?: DocumentScope;
   scopeLabel?: string;
+  requirement?: { id: string; name: string } | null;
   onClose: () => void;
   onDone: () => void;
 }): JSX.Element {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(requirement?.name ?? '');
   const [documentType, setDocumentType] = useState('working_paper');
   const [classification, setClassification] = useState('internal');
 
@@ -529,7 +641,7 @@ function UploadModal({
       return apiFetch(`/engagements/${engagementId}/documents`, {
         method: 'POST',
         body: {
-          title: title.trim() || file!.name,
+          title: title.trim() || requirement?.name || file!.name,
           documentType,
           classification,
           filename: file!.name,
@@ -539,6 +651,7 @@ function UploadModal({
           ...(scope?.componentInstanceId
             ? { componentInstanceId: scope.componentInstanceId }
             : {}),
+          ...(requirement ? { docRequirementId: requirement.id } : {}),
         },
       });
     },
@@ -553,11 +666,13 @@ function UploadModal({
     <Modal
       open
       onClose={onClose}
-      title="Upload document"
+      title={requirement ? `Upload: ${requirement.name}` : 'Upload document'}
       description={
-        scopeLabel
-          ? `Filed under ${scopeLabel}. Stored as versioned evidence; downloads are audited.`
-          : 'Stored as versioned evidence; downloads are audited.'
+        requirement
+          ? `Filed against the "${requirement.name}" checklist item${scopeLabel ? ` for ${scopeLabel}` : ''}.`
+          : scopeLabel
+            ? `Filed under ${scopeLabel}. Stored as versioned evidence; downloads are audited.`
+            : 'Stored as versioned evidence; downloads are audited.'
       }
       footer={
         <>

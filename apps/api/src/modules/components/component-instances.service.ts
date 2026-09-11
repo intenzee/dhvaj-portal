@@ -57,6 +57,8 @@ interface InstanceRow {
   completed_by_employee_id: string | null;
   completed_by_name: string | null;
   sets_registration_type: string | null;
+  required_docs_total: number;
+  required_docs_missing: number;
   notes: string | null;
   version: number;
   created_at: Date;
@@ -108,6 +110,21 @@ const INSTANCE_BASE = `
             AND ci.statutory_deadline < CURRENT_DATE) AS is_overdue,
          ci.completed_at, ci.completed_by_employee_id, ce.full_name AS completed_by_name,
          sc.sets_registration_type,
+         -- Required-documents checklist rollup (feature: "what's missing"):
+         -- total ACTIVE requirements for this component, and how many MANDATORY
+         -- ones have no non-deleted document filed against THIS period.
+         (SELECT count(*)::int FROM hsdg.service_component_doc_requirements r
+            WHERE r.service_component_id = ec.service_component_id AND r.is_active)
+           AS required_docs_total,
+         (SELECT count(*)::int FROM hsdg.service_component_doc_requirements r
+            WHERE r.service_component_id = ec.service_component_id
+              AND r.is_active AND r.is_mandatory
+              AND NOT EXISTS (
+                SELECT 1 FROM hsdg.documents d
+                 WHERE d.component_instance_id = ci.id
+                   AND d.doc_requirement_id = r.id
+                   AND d.deleted_at IS NULL))
+           AS required_docs_missing,
          ci.notes, ci.version, ci.created_at, ci.updated_at
   FROM hsdg.component_instances ci
   JOIN hsdg.engagement_components ec ON ec.id = ci.engagement_component_id
@@ -769,6 +786,8 @@ function mapInstance(row: InstanceRow): ComponentInstanceRecord {
     completedById: row.completed_by_employee_id,
     completedByName: row.completed_by_name,
     setsRegistrationType: row.sets_registration_type,
+    requiredDocsTotal: row.required_docs_total ?? 0,
+    requiredDocsMissing: row.required_docs_missing ?? 0,
     notes: row.notes,
     version: row.version,
     createdAt: row.created_at.toISOString(),

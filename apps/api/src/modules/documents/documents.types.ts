@@ -28,6 +28,8 @@ export interface DocumentRecord {
   taskId: string | null;
   /** Optional component-work period (e.g. GST for a month) this document is filed under. */
   componentInstanceId: string | null;
+  /** Optional checklist requirement this document satisfies (see doc requirements). */
+  docRequirementId: string | null;
   title: string;
   documentType: DocumentType;
   classification: DocumentClassification;
@@ -75,6 +77,8 @@ export interface CreateDocumentInput {
   taskId?: string | null;
   /** File the document under a specific component-work period (same engagement). */
   componentInstanceId?: string | null;
+  /** Tag the document as satisfying a checklist requirement of that component. */
+  docRequirementId?: string | null;
   documentType?: DocumentType;
   classification?: DocumentClassification;
   sensitivity?: DocumentSensitivity;

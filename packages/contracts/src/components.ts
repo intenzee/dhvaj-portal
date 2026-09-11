@@ -206,9 +206,56 @@ export interface ComponentInstanceRecord {
   /** When set, this instance is registration work producing this registration type (§40). */
   setsRegistrationType: string | null;
   notes: string | null;
+  /** Total ACTIVE checklist requirements defined for this component (0 if none). */
+  requiredDocsTotal: number;
+  /** Mandatory checklist requirements with no document filed against this period. */
+  requiredDocsMissing: number;
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One required-document type expected for a service component (checklist item). */
+export interface ServiceComponentDocRequirementRecord {
+  id: string;
+  serviceComponentId: string;
+  name: string;
+  description: string | null;
+  isMandatory: boolean;
+  displayOrder: number;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateComponentDocRequirementInput {
+  name: string;
+  description?: string | null;
+  isMandatory?: boolean;
+  displayOrder?: number;
+}
+
+export interface UpdateComponentDocRequirementInput {
+  name?: string;
+  description?: string | null;
+  isMandatory?: boolean;
+  displayOrder?: number;
+  isActive?: boolean;
+  version?: number;
+}
+
+/** A requirement resolved against one component-work period: is it satisfied? */
+export interface ComponentDocChecklistItem {
+  requirementId: string;
+  name: string;
+  description: string | null;
+  isMandatory: boolean;
+  displayOrder: number;
+  /** Whether at least one non-deleted document is filed against this requirement. */
+  satisfied: boolean;
+  /** How many documents are filed against this requirement for this period. */
+  documentCount: number;
 }
 
 /**

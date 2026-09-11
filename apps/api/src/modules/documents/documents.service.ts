@@ -39,6 +39,7 @@ interface DocumentRow {
   engagement_id: string;
   task_id: string | null;
   component_instance_id: string | null;
+  doc_requirement_id: string | null;
   title: string;
   document_type: DocumentType;
   classification: DocumentClassification;
@@ -75,6 +76,7 @@ interface VersionRow {
 
 const DOC_BASE = `
   SELECT d.id, d.engagement_id, d.task_id, d.component_instance_id,
+         d.doc_requirement_id,
          d.title, d.document_type, d.classification, d.sensitivity,
          d.status, d.current_version_no,
          cv.filename AS current_filename, cv.content_type AS current_content_type,
@@ -89,6 +91,7 @@ const DOC_BASE = `
 /** Like {@link DOC_BASE} but with engagement/client context, for the cross-engagement view. */
 const GLOBAL_DOC_BASE = `
   SELECT d.id, d.engagement_id, d.task_id, d.component_instance_id,
+         d.doc_requirement_id,
          d.title, d.document_type, d.classification, d.sensitivity,
          d.status, d.current_version_no,
          cv.filename AS current_filename, cv.content_type AS current_content_type,
@@ -144,13 +147,20 @@ export class DocumentsService {
     try {
       return await this.db.withRlsContext(ctx, async (client) => {
         await this.requireEngagement(client, engagementId);
-        await this.validateWorkLink(client, engagementId, input.taskId, input.componentInstanceId);
+        await this.validateWorkLink(
+          client,
+          engagementId,
+          input.taskId,
+          input.componentInstanceId,
+          input.docRequirementId,
+        );
         try {
           await client.query(
             `INSERT INTO hsdg.documents
                (id, engagement_id, title, document_type, classification, sensitivity,
-                retention_until, created_by_employee_id, task_id, component_instance_id)
-             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8,$9,$10)`,
+                retention_until, created_by_employee_id, task_id, component_instance_id,
+                doc_requirement_id)
+             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8,$9,$10,$11)`,
             [
               documentId,
               engagementId,
@@ -162,6 +172,7 @@ export class DocumentsService {
               ctx.employeeId ?? null,
               input.taskId ?? null,
               input.componentInstanceId ?? null,
+              input.docRequirementId ?? null,
             ],
           );
           const versionId = await this.insertVersion(client, {
@@ -616,6 +627,7 @@ export class DocumentsService {
     engagementId: string,
     taskId: string | null | undefined,
     componentInstanceId: string | null | undefined,
+    docRequirementId?: string | null | undefined,
   ): Promise<void> {
     if (taskId) {
       const { rows } = await client.query(
@@ -631,6 +643,26 @@ export class DocumentsService {
       );
       if (!rows[0]) {
         throw new BadRequestException('That component-work item is not part of this engagement.');
+      }
+    }
+    if (docRequirementId) {
+      // A checklist tag only makes sense on a component-work period, and the
+      // requirement must belong to that period's component.
+      if (!componentInstanceId) {
+        throw new BadRequestException(
+          'A checklist requirement can only be set on a component-work document.',
+        );
+      }
+      const { rows } = await client.query(
+        `SELECT 1
+           FROM hsdg.service_component_doc_requirements r
+           JOIN hsdg.component_instances ci ON ci.id = $2
+           JOIN hsdg.engagement_components ec ON ec.id = ci.engagement_component_id
+          WHERE r.id = $1 AND r.service_component_id = ec.service_component_id`,
+        [docRequirementId, componentInstanceId],
+      );
+      if (!rows[0]) {
+        throw new BadRequestException("That checklist item isn't part of this component.");
       }
     }
   }
@@ -754,6 +786,7 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     engagementId: row.engagement_id,
     taskId: row.task_id,
     componentInstanceId: row.component_instance_id,
+    docRequirementId: row.doc_requirement_id,
     title: row.title,
     documentType: row.document_type,
     classification: row.classification,
