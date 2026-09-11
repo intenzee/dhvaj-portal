@@ -30,9 +30,14 @@ export class NotificationsController {
     @CurrentPrincipal() principal: Principal,
     @Query() query: NotificationListQueryDto,
   ): Promise<Paginated<NotificationRecord>> {
-    const filter: { status?: NotificationListQueryDto['status']; unreadOnly?: boolean } = {};
+    const filter: {
+      status?: NotificationListQueryDto['status'];
+      unreadOnly?: boolean;
+      type?: NotificationListQueryDto['type'];
+    } = {};
     if (query.status) filter.status = query.status;
     if (query.unreadOnly) filter.unreadOnly = query.unreadOnly;
+    if (query.type) filter.type = query.type;
     return this.notifications
       .list(rlsContextFromPrincipal(principal), query, filter)
       .then((result) => paginate(result, query));

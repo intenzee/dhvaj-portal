@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
 import { DocumentsService } from './documents.service';
 import { DocumentsController } from './documents.controller';
@@ -17,7 +18,7 @@ import { GraphClient } from './m365/graph-client';
  * version rows are append-only so evidence is never silently replaced.
  */
 @Module({
-  imports: [AuditModule, StorageModule],
+  imports: [AuditModule, StorageModule, NotificationsModule],
   controllers: [DocumentsController, DocumentsListController, OnlyOfficeController],
   providers: [DocumentsService, OnlyOfficeService, M365Service, GraphClient],
   exports: [DocumentsService],

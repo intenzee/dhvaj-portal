@@ -478,6 +478,8 @@ export interface NotificationRow {
   title: string;
   body: string | null;
   engagementId: string | null;
+  objectType: string | null;
+  objectId: string | null;
   status: string;
   readAt: string | null;
   createdAt: string;

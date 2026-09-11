@@ -28,6 +28,8 @@ export const NOTIFICATION_TYPE = {
   engagementReopened: 'engagement_reopened',
   epChanged: 'ep_changed',
   highRiskException: 'high_risk_exception',
+  /** A document was uploaded — notifies the reviewer; powers the "to review" inbox. */
+  documentUploaded: 'document_uploaded',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);

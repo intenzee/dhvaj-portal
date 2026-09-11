@@ -145,7 +145,7 @@ export class NotificationsService {
   async list(
     ctx: RlsContext,
     page: PageParams,
-    filter: { status?: NotificationStatus; unreadOnly?: boolean },
+    filter: { status?: NotificationStatus; unreadOnly?: boolean; type?: NotificationType },
   ): Promise<PageResult<NotificationRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const params: unknown[] = [];
@@ -153,6 +153,10 @@ export class NotificationsService {
       if (filter.status) {
         params.push(filter.status);
         conds.push(`status = $${params.length}`);
+      }
+      if (filter.type) {
+        params.push(filter.type);
+        conds.push(`type = $${params.length}`);
       }
       if (filter.unreadOnly) conds.push(`status = 'unread'`);
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';

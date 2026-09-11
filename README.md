@@ -28,7 +28,11 @@ audit trail.
 > Each service component can define a **required-documents checklist** (migration
 > `1761700000000`, e.g. GST → GSTR-1, GSTR-3B): the period pop-up shows
 > satisfied/missing items and uploads can be filed against a specific item, and
-> the month grid flags any period missing mandatory evidence.
+> the month grid flags any period missing mandatory evidence. Uploading a
+> document notifies the reviewer (component reviewer, else the engagement leads)
+> via a new `document_uploaded` notification (migration `1761800000000`, fanned
+> out to email/Teams by the outbox), and **My Work → To Review** is the reviewer's
+> inbox of documents awaiting them.
 >
 > **Microsoft 365 viewing** opens Office files in genuine Office-for-the-web with
 > **no per-user Microsoft sign-in**, backed by one enterprise identity: the API

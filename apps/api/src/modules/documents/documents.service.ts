@@ -9,6 +9,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   DOCUMENT_STATUS,
+  NOTIFICATION_TYPE,
   type DocumentClassification,
   type DocumentSensitivity,
   type DocumentStatus,
@@ -20,6 +21,7 @@ import type { PageParams, PageResult } from '../../common/pagination/pagination.
 import { translatePgError } from '../../common/errors/pg-error.util';
 import { AppConfigService } from '../../config/config.module';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { STORAGE_PROVIDER, type StorageProvider } from './storage/storage-provider';
 import { decodeUpload } from './documents.upload';
 import type {
@@ -128,6 +130,7 @@ export class DocumentsService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly config: AppConfigService,
+    private readonly notifications: NotificationsService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
@@ -199,6 +202,15 @@ export class DocumentsService {
           objectType: 'document',
           objectId: documentId,
           after: { engagementId, title: input.title, filename: input.filename },
+        });
+        // Notify the reviewer(s) so it appears in their "to review" inbox (and
+        // fans out to email/Teams via the outbox). The uploader is excluded.
+        await this.notifyReviewers(client, ctx, {
+          engagementId,
+          documentId,
+          title: input.title,
+          filename: input.filename,
+          componentInstanceId: input.componentInstanceId ?? null,
         });
         return record!;
       });
@@ -614,6 +626,57 @@ export class DocumentsService {
   private async requireEngagement(client: PoolClient, engagementId: string): Promise<void> {
     const eng = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [engagementId]);
     if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
+  }
+
+  /**
+   * Emit a "document uploaded" notification to whoever should review it: the
+   * component-work reviewer when the doc is filed under a period, otherwise the
+   * engagement manager and partner. The uploader is never notified of their own
+   * upload. Runs in the caller's transaction alongside the create.
+   */
+  private async notifyReviewers(
+    client: PoolClient,
+    ctx: RlsContext,
+    doc: {
+      engagementId: string;
+      documentId: string;
+      title: string;
+      filename: string;
+      componentInstanceId: string | null;
+    },
+  ): Promise<void> {
+    let recipients: Array<string | null> = [];
+    if (doc.componentInstanceId) {
+      const { rows } = await client.query<{ r: string | null; m: string | null; p: string | null }>(
+        `SELECT ec.reviewer_employee_id AS r, e.engagement_manager_id AS m,
+                e.engagement_partner_id AS p
+           FROM hsdg.component_instances ci
+           JOIN hsdg.engagement_components ec ON ec.id = ci.engagement_component_id
+           JOIN hsdg.engagements e ON e.id = ci.engagement_id
+          WHERE ci.id = $1`,
+        [doc.componentInstanceId],
+      );
+      // Prefer the component reviewer; fall back to the engagement leads.
+      recipients = rows[0] ? [rows[0].r ?? rows[0].m, rows[0].p] : [];
+    } else {
+      const { rows } = await client.query<{ m: string | null; p: string | null }>(
+        `SELECT engagement_manager_id AS m, engagement_partner_id AS p
+           FROM hsdg.engagements WHERE id = $1`,
+        [doc.engagementId],
+      );
+      recipients = rows[0] ? [rows[0].m, rows[0].p] : [];
+    }
+    const toNotify = recipients.filter((id) => id && id !== ctx.employeeId);
+    if (toNotify.length === 0) return;
+    await this.notifications.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.documentUploaded,
+      recipientEmployeeIds: toNotify,
+      title: `Document to review: ${doc.title}`,
+      body: doc.filename,
+      engagementId: doc.engagementId,
+      objectType: 'document',
+      objectId: doc.documentId,
+    });
   }
 
   /**
