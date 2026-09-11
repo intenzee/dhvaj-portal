@@ -105,17 +105,24 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-20 w-64 flex-col bg-sidebar',
-          collapsed ? 'hidden' : 'hidden md:flex',
+          'fixed inset-y-0 left-0 z-20 hidden flex-col bg-sidebar transition-[width] duration-200 md:flex',
+          collapsed ? 'w-16' : 'w-64',
         )}
       >
-        <div className="flex items-center gap-2 px-5 py-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600 text-sm font-black text-white">
+        <div
+          className={cn(
+            'flex items-center gap-2 py-4',
+            collapsed ? 'justify-center px-0' : 'px-5',
+          )}
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-600 text-sm font-black text-white">
             H
           </div>
-          <div className="text-lg font-bold tracking-tight text-white">
-            Dhvaj <span className="font-medium text-sidebar-muted">Portal</span>
-          </div>
+          {!collapsed && (
+            <div className="text-lg font-bold tracking-tight text-white">
+              Dhvaj <span className="font-medium text-sidebar-muted">Portal</span>
+            </div>
+          )}
         </div>
 
         <nav className="scroll-slim flex-1 overflow-y-auto px-3 py-2">
@@ -129,16 +136,18 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               <Link
                 key={item.label}
                 href={item.href}
+                title={collapsed ? item.label : undefined}
                 className={cn(
-                  'mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition',
+                  'mb-0.5 flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition',
+                  collapsed ? 'justify-center px-0' : 'px-3',
                   active
                     ? 'bg-sidebar-active text-white shadow-sm'
                     : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-white',
                 )}
               >
                 <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
-                <span className="truncate">{item.label}</span>
-                {!item.ready && (
+                {!collapsed && <span className="truncate">{item.label}</span>}
+                {!collapsed && !item.ready && (
                   <span className="ml-auto rounded bg-white/5 px-1 text-[9px] uppercase tracking-wide text-sidebar-muted">
                     soon
                   </span>
@@ -149,19 +158,25 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
         </nav>
 
         <div className="border-t border-sidebar-border px-3 py-3">
-          <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-muted">
-            Shortcuts
-          </div>
+          {!collapsed && (
+            <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-muted">
+              Shortcuts
+            </div>
+          )}
           {SHORTCUTS.map((s) => {
             const Icon = s.icon;
             return (
               <Link
                 key={s.label}
                 href={s.href}
-                className="flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] text-sidebar-muted transition hover:bg-sidebar-hover hover:text-white"
+                title={collapsed ? s.label : undefined}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg py-1.5 text-[13px] text-sidebar-muted transition hover:bg-sidebar-hover hover:text-white',
+                  collapsed ? 'justify-center px-0' : 'px-3',
+                )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="truncate">{s.label}</span>
+                {!collapsed && <span className="truncate">{s.label}</span>}
               </Link>
             );
           })}
@@ -172,15 +187,15 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
       <div
         className={cn(
           'flex min-w-0 flex-1 flex-col transition-[margin] duration-200',
-          collapsed ? 'md:ml-0' : 'md:ml-64',
+          collapsed ? 'md:ml-16' : 'md:ml-64',
         )}
       >
         <header className="sticky top-0 z-10 flex items-center gap-4 border-b border-line-strong bg-surface px-5 py-2.5">
           <button
             onClick={toggleSidebar}
             className="rounded-lg p-2 text-ink-muted transition hover:bg-surface-sunken hover:text-ink"
-            title={`${collapsed ? 'Show' : 'Hide'} sidebar (⌘/Ctrl+B)`}
-            aria-label={collapsed ? 'Show sidebar' : 'Hide sidebar'}
+            title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (⌘/Ctrl+B)`}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-pressed={collapsed}
           >
             {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}

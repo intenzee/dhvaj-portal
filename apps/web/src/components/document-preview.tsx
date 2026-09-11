@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type Ref } from 'react';
-import { Download, X, FileQuestion, Pencil, Save, Loader2 } from 'lucide-react';
+import { Download, X, FileQuestion, Pencil, Save, Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { apiFetch, fetchBlob, downloadFile, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
@@ -77,7 +77,28 @@ export function DocumentPreview({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [maximized, setMaximized] = useState(false);
   const editorRef = useRef<EditorHandle>(null);
+
+  // Remember the maximized/windowed preference across opens.
+  useEffect(() => {
+    try {
+      setMaximized(window.localStorage.getItem('dhvaj-doc-maximized') === '1');
+    } catch {
+      /* storage unavailable — windowed default */
+    }
+  }, []);
+  const toggleMaximized = useCallback(() => {
+    setMaximized((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('dhvaj-doc-maximized', next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
   const downloadPath = `/engagements/${engagementId}/documents/${doc.id}/download`;
 
   // Editor precedence for Office/PDF files: Microsoft 365 (SharePoint Online,
@@ -179,9 +200,18 @@ export function DocumentPreview({
   const markDirty = useCallback(() => setDirty(true), []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={requestClose}>
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 ${
+        maximized ? 'p-0' : 'p-4'
+      }`}
+      onClick={requestClose}
+    >
       <div
-        className="flex h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-pop"
+        className={`flex flex-col overflow-hidden border-line-strong bg-surface shadow-pop ${
+          maximized
+            ? 'h-screen w-screen rounded-none border-0'
+            : 'h-[88vh] w-full max-w-5xl rounded-xl border'
+        }`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -222,6 +252,15 @@ export function DocumentPreview({
                 <Download className="h-4 w-4" /> Download
               </Button>
             )}
+            <button
+              onClick={toggleMaximized}
+              className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
+              aria-label={maximized ? 'Restore window' : 'Maximize to full screen'}
+              aria-pressed={maximized}
+              title={maximized ? 'Restore' : 'Maximize'}
+            >
+              {maximized ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+            </button>
             <button
               onClick={requestClose}
               className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
