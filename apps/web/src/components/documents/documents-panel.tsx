@@ -42,6 +42,17 @@ export interface DocumentScope {
   componentInstanceId?: string;
 }
 
+/** One version in a document's history (subset of the API detail response). */
+interface DocVersion {
+  id: string;
+  versionNo: number;
+  filename: string;
+  sizeBytes: number;
+  note: string | null;
+  uploadedByName: string | null;
+  uploadedAt: string;
+}
+
 /** Read a File as base64 (without the data: prefix) + its content type. */
 function readFileBase64(file: File): Promise<{ base64: string; contentType: string }> {
   return new Promise((resolve, reject) => {
@@ -221,17 +232,6 @@ export function DocumentsPanel({
     if (files.length > 0) bulkUpload.mutate(files);
   };
 
-  const download = async (d: DocumentRow): Promise<void> => {
-    try {
-      await downloadFile(
-        `/engagements/${engagementId}/documents/${d.id}/download`,
-        d.currentFilename ?? d.title,
-      );
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Download failed.', 'error');
-    }
-  };
-
   const canDrop = canManage && !showDeleted;
 
   return (
@@ -359,7 +359,6 @@ export function DocumentsPanel({
               archiving={archive.isPending}
               restoring={restore.isPending}
               onOpen={(mode) => setFull({ doc: selected, mode })}
-              onDownload={() => void download(selected)}
               onArchiveToggle={() => archive.mutate(selected)}
               onDelete={() => setDeleteFor(selected)}
               onRestore={() => restore.mutate(selected)}
@@ -426,7 +425,6 @@ function PreviewPane({
   archiving,
   restoring,
   onOpen,
-  onDownload,
   onArchiveToggle,
   onDelete,
   onRestore,
@@ -439,21 +437,48 @@ function PreviewPane({
   archiving: boolean;
   restoring: boolean;
   onOpen: (mode: 'view' | 'edit') => void;
-  onDownload: () => void;
   onArchiveToggle: () => void;
   onDelete: () => void;
   onRestore: () => void;
 }): JSX.Element {
+  const toast = useToast();
   const kind = useMemo(
     () => detectKind(doc.currentContentType, doc.currentFilename ?? doc.title),
     [doc.currentContentType, doc.currentFilename, doc.title],
   );
+
+  // Version history — a document may have several audited versions; any can be
+  // previewed and downloaded. Skipped in the deleted view (getOne 404s there).
+  const detail = useQuery({
+    queryKey: ['engagement', engagementId, 'document', doc.id, 'detail'],
+    queryFn: () =>
+      apiFetch<{ versions: DocVersion[] }>(`/engagements/${engagementId}/documents/${doc.id}`),
+    enabled: !deletedView,
+  });
+  const versions = detail.data?.versions ?? [];
+  // null = the current version.
+  const [versionId, setVersionId] = useState<string | null>(null);
+  const activeVersion = versionId ? versions.find((v) => v.id === versionId) : undefined;
+  const activeVersionNo = activeVersion?.versionNo ?? doc.currentVersionNo;
+  const activeFilename = activeVersion?.filename ?? doc.currentFilename ?? doc.title;
+  const previewPath = versionId
+    ? `/engagements/${engagementId}/documents/${doc.id}/versions/${versionId}/download`
+    : `/engagements/${engagementId}/documents/${doc.id}/download`;
+
   const [preview, setPreview] = useState<{
     loading: boolean;
     url?: string;
     text?: string;
     error?: string;
   }>({ loading: true });
+
+  const downloadActive = async (): Promise<void> => {
+    try {
+      await downloadFile(previewPath, activeFilename);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Download failed.', 'error');
+    }
+  };
 
   // Inline-preview the lightweight kinds (image / pdf / text / csv). Office
   // formats can't render as a plain blob — offer Open/Edit instead.
@@ -468,9 +493,7 @@ function PreviewPane({
     setPreview({ loading: true });
     (async () => {
       try {
-        const { blob } = await fetchBlob(
-          `/engagements/${engagementId}/documents/${doc.id}/download`,
-        );
+        const { blob } = await fetchBlob(previewPath);
         if (cancelled) return;
         if (kind === 'text' || kind === 'csv') {
           const text = await blob.text();
@@ -491,7 +514,7 @@ function PreviewPane({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [engagementId, doc.id, kind]);
+  }, [previewPath, kind]);
 
   return (
     <div className="flex h-full flex-col">
@@ -507,6 +530,36 @@ function PreviewPane({
             <span>· {formatDate(doc.updatedAt)}</span>
             {doc.createdByName && <span>· {doc.createdByName}</span>}
           </div>
+          {versions.length > 1 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <label className="text-xs text-ink-muted">Version</label>
+              <Select
+                value={versionId ?? 'current'}
+                onChange={(e) => setVersionId(e.target.value === 'current' ? null : e.target.value)}
+                className="h-7 py-0 text-xs"
+              >
+                <option value="current">v{doc.currentVersionNo} (current)</option>
+                {versions
+                  .filter((v) => v.versionNo !== doc.currentVersionNo)
+                  .map((v) => (
+                    <option key={v.id} value={v.id}>
+                      v{v.versionNo} · {formatDate(v.uploadedAt)}
+                      {v.uploadedByName ? ` · ${v.uploadedByName}` : ''}
+                    </option>
+                  ))}
+              </Select>
+              {activeVersion?.note && (
+                <span className="text-xs italic text-ink-faint" title={activeVersion.note}>
+                  “{activeVersion.note}”
+                </span>
+              )}
+              {versionId && (
+                <span className="rounded bg-warning-50 px-1.5 py-0.5 text-[11px] font-medium text-warning-700">
+                  Viewing v{activeVersionNo} (older)
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -560,7 +613,7 @@ function PreviewPane({
               but retained.
             </span>
             <div className="flex-1" />
-            <Button size="sm" variant="secondary" onClick={onDownload}>
+            <Button size="sm" variant="secondary" onClick={() => void downloadActive()}>
               <Download className="h-4 w-4" /> Download
             </Button>
             {canDelete && (
@@ -577,7 +630,7 @@ function PreviewPane({
             <Button size="sm" variant="secondary" onClick={() => onOpen('edit')}>
               <Pencil className="h-4 w-4" /> Edit
             </Button>
-            <Button size="sm" variant="secondary" onClick={onDownload}>
+            <Button size="sm" variant="secondary" onClick={() => void downloadActive()}>
               <Download className="h-4 w-4" /> Download
             </Button>
             <div className="flex-1" />
