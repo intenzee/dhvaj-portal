@@ -229,6 +229,21 @@ export class DocumentsController {
     return this.documents.restoreDeleted(rlsContextFromPrincipal(principal), id, docId, dto.reason);
   }
 
+  @Post(':id/documents/:docId/extract')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Re-run text extraction (Azure Document Intelligence) for a document; returns detail',
+  })
+  async extract(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+  ): Promise<DocumentDetail> {
+    const ctx = rlsContextFromPrincipal(principal);
+    await this.documents.reextract(ctx, id, docId);
+    return this.documents.getOne(ctx, id, docId);
+  }
+
   @Get(':id/documents/:docId/download')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Download the current version bytes (audited; RLS-mediated)' })

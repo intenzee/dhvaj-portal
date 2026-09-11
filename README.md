@@ -32,7 +32,12 @@ audit trail.
 > document notifies the reviewer (component reviewer, else the engagement leads)
 > via a new `document_uploaded` notification (migration `1761800000000`, fanned
 > out to email/Teams by the outbox), and **My Work → To Review** is the reviewer's
-> inbox of documents awaiting them.
+> inbox of documents awaiting them. When **Azure Document Intelligence** is
+> configured (`DOC_AI_ENABLED`, migration `1761900000000`), uploads are OCR'd
+> best-effort to extract their text and key fields (GSTIN/PAN/period) — powering
+> **full-text search over document contents** (the global search now matches
+> title, file name and contents) and a "Extract text" re-run action. It stays
+> inert until the endpoint + key are set.
 >
 > **Microsoft 365 viewing** opens Office files in genuine Office-for-the-web with
 > **no per-user Microsoft sign-in**, backed by one enterprise identity: the API

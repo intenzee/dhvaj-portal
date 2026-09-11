@@ -153,6 +153,26 @@ export const envSchema = z.object({
   M365_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
   M365_LOGIN_BASE_URL: z.string().url().default('https://login.microsoftonline.com'),
 
+  // ── Document text extraction / OCR (Azure Document Intelligence) ──────────
+  // When enabled, uploaded documents are run through Azure Document Intelligence
+  // to extract their text (for full-text search) and key fields (to pre-fill the
+  // type and pull GSTIN/period). OFF by default: the feature is inert until an
+  // endpoint + key are supplied. Extraction failures never block an upload.
+  DOC_AI_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Azure Document Intelligence resource endpoint, e.g. https://<res>.cognitiveservices.azure.com
+  DOC_AI_ENDPOINT: z.string().url().optional(),
+  // Resource key (Ocp-Apim-Subscription-Key). No default — supplied as a secret.
+  DOC_AI_KEY: z.string().optional(),
+  // Prebuilt model to run. `prebuilt-read` is pure OCR/text; `prebuilt-document`
+  // (a.k.a. layout) also returns key-value pairs used to pre-fill fields.
+  DOC_AI_MODEL: z.string().default('prebuilt-read'),
+  DOC_AI_API_VERSION: z.string().default('2024-11-30'),
+  // Max seconds to wait for the async analyze operation before giving up.
+  DOC_AI_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(300).default(60),
+
   // ── Notifications (Phase 11) ─────────────────────────────────────────────
   // Enabled delivery channels (comma-separated). `portal` (the in-app row) is
   // always on; add `email` and/or `teams` to fan out to those (stub transports

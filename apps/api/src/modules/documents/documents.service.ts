@@ -22,6 +22,7 @@ import { translatePgError } from '../../common/errors/pg-error.util';
 import { AppConfigService } from '../../config/config.module';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DocExtractionService } from './ocr/doc-extraction.service';
 import { STORAGE_PROVIDER, type StorageProvider } from './storage/storage-provider';
 import { decodeUpload } from './documents.upload';
 import type {
@@ -131,6 +132,7 @@ export class DocumentsService {
     private readonly audit: AuditService,
     private readonly config: AppConfigService,
     private readonly notifications: NotificationsService,
+    private readonly extraction: DocExtractionService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
@@ -148,7 +150,7 @@ export class DocumentsService {
     // transaction fails (e.g. RLS denies a non-lead), compensate the orphan.
     await this.storage.write(reference, decoded.buffer, contentType);
     try {
-      return await this.db.withRlsContext(ctx, async (client) => {
+      const created = await this.db.withRlsContext(ctx, async (client) => {
         await this.requireEngagement(client, engagementId);
         await this.validateWorkLink(
           client,
@@ -214,6 +216,10 @@ export class DocumentsService {
         });
         return record!;
       });
+      // Best-effort text extraction AFTER commit (own transaction; never blocks
+      // or fails the upload). No-op unless DOC_AI is configured.
+      void this.extraction.extractForDocument(ctx, engagementId, created.id).catch(() => undefined);
+      return created;
     } catch (err) {
       await this.storage.remove(reference).catch(() => undefined);
       throw err;
@@ -318,7 +324,14 @@ export class DocumentsService {
       }
       if (filter.search) {
         params.push(`%${filter.search}%`);
-        conds.push(`(d.title ILIKE $${params.length} OR cv.filename ILIKE $${params.length})`);
+        const likeParam = params.length;
+        params.push(filter.search);
+        const ftsParam = params.length;
+        // Title / filename substring OR full-text over extracted contents.
+        conds.push(
+          `(d.title ILIKE $${likeParam} OR cv.filename ILIKE $${likeParam}` +
+            ` OR d.documents_fts @@ plainto_tsquery('english', $${ftsParam}))`,
+        );
       }
       const where = `WHERE ${conds.join(' AND ')}`;
       params.push(page.limit, page.offset);
@@ -371,7 +384,14 @@ export class DocumentsService {
       }
       if (filter.search) {
         params.push(`%${filter.search}%`);
-        conds.push(`(d.title ILIKE $${params.length} OR cv.filename ILIKE $${params.length})`);
+        const likeParam = params.length;
+        params.push(filter.search);
+        const ftsParam = params.length;
+        // Title / filename substring OR full-text over extracted contents.
+        conds.push(
+          `(d.title ILIKE $${likeParam} OR cv.filename ILIKE $${likeParam}` +
+            ` OR d.documents_fts @@ plainto_tsquery('english', $${ftsParam}))`,
+        );
       }
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
       params.push(page.limit, page.offset);
@@ -388,6 +408,13 @@ export class DocumentsService {
       );
       return { items: rows.map(mapGlobalDocument), total: Number(totalRes.rows[0]?.total ?? 0) };
     });
+  }
+
+  /** Manually (re-)run text extraction for a document's current version. */
+  async reextract(ctx: RlsContext, engagementId: string, documentId: string): Promise<void> {
+    // Ensures the document exists / is visible (and not deleted) before working.
+    await this.getOne(ctx, engagementId, documentId);
+    await this.extraction.extractForDocument(ctx, engagementId, documentId);
   }
 
   async getOne(ctx: RlsContext, engagementId: string, documentId: string): Promise<DocumentDetail> {

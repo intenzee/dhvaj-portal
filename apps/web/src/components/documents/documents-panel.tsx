@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Circle,
   Upload as UploadIcon,
+  ScanText,
 } from 'lucide-react';
 import {
   DOCUMENT_TYPES,
@@ -442,10 +443,24 @@ function PreviewPane({
   onRestore: () => void;
 }): JSX.Element {
   const toast = useToast();
+  const qc = useQueryClient();
   const kind = useMemo(
     () => detectKind(doc.currentContentType, doc.currentFilename ?? doc.title),
     [doc.currentContentType, doc.currentFilename, doc.title],
   );
+
+  const reextract = useMutation({
+    mutationFn: () =>
+      apiFetch(`/engagements/${engagementId}/documents/${doc.id}/extract`, { method: 'POST' }),
+    onSuccess: () => {
+      toast('Text extraction finished.');
+      void qc.invalidateQueries({
+        queryKey: ['engagement', engagementId, 'document', doc.id, 'detail'],
+      });
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Extraction unavailable.', 'error'),
+  });
 
   // Version history — a document may have several audited versions; any can be
   // previewed and downloaded. Skipped in the deleted view (getOne 404s there).
@@ -634,6 +649,17 @@ function PreviewPane({
               <Download className="h-4 w-4" /> Download
             </Button>
             <div className="flex-1" />
+            {canManage && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={reextract.isPending}
+                onClick={() => reextract.mutate()}
+                title="Extract text for search (Azure Document Intelligence)"
+              >
+                <ScanText className="h-4 w-4" /> {reextract.isPending ? 'Extracting…' : 'Extract text'}
+              </Button>
+            )}
             {canManage && (
               <Button size="sm" variant="ghost" disabled={archiving} onClick={onArchiveToggle}>
                 {doc.status === 'archived' ? (
