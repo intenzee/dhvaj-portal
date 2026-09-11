@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
@@ -88,6 +88,7 @@ export function DocumentsPanel({
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadReq, setUploadReq] = useState<{ id: string; name: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [full, setFull] = useState<{ doc: DocumentRow; mode: 'view' | 'edit' } | null>(null);
   const [deleteFor, setDeleteFor] = useState<DocumentRow | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
@@ -180,6 +181,46 @@ export function DocumentsPanel({
     onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not restore.', 'error'),
   });
 
+  // Bulk upload (drag-and-drop or multi-select): one document per file, using the
+  // filename as the title and the panel's current scope. Metadata can be edited
+  // afterwards. Uploads sequentially so a partial failure is clear.
+  const bulkUpload = useMutation({
+    mutationFn: async (files: File[]) => {
+      let done = 0;
+      for (const f of files) {
+        const { base64, contentType } = await readFileBase64(f);
+        await apiFetch(`/engagements/${engagementId}/documents`, {
+          method: 'POST',
+          body: {
+            title: f.name.replace(/\.[^.]+$/, '') || f.name,
+            documentType: 'working_paper',
+            classification: 'internal',
+            filename: f.name,
+            contentType,
+            contentBase64: base64,
+            ...(taskId ? { taskId } : {}),
+            ...(componentInstanceId ? { componentInstanceId } : {}),
+          },
+        });
+        done += 1;
+      }
+      return done;
+    },
+    onSuccess: (n) => {
+      toast(`Uploaded ${n} document${n === 1 ? '' : 's'}.`);
+      invalidate();
+    },
+    onError: (err) => toast(err instanceof ApiError ? err.message : 'Upload failed.', 'error'),
+  });
+
+  const onDrop = (e: DragEvent): void => {
+    e.preventDefault();
+    setDragOver(false);
+    if (!canManage || showDeleted) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) bulkUpload.mutate(files);
+  };
+
   const download = async (d: DocumentRow): Promise<void> => {
     try {
       await downloadFile(
@@ -191,8 +232,32 @@ export function DocumentsPanel({
     }
   };
 
+  const canDrop = canManage && !showDeleted;
+
   return (
-    <div className={className}>
+    <div
+      className={`relative ${className ?? ''}`}
+      onDragOver={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+        if (!dragOver) setDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        // Only clear when leaving the panel itself, not moving between children.
+        if (e.currentTarget === e.target) setDragOver(false);
+      }}
+      onDrop={onDrop}
+    >
+      {canDrop && dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-primary-500 bg-primary-50/80 text-sm font-medium text-primary-700">
+          Drop files to upload{scopeLabel ? ` to ${scopeLabel}` : ''}
+        </div>
+      )}
+      {bulkUpload.isPending && (
+        <div className="mb-2 rounded-md bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700">
+          Uploading…
+        </div>
+      )}
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-ink">
           {showDeleted ? 'Deleted documents' : 'Documents'}
@@ -630,33 +695,41 @@ function UploadModal({
 }): JSX.Element {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState(requirement?.name ?? '');
   const [documentType, setDocumentType] = useState('working_paper');
   const [classification, setClassification] = useState('internal');
+  const multi = files.length > 1;
 
   const upload = useMutation({
     mutationFn: async () => {
-      const { base64, contentType } = await readFileBase64(file!);
-      return apiFetch(`/engagements/${engagementId}/documents`, {
-        method: 'POST',
-        body: {
-          title: title.trim() || requirement?.name || file!.name,
-          documentType,
-          classification,
-          filename: file!.name,
-          contentType,
-          contentBase64: base64,
-          ...(scope?.taskId ? { taskId: scope.taskId } : {}),
-          ...(scope?.componentInstanceId
-            ? { componentInstanceId: scope.componentInstanceId }
-            : {}),
-          ...(requirement ? { docRequirementId: requirement.id } : {}),
-        },
-      });
+      // One document per file. Title applies only to a single upload; with many,
+      // each file's own name is the title.
+      for (const f of files) {
+        const { base64, contentType } = await readFileBase64(f);
+        await apiFetch(`/engagements/${engagementId}/documents`, {
+          method: 'POST',
+          body: {
+            title: multi
+              ? f.name.replace(/\.[^.]+$/, '') || f.name
+              : title.trim() || requirement?.name || f.name,
+            documentType,
+            classification,
+            filename: f.name,
+            contentType,
+            contentBase64: base64,
+            ...(scope?.taskId ? { taskId: scope.taskId } : {}),
+            ...(scope?.componentInstanceId
+              ? { componentInstanceId: scope.componentInstanceId }
+              : {}),
+            ...(requirement ? { docRequirementId: requirement.id } : {}),
+          },
+        });
+      }
+      return files.length;
     },
-    onSuccess: () => {
-      toast('Document uploaded.');
+    onSuccess: (n) => {
+      toast(n === 1 ? 'Document uploaded.' : `Uploaded ${n} documents.`);
       onDone();
     },
     onError: (err) => toast(err instanceof ApiError ? err.message : 'Upload failed.', 'error'),
@@ -679,32 +752,45 @@ function UploadModal({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={!file || upload.isPending} onClick={() => upload.mutate()}>
-            {upload.isPending ? 'Uploading…' : 'Upload'}
+          <Button disabled={files.length === 0 || upload.isPending} onClick={() => upload.mutate()}>
+            {upload.isPending
+              ? 'Uploading…'
+              : multi
+                ? `Upload ${files.length} files`
+                : 'Upload'}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
-        <Field label="File" required>
+        <Field label={requirement ? 'File' : 'File(s)'} required>
           <input
             ref={fileRef}
             type="file"
+            multiple={!requirement}
             onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              setFile(f);
-              if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, ''));
+              const list = Array.from(e.target.files ?? []);
+              setFiles(list);
+              if (list.length === 1 && !title) setTitle(list[0]!.name.replace(/\.[^.]+$/, ''));
             }}
             className="w-full text-sm text-ink file:mr-3 file:rounded-md file:border-0 file:bg-primary-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-700 hover:file:bg-primary-100"
           />
+          {multi && (
+            <p className="mt-1 text-xs text-ink-faint">
+              {files.length} files selected — each is uploaded as its own document (named after the
+              file).
+            </p>
+          )}
         </Field>
-        <Field label="Title">
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Document title"
-          />
-        </Field>
+        {!multi && (
+          <Field label="Title">
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Document title"
+            />
+          </Field>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
             <Select value={documentType} onChange={(e) => setDocumentType(e.target.value)}>
