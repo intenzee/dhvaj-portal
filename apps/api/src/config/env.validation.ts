@@ -173,6 +173,20 @@ export const envSchema = z.object({
   // Max seconds to wait for the async analyze operation before giving up.
   DOC_AI_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(300).default(60),
 
+  // ── Client upload portal (secure magic-link) ─────────────────────────────
+  // When enabled, staff can mint tokenised, expiring, upload-only links for a
+  // client dependency; clients upload without logging in. OFF by default: the
+  // PUBLIC endpoints 404 until this is turned on. This is a public write path —
+  // review it (see the migration note) before enabling in production.
+  CLIENT_UPLOAD_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Default validity of a new link, in hours (staff can shorten per link).
+  CLIENT_UPLOAD_DEFAULT_TTL_HOURS: z.coerce.number().int().min(1).max(8760).default(168),
+  // Default max uploads per link (0 = unlimited).
+  CLIENT_UPLOAD_DEFAULT_MAX_UPLOADS: z.coerce.number().int().min(0).max(1000).default(20),
+
   // ── Notifications (Phase 11) ─────────────────────────────────────────────
   // Enabled delivery channels (comma-separated). `portal` (the in-app row) is
   // always on; add `email` and/or `teams` to fan out to those (stub transports

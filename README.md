@@ -39,6 +39,15 @@ audit trail.
 > title, file name and contents) and a "Extract text" re-run action. It stays
 > inert until the endpoint + key are set.
 >
+> **Client upload portal (secure magic-link):** staff mint a tokenised, expiring,
+> upload-only link for a client dependency (migration `1762000000000`); the client
+> uploads at `/client-upload/<token>` with no login, and files land as
+> client_shared documents attached to that dependency. Only a SHA-256 hash of the
+> token is stored; a single SECURITY DEFINER writer is the whole trust boundary
+> (validates the token, pins the engagement, minimal RLS elevation). PUBLIC
+> endpoints are inert (404) until `CLIENT_UPLOAD_ENABLED` — **run a security
+> review before enabling in production.**
+>
 > **Microsoft 365 viewing** opens Office files in genuine Office-for-the-web with
 > **no per-user Microsoft sign-in**, backed by one enterprise identity: the API
 > RLS-checks access then mints a short-lived **anonymous** SharePoint sharing link

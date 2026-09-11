@@ -17,6 +17,7 @@ import {
   CardTitle,
   CardBody,
   Badge,
+  Button,
   EmptyState,
 } from '@/components/ui';
 import { StatusBadge, PriorityBadge } from '@/components/status-badge';
@@ -33,7 +34,11 @@ import { CoveredEntitiesSection } from '@/components/actions/covered-entities-se
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
 import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
+import { ClientUploadLinkModal } from '@/components/actions/client-upload-link-modal';
 import { CompletionBar } from '@/components/completion';
+
+/** Whether the secure client upload portal is turned on for this deployment. */
+const CLIENT_UPLOAD_ENABLED = process.env.NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED === 'true';
 import { TimeSection } from '@/components/actions/time-section';
 import { InvoicesSection } from '@/components/actions/invoices-section';
 import { NotesSection } from '@/components/actions/notes-section';
@@ -82,6 +87,7 @@ export default function EngagementDetailPage(): JSX.Element {
   const [tab, setTab] = useState<TabKey>('overview');
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
   const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
+  const [linkForDep, setLinkForDep] = useState<MyClientDependency | null>(null);
 
   const eng = useQuery({
     queryKey: ['engagement', id],
@@ -335,7 +341,19 @@ export default function EngagementDetailPage(): JSX.Element {
                           {d.escalationDate ? formatDate(d.escalationDate) : '—'}
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          <ClientDependencyActions dep={d} />
+                          <div className="flex items-center justify-end gap-2">
+                            {CLIENT_UPLOAD_ENABLED && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setLinkForDep(d)}
+                                title="Create a secure upload link for the client"
+                              >
+                                Upload link
+                              </Button>
+                            )}
+                            <ClientDependencyActions dep={d} />
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -439,6 +457,16 @@ export default function EngagementDetailPage(): JSX.Element {
 
       {/* ── Documents ────────────────────────────────────────────────────── */}
       {tab === 'documents' && <DocumentsSection engagementId={e.id} />}
+
+      {/* Secure client upload link (opened from the client dependencies table). */}
+      {linkForDep && (
+        <ClientUploadLinkModal
+          engagementId={e.id}
+          dependencyId={linkForDep.id}
+          requestedInfo={linkForDep.requestedInfo}
+          onClose={() => setLinkForDep(null)}
+        />
+      )}
 
       {/* Per-task documents pop-up (opened from the Work tab). */}
       {docsForTask && (

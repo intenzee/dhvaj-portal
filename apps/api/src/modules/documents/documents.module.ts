@@ -11,6 +11,11 @@ import { M365Service } from './m365/m365.service';
 import { GraphClient } from './m365/graph-client';
 import { DocIntelligenceClient } from './ocr/doc-intelligence.client';
 import { DocExtractionService } from './ocr/doc-extraction.service';
+import { ClientUploadService } from './client-upload/client-upload.service';
+import {
+  ClientUploadLinksController,
+  ClientUploadPublicController,
+} from './client-upload/client-upload.controller';
 
 /**
  * Documents (Phase 10). Engagement-scoped professional evidence: metadata +
@@ -21,7 +26,13 @@ import { DocExtractionService } from './ocr/doc-extraction.service';
  */
 @Module({
   imports: [AuditModule, StorageModule, NotificationsModule],
-  controllers: [DocumentsController, DocumentsListController, OnlyOfficeController],
+  controllers: [
+    DocumentsController,
+    DocumentsListController,
+    OnlyOfficeController,
+    ClientUploadLinksController,
+    ClientUploadPublicController,
+  ],
   providers: [
     DocumentsService,
     OnlyOfficeService,
@@ -29,6 +40,7 @@ import { DocExtractionService } from './ocr/doc-extraction.service';
     GraphClient,
     DocIntelligenceClient,
     DocExtractionService,
+    ClientUploadService,
   ],
   exports: [DocumentsService],
 })
