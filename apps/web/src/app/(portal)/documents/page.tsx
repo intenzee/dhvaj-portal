@@ -117,7 +117,7 @@ export default function DocumentsPage(): JSX.Element {
         <input
           value={search}
           onChange={(e) => reset(() => setSearch(e.target.value))}
-          placeholder="Search by title…"
+          placeholder="Search by title or file name…"
           className="w-full max-w-xs rounded-md border border-line-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
         <FilterChip label="All statuses" active={status === ''} onClick={() => reset(() => setStatus(''))} />

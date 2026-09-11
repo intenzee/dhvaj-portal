@@ -318,7 +318,7 @@ export class DocumentsService {
       }
       if (filter.search) {
         params.push(`%${filter.search}%`);
-        conds.push(`d.title ILIKE $${params.length}`);
+        conds.push(`(d.title ILIKE $${params.length} OR cv.filename ILIKE $${params.length})`);
       }
       const where = `WHERE ${conds.join(' AND ')}`;
       params.push(page.limit, page.offset);
@@ -329,7 +329,8 @@ export class DocumentsService {
         params,
       );
       const totalRes = await client.query<{ total: string }>(
-        `SELECT count(*) AS total FROM hsdg.documents d ${where}`,
+        `SELECT count(*) AS total FROM hsdg.documents d
+         LEFT JOIN hsdg.document_versions cv ON cv.id = d.current_version_id ${where}`,
         params.slice(0, params.length - 2),
       );
       return { items: rows.map(mapDocument), total: Number(totalRes.rows[0]?.total ?? 0) };
@@ -370,7 +371,7 @@ export class DocumentsService {
       }
       if (filter.search) {
         params.push(`%${filter.search}%`);
-        conds.push(`d.title ILIKE $${params.length}`);
+        conds.push(`(d.title ILIKE $${params.length} OR cv.filename ILIKE $${params.length})`);
       }
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
       params.push(page.limit, page.offset);
@@ -381,7 +382,8 @@ export class DocumentsService {
         params,
       );
       const totalRes = await client.query<{ total: string }>(
-        `SELECT count(*) AS total FROM hsdg.documents d ${where}`,
+        `SELECT count(*) AS total FROM hsdg.documents d
+         LEFT JOIN hsdg.document_versions cv ON cv.id = d.current_version_id ${where}`,
         params.slice(0, params.length - 2),
       );
       return { items: rows.map(mapGlobalDocument), total: Number(totalRes.rows[0]?.total ?? 0) };
