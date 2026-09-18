@@ -256,6 +256,31 @@ export class AuditWorkService {
         deactivated += 1;
       }
 
+      // Unlock the Audit Areas phase (§7 progressive unlock): generation is the
+      // moment the audit file gains work, so Phase 06 moves locked → in_progress.
+      // Only lift the lock — never downgrade a phase that is already progressing.
+      // Without this the phase stays locked forever and the Audit Areas panel is
+      // unreachable through the audit-file nav (nav gates clicks on !== locked).
+      await client.query(
+        `UPDATE hsdg.audit_workflow_phases
+            SET state = 'in_progress'
+          WHERE workflow_instance_id = $1 AND phase_key = 'audit_areas' AND state = 'locked'`,
+        [workflowInstanceId],
+      );
+      // Make the Completion phase (07) reachable too: the completion checklist
+      // (subsequent events, going concern, …) runs alongside fieldwork, and the
+      // hard §28/§29 gates live on the Approve/Sign-off/Archive actions, not on
+      // opening the panel (§31 — locks are informational, RLS is the real gate).
+      // Lift only the lock, to not_started, so the nav can open it without
+      // overstating progress. Reporting/Sign-off/Archive stay locked until their
+      // own SA-8 gates (approveCompletion → reporting, signOff → archiving).
+      await client.query(
+        `UPDATE hsdg.audit_workflow_phases
+            SET state = 'not_started'
+          WHERE workflow_instance_id = $1 AND phase_key = 'completion' AND state = 'locked'`,
+        [workflowInstanceId],
+      );
+
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.work_generated',
         objectType: 'service_workflow_instance',

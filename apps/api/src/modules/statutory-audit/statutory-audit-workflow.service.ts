@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  ALL_COMPLETION_ITEMS,
   AUDIT_PHASES,
   FRAMEWORK_AREAS,
   PLANNING_ITEMS,
@@ -143,6 +144,25 @@ export class StatutoryAuditWorkflowService {
        VALUES ${planValues.join(', ')}
        ON CONFLICT (workflow_instance_id, item_key) DO NOTHING`,
       planParams,
+    );
+
+    // Seed the Completion (Phase 07) and Reporting (Phase 08) checklists (§27)
+    // alongside the shell so every engagement member can read them from the start
+    // of the file. Idempotent via ON CONFLICT; existing shells were seeded in
+    // migration 1762800000000.
+    const compValues: string[] = [];
+    const compParams: unknown[] = [workflowInstanceId, args.engagementId];
+    for (const item of ALL_COMPLETION_ITEMS) {
+      const base = compParams.length;
+      compValues.push(`($1, $2, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+      compParams.push(item.section, item.itemKey, item.title, item.sortOrder);
+    }
+    await client.query(
+      `INSERT INTO hsdg.audit_completion_items
+         (workflow_instance_id, engagement_id, section, item_key, title, sort_order)
+       VALUES ${compValues.join(', ')}
+       ON CONFLICT (workflow_instance_id, section, item_key) DO NOTHING`,
+      compParams,
     );
 
     await this.audit.recordWith(client, ctx, {

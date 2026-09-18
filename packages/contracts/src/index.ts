@@ -25,6 +25,7 @@ export * from './statutory-audit-procedures';
 export * from './statutory-audit-pbc';
 export * from './statutory-audit-review';
 export * from './statutory-audit-team';
+export * from './statutory-audit-completion';
 export * from './time';
 export * from './commercial';
 export * from './notes';
