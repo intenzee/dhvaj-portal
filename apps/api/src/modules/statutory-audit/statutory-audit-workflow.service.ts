@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
   AUDIT_PHASES,
+  FRAMEWORK_AREAS,
   STATUTORY_AUDIT_TEMPLATE_VERSION,
   STATUTORY_AUDIT_WORKFLOW_KEY,
   type AuditPhaseKey,
@@ -104,6 +105,24 @@ export class StatutoryAuditWorkflowService {
          (workflow_instance_id, engagement_id, phase_no, phase_key, title, state, sort_order)
        VALUES ${values.join(', ')}`,
       params,
+    );
+
+    // Seed the Framework (Phase 02) assessment areas alongside the shell (§5,
+    // §18) so every engagement member can read the framework without a lead
+    // having to initialise it first. Idempotent via ON CONFLICT.
+    const fwValues: string[] = [];
+    const fwParams: unknown[] = [workflowInstanceId, args.engagementId];
+    for (const area of FRAMEWORK_AREAS) {
+      const base = fwParams.length;
+      fwValues.push(`($1, $2, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+      fwParams.push(area.areaKey, area.title, area.kind, area.sortOrder);
+    }
+    await client.query(
+      `INSERT INTO hsdg.audit_framework_assessments
+         (workflow_instance_id, engagement_id, area_key, title, kind, sort_order)
+       VALUES ${fwValues.join(', ')}
+       ON CONFLICT (workflow_instance_id, area_key) DO NOTHING`,
+      fwParams,
     );
 
     await this.audit.recordWith(client, ctx, {

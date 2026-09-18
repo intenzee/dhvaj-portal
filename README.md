@@ -54,6 +54,29 @@ audit trail.
 > (`M365_ENABLED`, off until provisioned — see
 > [the provisioning checklist](docs/microsoft-365-sharepoint-provisioning.md)).
 
+> **Status: Statutory Audit workflow — SA-2 Framework (applicability/assessment) complete.**
+> **SA-2** (spec §18–§20, §33) adds the **Framework (Phase 02)** layer that
+> determines *what applies*. Migration `1762200000000_statutory_audit_framework.sql`
+> adds `hsdg.audit_framework_assessments` (the 16 assessment areas — Ind AS/AS,
+> Schedule III, CARO, IFC, CFS, internal audit, cost records, secretarial audit,
+> CSR, Rule 11, Sec 143, …), `hsdg.audit_framework_evidence` (links an existing
+> document or a note — never a duplicate) and `hsdg.audit_framework_approvals` (the
+> versioned, immutable Framework Memo). The areas are seeded with the shell. An
+> **advisory rule engine** (`framework-suggestions.ts`, pure + unit-tested) reads
+> the entity's real facts (financials, listings, group structure, regulatory
+> attributes) and offers a **suggestion with a stated basis** for each area, per
+> the §19 state model (`not_assessed → system_suggested_* / professional_judgement_
+> required / pending_information → applicable / not_applicable / overridden →
+> approved`); it never overwrites a professional conclusion and never guesses when
+> facts are missing. The professional **records the conclusion** (a basis is
+> required when it **overrides** the suggestion), links evidence, then **approves
+> the Framework Memo** — which freezes the conclusions in a versioned snapshot and
+> marks **Phase 02 complete** (blocked while any area is undecided). All under the
+> same assignment-based RLS (members read; leads mutate) with immutable audit
+> events. New endpoints under `GET/POST /engagements/:id/statutory-audit/framework…`
+> feed a **Framework screen** opened from the Work-tab audit-file tree. *Next:
+> SA-3 — dynamic work generation from the approved framework.*
+
 > **Status: Statutory Audit workflow — SA-1 foundation (versioned workflow shell) complete.**
 > Building the professional Statutory Audit service experience from the
 > [DHVAJ Statutory Audit spec](docs/statutory-audit-spec.md). **SA-1** lands the

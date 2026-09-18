@@ -37,6 +37,7 @@ import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-mo
 import { ClientUploadLinkModal } from '@/components/actions/client-upload-link-modal';
 import { CompletionBar } from '@/components/completion';
 import { AuditFileNav } from '@/components/statutory-audit/audit-file-nav';
+import { FrameworkPanel } from '@/components/statutory-audit/framework-panel';
 
 /** Whether the secure client upload portal is turned on for this deployment. */
 const CLIENT_UPLOAD_ENABLED = process.env.NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED === 'true';
@@ -89,6 +90,8 @@ export default function EngagementDetailPage(): JSX.Element {
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
   const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
   const [linkForDep, setLinkForDep] = useState<MyClientDependency | null>(null);
+  // Selected phase in the Work-tab audit-file tree (null ⇒ default tasks view).
+  const [auditPhase, setAuditPhase] = useState<string | null>(null);
 
   const eng = useQuery({
     queryKey: ['engagement', id],
@@ -236,7 +239,14 @@ export default function EngagementDetailPage(): JSX.Element {
         <div>
           {/* Statutory Audit file navigation (§8, §10) — renders only when the
               engagement carries a statutory-audit service. */}
-          <AuditFileNav engagementId={e.id} />
+          <AuditFileNav
+            engagementId={e.id}
+            selectedPhaseKey={auditPhase ?? undefined}
+            onSelectPhase={(k) => setAuditPhase((cur) => (cur === k ? null : k))}
+          />
+          {auditPhase === 'framework' && <FrameworkPanel engagementId={e.id} />}
+          {auditPhase !== 'framework' && (
+          <>
           <section>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-3">
@@ -366,6 +376,8 @@ export default function EngagementDetailPage(): JSX.Element {
               )}
             </Card>
           </section>
+          </>
+          )}
         </div>
       )}
 

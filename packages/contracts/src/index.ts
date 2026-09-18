@@ -17,6 +17,7 @@ export * from './services';
 export * from './components';
 export * from './engagements';
 export * from './statutory-audit';
+export * from './statutory-audit-framework';
 export * from './time';
 export * from './commercial';
 export * from './notes';

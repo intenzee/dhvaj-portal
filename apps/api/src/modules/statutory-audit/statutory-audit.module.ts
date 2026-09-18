@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { StatutoryAuditWorkflowService } from './statutory-audit-workflow.service';
 import { StatutoryAuditController } from './statutory-audit.controller';
+import { AuditFrameworkService } from './audit-framework.service';
+import { AuditFrameworkController } from './audit-framework.controller';
 
 /**
  * Statutory Audit — the professional audit-file experience (Audit Spec §5–§8).
@@ -16,8 +18,8 @@ import { StatutoryAuditController } from './statutory-audit.controller';
  */
 @Module({
   imports: [AuditModule],
-  controllers: [StatutoryAuditController],
-  providers: [StatutoryAuditWorkflowService],
-  exports: [StatutoryAuditWorkflowService],
+  controllers: [StatutoryAuditController, AuditFrameworkController],
+  providers: [StatutoryAuditWorkflowService, AuditFrameworkService],
+  exports: [StatutoryAuditWorkflowService, AuditFrameworkService],
 })
 export class StatutoryAuditModule {}
