@@ -42,3 +42,6 @@ infra/terraform/.terraform/
 
 # Docker local volumes
 .docker-data/
+
+# Claude Code local overrides
+.claude/settings.local.json
