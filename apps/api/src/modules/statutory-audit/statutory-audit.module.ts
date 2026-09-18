@@ -10,6 +10,8 @@ import { AuditPlanningService } from './audit-planning.service';
 import { AuditPlanningController } from './audit-planning.controller';
 import { AuditRiskService } from './audit-risk.service';
 import { AuditRiskController } from './audit-risk.controller';
+import { AuditProcedureService } from './audit-procedure.service';
+import { AuditProcedureController } from './audit-procedure.controller';
 
 /**
  * Statutory Audit — the professional audit-file experience (Audit Spec §5–§8).
@@ -30,6 +32,7 @@ import { AuditRiskController } from './audit-risk.controller';
     AuditWorkController,
     AuditPlanningController,
     AuditRiskController,
+    AuditProcedureController,
   ],
   providers: [
     StatutoryAuditWorkflowService,
@@ -37,6 +40,7 @@ import { AuditRiskController } from './audit-risk.controller';
     AuditWorkService,
     AuditPlanningService,
     AuditRiskService,
+    AuditProcedureService,
   ],
   exports: [
     StatutoryAuditWorkflowService,
@@ -44,6 +48,7 @@ import { AuditRiskController } from './audit-risk.controller';
     AuditWorkService,
     AuditPlanningService,
     AuditRiskService,
+    AuditProcedureService,
   ],
 })
 export class StatutoryAuditModule {}

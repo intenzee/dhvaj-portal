@@ -167,11 +167,14 @@ export class AuditPlanningService {
       if (!current) throw new NotFoundException('Planning item not found.');
       await this.assertNotApproved(client, current.workflow_instance_id);
 
+      // PATCH semantics: state and narrative are each updated only when the
+      // caller supplies them (undefined ⇒ unchanged). This keeps a state-only
+      // toggle from wiping an already-recorded narrative, and vice versa.
       const result = await client.query(
         `UPDATE hsdg.audit_planning_items
             SET state = COALESCE($3, state),
-                narrative = $4,
-                updated_by_employee_id = $5,
+                narrative = CASE WHEN $4 THEN $5 ELSE narrative END,
+                updated_by_employee_id = $6,
                 content_updated_at = now(),
                 version = version + 1
           WHERE id = $1 AND version = $2`,
@@ -179,6 +182,7 @@ export class AuditPlanningService {
           itemId,
           input.version,
           input.state ?? null,
+          input.narrative !== undefined,
           input.narrative?.trim() || null,
           ctx.employeeId ?? null,
         ],

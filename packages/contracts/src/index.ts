@@ -21,6 +21,7 @@ export * from './statutory-audit-framework';
 export * from './statutory-audit-work';
 export * from './statutory-audit-planning';
 export * from './statutory-audit-risk';
+export * from './statutory-audit-procedures';
 export * from './time';
 export * from './commercial';
 export * from './notes';

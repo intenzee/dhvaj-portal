@@ -1,7 +1,15 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  financialMovement,
   WORK_AREA_PROGRESSED_STATES,
+  type AreaConclusionState,
+  type AreaRiskLevel,
   type AuditWorkArea,
   type FrameworkConclusion,
   type StatutoryAuditWorkGeneration,
@@ -23,6 +31,21 @@ interface WorkAreaRow {
   is_active: boolean;
   generated_from_version: number | null;
   sort_order: number;
+  // §11 area-detail overlay (SA-5).
+  owner_employee_id: string | null;
+  owner_name: string | null;
+  reviewer_employee_id: string | null;
+  reviewer_name: string | null;
+  risk_level: AreaRiskLevel | null;
+  materiality: string | null;
+  // DATE columns come back as raw 'YYYY-MM-DD' strings (see database/pg-types.ts).
+  due_date: string | null;
+  financial_current: string | null;
+  financial_prior: string | null;
+  financial_source: string | null;
+  conclusion: string | null;
+  conclusion_state: AreaConclusionState;
+  detail_version: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -73,11 +96,18 @@ export class AuditWorkService {
     const shellIds = shells.map((s) => s.id);
 
     const { rows: areas } = await client.query<WorkAreaRow & { workflow_instance_id: string }>(
-      `SELECT id, workflow_instance_id, work_area_key, title, scope, source, origin_area_key,
-              state, is_active, generated_from_version, sort_order, created_at, updated_at
-         FROM hsdg.audit_work_areas
-        WHERE workflow_instance_id = ANY($1::uuid[])
-        ORDER BY is_active DESC, sort_order ASC`,
+      `SELECT a.id, a.workflow_instance_id, a.work_area_key, a.title, a.scope, a.source,
+              a.origin_area_key, a.state, a.is_active, a.generated_from_version, a.sort_order,
+              a.owner_employee_id, owner.full_name AS owner_name,
+              a.reviewer_employee_id, reviewer.full_name AS reviewer_name,
+              a.risk_level, a.materiality, a.due_date, a.financial_current, a.financial_prior,
+              a.financial_source, a.conclusion, a.conclusion_state, a.detail_version,
+              a.created_at, a.updated_at
+         FROM hsdg.audit_work_areas a
+         LEFT JOIN hsdg.employees owner ON owner.id = a.owner_employee_id
+         LEFT JOIN hsdg.employees reviewer ON reviewer.id = a.reviewer_employee_id
+        WHERE a.workflow_instance_id = ANY($1::uuid[])
+        ORDER BY a.is_active DESC, a.sort_order ASC`,
       [shellIds],
     );
 
@@ -244,6 +274,83 @@ export class AuditWorkService {
     });
   }
 
+  // ── §11 area-detail overlay (SA-5) ──────────────────────────────────────────
+
+  /**
+   * Update the §11 professional detail on a work area — ownership, risk,
+   * materiality, timing, financial data and conclusion (incl. draft/submitted).
+   * PATCH semantics (an omitted field is unchanged; explicit null clears) with
+   * optimistic concurrency on `detailVersion`. Never touches the generation
+   * provenance, so a later framework regeneration still preserves it.
+   */
+  async updateAreaDetail(
+    ctx: RlsContext,
+    engagementId: string,
+    workAreaId: string,
+    input: {
+      ownerEmployeeId?: string | null;
+      reviewerEmployeeId?: string | null;
+      riskLevel?: AreaRiskLevel | null;
+      materiality?: number | null;
+      dueDate?: string | null;
+      financialCurrent?: number | null;
+      financialPrior?: number | null;
+      financialSource?: string | null;
+      conclusion?: string | null;
+      conclusionState?: AreaConclusionState;
+      detailVersion: number;
+    },
+  ): Promise<StatutoryAuditWorkGeneration> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await client.query<{ id: string }>(
+        `SELECT id FROM hsdg.audit_work_areas WHERE id = $1 AND engagement_id = $2`,
+        [workAreaId, engagementId],
+      );
+      if (!rows[0]) throw new NotFoundException('Audit area not found on this engagement.');
+
+      const params: unknown[] = [workAreaId, input.detailVersion];
+      const sets: string[] = [];
+      const set = (col: string, value: unknown): void => {
+        params.push(value);
+        sets.push(`${col} = $${params.length}`);
+      };
+      if (input.ownerEmployeeId !== undefined)
+        set('owner_employee_id', input.ownerEmployeeId ?? null);
+      if (input.reviewerEmployeeId !== undefined)
+        set('reviewer_employee_id', input.reviewerEmployeeId ?? null);
+      if (input.riskLevel !== undefined) set('risk_level', input.riskLevel ?? null);
+      if (input.materiality !== undefined) set('materiality', input.materiality ?? null);
+      if (input.dueDate !== undefined) set('due_date', input.dueDate ?? null);
+      if (input.financialCurrent !== undefined)
+        set('financial_current', input.financialCurrent ?? null);
+      if (input.financialPrior !== undefined) set('financial_prior', input.financialPrior ?? null);
+      if (input.financialSource !== undefined)
+        set('financial_source', input.financialSource?.trim() || null);
+      if (input.conclusion !== undefined) set('conclusion', input.conclusion?.trim() || null);
+      if (input.conclusionState !== undefined) set('conclusion_state', input.conclusionState);
+
+      if (sets.length === 0) throw new BadRequestException('No area-detail fields to update.');
+
+      const result = await client.query(
+        `UPDATE hsdg.audit_work_areas
+            SET ${sets.join(', ')}, detail_version = detail_version + 1
+          WHERE id = $1 AND detail_version = $2`,
+        params,
+      );
+      if ((result.rowCount ?? 0) === 0) {
+        throw new ConflictException('This area changed since you loaded it; refresh and retry.');
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.area_detail_updated',
+        objectType: 'audit_work_area',
+        objectId: workAreaId,
+        after: { conclusionState: input.conclusionState },
+      });
+      const [generation] = await this.readGeneration(client, engagementId);
+      return generation!;
+    });
+  }
+
   // ── helpers ────────────────────────────────────────────────────────────────
 
   private async assertShell(
@@ -261,6 +368,8 @@ export class AuditWorkService {
 }
 
 function mapWorkArea(a: WorkAreaRow): AuditWorkArea {
+  const current = num(a.financial_current);
+  const prior = num(a.financial_prior);
   return {
     id: a.id,
     workAreaKey: a.work_area_key,
@@ -272,7 +381,29 @@ function mapWorkArea(a: WorkAreaRow): AuditWorkArea {
     isActive: a.is_active,
     generatedFromVersion: a.generated_from_version,
     sortOrder: a.sort_order,
+    detail: {
+      ownerEmployeeId: a.owner_employee_id,
+      ownerName: a.owner_name,
+      reviewerEmployeeId: a.reviewer_employee_id,
+      reviewerName: a.reviewer_name,
+      riskLevel: a.risk_level,
+      materiality: num(a.materiality),
+      dueDate: a.due_date,
+      financialCurrent: current,
+      financialPrior: prior,
+      financialMovement: financialMovement(current, prior),
+      financialSource: a.financial_source,
+      conclusion: a.conclusion,
+      conclusionState: a.conclusion_state,
+      detailVersion: a.detail_version,
+    },
     createdAt: a.created_at.toISOString(),
     updatedAt: a.updated_at.toISOString(),
   };
+}
+
+function num(value: string | null): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }

@@ -54,6 +54,30 @@ audit trail.
 > (`M365_ENABLED`, off until provisioned — see
 > [the provisioning checklist](docs/microsoft-365-sharepoint-provisioning.md)).
 
+> **Status: Statutory Audit workflow — SA-5 Audit-Area Execution (procedures, evidence, exceptions + reuse) complete.**
+> **SA-5** (spec §9–§14) builds the execution layer inside each generated audit
+> area. Migration `1762500000000_statutory_audit_procedures.sql` overlays the §11
+> professional detail on `hsdg.audit_work_areas` (owner, reviewer, risk level,
+> materiality, timing, current/prior financials + movement, and a draft/submitted
+> conclusion — preserved across framework regeneration), and adds
+> `hsdg.audit_procedures` (the §13 procedure/workpaper: objective, multi-select
+> assertions, optional risk response, population/sampling, owner/reviewer/due,
+> expected evidence, conclusion and an `not_started → in_progress →
+> ready_for_review → returned → complete` state), plus the reuse tables
+> `hsdg.audit_procedure_areas` (one procedure linked to several areas, §14),
+> `hsdg.audit_evidence` + `hsdg.audit_evidence_procedures` (one evidence record
+> reused across procedures — *"do the work once; use the evidence many times"*,
+> §9), and `hsdg.audit_exceptions` (§12 findings). A procedure ref auto-numbers
+> (`P1`, `P2`, …) unique per engagement; **completing** a procedure is gated on an
+> objective, a conclusion and no open exceptions (§13); the optional risk link
+> realises the §22 risk ↔ procedure two-way navigation. New endpoints under
+> `…/statutory-audit/procedures…`, `…/areas/:id/procedures`, `…/areas/:id/detail`
+> and `…/exceptions…` (lead-only, assignment-based RLS, immutable audit events)
+> feed the **Audit-Area screen** opened from a work area in the Work-tab tree
+> (detail, procedures with evidence/exceptions, area reuse, and the area
+> conclusion). All writes use PATCH semantics with optimistic concurrency. *Next:
+> SA-6 — PBC master tracker (§16).*
+>
 > **Status: Statutory Audit workflow — SA-4 Planning + Risk Assessment complete.**
 > **SA-4** (spec §21, §22) adds **Planning (Phase 03)** and **Risk Assessment
 > (Phase 04)**. Migration `1762400000000_statutory_audit_planning_risk.sql` adds

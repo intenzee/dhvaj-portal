@@ -153,7 +153,9 @@ function PlanningItemCard({
     mutationFn: (state: PlanningItemState) =>
       apiFetch(`/engagements/${engagementId}/statutory-audit/planning/${item.id}`, {
         method: 'POST',
-        body: { state, narrative: narrative || undefined, version: item.version },
+        // Send narrative as-is (empty string clears it); the API leaves an
+        // omitted field unchanged, so a full-replace must send the value.
+        body: { state, narrative, version: item.version },
       }),
     onSuccess: () => {
       toast(`${item.title}: saved.`);

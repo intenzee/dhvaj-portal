@@ -78,6 +78,7 @@ const EMPTY_DRAFT: RiskDraft = {
   conclusion: '',
 };
 
+// Create: empty optional fields are omitted (undefined) so inserts take defaults.
 function draftToBody(d: RiskDraft) {
   return {
     description: d.description,
@@ -92,6 +93,25 @@ function draftToBody(d: RiskDraft) {
     reviewerEmployeeId: d.reviewerEmployeeId || undefined,
     status: d.status,
     conclusion: d.conclusion || undefined,
+  };
+}
+
+// Update: the edit form is a full-replace, so a cleared field is sent as an
+// explicit null to clear it (the API leaves undefined fields unchanged).
+function draftToUpdateBody(d: RiskDraft) {
+  return {
+    description: d.description,
+    source: d.source,
+    fsArea: d.fsArea.trim() || null,
+    assertion: d.assertion || null,
+    rating: d.rating,
+    isSignificant: d.isSignificant,
+    isFraudRisk: d.isFraudRisk,
+    response: d.response.trim() || null,
+    ownerEmployeeId: d.ownerEmployeeId || null,
+    reviewerEmployeeId: d.reviewerEmployeeId || null,
+    status: d.status,
+    conclusion: d.conclusion.trim() || null,
   };
 }
 
@@ -218,7 +238,7 @@ function RiskCard({
     mutationFn: (draft: RiskDraft) =>
       apiFetch(`/engagements/${engagementId}/statutory-audit/risks/${risk.id}`, {
         method: 'POST',
-        body: { ...draftToBody(draft), version: risk.version },
+        body: { ...draftToUpdateBody(draft), version: risk.version },
       }),
     onSuccess: () => {
       toast(`${risk.riskRef}: updated.`);

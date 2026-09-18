@@ -1,18 +1,21 @@
 'use client';
 
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Wand2, Lock } from 'lucide-react';
+import { Wand2, Lock, ChevronRight } from 'lucide-react';
 import {
   PERMISSION,
   type AuditWorkArea,
   type StatutoryAuditWorkGeneration,
   type WorkAreaState,
 } from '@hsdg/contracts';
+import type { TeamMember } from '@/lib/types';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
+import { AuditAreaScreen } from './audit-area-panel';
 
 /**
  * Audit Areas (Phase 06) screen — Framework → Dynamic Work Generation (§20). The
@@ -39,11 +42,18 @@ const STATE_LABEL: Record<WorkAreaState, string> = {
 
 const WORK_QK = (id: string) => ['engagement', id, 'statutory-audit-work-areas'];
 
-export function WorkAreasPanel({ engagementId }: { engagementId: string }): JSX.Element | null {
+export function WorkAreasPanel({
+  engagementId,
+  team,
+}: {
+  engagementId: string;
+  team: TeamMember[];
+}): JSX.Element | null {
   const qc = useQueryClient();
   const toast = useToast();
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const query = useQuery({
     queryKey: WORK_QK(engagementId),
@@ -69,6 +79,19 @@ export function WorkAreasPanel({ engagementId }: { engagementId: string }): JSX.
   if (query.isLoading) return <Spinner label="Loading work areas…" />;
   const gen = query.data?.[0];
   if (!gen) return null;
+
+  const selected = selectedId ? gen.areas.find((a) => a.id === selectedId) ?? null : null;
+  if (selected) {
+    return (
+      <AuditAreaScreen
+        engagementId={engagementId}
+        area={selected}
+        allAreas={gen.areas}
+        team={team}
+        onBack={() => setSelectedId(null)}
+      />
+    );
+  }
 
   const active = gen.areas.filter((a) => a.isActive);
   const inactive = gen.areas.filter((a) => !a.isActive);
@@ -113,7 +136,7 @@ export function WorkAreasPanel({ engagementId }: { engagementId: string }): JSX.
       )}
 
       {active.map((a) => (
-        <WorkAreaCard key={a.id} area={a} />
+        <WorkAreaCard key={a.id} area={a} onOpen={() => setSelectedId(a.id)} />
       ))}
 
       {inactive.length > 0 && (
@@ -130,16 +153,25 @@ export function WorkAreasPanel({ engagementId }: { engagementId: string }): JSX.
   );
 }
 
-function WorkAreaCard({ area }: { area: AuditWorkArea }): JSX.Element {
-  return (
-    <Card className={`p-4 ${area.isActive ? '' : 'opacity-60'}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-ink">{area.title}</p>
-          {area.scope && <p className="mt-0.5 text-xs text-ink-muted">{area.scope}</p>}
-        </div>
-        <Badge tone={STATE_TONE[area.state]}>{STATE_LABEL[area.state]}</Badge>
+function WorkAreaCard({ area, onOpen }: { area: AuditWorkArea; onOpen?: () => void }): JSX.Element {
+  const body = (
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <p className="text-sm font-medium text-ink">{area.title}</p>
+        {area.scope && <p className="mt-0.5 text-xs text-ink-muted">{area.scope}</p>}
       </div>
+      <div className="flex items-center gap-2">
+        <Badge tone={STATE_TONE[area.state]}>{STATE_LABEL[area.state]}</Badge>
+        {onOpen && <ChevronRight className="h-4 w-4 text-ink-faint" />}
+      </div>
+    </div>
+  );
+  if (!onOpen) return <Card className="p-4 opacity-60">{body}</Card>;
+  return (
+    <Card className="p-0">
+      <button type="button" onClick={onOpen} className="block w-full rounded-xl p-4 text-left hover:bg-surface-muted">
+        {body}
+      </button>
     </Card>
   );
 }

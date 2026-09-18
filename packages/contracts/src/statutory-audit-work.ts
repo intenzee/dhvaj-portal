@@ -149,6 +149,12 @@ export interface AuditWorkArea {
   /** The framework approval version this area's generation reflects (§30 provenance). */
   generatedFromVersion: number | null;
   sortOrder: number;
+  /**
+   * The §11 professional detail overlaid on the area (ownership, risk,
+   * materiality, timing, financial data, conclusion). Added in SA-5 and
+   * preserved across framework regeneration. See `AuditAreaDetail`.
+   */
+  detail: import('./statutory-audit-procedures').AuditAreaDetail;
   createdAt: string;
   updatedAt: string;
 }

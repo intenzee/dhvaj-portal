@@ -223,42 +223,39 @@ export class AuditRiskService {
       const current = rows[0];
       if (!current) throw new NotFoundException('Risk not found.');
 
-      const nextRating = input.rating ?? current.rating;
-      const isSignificant =
-        input.isSignificant ?? (nextRating === RISK_RATING.significant ? true : undefined);
+      // PATCH semantics: an omitted field (undefined) is left unchanged; an
+      // explicit null clears a nullable field. This keeps a partial update
+      // (e.g. status-only from the mobile client) from wiping FS area,
+      // assertion, response, owner, reviewer or conclusion.
+      const params: unknown[] = [riskId, input.version];
+      const sets: string[] = [];
+      const set = (col: string, value: unknown): void => {
+        params.push(value);
+        sets.push(`${col} = $${params.length}`);
+      };
+
+      if (input.description !== undefined) set('description', input.description.trim());
+      if (input.source !== undefined) set('source', input.source);
+      if (input.fsArea !== undefined) set('fs_area', input.fsArea?.trim() || null);
+      if (input.assertion !== undefined) set('assertion', input.assertion ?? null);
+      if (input.rating !== undefined) set('rating', input.rating);
+      // A risk rated "significant" is significant unless the caller says otherwise.
+      if (input.isSignificant !== undefined) set('is_significant', input.isSignificant);
+      else if (input.rating === RISK_RATING.significant) set('is_significant', true);
+      if (input.isFraudRisk !== undefined) set('is_fraud_risk', input.isFraudRisk);
+      if (input.response !== undefined) set('response', input.response?.trim() || null);
+      if (input.ownerEmployeeId !== undefined)
+        set('owner_employee_id', input.ownerEmployeeId ?? null);
+      if (input.reviewerEmployeeId !== undefined)
+        set('reviewer_employee_id', input.reviewerEmployeeId ?? null);
+      if (input.status !== undefined) set('status', input.status);
+      if (input.conclusion !== undefined) set('conclusion', input.conclusion?.trim() || null);
 
       const result = await client.query(
         `UPDATE hsdg.audit_risks
-            SET description = COALESCE($3, description),
-                source = COALESCE($4, source),
-                fs_area = $5,
-                assertion = $6,
-                rating = COALESCE($7, rating),
-                is_significant = COALESCE($8, is_significant),
-                is_fraud_risk = COALESCE($9, is_fraud_risk),
-                response = $10,
-                owner_employee_id = $11,
-                reviewer_employee_id = $12,
-                status = COALESCE($13, status),
-                conclusion = $14,
-                version = version + 1
+            SET ${sets.length ? `${sets.join(', ')}, ` : ''}version = version + 1
           WHERE id = $1 AND version = $2`,
-        [
-          riskId,
-          input.version,
-          input.description?.trim() || null,
-          input.source ?? null,
-          input.fsArea?.trim() || null,
-          input.assertion ?? null,
-          input.rating ?? null,
-          isSignificant ?? null,
-          input.isFraudRisk ?? null,
-          input.response?.trim() || null,
-          input.ownerEmployeeId ?? null,
-          input.reviewerEmployeeId ?? null,
-          input.status ?? null,
-          input.conclusion?.trim() || null,
-        ],
+        params,
       );
       if ((result.rowCount ?? 0) === 0) {
         throw new ConflictException('This risk changed since you loaded it; refresh and retry.');

@@ -250,7 +250,7 @@ export default function EngagementDetailPage(): JSX.Element {
           {auditPhase === 'framework' && <FrameworkPanel engagementId={e.id} />}
           {auditPhase === 'planning' && <PlanningPanel engagementId={e.id} />}
           {auditPhase === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
-          {auditPhase === 'audit_areas' && <WorkAreasPanel engagementId={e.id} />}
+          {auditPhase === 'audit_areas' && <WorkAreasPanel engagementId={e.id} team={e.team} />}
           {!['framework', 'planning', 'risk', 'audit_areas'].includes(auditPhase ?? '') && (
           <>
           <section>

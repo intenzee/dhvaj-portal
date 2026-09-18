@@ -1,9 +1,10 @@
-import { Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type StatutoryAuditWorkGeneration } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditWorkService } from './audit-work.service';
+import { UpdateAreaDetailDto } from './dto/area.dto';
 
 /**
  * Statutory Audit — Framework → Dynamic Work Generation endpoints (Audit Spec §20).
@@ -39,5 +40,22 @@ export class AuditWorkController {
     @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
   ): Promise<StatutoryAuditWorkGeneration> {
     return this.work.generate(rlsContextFromPrincipal(principal), id, workflowInstanceId);
+  }
+
+  @Post(':id/statutory-audit/areas/:workAreaId/detail')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Update an audit area’s §11 professional detail (SA-5)',
+    description:
+      'Ownership, risk, materiality, timing, financial data and conclusion (draft / submitted). ' +
+      'Optimistic-locked on detailVersion; preserved across framework regeneration.',
+  })
+  updateAreaDetail(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workAreaId', new ParseUUIDPipe()) workAreaId: string,
+    @Body() dto: UpdateAreaDetailDto,
+  ): Promise<StatutoryAuditWorkGeneration> {
+    return this.work.updateAreaDetail(rlsContextFromPrincipal(principal), id, workAreaId, dto);
   }
 }
