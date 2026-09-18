@@ -1,18 +1,20 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { addMonthsUTC, parseISODate, toISODate } from '../src/modules/compliance/compliance-calc';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 
 /**
  * Rolling recurring-work horizon (spec §18).
  *
- * Recurring component work is materialised only for periods starting within a
- * configurable future horizon; a rolling sweep extends it as time advances,
- * idempotently and without duplicating. These tests pin "today" to the machine
- * clock (2026-08-27) and a monthly GST component on FY 2026-27:
- *   • horizon 1 month  → Apr–Sep 2026 (6 periods: past + 1 future month)
- *   • horizon 12 months → the full FY (12 periods)
- * Shrinking the horizon never cancels already-created future work.
+ * Recurring component work is materialised only for periods whose start falls on
+ * or before a configurable future horizon (today + N months); a rolling sweep
+ * extends it as time advances, idempotently and without duplicating. These tests
+ * use a monthly GST component on FY 2026-27 (12 monthly periods, Apr 2026 – Mar
+ * 2027) and compute the expected period count from the machine clock the same way
+ * the service does (horizonEnd = addMonthsUTC(today, N)), so they stay correct as
+ * the clock advances rather than pinning a specific "today". Shrinking the horizon
+ * never cancels already-created future work.
  */
 describe('Rolling recurring-work horizon (e2e)', () => {
   let app: INestApplication;
@@ -61,6 +63,17 @@ describe('Rolling recurring-work horizon (e2e)', () => {
   const roll = (t: string, body: Record<string, unknown>) =>
     request(app.getHttpServer()).post('/api/v1/compliance/horizon').set(bearer(t)).send(body);
 
+  // The monthly period starts for FY 2026-27 — the 1st of each month Apr..Mar.
+  const FY_MONTHLY_STARTS = Array.from({ length: 12 }, (_, i) =>
+    toISODate(addMonthsUTC(parseISODate('2026-04-01'), i)),
+  );
+  // How many of those periods a given horizon materialises, computed exactly as
+  // the service does: those whose start is on/before addMonthsUTC(today, months).
+  const expectedPeriods = (horizonMonths: number): number => {
+    const horizonEnd = toISODate(addMonthsUTC(parseISODate(toISODate(new Date())), horizonMonths));
+    return FY_MONTHLY_STARTS.filter((start) => start <= horizonEnd).length;
+  };
+
   const liveCount = async (t: string, engId: string): Promise<number> => {
     const res = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/component-work?limit=100`)
@@ -93,15 +106,16 @@ describe('Rolling recurring-work horizon (e2e)', () => {
     const engId = await createEngagement(pa);
     await configure(pa, engId, 'GSTR1'); // monthly
 
-    // Horizon 1 month → today (2026-08-27) + 1mo ⇒ only Apr–Sep 2026 (6 periods).
+    // Horizon 1 month → only periods starting on/before today + 1 month.
+    const within1 = expectedPeriods(1);
     const first = await roll(pa, { horizonMonths: 1, engagementId: engId }).expect(201);
     expect(first.body.engagementsProcessed).toBe(1);
-    expect(first.body.generated).toBe(6);
-    expect(await liveCount(pa, engId)).toBe(6);
+    expect(first.body.generated).toBe(within1);
+    expect(await liveCount(pa, engId)).toBe(within1);
 
-    // Roll the full 12-month horizon → the remaining 6 periods, no duplicates.
+    // Roll the full 12-month horizon → the remaining periods of the FY, no duplicates.
     const second = await roll(pa, { horizonMonths: 12, engagementId: engId }).expect(201);
-    expect(second.body.generated).toBe(6);
+    expect(second.body.generated).toBe(12 - within1);
     expect(await liveCount(pa, engId)).toBe(12);
 
     // Idempotent — re-running generates nothing new.
