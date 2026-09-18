@@ -45,6 +45,7 @@ import { PbcPanel } from '@/components/statutory-audit/pbc-panel';
 import { ReviewPanel } from '@/components/statutory-audit/review-panel';
 import { TeamPanel } from '@/components/statutory-audit/team-panel';
 import { CompletionPanel } from '@/components/statutory-audit/completion-panel';
+import { ReassessmentPanel } from '@/components/statutory-audit/reassessment-panel';
 
 /** Whether the secure client upload portal is turned on for this deployment. */
 const CLIENT_UPLOAD_ENABLED = process.env.NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED === 'true';
@@ -258,6 +259,7 @@ export default function EngagementDetailPage(): JSX.Element {
           {auditPhase === 'pbc' && <PbcPanel engagementId={e.id} />}
           {auditPhase === 'review' && <ReviewPanel engagementId={e.id} />}
           {auditPhase === 'team' && <TeamPanel engagementId={e.id} />}
+          {auditPhase === 'reassessment' && <ReassessmentPanel engagementId={e.id} />}
           {['completion', 'reporting', 'sign_off', 'archiving'].includes(auditPhase ?? '') && (
             <CompletionPanel engagementId={e.id} />
           )}
@@ -269,6 +271,7 @@ export default function EngagementDetailPage(): JSX.Element {
             'pbc',
             'review',
             'team',
+            'reassessment',
             'completion',
             'reporting',
             'sign_off',

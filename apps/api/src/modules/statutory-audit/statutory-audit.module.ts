@@ -20,6 +20,8 @@ import { AuditTeamService } from './audit-team.service';
 import { AuditTeamController } from './audit-team.controller';
 import { AuditCompletionService } from './audit-completion.service';
 import { AuditCompletionController } from './audit-completion.controller';
+import { AuditReassessmentService } from './audit-reassessment.service';
+import { AuditReassessmentController } from './audit-reassessment.controller';
 
 /**
  * Statutory Audit — the professional audit-file experience (Audit Spec §5–§8).
@@ -45,6 +47,7 @@ import { AuditCompletionController } from './audit-completion.controller';
     AuditReviewController,
     AuditTeamController,
     AuditCompletionController,
+    AuditReassessmentController,
   ],
   providers: [
     StatutoryAuditWorkflowService,
@@ -57,6 +60,7 @@ import { AuditCompletionController } from './audit-completion.controller';
     AuditReviewService,
     AuditTeamService,
     AuditCompletionService,
+    AuditReassessmentService,
   ],
   exports: [
     StatutoryAuditWorkflowService,
@@ -69,6 +73,7 @@ import { AuditCompletionController } from './audit-completion.controller';
     AuditReviewService,
     AuditTeamService,
     AuditCompletionService,
+    AuditReassessmentService,
   ],
 })
 export class StatutoryAuditModule {}

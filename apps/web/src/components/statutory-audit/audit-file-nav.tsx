@@ -10,6 +10,7 @@ import {
   Lock,
   Users,
   AlertTriangle,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
 import type { AuditPhaseState, StatutoryAuditWorkflow } from '@hsdg/contracts';
@@ -157,6 +158,18 @@ export function AuditFileNav({
                 <span className="w-6 shrink-0" />
                 <Users className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
                 <span className="flex-1 text-ink">Team</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectPhase('reassessment')}
+                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
+                  selectedPhaseKey === 'reassessment' ? 'bg-surface-sunken' : 'bg-transparent'
+                }`}
+                title="Change impact & reassessment"
+              >
+                <span className="w-6 shrink-0" />
+                <RefreshCw className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
+                <span className="flex-1 text-ink">Reassessment</span>
               </button>
             </div>
           )}

@@ -312,8 +312,17 @@ export class AuditPlanningService {
       );
       const version = existingApproval[0]!.next;
       if (version > 1) {
-        // Already approved at least once; re-approval is a SA-9 reassessment path.
-        throw new ConflictException('Planning is already approved.');
+        // Already approved at least once. Re-approval is permitted only when a
+        // SA-9 reassessment has re-opened planning (its phase → needs_attention);
+        // otherwise history is never rewritten (§30).
+        const { rows: phase } = await client.query<{ state: string }>(
+          `SELECT state FROM hsdg.audit_workflow_phases
+            WHERE workflow_instance_id = $1 AND phase_key = 'planning'`,
+          [workflowInstanceId],
+        );
+        if (phase[0]?.state !== 'needs_attention') {
+          throw new ConflictException('Planning is already approved.');
+        }
       }
 
       const { rows: matRows } = await client.query<MaterialityRow>(
