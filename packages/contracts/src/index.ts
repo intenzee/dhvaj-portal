@@ -23,6 +23,8 @@ export * from './statutory-audit-planning';
 export * from './statutory-audit-risk';
 export * from './statutory-audit-procedures';
 export * from './statutory-audit-pbc';
+export * from './statutory-audit-review';
+export * from './statutory-audit-team';
 export * from './time';
 export * from './commercial';
 export * from './notes';

@@ -5,8 +5,10 @@ import {
   CheckCircle2,
   CircleDashed,
   CircleDot,
+  ClipboardCheck,
   ClipboardList,
   Lock,
+  Users,
   AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
@@ -123,6 +125,38 @@ export function AuditFileNav({
                 <span className="w-6 shrink-0" />
                 <ClipboardList className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
                 <span className="flex-1 text-ink">PBC — Client Information</span>
+              </button>
+            </div>
+          )}
+
+          {/* Review — first-class review control (§25) and Team — people, workload
+              and time (§24). Cross-cutting layers over the whole file, not one of
+              the ten file phases; surfaced as trackers below the phase tree. */}
+          {onSelectPhase && (
+            <div className="border-t border-line">
+              <button
+                type="button"
+                onClick={() => onSelectPhase('review')}
+                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
+                  selectedPhaseKey === 'review' ? 'bg-surface-sunken' : 'bg-transparent'
+                }`}
+                title="Review — pending reviews and review notes"
+              >
+                <span className="w-6 shrink-0" />
+                <ClipboardCheck className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
+                <span className="flex-1 text-ink">Review</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectPhase('team')}
+                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
+                  selectedPhaseKey === 'team' ? 'bg-surface-sunken' : 'bg-transparent'
+                }`}
+                title="Team — people, workload and time"
+              >
+                <span className="w-6 shrink-0" />
+                <Users className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
+                <span className="flex-1 text-ink">Team</span>
               </button>
             </div>
           )}
