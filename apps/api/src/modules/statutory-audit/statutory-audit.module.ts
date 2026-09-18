@@ -4,6 +4,12 @@ import { StatutoryAuditWorkflowService } from './statutory-audit-workflow.servic
 import { StatutoryAuditController } from './statutory-audit.controller';
 import { AuditFrameworkService } from './audit-framework.service';
 import { AuditFrameworkController } from './audit-framework.controller';
+import { AuditWorkService } from './audit-work.service';
+import { AuditWorkController } from './audit-work.controller';
+import { AuditPlanningService } from './audit-planning.service';
+import { AuditPlanningController } from './audit-planning.controller';
+import { AuditRiskService } from './audit-risk.service';
+import { AuditRiskController } from './audit-risk.controller';
 
 /**
  * Statutory Audit — the professional audit-file experience (Audit Spec §5–§8).
@@ -18,8 +24,26 @@ import { AuditFrameworkController } from './audit-framework.controller';
  */
 @Module({
   imports: [AuditModule],
-  controllers: [StatutoryAuditController, AuditFrameworkController],
-  providers: [StatutoryAuditWorkflowService, AuditFrameworkService],
-  exports: [StatutoryAuditWorkflowService, AuditFrameworkService],
+  controllers: [
+    StatutoryAuditController,
+    AuditFrameworkController,
+    AuditWorkController,
+    AuditPlanningController,
+    AuditRiskController,
+  ],
+  providers: [
+    StatutoryAuditWorkflowService,
+    AuditFrameworkService,
+    AuditWorkService,
+    AuditPlanningService,
+    AuditRiskService,
+  ],
+  exports: [
+    StatutoryAuditWorkflowService,
+    AuditFrameworkService,
+    AuditWorkService,
+    AuditPlanningService,
+    AuditRiskService,
+  ],
 })
 export class StatutoryAuditModule {}

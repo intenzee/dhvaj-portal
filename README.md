@@ -54,6 +54,48 @@ audit trail.
 > (`M365_ENABLED`, off until provisioned — see
 > [the provisioning checklist](docs/microsoft-365-sharepoint-provisioning.md)).
 
+> **Status: Statutory Audit workflow — SA-4 Planning + Risk Assessment complete.**
+> **SA-4** (spec §21, §22) adds **Planning (Phase 03)** and **Risk Assessment
+> (Phase 04)**. Migration `1762400000000_statutory_audit_planning_risk.sql` adds
+> `hsdg.audit_planning_items` (the 16 planning sub-areas — strategy, materiality,
+> approach, areas & assertions, risk-to-response, programme, team, PBC, timeline,
+> …, seeded for every shell), `hsdg.audit_materiality` (a structured overall /
+> performance / clearly-trivial record with benchmark + basis), a versioned
+> immutable `hsdg.audit_planning_approvals`, and `hsdg.audit_risks` (the §22
+> register: source, FS area, assertion, rating, significant / fraud flags,
+> response, owner, reviewer, status, conclusion). Planning is documented sub-area
+> by sub-area; **approving Planning** (gated on Framework approval and every
+> sub-area complete) freezes a snapshot, marks Phase 03 complete and **unlocks
+> Risk (Phase 04)** — the §7 progressive unlock. The risk register opens only once
+> Planning is approved; risk refs auto-number (`R1`, `R2`, …), significant risks
+> are flagged when they lack a planned response (§29), and every write is
+> optimistic-locked. New endpoints under `…/statutory-audit/planning…` and
+> `…/statutory-audit/risks…` (lead-only, assignment-based RLS, immutable audit
+> events) feed **Planning** and **Risk** screens opened from the Work-tab tree.
+> Risk ↔ procedure two-way navigation (§22) lands with SA-5. *Next: SA-5 — audit
+> areas / workpapers / procedures / evidence + reuse (§9–§14).*
+>
+> **Status: Statutory Audit workflow — SA-3 Framework → Dynamic Work Generation complete.**
+> **SA-3** (spec §20) turns the approved framework into work: *"APPROVED FRAMEWORK
+> → APPLICABLE WORK AREAS"*. Migration `1762300000000_statutory_audit_work_generation.sql`
+> adds `hsdg.audit_work_areas` (one row per generated work area per shell, with
+> provenance — `source`, `origin_area_key`, `generated_from_version` — the §8/§31
+> professional state model, and an `is_active` flag). A **pure, unit-tested engine**
+> (`work-generation.ts`) maps each *applicable* framework conclusion to its
+> workstream via a deterministic blueprint (`WORK_AREA_BLUEPRINT` in
+> `@hsdg/contracts`): Ind AS review, Schedule III/AS work, the CARO 2020 21-clause
+> workstream, IFC, CFS, reliance on internal audit (SA 610), and the Section 143 /
+> Rule 11 auditor's-report workstream (rule_11 + section_143 deduplicated to one).
+> Generation is **idempotent** (§20, §36): it upserts by `(workflow_instance_id,
+> work_area_key)`, so re-running never duplicates; an area a later framework change
+> makes not-applicable is **deactivated, never deleted**, and a deactivated area
+> that already carries progress is flagged `needs_attention` so completed work is
+> never silently lost. It is **gated on Framework Memo approval** (409 otherwise).
+> New endpoints `GET /engagements/:id/statutory-audit/work-areas` and `POST
+> …/:workflowInstanceId/work-areas/generate` (lead-only, same assignment-based RLS,
+> immutable `work_generated` audit event) feed an **Audit Areas screen** opened
+> from the Work-tab tree (Phase 06). *Next: SA-4 — Planning + Risk (§21, §22).*
+>
 > **Status: Statutory Audit workflow — SA-2 Framework (applicability/assessment) complete.**
 > **SA-2** (spec §18–§20, §33) adds the **Framework (Phase 02)** layer that
 > determines *what applies*. Migration `1762200000000_statutory_audit_framework.sql`

@@ -298,6 +298,18 @@ export class AuditFrameworkService {
       if (!input.documentId && !note) {
         throw new BadRequestException('Evidence needs a linked document or a note.');
       }
+      // A linked document must belong to THIS engagement (§16 — link within the
+      // engagement's own document set, never a cross-engagement reference). RLS on
+      // the evidence row only checks the evidence's engagement, not the target's.
+      if (input.documentId) {
+        const { rows: docRows } = await client.query(
+          `SELECT 1 FROM hsdg.documents WHERE id = $1 AND engagement_id = $2`,
+          [input.documentId, engagementId],
+        );
+        if (!docRows[0]) {
+          throw new BadRequestException('The linked document does not belong to this engagement.');
+        }
+      }
       await client.query(
         `INSERT INTO hsdg.audit_framework_evidence
            (assessment_id, engagement_id, document_id, note, created_by_employee_id)
@@ -380,19 +392,29 @@ export class AuditFrameworkService {
         isOverridden: a.is_overridden,
       }));
 
-      await client.query(
-        `INSERT INTO hsdg.audit_framework_approvals
-           (workflow_instance_id, engagement_id, version, memo, snapshot, approved_by_employee_id)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
-        [
-          workflowInstanceId,
-          engagementId,
-          version,
-          input.memo?.trim() || null,
-          JSON.stringify(snapshot),
-          ctx.employeeId ?? null,
-        ],
-      );
+      try {
+        await client.query(
+          `INSERT INTO hsdg.audit_framework_approvals
+             (workflow_instance_id, engagement_id, version, memo, snapshot, approved_by_employee_id)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+          [
+            workflowInstanceId,
+            engagementId,
+            version,
+            input.memo?.trim() || null,
+            JSON.stringify(snapshot),
+            ctx.employeeId ?? null,
+          ],
+        );
+      } catch (err) {
+        // Concurrent approval computed the same version (UNIQUE violation, 23505).
+        if ((err as { code?: string }).code === '23505') {
+          throw new ConflictException(
+            'The framework was approved concurrently; refresh and retry.',
+          );
+        }
+        throw err;
+      }
       // Freeze conclusions.
       await client.query(
         `UPDATE hsdg.audit_framework_assessments

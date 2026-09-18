@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import {
   AUDIT_PHASES,
   FRAMEWORK_AREAS,
+  PLANNING_ITEMS,
   STATUTORY_AUDIT_TEMPLATE_VERSION,
   STATUTORY_AUDIT_WORKFLOW_KEY,
   type AuditPhaseKey,
@@ -123,6 +124,25 @@ export class StatutoryAuditWorkflowService {
        VALUES ${fwValues.join(', ')}
        ON CONFLICT (workflow_instance_id, area_key) DO NOTHING`,
       fwParams,
+    );
+
+    // Seed the Planning (Phase 03) sub-areas alongside the shell (§21) so every
+    // engagement member can read the planning file without a lead initialising
+    // it. Idempotent via ON CONFLICT; existing shells were seeded in migration
+    // 1762400000000.
+    const planValues: string[] = [];
+    const planParams: unknown[] = [workflowInstanceId, args.engagementId];
+    for (const item of PLANNING_ITEMS) {
+      const base = planParams.length;
+      planValues.push(`($1, $2, $${base + 1}, $${base + 2}, $${base + 3})`);
+      planParams.push(item.itemKey, item.title, item.sortOrder);
+    }
+    await client.query(
+      `INSERT INTO hsdg.audit_planning_items
+         (workflow_instance_id, engagement_id, item_key, title, sort_order)
+       VALUES ${planValues.join(', ')}
+       ON CONFLICT (workflow_instance_id, item_key) DO NOTHING`,
+      planParams,
     );
 
     await this.audit.recordWith(client, ctx, {
