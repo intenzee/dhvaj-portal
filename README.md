@@ -54,7 +54,25 @@ audit trail.
 > (`M365_ENABLED`, off until provisioned — see
 > [the provisioning checklist](docs/microsoft-365-sharepoint-provisioning.md)).
 
-> **Status: Statutory Audit workflow — SA-5 Audit-Area Execution (procedures, evidence, exceptions + reuse) complete.**
+> **Status: Statutory Audit workflow — SA-6 PBC Master Client Information Tracker complete.**
+> **SA-6** (spec §16) adds the **PBC — Master Client Information Tracker**, the
+> client information-request layer (not the audit workpaper). Migration
+> `1762600000000_statutory_audit_pbc.sql` adds `hsdg.audit_pbc_items`: each row is
+> a distinct requirement asked of the client, with a `pbc_ref` (`PBC-001`,
+> `PBC-002`, … unique per engagement), a client owner, the §16 seven-state status
+> model (`requested → received → under_review → accepted / rejected /
+> clarification_required → closed`), agreed/requested/received dates, an optional
+> **linked work area** (§16 LINKED WORK) and the received DHVAJ **document** —
+> linked by reference so a received file is surfaced in the linked area without
+> being re-uploaded (§16). A `rejected` item must carry a reason (row CHECK +
+> 400); moving to `received` stamps the received date; an outstanding item past
+> its due date is flagged **overdue** (§29). The tracker is populated once
+> Planning is approved (§7, workflow step 13). Pure helpers `nextPbcRef` /
+> `isPbcOverdue` are unit-tested. New endpoints under `…/statutory-audit/pbc…`
+> (lead-only, assignment-based RLS, immutable audit events) feed the **PBC panel**
+> opened from the audit-file navigation. All writes use PATCH semantics with
+> optimistic concurrency. *Next: SA-7 — Review + Team/workload/time (§24, §25).*
+>
 > **SA-5** (spec §9–§14) builds the execution layer inside each generated audit
 > area. Migration `1762500000000_statutory_audit_procedures.sql` overlays the §11
 > professional detail on `hsdg.audit_work_areas` (owner, reviewer, risk level,

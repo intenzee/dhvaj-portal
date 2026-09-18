@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   CircleDashed,
   CircleDot,
+  ClipboardList,
   Lock,
   AlertTriangle,
   type LucideIcon,
@@ -105,6 +106,26 @@ export function AuditFileNav({
               );
             })}
           </ol>
+
+          {/* PBC — Master Client Information Tracker (§16). A cross-cutting
+              client-request layer, not one of the ten file phases; surfaced as a
+              first-class tracker below the phase tree. */}
+          {onSelectPhase && (
+            <div className="border-t border-line">
+              <button
+                type="button"
+                onClick={() => onSelectPhase('pbc')}
+                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
+                  selectedPhaseKey === 'pbc' ? 'bg-surface-sunken' : 'bg-transparent'
+                }`}
+                title="PBC — Client Information Tracker"
+              >
+                <span className="w-6 shrink-0" />
+                <ClipboardList className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
+                <span className="flex-1 text-ink">PBC — Client Information</span>
+              </button>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line bg-surface-raised/40 px-4 py-2 text-[11px] text-ink-faint">
             {LEGEND.map((state) => {

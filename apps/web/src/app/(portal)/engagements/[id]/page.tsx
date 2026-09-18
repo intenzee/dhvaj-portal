@@ -41,6 +41,7 @@ import { FrameworkPanel } from '@/components/statutory-audit/framework-panel';
 import { WorkAreasPanel } from '@/components/statutory-audit/work-areas-panel';
 import { PlanningPanel } from '@/components/statutory-audit/planning-panel';
 import { RiskPanel } from '@/components/statutory-audit/risk-panel';
+import { PbcPanel } from '@/components/statutory-audit/pbc-panel';
 
 /** Whether the secure client upload portal is turned on for this deployment. */
 const CLIENT_UPLOAD_ENABLED = process.env.NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED === 'true';
@@ -251,7 +252,8 @@ export default function EngagementDetailPage(): JSX.Element {
           {auditPhase === 'planning' && <PlanningPanel engagementId={e.id} />}
           {auditPhase === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
           {auditPhase === 'audit_areas' && <WorkAreasPanel engagementId={e.id} team={e.team} />}
-          {!['framework', 'planning', 'risk', 'audit_areas'].includes(auditPhase ?? '') && (
+          {auditPhase === 'pbc' && <PbcPanel engagementId={e.id} />}
+          {!['framework', 'planning', 'risk', 'audit_areas', 'pbc'].includes(auditPhase ?? '') && (
           <>
           <section>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
