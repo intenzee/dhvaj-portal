@@ -6,13 +6,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import { EP_OPTIONAL_STATUSES, NOTIFICATION_TYPE, type EngagementStatus } from '@hsdg/contracts';
+import {
+  EP_OPTIONAL_STATUSES,
+  NOTIFICATION_TYPE,
+  STATUTORY_AUDIT_SERVICE_CODE,
+  type EngagementStatus,
+} from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { translatePgError as mapPgError } from '../../common/errors/pg-error.util';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StatutoryAuditWorkflowService } from '../statutory-audit/statutory-audit-workflow.service';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
 import type {
@@ -53,6 +59,7 @@ export class EngagementsService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly statutoryAudit: StatutoryAuditWorkflowService,
   ) {}
 
   async listEngagements(
@@ -399,13 +406,25 @@ export class EngagementsService {
         throw translatePgError(err);
       }
       await this.bumpVersion(client, id);
-      const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.service_added',
         objectType: 'engagement',
         objectId: id,
         after: { engagementServiceId: serviceLineId, serviceId: input.serviceId },
       });
+      // Statutory Audit provisions its versioned workflow shell on add (§5, §36).
+      // Idempotent and atomic with this transaction; other services are untouched.
+      const { rows: svc } = await client.query<{ code: string }>(
+        `SELECT code FROM hsdg.services WHERE id = $1`,
+        [input.serviceId],
+      );
+      if (svc[0]?.code === STATUTORY_AUDIT_SERVICE_CODE) {
+        await this.statutoryAudit.provision(client, ctx, {
+          engagementServiceId: serviceLineId,
+          engagementId: id,
+        });
+      }
+      const after = await selectEngagementDetail(client, id);
       return after!;
     });
   }

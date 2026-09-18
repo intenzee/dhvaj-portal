@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { StatutoryAuditModule } from '../statutory-audit/statutory-audit.module';
 import { EngagementsService } from './engagements.service';
 import { EngagementsController } from './engagements.controller';
 import { EngagementLifecycleService } from './lifecycle/engagement-lifecycle.service';
@@ -19,7 +20,7 @@ import { TimeTrackingController } from './time/time-tracking.controller';
  * completion — see ADR-0011 and ADR-0012.
  */
 @Module({
-  imports: [AuditModule, NotificationsModule],
+  imports: [AuditModule, NotificationsModule, StatutoryAuditModule],
   controllers: [EngagementsController, EngagementReviewsController, TimeTrackingController],
   providers: [
     EngagementsService,

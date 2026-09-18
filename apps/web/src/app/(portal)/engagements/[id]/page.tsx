@@ -36,6 +36,7 @@ import { DocumentsSection } from '@/components/actions/documents-section';
 import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
 import { ClientUploadLinkModal } from '@/components/actions/client-upload-link-modal';
 import { CompletionBar } from '@/components/completion';
+import { AuditFileNav } from '@/components/statutory-audit/audit-file-nav';
 
 /** Whether the secure client upload portal is turned on for this deployment. */
 const CLIENT_UPLOAD_ENABLED = process.env.NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED === 'true';
@@ -230,9 +231,12 @@ export default function EngagementDetailPage(): JSX.Element {
         </div>
       )}
 
-      {/* ── Work (tasks + client dependencies) ───────────────────────────── */}
+      {/* ── Work (digital audit file + tasks + client dependencies) ──────── */}
       {tab === 'work' && (
         <div>
+          {/* Statutory Audit file navigation (§8, §10) — renders only when the
+              engagement carries a statutory-audit service. */}
+          <AuditFileNav engagementId={e.id} />
           <section>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-3">

@@ -54,6 +54,30 @@ audit trail.
 > (`M365_ENABLED`, off until provisioned — see
 > [the provisioning checklist](docs/microsoft-365-sharepoint-provisioning.md)).
 
+> **Status: Statutory Audit workflow — SA-1 foundation (versioned workflow shell) complete.**
+> Building the professional Statutory Audit service experience from the
+> [DHVAJ Statutory Audit spec](docs/statutory-audit-spec.md). **SA-1** lands the
+> foundation (spec §5–§8, §33, §36): adding **Statutory Audit** (`services.code =
+> STAT_AUDIT`) to an engagement now provisions a **versioned workflow shell** — the
+> ten-phase digital audit file (Acceptance → Framework → Planning → Risk → Controls
+> → Audit Areas → Completion → Reporting → Sign-off → Archive) — **not** hundreds of
+> detailed procedures; detailed work is generated progressively in later phases.
+> Migration `1762100000000_statutory_audit_workflow.sql` adds
+> `hsdg.service_workflow_instances` (one shell per service instance; the
+> methodology **template version is frozen onto the instance** so historical files
+> stay reproducible) and `hsdg.audit_workflow_phases` (the ten phases with
+> professional state: complete / in_progress / not_started / needs_attention /
+> locked). Provisioning is **idempotent** — a `UNIQUE(engagement_service_id)` and
+> `ON CONFLICT DO NOTHING` mean a repeated add can never create a second shell
+> (§36) — and runs **atomically** inside the add-service transaction with an
+> immutable `statutory_audit.workflow_provisioned` audit event. Both tables ride
+> the same assignment-based RLS as `engagement_services` (members see the file;
+> only leads mutate it). `GET /engagements/:id/statutory-audit` feeds the new
+> **Work-tab left audit-file navigation** (an expandable professional-file tree
+> with a state legend, not a flat task list). Phase-key/title/state vocabulary is
+> shared once via `@hsdg/contracts` (`AUDIT_PHASES`). *Next: SA-2 — the Framework
+> applicability/assessment layer.*
+
 > **Status: Add Client / Entity Master — spec §1–§36 fully delivered (Phases A–C complete).**
 > The [Add Client / Entity Master developer spec](docs/entity-master-roadmap.md)
 > is built end-to-end across three phases, on one principle throughout: the master
