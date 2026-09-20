@@ -5,6 +5,7 @@ import {
   AUDIT_PHASES,
   FRAMEWORK_AREAS,
   PLANNING_ITEMS,
+  STATUTORY_AUDIT_SERVICE_CODE,
   STATUTORY_AUDIT_TEMPLATE_VERSION,
   STATUTORY_AUDIT_WORKFLOW_KEY,
   type AuditPhaseKey,
@@ -190,6 +191,14 @@ export class StatutoryAuditWorkflowService {
     engagementId: string,
   ): Promise<StatutoryAuditWorkflow[]> {
     return this.db.withRlsContext(ctx, async (client) => {
+      // Self-heal: a statutory-audit service line added before provisioning was
+      // wired into engagement creation (or one that predates SA-1) may have no
+      // shell, so the Work-tab file would render nothing. When the caller is a
+      // lead — exactly who RLS lets write — provision the missing shell(s) now.
+      // provision() is idempotent, so this is safe and drift-free (it reuses the
+      // canonical seed), and it is skipped for non-leads (the read still returns).
+      await this.ensureProvisioned(client, ctx, engagementId);
+
       const { rows: workflows } = await client.query<WorkflowRow>(
         `SELECT id, engagement_service_id, engagement_id, workflow_key, template_version, status
            FROM hsdg.service_workflow_instances
@@ -226,5 +235,48 @@ export class StatutoryAuditWorkflowService {
           })),
       }));
     });
+  }
+
+  /**
+   * Provision any statutory-audit service line on the engagement that is missing
+   * its workflow shell, when the caller is a lead (so the RLS INSERT is allowed).
+   * Idempotent and gated: non-leads are skipped so a member's read is unaffected,
+   * and a lead's first visit backfills historical engagements. Runs inside the
+   * caller's transaction/client.
+   */
+  private async ensureProvisioned(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+  ): Promise<void> {
+    const { rows: missing } = await client.query<{ engagement_service_id: string }>(
+      `SELECT es.id AS engagement_service_id
+         FROM hsdg.engagement_services es
+         JOIN hsdg.services s ON s.id = es.service_id
+        WHERE es.engagement_id = $1
+          AND s.code = $2
+          AND es.status <> 'cancelled'
+          AND NOT EXISTS (
+            SELECT 1 FROM hsdg.service_workflow_instances w
+             WHERE w.engagement_service_id = es.id
+          )`,
+      [engagementId, STATUTORY_AUDIT_SERVICE_CODE],
+    );
+    if (missing.length === 0) return;
+
+    // Only a lead may INSERT under RLS; check first so we never abort the
+    // read transaction with a policy violation for a plain member.
+    const { rows: lead } = await client.query<{ lead: boolean }>(
+      `SELECT hsdg.is_engagement_lead($1) AS lead`,
+      [engagementId],
+    );
+    if (!lead[0]?.lead) return;
+
+    for (const row of missing) {
+      await this.provision(client, ctx, {
+        engagementServiceId: row.engagement_service_id,
+        engagementId,
+      });
+    }
   }
 }

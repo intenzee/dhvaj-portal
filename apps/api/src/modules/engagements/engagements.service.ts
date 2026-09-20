@@ -203,6 +203,27 @@ export class EngagementsService {
         throw translatePgError(err);
       }
 
+      // When the primary service is Statutory Audit, provision its versioned
+      // workflow shell now (§5, §36) — the AFTER-INSERT trigger has already
+      // created the primary engagement_services row. Without this, an engagement
+      // created with Statutory Audit as its primary service would have no audit
+      // file in the Work tab (provisioning previously fired only in addService).
+      // Idempotent and atomic with this transaction.
+      const { rows: primary } = await client.query<{ id: string; code: string }>(
+        `SELECT es.id, s.code
+           FROM hsdg.engagement_services es
+           JOIN hsdg.services s ON s.id = es.service_id
+          WHERE es.engagement_id = $1 AND es.is_primary
+          LIMIT 1`,
+        [id],
+      );
+      if (primary[0]?.code === STATUTORY_AUDIT_SERVICE_CODE) {
+        await this.statutoryAudit.provision(client, ctx, {
+          engagementServiceId: primary[0].id,
+          engagementId: id,
+        });
+      }
+
       const detail = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.created',

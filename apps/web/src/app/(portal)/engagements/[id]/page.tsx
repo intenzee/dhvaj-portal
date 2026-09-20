@@ -28,7 +28,6 @@ import { RequestDependencyModal } from '@/components/actions/request-dependency-
 import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
 import { TeamSection } from '@/components/actions/team-section';
-import { ComponentsSection } from '@/components/actions/components-section';
 import { ServicesSection } from '@/components/actions/services-section';
 import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
@@ -237,7 +236,6 @@ export default function EngagementDetailPage(): JSX.Element {
       {tab === 'services' && (
         <div>
           <ServicesSection engagementId={e.id} services={e.services} />
-          <ComponentsSection engagementId={e.id} services={e.services} />
           <ComponentWorkSection engagementId={e.id} />
         </div>
       )}
