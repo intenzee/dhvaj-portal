@@ -57,6 +57,8 @@ export const MEASUREMENT_BASES: MeasurementBasis[] = Object.values(MEASUREMENT_B
 export const RULE_CRITERION = {
   netWorth: 'net_worth',
   paidUpCapital: 'paid_up_capital',
+  /** Paid-up capital + reserves & surplus (e.g. the CARO 2020 private-company test). */
+  capitalAndReserves: 'capital_and_reserves',
   borrowings: 'borrowings',
   revenue: 'revenue',
   turnover: 'turnover',
