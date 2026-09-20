@@ -54,6 +54,77 @@ audit trail.
 > (`M365_ENABLED`, off until provisioned — see
 > [the provisioning checklist](docs/microsoft-365-sharepoint-provisioning.md)).
 
+> **Status: DHVAJ Statutory Audit — Phase 3 (Section 01 Engagement & Acceptance) complete.**
+> The stub `acceptance` phase becomes a real **8-segment workflow** (guide §8):
+> Engagement Profile · Appointment & Eligibility · Previous Auditor · Acceptance /
+> Continuance · Independence & Ethics · Audit Preconditions · Engagement Letter ·
+> Final Acceptance. Migration `1763300000000_statutory_audit_acceptance.sql` adds
+> `audit_acceptance_segments` / `_answers` / `_approvals` (member-read / lead-mutate
+> RLS; segments seeded per shell by provisioning, self-healing on read). Compact
+> **Yes/No/NA** answers drive a methodology **question catalogue** (`ACCEPTANCE_QUESTIONS`
+> in contracts); an adverse answer raises an **Acceptance Matter** through the one
+> Matters engine from Phase 2 (`section = 'acceptance'`, a pure `acceptance-matters.ts`
+> derivation reusing the shared reconcile path). The **Engagement Partner approval
+> (FINAL-02)** requires every segment resolved and **no open blocking matter**, then
+> snapshots the answers, freezes Section 01, and **unlocks Section 02** — Framework
+> now provisions **`locked`** and its mutations 409 until acceptance is approved
+> (§8.2/§8.5; backward-compatible — pre-existing shells were never `locked`). New
+> endpoints under `…/statutory-audit/acceptance…`; new contract
+> `statutory-audit-acceptance.ts`. The e2e drives Section 01 → approval → Framework
+> unlock, and asserts the blocking-matter gate. **§8.6 create-from-template with
+> data merge remains deferred** (answers can link existing documents as evidence
+> today); it lands as its own document-subsystem slice. *Next: Phase 4 — 02.1 Entity
+> & Regulatory Profile, the fact foundation (§9.1).*
+
+> **Status: DHVAJ Statutory Audit — Phase 2 (Matters / Exceptions engine) complete.**
+> The one reusable **Matters engine** the guide mandates for Section 01 (Acceptance)
+> and Section 02 (Framework) (§10): matters are **generated, not re-entered**.
+> Migration `1763200000000_audit_matters.sql` adds `audit_matter` (engagement-scoped,
+> same member-read / lead-mutate RLS as the framework tables), keyed
+> `UNIQUE(workflow_instance_id, source)` so generation is idempotent, with a partial
+> index over open blocking matters. A pure derivation engine
+> (`matters-generation.ts` + spec) turns assessment state into matters —
+> `pending_information` → a **blocking** `information_pending` matter, an override →
+> a tracked `framework_override` matter, `professional_judgement_required` →
+> `technical_judgment` — each with a `source` back-link. `AuditMattersService`
+> reconciles them on every `run-suggestions` / decision (upsert by source, reopen a
+> returned condition, **auto-close** cleared ones), lets professionals resolve /
+> accept-with-approval in place (evidence links a document row, never a copy), and
+> **gates Framework approval** on any open blocking matter (409). New endpoints:
+> `GET …/:shell/matters`, `POST …/:shell/matters/sync-framework`,
+> `POST …/matters/:id`. New contracts: `statutory-audit-matters.ts`
+> (`MATTER_STATUS`, `FRAMEWORK_MATTER_CATEGORY`, `AuditMatterRecord`).
+> **§11 (documents) — confirmed, not rebuilt:** the `documents` module already
+> satisfies the spec's "SharePoint/M365" contract (OnlyOffice in-app edit +
+> autosave/forcesave, `document_versions` history, evidence-links-not-copies).
+> The one open gap — Office **create-from-template with data merge** — is flagged to
+> build when Phase 3 (engagement letter) needs it, per "existing convention wins."
+> *Next: Phase 3 — Section 01 Acceptance workflow + partner-approval gate (§8).*
+
+> **Status: DHVAJ Statutory Audit — Phase 1 (Foundational Rules & Authority Libraries) complete.**
+> Implementing the [DHVAJ Statutory Audit Implementation Guide](docs/DHVAJ_Statutory_Audit_Implementation_Guide.md),
+> starting with the two foundational subsystems the guide mandates first (§4, §5):
+> the **Audit Rules Library** and the **Authority / Provision Library** — so that
+> **no statutory number lives in code** (guide §1). Every threshold, ratio and
+> effective date is now *configuration data* resolved by the engagement's audit
+> period. Migrations `1763000000000_authority_provision_library.sql` (versioned
+> legal-provision registry seeded with the Companies Act / Rules / SA / Ind AS
+> provisions the specs cite) and `1763100000000_audit_rules_library.sql`
+> (`audit_rule` / `audit_rule_version` / `audit_rule_band` / `audit_ruleset_version`,
+> append-only + effective-dated, mirroring the `compliance` rule-version precedent)
+> land the schema; both are firm-wide catalogue-owned reference data (read by any
+> role, written only by firm-wide admins, version rows append-only). The
+> **thresholds previously hard-coded** in `framework-suggestions.ts` (₹250 cr Ind AS,
+> ₹1/1/10 cr CARO, Sec 138/204/135 limits) are **seeded as data** and the engine is
+> refactored to resolve them through an injected pure **`RuleResolver`**
+> (`AuditRulesService.buildResolverOn`), keeping it DB-free and unit-testable and
+> rendering the *actual rule + limit + effective date* in every basis string. A new
+> **no-hard-coded-number guard** (`no-hardcoded-numbers.spec.ts`, guide §15.6) fails
+> the build on any statutory literal in the engines, and effective-date resolution
+> (historical freeze; "a future change affects future periods only") is unit-tested.
+> New contracts: `@hsdg/contracts` `authority.ts` + `audit-rules.ts`. *Next: Phase 2 —
+> the Matters/Exceptions engine (§10) + document/template wiring (§11).*
+
 > **Status: Statutory Audit workflow — SA-6 PBC Master Client Information Tracker complete.**
 > **SA-6** (spec §16) adds the **PBC — Master Client Information Tracker**, the
 > client information-request layer (not the audit workpaper). Migration

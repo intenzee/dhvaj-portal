@@ -7,6 +7,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   FRAMEWORK_DECIDED_STATES,
+  auditPeriodStartFromFinancialYear,
   type FrameworkAreaKey,
   type FrameworkAssessment,
   type FrameworkConclusion,
@@ -17,6 +18,8 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { AuditRulesService } from '../catalogue/audit-rules.service';
+import { AuditMattersService } from './audit-matters.service';
 import { suggestArea, type FrameworkFacts } from './framework-suggestions';
 
 interface AssessmentRow {
@@ -70,6 +73,8 @@ export class AuditFrameworkService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly rules: AuditRulesService,
+    private readonly matters: AuditMattersService,
   ) {}
 
   // ── Read ──────────────────────────────────────────────────────────────────
@@ -172,7 +177,19 @@ export class AuditFrameworkService {
   ): Promise<StatutoryAuditFramework> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
+      await this.assertFrameworkUnlocked(client, workflowInstanceId);
       const facts = await loadFacts(client, engagementId);
+
+      // Resolve every statutory threshold from the Rules Library by the
+      // engagement's audit period (guide §4) — no number is hard-coded.
+      const fyRes = await client.query<{ financial_year: string }>(
+        `SELECT financial_year FROM hsdg.engagements WHERE id = $1`,
+        [engagementId],
+      );
+      const auditPeriodStart = fyRes.rows[0]
+        ? auditPeriodStartFromFinancialYear(fyRes.rows[0].financial_year)
+        : new Date().toISOString().slice(0, 10);
+      const resolve = await this.rules.buildResolverOn(client, auditPeriodStart);
 
       const { rows } = await client.query<{ id: string; area_key: string; state: FrameworkState }>(
         `SELECT id, area_key, state
@@ -184,7 +201,7 @@ export class AuditFrameworkService {
       for (const row of rows) {
         // Never overwrite a professional conclusion (§19).
         if (FRAMEWORK_DECIDED_STATES.includes(row.state)) continue;
-        const s = suggestArea(row.area_key as FrameworkAreaKey, facts);
+        const s = suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
         if (!s.suggestion && s.state === 'not_assessed') continue; // descriptive — leave alone
         await client.query(
           `UPDATE hsdg.audit_framework_assessments
@@ -200,6 +217,8 @@ export class AuditFrameworkService {
         objectId: workflowInstanceId,
         after: { updated },
       });
+      // Generate/reconcile Framework Matters from the new states (§10).
+      await this.matters.syncFrameworkOn(client, ctx, engagementId, workflowInstanceId);
       const [framework] = await this.readFrameworks(client, engagementId);
       return framework!;
     });
@@ -223,14 +242,16 @@ export class AuditFrameworkService {
         id: string;
         state: FrameworkState;
         system_suggestion: FrameworkConclusion | null;
+        workflow_instance_id: string;
       }>(
-        `SELECT id, state, system_suggestion
+        `SELECT id, state, system_suggestion, workflow_instance_id
            FROM hsdg.audit_framework_assessments
           WHERE id = $1 AND engagement_id = $2`,
         [assessmentId, engagementId],
       );
       const current = rows[0];
       if (!current) throw new NotFoundException('Assessment not found.');
+      await this.assertFrameworkUnlocked(client, current.workflow_instance_id);
       if (current.state === 'approved') {
         throw new ConflictException(
           'The framework is approved; reopen it before changing a conclusion.',
@@ -275,6 +296,9 @@ export class AuditFrameworkService {
         objectId: assessmentId,
         after: { conclusion: input.conclusion, isOverridden },
       });
+      // Reconcile Framework Matters: a decision may clear a pending matter or
+      // raise an override matter (§10).
+      await this.matters.syncFrameworkOn(client, ctx, engagementId, current.workflow_instance_id);
       const [framework] = await this.readFrameworks(client, engagementId);
       return framework!;
     });
@@ -353,6 +377,7 @@ export class AuditFrameworkService {
   ): Promise<StatutoryAuditFramework> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
+      await this.assertFrameworkUnlocked(client, workflowInstanceId);
 
       const { rows: areas } = await client.query<{
         area_key: string;
@@ -379,6 +404,10 @@ export class AuditFrameworkService {
       if (alreadyApproved && !reopened) {
         throw new ConflictException('The framework is already approved.');
       }
+
+      // §10 — reconcile matters, then block approval on any open blocking matter.
+      await this.matters.syncFrameworkOn(client, ctx, engagementId, workflowInstanceId);
+      await this.matters.assertNoOpenBlockingMatters(client, workflowInstanceId, 'framework');
 
       const { rows: verRows } = await client.query<{ next: number }>(
         `SELECT COALESCE(MAX(version), 0) + 1 AS next
@@ -455,6 +484,27 @@ export class AuditFrameworkService {
     );
     if (!rows[0])
       throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
+  }
+
+  /**
+   * §8.5 gate — the Framework is unavailable until Section 01 (Acceptance) is
+   * approved (which sets this phase `in_progress`). Shells provisioned before
+   * Section 01 existed are never `locked`, so the gate is backward-compatible.
+   */
+  private async assertFrameworkUnlocked(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<void> {
+    const { rows } = await client.query<{ state: string }>(
+      `SELECT state FROM hsdg.audit_workflow_phases
+        WHERE workflow_instance_id = $1 AND phase_key = 'framework'`,
+      [workflowInstanceId],
+    );
+    if (rows[0]?.state === 'locked') {
+      throw new ConflictException(
+        'Section 01 (Acceptance) must be approved before the Framework is available.',
+      );
+    }
   }
 }
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  ACCEPTANCE_SEGMENTS,
   ALL_COMPLETION_ITEMS,
   AUDIT_PHASES,
   FRAMEWORK_AREAS,
@@ -108,6 +109,25 @@ export class StatutoryAuditWorkflowService {
          (workflow_instance_id, engagement_id, phase_no, phase_key, title, state, sort_order)
        VALUES ${values.join(', ')}`,
       params,
+    );
+
+    // Seed the Section 01 (Acceptance) segments alongside the shell (Guide §8.3)
+    // so every engagement member can read the acceptance file without a lead
+    // initialising it. Idempotent via ON CONFLICT; existing shells self-heal on
+    // the acceptance read.
+    const accValues: string[] = [];
+    const accParams: unknown[] = [workflowInstanceId, args.engagementId];
+    for (const seg of ACCEPTANCE_SEGMENTS) {
+      const base = accParams.length;
+      accValues.push(`($1, $2, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+      accParams.push(seg.segmentKey, seg.title, seg.readOnly ?? false, seg.sortOrder);
+    }
+    await client.query(
+      `INSERT INTO hsdg.audit_acceptance_segments
+         (workflow_instance_id, engagement_id, segment_key, title, read_only, sort_order)
+       VALUES ${accValues.join(', ')}
+       ON CONFLICT (workflow_instance_id, segment_key) DO NOTHING`,
+      accParams,
     );
 
     // Seed the Framework (Phase 02) assessment areas alongside the shell (§5,

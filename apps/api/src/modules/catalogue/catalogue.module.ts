@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueTemplatesService } from './catalogue-templates.service';
+import { AuditRulesService } from './audit-rules.service';
 import { ServicesController } from './services.controller';
 import { ServiceLinesController } from './service-lines.controller';
 import { CatalogueTemplatesController } from './catalogue-templates.controller';
@@ -21,7 +22,7 @@ import { ReviewModelsController, WorkflowFamiliesController } from './reference.
     ReviewModelsController,
     WorkflowFamiliesController,
   ],
-  providers: [CatalogueService, CatalogueTemplatesService],
-  exports: [CatalogueService, CatalogueTemplatesService],
+  providers: [CatalogueService, CatalogueTemplatesService, AuditRulesService],
+  exports: [CatalogueService, CatalogueTemplatesService, AuditRulesService],
 })
 export class CatalogueModule {}

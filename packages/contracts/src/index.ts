@@ -12,12 +12,16 @@ export const API_VERSION = 'v1' as const;
 export const API_PREFIX = 'api' as const;
 
 export * from './identity';
+export * from './authority';
+export * from './audit-rules';
 export * from './entities';
 export * from './services';
 export * from './components';
 export * from './engagements';
 export * from './statutory-audit';
+export * from './statutory-audit-acceptance';
 export * from './statutory-audit-framework';
+export * from './statutory-audit-matters';
 export * from './statutory-audit-work';
 export * from './statutory-audit-planning';
 export * from './statutory-audit-risk';

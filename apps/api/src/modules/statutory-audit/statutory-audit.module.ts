@@ -1,9 +1,14 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { CatalogueModule } from '../catalogue/catalogue.module';
 import { StatutoryAuditWorkflowService } from './statutory-audit-workflow.service';
 import { StatutoryAuditController } from './statutory-audit.controller';
+import { AuditAcceptanceService } from './audit-acceptance.service';
+import { AuditAcceptanceController } from './audit-acceptance.controller';
 import { AuditFrameworkService } from './audit-framework.service';
 import { AuditFrameworkController } from './audit-framework.controller';
+import { AuditMattersService } from './audit-matters.service';
+import { AuditMattersController } from './audit-matters.controller';
 import { AuditWorkService } from './audit-work.service';
 import { AuditWorkController } from './audit-work.controller';
 import { AuditPlanningService } from './audit-planning.service';
@@ -35,10 +40,12 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
  * without a circular import. See migration 1762100000000.
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, CatalogueModule],
   controllers: [
     StatutoryAuditController,
+    AuditAcceptanceController,
     AuditFrameworkController,
+    AuditMattersController,
     AuditWorkController,
     AuditPlanningController,
     AuditRiskController,
@@ -51,7 +58,9 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
   ],
   providers: [
     StatutoryAuditWorkflowService,
+    AuditAcceptanceService,
     AuditFrameworkService,
+    AuditMattersService,
     AuditWorkService,
     AuditPlanningService,
     AuditRiskService,
@@ -64,7 +73,9 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
   ],
   exports: [
     StatutoryAuditWorkflowService,
+    AuditAcceptanceService,
     AuditFrameworkService,
+    AuditMattersService,
     AuditWorkService,
     AuditPlanningService,
     AuditRiskService,

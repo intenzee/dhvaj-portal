@@ -1,6 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import type { StatutoryAuditCompletion } from '@hsdg/contracts';
+import { ACCEPTANCE_QUESTIONS, type StatutoryAuditCompletion } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 
@@ -51,7 +51,7 @@ describe('Statutory Audit (e2e §35/§36)', () => {
   // ── helpers that build an audit file to a chosen depth ──────────────────────
 
   /** Create a North-client engagement and add Statutory Audit → provisions the shell. */
-  const newAuditFile = async (): Promise<{ engId: string; shellId: string }> => {
+  const provisionAuditFile = async (): Promise<{ engId: string; shellId: string }> => {
     const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
@@ -80,6 +80,41 @@ describe('Statutory Audit (e2e §35/§36)', () => {
       .set(bearer(pa))
       .expect(200);
     return { engId, shellId: shells.body[0].workflowInstanceId as string };
+  };
+
+  /** Complete Section 01 with clean answers and Partner-approve → unlocks Framework (§8). */
+  const acceptSection01 = async (engId: string, shellId: string): Promise<void> => {
+    const acc = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/statutory-audit/acceptance`)
+      .set(bearer(pa))
+      .expect(200);
+    const segments = acc.body[0].segments as Array<{ id: string; segmentKey: string }>;
+    const segIdByKey = new Map(segments.map((s) => [s.segmentKey, s.id]));
+    for (const q of ACCEPTANCE_QUESTIONS) {
+      const segmentId = segIdByKey.get(q.segmentKey);
+      if (!segmentId) continue;
+      // The non-adverse answer keeps every acceptance matter clear.
+      const answer = q.adverseAnswer === 'no' ? 'yes' : 'no';
+      await request(app.getHttpServer())
+        .post(
+          `/api/v1/engagements/${engId}/statutory-audit/acceptance/segments/${segmentId}/answer`,
+        )
+        .set(bearer(pa))
+        .send({ questionKey: q.questionKey, answer })
+        .expect(201);
+    }
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/acceptance/approve`)
+      .set(bearer(pa))
+      .send({ conclusion: 'accept', memo: 'Accepted (e2e).' })
+      .expect(201);
+  };
+
+  /** Provision a shell AND approve Section 01, so the Framework is unlocked. */
+  const newAuditFile = async (): Promise<{ engId: string; shellId: string }> => {
+    const file = await provisionAuditFile();
+    await acceptSection01(file.engId, file.shellId);
+    return file;
   };
 
   /** Conclude every framework area (caro optionally not-applicable) and approve. */
@@ -178,22 +213,85 @@ describe('Statutory Audit (e2e §35/§36)', () => {
 
   // ── §36: provisioning ───────────────────────────────────────────────────────
 
-  it('Add Statutory Audit → one service instance + one ten-phase workflow shell', async () => {
-    const { engId } = await newAuditFile();
+  it('Add Statutory Audit → one shell; Acceptance opens, Framework locked until approved (§8.2)', async () => {
+    const { engId } = await provisionAuditFile();
     const shells = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/statutory-audit`)
       .set(bearer(pa))
       .expect(200);
     expect(shells.body).toHaveLength(1);
     expect(shells.body[0].phases).toHaveLength(10);
+    const phase = (key: string) =>
+      shells.body[0].phases.find((p: { phaseKey: string }) => p.phaseKey === key);
+    expect(phase('acceptance').state).toBe('in_progress');
+    expect(phase('framework').state).toBe('locked');
+    expect(phase('completion').state).toBe('locked');
+  });
+
+  it('Framework is gated until Section 01 is Partner-approved, then unlocks (§8.5)', async () => {
+    const { engId, shellId } = await provisionAuditFile();
+    // Framework mutations are refused while acceptance is unapproved.
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/run-suggestions`)
+      .set(bearer(pa))
+      .expect(409);
+    await acceptSection01(engId, shellId);
+    // Now the Framework phase is in_progress and suggestions run.
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/run-suggestions`)
+      .set(bearer(pa))
+      .expect(201);
+    const shells = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/statutory-audit`)
+      .set(bearer(pa))
+      .expect(200);
     const framework = shells.body[0].phases.find(
       (p: { phaseKey: string }) => p.phaseKey === 'framework',
     );
-    const completion = shells.body[0].phases.find(
-      (p: { phaseKey: string }) => p.phaseKey === 'completion',
-    );
     expect(framework.state).toBe('in_progress');
-    expect(completion.state).toBe('locked');
+  });
+
+  it('A blocking Acceptance Matter prevents Partner approval until resolved (§8.4)', async () => {
+    const { engId, shellId } = await provisionAuditFile();
+    const acc = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/statutory-audit/acceptance`)
+      .set(bearer(pa))
+      .expect(200);
+    const segments = acc.body[0].segments as Array<{ id: string; segmentKey: string }>;
+    const segIdByKey = new Map(segments.map((s) => [s.segmentKey, s.id]));
+    // Answer everything cleanly EXCEPT one adverse (blocking) response.
+    for (const q of ACCEPTANCE_QUESTIONS) {
+      const segmentId = segIdByKey.get(q.segmentKey)!;
+      const adverse = q.questionKey === 'properly_appointed';
+      const answer = adverse ? q.adverseAnswer : q.adverseAnswer === 'no' ? 'yes' : 'no';
+      await request(app.getHttpServer())
+        .post(
+          `/api/v1/engagements/${engId}/statutory-audit/acceptance/segments/${segmentId}/answer`,
+        )
+        .set(bearer(pa))
+        .send({
+          questionKey: q.questionKey,
+          answer,
+          narrative: adverse ? 'Not yet appointed.' : undefined,
+        })
+        .expect(201);
+    }
+    // Approval is blocked by the open blocking matter.
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/acceptance/approve`)
+      .set(bearer(pa))
+      .send({ conclusion: 'accept' })
+      .expect(409);
+    // A blocking matter exists in the acceptance section.
+    const matters = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/matters?section=acceptance`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(
+      (matters.body as Array<{ isBlocking: boolean; status: string }>).some(
+        (m) => m.isBlocking && m.status === 'open',
+      ),
+    ).toBe(true);
   });
 
   // ── §36: generation gating + idempotency ────────────────────────────────────
