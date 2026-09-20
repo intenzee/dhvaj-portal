@@ -24,6 +24,7 @@ export * from './statutory-audit-profile';
 export * from './statutory-audit-framework';
 export * from './statutory-audit-subassessment';
 export * from './statutory-audit-financial-reporting';
+export * from './statutory-audit-schedule-iii';
 export * from './statutory-audit-matters';
 export * from './statutory-audit-work';
 export * from './statutory-audit-planning';

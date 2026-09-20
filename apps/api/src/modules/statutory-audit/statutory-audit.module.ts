@@ -9,6 +9,8 @@ import { AuditProfileService } from './audit-profile.service';
 import { AuditProfileController } from './audit-profile.controller';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
 import { AuditFinancialReportingController } from './audit-financial-reporting.controller';
+import { AuditScheduleIiiService } from './audit-schedule-iii.service';
+import { AuditScheduleIiiController } from './audit-schedule-iii.controller';
 import { AuditFrameworkService } from './audit-framework.service';
 import { AuditFrameworkController } from './audit-framework.controller';
 import { AuditMattersService } from './audit-matters.service';
@@ -50,6 +52,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditAcceptanceController,
     AuditProfileController,
     AuditFinancialReportingController,
+    AuditScheduleIiiController,
     AuditFrameworkController,
     AuditMattersController,
     AuditWorkController,
@@ -67,6 +70,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditAcceptanceService,
     AuditProfileService,
     AuditFinancialReportingService,
+    AuditScheduleIiiService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,
@@ -84,6 +88,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditAcceptanceService,
     AuditProfileService,
     AuditFinancialReportingService,
+    AuditScheduleIiiService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,
