@@ -5,6 +5,8 @@ import { StatutoryAuditWorkflowService } from './statutory-audit-workflow.servic
 import { StatutoryAuditController } from './statutory-audit.controller';
 import { AuditAcceptanceService } from './audit-acceptance.service';
 import { AuditAcceptanceController } from './audit-acceptance.controller';
+import { AuditProfileService } from './audit-profile.service';
+import { AuditProfileController } from './audit-profile.controller';
 import { AuditFrameworkService } from './audit-framework.service';
 import { AuditFrameworkController } from './audit-framework.controller';
 import { AuditMattersService } from './audit-matters.service';
@@ -44,6 +46,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
   controllers: [
     StatutoryAuditController,
     AuditAcceptanceController,
+    AuditProfileController,
     AuditFrameworkController,
     AuditMattersController,
     AuditWorkController,
@@ -59,6 +62,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
   providers: [
     StatutoryAuditWorkflowService,
     AuditAcceptanceService,
+    AuditProfileService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,
@@ -74,6 +78,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
   exports: [
     StatutoryAuditWorkflowService,
     AuditAcceptanceService,
+    AuditProfileService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,

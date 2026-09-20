@@ -148,6 +148,16 @@ export class StatutoryAuditWorkflowService {
       fwParams,
     );
 
+    // Seed the 02.1 Entity & Regulatory Profile row alongside the shell (§9.1) —
+    // the fact foundation every member can read from the start. Idempotent via
+    // ON CONFLICT; existing shells self-heal on the profile read.
+    await client.query(
+      `INSERT INTO hsdg.audit_entity_profile (workflow_instance_id, engagement_id)
+       VALUES ($1, $2)
+       ON CONFLICT (workflow_instance_id) DO NOTHING`,
+      [workflowInstanceId, args.engagementId],
+    );
+
     // Seed the Planning (Phase 03) sub-areas alongside the shell (§21) so every
     // engagement member can read the planning file without a lead initialising
     // it. Idempotent via ON CONFLICT; existing shells were seeded in migration

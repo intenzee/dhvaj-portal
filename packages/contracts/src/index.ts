@@ -20,6 +20,7 @@ export * from './components';
 export * from './engagements';
 export * from './statutory-audit';
 export * from './statutory-audit-acceptance';
+export * from './statutory-audit-profile';
 export * from './statutory-audit-framework';
 export * from './statutory-audit-matters';
 export * from './statutory-audit-work';
