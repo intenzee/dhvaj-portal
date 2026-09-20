@@ -158,6 +158,16 @@ export class StatutoryAuditWorkflowService {
       [workflowInstanceId, args.engagementId],
     );
 
+    // Seed the 02.2 Financial Reporting Framework sub-assessment (§9.2) on the
+    // shared per-sub-section table. Idempotent; existing shells self-heal on read.
+    await client.query(
+      `INSERT INTO hsdg.audit_framework_subassessment
+         (workflow_instance_id, engagement_id, sub_section_key, area_key, title)
+       VALUES ($1, $2, '02.2', 'financial_reporting_framework', 'Applicable Financial Reporting Framework')
+       ON CONFLICT (workflow_instance_id, sub_section_key, area_key) DO NOTHING`,
+      [workflowInstanceId, args.engagementId],
+    );
+
     // Seed the Planning (Phase 03) sub-areas alongside the shell (§21) so every
     // engagement member can read the planning file without a lead initialising
     // it. Idempotent via ON CONFLICT; existing shells were seeded in migration
