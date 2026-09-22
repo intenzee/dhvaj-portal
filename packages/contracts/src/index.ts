@@ -27,6 +27,7 @@ export * from './statutory-audit-financial-reporting';
 export * from './statutory-audit-schedule-iii';
 export * from './statutory-audit-caro';
 export * from './statutory-audit-icfr';
+export * from './statutory-audit-consolidation';
 export * from './statutory-audit-matters';
 export * from './statutory-audit-work';
 export * from './statutory-audit-planning';

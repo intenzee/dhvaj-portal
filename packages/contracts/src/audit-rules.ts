@@ -64,6 +64,10 @@ export const RULE_CRITERION = {
   turnover: 'turnover',
   deposits: 'deposits',
   netProfit: 'net_profit',
+  /** Ownership % control presumption (e.g. AS 21 / Ind AS 110 consolidation). */
+  controlOwnership: 'control_ownership',
+  /** Ownership % significant-influence presumption (e.g. AS 23 / Ind AS 28). */
+  significantInfluenceOwnership: 'significant_influence_ownership',
 } as const;
 export type RuleCriterion = (typeof RULE_CRITERION)[keyof typeof RULE_CRITERION];
 export const RULE_CRITERIA: RuleCriterion[] = Object.values(RULE_CRITERION);

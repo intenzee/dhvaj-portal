@@ -15,6 +15,8 @@ import { AuditCaroService } from './audit-caro.service';
 import { AuditCaroController } from './audit-caro.controller';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditIcfrController } from './audit-icfr.controller';
+import { AuditConsolidationService } from './audit-consolidation.service';
+import { AuditConsolidationController } from './audit-consolidation.controller';
 import { AuditFrameworkService } from './audit-framework.service';
 import { AuditFrameworkController } from './audit-framework.controller';
 import { AuditMattersService } from './audit-matters.service';
@@ -59,6 +61,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditScheduleIiiController,
     AuditCaroController,
     AuditIcfrController,
+    AuditConsolidationController,
     AuditFrameworkController,
     AuditMattersController,
     AuditWorkController,
@@ -79,6 +82,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditScheduleIiiService,
     AuditCaroService,
     AuditIcfrService,
+    AuditConsolidationService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,
@@ -99,6 +103,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditScheduleIiiService,
     AuditCaroService,
     AuditIcfrService,
+    AuditConsolidationService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,
