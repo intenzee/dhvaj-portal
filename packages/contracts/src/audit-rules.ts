@@ -68,6 +68,16 @@ export const RULE_CRITERION = {
   controlOwnership: 'control_ownership',
   /** Ownership % significant-influence presumption (e.g. AS 23 / Ind AS 28). */
   significantInfluenceOwnership: 'significant_influence_ownership',
+  /** Overall managerial-remuneration ceiling as a % of Section 198 net profit (§197). */
+  managerialRemunerationPercent: 'managerial_remuneration_percent',
+  /** Fraud amount at/above which the Central Government route applies (§143(12)). */
+  fraudReportingThreshold: 'fraud_reporting_threshold',
+  /** Days to seek the Board/Audit-Committee reply on a reported fraud (Rule 13). */
+  boardReplyDays: 'board_reply_days',
+  /** Days to forward the fraud report to the Central Government after the reply (Rule 13). */
+  cgForwardDays: 'cg_forward_days',
+  /** Books/audit-trail preservation period in years (Sec 128(5)). */
+  retentionYears: 'retention_years',
 } as const;
 export type RuleCriterion = (typeof RULE_CRITERION)[keyof typeof RULE_CRITERION];
 export const RULE_CRITERIA: RuleCriterion[] = Object.values(RULE_CRITERION);
