@@ -21,6 +21,8 @@ import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditOtherReportingController } from './audit-other-reporting.controller';
 import { AuditFrameworkSummaryService } from './audit-framework-summary.service';
 import { AuditFrameworkSummaryController } from './audit-framework-summary.controller';
+import { AuditRollForwardService } from './audit-rollforward.service';
+import { AuditRollForwardController } from './audit-rollforward.controller';
 import { AuditFrameworkService } from './audit-framework.service';
 import { AuditFrameworkController } from './audit-framework.controller';
 import { AuditMattersService } from './audit-matters.service';
@@ -68,6 +70,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditConsolidationController,
     AuditOtherReportingController,
     AuditFrameworkSummaryController,
+    AuditRollForwardController,
     AuditFrameworkController,
     AuditMattersController,
     AuditWorkController,
@@ -91,6 +94,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditConsolidationService,
     AuditOtherReportingService,
     AuditFrameworkSummaryService,
+    AuditRollForwardService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,
@@ -114,6 +118,7 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditConsolidationService,
     AuditOtherReportingService,
     AuditFrameworkSummaryService,
+    AuditRollForwardService,
     AuditFrameworkService,
     AuditMattersService,
     AuditWorkService,
