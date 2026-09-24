@@ -95,13 +95,9 @@ REVOKE UPDATE, DELETE ON hsdg.audit_rule_version FROM hsdg_app;
 REVOKE UPDATE, DELETE ON hsdg.audit_rule_band    FROM hsdg_app;
 
 ALTER TABLE hsdg.audit_rule            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hsdg.audit_rule            FORCE  ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_version    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hsdg.audit_rule_version    FORCE  ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_band       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hsdg.audit_rule_band       FORCE  ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_ruleset_version ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hsdg.audit_ruleset_version FORCE  ROW LEVEL SECURITY;
 
 CREATE POLICY audit_rule_read ON hsdg.audit_rule
   FOR SELECT USING (hsdg.ctx_role() IS NOT NULL);
@@ -168,6 +164,14 @@ FROM (VALUES
 JOIN hsdg.audit_rule r ON r.code = v.rule_code
 LEFT JOIN hsdg.authority_provision p ON p.code = v.prov_code
 ON CONFLICT (audit_rule_id, version) DO NOTHING;
+
+-- FORCE RLS only AFTER the seed: under FORCE even the owning migrator (no
+-- request context) is policy-gated, so a seed placed after it is rejected.
+-- Same ordering as catalogue_templates (1760200000000).
+ALTER TABLE hsdg.audit_rule            FORCE  ROW LEVEL SECURITY;
+ALTER TABLE hsdg.audit_rule_version    FORCE  ROW LEVEL SECURITY;
+ALTER TABLE hsdg.audit_rule_band       FORCE  ROW LEVEL SECURITY;
+ALTER TABLE hsdg.audit_ruleset_version FORCE  ROW LEVEL SECURITY;
 
 -- Down Migration
 

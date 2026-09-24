@@ -20,6 +20,13 @@
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- Up Migration
+-- The methodology seed below writes firm-wide library tables that are FORCE
+-- RLS; lift FORCE for the migrator (no request context) and restore it after,
+-- as catalogue_templates (1760200000000) does.
+ALTER TABLE hsdg.audit_rule NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.audit_rule_version NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.authority_provision NO FORCE ROW LEVEL SECURITY;
+
 
 -- ── Section 2(40) proviso — cash-flow statement exemption authority (§5) ─────
 INSERT INTO hsdg.authority_provision
@@ -46,6 +53,11 @@ FROM (VALUES
 ) AS v(rule_code, ver, eff, eff_to, threshold, outcome)
 JOIN hsdg.audit_rule r ON r.code = v.rule_code
 ON CONFLICT (audit_rule_id, version) DO NOTHING;
+
+-- Restore FORCE RLS on the library tables (see top of Up).
+ALTER TABLE hsdg.audit_rule FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.audit_rule_version FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.authority_provision FORCE ROW LEVEL SECURITY;
 
 -- Down Migration
 

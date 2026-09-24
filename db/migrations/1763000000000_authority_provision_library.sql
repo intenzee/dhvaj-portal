@@ -43,7 +43,6 @@ CREATE TRIGGER authority_provision_set_updated_at
 -- ── Row Level Security (firm-wide reference data; mirrors catalogue_templates) ──
 REVOKE DELETE ON hsdg.authority_provision FROM hsdg_app;
 ALTER TABLE hsdg.authority_provision ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hsdg.authority_provision FORCE  ROW LEVEL SECURITY;
 CREATE POLICY authority_provision_read ON hsdg.authority_provision
   FOR SELECT USING (hsdg.ctx_role() IS NOT NULL);
 CREATE POLICY authority_provision_write ON hsdg.authority_provision
@@ -94,6 +93,11 @@ VALUES
   ('AS_23',          'ICAI','Accounting for investments in associates (AS)',    'AS 23',            '2002-04-01', 'AS 23'),
   ('AS_27',          'ICAI','Financial reporting of interests in JVs (AS)',     'AS 27',            '2002-04-01', 'AS 27')
 ON CONFLICT (code) DO NOTHING;
+
+-- FORCE RLS only AFTER the seed: under FORCE even the owning migrator (no
+-- request context) is policy-gated, so a seed placed after it is rejected.
+-- Same ordering as catalogue_templates (1760200000000).
+ALTER TABLE hsdg.authority_provision FORCE  ROW LEVEL SECURITY;
 
 -- Down Migration
 

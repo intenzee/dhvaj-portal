@@ -24,6 +24,12 @@
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- Up Migration
+-- The methodology seed below writes firm-wide library tables that are FORCE
+-- RLS; lift FORCE for the migrator (no request context) and restore it after,
+-- as catalogue_templates (1760200000000) does.
+ALTER TABLE hsdg.audit_rule NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.audit_rule_version NO FORCE ROW LEVEL SECURITY;
+
 
 INSERT INTO hsdg.audit_rule (code, area_key, entity_class, criterion, operator, unit, measurement_basis) VALUES
   ('ICFR_EXEMPT_TURNOVER',   'ifc', NULL, 'turnover',   '<', 'inr', 'balance_sheet_date'),
@@ -41,6 +47,10 @@ FROM (VALUES
 JOIN hsdg.audit_rule r ON r.code = v.rule_code
 LEFT JOIN hsdg.authority_provision p ON p.code = 'COS_ACT_143_3_I'
 ON CONFLICT (audit_rule_id, version) DO NOTHING;
+
+-- Restore FORCE RLS on the library tables (see top of Up).
+ALTER TABLE hsdg.audit_rule FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.audit_rule_version FORCE ROW LEVEL SECURITY;
 
 -- Down Migration
 
