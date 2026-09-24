@@ -39,6 +39,10 @@ import { AuditBusinessUnderstandingService } from './audit-business-understandin
 import { AuditBusinessUnderstandingController } from './audit-business-understanding.controller';
 import { AuditMaterialityService } from './audit-materiality.service';
 import { AuditMaterialityController } from './audit-materiality.controller';
+import { AuditScopeApproachService } from './audit-scope-approach.service';
+import { AuditScopeApproachController } from './audit-scope-approach.controller';
+import { AuditAreaReviewService } from './audit-area-review.service';
+import { AuditAreaReviewController } from './audit-area-review.controller';
 import { AuditRiskService } from './audit-risk.service';
 import { AuditRiskController } from './audit-risk.controller';
 import { AuditProcedureService } from './audit-procedure.service';
@@ -87,6 +91,8 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditPlanningStrategyController,
     AuditBusinessUnderstandingController,
     AuditMaterialityController,
+    AuditScopeApproachController,
+    AuditAreaReviewController,
     AuditRiskController,
     AuditProcedureController,
     AuditPbcController,
@@ -115,6 +121,8 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditPlanningStrategyService,
     AuditBusinessUnderstandingService,
     AuditMaterialityService,
+    AuditScopeApproachService,
+    AuditAreaReviewService,
     AuditRiskService,
     AuditProcedureService,
     AuditPbcService,

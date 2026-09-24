@@ -46,6 +46,8 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditBusinessUnderstandingService } from './audit-business-understanding.service';
+import { AuditAreaReviewService } from './audit-area-review.service';
+import { flagScopeReassessment } from './audit-scope-approach.service';
 import {
   MATERIALITY_IMPACT_PREVIEW,
   QUALITATIVE_KEYS,
@@ -181,6 +183,7 @@ export class AuditMaterialityService {
     private readonly audit: AuditService,
     private readonly rules: AuditRulesService,
     private readonly understanding: AuditBusinessUnderstandingService,
+    private readonly areaReview: AuditAreaReviewService,
   ) {}
 
   // ── Summary ────────────────────────────────────────────────────────────────
@@ -502,6 +505,17 @@ export class AuditMaterialityService {
         );
         await this.publish(client, ctx, engagementId, workflowInstanceId, next);
         await this.rollUp(client, ctx, workflowInstanceId, 'complete');
+        // §25 (03.5): a completed Audit Area review affected by the new materiality → Update Required.
+        await this.areaReview.markImpacted(client, workflowInstanceId);
+        if (next.versionNo > 1) {
+          // §24 (03.4): a materiality revision flags affected scope / map items — never silently.
+          await flagScopeReassessment(
+            client,
+            workflowInstanceId,
+            'materiality_revision',
+            `Materiality revised to ${materialityVersionLabel(next.versionNo)} (OM ₹${(next.selectedOm ?? 0).toLocaleString('en-IN')}): ${next.revisionReason ?? ''}`.trim(),
+          );
+        }
       } else {
         await this.syncRevisionItems(client, engagementId, workflowInstanceId, row.id);
         await this.rollUp(client, ctx, workflowInstanceId, 'in_progress');

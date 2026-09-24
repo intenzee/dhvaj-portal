@@ -20,11 +20,17 @@ import { Textarea } from '@/components/form';
 import { PlanningIntelligencePanel } from './planning-intelligence-panel';
 import { BusinessUnderstandingPanel } from './business-understanding-panel';
 import { MaterialityPanel } from './materiality-panel';
+import { ScopeApproachPanel } from './scope-approach-panel';
+import { AuditAreasPanel } from './audit-areas-panel';
 
 /** The sub-area backed by the full 03.1 Planning Intelligence workflow. */
 const INTELLIGENCE_ITEM_KEY = 'audit_strategy';
 const UNDERSTANDING_ITEM_KEY = 'engagement_understanding';
 const MATERIALITY_ITEM_KEY = 'materiality';
+/** 03.4 Audit Scope & Approach backs both the audit-approach and overall-audit-plan rows. */
+const SCOPE_ITEM_KEY = 'audit_approach';
+const SCOPE_COVERED_ITEM_KEY = 'overall_audit_plan';
+const AREAS_ITEM_KEY = 'areas_and_assertions';
 
 /**
  * Planning (Phase 03) screen (Audit Spec §21). A structured planning file of
@@ -166,10 +172,13 @@ function PlanningItemCard({
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [narrative, setNarrative] = useState(item.narrative ?? '');
-  // 03.1 / 03.2 / 03.3 replace these sub-areas' free-text narrative; their state rolls up.
+  // 03.1 – 03.5 replace these sub-areas' free-text narrative; their state rolls up.
   const isIntelligence = item.itemKey === INTELLIGENCE_ITEM_KEY;
   const isUnderstanding = item.itemKey === UNDERSTANDING_ITEM_KEY;
   const isMateriality = item.itemKey === MATERIALITY_ITEM_KEY;
+  const isScope = item.itemKey === SCOPE_ITEM_KEY;
+  const isScopeCovered = item.itemKey === SCOPE_COVERED_ITEM_KEY;
+  const isAreas = item.itemKey === AREAS_ITEM_KEY;
 
   const save = useMutation({
     mutationFn: (state: PlanningItemState) =>
@@ -204,7 +213,13 @@ function PlanningItemCard({
                 ? '03.2 Business Understanding & Preliminary Analytics'
                 : isMateriality
                   ? '03.3 Materiality'
-                  : item.title}
+                  : isScope
+                    ? '03.4 Audit Scope & Approach'
+                    : isScopeCovered
+                      ? `${item.title} (via 03.4)`
+                      : isAreas
+                        ? '03.5 Audit Areas & Assertions'
+                        : item.title}
           </span>
         </span>
         <Badge tone={STATE_TONE[item.state]}>{STATE_LABEL[item.state]}</Badge>
@@ -247,7 +262,40 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && !isIntelligence && !isUnderstanding && !isMateriality && (
+      {open && isScope && (
+        <div className="mt-3 border-t border-line pt-3">
+          <ScopeApproachPanel
+            engagementId={engagementId}
+            workflowInstanceId={workflowInstanceId}
+            team={team}
+            editable={editable}
+            canRevise={canManage}
+            onChanged={onChanged}
+          />
+        </div>
+      )}
+
+      {open && isAreas && (
+        <div className="mt-3 border-t border-line pt-3">
+          <AuditAreasPanel
+            engagementId={engagementId}
+            workflowInstanceId={workflowInstanceId}
+            team={team}
+            editable={editable}
+            canManage={canManage}
+            onChanged={onChanged}
+          />
+        </div>
+      )}
+
+      {open && isScopeCovered && (
+        <p className="mt-3 border-t border-line pt-3 text-sm text-ink-muted">
+          The overall audit plan (strategic scope, approach, timing pattern and evidence strategy) is recorded in
+          03.4 Audit Scope &amp; Approach — this row follows its status.
+        </p>
+      )}
+
+      {open && !isIntelligence && !isUnderstanding && !isMateriality && !isScope && !isScopeCovered && !isAreas && (
         <div className="mt-3 space-y-3 border-t border-line pt-3">
           {editable ? (
             <>

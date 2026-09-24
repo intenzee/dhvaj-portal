@@ -51,6 +51,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditPlanningStrategyService } from './audit-planning-strategy.service';
+import { AuditAreaReviewService } from './audit-area-review.service';
 import {
   deriveEngagementSignals,
   type EngagementIntelligenceFacts,
@@ -186,6 +187,7 @@ export class AuditPlanningIntelligenceService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly strategy: AuditPlanningStrategyService,
+    private readonly areaReview: AuditAreaReviewService,
   ) {}
 
   // ── Control room (§4) ──────────────────────────────────────────────────────
@@ -426,6 +428,8 @@ export class AuditPlanningIntelligenceService {
         documentId: input.documentId ?? null,
       });
       await this.strategy.syncConsiderations(client, engagementId, workflowInstanceId);
+      // §25 (03.5): a new Enhanced / Immediate signal can make a completed 03.5 Update Required.
+      await this.areaReview.markImpacted(client, workflowInstanceId);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.planning_signal_created',
         objectType: 'audit_planning_signal',
@@ -542,6 +546,7 @@ export class AuditPlanningIntelligenceService {
         throw new ConflictException('This signal changed since you loaded it; refresh and retry.');
       }
       await this.strategy.syncConsiderations(client, engagementId, current.workflow_instance_id);
+      await this.areaReview.markImpacted(client, current.workflow_instance_id);
       // The first assessment moves 03.1 into Manager Assessment (§4 status flow).
       const advanced = await client.query(
         `UPDATE hsdg.audit_planning_intelligence
