@@ -61,7 +61,7 @@ function ReviewsInner(): JSX.Element {
     <div>
       <PageHeader
         title="Reviews & Sign-offs"
-        subtitle="Active engagements still needing review or sign-off (assignment-scoped)."
+        subtitle="Engagements you are assigned to that still need a review or a partner sign-off."
       />
 
       <div className="mb-4 flex flex-wrap gap-2">

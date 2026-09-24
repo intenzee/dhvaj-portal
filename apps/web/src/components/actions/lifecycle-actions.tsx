@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { hasRole } from '@/lib/principal';
+import { engagementAbilities } from '@/lib/engagement-permissions';
 import { useToast } from '@/lib/toast';
 import type { EngagementDetail } from '@/lib/types';
 import { Button } from '@/components/ui';
@@ -110,24 +110,32 @@ export function LifecycleActions({ engagement }: { engagement: EngagementDetail 
     proceed(a);
   };
 
-  const isMp = hasRole(principal, 'managing_partner');
-  const available = (ACTIONS[engagement.status] ?? []).filter((a) => !a.mpOnly || isMp);
+  // Only leads (EP, manager, Managing Partner) may move an engagement — the server
+  // would refuse anyone else (see engagementAbilities).
+  const abilities = engagementAbilities(principal, engagement);
+  if (!abilities.canManage) return null;
+  const available = (ACTIONS[engagement.status] ?? []).filter((a) => !a.mpOnly || abilities.canReopen);
   if (available.length === 0) return null;
 
   return (
     <>
       <div className="flex flex-wrap gap-2">
-        {available.map((a) => (
-          <Button
-            key={a.action}
-            size="sm"
-            variant={a.variant ?? 'secondary'}
-            disabled={run.isPending || stopTimer.isPending}
-            onClick={() => onAction(a)}
-          >
-            {a.label}
-          </Button>
-        ))}
+        {available.map((a) => {
+          // Complete is shown but disabled until sign-off, with the reason on hover.
+          const blocked = a.action === 'complete' ? abilities.completeBlockedReason : null;
+          return (
+            <Button
+              key={a.action}
+              size="sm"
+              variant={a.variant ?? 'secondary'}
+              disabled={!!blocked || run.isPending || stopTimer.isPending}
+              title={blocked ?? undefined}
+              onClick={() => onAction(a)}
+            >
+              {a.label}
+            </Button>
+          );
+        })}
       </div>
 
       <Modal

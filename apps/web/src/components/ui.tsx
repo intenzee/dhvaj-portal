@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
@@ -144,14 +144,25 @@ export function PageHeader({
   title,
   subtitle,
   actions,
+  back,
 }: {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  /** A "← Back to …" link above the title, for detail pages. */
+  back?: { href: string; label: string };
 }): JSX.Element {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <div>
+      <div className="min-w-0">
+        {back && (
+          <Link
+            href={back.href}
+            className="mb-1.5 inline-flex items-center gap-1 text-sm text-ink-muted hover:text-primary-600"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> {back.label}
+          </Link>
+        )}
         <h1 className="text-2xl font-bold tracking-tight text-ink">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-ink-muted">{subtitle}</p>}
       </div>

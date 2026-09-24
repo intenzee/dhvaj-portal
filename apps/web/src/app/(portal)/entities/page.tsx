@@ -49,13 +49,13 @@ export default function EntitiesPage(): JSX.Element {
   return (
     <div>
       <PageHeader
-        title="Entities"
-        subtitle="Client entities you can access. Open one for Client 360."
+        title="Clients"
+        subtitle="Companies, firms and individuals we work for. Click a client to see everything we do for them."
         actions={
           can(principal, PERMISSION.entityManage) ? (
             <Link href="/entities/new">
               <Button>
-                <Plus className="h-4 w-4" /> New entity
+                <Plus className="h-4 w-4" /> New client
               </Button>
             </Link>
           ) : undefined

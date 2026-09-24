@@ -10,6 +10,13 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Easier first use — navigation, onboarding and action gating (complete).**
+> The web portal was simplified so new employees can find their way without help:
+> - **Navigation.** The sidebar is grouped into *your day*, **Client work** and **Practice**, and each item has a one-line hover hint (`apps/web/src/lib/nav.ts`). The duplicate "Shortcuts" block is replaced by one **+ New** menu that lists only what the user may create. "Entities" is labelled **Clients** (the route is still `/entities`). Phones get a ☰ drawer (previously there was no navigation below tablet width). Detail and sub-pages have a "← Back to …" link (`PageHeader back=`).
+> - **Onboarding and help.** Home shows a role-aware **Getting started** checklist that ticks off as the user visits each place (`apps/web/src/lib/onboarding.ts`; per-user, per-browser state only). The **Help (?)** button opens a panel with where-things-are, a glossary (engagement, EP, client dependency, review point, PBC…) and keyboard shortcuts, and can restore the checklist.
+> - **Less clutter.** The dead Messages and Customise buttons are removed. Engagements shows 5 common status chips plus a "More…" dropdown. Each engagement tab has a one-line explanation. Page subtitles are in plain language (no "assignment-scoped", "§16").
+> - **Action gating.** Engagement review, sign-off and lifecycle buttons show only to users the server would accept (`apps/web/src/lib/engagement-permissions.ts`): `engagement.manage` **and** an engagement lead (effective Managing Partner, or the engagement's EP or manager). EP review and EP-required sign-off are EP-only. Reopen checks the *effective* Managing Partner role (it previously also matched held roles). Complete stays visible but disabled, with the reason on hover. Non-leads see a one-line explanation instead. The server remains the source of truth; no API change.
+
 > **Status: Statutory Audit Sections 02–03 — hardening pass (complete).**
 > A review of 02.1–02.8, roll-forward and 03.1–03.5 fixed:
 > - **Concurrency.** 03.4, 03.5, the 02.1 profile and the 02.8 baseline (confirm, approve, reopen) now lock before their version checks, so concurrent saves can't overwrite each other and double-submits can't create duplicates. Planning `PS-/FA-/PY-/PM-` numbers are allocated under a lock.

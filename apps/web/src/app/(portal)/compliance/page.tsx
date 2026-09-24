@@ -240,7 +240,7 @@ function ComplianceInner(): JSX.Element {
     <div>
       <PageHeader
         title="Compliance Calendar"
-        subtitle="Open obligations across your engagements. Two clocks: statutory vs internal SLA, each with its own deadline events (§16)."
+        subtitle="Returns and filings due for your clients. Each has two dates: the statutory due date (the law’s deadline) and our internal target date."
         actions={
           <div className="flex flex-wrap gap-2">
             {can(principal, PERMISSION.engagementManage) && <RollHorizonButton />}

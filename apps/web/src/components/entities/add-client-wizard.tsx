@@ -289,8 +289,9 @@ export function AddClientWizard(): JSX.Element {
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
-        title="Add client / entity"
-        subtitle="Capture the facts. Registrations and financials can be completed progressively."
+        back={{ href: '/entities', label: 'Clients' }}
+        title="Add a client"
+        subtitle="Start with the basics — you can add registrations and financials later."
       />
       <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
         <Stepper step={step} onStep={setStep} />

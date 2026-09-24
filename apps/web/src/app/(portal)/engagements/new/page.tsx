@@ -133,7 +133,11 @@ export default function NewEngagementPage(): JSX.Element {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <PageHeader title="Create Engagement" subtitle="Guided setup — client, details, services." />
+      <PageHeader
+        back={{ href: '/engagements', label: 'Engagements' }}
+        title="New engagement"
+        subtitle="Three short steps: pick the client, fill in the details, choose the services."
+      />
 
       {/* Stepper */}
       <ol className="mb-5 flex items-center gap-2">

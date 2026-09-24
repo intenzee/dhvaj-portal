@@ -3,16 +3,23 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { engagementAbilities } from '@/lib/engagement-permissions';
 import { useToast } from '@/lib/toast';
 import type { EngagementDetail } from '@/lib/types';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Select, Textarea } from '@/components/form';
 
-/** Record a review or perform the terminal sign-off (backend enforces who may). */
+/**
+ * Record a review or perform the terminal sign-off. Buttons show only for users
+ * the server would accept (see engagementAbilities); the backend still enforces.
+ */
 export function ReviewActions({ engagement }: { engagement: EngagementDetail }): JSX.Element | null {
   const qc = useQueryClient();
   const toast = useToast();
+  const { principal } = useAuth();
+  const abilities = engagementAbilities(principal, engagement);
   const [open, setOpen] = useState(false);
   const [reviewType, setReviewType] = useState('manager_review');
   const [outcome, setOutcome] = useState('cleared');
@@ -52,7 +59,7 @@ export function ReviewActions({ engagement }: { engagement: EngagementDetail }):
     onError: (err) => toast(err instanceof ApiError ? err.message : 'Sign-off was rejected.', 'error'),
   });
 
-  if (engagement.status !== 'active' || engagement.isSignedOff) return null;
+  if (!abilities.canRecordReview) return null;
 
   return (
     <>
@@ -60,14 +67,24 @@ export function ReviewActions({ engagement }: { engagement: EngagementDetail }):
         <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
           Record review
         </Button>
-        <Button
-          size="sm"
-          disabled={engagement.openReviewPointCount > 0 || signOff.isPending}
-          title={engagement.openReviewPointCount > 0 ? 'Resolve open review points first' : undefined}
-          onClick={() => signOff.mutate()}
-        >
-          Sign off
-        </Button>
+        {abilities.canSignOff && (
+          <Button
+            size="sm"
+            disabled={engagement.openReviewPointCount > 0 || signOff.isPending}
+            title={engagement.openReviewPointCount > 0 ? 'Resolve open review points first' : undefined}
+            onClick={() => signOff.mutate()}
+          >
+            Sign off
+          </Button>
+        )}
+        {abilities.awaitingEpSignOff && (
+          <span
+            className="self-center text-xs text-ink-muted"
+            title={`The "${engagement.effectiveReviewModel.name}" review model requires the Engagement Partner to sign off.`}
+          >
+            Awaiting EP sign-off
+          </span>
+        )}
       </div>
 
       <Modal
@@ -90,7 +107,7 @@ export function ReviewActions({ engagement }: { engagement: EngagementDetail }):
             <Field label="Review type">
               <Select value={reviewType} onChange={(e) => setReviewType(e.target.value)}>
                 <option value="manager_review">Manager review</option>
-                <option value="ep_review">EP review</option>
+                {abilities.canRecordEpReview && <option value="ep_review">EP review</option>}
               </Select>
             </Field>
             <Field label="Outcome">

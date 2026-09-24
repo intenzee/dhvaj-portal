@@ -44,7 +44,7 @@ export default function ReportsPage(): JSX.Element {
     <div>
       <PageHeader
         title="Reports & MIS"
-        subtitle="Management rollups across everything you can see. Firm-wide for partners; scoped by the database."
+        subtitle="Management summaries across the engagements you can see (partners see the whole firm)."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (

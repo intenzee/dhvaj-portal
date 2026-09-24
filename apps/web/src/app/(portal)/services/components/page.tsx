@@ -49,8 +49,9 @@ export default function ComponentCataloguePage(): JSX.Element {
   return (
     <div>
       <PageHeader
+        back={{ href: '/services', label: 'Services' }}
         title="Component catalogue"
-        subtitle="The scopes/obligations available under each service — discovery and configuration draw from here."
+        subtitle="The individual pieces of work (scopes and filings) that make up each service."
         actions={
           <div className="flex items-center gap-2">
             <Link

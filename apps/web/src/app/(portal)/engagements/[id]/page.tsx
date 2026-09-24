@@ -7,6 +7,8 @@ import { useQuery } from '@tanstack/react-query';
 import { FolderOpen } from 'lucide-react';
 import { TASK_STATUS, type Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { engagementAbilities } from '@/lib/engagement-permissions';
 import { formatDate, humanize } from '@/lib/format';
 import type {
   EngagementDetail,
@@ -74,17 +76,18 @@ type TabKey =
   | 'invoices'
   | 'notes';
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'services', label: 'Services' },
-  { key: 'work', label: 'Work' },
-  { key: 'compliance', label: 'Compliance' },
-  { key: 'documents', label: 'Documents' },
-  { key: 'team', label: 'Team' },
-  { key: 'time', label: 'Time' },
-  { key: 'activity', label: 'Activity' },
-  { key: 'invoices', label: 'Invoices' },
-  { key: 'notes', label: 'Notes' },
+/** Each tab with one plain line on what it's for — shown under the tab bar. */
+const TABS: { key: TabKey; label: string; hint: string }[] = [
+  { key: 'overview', label: 'Overview', hint: 'Who is responsible, where things stand and the key details.' },
+  { key: 'services', label: 'Services', hint: 'The services in this engagement and the entities they cover.' },
+  { key: 'work', label: 'Work', hint: 'Tasks to do, and what we are waiting on from the client.' },
+  { key: 'compliance', label: 'Compliance', hint: 'Returns and filings for this engagement, with their due dates.' },
+  { key: 'documents', label: 'Documents', hint: 'Working papers and client files — upload, open and edit here.' },
+  { key: 'team', label: 'Team', hint: 'Who is on this engagement and in what role.' },
+  { key: 'time', label: 'Time', hint: 'Log your hours, or start a timer, against this engagement.' },
+  { key: 'activity', label: 'Activity', hint: 'History of status changes — who did what, and when.' },
+  { key: 'invoices', label: 'Invoices', hint: 'Raise invoices and record payments received.' },
+  { key: 'notes', label: 'Notes', hint: 'Internal notes for the team.' },
 ];
 
 interface ActivityRecord {
@@ -99,6 +102,7 @@ interface ActivityRecord {
 
 export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
+  const { principal } = useAuth();
   const [tab, setTab] = useState<TabKey>('overview');
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
   const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
@@ -143,6 +147,7 @@ export default function EngagementDetailPage(): JSX.Element {
   return (
     <div>
       <PageHeader
+        back={{ href: '/engagements', label: 'Engagements' }}
         title={`${e.engagementCode} · ${e.entityName}`}
         subtitle={`${e.serviceName} · ${e.financialYear} ${e.periodLabel} · ${e.officeCode}`}
         actions={
@@ -164,18 +169,27 @@ export default function EngagementDetailPage(): JSX.Element {
             </span>
             <StatusBadge status={e.status} />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ReviewActions engagement={e} />
-            <LifecycleActions engagement={e} />
-          </div>
+          {engagementAbilities(principal, e).canManage ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <ReviewActions engagement={e} />
+              <LifecycleActions engagement={e} />
+            </div>
+          ) : (
+            <p className="text-xs text-ink-muted">
+              Reviews, sign-off and status changes are made by the engagement partner or manager.
+            </p>
+          )}
         </CardBody>
       </Card>
 
       {/* Tab bar */}
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line-strong">
+      <div className="flex gap-1 overflow-x-auto border-b border-line-strong" role="tablist">
         {TABS.map((t) => (
           <button
             key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            title={t.hint}
             onClick={() => setTab(t.key)}
             className={`shrink-0 border-b-2 px-3.5 py-2 text-sm font-medium transition ${
               tab === t.key
@@ -187,6 +201,7 @@ export default function EngagementDetailPage(): JSX.Element {
           </button>
         ))}
       </div>
+      <p className="mb-4 mt-2 text-xs text-ink-muted">{TABS.find((t) => t.key === tab)?.hint}</p>
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
       {tab === 'overview' && (

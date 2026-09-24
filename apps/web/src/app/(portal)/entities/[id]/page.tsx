@@ -51,6 +51,7 @@ export default function EntityDetailPage(): JSX.Element {
   return (
     <div className="space-y-5">
       <PageHeader
+        back={{ href: '/entities', label: 'Clients' }}
         title={e.legalName}
         subtitle={`${e.entityCode} · ${e.typeName}${e.tradeName ? ` · ${e.tradeName}` : ''}`}
         actions={<EntityDetailActions entity={e} />}

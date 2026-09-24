@@ -1,13 +1,13 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Sparkles } from 'lucide-react';
 import type { DashboardSummary } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { stripCardsForRole } from '@/lib/dashboard-cards';
 import { StatCard } from '@/components/stat-card';
-import { Button, Spinner, EmptyState } from '@/components/ui';
+import { Spinner, EmptyState } from '@/components/ui';
+import { GettingStarted } from '@/components/help/getting-started';
 import { MyEngagementsPanel } from '@/components/dashboard/my-engagements';
 import { UpcomingDeadlinesPanel } from '@/components/dashboard/upcoming-deadlines';
 import { MyTasksPanel } from '@/components/dashboard/my-tasks';
@@ -33,17 +33,14 @@ export default function HomePage(): JSX.Element {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ink">Welcome, {firstName}</h1>
-          <p className="mt-1 text-sm text-ink-muted">
-            Here&rsquo;s what&rsquo;s happening across your practice today.
-          </p>
-        </div>
-        <Button variant="secondary" size="sm">
-          <Sparkles className="h-4 w-4" /> Customise
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Welcome, {firstName}</h1>
+        <p className="mt-1 text-sm text-ink-muted">
+          Here&rsquo;s what needs your attention today. Click any number or panel to open it.
+        </p>
       </div>
+
+      <GettingStarted />
 
       {/* Stat strip */}
       {summary.isLoading && <Spinner label="Loading your dashboard…" />}

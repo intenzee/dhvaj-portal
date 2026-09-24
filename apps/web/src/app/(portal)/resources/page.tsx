@@ -48,7 +48,7 @@ function Resources(): JSX.Element {
     <div>
       <PageHeader
         title="Resource Management"
-        subtitle="Who is carrying what, across everything you can see. Firm-wide for partners; scoped by the database. Active EP/manager/member load plus open and overdue tasks."
+        subtitle="Who is working on what, and who has room for more — engagements led or joined, plus open and overdue tasks per person."
       />
       {q.isLoading && <Spinner label="Loading workload…" />}
       {q.data && <Workload r={q.data} />}

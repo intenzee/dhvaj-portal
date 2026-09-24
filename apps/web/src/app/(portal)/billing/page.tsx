@@ -118,7 +118,7 @@ function Billing(): JSX.Element {
     <div>
       <PageHeader
         title="Billing & Collections"
-        subtitle="Invoices across everything you can see, with what’s outstanding and overdue. Scoped by the database; issue and record payment on each engagement’s Invoices tab."
+        subtitle="Invoices across everything you can see, with what’s outstanding and overdue. To raise an invoice or record a payment, open the engagement and use its Invoices tab."
       />
 
       {summary.data && <SummaryCards s={summary.data} />}

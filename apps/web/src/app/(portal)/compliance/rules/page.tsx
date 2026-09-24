@@ -34,8 +34,9 @@ export default function ComplianceConfigPage(): JSX.Element {
   return (
     <div>
       <PageHeader
+        back={{ href: '/compliance', label: 'Compliance' }}
         title="Compliance configuration"
-        subtitle="Rules, effective-dated versions and the holiday calendar. Statutory dates are data, not code."
+        subtitle="The rules that set each return’s due date, and the holiday calendar they use."
         actions={
           <Link href="/compliance" className="text-sm text-primary-600 hover:underline">
             ← Back to calendar

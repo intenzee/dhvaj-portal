@@ -6,7 +6,15 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { ENGAGEMENT_STATUSES, type Paginated, type EngagementStatus } from '@hsdg/contracts';
+import {
+  ENGAGEMENT_STATUS,
+  ENGAGEMENT_STATUSES,
+  PERMISSION,
+  type Paginated,
+  type EngagementStatus,
+} from '@hsdg/contracts';
+import { useAuth } from '@/lib/auth';
+import { can } from '@/lib/principal';
 import { apiFetch } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import type { EngagementRow } from '@/lib/types';
@@ -17,6 +25,16 @@ import { Pagination } from '@/components/pagination';
 import { cn } from '@/lib/cn';
 
 const PAGE_SIZE = 25;
+
+/** Statuses shown as one-click chips; the rest sit under "More" to keep the bar short. */
+const COMMON_STATUSES: EngagementStatus[] = [
+  ENGAGEMENT_STATUS.active,
+  ENGAGEMENT_STATUS.pendingAcceptance,
+  ENGAGEMENT_STATUS.accepted,
+  ENGAGEMENT_STATUS.onHold,
+  ENGAGEMENT_STATUS.completed,
+];
+const OTHER_STATUSES = ENGAGEMENT_STATUSES.filter((s) => !COMMON_STATUSES.includes(s));
 
 const columns: ColumnDef<EngagementRow, unknown>[] = [
   {
@@ -35,7 +53,7 @@ const columns: ColumnDef<EngagementRow, unknown>[] = [
       </span>
     ),
   },
-  { header: 'EP', cell: ({ row }) => row.original.engagementPartnerName ?? <span className="text-ink-faint">—</span> },
+  { header: 'Partner', cell: ({ row }) => row.original.engagementPartnerName ?? <span className="text-ink-faint">—</span> },
   { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
   {
     header: 'Signals',
@@ -55,6 +73,7 @@ const columns: ColumnDef<EngagementRow, unknown>[] = [
 ];
 
 function EngagementsInner(): JSX.Element {
+  const { principal } = useAuth();
   const params = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<EngagementStatus | ''>(
@@ -80,20 +99,22 @@ function EngagementsInner(): JSX.Element {
     <div>
       <PageHeader
         title="Engagements"
-        subtitle="Engagements you can access (assignment-scoped)."
+        subtitle="Each engagement is one job for one client. You see the ones you are assigned to — click a row to open it."
         actions={
+          can(principal, PERMISSION.engagementManage) && (
           <Link
             href="/engagements/new"
             className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-700"
           >
             <Plus className="h-4 w-4" /> New engagement
           </Link>
+          )
         }
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <FilterChip label="All" active={status === ''} onClick={() => setStatusFiltered('')} />
-        {ENGAGEMENT_STATUSES.map((s) => (
+        {COMMON_STATUSES.map((s) => (
           <FilterChip
             key={s}
             label={humanize(s)}
@@ -101,6 +122,24 @@ function EngagementsInner(): JSX.Element {
             onClick={() => setStatusFiltered(s)}
           />
         ))}
+        <select
+          aria-label="More statuses"
+          value={OTHER_STATUSES.includes(status as EngagementStatus) ? status : ''}
+          onChange={(e) => setStatusFiltered(e.target.value as EngagementStatus | '')}
+          className={cn(
+            'rounded-full border px-3 py-1 text-xs font-medium',
+            OTHER_STATUSES.includes(status as EngagementStatus)
+              ? 'border-primary-600 bg-primary-600 text-white'
+              : 'border-line-strong bg-surface text-ink-muted',
+          )}
+        >
+          <option value="">More…</option>
+          {OTHER_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {humanize(s)}
+            </option>
+          ))}
+        </select>
       </div>
 
       <Card className="p-0">
