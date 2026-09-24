@@ -11,11 +11,16 @@ import {
   type StatutoryAuditPlanning,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
+import type { TeamMember } from '@/lib/types';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Textarea } from '@/components/form';
+import { PlanningIntelligencePanel } from './planning-intelligence-panel';
+
+/** The sub-area backed by the full 03.1 Planning Intelligence workflow. */
+const INTELLIGENCE_ITEM_KEY = 'audit_strategy';
 
 /**
  * Planning (Phase 03) screen (Audit Spec §21). A structured planning file of
@@ -39,7 +44,13 @@ const STATE_LABEL: Record<PlanningItemState, string> = {
 
 const PLANNING_QK = (id: string) => ['engagement', id, 'statutory-audit-planning'];
 
-export function PlanningPanel({ engagementId }: { engagementId: string }): JSX.Element | null {
+export function PlanningPanel({
+  engagementId,
+  team,
+}: {
+  engagementId: string;
+  team: TeamMember[];
+}): JSX.Element | null {
   const qc = useQueryClient();
   const toast = useToast();
   const { principal } = useAuth();
@@ -125,6 +136,8 @@ export function PlanningPanel({ engagementId }: { engagementId: string }): JSX.E
         <PlanningItemCard
           key={item.id}
           engagementId={engagementId}
+          workflowInstanceId={planning.workflowInstanceId}
+          team={team}
           item={item}
           editable={editable}
           onChanged={invalidate}
@@ -136,11 +149,15 @@ export function PlanningPanel({ engagementId }: { engagementId: string }): JSX.E
 
 function PlanningItemCard({
   engagementId,
+  workflowInstanceId,
+  team,
   item,
   editable,
   onChanged,
 }: {
   engagementId: string;
+  workflowInstanceId: string;
+  team: TeamMember[];
   item: PlanningItem;
   editable: boolean;
   onChanged: () => void;
@@ -148,6 +165,8 @@ function PlanningItemCard({
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [narrative, setNarrative] = useState(item.narrative ?? '');
+  // 03.1 replaces this sub-area's free-text narrative; its state rolls up from 03.1.
+  const isIntelligence = item.itemKey === INTELLIGENCE_ITEM_KEY;
 
   const save = useMutation({
     mutationFn: (state: PlanningItemState) =>
@@ -175,12 +194,26 @@ function PlanningItemCard({
           <span className="font-mono text-xs text-ink-faint">
             {String(item.sortOrder).padStart(2, '0')}
           </span>
-          <span className="text-sm font-medium text-ink">{item.title}</span>
+          <span className="text-sm font-medium text-ink">
+            {isIntelligence ? '03.1 Planning Intelligence & Overall Audit Strategy' : item.title}
+          </span>
         </span>
         <Badge tone={STATE_TONE[item.state]}>{STATE_LABEL[item.state]}</Badge>
       </button>
 
-      {open && (
+      {open && isIntelligence && (
+        <div className="mt-3 border-t border-line pt-3">
+          <PlanningIntelligencePanel
+            engagementId={engagementId}
+            workflowInstanceId={workflowInstanceId}
+            team={team}
+            editable={editable}
+            onChanged={onChanged}
+          />
+        </div>
+      )}
+
+      {open && !isIntelligence && (
         <div className="mt-3 space-y-3 border-t border-line pt-3">
           {editable ? (
             <>

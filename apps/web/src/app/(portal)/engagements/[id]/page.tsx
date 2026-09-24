@@ -8,7 +8,13 @@ import { FolderOpen } from 'lucide-react';
 import { TASK_STATUS, type Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate, humanize } from '@/lib/format';
-import type { EngagementDetail, MyTask, ComplianceRow, MyClientDependency } from '@/lib/types';
+import type {
+  EngagementDetail,
+  MyTask,
+  ComplianceRow,
+  MyClientDependency,
+  TeamMember,
+} from '@/lib/types';
 import {
   PageHeader,
   Spinner,
@@ -251,7 +257,9 @@ export default function EngagementDetailPage(): JSX.Element {
             onSelectPhase={(k) => setAuditPhase((cur) => (cur === k ? null : k))}
           />
           {auditPhase === 'framework' && <FrameworkPanel engagementId={e.id} />}
-          {auditPhase === 'planning' && <PlanningPanel engagementId={e.id} />}
+          {auditPhase === 'planning' && (
+            <PlanningPanel engagementId={e.id} team={planningTeam(e)} />
+          )}
           {auditPhase === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
           {auditPhase === 'audit_areas' && <WorkAreasPanel engagementId={e.id} team={e.team} />}
           {auditPhase === 'pbc' && <PbcPanel engagementId={e.id} />}
@@ -586,4 +594,32 @@ function Fact({ label, value }: { label: string; value: string | null }): JSX.El
       <div className="text-ink">{value ?? '—'}</div>
     </div>
   );
+}
+
+/**
+ * The engagement team plus the EP and Manager (held on the engagement itself,
+ * not in `team`), so planning owners and discussion participants can include them.
+ */
+function planningTeam(e: EngagementDetail): TeamMember[] {
+  const leads: TeamMember[] = [];
+  if (e.engagementPartnerId && e.engagementPartnerName) {
+    leads.push({
+      id: `ep-${e.engagementPartnerId}`,
+      employeeId: e.engagementPartnerId,
+      employeeCode: '',
+      employeeName: e.engagementPartnerName,
+      roleOnEngagement: 'engagement_partner',
+    });
+  }
+  if (e.engagementManagerId && e.engagementManagerName) {
+    leads.push({
+      id: `em-${e.engagementManagerId}`,
+      employeeId: e.engagementManagerId,
+      employeeCode: '',
+      employeeName: e.engagementManagerName,
+      roleOnEngagement: 'engagement_manager',
+    });
+  }
+  const seen = new Set(leads.map((m) => m.employeeId));
+  return [...leads, ...e.team.filter((m) => !seen.has(m.employeeId))];
 }
