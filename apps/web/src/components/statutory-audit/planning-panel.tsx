@@ -18,9 +18,11 @@ import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Textarea } from '@/components/form';
 import { PlanningIntelligencePanel } from './planning-intelligence-panel';
+import { BusinessUnderstandingPanel } from './business-understanding-panel';
 
 /** The sub-area backed by the full 03.1 Planning Intelligence workflow. */
 const INTELLIGENCE_ITEM_KEY = 'audit_strategy';
+const UNDERSTANDING_ITEM_KEY = 'engagement_understanding';
 
 /**
  * Planning (Phase 03) screen (Audit Spec §21). A structured planning file of
@@ -165,8 +167,9 @@ function PlanningItemCard({
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [narrative, setNarrative] = useState(item.narrative ?? '');
-  // 03.1 replaces this sub-area's free-text narrative; its state rolls up from 03.1.
+  // 03.1 / 03.2 replace these sub-areas' free-text narrative; their state rolls up.
   const isIntelligence = item.itemKey === INTELLIGENCE_ITEM_KEY;
+  const isUnderstanding = item.itemKey === UNDERSTANDING_ITEM_KEY;
 
   const save = useMutation({
     mutationFn: (state: PlanningItemState) =>
@@ -195,7 +198,11 @@ function PlanningItemCard({
             {String(item.sortOrder).padStart(2, '0')}
           </span>
           <span className="text-sm font-medium text-ink">
-            {isIntelligence ? '03.1 Planning Intelligence & Overall Audit Strategy' : item.title}
+            {isIntelligence
+              ? '03.1 Planning Intelligence & Overall Audit Strategy'
+              : isUnderstanding
+                ? '03.2 Business Understanding & Preliminary Analytics'
+                : item.title}
           </span>
         </span>
         <Badge tone={STATE_TONE[item.state]}>{STATE_LABEL[item.state]}</Badge>
@@ -213,7 +220,19 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && !isIntelligence && (
+      {open && isUnderstanding && (
+        <div className="mt-3 border-t border-line pt-3">
+          <BusinessUnderstandingPanel
+            engagementId={engagementId}
+            workflowInstanceId={workflowInstanceId}
+            team={team}
+            editable={editable}
+            onChanged={onChanged}
+          />
+        </div>
+      )}
+
+      {open && !isIntelligence && !isUnderstanding && (
         <div className="mt-3 space-y-3 border-t border-line pt-3">
           {editable ? (
             <>
