@@ -133,9 +133,11 @@ export function MaterialityPanel({
         method: 'POST',
         body: { ...v.body, version: summary.data!.determination.version },
       }),
-    onSuccess: (_r, v) => {
+    onSuccess: (data, v) => {
+      // The response is the fresh summary: use it (new version for the next save) instead of refetching.
+      qc.setQueryData(qk, data);
       toast(v.done ?? 'Materiality saved.');
-      refresh();
+      onChanged();
     },
     onError: (e) => toast(errMsg(e, 'Could not save materiality.')),
   });

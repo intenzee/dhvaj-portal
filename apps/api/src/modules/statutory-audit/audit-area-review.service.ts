@@ -759,6 +759,7 @@ export class AuditAreaReviewService {
     if (!reason) throw new BadRequestException('Reopening 03.5 needs a reason.');
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
+      await this.lockReview(client, wi);
       const ws = await this.workspace(client, wi);
       const rec = ws.record;
       if (!rec || rec.status === 'in_progress') {
@@ -767,14 +768,22 @@ export class AuditAreaReviewService {
         );
       }
       // Impacted areas carry Requires Review into the new version (VAL-09).
+      // One statement; the first impact naming an area wins (as the old per-row loop did).
+      const flagged = new Map<string, { message: string; kind: string }>();
       for (const imp of ws.impacts) {
         for (const areaId of imp.areaIds) {
-          await client.query(
-            `UPDATE hsdg.audit_engagement_area SET review_flag = $2, review_flag_source = $3, version = version + 1
-              WHERE id = $1 AND review_flag IS NULL`,
-            [areaId, imp.message, imp.kind],
-          );
+          if (!flagged.has(areaId)) flagged.set(areaId, { message: imp.message, kind: imp.kind });
         }
+      }
+      if (flagged.size) {
+        const ids = [...flagged.keys()];
+        await client.query(
+          `UPDATE hsdg.audit_engagement_area a
+              SET review_flag = f.message, review_flag_source = f.kind, version = a.version + 1
+             FROM unnest($1::uuid[], $2::text[], $3::text[]) AS f(id, message, kind)
+            WHERE a.id = f.id AND a.review_flag IS NULL`,
+          [ids, ids.map((i) => flagged.get(i)!.message), ids.map((i) => flagged.get(i)!.kind)],
+        );
       }
       const nextNo = rec.versionNo + 1;
       await client.query(
@@ -1045,17 +1054,31 @@ export class AuditAreaReviewService {
   }
 
   /** Creates the review + complete applicable population once (§3, AT-01/AT-02). */
+  private async lockReview(client: PoolClient, wi: string): Promise<string | null> {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.audit_area_review WHERE workflow_instance_id = $1 FOR UPDATE`,
+      [wi],
+    );
+    if (rows[0]) return rows[0].id;
+    // RLS applies the UPDATE policy to FOR UPDATE, hiding the row from non-leads;
+    // they still get a plain read (their writes are refused by RLS as before).
+    const { rows: seen } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
+      [wi],
+    );
+    return seen[0]?.id ?? null;
+  }
+
   private async ensure(
     client: PoolClient,
     ctx: RlsContext,
     engagementId: string,
     wi: string,
   ): Promise<string> {
-    const { rows } = await client.query<{ id: string }>(
-      `SELECT id FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
-      [wi],
-    );
-    if (rows[0]) return rows[0].id;
+    // Row lock serialises every mutation of this review, so the read-then-compare
+    // version checks in the callers cannot interleave (no lost updates).
+    const existing = await this.lockReview(client, wi);
+    if (existing) return existing;
     const version = await this.currentLibraryVersion(client);
     if (!version) throw new ConflictException('No DHVAJ Audit Area Library has been released.');
     const { facts, periodEnd } = await this.readFacts(client, wi);
@@ -1079,13 +1102,7 @@ export class AuditAreaReviewService {
         ctx.employeeId ?? null,
       ],
     );
-    if (!ins[0]) {
-      const again = await client.query<{ id: string }>(
-        `SELECT id FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
-        [wi],
-      );
-      return again.rows[0]!.id;
-    }
+    if (!ins[0]) return (await this.lockReview(client, wi))!;
     const id = ins[0].id;
     for (const lib of population) {
       await this.insertLibraryArea(client, ctx, engagementId, id, lib, 'population', null, facts);

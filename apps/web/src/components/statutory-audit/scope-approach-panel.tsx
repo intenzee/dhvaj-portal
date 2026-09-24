@@ -171,17 +171,15 @@ export function ScopeApproachPanel({
     queryKey: ['engagement', engagementId, 'planning-intelligence', workflowInstanceId, 'focus'],
     queryFn: () => apiFetch<AreaOfFocusRecord[]>(`${base}/areas-of-focus`),
   });
-  const refresh = () => {
-    void qc.invalidateQueries({ queryKey: qk });
-    void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'planning-intelligence', workflowInstanceId] });
-    onChanged();
-  };
   const mutation = useMutation({
     mutationFn: (v: { path: string; body: unknown; done: string }) =>
       apiFetch<ScopeApproachSummary>(`${base}/scope-approach${v.path}`, { method: 'POST', body: v.body }),
-    onSuccess: (_r, v) => {
+    onSuccess: (data, v) => {
+      // The response is the fresh summary: use it (new version for the next save) instead of refetching.
+      qc.setQueryData(qk, data);
       toast(v.done);
-      refresh();
+      void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'planning-intelligence', workflowInstanceId] });
+      onChanged();
     },
     onError: (e) => toast(errMsg(e, 'Could not save 03.4.')),
   });

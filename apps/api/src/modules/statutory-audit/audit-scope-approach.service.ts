@@ -1126,6 +1126,8 @@ export class AuditScopeApproachService {
     if (!reason) throw new BadRequestException('A revision needs a reason.');
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
+      // A double-submit must not snapshot the same baseline into two revisions.
+      await this.lockRecord(client, wi);
       const summary = await this.buildSummary(client, wi);
       const r = summary.record;
       if (!r.id || r.status === 'draft') {
@@ -1223,20 +1225,35 @@ export class AuditScopeApproachService {
     engagementId: string,
     wi: string,
   ): Promise<{ id: string; created: boolean }> {
-    const { rows } = await client.query<{ id: string }>(
-      `SELECT id FROM hsdg.audit_scope_approach WHERE workflow_instance_id = $1`,
-      [wi],
-    );
-    if (rows[0]) return { id: rows[0].id, created: false };
+    // Row lock serialises every mutation of this strategy, so the read-then-compare
+    // version checks in the callers cannot interleave (no lost updates).
+    const existing = await this.lockRecord(client, wi);
+    if (existing) return { id: existing, created: false };
     const { rows: ins } = await client.query<{ id: string }>(
       `INSERT INTO hsdg.audit_scope_approach (workflow_instance_id, engagement_id, methodology_version)
-       VALUES ($1, $2, $3) RETURNING id`,
+       VALUES ($1, $2, $3) ON CONFLICT (workflow_instance_id) DO NOTHING RETURNING id`,
       [wi, engagementId, SCOPE_METHODOLOGY_VERSION],
     );
-    const id = ins[0]!.id;
+    if (!ins[0]) return { id: (await this.lockRecord(client, wi))!, created: false };
+    const id = ins[0].id;
     await this.sync(client, engagementId, wi, id);
     await this.rollUp(client, ctx, wi, 'in_progress');
     return { id, created: true };
+  }
+
+  private async lockRecord(client: PoolClient, wi: string): Promise<string | null> {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.audit_scope_approach WHERE workflow_instance_id = $1 FOR UPDATE`,
+      [wi],
+    );
+    if (rows[0]) return rows[0].id;
+    // RLS applies the UPDATE policy to FOR UPDATE, hiding the row from non-leads;
+    // they still get a plain read (their writes are refused by RLS as before).
+    const { rows: seen } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.audit_scope_approach WHERE workflow_instance_id = $1`,
+      [wi],
+    );
+    return seen[0]?.id ?? null;
   }
 
   /** ensure + draft check for child mutations. */

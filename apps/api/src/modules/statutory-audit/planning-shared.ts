@@ -32,6 +32,13 @@ export async function maxSeq(
   table: PlanningSeqTable,
   workflowInstanceId: string,
 ): Promise<number> {
+  // Callers insert MAX+1 in this transaction: serialise per table + audit file so
+  // two concurrent inserts cannot draw the same PS-/FA-/PY-/PM- number (a 500 on
+  // the unique constraint). Transaction-scoped, so it releases on commit.
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`, [
+    table,
+    workflowInstanceId,
+  ]);
   const { rows } = await client.query<{ m: number }>(
     `SELECT COALESCE(MAX(seq), 0) AS m FROM hsdg.${table} WHERE workflow_instance_id = $1`,
     [workflowInstanceId],

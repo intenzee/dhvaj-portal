@@ -102,18 +102,15 @@ export function AuditAreasPanel({
   const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/audit-areas`;
   const qk = ['engagement', engagementId, 'audit-areas', workflowInstanceId];
   const summary = useQuery({ queryKey: qk, queryFn: () => apiFetch<AuditAreaReviewSummary>(base) });
-  const refresh = () => {
-    void qc.invalidateQueries({ queryKey: qk });
-    onChanged();
-  };
   const mutation = useMutation({
     mutationFn: (v: { path: string; body: unknown; done: string; after?: () => void }) =>
       apiFetch<AuditAreaReviewSummary>(`${base}${v.path}`, { method: 'POST', body: v.body }),
     onSuccess: (data, v) => {
+      // Fresh summary from the response — no refetch of the same query.
       qc.setQueryData(qk, data);
       toast(v.done);
       v.after?.();
-      refresh();
+      onChanged();
     },
     onError: (e) => toast(errMsg(e, 'Could not save 03.5.')),
   });
