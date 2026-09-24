@@ -140,6 +140,18 @@ describe('assessCaro — the cumulative private-company test (§9.4 / spec §20)
     const r = assessCaro(facts({ capitalPlusReserves: 0, totalRevenue: 0 }), resolve);
     expect(r.outcome).toBe(CARO_OUTCOME.informationInsufficient);
   });
+
+  it('8b. one captured figure over its limit decides it — the missing ones are moot', () => {
+    const r = assessCaro(facts({ totalRevenue: 15 * CRORE }), resolve);
+    expect(r.outcome).toBe(CARO_OUTCOME.applicable);
+    expect(r.detail.privateTest).toEqual({
+      tested: true,
+      noPublicGroupRelationship: true,
+      capitalWithinLimit: null,
+      borrowingsWithinLimit: null,
+      revenueWithinLimit: false,
+    });
+  });
 });
 
 describe('assessCaro — public company & period gating (§9.4 / spec §20)', () => {

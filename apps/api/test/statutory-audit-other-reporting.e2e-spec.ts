@@ -49,7 +49,7 @@ describe('Statutory Audit — 02.7 Other Reporting (e2e §9.7)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
@@ -96,7 +96,7 @@ describe('Statutory Audit — 02.7 Other Reporting (e2e §9.7)', () => {
         version: before.assessment.version,
       })
       .expect(201);
-    const o = res.body[0] as StatutoryAuditOtherReporting;
+    const o = res.body as StatutoryAuditOtherReporting;
     expect(o.detail!.fraud.route).toBe('central_government');
     expect(o.detail!.fraud.boardReplyByDate).toBe('2024-07-16');
     expect(o.detail!.fraud.cgForwardByDate).toBe('2024-07-31');
@@ -114,13 +114,18 @@ describe('Statutory Audit — 02.7 Other Reporting (e2e §9.7)', () => {
         version: o.assessment.version,
       })
       .expect(201);
-    const decided = res.body[0] as StatutoryAuditOtherReporting;
+    const decided = res.body as StatutoryAuditOtherReporting;
     expect(decided.assessment.conclusion).toBe(OTHER_REPORTING_OUTCOME.attentionRequired);
 
     await request(app.getHttpServer())
       .post(`${base()}/${shellId}/other-reporting/decision`)
       .set(bearer(pa))
-      .send({ conclusion: OTHER_REPORTING_OUTCOME.configured, version: o.assessment.version })
+      // A justified override, so the only fault is the stale version.
+      .send({
+        conclusion: OTHER_REPORTING_OUTCOME.configured,
+        basis: 'Stale-version check (e2e).',
+        version: o.assessment.version,
+      })
       .expect(409);
   });
 
@@ -135,7 +140,7 @@ describe('Statutory Audit — 02.7 Other Reporting (e2e §9.7)', () => {
 
   it('records an immutable audit event for the decision', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=audit_framework_subassessment&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (res.body.items as Array<{ action: string }>).map((e) => e.action);

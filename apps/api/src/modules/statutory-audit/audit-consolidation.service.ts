@@ -100,7 +100,8 @@ export class AuditConsolidationService {
     await client.query(
       `INSERT INTO hsdg.audit_framework_subassessment
          (workflow_instance_id, engagement_id, sub_section_key, area_key, title)
-       VALUES ($1, $2, $3, $4, $5)
+       SELECT $1::uuid, $2::uuid, $3::text, $4::text, $5::text
+        WHERE hsdg.is_engagement_lead($2::uuid) -- lead-only insert (RLS); others read or 404
        ON CONFLICT (workflow_instance_id, sub_section_key, area_key) DO NOTHING`,
       [workflowInstanceId, engagementId, SUB, AREA, TITLE],
     );
@@ -289,7 +290,8 @@ export class AuditConsolidationService {
             SET conclusion = $3, is_overridden = $4, basis = $5, impact = $6, state = $7,
                 system_outcome = $8, system_basis = $9, system_detail = $10::jsonb,
                 rule_version_id = $11, authority_provision_id = $12,
-                decided_by_employee_id = $13, decided_at = now(), version = version + 1
+                decided_by_employee_id = $13, decided_at = now(), needs_reevaluation = false,
+                version = version + 1
           WHERE id = $1 AND version = $2`,
         [
           row.id,

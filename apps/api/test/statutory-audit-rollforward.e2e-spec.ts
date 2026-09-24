@@ -71,7 +71,7 @@ describe('Statutory Audit — prior-year roll-forward (e2e §12)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
 
@@ -102,7 +102,7 @@ describe('Statutory Audit — prior-year roll-forward (e2e §12)', () => {
   it('applies the roll-forward (carry-forward + re-evaluation flags) and audits it', async () => {
     await request(app.getHttpServer()).post(`${base()}/apply`).set(bearer(pa)).expect(201);
     const events = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=service_workflow_instances&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (events.body.items as Array<{ action: string }>).map((e) => e.action);

@@ -54,7 +54,7 @@ describe('Statutory Audit — 02.6 Consolidation (e2e §9.6)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
@@ -124,7 +124,7 @@ describe('Statutory Audit — 02.6 Consolidation (e2e §9.6)', () => {
         version: before.assessment.version,
       })
       .expect(201);
-    const c = res.body[0] as StatutoryAuditConsolidation;
+    const c = res.body as StatutoryAuditConsolidation;
     expect(c.assessment.systemOutcome).toBe(CONSOLIDATION_OUTCOME.cfsRequired);
     expect(c.detail!.cfsTriggered).toBe(true);
     expect(c.detail!.perimeter[0]?.relationship).toBe('subsidiary');
@@ -138,14 +138,19 @@ describe('Statutory Audit — 02.6 Consolidation (e2e §9.6)', () => {
       .set(bearer(pa))
       .send({ conclusion: CONSOLIDATION_OUTCOME.cfsRequired, version: c.assessment.version })
       .expect(201);
-    const decided = res.body[0] as StatutoryAuditConsolidation;
+    const decided = res.body as StatutoryAuditConsolidation;
     expect(decided.assessment.conclusion).toBe(CONSOLIDATION_OUTCOME.cfsRequired);
     expect(decided.assessment.state).toBe('applicable');
 
     await request(app.getHttpServer())
       .post(`${base()}/${shellId}/consolidation/decision`)
       .set(bearer(pa))
-      .send({ conclusion: CONSOLIDATION_OUTCOME.cfsExempt, version: c.assessment.version })
+      // A justified override, so the only fault is the stale version.
+      .send({
+        conclusion: CONSOLIDATION_OUTCOME.cfsExempt,
+        basis: 'Stale-version check (e2e).',
+        version: c.assessment.version,
+      })
       .expect(409);
   });
 
@@ -160,7 +165,7 @@ describe('Statutory Audit — 02.6 Consolidation (e2e §9.6)', () => {
 
   it('records an immutable audit event for the decision', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=audit_framework_subassessment&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (res.body.items as Array<{ action: string }>).map((e) => e.action);

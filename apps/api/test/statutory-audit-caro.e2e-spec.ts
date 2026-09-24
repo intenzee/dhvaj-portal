@@ -47,7 +47,7 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
@@ -78,7 +78,7 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
   it('provisions one 02.4 assessment; without the CARO facts it is information-insufficient', async () => {
     const caro = await getCaro(pa);
     expect(caro.assessment.subSectionKey).toBe('02.4');
-    // The seeded "Bharat" entity is a private company; with no captured numbers the
+    // The seeded "Acme" entity is a private company (Bharat is an LLP, outside CARO); with no captured numbers the
     // cumulative test cannot run yet.
     expect(caro.assessment.systemOutcome).toBe(CARO_OUTCOME.informationInsufficient);
   });
@@ -96,7 +96,7 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
         version: before.assessment.version,
       })
       .expect(201);
-    const caro = res.body[0] as StatutoryAuditCaro;
+    const caro = res.body as StatutoryAuditCaro;
     expect(caro.capturedFacts.totalRevenue).toBe(150000000);
     expect(caro.assessment.systemOutcome).toBe(CARO_OUTCOME.applicable);
     expect(caro.detail!.level1Applies).toBe(true);
@@ -111,14 +111,19 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
       .set(bearer(pa))
       .send({ conclusion: CARO_OUTCOME.applicable, version: caro.assessment.version })
       .expect(201);
-    const decided = res.body[0] as StatutoryAuditCaro;
+    const decided = res.body as StatutoryAuditCaro;
     expect(decided.assessment.conclusion).toBe(CARO_OUTCOME.applicable);
     expect(decided.assessment.state).toBe('applicable');
 
     await request(app.getHttpServer())
       .post(`${base()}/${shellId}/caro/decision`)
       .set(bearer(pa))
-      .send({ conclusion: CARO_OUTCOME.notApplicableExempt, version: caro.assessment.version })
+      // A justified override, so the only fault is the stale version.
+      .send({
+        conclusion: CARO_OUTCOME.notApplicableExempt,
+        basis: 'Stale-version check (e2e).',
+        version: caro.assessment.version,
+      })
       .expect(409);
   });
 
@@ -133,7 +138,7 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
 
   it('records an immutable audit event for the decision', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=audit_framework_subassessment&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (res.body.items as Array<{ action: string }>).map((e) => e.action);

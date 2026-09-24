@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  CARO_OUTCOME,
+  CONSOLIDATION_OUTCOME,
   FRAMEWORK_AREA_KEY,
+  ICFR_OUTCOME,
   SUB_SECTION_KEY,
   changedSections,
   compareProfile,
@@ -46,6 +49,14 @@ const SECTIONS: Array<{ sub: SubSectionKey; area: string; title: string }> = [
     title: 'Other Companies Act & Statutory Reporting',
   },
 ];
+
+/** Carried conclusions that mean "does not apply" — suggested as Not Applicable, not Applicable. */
+const NOT_APPLICABLE_OUTCOMES = new Set<string>([
+  CARO_OUTCOME.notApplicableExempt,
+  ICFR_OUTCOME.exempt,
+  CONSOLIDATION_OUTCOME.notApplicable,
+  CONSOLIDATION_OUTCOME.cfsExempt,
+]);
 
 /**
  * Prior-year roll-forward for continuing audits (Implementation Guide §12).
@@ -94,7 +105,7 @@ export class AuditRollForwardService {
         if (!s.carriedForward || s.priorConclusion == null) continue;
         await client.query(
           `UPDATE hsdg.audit_framework_subassessment
-              SET system_outcome = $4, system_basis = $5, state = 'system_suggested_applicable'
+              SET system_outcome = $4, system_basis = $5, state = $6
             WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3
               AND state NOT IN ('applicable','not_applicable','overridden','approved')`,
           [
@@ -103,6 +114,9 @@ export class AuditRollForwardService {
             areaFor(s.subSectionKey),
             s.priorConclusion,
             `Carried forward from FY ${cmp.priorFinancialYear} as a system suggestion — confirm for this year.`,
+            NOT_APPLICABLE_OUTCOMES.has(s.priorConclusion)
+              ? 'system_suggested_not_applicable'
+              : 'system_suggested_applicable',
           ],
         );
       }

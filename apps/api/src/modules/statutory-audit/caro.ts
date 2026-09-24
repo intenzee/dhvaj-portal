@@ -151,6 +151,33 @@ export function assessCaro(f: CaroFacts, resolve: RuleResolver): CaroResult {
       },
     );
 
+  // The exemption needs ALL three within limit, so one captured figure over its
+  // limit already defeats it — the missing figures are moot.
+  const over = (
+    [
+      ['capital + reserves', f.capitalPlusReserves, capRule],
+      ['aggregate bank/FI borrowings (peak in the year)', f.peakBankFiBorrowings, borRule],
+      ['total revenue', f.totalRevenue, revRule],
+    ] as const
+  ).find(([, value, rule]) => value != null && !ruleMeets(value, rule));
+  const anyMissing =
+    f.capitalPlusReserves == null || f.peakBankFiBorrowings == null || f.totalRevenue == null;
+  if (over && anyMissing) {
+    const [label, value, rule] = over;
+    const within = (v: number | null, r: ResolvedRule) => (v == null ? null : ruleMeets(v, r));
+    return applies(
+      `Private company exceeds a CARO 2020 exemption limit (${label} ${formatInrCrore(value!)} ${rule.operator} ${formatInrCrore(rule.threshold!)} fails) — the cumulative exemption is unavailable, so CARO 2020 applies.`,
+      rule.ruleVersionId,
+      {
+        tested: true,
+        noPublicGroupRelationship: true,
+        capitalWithinLimit: within(f.capitalPlusReserves, capRule),
+        borrowingsWithinLimit: within(f.peakBankFiBorrowings, borRule),
+        revenueWithinLimit: within(f.totalRevenue, revRule),
+      },
+    );
+  }
+
   const missing: string[] = [];
   if (f.capitalPlusReserves == null) missing.push('paid-up capital + reserves');
   if (f.peakBankFiBorrowings == null)

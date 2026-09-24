@@ -47,7 +47,7 @@ describe('Statutory Audit — 02.5 ICFR (e2e §9.5)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
@@ -83,7 +83,7 @@ describe('Statutory Audit — 02.5 ICFR (e2e §9.5)', () => {
   });
 
   it('provisions one 02.5 assessment; a private company over the turnover limit → applicable', async () => {
-    // "Bharat" is a private company; ₹80cr turnover already exceeds the ₹50cr limit,
+    // "Acme" is a private company; ₹80cr turnover already exceeds the ₹50cr limit,
     // so even before capturing borrowings the exemption cannot hold.
     const icfr = await getIcfr(pa);
     expect(icfr.assessment.subSectionKey).toBe('02.5');
@@ -103,7 +103,7 @@ describe('Statutory Audit — 02.5 ICFR (e2e §9.5)', () => {
         version: before.assessment.version,
       })
       .expect(201);
-    const icfr = res.body[0] as StatutoryAuditIcfr;
+    const icfr = res.body as StatutoryAuditIcfr;
     expect(icfr.capturedFacts.filingDefault).toBe(true);
     expect(icfr.assessment.systemOutcome).toBe(ICFR_OUTCOME.applicable);
     expect(icfr.assessment.authorityProvisionId).toBeTruthy(); // §143(3)(i) frozen period-correct
@@ -116,14 +116,19 @@ describe('Statutory Audit — 02.5 ICFR (e2e §9.5)', () => {
       .set(bearer(pa))
       .send({ conclusion: ICFR_OUTCOME.applicable, version: icfr.assessment.version })
       .expect(201);
-    const decided = res.body[0] as StatutoryAuditIcfr;
+    const decided = res.body as StatutoryAuditIcfr;
     expect(decided.assessment.conclusion).toBe(ICFR_OUTCOME.applicable);
     expect(decided.assessment.state).toBe('applicable');
 
     await request(app.getHttpServer())
       .post(`${base()}/${shellId}/icfr/decision`)
       .set(bearer(pa))
-      .send({ conclusion: ICFR_OUTCOME.exempt, version: icfr.assessment.version })
+      // A justified override, so the only fault is the stale version.
+      .send({
+        conclusion: ICFR_OUTCOME.exempt,
+        basis: 'Stale-version check (e2e).',
+        version: icfr.assessment.version,
+      })
       .expect(409);
   });
 
@@ -138,7 +143,7 @@ describe('Statutory Audit — 02.5 ICFR (e2e §9.5)', () => {
 
   it('records an immutable audit event for the decision', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=audit_framework_subassessment&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (res.body.items as Array<{ action: string }>).map((e) => e.action);

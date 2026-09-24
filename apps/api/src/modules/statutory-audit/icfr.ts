@@ -143,7 +143,27 @@ export function assessIcfr(f: IcfrFacts, resolve: RuleResolver): IcfrResult {
       'Small company (§2(85), per the confirmed 02.1 assessment) — exempt from §143(3)(i) ICFR reporting.',
     );
 
-  // 6. The cumulative monetary test — BOTH conditions required.
+  // 6. The cumulative monetary test — BOTH conditions required, so one captured
+  //    figure at/over its limit already defeats the exemption (the other is moot).
+  const turnoverOver = f.turnover != null && !ruleMeets(f.turnover, turnRule);
+  const borrowingsOver =
+    f.peakCoveredBorrowings != null && !ruleMeets(f.peakCoveredBorrowings, borRule);
+  if ((turnoverOver || borrowingsOver) && (f.turnover == null || f.peakCoveredBorrowings == null)) {
+    const [label, value, rule] = turnoverOver
+      ? (['turnover', f.turnover!, turnRule] as const)
+      : (['peak aggregate covered borrowings', f.peakCoveredBorrowings!, borRule] as const);
+    return applies(
+      `Private company meets or exceeds a §143(3)(i) exemption limit (${label} ${formatInrCrore(value)} ${rule.operator} ${formatInrCrore(rule.threshold!)} fails) — ICFR reporting applies whatever the other figure is.`,
+      {
+        ruleVersionId: rule.ruleVersionId,
+        monetaryTest: {
+          tested: true,
+          turnoverWithinLimit: f.turnover == null ? null : !turnoverOver,
+          borrowingsWithinLimit: f.peakCoveredBorrowings == null ? null : !borrowingsOver,
+        },
+      },
+    );
+  }
   if (f.turnover == null || f.peakCoveredBorrowings == null) {
     const missing = [
       f.turnover == null ? 'turnover' : null,

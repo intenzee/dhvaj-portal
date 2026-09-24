@@ -57,7 +57,7 @@ describe('Statutory Audit — 02.3 Schedule III (e2e §9.3)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
@@ -123,7 +123,7 @@ describe('Statutory Audit — 02.3 Schedule III (e2e §9.3)', () => {
       .post(`${base()}/${shellId}/schedule-iii/run-suggestions`)
       .set(bearer(pa))
       .expect(201);
-    const sch = res.body[0] as StatutoryAuditScheduleIii;
+    const sch = res.body as StatutoryAuditScheduleIii;
     expect(sch.assessment.systemOutcome).toBe(SCHEDULE_III_OUTCOME.divisionII);
     expect(sch.detail).not.toBeNull();
     expect(sch.detail!.divisionProvisionCode).toBe('SCH_III_DIV_II');
@@ -140,14 +140,19 @@ describe('Statutory Audit — 02.3 Schedule III (e2e §9.3)', () => {
       .set(bearer(pa))
       .send({ conclusion: SCHEDULE_III_OUTCOME.divisionII, version: sch.assessment.version })
       .expect(201);
-    const decided = res.body[0] as StatutoryAuditScheduleIii;
+    const decided = res.body as StatutoryAuditScheduleIii;
     expect(decided.assessment.conclusion).toBe(SCHEDULE_III_OUTCOME.divisionII);
     expect(decided.assessment.state).toBe('applicable');
 
     await request(app.getHttpServer())
       .post(`${base()}/${shellId}/schedule-iii/decision`)
       .set(bearer(pa))
-      .send({ conclusion: SCHEDULE_III_OUTCOME.divisionI, version: sch.assessment.version })
+      // A justified override, so the only fault is the stale version.
+      .send({
+        conclusion: SCHEDULE_III_OUTCOME.divisionI,
+        basis: 'Stale-version check (e2e).',
+        version: sch.assessment.version,
+      })
       .expect(409);
   });
 
@@ -163,7 +168,7 @@ describe('Statutory Audit — 02.3 Schedule III (e2e §9.3)', () => {
 
   it('records an immutable audit event for the decision', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=audit_framework_subassessment&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (res.body.items as Array<{ action: string }>).map((e) => e.action);

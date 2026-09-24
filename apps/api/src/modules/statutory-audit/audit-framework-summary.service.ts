@@ -334,6 +334,7 @@ export class AuditFrameworkSummaryService {
   ): Promise<StatutoryAuditFrameworkSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
+      await this.lockBaseline(client, workflowInstanceId);
       const summary = await this.build(client, engagementId, workflowInstanceId, '');
       if (!summary.gates.canConfirm) {
         throw new BadRequestException(this.blockedReason(summary));
@@ -379,6 +380,7 @@ export class AuditFrameworkSummaryService {
   ): Promise<StatutoryAuditFrameworkSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
+      await this.lockBaseline(client, workflowInstanceId);
       const existing = await this.rawCurrent(client, workflowInstanceId);
       if (!existing || existing.status !== 'manager_confirmed') {
         throw new BadRequestException('AF-02 requires a Manager-confirmed (AF-01) baseline.');
@@ -441,6 +443,7 @@ export class AuditFrameworkSummaryService {
   ): Promise<StatutoryAuditFrameworkSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
+      await this.lockBaseline(client, workflowInstanceId);
       const reason = input.reason?.trim();
       if (!reason) throw new BadRequestException('A reason is required to reopen the framework.');
       const existing = await this.rawCurrent(client, workflowInstanceId);
@@ -489,6 +492,18 @@ export class AuditFrameworkSummaryService {
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────────
+
+  /**
+   * AF-01 / AF-02 / reopen read the current baseline, check it, then write: a
+   * per-audit-file transaction lock makes that atomic (a double-submit cannot
+   * create two v1.0 / v1.1 rows or approve twice). Advisory, so RLS-agnostic.
+   */
+  private async lockBaseline(client: PoolClient, workflowInstanceId: string): Promise<void> {
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext('audit_framework_baseline:' || $1))`,
+      [workflowInstanceId],
+    );
+  }
 
   private async rawCurrent(
     client: PoolClient,

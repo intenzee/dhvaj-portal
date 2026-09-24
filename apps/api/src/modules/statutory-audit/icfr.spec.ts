@@ -137,6 +137,19 @@ describe('assessIcfr — §143(3)(i) applicability (§9.5 / spec §24)', () => {
     const r = assessIcfr(facts({ turnover: 10 * CRORE }), resolve);
     expect(r.outcome).toBe(ICFR_OUTCOME.informationInsufficient);
   });
+
+  it('10b. one captured figure over its limit decides it — the missing one is moot', () => {
+    const t = assessIcfr(facts({ turnover: 80 * CRORE }), resolve);
+    expect(t.outcome).toBe(ICFR_OUTCOME.applicable);
+    expect(t.detail.monetaryTest).toEqual({
+      tested: true,
+      turnoverWithinLimit: false,
+      borrowingsWithinLimit: null,
+    });
+    const b = assessIcfr(facts({ peakCoveredBorrowings: 30 * CRORE }), resolve);
+    expect(b.outcome).toBe(ICFR_OUTCOME.applicable);
+    expect(b.detail.monetaryTest?.borrowingsWithinLimit).toBe(false);
+  });
 });
 
 describe('assessIcfr — separations & period gating (§9.5 / spec §24)', () => {

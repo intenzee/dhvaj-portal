@@ -43,7 +43,7 @@ describe('Statutory Audit — 02.1 Profile (e2e §9.1)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
@@ -146,7 +146,7 @@ describe('Statutory Audit — 02.1 Profile (e2e §9.1)', () => {
       .set(bearer(pa))
       .send({ note: 'Profile confirmed (e2e).' })
       .expect(201);
-    const confirmed = res.body[0] as StatutoryAuditEntityProfile;
+    const confirmed = res.body as StatutoryAuditEntityProfile;
     expect(confirmed.state).toBe('confirmed');
     expect(confirmed.confirmation?.methodologyVersion).toBe('v2026.1');
     expect(confirmed.confirmation?.confirmedAt).toBeTruthy();
@@ -162,7 +162,7 @@ describe('Statutory Audit — 02.1 Profile (e2e §9.1)', () => {
 
   it('records an immutable audit event for the confirmation', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=audit_entity_profile&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (res.body.items as Array<{ action: string }>).map((e) => e.action);

@@ -116,7 +116,8 @@ export class AuditProfileService {
   ): Promise<void> {
     await client.query(
       `INSERT INTO hsdg.audit_entity_profile (workflow_instance_id, engagement_id)
-       VALUES ($1, $2)
+       SELECT $1::uuid, $2::uuid
+        WHERE hsdg.is_engagement_lead($2::uuid) -- lead-only insert (RLS); others read or 404
        ON CONFLICT (workflow_instance_id) DO NOTHING`,
       [workflowInstanceId, engagementId],
     );
@@ -587,6 +588,13 @@ export class AuditProfileService {
     workflowInstanceId: string,
   ): Promise<ProfileRow> {
     await this.seedProfileOn(client, workflowInstanceId, engagementId);
+    // Every caller mutates: lock first so confirm cannot interleave with an edit
+    // (the confirmed snapshot must match the stored financials).
+    await client.query(
+      `SELECT 1 FROM hsdg.audit_entity_profile
+        WHERE workflow_instance_id = $1 AND engagement_id = $2 FOR UPDATE`,
+      [workflowInstanceId, engagementId],
+    );
     const { rows } = await client.query<ProfileRow>(
       `SELECT p.id, p.workflow_instance_id, swi.engagement_service_id, p.engagement_id, p.state,
               p.special_entity_types, p.initial_audit, p.initial_audit_derived, p.joint_audit,

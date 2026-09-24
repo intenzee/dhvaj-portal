@@ -44,7 +44,7 @@ describe('Statutory Audit — 02.2 Financial Reporting (e2e §9.2)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
-    const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
@@ -104,7 +104,7 @@ describe('Statutory Audit — 02.2 Financial Reporting (e2e §9.2)', () => {
       )
       .set(bearer(pa))
       .expect(201);
-    const fr = res.body[0] as StatutoryAuditFinancialReporting;
+    const fr = res.body as StatutoryAuditFinancialReporting;
     expect(fr.assessment.systemOutcome).toBeTruthy();
     expect(fr.detail).not.toBeNull();
   });
@@ -116,7 +116,7 @@ describe('Statutory Audit — 02.2 Financial Reporting (e2e §9.2)', () => {
       .set(bearer(pa))
       .send({ groupTriggersIndAs: true, version: before.assessment.version })
       .expect(201);
-    const fr = res.body[0] as StatutoryAuditFinancialReporting;
+    const fr = res.body as StatutoryAuditFinancialReporting;
     expect(fr.capturedFacts.groupTriggersIndAs).toBe(true);
   });
 
@@ -133,7 +133,7 @@ describe('Statutory Audit — 02.2 Financial Reporting (e2e §9.2)', () => {
       .set(bearer(pa))
       .send({ conclusion, version: fr.assessment.version })
       .expect(201);
-    const decided = res.body[0] as StatutoryAuditFinancialReporting;
+    const decided = res.body as StatutoryAuditFinancialReporting;
     expect(decided.assessment.conclusion).toBe(conclusion);
     expect(['applicable', 'overridden']).toContain(decided.assessment.state);
 
@@ -141,13 +141,18 @@ describe('Statutory Audit — 02.2 Financial Reporting (e2e §9.2)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/financial-reporting/decision`)
       .set(bearer(pa))
-      .send({ conclusion: 'accounting_standards', version: fr.assessment.version })
+      // A justified override, so the only fault is the stale version.
+      .send({
+        conclusion: 'accounting_standards',
+        basis: 'Stale-version check (e2e).',
+        version: fr.assessment.version,
+      })
       .expect(409);
   });
 
   it('records an immutable audit event for the decision', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/api/v1/audit?objectType=audit_framework_subassessment&limit=50`)
+      .get(`/api/v1/audit?limit=100`)
       .set(bearer(mp))
       .expect(200);
     const actions = (res.body.items as Array<{ action: string }>).map((e) => e.action);
