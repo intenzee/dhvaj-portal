@@ -10,6 +10,9 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Fix: deployed demo — partners saw no engagements.**
+> A demo database first seeded before the Dhvaj rebrand and later re-seeded held two sets of persona logins: new `@dhvaj.in` users (used by the sign-in screen) and the old `@hsdg.in` users, which the employee rows were still linked to (the seed skips existing employees). Signing in as a partner therefore gave no `employeeId`, so row-level security hid every engagement from everyone except the Managing Partner. Migration `1764900000000_relink_demo_employee_logins.sql` re-links each employee to its `@dhvaj.in` login and deactivates the orphaned `@hsdg.in` one. It runs automatically on deploy, can be re-run safely, and does nothing on databases without the duplicate logins.
+
 > **Status: Easier first use — navigation, onboarding and action gating (complete).**
 > The web portal was simplified so new employees can find their way without help:
 > - **Navigation.** The sidebar is grouped into *your day*, **Client work** and **Practice**, and each item has a one-line hover hint (`apps/web/src/lib/nav.ts`). The duplicate "Shortcuts" block is replaced by one **+ New** menu that lists only what the user may create. "Entities" is labelled **Clients** (the route is still `/entities`). Phones get a ☰ drawer (previously there was no navigation below tablet width). Detail and sub-pages have a "← Back to …" link (`PageHeader back=`).
