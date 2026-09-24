@@ -219,6 +219,16 @@ export class AuditPlanningService {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
       await this.assertNotApproved(client, workflowInstanceId);
+      // Once 03.3 is in use it owns the determination and publishes this row.
+      const { rows: determined } = await client.query(
+        `SELECT 1 FROM hsdg.audit_materiality_determination WHERE workflow_instance_id = $1 LIMIT 1`,
+        [workflowInstanceId],
+      );
+      if (determined[0]) {
+        throw new ConflictException(
+          'Materiality is determined in 03.3 Materiality — change it there (a completed version needs a revision).',
+        );
+      }
 
       const { rows: existing } = await client.query<{ version: number }>(
         `SELECT version FROM hsdg.audit_materiality WHERE workflow_instance_id = $1`,

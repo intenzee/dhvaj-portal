@@ -16,13 +16,15 @@ import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
-import { Field, Input, Textarea } from '@/components/form';
+import { Textarea } from '@/components/form';
 import { PlanningIntelligencePanel } from './planning-intelligence-panel';
 import { BusinessUnderstandingPanel } from './business-understanding-panel';
+import { MaterialityPanel } from './materiality-panel';
 
 /** The sub-area backed by the full 03.1 Planning Intelligence workflow. */
 const INTELLIGENCE_ITEM_KEY = 'audit_strategy';
 const UNDERSTANDING_ITEM_KEY = 'engagement_understanding';
+const MATERIALITY_ITEM_KEY = 'materiality';
 
 /**
  * Planning (Phase 03) screen (Audit Spec §21). A structured planning file of
@@ -126,13 +128,7 @@ export function PlanningPanel({
         )}
       </Card>
 
-      <MaterialityCard
-        engagementId={engagementId}
-        workflowInstanceId={planning.workflowInstanceId}
-        materiality={planning.materiality}
-        editable={editable}
-        onChanged={invalidate}
-      />
+      <PublishedMaterialityCard materiality={planning.materiality} />
 
       {planning.items.map((item) => (
         <PlanningItemCard
@@ -142,6 +138,7 @@ export function PlanningPanel({
           team={team}
           item={item}
           editable={editable}
+          canManage={canManage}
           onChanged={invalidate}
         />
       ))}
@@ -155,6 +152,7 @@ function PlanningItemCard({
   team,
   item,
   editable,
+  canManage,
   onChanged,
 }: {
   engagementId: string;
@@ -162,14 +160,16 @@ function PlanningItemCard({
   team: TeamMember[];
   item: PlanningItem;
   editable: boolean;
+  canManage: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [narrative, setNarrative] = useState(item.narrative ?? '');
-  // 03.1 / 03.2 replace these sub-areas' free-text narrative; their state rolls up.
+  // 03.1 / 03.2 / 03.3 replace these sub-areas' free-text narrative; their state rolls up.
   const isIntelligence = item.itemKey === INTELLIGENCE_ITEM_KEY;
   const isUnderstanding = item.itemKey === UNDERSTANDING_ITEM_KEY;
+  const isMateriality = item.itemKey === MATERIALITY_ITEM_KEY;
 
   const save = useMutation({
     mutationFn: (state: PlanningItemState) =>
@@ -202,7 +202,9 @@ function PlanningItemCard({
               ? '03.1 Planning Intelligence & Overall Audit Strategy'
               : isUnderstanding
                 ? '03.2 Business Understanding & Preliminary Analytics'
-                : item.title}
+                : isMateriality
+                  ? '03.3 Materiality'
+                  : item.title}
           </span>
         </span>
         <Badge tone={STATE_TONE[item.state]}>{STATE_LABEL[item.state]}</Badge>
@@ -232,7 +234,20 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && !isIntelligence && !isUnderstanding && (
+      {open && isMateriality && (
+        <div className="mt-3 border-t border-line pt-3">
+          <MaterialityPanel
+            engagementId={engagementId}
+            workflowInstanceId={workflowInstanceId}
+            team={team}
+            editable={editable}
+            canRevise={canManage}
+            onChanged={onChanged}
+          />
+        </div>
+      )}
+
+      {open && !isIntelligence && !isUnderstanding && !isMateriality && (
         <div className="mt-3 space-y-3 border-t border-line pt-3">
           {editable ? (
             <>
@@ -268,103 +283,26 @@ function PlanningItemCard({
   );
 }
 
-function MaterialityCard({
-  engagementId,
-  workflowInstanceId,
-  materiality,
-  editable,
-  onChanged,
-}: {
-  engagementId: string;
-  workflowInstanceId: string;
-  materiality: Materiality | null;
-  editable: boolean;
-  onChanged: () => void;
-}): JSX.Element {
-  const toast = useToast();
-  const [open, setOpen] = useState(false);
-  const [overall, setOverall] = useState(materiality?.overallMateriality?.toString() ?? '');
-  const [performance, setPerformance] = useState(
-    materiality?.performanceMateriality?.toString() ?? '',
-  );
-  const [trivial, setTrivial] = useState(materiality?.clearlyTrivialThreshold?.toString() ?? '');
-  const [benchmark, setBenchmark] = useState(materiality?.benchmark ?? '');
-  const [basis, setBasis] = useState(materiality?.basis ?? '');
-
-  const save = useMutation({
-    mutationFn: () =>
-      apiFetch(`/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/planning/materiality`, {
-        method: 'POST',
-        body: {
-          overallMateriality: overall ? Number(overall) : undefined,
-          performanceMateriality: performance ? Number(performance) : undefined,
-          clearlyTrivialThreshold: trivial ? Number(trivial) : undefined,
-          benchmark: benchmark || undefined,
-          basis: basis || undefined,
-          version: materiality?.version,
-        },
-      }),
-    onSuccess: () => {
-      toast('Materiality saved.');
-      onChanged();
-    },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not save materiality.'),
-  });
-
-  const fmt = (n: number | null) =>
-    n == null ? '—' : `₹${n.toLocaleString('en-IN')}`;
-
+/**
+ * The published (current-version) materiality, read-only. 03.3 Materiality
+ * owns the determination and publishes it here when a version is completed.
+ */
+function PublishedMaterialityCard({ materiality }: { materiality: Materiality | null }): JSX.Element {
+  const fmt = (n: number | null) => (n == null ? '—' : `₹${n.toLocaleString('en-IN')}`);
   return (
-    <Card className="p-4">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-3 text-left"
-      >
-        <span className="flex items-center gap-2.5">
-          <Calculator className="h-4 w-4 text-ink-faint" />
-          <span className="text-sm font-medium text-ink">Materiality</span>
-        </span>
+    <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+      <span className="flex items-center gap-2.5">
+        <Calculator className="h-4 w-4 text-ink-faint" />
+        <span className="text-sm font-medium text-ink">Materiality in use</span>
+      </span>
+      {materiality?.overallMateriality != null ? (
         <span className="text-xs text-ink-muted">
-          Overall {fmt(materiality?.overallMateriality ?? null)}
+          OM {fmt(materiality.overallMateriality)} · PM {fmt(materiality.performanceMateriality)} · Clearly
+          trivial {fmt(materiality.clearlyTrivialThreshold)}
+          {materiality.benchmark ? ` · ${materiality.benchmark}` : ''}
         </span>
-      </button>
-
-      {open && (
-        <div className="mt-3 space-y-3 border-t border-line pt-3">
-          {editable ? (
-            <>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Field label="Overall materiality (₹)">
-                  <Input type="number" min={0} value={overall} onChange={(e) => setOverall(e.target.value)} />
-                </Field>
-                <Field label="Performance materiality (₹)">
-                  <Input type="number" min={0} value={performance} onChange={(e) => setPerformance(e.target.value)} />
-                </Field>
-                <Field label="Clearly-trivial (₹)">
-                  <Input type="number" min={0} value={trivial} onChange={(e) => setTrivial(e.target.value)} />
-                </Field>
-              </div>
-              <Field label="Benchmark">
-                <Input placeholder="e.g. 5% of profit before tax" value={benchmark} onChange={(e) => setBenchmark(e.target.value)} />
-              </Field>
-              <Field label="Basis">
-                <Textarea rows={2} value={basis} onChange={(e) => setBasis(e.target.value)} />
-              </Field>
-              <Button variant="secondary" onClick={() => save.mutate()} disabled={save.isPending}>
-                Save materiality
-              </Button>
-            </>
-          ) : (
-            <div className="grid gap-2 text-sm text-ink-muted sm:grid-cols-3">
-              <div>Overall: <span className="text-ink">{fmt(materiality?.overallMateriality ?? null)}</span></div>
-              <div>Performance: <span className="text-ink">{fmt(materiality?.performanceMateriality ?? null)}</span></div>
-              <div>Clearly-trivial: <span className="text-ink">{fmt(materiality?.clearlyTrivialThreshold ?? null)}</span></div>
-              {materiality?.benchmark && <div className="sm:col-span-3">Benchmark: <span className="text-ink">{materiality.benchmark}</span></div>}
-              {materiality?.basis && <div className="sm:col-span-3">Basis: <span className="text-ink">{materiality.basis}</span></div>}
-            </div>
-          )}
-        </div>
+      ) : (
+        <span className="text-xs text-ink-muted">Not yet determined — complete 03.3 Materiality below.</span>
       )}
     </Card>
   );

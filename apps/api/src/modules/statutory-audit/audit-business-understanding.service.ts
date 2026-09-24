@@ -863,6 +863,21 @@ export class AuditBusinessUnderstandingService {
     });
   }
 
+  /**
+   * The 03.2.7 header and calculated analytics, read by 03.3 Materiality so it
+   * consumes the canonical metric ids instead of keeping a second financial
+   * master. Runs inside the caller's RLS transaction.
+   */
+  async readFinancialBasis(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<{ header: FinancialDatasetHeader; analytics: AnalyticsResult }> {
+    return {
+      header: await this.readDataset(client, workflowInstanceId),
+      analytics: await this.computeAnalytics(client, workflowInstanceId),
+    };
+  }
+
   // ── internals ──────────────────────────────────────────────────────────────
 
   /**

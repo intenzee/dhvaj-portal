@@ -37,6 +37,7 @@ export * from './statutory-audit-planning';
 export * from './statutory-audit-planning-signal';
 export * from './statutory-audit-planning-strategy';
 export * from './statutory-audit-planning-analytics';
+export * from './statutory-audit-materiality';
 export * from './statutory-audit-risk';
 export * from './statutory-audit-procedures';
 export * from './statutory-audit-pbc';
