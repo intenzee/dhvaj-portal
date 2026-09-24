@@ -10,6 +10,14 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Status: Statutory Audit Sections 02–03 — hardening pass (complete).**
+> A review of 02.1–02.8, roll-forward and 03.1–03.5 fixed:
+> - **Concurrency.** 03.4, 03.5, the 02.1 profile and the 02.8 baseline (confirm, approve, reopen) now lock before their version checks, so concurrent saves can't overwrite each other and double-submits can't create duplicates. Planning `PS-/FA-/PY-/PM-` numbers are allocated under a lock.
+> - **Correctness.** Re-deciding a 02.2–02.7 section clears `needs_reevaluation`, so an approved baseline stays frozen after a reopen. Roll-forward carries prior "not applicable" conclusions forward as *suggested not applicable*. CARO and ICFR return "applicable" as soon as any captured figure breaches its limit.
+> - **RLS.** Only engagement leads create 02.x rows, so an outsider gets a 404 and a non-lead member no longer gets a 500.
+> - **Data.** Migration `1764800000000_statutory_audit_rule_provision_backfill.sql` restores the rule → authority-provision citations that FORCE RLS on `authority_provision` had silently left NULL. **Apply it to every existing database.**
+> - **Tests.** The 02.x e2e suites were corrected (Acme private-company fixture, single-object POST responses) and all pass. 03.3–03.5 panels reuse the returned summary instead of refetching.
+
 > **Status: Documents clubbed with the work + Microsoft 365 no-login viewing (complete).**
 > Documents are no longer only engagement-level — a document can be filed under a
 > **task** or a **component-work period** (e.g. the GST return for a month) via the
