@@ -10,6 +10,8 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **New: always-on hosting on Vercel.** The API now also runs as a Vercel serverless function (`apps/api/vercel.json`, `src/serverless.ts`). Migrations and seeding run at build time, and a daily Vercel Cron job calls `GET /api/v1/internal/cron` (guarded by `CRON_SECRET`) in place of the in-process scheduler. The web app deploys as a standard Next.js project. See [DEPLOY-VERCEL.md](DEPLOY-VERCEL.md). Render and Docker deploys are unchanged.
+
 > **Fix: deployed demo — partners saw no engagements.**
 > A demo database first seeded before the Dhvaj rebrand and later re-seeded held two sets of persona logins: new `@dhvaj.in` users (used by the sign-in screen) and the old `@hsdg.in` users, which the employee rows were still linked to (the seed skips existing employees). Signing in as a partner therefore gave no `employeeId`, so row-level security hid every engagement from everyone except the Managing Partner. Migration `1764900000000_relink_demo_employee_logins.sql` re-links each employee to its `@dhvaj.in` login and deactivates the orphaned `@hsdg.in` one. It runs automatically on deploy, can be re-run safely, and does nothing on databases without the duplicate logins.
 

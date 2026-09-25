@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ComponentsModule } from '../components/components.module';
 import { ComplianceSchedulerService } from './compliance-scheduler.service';
+import { CronController } from './cron.controller';
 
 /**
  * Background scheduling (spec §17/§18/§24). Wires the compliance sweep
@@ -11,6 +12,7 @@ import { ComplianceSchedulerService } from './compliance-scheduler.service';
  */
 @Module({
   imports: [NotificationsModule, ComponentsModule],
+  controllers: [CronController],
   providers: [ComplianceSchedulerService],
   exports: [ComplianceSchedulerService],
 })

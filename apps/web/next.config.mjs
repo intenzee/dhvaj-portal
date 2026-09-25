@@ -8,9 +8,10 @@ const nextConfig = {
   reactStrictMode: true,
   // @hsdg/contracts ships TS source consumed directly by the app.
   transpilePackages: ['@hsdg/contracts'],
-  // Produce a self-contained server for a lean production container image.
+  // Produce a self-contained server for a lean production container image
+  // (Docker/Render). Vercel builds its own output, so skip it there.
   // The tracing root is the monorepo root so workspace deps are included.
-  output: 'standalone',
+  ...(process.env.VERCEL ? {} : { output: 'standalone' }),
   outputFileTracingRoot: path.join(__dirname, '..', '..'),
 };
 

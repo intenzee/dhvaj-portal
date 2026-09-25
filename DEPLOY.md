@@ -1,5 +1,7 @@
 # Ship a free temporary demo (Render + Neon)
 
+> **Want it always on (no sleeping)?** See [DEPLOY-VERCEL.md](DEPLOY-VERCEL.md).
+
 A throwaway, no-cost deployment so someone can open the HSDG Portal in a browser
 and click around. **The data is synthetic** and anyone with the URL can sign in
 as a persona (no password) — fine for a demo, not for real client data. Delete

@@ -223,6 +223,9 @@ export const envSchema = z.object({
   SCHEDULER_HORIZON_CRON: z.string().default('30 1 * * *'),
   // The outbox drain runs frequently so external delivery latency stays low.
   SCHEDULER_OUTBOX_CRON: z.string().default('*/5 * * * *'),
+  // Bearer secret for GET /internal/cron — the HTTP trigger serverless hosts
+  // (Vercel Cron) use in place of the in-process scheduler. Unset = disabled.
+  CRON_SECRET: z.string().min(16).optional(),
 
   // Auto-generated deadline layers (spec §16/§17 step 8): when a STATUTORY
   // obligation is generated, add the standard review milestones as separate
