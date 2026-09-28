@@ -46,6 +46,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
+import { SectionLauncher, SectionModal } from './section-launcher';
 
 /**
  * 03.2 Business Understanding & Preliminary Analytics (DHVAJ 03.2). The portal
@@ -82,7 +83,7 @@ export function BusinessUnderstandingPanel({
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('understanding');
+  const [tab, setTab] = useState<Tab | null>(null);
   const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}`;
   const qk = ['engagement', engagementId, 'business-understanding', workflowInstanceId];
   const summary = useQuery({
@@ -118,6 +119,15 @@ export function BusinessUnderstandingPanel({
   if (!s) return <p className="text-sm text-ink-muted">03.2 is unavailable.</p>;
   const outstanding = s.completion.filter((c) => !c.met).length;
 
+  const sections: [Tab, string][] = [
+        ['understanding', 'Understanding (03.2.1–6)'],
+        ['dataset', 'Financial dataset'],
+        ['analytics', 'Analytical review'],
+        ['investigations', `Investigations${s.openInvestigations ? ` (${s.openInvestigations})` : ''}`],
+        ['expectations', 'Expectations'],
+        ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
+      ];
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
@@ -144,75 +154,58 @@ export function BusinessUnderstandingPanel({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-line">
-        {(
-          [
-            ['understanding', 'Understanding (03.2.1–6)'],
-            ['dataset', 'Financial dataset'],
-            ['analytics', 'Analytical review'],
-            ['investigations', `Investigations${s.openInvestigations ? ` (${s.openInvestigations})` : ''}`],
-            ['expectations', 'Expectations'],
-            ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={
-              tab === key
-                ? '-mb-px border-b-2 border-primary-600 px-3 py-1.5 text-sm font-medium text-primary-700'
-                : 'px-3 py-1.5 text-sm text-ink-muted hover:text-ink'
-            }
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <SectionLauncher sections={sections} onOpen={setTab} />
 
-      {tab === 'understanding' && (
-        <div className="space-y-2">
-          {UNDERSTANDING_SECTION_DEFS.map((def) => (
-            <SectionCard
-              key={`${def.key}-${s.sections.find((x) => x.key === def.key)!.version}`}
-              base={base}
-              def={def}
-              section={s.sections.find((x) => x.key === def.key)!}
-              industryConsiderations={def.key === 'industry' ? s.industryConsiderations : []}
-              editable={editable}
-              onChanged={refresh}
-            />
-          ))}
-        </div>
-      )}
-      {tab === 'dataset' && (
-        <DatasetSection key={s.dataset.version} base={base} summary={s} editable={editable} onChanged={refresh} />
-      )}
-      {tab === 'analytics' && <AnalyticsSection summary={s} />}
-      {tab === 'investigations' && (
-        <InvestigationsSection
-          engagementId={engagementId}
-          base={base}
-          qk={qk}
-          team={team}
-          signals={signals.data ?? []}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'expectations' && (
-        <ExpectationsSection
-          engagementId={engagementId}
-          base={base}
-          qk={qk}
-          summary={s}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'conclusion' && (
-        <ConclusionSection key={s.record.version} base={base} summary={s} editable={editable} onChanged={refresh} />
-      )}
+      <SectionModal
+        open={tab}
+        sections={sections}
+        context="03.2 Business Understanding & Preliminary Analytics"
+        onClose={() => setTab(null)}
+      >
+        {tab === 'understanding' && (
+          <div className="space-y-2">
+            {UNDERSTANDING_SECTION_DEFS.map((def) => (
+              <SectionCard
+                key={`${def.key}-${s.sections.find((x) => x.key === def.key)!.version}`}
+                base={base}
+                def={def}
+                section={s.sections.find((x) => x.key === def.key)!}
+                industryConsiderations={def.key === 'industry' ? s.industryConsiderations : []}
+                editable={editable}
+                onChanged={refresh}
+              />
+            ))}
+          </div>
+        )}
+        {tab === 'dataset' && (
+          <DatasetSection key={s.dataset.version} base={base} summary={s} editable={editable} onChanged={refresh} />
+        )}
+        {tab === 'analytics' && <AnalyticsSection summary={s} />}
+        {tab === 'investigations' && (
+          <InvestigationsSection
+            engagementId={engagementId}
+            base={base}
+            qk={qk}
+            team={team}
+            signals={signals.data ?? []}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'expectations' && (
+          <ExpectationsSection
+            engagementId={engagementId}
+            base={base}
+            qk={qk}
+            summary={s}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'conclusion' && (
+          <ConclusionSection key={s.record.version} base={base} summary={s} editable={editable} onChanged={refresh} />
+        )}
+      </SectionModal>
     </div>
   );
 }

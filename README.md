@@ -10,6 +10,8 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Change: sub-sections open in pop-ups too.** Inside Planning, each section (03.1 Planning Intelligence, 03.2 Business Understanding, 03.3 Materiality, 03.4 Scope & Approach, 03.5 Audit Areas) now shows its sub-sections as tiles, and each tile opens in its own pop-up on top (for example, 03.1 → Signal register). Framework areas (Phase 02) also open in a pop-up instead of expanding in place. Escape or ✕ closes the top pop-up and returns to the one underneath. The shared tiles and pop-up live in `components/statutory-audit/section-launcher.tsx`.
+
 > **Change: audit-file phases open in a pop-up.** Clicking a phase in the Statutory Audit file (Planning, Risk, PBC, Review, Team, Reassessment, Completion …) now opens it in a large workspace pop-up over the Work tab instead of adding it to the page. Inside Planning, the sub-areas (03.1–03.5 and the rest) are a compact list on the left, and the selected one is worked on to the right, one at a time. Escape closes only the top-most pop-up.
 
 > **Fix: a partner could see other partners' engagements after switching persona.** The browser's data cache survived sign-out, so the next user was briefly shown the previous user's lists (e.g. every engagement, as the Managing Partner sees them). Opening another partner's engagement was correctly refused by the server. The cache is now cleared on every sign-in and sign-out.

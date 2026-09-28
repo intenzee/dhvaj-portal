@@ -36,6 +36,7 @@ import {
   DiscussionSection,
   MattersSection,
 } from './planning-strategy-sections';
+import { SectionLauncher, SectionModal } from './section-launcher';
 
 /**
  * 03.1 Planning Intelligence & Overall Audit Strategy (DHVAJ 03.1) — the
@@ -121,7 +122,7 @@ export function PlanningIntelligencePanel({
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('signals');
+  const [tab, setTab] = useState<Tab | null>(null);
   const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}`;
   const qk = ['engagement', engagementId, 'planning-intelligence', workflowInstanceId];
 
@@ -182,6 +183,17 @@ export function PlanningIntelligencePanel({
   ];
   const outstanding = s.completion.filter((c) => !c.met).length;
 
+  const sections: [Tab, string][] = [
+        ['signals', 'Signal register'],
+        ['changes', 'Significant changes (PI-01)'],
+        ['focus', 'Areas of Focus'],
+        ['considerations', 'Timing & resources'],
+        ['carried', 'Prior year & acceptance'],
+        ['discussion', 'Team discussion'],
+        ['matters', 'Planning matters'],
+        ['strategy', outstanding ? `Overall direction (${outstanding} to do)` : 'Overall direction'],
+      ];
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -233,111 +245,92 @@ export function PlanningIntelligencePanel({
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-line">
-        {(
-          [
-            ['signals', 'Signal register'],
-            ['changes', 'Significant changes (PI-01)'],
-            ['focus', 'Areas of Focus'],
-            ['considerations', 'Timing & resources'],
-            ['carried', 'Prior year & acceptance'],
-            ['discussion', 'Team discussion'],
-            ['matters', 'Planning matters'],
-            ['strategy', outstanding ? `Overall direction (${outstanding} to do)` : 'Overall direction'],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={
-              tab === key
-                ? '-mb-px border-b-2 border-primary-600 px-3 py-1.5 text-sm font-medium text-primary-700'
-                : 'px-3 py-1.5 text-sm text-ink-muted hover:text-ink'
-            }
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <SectionLauncher sections={sections} onOpen={setTab} />
 
-      {tab === 'signals' && (
-        <SignalRegister
-          engagementId={engagementId}
-          base={base}
-          signals={signals.data ?? []}
-          loading={signals.isLoading}
-          team={team}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'changes' && (
-        <ChangesSection base={base} qk={qk} editable={editable} onChanged={refresh} />
-      )}
-      {tab === 'focus' && (
-        <FocusSection
-          engagementId={engagementId}
-          base={base}
-          qk={qk}
-          signals={signals.data ?? []}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'considerations' && (
-        <ConsiderationsSection
-          engagementId={engagementId}
-          base={base}
-          qk={qk}
-          signals={signals.data ?? []}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'carried' && (
-        <CarriedMattersSection
-          engagementId={engagementId}
-          base={base}
-          qk={qk}
-          signals={signals.data ?? []}
-          initialAudit={s.initialAudit}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'discussion' && (
-        <DiscussionSection
-          base={base}
-          qk={qk}
-          team={team}
-          signals={signals.data ?? []}
-          focus={focusAreas.data ?? []}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'matters' && (
-        <MattersSection
-          engagementId={engagementId}
-          base={base}
-          qk={qk}
-          team={team}
-          signals={signals.data ?? []}
-          focus={focusAreas.data ?? []}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'strategy' && (
-        <StrategySection
-          key={s.record.version}
-          base={base}
-          summary={s}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
+      <SectionModal
+        open={tab}
+        sections={sections}
+        context="03.1 Planning Intelligence & Overall Audit Strategy"
+        onClose={() => setTab(null)}
+      >
+        {tab === 'signals' && (
+          <SignalRegister
+            engagementId={engagementId}
+            base={base}
+            signals={signals.data ?? []}
+            loading={signals.isLoading}
+            team={team}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'changes' && (
+          <ChangesSection base={base} qk={qk} editable={editable} onChanged={refresh} />
+        )}
+        {tab === 'focus' && (
+          <FocusSection
+            engagementId={engagementId}
+            base={base}
+            qk={qk}
+            signals={signals.data ?? []}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'considerations' && (
+          <ConsiderationsSection
+            engagementId={engagementId}
+            base={base}
+            qk={qk}
+            signals={signals.data ?? []}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'carried' && (
+          <CarriedMattersSection
+            engagementId={engagementId}
+            base={base}
+            qk={qk}
+            signals={signals.data ?? []}
+            initialAudit={s.initialAudit}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'discussion' && (
+          <DiscussionSection
+            base={base}
+            qk={qk}
+            team={team}
+            signals={signals.data ?? []}
+            focus={focusAreas.data ?? []}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'matters' && (
+          <MattersSection
+            engagementId={engagementId}
+            base={base}
+            qk={qk}
+            team={team}
+            signals={signals.data ?? []}
+            focus={focusAreas.data ?? []}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'strategy' && (
+          <StrategySection
+            key={s.record.version}
+            base={base}
+            summary={s}
+            editable={editable}
+            onChanged={refresh}
+          />
+        )}
+      </SectionModal>
     </div>
   );
 }

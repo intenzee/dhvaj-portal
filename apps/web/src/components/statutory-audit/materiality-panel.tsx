@@ -45,6 +45,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
+import { SectionLauncher, SectionModal } from './section-launcher';
 
 /**
  * 03.3 Materiality (DHVAJ 03.3). Not a percentage calculator: the portal shows
@@ -107,7 +108,7 @@ export function MaterialityPanel({
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('context');
+  const [tab, setTab] = useState<Tab | null>(null);
   const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}`;
   const qk = ['engagement', engagementId, 'materiality', workflowInstanceId];
   const summary = useQuery({
@@ -152,6 +153,19 @@ export function MaterialityPanel({
   const outstanding = s.completion.filter((c) => !c.met).length;
   const k = `${d.id ?? 'new'}-${d.version}`;
   const common = { s, canEdit, save, pending: update.isPending };
+
+  const sections: [Tab, string][] = [
+        ['context', 'Context'],
+        ['benchmarks', 'Benchmarks'],
+        ['overall', 'Overall (OM)'],
+        ['performance', 'Performance (PM)'],
+        ['specific', 'Specific'],
+        ['trivial', 'Clearly trivial'],
+        ['qualitative', 'Qualitative'],
+        ['sensitivity', 'Sensitivity'],
+        ['revision', d.versionNo > 1 ? `Revision (${d.versionLabel})` : 'Revision & history'],
+        ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
+      ];
 
   return (
     <div className="space-y-3">
@@ -219,65 +233,44 @@ export function MaterialityPanel({
         </Card>
       )}
 
-      <div className="flex flex-wrap gap-1 border-b border-line">
-        {(
-          [
-            ['context', 'Context'],
-            ['benchmarks', 'Benchmarks'],
-            ['overall', 'Overall (OM)'],
-            ['performance', 'Performance (PM)'],
-            ['specific', 'Specific'],
-            ['trivial', 'Clearly trivial'],
-            ['qualitative', 'Qualitative'],
-            ['sensitivity', 'Sensitivity'],
-            ['revision', d.versionNo > 1 ? `Revision (${d.versionLabel})` : 'Revision & history'],
-            ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={
-              tab === key
-                ? '-mb-px border-b-2 border-primary-600 px-3 py-1.5 text-sm font-medium text-primary-700'
-                : 'px-3 py-1.5 text-sm text-ink-muted hover:text-ink'
-            }
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <SectionLauncher sections={sections} onOpen={setTab} />
 
-      {tab === 'context' && <ContextTab key={k} {...common} />}
-      {tab === 'benchmarks' && <BenchmarksTab key={k} {...common} base={base} onChanged={refresh} />}
-      {tab === 'overall' && <OverallTab key={k} {...common} />}
-      {tab === 'performance' && <PerformanceTab key={k} {...common} />}
-      {tab === 'specific' && <SpecificTab key={k} {...common} base={base} onChanged={refresh} />}
-      {tab === 'trivial' && <TrivialTab key={k} {...common} />}
-      {tab === 'qualitative' && (
-        <QualitativeTab
-          key={k}
-          {...common}
-          base={base}
-          signals={signals.data ?? []}
-          focus={focus.data ?? []}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'sensitivity' && <SensitivityTab key={k} {...common} />}
-      {tab === 'revision' && (
-        <RevisionTab
-          key={k}
-          {...common}
-          editable={canRevise}
-          engagementId={engagementId}
-          base={base}
-          team={team}
-          onChanged={refresh}
-        />
-      )}
-      {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
+      <SectionModal
+        open={tab}
+        sections={sections}
+        context="03.3 Materiality"
+        onClose={() => setTab(null)}
+      >
+        {tab === 'context' && <ContextTab key={k} {...common} />}
+        {tab === 'benchmarks' && <BenchmarksTab key={k} {...common} base={base} onChanged={refresh} />}
+        {tab === 'overall' && <OverallTab key={k} {...common} />}
+        {tab === 'performance' && <PerformanceTab key={k} {...common} />}
+        {tab === 'specific' && <SpecificTab key={k} {...common} base={base} onChanged={refresh} />}
+        {tab === 'trivial' && <TrivialTab key={k} {...common} />}
+        {tab === 'qualitative' && (
+          <QualitativeTab
+            key={k}
+            {...common}
+            base={base}
+            signals={signals.data ?? []}
+            focus={focus.data ?? []}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'sensitivity' && <SensitivityTab key={k} {...common} />}
+        {tab === 'revision' && (
+          <RevisionTab
+            key={k}
+            {...common}
+            editable={canRevise}
+            engagementId={engagementId}
+            base={base}
+            team={team}
+            onChanged={refresh}
+          />
+        )}
+        {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
+      </SectionModal>
     </div>
   );
 }

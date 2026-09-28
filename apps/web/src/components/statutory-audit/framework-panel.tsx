@@ -16,6 +16,7 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Textarea } from '@/components/form';
+import { Modal } from '@/components/modal';
 
 /**
  * Framework (Phase 02) screen (Audit Spec §18–§20): the applicability/assessment
@@ -213,7 +214,7 @@ function FrameworkAreaCard({
     <Card className="p-4">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(true)}
         className="flex w-full items-center justify-between gap-3 text-left"
       >
         <span className="flex items-center gap-2.5">
@@ -225,8 +226,15 @@ function FrameworkAreaCard({
         <Badge tone={STATE_TONE[assessment.state]}>{STATE_LABEL[assessment.state]}</Badge>
       </button>
 
-      {open && (
-        <div className="mt-3 space-y-3 border-t border-line pt-3">
+      {/* The area's work (conclusion + evidence) opens in a pop-up. */}
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={assessment.title}
+        description={`Framework · ${STATE_LABEL[assessment.state]}`}
+        size="lg"
+      >
+        <div className="space-y-3">
           {/* System assessment (advisory) */}
           {assessment.systemBasis && (
             <p className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-ink-muted">
@@ -328,7 +336,7 @@ function FrameworkAreaCard({
             )}
           </div>
         </div>
-      )}
+      </Modal>
     </Card>
   );
 }

@@ -98,6 +98,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
+import { SectionLauncher, SectionModal } from './section-launcher';
 
 /**
  * 03.4 Audit Scope & Approach (DHVAJ 03.4). "This is the population you are
@@ -156,7 +157,7 @@ export function ScopeApproachPanel({
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('intelligence');
+  const [tab, setTab] = useState<Tab | null>(null);
   const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}`;
   const qk = ['engagement', engagementId, 'scope-approach', workflowInstanceId];
   const summary = useQuery({
@@ -198,6 +199,19 @@ export function ScopeApproachPanel({
   const common: TabProps = { s, canEdit, save, post, pending: mutation.isPending };
   const sig = signals.data ?? [];
   const foc = focus.data ?? [];
+
+  const sections: [Tab, string][] = [
+        ['intelligence', 'Scope intelligence'],
+        ['population', `Population (${s.units.length})`],
+        ['approach', 'Approach & controls'],
+        ['evidence', 'Evidence'],
+        ['special', 'Special considerations'],
+        ['dependencies', 'Dependencies & limitations'],
+        ['map', 'Approach map'],
+        ['partner', 'Partner view'],
+        ['revision', r.versionNo > 1 ? `Revision (${r.versionLabel})` : 'Revision & history'],
+        ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
+      ];
 
   return (
     <div className="space-y-3">
@@ -258,46 +272,25 @@ export function ScopeApproachPanel({
         </Card>
       )}
 
-      <div className="flex flex-wrap gap-1 border-b border-line">
-        {(
-          [
-            ['intelligence', 'Scope intelligence'],
-            ['population', `Population (${s.units.length})`],
-            ['approach', 'Approach & controls'],
-            ['evidence', 'Evidence'],
-            ['special', 'Special considerations'],
-            ['dependencies', 'Dependencies & limitations'],
-            ['map', 'Approach map'],
-            ['partner', 'Partner view'],
-            ['revision', r.versionNo > 1 ? `Revision (${r.versionLabel})` : 'Revision & history'],
-            ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
-          ] as [Tab, string][]
-        ).map(([key, text]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={
-              tab === key
-                ? '-mb-px border-b-2 border-primary-600 px-3 py-1.5 text-sm font-medium text-primary-700'
-                : 'px-3 py-1.5 text-sm text-ink-muted hover:text-ink'
-            }
-          >
-            {text}
-          </button>
-        ))}
-      </div>
+      <SectionLauncher sections={sections} onOpen={setTab} />
 
-      {tab === 'intelligence' && <IntelligenceTab key={k} {...common} />}
-      {tab === 'population' && <PopulationTab key={k} {...common} signals={sig} focus={foc} />}
-      {tab === 'approach' && <ApproachTab key={k} {...common} />}
-      {tab === 'evidence' && <EvidenceTab key={k} {...common} />}
-      {tab === 'special' && <SpecialTab key={k} {...common} signals={sig} />}
-      {tab === 'dependencies' && <DependenciesTab key={k} {...common} team={team} />}
-      {tab === 'map' && <MapTab key={k} {...common} signals={sig} focus={foc} />}
-      {tab === 'partner' && <PartnerTab key={k} {...common} canAct={canRevise} />}
-      {tab === 'revision' && <RevisionTab key={k} {...common} canRevise={canRevise} />}
-      {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
+      <SectionModal
+        open={tab}
+        sections={sections}
+        context="03.4 Audit Scope & Approach"
+        onClose={() => setTab(null)}
+      >
+        {tab === 'intelligence' && <IntelligenceTab key={k} {...common} />}
+        {tab === 'population' && <PopulationTab key={k} {...common} signals={sig} focus={foc} />}
+        {tab === 'approach' && <ApproachTab key={k} {...common} />}
+        {tab === 'evidence' && <EvidenceTab key={k} {...common} />}
+        {tab === 'special' && <SpecialTab key={k} {...common} signals={sig} />}
+        {tab === 'dependencies' && <DependenciesTab key={k} {...common} team={team} />}
+        {tab === 'map' && <MapTab key={k} {...common} signals={sig} focus={foc} />}
+        {tab === 'partner' && <PartnerTab key={k} {...common} canAct={canRevise} />}
+        {tab === 'revision' && <RevisionTab key={k} {...common} canRevise={canRevise} />}
+        {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
+      </SectionModal>
     </div>
   );
 }

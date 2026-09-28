@@ -48,6 +48,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { Modal } from '@/components/modal';
+import { SectionLauncher, SectionModal } from './section-launcher';
 
 /**
  * 03.5 Audit Areas & Assertions (DHVAJ 03.5 — FROZEN). The complete applicable
@@ -98,7 +99,7 @@ export function AuditAreasPanel({
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('areas');
+  const [tab, setTab] = useState<Tab | null>(null);
   const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/audit-areas`;
   const qk = ['engagement', engagementId, 'audit-areas', workflowInstanceId];
   const summary = useQuery({ queryKey: qk, queryFn: () => apiFetch<AuditAreaReviewSummary>(base) });
@@ -143,6 +144,14 @@ export function AuditAreasPanel({
   const canReopen = canManage && r.status !== 'in_progress';
   const failing = s.validations.filter((v) => !v.met).length;
   const openComments = s.comments.filter((c) => c.status === 'open').length;
+
+  const sections: [Tab, string][] = [
+        ['areas', `Audit Areas (${s.areas.length})`],
+        ['signals', `Signals & specific materiality`],
+        ['matrix', `Matrix (${s.matrix.length})`],
+        ['review', openComments ? `Partner review (${openComments} open)` : 'Partner review'],
+        ['complete', failing ? `Completeness (${failing} to resolve)` : 'Completeness'],
+      ];
 
   return (
     <div className="space-y-3">
@@ -208,36 +217,20 @@ export function AuditAreasPanel({
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-line">
-        {(
-          [
-            ['areas', `Audit Areas (${s.areas.length})`],
-            ['signals', `Signals & specific materiality`],
-            ['matrix', `Matrix (${s.matrix.length})`],
-            ['review', openComments ? `Partner review (${openComments} open)` : 'Partner review'],
-            ['complete', failing ? `Completeness (${failing} to resolve)` : 'Completeness'],
-          ] as [Tab, string][]
-        ).map(([key, text]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={
-              tab === key
-                ? '-mb-px border-b-2 border-primary-600 px-3 py-1.5 text-sm font-medium text-primary-700'
-                : 'px-3 py-1.5 text-sm text-ink-muted hover:text-ink'
-            }
-          >
-            {text}
-          </button>
-        ))}
-      </div>
+      <SectionLauncher sections={sections} onOpen={setTab} />
 
-      {tab === 'areas' && <AreasTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} team={team} />}
-      {tab === 'signals' && <SignalsTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
-      {tab === 'matrix' && <MatrixTab s={s} />}
-      {tab === 'review' && <ReviewTab s={s} canAct={canManage} post={post} pending={mutation.isPending} />}
-      {tab === 'complete' && <CompleteTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
+      <SectionModal
+        open={tab}
+        sections={sections}
+        context="03.5 Audit Areas & Assertions"
+        onClose={() => setTab(null)}
+      >
+        {tab === 'areas' && <AreasTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} team={team} />}
+        {tab === 'signals' && <SignalsTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
+        {tab === 'matrix' && <MatrixTab s={s} />}
+        {tab === 'review' && <ReviewTab s={s} canAct={canManage} post={post} pending={mutation.isPending} />}
+        {tab === 'complete' && <CompleteTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
+      </SectionModal>
     </div>
   );
 }
