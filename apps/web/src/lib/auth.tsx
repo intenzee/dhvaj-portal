@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch, setToken } from './api';
 import { entraSignIn, entraSignOut, isEntraConfigured } from './entra';
 import type { Principal } from './principal';
@@ -27,6 +28,11 @@ async function loadMe(): Promise<Principal> {
 export function AuthProvider({ children }: { children: ReactNode }): JSX.Element {
   const [principal, setPrincipal] = useState<Principal | null>(null);
   const [loading, setLoading] = useState(true);
+  // Every cached query was fetched under the previous identity's row-level
+  // security scope. Drop the whole cache whenever the identity changes, or the
+  // next user briefly sees the previous user's lists (e.g. a partner seeing
+  // the Managing Partner's engagements).
+  const queryClient = useQueryClient();
 
   const refresh = useCallback(async () => {
     try {
@@ -51,21 +57,24 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
       body: { email },
       anonymous: true,
     });
+    queryClient.clear();
     setToken(res.accessToken);
     setPrincipal(await loadMe());
-  }, []);
+  }, [queryClient]);
 
   const loginWithEntra = useCallback(async () => {
     const accessToken = await entraSignIn();
+    queryClient.clear();
     setToken(accessToken);
     setPrincipal(await loadMe());
-  }, []);
+  }, [queryClient]);
 
   const logout = useCallback(() => {
     setToken(null);
     setPrincipal(null);
+    queryClient.clear();
     if (isEntraConfigured) void entraSignOut().catch(() => undefined);
-  }, []);
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider
