@@ -10,6 +10,8 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Change: Review and Team work in pop-ups.** Review notes are now compact rows showing the note, what it's on, who raised it, and level, status and blocking badges. Clicking one opens the full note and response in a pop-up with **Respond**, **Clear** and **Remove**. **Record note** on a review-queue item opens its form in a pop-up. On Team, clicking a person opens their responsibility, hours and assigned areas and procedures in a pop-up. Planned hours can still be edited directly in the table.
+
 > **Change: Risk and PBC work in pop-ups.** The risk register (Phase 04) and the PBC tracker are now compact lists, one row per risk or request with its reference, badges and key details. Clicking a row opens it in a pop-up to read the full detail, edit it, change its status (PBC) or remove it. **Add risk** and **Add request** also open their forms in a pop-up.
 
 > **Change: sub-sections open in pop-ups too.** Inside Planning, each section (03.1 Planning Intelligence, 03.2 Business Understanding, 03.3 Materiality, 03.4 Scope & Approach, 03.5 Audit Areas) now shows its sub-sections as tiles, and each tile opens in its own pop-up on top (for example, 03.1 → Signal register). Framework areas (Phase 02) also open in a pop-up instead of expanding in place. Escape or ✕ closes the top pop-up and returns to the one underneath. The shared tiles and pop-up live in `components/statutory-audit/section-launcher.tsx`.

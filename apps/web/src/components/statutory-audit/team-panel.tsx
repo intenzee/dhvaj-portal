@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import {
   PERMISSION,
   type AuditTeamMember,
@@ -16,13 +16,14 @@ import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Card, Badge, Spinner, EmptyState } from '@/components/ui';
 import { Input } from '@/components/form';
+import { Modal } from '@/components/modal';
 
 /**
  * Team — people + workload + time (Audit Spec §24, §37). One row per person on
  * the audit file: role, work items owned, planned hours (an allocation) and
  * actual hours (aggregated from the time-entry mechanism), plus whether they act
- * as a reviewer. Click a person to see their assigned areas, procedures, reviews
- * and time.
+ * as a reviewer. Click a person to open their assigned areas, procedures,
+ * reviews and time in a pop-up.
  */
 
 const TEAM_QK = (id: string) => ['engagement', id, 'statutory-audit-team'];
@@ -138,15 +139,12 @@ function MemberRow({
       <div className="grid grid-cols-[1.6fr_0.9fr_0.7fr_0.8fr_0.8fr_0.6fr] items-center gap-2 px-4 py-2.5 text-sm">
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen(true)}
           className="flex items-center gap-1.5 text-left text-ink hover:text-primary-700"
+          title="Open this person's work"
         >
-          {open ? (
-            <ChevronDown className="h-4 w-4 shrink-0 text-ink-faint" />
-          ) : (
-            <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" />
-          )}
           <span className="truncate">{member.name}</span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" />
         </button>
         <span className="text-ink-muted">{member.role}</span>
         <span className="text-right tabular-nums text-ink">{member.workItems}</span>
@@ -174,12 +172,16 @@ function MemberRow({
         </span>
       </div>
 
-      {open && (
-        <div className="border-t border-line bg-surface-sunken/20 px-4 py-3">
-          {detail.isLoading && <Spinner label="Loading…" />}
-          {detail.data && <MemberDetail detail={detail.data} />}
-        </div>
-      )}
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={member.name}
+        description={`${member.role} · Team`}
+        size="lg"
+      >
+        {detail.isLoading && <Spinner label="Loading…" />}
+        {detail.data && <MemberDetail detail={detail.data} />}
+      </Modal>
     </li>
   );
 }
