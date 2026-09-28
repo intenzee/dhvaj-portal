@@ -77,6 +77,8 @@ export function PlanningPanel({
     void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'statutory-audit'] });
   };
 
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   const approve = useMutation({
     mutationFn: (workflowInstanceId: string) =>
       apiFetch<StatutoryAuditPlanning>(
@@ -93,6 +95,13 @@ export function PlanningPanel({
   if (query.isLoading) return <Spinner label="Loading planning…" />;
   const planning = query.data?.[0];
   if (!planning) return null;
+
+  // Default to the first sub-area still needing work, so the pop-up opens on
+  // the next thing to do.
+  const selected =
+    planning.items.find((i) => i.id === selectedId) ??
+    planning.items.find((i) => i.state !== 'complete') ??
+    planning.items[0];
 
   const approved = planning.approval != null;
   const ready = planning.frameworkApproved && planning.incompleteCount === 0;
@@ -136,23 +145,81 @@ export function PlanningPanel({
 
       <PublishedMaterialityCard materiality={planning.materiality} />
 
-      {planning.items.map((item) => (
-        <PlanningItemCard
-          key={item.id}
-          engagementId={engagementId}
-          workflowInstanceId={planning.workflowInstanceId}
-          team={team}
-          item={item}
-          editable={editable}
-          canManage={canManage}
-          onChanged={invalidate}
-        />
-      ))}
+      {/* Sub-areas as a compact index; the selected one is worked on beside it,
+          so the planning file never becomes one long scrolling page. */}
+      <div className="grid gap-3 md:grid-cols-[17rem_minmax(0,1fr)]">
+        <Card className="self-start overflow-hidden p-0 md:sticky md:top-0">
+          <ol className="divide-y divide-line" aria-label="Planning sub-areas">
+            {planning.items.map((item) => {
+              const isSelected = item.id === selected?.id;
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(item.id)}
+                    aria-current={isSelected ? 'true' : undefined}
+                    className={`flex w-full flex-col gap-1 px-3.5 py-2.5 text-left transition hover:bg-surface-sunken ${
+                      isSelected
+                        ? 'bg-surface-sunken shadow-[inset_3px_0_0] shadow-primary-600'
+                        : ''
+                    }`}
+                  >
+                    <span className="flex items-start gap-2">
+                      <span className="mt-0.5 font-mono text-[11px] text-ink-faint">
+                        {String(item.sortOrder).padStart(2, '0')}
+                      </span>
+                      <span className="text-sm font-medium leading-snug text-ink">
+                        {planningItemTitle(item)}
+                      </span>
+                    </span>
+                    <span className="pl-6">
+                      <Badge tone={STATE_TONE[item.state]}>{STATE_LABEL[item.state]}</Badge>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </Card>
+
+        {selected && (
+          <PlanningItemWork
+            key={selected.id}
+            engagementId={engagementId}
+            workflowInstanceId={planning.workflowInstanceId}
+            team={team}
+            item={selected}
+            editable={editable}
+            canManage={canManage}
+            onChanged={invalidate}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function PlanningItemCard({
+/** Display title of a planning sub-area (03.1 – 03.5 carry their section numbers). */
+function planningItemTitle(item: PlanningItem): string {
+  switch (item.itemKey) {
+    case INTELLIGENCE_ITEM_KEY:
+      return '03.1 Planning Intelligence & Overall Audit Strategy';
+    case UNDERSTANDING_ITEM_KEY:
+      return '03.2 Business Understanding & Preliminary Analytics';
+    case MATERIALITY_ITEM_KEY:
+      return '03.3 Materiality';
+    case SCOPE_ITEM_KEY:
+      return '03.4 Audit Scope & Approach';
+    case SCOPE_COVERED_ITEM_KEY:
+      return `${item.title} (via 03.4)`;
+    case AREAS_ITEM_KEY:
+      return '03.5 Audit Areas & Assertions';
+    default:
+      return item.title;
+  }
+}
+
+function PlanningItemWork({
   engagementId,
   workflowInstanceId,
   team,
@@ -170,7 +237,6 @@ function PlanningItemCard({
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
-  const [open, setOpen] = useState(false);
   const [narrative, setNarrative] = useState(item.narrative ?? '');
   // 03.1 – 03.5 replace these sub-areas' free-text narrative; their state rolls up.
   const isIntelligence = item.itemKey === INTELLIGENCE_ITEM_KEY;
@@ -196,36 +262,13 @@ function PlanningItemCard({
   });
 
   return (
-    <Card className="p-4">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-3 text-left"
-      >
-        <span className="flex items-center gap-2.5">
-          <span className="font-mono text-xs text-ink-faint">
-            {String(item.sortOrder).padStart(2, '0')}
-          </span>
-          <span className="text-sm font-medium text-ink">
-            {isIntelligence
-              ? '03.1 Planning Intelligence & Overall Audit Strategy'
-              : isUnderstanding
-                ? '03.2 Business Understanding & Preliminary Analytics'
-                : isMateriality
-                  ? '03.3 Materiality'
-                  : isScope
-                    ? '03.4 Audit Scope & Approach'
-                    : isScopeCovered
-                      ? `${item.title} (via 03.4)`
-                      : isAreas
-                        ? '03.5 Audit Areas & Assertions'
-                        : item.title}
-          </span>
-        </span>
+    <Card className="min-w-0 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-ink">{planningItemTitle(item)}</h3>
         <Badge tone={STATE_TONE[item.state]}>{STATE_LABEL[item.state]}</Badge>
-      </button>
+      </div>
 
-      {open && isIntelligence && (
+      {isIntelligence && (
         <div className="mt-3 border-t border-line pt-3">
           <PlanningIntelligencePanel
             engagementId={engagementId}
@@ -237,7 +280,7 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && isUnderstanding && (
+      {isUnderstanding && (
         <div className="mt-3 border-t border-line pt-3">
           <BusinessUnderstandingPanel
             engagementId={engagementId}
@@ -249,7 +292,7 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && isMateriality && (
+      {isMateriality && (
         <div className="mt-3 border-t border-line pt-3">
           <MaterialityPanel
             engagementId={engagementId}
@@ -262,7 +305,7 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && isScope && (
+      {isScope && (
         <div className="mt-3 border-t border-line pt-3">
           <ScopeApproachPanel
             engagementId={engagementId}
@@ -275,7 +318,7 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && isAreas && (
+      {isAreas && (
         <div className="mt-3 border-t border-line pt-3">
           <AuditAreasPanel
             engagementId={engagementId}
@@ -288,45 +331,62 @@ function PlanningItemCard({
         </div>
       )}
 
-      {open && isScopeCovered && (
+      {isScopeCovered && (
         <p className="mt-3 border-t border-line pt-3 text-sm text-ink-muted">
-          The overall audit plan (strategic scope, approach, timing pattern and evidence strategy) is recorded in
-          03.4 Audit Scope &amp; Approach — this row follows its status.
+          The overall audit plan (strategic scope, approach, timing pattern and evidence strategy)
+          is recorded in 03.4 Audit Scope &amp; Approach — this row follows its status.
         </p>
       )}
 
-      {open && !isIntelligence && !isUnderstanding && !isMateriality && !isScope && !isScopeCovered && !isAreas && (
-        <div className="mt-3 space-y-3 border-t border-line pt-3">
-          {editable ? (
-            <>
-              <Textarea
-                rows={3}
-                placeholder="Planning narrative for this sub-area…"
-                value={narrative}
-                onChange={(e) => setNarrative(e.target.value)}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={() => save.mutate('in_progress')} disabled={save.isPending}>
-                  Save · In progress
-                </Button>
-                <Button variant="secondary" onClick={() => save.mutate('complete')} disabled={save.isPending}>
-                  Save · Complete
-                </Button>
-                <Button variant="secondary" onClick={() => save.mutate('needs_attention')} disabled={save.isPending}>
-                  Needs attention
-                </Button>
-              </div>
-            </>
-          ) : (
-            <p className="whitespace-pre-wrap text-sm text-ink-muted">
-              {item.narrative || <span className="text-ink-faint">No narrative recorded.</span>}
-            </p>
-          )}
-          {item.updatedByName && (
-            <p className="text-[11px] text-ink-faint">Last updated by {item.updatedByName}</p>
-          )}
-        </div>
-      )}
+      {!isIntelligence &&
+        !isUnderstanding &&
+        !isMateriality &&
+        !isScope &&
+        !isScopeCovered &&
+        !isAreas && (
+          <div className="mt-3 space-y-3 border-t border-line pt-3">
+            {editable ? (
+              <>
+                <Textarea
+                  rows={3}
+                  placeholder="Planning narrative for this sub-area…"
+                  value={narrative}
+                  onChange={(e) => setNarrative(e.target.value)}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => save.mutate('in_progress')}
+                    disabled={save.isPending}
+                  >
+                    Save · In progress
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => save.mutate('complete')}
+                    disabled={save.isPending}
+                  >
+                    Save · Complete
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => save.mutate('needs_attention')}
+                    disabled={save.isPending}
+                  >
+                    Needs attention
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="whitespace-pre-wrap text-sm text-ink-muted">
+                {item.narrative || <span className="text-ink-faint">No narrative recorded.</span>}
+              </p>
+            )}
+            {item.updatedByName && (
+              <p className="text-[11px] text-ink-faint">Last updated by {item.updatedByName}</p>
+            )}
+          </div>
+        )}
     </Card>
   );
 }
@@ -335,7 +395,11 @@ function PlanningItemCard({
  * The published (current-version) materiality, read-only. 03.3 Materiality
  * owns the determination and publishes it here when a version is completed.
  */
-function PublishedMaterialityCard({ materiality }: { materiality: Materiality | null }): JSX.Element {
+function PublishedMaterialityCard({
+  materiality,
+}: {
+  materiality: Materiality | null;
+}): JSX.Element {
   const fmt = (n: number | null) => (n == null ? '—' : `₹${n.toLocaleString('en-IN')}`);
   return (
     <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -345,12 +409,14 @@ function PublishedMaterialityCard({ materiality }: { materiality: Materiality | 
       </span>
       {materiality?.overallMateriality != null ? (
         <span className="text-xs text-ink-muted">
-          OM {fmt(materiality.overallMateriality)} · PM {fmt(materiality.performanceMateriality)} · Clearly
-          trivial {fmt(materiality.clearlyTrivialThreshold)}
+          OM {fmt(materiality.overallMateriality)} · PM {fmt(materiality.performanceMateriality)} ·
+          Clearly trivial {fmt(materiality.clearlyTrivialThreshold)}
           {materiality.benchmark ? ` · ${materiality.benchmark}` : ''}
         </span>
       ) : (
-        <span className="text-xs text-ink-muted">Not yet determined — complete 03.3 Materiality below.</span>
+        <span className="text-xs text-ink-muted">
+          Not yet determined — complete 03.3 Materiality.
+        </span>
       )}
     </Card>
   );

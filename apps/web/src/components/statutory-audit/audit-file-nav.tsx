@@ -24,20 +24,18 @@ import { Card } from '@/components/ui';
  * engagement carries no statutory-audit service, so non-audit engagements are
  * unaffected.
  *
- * Selecting a phase is wired in later SA phases (Framework, Planning, …); for now
- * this establishes the file skeleton and communicates stage at a glance.
+ * Selecting a phase opens its work in a workspace pop-up (see the engagement
+ * page), so the file tree stays a compact index of the audit.
  */
 
-const STATE_META: Record<
-  AuditPhaseState,
-  { icon: LucideIcon; className: string; label: string }
-> = {
-  complete: { icon: CheckCircle2, className: 'text-emerald-600', label: 'Complete' },
-  in_progress: { icon: CircleDot, className: 'text-primary-600', label: 'In Progress' },
-  not_started: { icon: CircleDashed, className: 'text-ink-faint', label: 'Not Started' },
-  needs_attention: { icon: AlertTriangle, className: 'text-amber-600', label: 'Needs Attention' },
-  locked: { icon: Lock, className: 'text-ink-faint/70', label: 'Locked' },
-};
+const STATE_META: Record<AuditPhaseState, { icon: LucideIcon; className: string; label: string }> =
+  {
+    complete: { icon: CheckCircle2, className: 'text-emerald-600', label: 'Complete' },
+    in_progress: { icon: CircleDot, className: 'text-primary-600', label: 'In Progress' },
+    not_started: { icon: CircleDashed, className: 'text-ink-faint', label: 'Not Started' },
+    needs_attention: { icon: AlertTriangle, className: 'text-amber-600', label: 'Needs Attention' },
+    locked: { icon: Lock, className: 'text-ink-faint/70', label: 'Locked' },
+  };
 
 /** Distinct legend entries in professional-file order. */
 const LEGEND: AuditPhaseState[] = [
@@ -55,11 +53,12 @@ export function AuditFileNav({
 }: {
   engagementId: string;
   selectedPhaseKey?: string;
-  onSelectPhase?: (phaseKey: string) => void;
+  onSelectPhase?: (phaseKey: string, title?: string) => void;
 }): JSX.Element | null {
   const query = useQuery({
     queryKey: ['engagement', engagementId, 'statutory-audit'],
-    queryFn: () => apiFetch<StatutoryAuditWorkflow[]>(`/engagements/${engagementId}/statutory-audit`),
+    queryFn: () =>
+      apiFetch<StatutoryAuditWorkflow[]>(`/engagements/${engagementId}/statutory-audit`),
   });
 
   // Silent when there is no audit file — this section is additive to Work.
@@ -89,7 +88,9 @@ export function AuditFileNav({
                   <button
                     type="button"
                     disabled={!clickable}
-                    onClick={clickable ? () => onSelectPhase!(phase.phaseKey) : undefined}
+                    onClick={
+                      clickable ? () => onSelectPhase!(phase.phaseKey, phase.title) : undefined
+                    }
                     className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition ${
                       isSelected ? 'bg-surface-sunken' : 'bg-transparent'
                     } ${clickable ? 'hover:bg-surface-sunken' : 'cursor-default'} ${
@@ -101,7 +102,9 @@ export function AuditFileNav({
                       {String(phase.phaseNo).padStart(2, '0')}
                     </span>
                     <Icon className={`h-4 w-4 shrink-0 ${meta.className}`} aria-hidden />
-                    <span className={`flex-1 ${phase.state === 'locked' ? 'text-ink-muted' : 'text-ink'}`}>
+                    <span
+                      className={`flex-1 ${phase.state === 'locked' ? 'text-ink-muted' : 'text-ink'}`}
+                    >
                       {phase.title}
                     </span>
                   </button>
@@ -117,7 +120,7 @@ export function AuditFileNav({
             <div className="border-t border-line">
               <button
                 type="button"
-                onClick={() => onSelectPhase('pbc')}
+                onClick={() => onSelectPhase('pbc', 'PBC — Client Information')}
                 className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
                   selectedPhaseKey === 'pbc' ? 'bg-surface-sunken' : 'bg-transparent'
                 }`}
@@ -137,7 +140,7 @@ export function AuditFileNav({
             <div className="border-t border-line">
               <button
                 type="button"
-                onClick={() => onSelectPhase('review')}
+                onClick={() => onSelectPhase('review', 'Review')}
                 className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
                   selectedPhaseKey === 'review' ? 'bg-surface-sunken' : 'bg-transparent'
                 }`}
@@ -149,7 +152,7 @@ export function AuditFileNav({
               </button>
               <button
                 type="button"
-                onClick={() => onSelectPhase('team')}
+                onClick={() => onSelectPhase('team', 'Team')}
                 className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
                   selectedPhaseKey === 'team' ? 'bg-surface-sunken' : 'bg-transparent'
                 }`}
@@ -161,7 +164,7 @@ export function AuditFileNav({
               </button>
               <button
                 type="button"
-                onClick={() => onSelectPhase('reassessment')}
+                onClick={() => onSelectPhase('reassessment', 'Reassessment')}
                 className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
                   selectedPhaseKey === 'reassessment' ? 'bg-surface-sunken' : 'bg-transparent'
                 }`}

@@ -10,6 +10,10 @@ engagements with accountable Engagement Partners, review & sign-off, compliance,
 tasks, client dependencies, documents, notifications, reporting and an immutable
 audit trail.
 
+> **Change: audit-file phases open in a pop-up.** Clicking a phase in the Statutory Audit file (Planning, Risk, PBC, Review, Team, Reassessment, Completion …) now opens it in a large workspace pop-up over the Work tab instead of adding it to the page. Inside Planning, the sub-areas (03.1–03.5 and the rest) are a compact list on the left, and the selected one is worked on to the right, one at a time. Escape closes only the top-most pop-up.
+
+> **Fix: a partner could see other partners' engagements after switching persona.** The browser's data cache survived sign-out, so the next user was briefly shown the previous user's lists (e.g. every engagement, as the Managing Partner sees them). Opening another partner's engagement was correctly refused by the server. The cache is now cleared on every sign-in and sign-out.
+
 > **New: always-on hosting on Vercel.** The API now also runs as a Vercel serverless function (`apps/api/vercel.json`, `src/serverless.ts`). Migrations and seeding run at build time, and a daily Vercel Cron job calls `GET /api/v1/internal/cron` (guarded by `CRON_SECRET`) in place of the in-process scheduler. The web app deploys as a standard Next.js project. See [DEPLOY-VERCEL.md](DEPLOY-VERCEL.md). Render and Docker deploys are unchanged.
 
 > **Fix: deployed demo — partners saw no engagements.**

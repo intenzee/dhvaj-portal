@@ -43,6 +43,7 @@ import { DocumentsSection } from '@/components/actions/documents-section';
 import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
 import { ClientUploadLinkModal } from '@/components/actions/client-upload-link-modal';
 import { CompletionBar } from '@/components/completion';
+import { Modal } from '@/components/modal';
 import { AuditFileNav } from '@/components/statutory-audit/audit-file-nav';
 import { FrameworkPanel } from '@/components/statutory-audit/framework-panel';
 import { WorkAreasPanel } from '@/components/statutory-audit/work-areas-panel';
@@ -78,16 +79,56 @@ type TabKey =
 
 /** Each tab with one plain line on what it's for — shown under the tab bar. */
 const TABS: { key: TabKey; label: string; hint: string }[] = [
-  { key: 'overview', label: 'Overview', hint: 'Who is responsible, where things stand and the key details.' },
-  { key: 'services', label: 'Services', hint: 'The services in this engagement and the entities they cover.' },
+  {
+    key: 'overview',
+    label: 'Overview',
+    hint: 'Who is responsible, where things stand and the key details.',
+  },
+  {
+    key: 'services',
+    label: 'Services',
+    hint: 'The services in this engagement and the entities they cover.',
+  },
   { key: 'work', label: 'Work', hint: 'Tasks to do, and what we are waiting on from the client.' },
-  { key: 'compliance', label: 'Compliance', hint: 'Returns and filings for this engagement, with their due dates.' },
-  { key: 'documents', label: 'Documents', hint: 'Working papers and client files — upload, open and edit here.' },
+  {
+    key: 'compliance',
+    label: 'Compliance',
+    hint: 'Returns and filings for this engagement, with their due dates.',
+  },
+  {
+    key: 'documents',
+    label: 'Documents',
+    hint: 'Working papers and client files — upload, open and edit here.',
+  },
   { key: 'team', label: 'Team', hint: 'Who is on this engagement and in what role.' },
-  { key: 'time', label: 'Time', hint: 'Log your hours, or start a timer, against this engagement.' },
-  { key: 'activity', label: 'Activity', hint: 'History of status changes — who did what, and when.' },
+  {
+    key: 'time',
+    label: 'Time',
+    hint: 'Log your hours, or start a timer, against this engagement.',
+  },
+  {
+    key: 'activity',
+    label: 'Activity',
+    hint: 'History of status changes — who did what, and when.',
+  },
   { key: 'invoices', label: 'Invoices', hint: 'Raise invoices and record payments received.' },
   { key: 'notes', label: 'Notes', hint: 'Internal notes for the team.' },
+];
+
+/** Audit-file phases (and cross-cutting trackers) that open a workspace pop-up. */
+const AUDIT_PHASE_PANELS = [
+  'framework',
+  'planning',
+  'risk',
+  'audit_areas',
+  'pbc',
+  'review',
+  'team',
+  'reassessment',
+  'completion',
+  'reporting',
+  'sign_off',
+  'archiving',
 ];
 
 interface ActivityRecord {
@@ -107,8 +148,8 @@ export default function EngagementDetailPage(): JSX.Element {
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
   const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
   const [linkForDep, setLinkForDep] = useState<MyClientDependency | null>(null);
-  // Selected phase in the Work-tab audit-file tree (null ⇒ default tasks view).
-  const [auditPhase, setAuditPhase] = useState<string | null>(null);
+  // Audit-file phase open in the workspace pop-up (null ⇒ none open).
+  const [auditPhase, setAuditPhase] = useState<{ key: string; title: string } | null>(null);
 
   const eng = useQuery({
     queryKey: ['engagement', id],
@@ -214,7 +255,10 @@ export default function EngagementDetailPage(): JSX.Element {
               <Fact label="Engagement Partner" value={e.engagementPartnerName} />
               <Fact label="Manager" value={e.engagementManagerName} />
               <Fact label="Review model" value={e.effectiveReviewModel.name} />
-              <Fact label="Signed off" value={e.isSignedOff ? (e.signedOffByName ?? 'Yes') : 'No'} />
+              <Fact
+                label="Signed off"
+                value={e.isSignedOff ? (e.signedOffByName ?? 'Yes') : 'No'}
+              />
               <Fact label="Open review points" value={String(e.openReviewPointCount)} />
               <Fact label="Open tasks" value={String(e.openTaskCount)} />
             </CardBody>
@@ -268,37 +312,34 @@ export default function EngagementDetailPage(): JSX.Element {
               engagement carries a statutory-audit service. */}
           <AuditFileNav
             engagementId={e.id}
-            selectedPhaseKey={auditPhase ?? undefined}
-            onSelectPhase={(k) => setAuditPhase((cur) => (cur === k ? null : k))}
+            selectedPhaseKey={auditPhase?.key}
+            onSelectPhase={(key, title) => setAuditPhase({ key, title: title ?? 'Audit file' })}
           />
-          {auditPhase === 'framework' && <FrameworkPanel engagementId={e.id} />}
-          {auditPhase === 'planning' && (
-            <PlanningPanel engagementId={e.id} team={planningTeam(e)} />
-          )}
-          {auditPhase === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
-          {auditPhase === 'audit_areas' && <WorkAreasPanel engagementId={e.id} team={e.team} />}
-          {auditPhase === 'pbc' && <PbcPanel engagementId={e.id} />}
-          {auditPhase === 'review' && <ReviewPanel engagementId={e.id} />}
-          {auditPhase === 'team' && <TeamPanel engagementId={e.id} />}
-          {auditPhase === 'reassessment' && <ReassessmentPanel engagementId={e.id} />}
-          {['completion', 'reporting', 'sign_off', 'archiving'].includes(auditPhase ?? '') && (
-            <CompletionPanel engagementId={e.id} />
-          )}
-          {![
-            'framework',
-            'planning',
-            'risk',
-            'audit_areas',
-            'pbc',
-            'review',
-            'team',
-            'reassessment',
-            'completion',
-            'reporting',
-            'sign_off',
-            'archiving',
-          ].includes(auditPhase ?? '') && (
-          <>
+          {/* The selected phase opens as a workspace pop-up over the Work tab,
+              so its work is done in one focused surface, not a long page. */}
+          <Modal
+            open={auditPhase !== null && AUDIT_PHASE_PANELS.includes(auditPhase.key)}
+            onClose={() => setAuditPhase(null)}
+            title={auditPhase?.title ?? ''}
+            description="Statutory Audit file"
+            size="workspace"
+          >
+            {auditPhase?.key === 'framework' && <FrameworkPanel engagementId={e.id} />}
+            {auditPhase?.key === 'planning' && (
+              <PlanningPanel engagementId={e.id} team={planningTeam(e)} />
+            )}
+            {auditPhase?.key === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
+            {auditPhase?.key === 'audit_areas' && (
+              <WorkAreasPanel engagementId={e.id} team={e.team} />
+            )}
+            {auditPhase?.key === 'pbc' && <PbcPanel engagementId={e.id} />}
+            {auditPhase?.key === 'review' && <ReviewPanel engagementId={e.id} />}
+            {auditPhase?.key === 'team' && <TeamPanel engagementId={e.id} />}
+            {auditPhase?.key === 'reassessment' && <ReassessmentPanel engagementId={e.id} />}
+            {['completion', 'reporting', 'sign_off', 'archiving'].includes(
+              auditPhase?.key ?? '',
+            ) && <CompletionPanel engagementId={e.id} />}
+          </Modal>
           <section>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-3">
@@ -428,8 +469,6 @@ export default function EngagementDetailPage(): JSX.Element {
               )}
             </Card>
           </section>
-          </>
-          )}
         </div>
       )}
 
