@@ -18,6 +18,7 @@ import { useToast } from '@/lib/toast';
 import { humanize, formatDate } from '@/lib/format';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { Modal } from '@/components/modal';
 
 /**
  * PBC — Master Client Information Tracker (Audit Spec §16). One master list per
@@ -25,6 +26,9 @@ import { Field, Input, Select, Textarea } from '@/components/form';
  * date, professional status and an optional linked work area. The tracker is
  * populated once Planning is approved (§7, workflow step 13). A received file is
  * surfaced in the linked area by reference — it is never re-uploaded (§16).
+ *
+ * The tracker is a compact list; a request's detail, status, edit form and
+ * removal open in a pop-up, as does adding a request.
  */
 
 const STATUS_TONE: Record<PbcStatus, string> = {
@@ -163,24 +167,31 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
           </p>
         </div>
         {canManage && (
-          <Button onClick={() => setAdding((a) => !a)}>
+          <Button onClick={() => setAdding(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
             Add request
           </Button>
         )}
       </Card>
 
-      {adding && canManage && (
+      <Modal
+        open={adding && canManage}
+        onClose={() => setAdding(false)}
+        title="Add PBC request"
+        description="PBC — Client Information Tracker"
+        size="lg"
+      >
         <PbcForm
+          plain
           areas={areas}
           submitLabel="Add request"
           pending={create.isPending}
           onCancel={() => setAdding(false)}
           onSubmit={(d) => create.mutate(d)}
         />
-      )}
+      </Modal>
 
-      {tracker.items.length === 0 && !adding && (
+      {tracker.items.length === 0 && (
         <Card className="p-5">
           <EmptyState>
             No client information requested yet. Add the requirements the client must supply.
@@ -188,23 +199,29 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
         </Card>
       )}
 
-      {tracker.items.map((item) => (
-        <PbcCard
-          key={item.id}
-          engagementId={engagementId}
-          item={item}
-          areas={areas}
-          canManage={canManage}
-          onChanged={invalidate}
-        />
-      ))}
+      {tracker.items.length > 0 && (
+        <Card className="overflow-hidden p-0">
+          <ul className="divide-y divide-line">
+            {tracker.items.map((item) => (
+              <PbcRow
+                key={item.id}
+                engagementId={engagementId}
+                item={item}
+                areas={areas}
+                canManage={canManage}
+                onChanged={invalidate}
+              />
+            ))}
+          </ul>
+        </Card>
+      )}
     </div>
   );
 }
 
 type AreaOption = { id: string; title: string };
 
-function PbcCard({
+function PbcRow({
   engagementId,
   item,
   areas,
@@ -218,7 +235,12 @@ function PbcCard({
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
+  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const close = () => {
+    setOpen(false);
+    setEditing(false);
+  };
 
   const update = useMutation({
     mutationFn: (draft: PbcDraft) =>
@@ -255,92 +277,123 @@ function PbcCard({
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not remove request.'),
   });
 
-  if (editing) {
-    return (
-      <PbcForm
-        areas={areas}
-        initial={{
-          requirement: item.requirement,
-          clientOwner: item.clientOwner ?? '',
-          workAreaId: item.workAreaId ?? '',
-          status: item.status,
-          rejectionReason: item.rejectionReason ?? '',
-          requestedDate: item.requestedDate ?? '',
-          dueDate: item.dueDate ?? '',
-          receivedDate: item.receivedDate ?? '',
-          note: item.note ?? '',
-        }}
-        submitLabel="Save"
-        pending={update.isPending}
-        onCancel={() => setEditing(false)}
-        onSubmit={(d) => update.mutate(d)}
-      />
-    );
-  }
-
   return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-ink-faint">{item.pbcRef}</span>
-            <Badge tone={STATUS_TONE[item.status]}>{humanize(item.status)}</Badge>
-            {item.isOverdue && (
-              <Badge tone="danger">
-                <AlertTriangle className="mr-1 h-3 w-3" />
-                Overdue
-              </Badge>
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-surface-sunken"
+      >
+        <span className="w-16 shrink-0 font-mono text-xs text-ink-faint">{item.pbcRef}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-ink">{item.requirement}</span>
+          <span className="block truncate text-[11px] text-ink-muted">
+            {[
+              item.clientOwner,
+              item.workAreaTitle,
+              item.dueDate && `Due ${formatDate(item.dueDate)}`,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </span>
+        </span>
+        <span className="flex shrink-0 flex-wrap justify-end gap-1.5">
+          {item.isOverdue && <Badge tone="danger">Overdue</Badge>}
+          <Badge tone={STATUS_TONE[item.status]}>{humanize(item.status)}</Badge>
+        </span>
+      </button>
+
+      <Modal
+        open={open}
+        onClose={close}
+        title={`${item.pbcRef} · ${editing ? 'Edit request' : 'PBC request'}`}
+        description="PBC — Client Information Tracker"
+        size="lg"
+      >
+        {editing ? (
+          <PbcForm
+            plain
+            areas={areas}
+            initial={{
+              requirement: item.requirement,
+              clientOwner: item.clientOwner ?? '',
+              workAreaId: item.workAreaId ?? '',
+              status: item.status,
+              rejectionReason: item.rejectionReason ?? '',
+              requestedDate: item.requestedDate ?? '',
+              dueDate: item.dueDate ?? '',
+              receivedDate: item.receivedDate ?? '',
+              note: item.note ?? '',
+            }}
+            submitLabel="Save"
+            pending={update.isPending}
+            onCancel={() => setEditing(false)}
+            onSubmit={(d) => update.mutate(d)}
+          />
+        ) : (
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-xs text-ink-faint">{item.pbcRef}</span>
+                <Badge tone={STATUS_TONE[item.status]}>{humanize(item.status)}</Badge>
+                {item.isOverdue && (
+                  <Badge tone="danger">
+                    <AlertTriangle className="mr-1 h-3 w-3" />
+                    Overdue
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-1.5 text-sm text-ink">{item.requirement}</p>
+              <p className="mt-1 text-xs text-ink-muted">
+                {item.clientOwner && `Owner: ${item.clientOwner}`}
+                {item.workAreaTitle && ` · Linked: ${item.workAreaTitle}`}
+                {item.dueDate && ` · Due ${formatDate(item.dueDate)}`}
+                {item.receivedDate && ` · Received ${formatDate(item.receivedDate)}`}
+              </p>
+              {item.documentTitle && (
+                <p className="mt-1 text-xs text-ink-muted">
+                  <span className="font-semibold text-ink">File:</span> {item.documentTitle}
+                </p>
+              )}
+              {item.status === PBC_STATUS.rejected && item.rejectionReason && (
+                <p className="mt-1 text-xs text-danger-600">
+                  <span className="font-semibold">Rejected:</span> {item.rejectionReason}
+                </p>
+              )}
+              {item.note && <p className="mt-1 text-xs text-ink-muted">{item.note}</p>}
+            </div>
+            {canManage && (
+              <div className="flex shrink-0 items-center gap-2">
+                <Select
+                  value={item.status}
+                  disabled={setStatus.isPending}
+                  onChange={(e) => setStatus.mutate(e.target.value as PbcStatus)}
+                  className="h-8"
+                  title="Change status"
+                >
+                  {Object.values(PBC_STATUS).map((s) => (
+                    <option key={s} value={s}>
+                      {humanize(s)}
+                    </option>
+                  ))}
+                </Select>
+                <Button variant="secondary" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => remove.mutate()}
+                  className="text-ink-faint hover:text-danger-600"
+                  title="Remove request"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             )}
           </div>
-          <p className="mt-1.5 text-sm text-ink">{item.requirement}</p>
-          <p className="mt-1 text-xs text-ink-muted">
-            {item.clientOwner && `Owner: ${item.clientOwner}`}
-            {item.workAreaTitle && ` · Linked: ${item.workAreaTitle}`}
-            {item.dueDate && ` · Due ${formatDate(item.dueDate)}`}
-            {item.receivedDate && ` · Received ${formatDate(item.receivedDate)}`}
-          </p>
-          {item.documentTitle && (
-            <p className="mt-1 text-xs text-ink-muted">
-              <span className="font-semibold text-ink">File:</span> {item.documentTitle}
-            </p>
-          )}
-          {item.status === PBC_STATUS.rejected && item.rejectionReason && (
-            <p className="mt-1 text-xs text-danger-600">
-              <span className="font-semibold">Rejected:</span> {item.rejectionReason}
-            </p>
-          )}
-          {item.note && <p className="mt-1 text-xs text-ink-muted">{item.note}</p>}
-        </div>
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-2">
-            <Select
-              value={item.status}
-              disabled={setStatus.isPending}
-              onChange={(e) => setStatus.mutate(e.target.value as PbcStatus)}
-              className="h-8"
-              title="Change status"
-            >
-              {Object.values(PBC_STATUS).map((s) => (
-                <option key={s} value={s}>
-                  {humanize(s)}
-                </option>
-              ))}
-            </Select>
-            <Button variant="secondary" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-            <button
-              type="button"
-              onClick={() => remove.mutate()}
-              className="text-ink-faint hover:text-danger-600"
-              title="Remove request"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
         )}
-      </div>
-    </Card>
+      </Modal>
+    </li>
   );
 }
 
@@ -351,7 +404,10 @@ function PbcForm({
   pending,
   onSubmit,
   onCancel,
+  plain,
 }: {
+  /** Render without its card (inside a pop-up). */
+  plain?: boolean;
   areas: AreaOption[];
   initial?: PbcDraft;
   submitLabel: string;
@@ -365,9 +421,10 @@ function PbcForm({
 
   const rejectedNeedsReason =
     draft.status === PBC_STATUS.rejected && draft.rejectionReason.trim().length === 0;
+  const Wrapper = plain ? 'div' : Card;
 
   return (
-    <Card className="space-y-3 p-4">
+    <Wrapper className={plain ? 'space-y-3' : 'space-y-3 p-4'}>
       <Field label="Requirement" required>
         <Textarea
           rows={2}
@@ -445,6 +502,6 @@ function PbcForm({
           Cancel
         </Button>
       </div>
-    </Card>
+    </Wrapper>
   );
 }

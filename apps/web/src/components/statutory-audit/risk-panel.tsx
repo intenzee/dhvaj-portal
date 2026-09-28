@@ -24,12 +24,16 @@ import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { Modal } from '@/components/modal';
 
 /**
  * Risk Assessment (Phase 04) screen (Audit Spec §22). The risk register — each
  * risk with its source, FS area, assertion, rating, significant / fraud flags,
  * response, owner, reviewer, status and conclusion. Available once Planning is
  * approved. Risk ↔ procedure two-way navigation is added in SA-5.
+ *
+ * The register is a compact list; a risk's detail, edit form and removal open
+ * in a pop-up, as does adding a risk, so the page never becomes a long stack.
  */
 
 const RATING_TONE: Record<RiskRating, string> = {
@@ -181,44 +185,57 @@ export function RiskPanel({
           </p>
         </div>
         {canManage && (
-          <Button onClick={() => setAdding((a) => !a)}>
+          <Button onClick={() => setAdding(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
             Add risk
           </Button>
         )}
       </Card>
 
-      {adding && canManage && (
+      <Modal
+        open={adding && canManage}
+        onClose={() => setAdding(false)}
+        title="Add risk"
+        description="Risk Assessment · Phase 04"
+        size="lg"
+      >
         <RiskForm
+          plain
           team={team}
           submitLabel="Add risk"
           pending={create.isPending}
           onCancel={() => setAdding(false)}
           onSubmit={(d) => create.mutate(d)}
         />
-      )}
+      </Modal>
 
-      {register.risks.length === 0 && !adding && (
+      {register.risks.length === 0 && (
         <Card className="p-5">
           <EmptyState>No risks recorded yet.</EmptyState>
         </Card>
       )}
 
-      {register.risks.map((risk) => (
-        <RiskCard
-          key={risk.id}
-          engagementId={engagementId}
-          risk={risk}
-          team={team}
-          canManage={canManage}
-          onChanged={invalidate}
-        />
-      ))}
+      {register.risks.length > 0 && (
+        <Card className="overflow-hidden p-0">
+          <ul className="divide-y divide-line">
+            {register.risks.map((risk) => (
+              <RiskRow
+                key={risk.id}
+                engagementId={engagementId}
+                risk={risk}
+                team={team}
+                canManage={canManage}
+                onChanged={invalidate}
+              />
+            ))}
+          </ul>
+        </Card>
+      )}
     </div>
   );
 }
 
-function RiskCard({
+function RiskRow({
   engagementId,
   risk,
   team,
@@ -232,7 +249,12 @@ function RiskCard({
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
+  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const close = () => {
+    setOpen(false);
+    setEditing(false);
+  };
 
   const update = useMutation({
     mutationFn: (draft: RiskDraft) =>
@@ -258,79 +280,108 @@ function RiskCard({
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not remove risk.'),
   });
 
-  if (editing) {
-    return (
-      <RiskForm
-        team={team}
-        initial={{
-          description: risk.description,
-          source: risk.source,
-          fsArea: risk.fsArea ?? '',
-          assertion: risk.assertion ?? '',
-          rating: risk.rating,
-          isSignificant: risk.isSignificant,
-          isFraudRisk: risk.isFraudRisk,
-          response: risk.response ?? '',
-          ownerEmployeeId: risk.ownerEmployeeId ?? '',
-          reviewerEmployeeId: risk.reviewerEmployeeId ?? '',
-          status: risk.status,
-          conclusion: risk.conclusion ?? '',
-        }}
-        submitLabel="Save"
-        pending={update.isPending}
-        onCancel={() => setEditing(false)}
-        onSubmit={(d) => update.mutate(d)}
-      />
-    );
-  }
-
   return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-ink-faint">{risk.riskRef}</span>
-            <Badge tone={RATING_TONE[risk.rating]}>{humanize(risk.rating)}</Badge>
-            <Badge tone={STATUS_TONE[risk.status]}>{humanize(risk.status)}</Badge>
-            {risk.isSignificant && <Badge tone="danger">Significant</Badge>}
-            {risk.isFraudRisk && <Badge tone="danger">Fraud</Badge>}
-          </div>
-          <p className="mt-1.5 text-sm text-ink">{risk.description}</p>
-          <p className="mt-1 text-xs text-ink-muted">
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-surface-sunken"
+      >
+        <span className="w-16 shrink-0 font-mono text-xs text-ink-faint">{risk.riskRef}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-ink">{risk.description}</span>
+          <span className="block truncate text-[11px] text-ink-muted">
             {humanize(risk.source)}
             {risk.fsArea && ` · ${risk.fsArea}`}
-            {risk.assertion && ` · ${humanize(risk.assertion)}`}
-            {risk.ownerName && ` · Owner: ${risk.ownerName}`}
-            {risk.reviewerName && ` · Reviewer: ${risk.reviewerName}`}
-          </p>
-          {risk.response && (
-            <p className="mt-1.5 text-xs text-ink-muted">
-              <span className="font-semibold text-ink">Response:</span> {risk.response}
-            </p>
-          )}
-          {risk.conclusion && (
-            <p className="mt-1 text-xs text-ink-muted">
-              <span className="font-semibold text-ink">Conclusion:</span> {risk.conclusion}
-            </p>
-          )}
-        </div>
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="secondary" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-            <button
-              type="button"
-              onClick={() => remove.mutate()}
-              className="text-ink-faint hover:text-danger-600"
-              title="Remove risk"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            {risk.ownerName && ` · ${risk.ownerName}`}
+          </span>
+        </span>
+        <span className="flex shrink-0 flex-wrap justify-end gap-1.5">
+          {risk.isSignificant && <Badge tone="danger">Significant</Badge>}
+          {risk.isFraudRisk && <Badge tone="danger">Fraud</Badge>}
+          <Badge tone={RATING_TONE[risk.rating]}>{humanize(risk.rating)}</Badge>
+          <Badge tone={STATUS_TONE[risk.status]}>{humanize(risk.status)}</Badge>
+        </span>
+      </button>
+
+      <Modal
+        open={open}
+        onClose={close}
+        title={`${risk.riskRef} · ${editing ? 'Edit risk' : 'Risk'}`}
+        description="Risk Assessment · Phase 04"
+        size="lg"
+      >
+        {editing ? (
+          <RiskForm
+            plain
+            team={team}
+            initial={{
+              description: risk.description,
+              source: risk.source,
+              fsArea: risk.fsArea ?? '',
+              assertion: risk.assertion ?? '',
+              rating: risk.rating,
+              isSignificant: risk.isSignificant,
+              isFraudRisk: risk.isFraudRisk,
+              response: risk.response ?? '',
+              ownerEmployeeId: risk.ownerEmployeeId ?? '',
+              reviewerEmployeeId: risk.reviewerEmployeeId ?? '',
+              status: risk.status,
+              conclusion: risk.conclusion ?? '',
+            }}
+            submitLabel="Save"
+            pending={update.isPending}
+            onCancel={() => setEditing(false)}
+            onSubmit={(d) => update.mutate(d)}
+          />
+        ) : (
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-xs text-ink-faint">{risk.riskRef}</span>
+                <Badge tone={RATING_TONE[risk.rating]}>{humanize(risk.rating)}</Badge>
+                <Badge tone={STATUS_TONE[risk.status]}>{humanize(risk.status)}</Badge>
+                {risk.isSignificant && <Badge tone="danger">Significant</Badge>}
+                {risk.isFraudRisk && <Badge tone="danger">Fraud</Badge>}
+              </div>
+              <p className="mt-1.5 text-sm text-ink">{risk.description}</p>
+              <p className="mt-1 text-xs text-ink-muted">
+                {humanize(risk.source)}
+                {risk.fsArea && ` · ${risk.fsArea}`}
+                {risk.assertion && ` · ${humanize(risk.assertion)}`}
+                {risk.ownerName && ` · Owner: ${risk.ownerName}`}
+                {risk.reviewerName && ` · Reviewer: ${risk.reviewerName}`}
+              </p>
+              {risk.response && (
+                <p className="mt-1.5 text-xs text-ink-muted">
+                  <span className="font-semibold text-ink">Response:</span> {risk.response}
+                </p>
+              )}
+              {risk.conclusion && (
+                <p className="mt-1 text-xs text-ink-muted">
+                  <span className="font-semibold text-ink">Conclusion:</span> {risk.conclusion}
+                </p>
+              )}
+            </div>
+            {canManage && (
+              <div className="flex shrink-0 items-center gap-2">
+                <Button variant="secondary" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => remove.mutate()}
+                  className="text-ink-faint hover:text-danger-600"
+                  title="Remove risk"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
-      </div>
-    </Card>
+      </Modal>
+    </li>
   );
 }
 
@@ -341,7 +392,10 @@ function RiskForm({
   pending,
   onSubmit,
   onCancel,
+  plain,
 }: {
+  /** Render without its card (inside a pop-up). */
+  plain?: boolean;
   team: TeamMember[];
   initial?: RiskDraft;
   submitLabel: string;
@@ -352,9 +406,10 @@ function RiskForm({
   const [draft, setDraft] = useState<RiskDraft>(initial ?? EMPTY_DRAFT);
   const set = <K extends keyof RiskDraft>(k: K, v: RiskDraft[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
+  const Wrapper = plain ? 'div' : Card;
 
   return (
-    <Card className="space-y-3 p-4">
+    <Wrapper className={plain ? 'space-y-3' : 'space-y-3 p-4'}>
       <Field label="Description" required>
         <Textarea
           rows={2}
@@ -439,6 +494,6 @@ function RiskForm({
           Cancel
         </Button>
       </div>
-    </Card>
+    </Wrapper>
   );
 }
