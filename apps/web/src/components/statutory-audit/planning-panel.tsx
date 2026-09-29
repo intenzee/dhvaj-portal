@@ -86,7 +86,7 @@ export function PlanningPanel({
         { method: 'POST', body: {} },
       ),
     onSuccess: () => {
-      toast('Planning approved — Phase 03 complete, Risk unlocked.');
+      toast('Planning approved — Phase 03 complete.');
       invalidate();
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not approve planning.'),

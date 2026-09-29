@@ -83,26 +83,22 @@ export interface AuditPhaseDefinition {
  * The canonical ten audit-file phases, in order (§8). Provisioning seeds exactly
  * these rows; the Work-tab left panel renders them.
  *
- * Initial states follow the DHVAJ Implementation Guide §8.2: Section 01
- * (Acceptance) is a real workflow, so it opens `in_progress`, and Framework is
- * `locked` until the Engagement Partner approves acceptance (which unlocks it).
- * Planning is available-but-not-started, and everything downstream is locked
- * until its predecessor is approved (progressive unlock in later SA phases).
- * Locks are never a permission statement — RLS is (§35). (Shells provisioned
- * before this change keep their seeded states; the gate is backward-compatible
- * because it only blocks a Framework whose phase is still `locked`.)
+ * Initial states: Section 01 (Acceptance) opens `in_progress` and every other
+ * phase opens `not_started`. No phase is locked — the team can open and work
+ * any section at any time. Approvals still record sign-off and move a phase's
+ * state along, but they never gate access. Access is RLS (§35).
  */
 export const AUDIT_PHASES: readonly AuditPhaseDefinition[] = [
   { phaseNo: 1, phaseKey: 'acceptance', title: 'Engagement & Acceptance', initialState: 'in_progress' },
-  { phaseNo: 2, phaseKey: 'framework', title: 'Audit Framework', initialState: 'locked' },
+  { phaseNo: 2, phaseKey: 'framework', title: 'Audit Framework', initialState: 'not_started' },
   { phaseNo: 3, phaseKey: 'planning', title: 'Planning', initialState: 'not_started' },
-  { phaseNo: 4, phaseKey: 'risk', title: 'Risk Assessment', initialState: 'locked' },
-  { phaseNo: 5, phaseKey: 'controls', title: 'Internal Controls / IFC', initialState: 'locked' },
-  { phaseNo: 6, phaseKey: 'audit_areas', title: 'Audit Areas', initialState: 'locked' },
-  { phaseNo: 7, phaseKey: 'completion', title: 'Completion', initialState: 'locked' },
-  { phaseNo: 8, phaseKey: 'reporting', title: 'Reporting', initialState: 'locked' },
-  { phaseNo: 9, phaseKey: 'sign_off', title: 'Partner Sign-off', initialState: 'locked' },
-  { phaseNo: 10, phaseKey: 'archiving', title: 'Archiving', initialState: 'locked' },
+  { phaseNo: 4, phaseKey: 'risk', title: 'Risk Assessment', initialState: 'not_started' },
+  { phaseNo: 5, phaseKey: 'controls', title: 'Internal Controls / IFC', initialState: 'not_started' },
+  { phaseNo: 6, phaseKey: 'audit_areas', title: 'Audit Areas', initialState: 'not_started' },
+  { phaseNo: 7, phaseKey: 'completion', title: 'Completion', initialState: 'not_started' },
+  { phaseNo: 8, phaseKey: 'reporting', title: 'Reporting', initialState: 'not_started' },
+  { phaseNo: 9, phaseKey: 'sign_off', title: 'Partner Sign-off', initialState: 'not_started' },
+  { phaseNo: 10, phaseKey: 'archiving', title: 'Archiving', initialState: 'not_started' },
 ] as const;
 
 /** One phase of a live audit-file shell. */

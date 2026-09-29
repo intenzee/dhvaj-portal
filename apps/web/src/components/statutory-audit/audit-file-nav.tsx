@@ -7,7 +7,6 @@ import {
   CircleDot,
   ClipboardCheck,
   ClipboardList,
-  Lock,
   Users,
   AlertTriangle,
   RefreshCw,
@@ -34,7 +33,8 @@ const STATE_META: Record<AuditPhaseState, { icon: LucideIcon; className: string;
     in_progress: { icon: CircleDot, className: 'text-primary-600', label: 'In Progress' },
     not_started: { icon: CircleDashed, className: 'text-ink-faint', label: 'Not Started' },
     needs_attention: { icon: AlertTriangle, className: 'text-amber-600', label: 'Needs Attention' },
-    locked: { icon: Lock, className: 'text-ink-faint/70', label: 'Locked' },
+    // Nothing is locked any more; a legacy `locked` row reads as not started.
+    locked: { icon: CircleDashed, className: 'text-ink-faint', label: 'Not Started' },
   };
 
 /** Distinct legend entries in professional-file order. */
@@ -43,7 +43,6 @@ const LEGEND: AuditPhaseState[] = [
   'in_progress',
   'not_started',
   'needs_attention',
-  'locked',
 ];
 
 export function AuditFileNav({
@@ -82,7 +81,7 @@ export function AuditFileNav({
               const meta = STATE_META[phase.state];
               const Icon = meta.icon;
               const isSelected = selectedPhaseKey === phase.phaseKey;
-              const clickable = Boolean(onSelectPhase) && phase.state !== 'locked';
+              const clickable = Boolean(onSelectPhase);
               return (
                 <li key={phase.id}>
                   <button
@@ -93,20 +92,14 @@ export function AuditFileNav({
                     }
                     className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition ${
                       isSelected ? 'bg-surface-sunken' : 'bg-transparent'
-                    } ${clickable ? 'hover:bg-surface-sunken' : 'cursor-default'} ${
-                      phase.state === 'locked' ? 'opacity-70' : ''
-                    }`}
-                    title={`${meta.label}${phase.state === 'locked' ? ' — unlocks after its predecessor is approved' : ''}`}
+                    } ${clickable ? 'hover:bg-surface-sunken' : 'cursor-default'}`}
+                    title={meta.label}
                   >
                     <span className="w-6 shrink-0 font-mono text-xs text-ink-faint">
                       {String(phase.phaseNo).padStart(2, '0')}
                     </span>
                     <Icon className={`h-4 w-4 shrink-0 ${meta.className}`} aria-hidden />
-                    <span
-                      className={`flex-1 ${phase.state === 'locked' ? 'text-ink-muted' : 'text-ink'}`}
-                    >
-                      {phase.title}
-                    </span>
+                    <span className="flex-1 text-ink">{phase.title}</span>
                   </button>
                 </li>
               );

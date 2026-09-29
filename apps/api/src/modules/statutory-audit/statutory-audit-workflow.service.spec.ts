@@ -36,14 +36,12 @@ describe('AUDIT_PHASES catalogue (§8)', () => {
     ]);
   });
 
-  it('seeds initial states per Guide §8.2 (Acceptance opens; Framework locked until approved)', () => {
+  it('seeds no locked phases (Acceptance opens; everything else not started)', () => {
     const state = (key: string) => AUDIT_PHASES.find((p) => p.phaseKey === key)!.initialState;
     expect(state('acceptance')).toBe('in_progress');
-    expect(state('framework')).toBe('locked');
-    expect(state('planning')).toBe('not_started');
-    // Everything downstream of planning is locked until its predecessor is approved.
-    expect(state('risk')).toBe('locked');
-    expect(state('archiving')).toBe('locked');
+    expect(AUDIT_PHASES.filter((p) => p.phaseKey !== 'acceptance').map((p) => p.initialState)).toEqual(
+      Array(9).fill('not_started'),
+    );
   });
 });
 

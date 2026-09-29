@@ -144,7 +144,6 @@ export class AuditRiskService {
   ): Promise<StatutoryAuditRiskRegister> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
-      await this.assertPlanningApproved(client, workflowInstanceId);
 
       const { rows: existing } = await client.query<{ risk_ref: string }>(
         `SELECT risk_ref FROM hsdg.audit_risks WHERE workflow_instance_id = $1`,
@@ -309,19 +308,6 @@ export class AuditRiskService {
       throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
   }
 
-  /** Phase 04 (Risk) is locked until Planning is approved (§7). */
-  private async assertPlanningApproved(
-    client: PoolClient,
-    workflowInstanceId: string,
-  ): Promise<void> {
-    const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.audit_planning_approvals WHERE workflow_instance_id = $1 LIMIT 1`,
-      [workflowInstanceId],
-    );
-    if (!rows[0]) {
-      throw new ConflictException('Approve Planning before recording risks (§7).');
-    }
-  }
 }
 
 function mapRisk(r: RiskRow): AuditRisk {

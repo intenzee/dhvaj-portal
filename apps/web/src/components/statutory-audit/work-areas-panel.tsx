@@ -37,7 +37,7 @@ const STATE_LABEL: Record<WorkAreaState, string> = {
   in_progress: 'In progress',
   complete: 'Complete',
   needs_attention: 'Needs attention',
-  locked: 'Locked',
+  locked: 'Not started',
 };
 
 const WORK_QK = (id: string) => ['engagement', id, 'statutory-audit-work-areas'];

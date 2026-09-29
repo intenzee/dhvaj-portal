@@ -264,7 +264,7 @@ export class AuditWorkService {
       await client.query(
         `UPDATE hsdg.audit_workflow_phases
             SET state = 'in_progress'
-          WHERE workflow_instance_id = $1 AND phase_key = 'audit_areas' AND state = 'locked'`,
+          WHERE workflow_instance_id = $1 AND phase_key = 'audit_areas' AND state IN ('locked', 'not_started')`,
         [workflowInstanceId],
       );
       // Make the Completion phase (07) reachable too: the completion checklist

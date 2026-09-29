@@ -422,7 +422,7 @@ export class AuditAcceptanceService {
         );
         await client.query(
           `UPDATE hsdg.audit_workflow_phases SET state = 'in_progress'
-            WHERE workflow_instance_id = $1 AND phase_key = 'framework' AND state = 'locked'`,
+            WHERE workflow_instance_id = $1 AND phase_key = 'framework' AND state IN ('locked', 'not_started')`,
           [workflowInstanceId],
         );
       }

@@ -177,7 +177,6 @@ export class AuditFrameworkService {
   ): Promise<StatutoryAuditFramework> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
-      await this.assertFrameworkUnlocked(client, workflowInstanceId);
       const facts = await loadFacts(client, engagementId);
 
       // Resolve every statutory threshold from the Rules Library by the
@@ -251,7 +250,6 @@ export class AuditFrameworkService {
       );
       const current = rows[0];
       if (!current) throw new NotFoundException('Assessment not found.');
-      await this.assertFrameworkUnlocked(client, current.workflow_instance_id);
       if (current.state === 'approved') {
         throw new ConflictException(
           'The framework is approved; reopen it before changing a conclusion.',
@@ -377,7 +375,6 @@ export class AuditFrameworkService {
   ): Promise<StatutoryAuditFramework> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
-      await this.assertFrameworkUnlocked(client, workflowInstanceId);
 
       const { rows: areas } = await client.query<{
         area_key: string;
@@ -486,26 +483,6 @@ export class AuditFrameworkService {
       throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
   }
 
-  /**
-   * §8.5 gate — the Framework is unavailable until Section 01 (Acceptance) is
-   * approved (which sets this phase `in_progress`). Shells provisioned before
-   * Section 01 existed are never `locked`, so the gate is backward-compatible.
-   */
-  private async assertFrameworkUnlocked(
-    client: PoolClient,
-    workflowInstanceId: string,
-  ): Promise<void> {
-    const { rows } = await client.query<{ state: string }>(
-      `SELECT state FROM hsdg.audit_workflow_phases
-        WHERE workflow_instance_id = $1 AND phase_key = 'framework'`,
-      [workflowInstanceId],
-    );
-    if (rows[0]?.state === 'locked') {
-      throw new ConflictException(
-        'Section 01 (Acceptance) must be approved before the Framework is available.',
-      );
-    }
-  }
 }
 
 function mapAssessment(a: AssessmentRow, evidence: EvidenceRow[]): FrameworkAssessment {

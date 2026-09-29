@@ -151,7 +151,6 @@ export class AuditPbcService {
   ): Promise<StatutoryAuditPbc> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
-      await this.assertPlanningApproved(client, workflowInstanceId);
       if (input.workAreaId) await this.assertArea(client, engagementId, input.workAreaId);
       if (input.documentId) await this.assertDocument(client, engagementId, input.documentId);
       const status = input.status ?? PBC_STATUS.requested;
@@ -364,19 +363,6 @@ export class AuditPbcService {
       throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
   }
 
-  /** The PBC master is populated once Planning is approved (§7, workflow step 13). */
-  private async assertPlanningApproved(
-    client: PoolClient,
-    workflowInstanceId: string,
-  ): Promise<void> {
-    const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.audit_planning_approvals WHERE workflow_instance_id = $1 LIMIT 1`,
-      [workflowInstanceId],
-    );
-    if (!rows[0]) {
-      throw new ConflictException('Approve Planning before populating the PBC tracker (§7).');
-    }
-  }
 
   private async assertArea(
     client: PoolClient,
