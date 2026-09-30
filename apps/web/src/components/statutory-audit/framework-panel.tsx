@@ -16,7 +16,8 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Textarea } from '@/components/form';
-import { Modal } from '@/components/modal';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
+import { EntityProfileCard } from './entity-profile-card';
 
 /**
  * Framework (Phase 02) screen (Audit Spec §18–§20): the applicability/assessment
@@ -106,6 +107,7 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
 
   return (
     <div className="space-y-3">
+      <EntityProfileCard engagementId={engagementId} />
       <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div>
           <h2 className="text-sm font-semibold text-ink">Audit Framework · Phase 02</h2>
@@ -214,10 +216,12 @@ function FrameworkAreaCard({
     <Card className="p-4">
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className="flex w-full items-center justify-between gap-3 text-left"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="group flex w-full items-center justify-between gap-3 text-left"
       >
         <span className="flex items-center gap-2.5">
+          <ExpandToggle open={open} />
           <span className="font-mono text-xs text-ink-faint">
             {String(assessment.sortOrder).padStart(2, '0')}
           </span>
@@ -227,7 +231,7 @@ function FrameworkAreaCard({
       </button>
 
       {/* The area's work (conclusion + evidence) opens in a pop-up. */}
-      <Modal
+      <InlinePanel
         open={open}
         onClose={() => setOpen(false)}
         title={assessment.title}
@@ -336,7 +340,7 @@ function FrameworkAreaCard({
             )}
           </div>
         </div>
-      </Modal>
+      </InlinePanel>
     </Card>
   );
 }

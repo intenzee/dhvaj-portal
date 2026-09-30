@@ -98,7 +98,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
-import { SectionLauncher, SectionModal } from './section-launcher';
+import { SectionLauncher } from './section-launcher';
 
 /**
  * 03.4 Audit Scope & Approach (DHVAJ 03.4). "This is the population you are
@@ -272,14 +272,7 @@ export function ScopeApproachPanel({
         </Card>
       )}
 
-      <SectionLauncher sections={sections} onOpen={setTab} />
-
-      <SectionModal
-        open={tab}
-        sections={sections}
-        context="03.4 Audit Scope & Approach"
-        onClose={() => setTab(null)}
-      >
+      <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.4 Audit Scope & Approach">
         {tab === 'intelligence' && <IntelligenceTab key={k} {...common} />}
         {tab === 'population' && <PopulationTab key={k} {...common} signals={sig} focus={foc} />}
         {tab === 'approach' && <ApproachTab key={k} {...common} />}
@@ -290,7 +283,7 @@ export function ScopeApproachPanel({
         {tab === 'partner' && <PartnerTab key={k} {...common} canAct={canRevise} />}
         {tab === 'revision' && <RevisionTab key={k} {...common} canRevise={canRevise} />}
         {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
-      </SectionModal>
+      </SectionLauncher>
     </div>
   );
 }

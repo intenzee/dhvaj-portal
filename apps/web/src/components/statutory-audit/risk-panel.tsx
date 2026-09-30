@@ -24,7 +24,7 @@ import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
-import { Modal } from '@/components/modal';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 
 /**
  * Risk Assessment (Phase 04) screen (Audit Spec §22). The risk register — each
@@ -192,7 +192,7 @@ export function RiskPanel({
         )}
       </Card>
 
-      <Modal
+      <InlinePanel
         open={adding && canManage}
         onClose={() => setAdding(false)}
         title="Add risk"
@@ -207,7 +207,7 @@ export function RiskPanel({
           onCancel={() => setAdding(false)}
           onSubmit={(d) => create.mutate(d)}
         />
-      </Modal>
+      </InlinePanel>
 
       {register.risks.length === 0 && (
         <Card className="p-5">
@@ -284,9 +284,11 @@ function RiskRow({
     <li>
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-surface-sunken"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+        className="group flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-surface-sunken"
       >
+        <ExpandToggle open={open} />
         <span className="w-16 shrink-0 font-mono text-xs text-ink-faint">{risk.riskRef}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm text-ink">{risk.description}</span>
@@ -304,7 +306,8 @@ function RiskRow({
         </span>
       </button>
 
-      <Modal
+      <InlinePanel
+        className="mx-4 mb-3"
         open={open}
         onClose={close}
         title={`${risk.riskRef} · ${editing ? 'Edit risk' : 'Risk'}`}
@@ -380,7 +383,7 @@ function RiskRow({
             )}
           </div>
         )}
-      </Modal>
+      </InlinePanel>
     </li>
   );
 }

@@ -25,6 +25,11 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditMattersService } from './audit-matters.service';
 import { deriveAcceptanceMatters } from './acceptance-matters';
+import {
+  engagementProfileFacts,
+  readEngagementMasterFacts,
+  readInitialAudit,
+} from './master-facts';
 
 /** Question keys per segment, from the methodology catalogue (guide §8.3). */
 const QUESTIONS_BY_SEGMENT = new Map<string, string[]>();
@@ -104,7 +109,7 @@ export class AuditAcceptanceService {
       const { rows: shells } = await client.query<{ id: string }>(
         `SELECT swi.id
            FROM hsdg.service_workflow_instances swi
-          WHERE swi.engagement_id = $1
+          WHERE swi.engagement_id = $1 AND swi.status <> 'cancelled'
             AND NOT EXISTS (
               SELECT 1 FROM hsdg.audit_acceptance_segments s
                WHERE s.workflow_instance_id = swi.id)`,
@@ -126,7 +131,7 @@ export class AuditAcceptanceService {
     }>(
       `SELECT id, engagement_service_id, engagement_id
          FROM hsdg.service_workflow_instances
-        WHERE engagement_id = $1
+        WHERE engagement_id = $1 AND status <> 'cancelled'
         ORDER BY created_at ASC`,
       [engagementId],
     );
@@ -189,11 +194,18 @@ export class AuditAcceptanceService {
         (s) => s.segment_key !== FINAL && !SEGMENT_RESOLVED_STATES.includes(s.state),
       ).length;
       const approval = approvals.find((a) => a.workflow_instance_id === shell.id) ?? null;
+      const master = await readEngagementMasterFacts(client, shell.id);
+      const engagementProfile = master
+        ? engagementProfileFacts(master, {
+            initialAudit: await readInitialAudit(client, shell.id),
+          })
+        : [];
       out.push({
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
         engagementId: shell.engagement_id,
         phaseState: phases.find((p) => p.workflow_instance_id === shell.id)?.state ?? 'in_progress',
+        engagementProfile,
         segments: shellSegments.map((s) => mapSegment(s, answers)),
         approval: approval
           ? {
@@ -529,7 +541,7 @@ export class AuditAcceptanceService {
     workflowInstanceId: string,
   ): Promise<void> {
     const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.service_workflow_instances WHERE id = $1 AND engagement_id = $2`,
+      `SELECT 1 FROM hsdg.service_workflow_instances WHERE id = $1 AND engagement_id = $2 AND status <> 'cancelled'`,
       [workflowInstanceId, engagementId],
     );
     if (!rows[0])

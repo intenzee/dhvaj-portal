@@ -117,7 +117,7 @@ export class AuditProcedureService {
     }>(
       `SELECT id, engagement_service_id, engagement_id
          FROM hsdg.service_workflow_instances
-        WHERE engagement_id = $1
+        WHERE engagement_id = $1 AND status <> 'cancelled'
         ORDER BY created_at ASC`,
       [engagementId],
     );

@@ -59,7 +59,7 @@ function wrap(ui: ReactNode): ReactNode {
 
 beforeEach(() => apiFetch.mockReset());
 
-describe('Risk register pop-ups', () => {
+describe('Risk register inline panels', () => {
   beforeEach(() => {
     apiFetch.mockResolvedValue([
       {
@@ -71,38 +71,39 @@ describe('Risk register pop-ups', () => {
     ]);
   });
 
-  it('lists risks compactly and opens a risk in a pop-up', async () => {
+  it('lists risks compactly and opens a risk inline under its row', async () => {
     const user = userEvent.setup();
     render(wrap(<RiskPanel engagementId="e1" team={[]} />));
 
     const row = await screen.findByRole('button', { name: /R-001/ });
     // The response is detail — not shown in the compact list.
     expect(screen.queryByText(/Cut-off testing/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
 
     await user.click(row);
-    const dialog = screen.getByRole('dialog', { name: 'R-001 · Risk' });
-    expect(within(dialog).getByText(/Cut-off testing/)).toBeInTheDocument();
+    const panel = screen.getByRole('region', { name: 'R-001 · Risk' });
+    expect(within(panel).getByText(/Cut-off testing/)).toBeInTheDocument();
 
-    // Edit happens inside the same pop-up.
-    await user.click(within(dialog).getByRole('button', { name: 'Edit' }));
-    const editing = screen.getByRole('dialog', { name: 'R-001 · Edit risk' });
+    // Edit happens inside the same inline panel.
+    await user.click(within(panel).getByRole('button', { name: 'Edit' }));
+    const editing = screen.getByRole('region', { name: 'R-001 · Edit risk' });
     expect(within(editing).getByDisplayValue(risk.description)).toBeInTheDocument();
 
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Clicking the row again (its − toggle) collapses it.
+    await user.click(row);
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 
-  it('opens the add-risk form in a pop-up', async () => {
+  it('opens the add-risk form inline under its row', async () => {
     const user = userEvent.setup();
     render(wrap(<RiskPanel engagementId="e1" team={[]} />));
     await user.click(await screen.findByRole('button', { name: /Add risk/ }));
-    const dialog = screen.getByRole('dialog', { name: 'Add risk' });
-    expect(within(dialog).getByText('Planned response')).toBeInTheDocument();
+    const panel = screen.getByRole('region', { name: 'Add risk' });
+    expect(within(panel).getByText('Planned response')).toBeInTheDocument();
   });
 });
 
-describe('PBC tracker pop-ups', () => {
+describe('PBC tracker inline panels', () => {
   beforeEach(() => {
     apiFetch.mockImplementation((url: string) =>
       Promise.resolve(
@@ -113,7 +114,7 @@ describe('PBC tracker pop-ups', () => {
     );
   });
 
-  it('lists requests compactly and opens a request in a pop-up', async () => {
+  it('lists requests compactly and opens a request inline under its row', async () => {
     const user = userEvent.setup();
     render(wrap(<PbcPanel engagementId="e1" />));
 
@@ -121,18 +122,18 @@ describe('PBC tracker pop-ups', () => {
     expect(screen.queryByText('Signed copy please')).not.toBeInTheDocument();
 
     await user.click(row);
-    const dialog = screen.getByRole('dialog', { name: 'PBC-001 · PBC request' });
-    expect(within(dialog).getByText('Signed copy please')).toBeInTheDocument();
-    expect(within(dialog).getByTitle('Change status')).toBeInTheDocument();
+    const panel = screen.getByRole('region', { name: 'PBC-001 · PBC request' });
+    expect(within(panel).getByText('Signed copy please')).toBeInTheDocument();
+    expect(within(panel).getByTitle('Change status')).toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole('button', { name: 'Edit' }));
-    expect(screen.getByRole('dialog', { name: 'PBC-001 · Edit request' })).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('region', { name: 'PBC-001 · Edit request' })).toBeInTheDocument();
   });
 
-  it('opens the add-request form in a pop-up', async () => {
+  it('opens the add-request form inline under its row', async () => {
     const user = userEvent.setup();
     render(wrap(<PbcPanel engagementId="e1" />));
     await user.click(await screen.findByRole('button', { name: /Add request/ }));
-    expect(screen.getByRole('dialog', { name: 'Add PBC request' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Add PBC request' })).toBeInTheDocument();
   });
 });

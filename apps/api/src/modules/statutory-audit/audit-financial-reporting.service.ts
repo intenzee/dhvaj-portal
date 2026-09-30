@@ -110,7 +110,7 @@ export class AuditFinancialReportingService {
       const { rows: shells } = await client.query<{ id: string }>(
         `SELECT swi.id
            FROM hsdg.service_workflow_instances swi
-          WHERE swi.engagement_id = $1
+          WHERE swi.engagement_id = $1 AND swi.status <> 'cancelled'
             AND NOT EXISTS (
               SELECT 1 FROM hsdg.audit_framework_subassessment s
                WHERE s.workflow_instance_id = swi.id

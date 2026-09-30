@@ -3,7 +3,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Star, X } from 'lucide-react';
-import { PERMISSION, type EngagementServiceLine, type Paginated } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  STATUTORY_AUDIT_SERVICE_CODE,
+  type EngagementServiceLine,
+  type Paginated,
+} from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
@@ -74,10 +79,14 @@ export function ServicesSection({
   });
 
   const remove = useMutation({
-    mutationFn: (serviceLineId: string) =>
-      apiFetch(`/engagements/${engagementId}/services/${serviceLineId}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      toast('Service removed from the engagement.');
+    mutationFn: (line: EngagementServiceLine) =>
+      apiFetch(`/engagements/${engagementId}/services/${line.id}`, { method: 'DELETE' }),
+    onSuccess: (_data, line) => {
+      toast(
+        line.serviceCode === STATUTORY_AUDIT_SERVICE_CODE
+          ? 'Statutory Audit removed — its audit file is taken out of Work. Add the service again to bring the file back with its work.'
+          : 'Service removed from the engagement.',
+      );
       invalidate();
     },
     onError: (err) =>
@@ -132,7 +141,7 @@ export function ServicesSection({
                   <td className="px-4 py-2.5 text-right">
                     {!s.isPrimary && (
                       <button
-                        onClick={() => remove.mutate(s.id)}
+                        onClick={() => remove.mutate(s)}
                         disabled={remove.isPending}
                         className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
                         aria-label={`Remove ${s.serviceName}`}

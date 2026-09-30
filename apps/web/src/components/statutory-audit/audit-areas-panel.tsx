@@ -48,7 +48,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { Modal } from '@/components/modal';
-import { SectionLauncher, SectionModal } from './section-launcher';
+import { SectionLauncher } from './section-launcher';
 
 /**
  * 03.5 Audit Areas & Assertions (DHVAJ 03.5 — FROZEN). The complete applicable
@@ -217,20 +217,13 @@ export function AuditAreasPanel({
         ))}
       </div>
 
-      <SectionLauncher sections={sections} onOpen={setTab} />
-
-      <SectionModal
-        open={tab}
-        sections={sections}
-        context="03.5 Audit Areas & Assertions"
-        onClose={() => setTab(null)}
-      >
+      <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.5 Audit Areas & Assertions">
         {tab === 'areas' && <AreasTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} team={team} />}
         {tab === 'signals' && <SignalsTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
         {tab === 'matrix' && <MatrixTab s={s} />}
         {tab === 'review' && <ReviewTab s={s} canAct={canManage} post={post} pending={mutation.isPending} />}
         {tab === 'complete' && <CompleteTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
-      </SectionModal>
+      </SectionLauncher>
     </div>
   );
 }

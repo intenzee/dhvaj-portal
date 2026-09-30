@@ -16,7 +16,7 @@ import { useToast } from '@/lib/toast';
 import { formatDate } from '@/lib/format';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { Field, Textarea } from '@/components/form';
-import { Modal } from '@/components/modal';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 
 /**
  * Review — first-class review control (Audit Spec §25, §344). The pending-review
@@ -200,7 +200,7 @@ function QueueRow({
           </Button>
         )}
       </div>
-      <Modal
+      <InlinePanel
         open={noting && canManage}
         onClose={() => setNoting(false)}
         title="Record review note"
@@ -236,7 +236,7 @@ function QueueRow({
             </Button>
           </div>
         </div>
-      </Modal>
+      </InlinePanel>
     </li>
   );
 }
@@ -306,9 +306,11 @@ function NoteRow({
     <li>
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 py-2.5 text-left transition hover:bg-surface-sunken"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+        className="group flex w-full items-center gap-3 py-2.5 text-left transition hover:bg-surface-sunken"
       >
+        <ExpandToggle open={open} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm text-ink">{note.body}</span>
           <span className="block truncate text-[11px] text-ink-muted">
@@ -325,7 +327,8 @@ function NoteRow({
         </span>
       </button>
 
-      <Modal
+      <InlinePanel
+        className="mb-3"
         open={open}
         onClose={close}
         title="Review note"
@@ -415,7 +418,7 @@ function NoteRow({
             </div>
           </div>
         )}
-      </Modal>
+      </InlinePanel>
     </li>
   );
 }

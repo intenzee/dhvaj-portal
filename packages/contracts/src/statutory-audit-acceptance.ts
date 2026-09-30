@@ -1,3 +1,5 @@
+import type { MasterFact } from './statutory-audit';
+
 /**
  * Section 01 — Engagement & Acceptance (Implementation Guide §8).
  *
@@ -155,6 +157,8 @@ export interface StatutoryAuditAcceptance {
   engagementId: string;
   /** Phase state of `acceptance` (in_progress until approved, then complete). */
   phaseState: string;
+  /** 01.1 Engagement Profile — prefilled read-only from the masters (spec §4). */
+  engagementProfile: MasterFact[];
   segments: AcceptanceSegment[];
   approval: AcceptanceApproval | null;
   /** Segments not yet complete/NA. */

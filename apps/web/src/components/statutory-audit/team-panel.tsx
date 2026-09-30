@@ -16,7 +16,7 @@ import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Card, Badge, Spinner, EmptyState } from '@/components/ui';
 import { Input } from '@/components/form';
-import { Modal } from '@/components/modal';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 
 /**
  * Team — people + workload + time (Audit Spec §24, §37). One row per person on
@@ -139,10 +139,12 @@ function MemberRow({
       <div className="grid grid-cols-[1.6fr_0.9fr_0.7fr_0.8fr_0.8fr_0.6fr] items-center gap-2 px-4 py-2.5 text-sm">
         <button
           type="button"
-          onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 text-left text-ink hover:text-primary-700"
-          title="Open this person's work"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="group flex items-center gap-1.5 text-left text-ink hover:text-primary-700"
+          title={open ? "Collapse this person's work" : "Open this person's work"}
         >
+          <ExpandToggle open={open} />
           <span className="truncate">{member.name}</span>
           <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" />
         </button>
@@ -172,7 +174,8 @@ function MemberRow({
         </span>
       </div>
 
-      <Modal
+      <InlinePanel
+        className="mx-4 mb-3"
         open={open}
         onClose={() => setOpen(false)}
         title={member.name}
@@ -181,7 +184,7 @@ function MemberRow({
       >
         {detail.isLoading && <Spinner label="Loading…" />}
         {detail.data && <MemberDetail detail={detail.data} />}
-      </Modal>
+      </InlinePanel>
     </li>
   );
 }

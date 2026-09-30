@@ -1,71 +1,76 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { ChevronRight } from 'lucide-react';
-import { Modal } from '@/components/modal';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 
 /**
  * Sub-sections of an audit-file section (e.g. 03.1's Signal register, Areas of
- * Focus, …) as a grid of tiles. Picking one opens its work in a workspace
- * pop-up ({@link SectionModal}), so a section is a compact index rather than a
- * long page of stacked forms.
+ * Focus, …) as an expandable list. Each row carries a +/− toggle: `+` opens the
+ * sub-section's work directly underneath it, `−` (or clicking the row again)
+ * collapses it — worked in place, never in a pop-up. One sub-section is open
+ * at a time so the section stays a compact index.
+ *
+ * `children` is the open sub-section's content; the caller renders it by key
+ * exactly as before. A key that has no row of its own (e.g. a revision view
+ * reached from a banner) opens below the list.
  */
 export function SectionLauncher<K extends string>({
   sections,
-  onOpen,
-}: {
-  sections: [K, string][];
-  onOpen: (key: K) => void;
-}): JSX.Element {
-  return (
-    <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-label="Sub-sections">
-      {sections.map(([key, label], i) => (
-        <li key={key}>
-          <button
-            type="button"
-            onClick={() => onOpen(key)}
-            className="group flex h-full w-full items-center gap-3 rounded-lg border border-line bg-surface-raised px-3.5 py-3 text-left transition hover:border-primary-600/50 hover:bg-surface-sunken"
-          >
-            <span className="font-mono text-[11px] text-ink-faint">
-              {String(i + 1).padStart(2, '0')}
-            </span>
-            <span className="flex-1 text-sm font-medium leading-snug text-ink">{label}</span>
-            <ChevronRight
-              className="h-4 w-4 shrink-0 text-ink-faint transition group-hover:translate-x-0.5 group-hover:text-primary-600"
-              aria-hidden
-            />
-          </button>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-/** The workspace pop-up holding the open sub-section of a {@link SectionLauncher}. */
-export function SectionModal<K extends string>({
   open,
-  sections,
+  onToggle,
   context,
-  onClose,
   children,
 }: {
-  open: K | null;
   sections: [K, string][];
-  /** The parent section, shown under the title (e.g. "03.3 Materiality"). */
+  open: K | null;
+  onToggle: (key: K | null) => void;
+  /** The parent section, shown on the open sub-section (e.g. "03.3 Materiality"). */
   context: string;
-  onClose: () => void;
   children: ReactNode;
 }): JSX.Element {
-  const label = sections.find(([key]) => key === open)?.[1] ?? '';
+  const listed = open !== null && sections.some(([key]) => key === open);
   return (
-    <Modal
-      open={open !== null}
-      onClose={onClose}
-      title={label}
-      description={context}
-      size="workspace"
-    >
-      {children}
-    </Modal>
+    <div>
+      <ol className="space-y-2" aria-label="Sub-sections">
+        {sections.map(([key, label], i) => {
+          const isOpen = key === open;
+          return (
+            <li key={key}>
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                onClick={() => onToggle(isOpen ? null : key)}
+                className={`group flex w-full items-center gap-3 rounded-lg border px-3.5 py-3 text-left transition hover:border-primary-600/50 hover:bg-surface-sunken ${
+                  isOpen
+                    ? 'border-primary-600/50 bg-surface-sunken'
+                    : 'border-line bg-surface-raised'
+                }`}
+              >
+                <ExpandToggle open={isOpen} />
+                <span className="font-mono text-[11px] text-ink-faint">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <span className="flex-1 text-sm font-medium leading-snug text-ink">{label}</span>
+              </button>
+              {isOpen && (
+                <InlinePanel
+                  open
+                  title={label}
+                  description={context}
+                  onClose={() => onToggle(null)}
+                >
+                  {children}
+                </InlinePanel>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {open !== null && !listed && (
+        <InlinePanel open title={context} onClose={() => onToggle(null)}>
+          {children}
+        </InlinePanel>
+      )}
+    </div>
   );
 }

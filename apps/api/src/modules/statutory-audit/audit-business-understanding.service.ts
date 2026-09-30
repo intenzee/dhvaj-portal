@@ -58,6 +58,12 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditPlanningStrategyService } from './audit-planning-strategy.service';
+import {
+  isEngagementLead,
+  planUnderstandingPrefill,
+  readEngagementMasterFacts,
+  understandingContextFacts,
+} from './master-facts';
 import { INDUSTRY_PROFILE_CONFIG, runPreliminaryAnalytics } from './planning-analytics-engine';
 import {
   assertShell,
@@ -95,6 +101,7 @@ interface RecordRow {
   industry_profile: IndustryProfile;
   ba01: Ba01Answer | null;
   conclusion_summary: string | null;
+  master_prefilled_at: Date | null;
   version: number;
 }
 
@@ -225,7 +232,32 @@ export class AuditBusinessUnderstandingService {
   ): Promise<BusinessUnderstandingSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
+      const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      // Capture-once: the first open seeds 03.2 from the masters (one-shot, so a
+      // figure the team later removes is never silently put back).
+      // Writes are lead-only under RLS, so a read-only member simply sees the
+      // file as it is until a lead opens it.
+      if (!record.master_prefilled_at && (await isEngagementLead(client, engagementId))) {
+        await this.applyMasterPrefill(client, ctx, engagementId, workflowInstanceId);
+      }
+      return this.buildSummary(client, workflowInstanceId);
+    });
+  }
+
+  /**
+   * "Fill from client master" — re-run the prefill on request after the master
+   * has been updated. Only blanks are filled; recorded figures and saved
+   * sections are never overwritten.
+   */
+  async prefillFromMasters(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<BusinessUnderstandingSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
       await this.ensureRecord(client, engagementId, workflowInstanceId);
+      await this.applyMasterPrefill(client, ctx, engagementId, workflowInstanceId);
       return this.buildSummary(client, workflowInstanceId);
     });
   }
@@ -1192,6 +1224,8 @@ export class AuditBusinessUnderstandingService {
       [workflowInstanceId],
     );
     const out: Partial<Record<UnderstandingSectionKey, UnderstandingContextItem[]>> = {};
+    const master = await readEngagementMasterFacts(client, workflowInstanceId);
+    const masterContext = master ? understandingContextFacts(master) : null;
     for (const key of UNDERSTANDING_SECTIONS) {
       const filter = SECTION_CHANGE_CONTEXT[key];
       out[key] = changes
@@ -1204,6 +1238,11 @@ export class AuditBusinessUnderstandingService {
               .join(', ') || 'Recorded',
           source: '03.1',
         }));
+    }
+    if (masterContext) {
+      out.business_model!.unshift(...masterContext.businessModel);
+      out.governance!.unshift(...masterContext.governance);
+      out.industry!.unshift(...masterContext.industry);
     }
     const env = profile[0]?.accounting_environment;
     if (env) {
@@ -1346,6 +1385,115 @@ export class AuditBusinessUnderstandingService {
       };
       return { ...rec, ...evaluateExpectation(rec, mv?.py ?? null) };
     });
+  }
+
+  /** Apply the pure prefill plan (master-facts.ts) inside the caller's transaction. */
+  private async applyMasterPrefill(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<void> {
+    const master = await readEngagementMasterFacts(client, workflowInstanceId);
+    const markDone = () =>
+      client.query(
+        `UPDATE hsdg.audit_business_understanding SET master_prefilled_at = now()
+          WHERE workflow_instance_id = $1`,
+        [workflowInstanceId],
+      );
+    if (!master) {
+      await markDone();
+      return;
+    }
+    const header = await this.readDataset(client, workflowInstanceId);
+    const values = await this.readValues(client, workflowInstanceId);
+    const sections = await client.query<{ section_key: UnderstandingSectionKey }>(
+      `SELECT section_key FROM hsdg.audit_understanding_section WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+    const special = await client.query<{ special_entity_types: string[] | null }>(
+      `SELECT special_entity_types FROM hsdg.audit_entity_profile WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+
+    const plan = planUnderstandingPrefill(master, {
+      header: { ...header, exists: header.version > 0 },
+      recordedValues: new Set(values.map((v) => `${v.metricKey}:${v.period}`)),
+      savedSections: new Set(sections.rows.map((r) => r.section_key)),
+      industryProfile: record.industry_profile,
+      specialEntityTypes: special.rows[0]?.special_entity_types ?? [],
+    });
+
+    const headerCols = Object.entries(plan.header);
+    if (headerCols.length) {
+      await client.query(
+        `INSERT INTO hsdg.audit_financial_dataset (workflow_instance_id, engagement_id)
+         VALUES ($1, $2) ON CONFLICT (workflow_instance_id) DO NOTHING`,
+        [workflowInstanceId, engagementId],
+      );
+      // Only blank columns are in the plan; COALESCE guards a concurrent save.
+      const casts: Record<string, string> = { period_end: '::date', py_period_end: '::date' };
+      await client.query(
+        `UPDATE hsdg.audit_financial_dataset
+            SET ${headerCols.map(([c], i) => `${c} = COALESCE(${c}, $${i + 2}${casts[c] ?? ''})`).join(', ')},
+                version = version + 1
+          WHERE workflow_instance_id = $1`,
+        [workflowInstanceId, ...headerCols.map(([, v]) => v)],
+      );
+    }
+    let valuesAdded = 0;
+    for (const v of plan.values) {
+      const ins = await client.query(
+        `INSERT INTO hsdg.audit_financial_value
+           (workflow_instance_id, engagement_id, metric_key, period, amount, source_type, source_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (workflow_instance_id, metric_key, period) DO NOTHING`,
+        [
+          workflowInstanceId,
+          engagementId,
+          v.metricKey,
+          v.period,
+          v.amount,
+          v.sourceType,
+          v.sourceRef,
+        ],
+      );
+      valuesAdded += ins.rowCount ?? 0;
+    }
+    for (const sec of plan.sections) {
+      await client.query(
+        `INSERT INTO hsdg.audit_understanding_section
+           (workflow_instance_id, engagement_id, section_key, answers)
+         VALUES ($1, $2, $3, $4::jsonb)
+         ON CONFLICT (workflow_instance_id, section_key) DO NOTHING`,
+        [workflowInstanceId, engagementId, sec.key, JSON.stringify(sec.answers)],
+      );
+    }
+    if (plan.industryProfile) {
+      await client.query(
+        `UPDATE hsdg.audit_business_understanding SET industry_profile = $2
+          WHERE workflow_instance_id = $1 AND industry_profile = 'generic'`,
+        [workflowInstanceId, plan.industryProfile],
+      );
+    }
+    if (valuesAdded || plan.industryProfile) {
+      await this.syncExceptions(client, engagementId, workflowInstanceId);
+    }
+    await markDone();
+    if (headerCols.length || valuesAdded || plan.sections.length || plan.industryProfile) {
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.business_understanding_prefilled',
+        objectType: 'service_workflow_instance',
+        objectId: workflowInstanceId,
+        after: {
+          header: headerCols.map(([c]) => c),
+          values: valuesAdded,
+          sections: plan.sections.map((x) => x.key),
+          industryProfile: plan.industryProfile,
+        },
+      });
+    }
   }
 
   private async ensureRecord(

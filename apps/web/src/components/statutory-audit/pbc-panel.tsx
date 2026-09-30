@@ -18,7 +18,7 @@ import { useToast } from '@/lib/toast';
 import { humanize, formatDate } from '@/lib/format';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
-import { Modal } from '@/components/modal';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 
 /**
  * PBC — Master Client Information Tracker (Audit Spec §16). One master list per
@@ -174,7 +174,7 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
         )}
       </Card>
 
-      <Modal
+      <InlinePanel
         open={adding && canManage}
         onClose={() => setAdding(false)}
         title="Add PBC request"
@@ -189,7 +189,7 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
           onCancel={() => setAdding(false)}
           onSubmit={(d) => create.mutate(d)}
         />
-      </Modal>
+      </InlinePanel>
 
       {tracker.items.length === 0 && (
         <Card className="p-5">
@@ -281,9 +281,11 @@ function PbcRow({
     <li>
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-surface-sunken"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+        className="group flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-surface-sunken"
       >
+        <ExpandToggle open={open} />
         <span className="w-16 shrink-0 font-mono text-xs text-ink-faint">{item.pbcRef}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm text-ink">{item.requirement}</span>
@@ -303,7 +305,8 @@ function PbcRow({
         </span>
       </button>
 
-      <Modal
+      <InlinePanel
+        className="mx-4 mb-3"
         open={open}
         onClose={close}
         title={`${item.pbcRef} · ${editing ? 'Edit request' : 'PBC request'}`}
@@ -392,7 +395,7 @@ function PbcRow({
             )}
           </div>
         )}
-      </Modal>
+      </InlinePanel>
     </li>
   );
 }

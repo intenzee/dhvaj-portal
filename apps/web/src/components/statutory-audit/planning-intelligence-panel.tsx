@@ -36,7 +36,7 @@ import {
   DiscussionSection,
   MattersSection,
 } from './planning-strategy-sections';
-import { SectionLauncher, SectionModal } from './section-launcher';
+import { SectionLauncher } from './section-launcher';
 
 /**
  * 03.1 Planning Intelligence & Overall Audit Strategy (DHVAJ 03.1) — the
@@ -245,14 +245,7 @@ export function PlanningIntelligencePanel({
         ))}
       </div>
 
-      <SectionLauncher sections={sections} onOpen={setTab} />
-
-      <SectionModal
-        open={tab}
-        sections={sections}
-        context="03.1 Planning Intelligence & Overall Audit Strategy"
-        onClose={() => setTab(null)}
-      >
+      <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.1 Planning Intelligence & Overall Audit Strategy">
         {tab === 'signals' && (
           <SignalRegister
             engagementId={engagementId}
@@ -330,7 +323,7 @@ export function PlanningIntelligencePanel({
             onChanged={refresh}
           />
         )}
-      </SectionModal>
+      </SectionLauncher>
     </div>
   );
 }

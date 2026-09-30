@@ -45,7 +45,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
-import { SectionLauncher, SectionModal } from './section-launcher';
+import { SectionLauncher } from './section-launcher';
 
 /**
  * 03.3 Materiality (DHVAJ 03.3). Not a percentage calculator: the portal shows
@@ -233,14 +233,7 @@ export function MaterialityPanel({
         </Card>
       )}
 
-      <SectionLauncher sections={sections} onOpen={setTab} />
-
-      <SectionModal
-        open={tab}
-        sections={sections}
-        context="03.3 Materiality"
-        onClose={() => setTab(null)}
-      >
+      <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.3 Materiality">
         {tab === 'context' && <ContextTab key={k} {...common} />}
         {tab === 'benchmarks' && <BenchmarksTab key={k} {...common} base={base} onChanged={refresh} />}
         {tab === 'overall' && <OverallTab key={k} {...common} />}
@@ -270,7 +263,7 @@ export function MaterialityPanel({
           />
         )}
         {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
-      </SectionModal>
+      </SectionLauncher>
     </div>
   );
 }

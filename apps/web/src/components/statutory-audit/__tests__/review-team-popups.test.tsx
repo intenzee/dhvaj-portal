@@ -21,7 +21,7 @@ function wrap(ui: ReactNode): ReactNode {
 
 beforeEach(() => apiFetch.mockReset());
 
-describe('Review pop-ups', () => {
+describe('Review inline panels', () => {
   beforeEach(() => {
     apiFetch.mockResolvedValue([
       {
@@ -67,7 +67,7 @@ describe('Review pop-ups', () => {
     ]);
   });
 
-  it('opens a review note in a pop-up with its response and actions', async () => {
+  it('opens a review note inline under its row with its response and actions', async () => {
     const user = userEvent.setup();
     render(wrap(<ReviewPanel engagementId="e1" />));
 
@@ -76,28 +76,29 @@ describe('Review pop-ups', () => {
     expect(screen.queryByText('Extended sample attached')).not.toBeInTheDocument();
 
     await user.click(row);
-    const dialog = screen.getByRole('dialog', { name: 'Review note' });
-    expect(within(dialog).getByText('Extended sample attached')).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: /Clear/ })).toBeInTheDocument();
+    const panel = screen.getByRole('region', { name: 'Review note' });
+    expect(within(panel).getByText('Extended sample attached')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: /Clear/ })).toBeInTheDocument();
 
-    await user.click(within(dialog).getByTitle('Respond'));
-    expect(within(dialog).getByText('Submit response')).toBeInTheDocument();
+    await user.click(within(panel).getByTitle('Respond'));
+    expect(within(panel).getByText('Submit response')).toBeInTheDocument();
 
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // The − toggle on the panel collapses it back into the row.
+    await user.click(within(panel).getByRole('button', { name: 'Collapse Review note' }));
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 
-  it('records a note against a queue item in a pop-up', async () => {
+  it('records a note against a queue item inline under its row', async () => {
     const user = userEvent.setup();
     render(wrap(<ReviewPanel engagementId="e1" />));
     await user.click(await screen.findByRole('button', { name: /Record note/ }));
-    const dialog = screen.getByRole('dialog', { name: 'Record review note' });
-    expect(within(dialog).getByText('Revenue cut-off testing')).toBeInTheDocument();
-    expect(within(dialog).getByText(/Blocking — prevents completion/)).toBeInTheDocument();
+    const panel = screen.getByRole('region', { name: 'Record review note' });
+    expect(within(panel).getByText('Revenue cut-off testing')).toBeInTheDocument();
+    expect(within(panel).getByText(/Blocking — prevents completion/)).toBeInTheDocument();
   });
 });
 
-describe('Team pop-ups', () => {
+describe('Team inline panels', () => {
   beforeEach(() => {
     apiFetch.mockImplementation((url: string) =>
       Promise.resolve(
@@ -134,13 +135,13 @@ describe('Team pop-ups', () => {
     );
   });
 
-  it("opens a person's work in a pop-up", async () => {
+  it("opens a person's work inline under its row", async () => {
     const user = userEvent.setup();
     render(wrap(<TeamPanel engagementId="e1" />));
 
     await user.click(await screen.findByRole('button', { name: /Senior Y/ }));
-    const dialog = screen.getByRole('dialog', { name: 'Senior Y' });
-    expect(await within(dialog).findByText('Revenue and receivables')).toBeInTheDocument();
-    expect(within(dialog).getByText('A-01')).toBeInTheDocument();
+    const panel = screen.getByRole('region', { name: 'Senior Y' });
+    expect(await within(panel).findByText('Revenue and receivables')).toBeInTheDocument();
+    expect(within(panel).getByText('A-01')).toBeInTheDocument();
   });
 });

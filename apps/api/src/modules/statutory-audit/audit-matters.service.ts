@@ -362,7 +362,7 @@ export class AuditMattersService {
     workflowInstanceId: string,
   ): Promise<void> {
     const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.service_workflow_instances WHERE id = $1 AND engagement_id = $2`,
+      `SELECT 1 FROM hsdg.service_workflow_instances WHERE id = $1 AND engagement_id = $2 AND status <> 'cancelled'`,
       [workflowInstanceId, engagementId],
     );
     if (!rows[0])

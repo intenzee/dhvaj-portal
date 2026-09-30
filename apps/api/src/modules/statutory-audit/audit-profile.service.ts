@@ -26,6 +26,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { assessSmallCompany, deriveSaTriggers, type SmallCompanyFacts } from './entity-profile';
+import { readEngagementMasterFacts, regulatoryProfileFacts } from './master-facts';
 
 /** Relationship types that make an entity a holding OR subsidiary (§2(85)). */
 const HOLDING_SUBSIDIARY_TYPES = [
@@ -134,7 +135,7 @@ export class AuditProfileService {
       const { rows: shells } = await client.query<{ id: string }>(
         `SELECT swi.id
            FROM hsdg.service_workflow_instances swi
-          WHERE swi.engagement_id = $1
+          WHERE swi.engagement_id = $1 AND swi.status <> 'cancelled'
             AND NOT EXISTS (
               SELECT 1 FROM hsdg.audit_entity_profile p
                WHERE p.workflow_instance_id = swi.id)`,
@@ -208,6 +209,13 @@ export class AuditProfileService {
       }
 
       const missingFacts = this.missingFacts(facts, smallCompany);
+      const master = await readEngagementMasterFacts(client, p.workflow_instance_id);
+      const masterFacts = master
+        ? regulatoryProfileFacts(
+            master,
+            new Map(fins.map((f) => [f.parameter, num(f.current_value)])),
+          )
+        : [];
       out.push({
         workflowInstanceId: p.workflow_instance_id,
         engagementServiceId: p.engagement_service_id,
@@ -222,6 +230,7 @@ export class AuditProfileService {
         jointAudit: p.joint_audit,
         accountingEnvironment: p.accounting_environment,
         financials: fins.map(mapFinancial),
+        masterFacts,
         smallCompany,
         saTriggers,
         confirmation:
@@ -302,17 +311,33 @@ export class AuditProfileService {
     let paidUpCapital = captured.get('paid_up_capital') ?? null;
     let turnover = captured.get('turnover') ?? null;
     if (paidUpCapital == null || turnover == null) {
+      // The audit year's financial profile first, then the current one, then the
+      // headline figures on the entity itself — whichever the master has.
       const fin = await client.query<{ paid_up_capital: string | null; turnover: string | null }>(
-        `SELECT fp.paid_up_capital, fp.turnover
+        `SELECT fp.paid_up_capital, COALESCE(fp.turnover, fp.revenue) AS turnover
            FROM hsdg.entity_financial_profiles fp
            JOIN hsdg.engagements e ON e.entity_id = fp.entity_id
-          WHERE e.id = $1 AND fp.is_current
+          WHERE e.id = $1 AND (fp.financial_year = e.financial_year OR fp.is_current)
+          ORDER BY (fp.financial_year = e.financial_year) DESC, fp.created_at DESC
           LIMIT 1`,
         [engagementId],
       );
       if (fin.rows[0]) {
         paidUpCapital = paidUpCapital ?? num(fin.rows[0].paid_up_capital);
         turnover = turnover ?? num(fin.rows[0].turnover);
+      }
+      if (paidUpCapital == null || turnover == null) {
+        const ent = await client.query<{
+          paid_up_capital: string | null;
+          annual_turnover: string | null;
+        }>(
+          `SELECT ent.paid_up_capital, ent.annual_turnover
+             FROM hsdg.engagements e JOIN hsdg.entities ent ON ent.id = e.entity_id
+            WHERE e.id = $1`,
+          [engagementId],
+        );
+        paidUpCapital = paidUpCapital ?? num(ent.rows[0]?.paid_up_capital ?? null);
+        turnover = turnover ?? num(ent.rows[0]?.annual_turnover ?? null);
       }
     }
 
@@ -324,7 +349,7 @@ export class AuditProfileService {
         `SELECT 1
            FROM hsdg.service_workflow_instances swi
            JOIN hsdg.engagements e2 ON e2.id = swi.engagement_id
-          WHERE swi.workflow_key = 'statutory_audit'
+          WHERE swi.workflow_key = 'statutory_audit' AND swi.status <> 'cancelled'
             AND swi.id <> $1
             AND e2.entity_id = (SELECT entity_id FROM hsdg.engagements WHERE id = $2)
             AND e2.financial_year < COALESCE($3, e2.financial_year)

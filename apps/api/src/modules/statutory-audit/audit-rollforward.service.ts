@@ -220,7 +220,7 @@ export class AuditRollForwardService {
       `SELECT e.entity_id, e.financial_year
          FROM hsdg.service_workflow_instances swi
          JOIN hsdg.engagements e ON e.id = swi.engagement_id
-        WHERE swi.id = $1 AND swi.engagement_id = $2`,
+        WHERE swi.id = $1 AND swi.engagement_id = $2 AND swi.status <> 'cancelled'`,
       [workflowInstanceId, engagementId],
     );
     if (!rows[0])
@@ -252,6 +252,7 @@ export class AuditRollForwardService {
          FROM hsdg.service_workflow_instances swi
          JOIN hsdg.engagements e ON e.id = swi.engagement_id
         WHERE e.entity_id = $1 AND e.financial_year < $2 AND swi.id <> $3
+          AND swi.status <> 'cancelled'
           AND EXISTS (SELECT 1 FROM hsdg.audit_entity_profile p WHERE p.workflow_instance_id = swi.id)
         ORDER BY e.financial_year DESC
         LIMIT 1`,

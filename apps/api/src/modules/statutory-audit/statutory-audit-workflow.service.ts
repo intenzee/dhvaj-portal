@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
   ACCEPTANCE_SEGMENTS,
@@ -71,6 +71,32 @@ export class StatutoryAuditWorkflowService {
     ctx: RlsContext,
     args: { engagementServiceId: string; engagementId: string },
   ): Promise<{ workflowInstanceId: string; created: boolean }> {
+    // Re-adding Statutory Audit to an engagement whose audit file was cancelled
+    // (service removed) restores THAT file on the new service line, so work
+    // recorded before an accidental removal is not lost behind a blank shell.
+    const restored = await client.query<{ id: string }>(
+      `UPDATE hsdg.service_workflow_instances
+          SET engagement_service_id = $1, status = 'active'
+        WHERE id = (
+          SELECT id FROM hsdg.service_workflow_instances
+           WHERE engagement_id = $2 AND workflow_key = $3 AND status = 'cancelled'
+             AND NOT EXISTS (
+               SELECT 1 FROM hsdg.service_workflow_instances
+                WHERE engagement_service_id = $1)
+           ORDER BY created_at DESC LIMIT 1)
+       RETURNING id`,
+      [args.engagementServiceId, args.engagementId, STATUTORY_AUDIT_WORKFLOW_KEY],
+    );
+    if (restored.rows[0]) {
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.workflow_restored',
+        objectType: 'service_workflow_instance',
+        objectId: restored.rows[0].id,
+        after: { engagementServiceId: args.engagementServiceId },
+      });
+      return { workflowInstanceId: restored.rows[0].id, created: false };
+    }
+
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO hsdg.service_workflow_instances
          (engagement_service_id, engagement_id, workflow_key, template_version)
@@ -242,7 +268,7 @@ export class StatutoryAuditWorkflowService {
       const { rows: workflows } = await client.query<WorkflowRow>(
         `SELECT id, engagement_service_id, engagement_id, workflow_key, template_version, status
            FROM hsdg.service_workflow_instances
-          WHERE engagement_id = $1
+          WHERE engagement_id = $1 AND status <> 'cancelled'
           ORDER BY created_at ASC`,
         [engagementId],
       );
@@ -284,6 +310,54 @@ export class StatutoryAuditWorkflowService {
    * and a lead's first visit backfills historical engagements. Runs inside the
    * caller's transaction/client.
    */
+  /**
+   * The engagement's Statutory Audit service line was removed: cancel its audit
+   * file so it leaves the Work tab and every audit-file read. The recorded work
+   * is kept (audit trail) and comes back if the service is re-added. A file that
+   * has been signed off or archived is a finished professional record — its
+   * service cannot be removed.
+   */
+  async cancelForService(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementServiceId: string,
+  ): Promise<void> {
+    const { rows } = await client.query<{
+      id: string;
+      status: string;
+      signed_off_at: Date | null;
+    }>(
+      `SELECT id, status, signed_off_at FROM hsdg.service_workflow_instances
+        WHERE engagement_service_id = $1`,
+      [engagementServiceId],
+    );
+    const shell = rows[0];
+    if (!shell || shell.status === 'cancelled') return;
+    if (shell.signed_off_at || ['completed', 'archived'].includes(shell.status)) {
+      throw new BadRequestException(
+        'This Statutory Audit file is signed off or archived, so its service cannot be removed.',
+      );
+    }
+    const res = await client.query(
+      `UPDATE hsdg.service_workflow_instances SET status = 'cancelled' WHERE id = $1`,
+      [shell.id],
+    );
+    // RLS filters an UPDATE by a non-lead to zero rows; never leave the file
+    // behind silently while the service itself disappears.
+    if ((res.rowCount ?? 0) === 0) {
+      throw new ForbiddenException(
+        'Only the engagement partner or manager can remove the Statutory Audit service.',
+      );
+    }
+    await this.audit.recordWith(client, ctx, {
+      action: 'statutory_audit.workflow_cancelled',
+      objectType: 'service_workflow_instance',
+      objectId: shell.id,
+      before: { status: shell.status },
+      after: { status: 'cancelled', engagementServiceId },
+    });
+  }
+
   private async ensureProvisioned(
     client: PoolClient,
     ctx: RlsContext,

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, ChevronRight, Info, Plus, Sparkles } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Database, Info, Plus, Sparkles } from 'lucide-react';
 import {
   DATASET_STATUSES,
   EXPECTATION_BASES,
@@ -46,7 +46,7 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
-import { SectionLauncher, SectionModal } from './section-launcher';
+import { SectionLauncher } from './section-launcher';
 
 /**
  * 03.2 Business Understanding & Preliminary Analytics (DHVAJ 03.2). The portal
@@ -114,6 +114,19 @@ export function BusinessUnderstandingPanel({
     onError: (e) => toast(errMsg(e, 'Could not change the industry profile.')),
   });
 
+  const prefill = useMutation({
+    mutationFn: () =>
+      apiFetch<BusinessUnderstandingSummary>(`${base}/business-understanding/prefill`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: () => {
+      toast('Blanks filled from the client master — nothing you recorded was changed.');
+      refresh();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not fill from the client master.')),
+  });
+
   if (summary.isLoading) return <Spinner label="Loading 03.2…" />;
   const s = summary.data;
   if (!s) return <p className="text-sm text-ink-muted">03.2 is unavailable.</p>;
@@ -136,6 +149,18 @@ export function BusinessUnderstandingPanel({
             {s.record.status === 'complete' ? 'Complete' : s.record.status === 'in_progress' ? 'In progress' : 'Not started'}
           </Badge>
           {s.openInvestigations > 0 && <Badge tone="warn">{s.openInvestigations} open investigation(s)</Badge>}
+          {editable && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={prefill.isPending}
+              title="Fill empty fields from the client master and the entity's financial profiles. Recorded figures are never overwritten."
+              onClick={() => prefill.mutate()}
+            >
+              <Database className="h-4 w-4" />
+              Fill from client master
+            </Button>
+          )}
         </div>
         <div className="w-64">
           <Field label="Industry analytics profile">
@@ -154,14 +179,7 @@ export function BusinessUnderstandingPanel({
         </div>
       </div>
 
-      <SectionLauncher sections={sections} onOpen={setTab} />
-
-      <SectionModal
-        open={tab}
-        sections={sections}
-        context="03.2 Business Understanding & Preliminary Analytics"
-        onClose={() => setTab(null)}
-      >
+      <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.2 Business Understanding & Preliminary Analytics">
         {tab === 'understanding' && (
           <div className="space-y-2">
             {UNDERSTANDING_SECTION_DEFS.map((def) => (
@@ -205,7 +223,7 @@ export function BusinessUnderstandingPanel({
         {tab === 'conclusion' && (
           <ConclusionSection key={s.record.version} base={base} summary={s} editable={editable} onChanged={refresh} />
         )}
-      </SectionModal>
+      </SectionLauncher>
     </div>
   );
 }

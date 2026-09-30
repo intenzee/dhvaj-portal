@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -15,6 +16,7 @@ import {
 import type { AuditPhaseState, StatutoryAuditWorkflow } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { Card } from '@/components/ui';
+import { ExpandToggle } from '@/components/inline-panel';
 
 /**
  * The Work-tab left audit-file navigation (Audit Spec §8, §10) — the versioned
@@ -23,8 +25,9 @@ import { Card } from '@/components/ui';
  * engagement carries no statutory-audit service, so non-audit engagements are
  * unaffected.
  *
- * Selecting a phase opens its work in a workspace pop-up (see the engagement
- * page), so the file tree stays a compact index of the audit.
+ * Every phase has a +/− toggle at its side: `+` opens the phase's workspace
+ * directly under its row, `−` collapses it again. Work happens in place in
+ * the file tree — never in a pop-up.
  */
 
 const STATE_META: Record<AuditPhaseState, { icon: LucideIcon; className: string; label: string }> =
@@ -38,30 +41,76 @@ const STATE_META: Record<AuditPhaseState, { icon: LucideIcon; className: string;
   };
 
 /** Distinct legend entries in professional-file order. */
-const LEGEND: AuditPhaseState[] = [
-  'complete',
-  'in_progress',
-  'not_started',
-  'needs_attention',
-];
+const LEGEND: AuditPhaseState[] = ['complete', 'in_progress', 'not_started', 'needs_attention'];
 
 export function AuditFileNav({
   engagementId,
-  selectedPhaseKey,
-  onSelectPhase,
+  panelKeys = [],
+  renderPhase,
 }: {
   engagementId: string;
-  selectedPhaseKey?: string;
-  onSelectPhase?: (phaseKey: string, title?: string) => void;
+  /** Phase / tracker keys that have a workspace to expand. */
+  panelKeys?: readonly string[];
+  /** The workspace for an expanded phase, rendered directly under its row. */
+  renderPhase?: (phaseKey: string) => ReactNode;
 }): JSX.Element | null {
   const query = useQuery({
     queryKey: ['engagement', engagementId, 'statutory-audit'],
     queryFn: () =>
       apiFetch<StatutoryAuditWorkflow[]>(`/engagements/${engagementId}/statutory-audit`),
   });
+  // Several phases may be open at once; each collapses independently.
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // Silent when there is no audit file — this section is additive to Work.
   if (!query.data || query.data.length === 0) return null;
+
+  const row = (
+    key: string,
+    label: ReactNode,
+    lead: ReactNode,
+    icon: ReactNode,
+    title: string,
+  ): JSX.Element => {
+    const expandable = Boolean(renderPhase) && panelKeys.includes(key);
+    const isOpen = expandable && open.has(key);
+    return (
+      <li key={key}>
+        <button
+          type="button"
+          disabled={!expandable}
+          aria-expanded={expandable ? isOpen : undefined}
+          onClick={expandable ? () => toggle(key) : undefined}
+          className={`group flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition ${
+            isOpen ? 'bg-surface-sunken' : 'bg-transparent'
+          } ${expandable ? 'hover:bg-surface-sunken' : 'cursor-default'}`}
+          title={title}
+        >
+          {lead}
+          {icon}
+          <span className="flex-1 text-ink">{label}</span>
+          {expandable && <ExpandToggle open={isOpen} />}
+        </button>
+        {isOpen && (
+          <div className="border-t border-line bg-surface px-4 py-4">{renderPhase!(key)}</div>
+        )}
+      </li>
+    );
+  };
+
+  const TRACKERS: Array<[string, string, LucideIcon, string]> = [
+    ['pbc', 'PBC — Client Information', ClipboardList, 'PBC — Client Information Tracker'],
+    ['review', 'Review', ClipboardCheck, 'Review — pending reviews and review notes'],
+    ['team', 'Team', Users, 'Team — people, workload and time'],
+    ['reassessment', 'Reassessment', RefreshCw, 'Change impact & reassessment'],
+  ];
 
   return (
     <>
@@ -80,94 +129,33 @@ export function AuditFileNav({
             {wf.phases.map((phase) => {
               const meta = STATE_META[phase.state];
               const Icon = meta.icon;
-              const isSelected = selectedPhaseKey === phase.phaseKey;
-              const clickable = Boolean(onSelectPhase);
-              return (
-                <li key={phase.id}>
-                  <button
-                    type="button"
-                    disabled={!clickable}
-                    onClick={
-                      clickable ? () => onSelectPhase!(phase.phaseKey, phase.title) : undefined
-                    }
-                    className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition ${
-                      isSelected ? 'bg-surface-sunken' : 'bg-transparent'
-                    } ${clickable ? 'hover:bg-surface-sunken' : 'cursor-default'}`}
-                    title={meta.label}
-                  >
-                    <span className="w-6 shrink-0 font-mono text-xs text-ink-faint">
-                      {String(phase.phaseNo).padStart(2, '0')}
-                    </span>
-                    <Icon className={`h-4 w-4 shrink-0 ${meta.className}`} aria-hidden />
-                    <span className="flex-1 text-ink">{phase.title}</span>
-                  </button>
-                </li>
+              return row(
+                phase.phaseKey,
+                phase.title,
+                <span className="w-6 shrink-0 font-mono text-xs text-ink-faint">
+                  {String(phase.phaseNo).padStart(2, '0')}
+                </span>,
+                <Icon className={`h-4 w-4 shrink-0 ${meta.className}`} aria-hidden />,
+                meta.label,
               );
             })}
           </ol>
 
-          {/* PBC — Master Client Information Tracker (§16). A cross-cutting
-              client-request layer, not one of the ten file phases; surfaced as a
-              first-class tracker below the phase tree. */}
-          {onSelectPhase && (
-            <div className="border-t border-line">
-              <button
-                type="button"
-                onClick={() => onSelectPhase('pbc', 'PBC — Client Information')}
-                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
-                  selectedPhaseKey === 'pbc' ? 'bg-surface-sunken' : 'bg-transparent'
-                }`}
-                title="PBC — Client Information Tracker"
-              >
-                <span className="w-6 shrink-0" />
-                <ClipboardList className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
-                <span className="flex-1 text-ink">PBC — Client Information</span>
-              </button>
-            </div>
-          )}
-
-          {/* Review — first-class review control (§25) and Team — people, workload
-              and time (§24). Cross-cutting layers over the whole file, not one of
-              the ten file phases; surfaced as trackers below the phase tree. */}
-          {onSelectPhase && (
-            <div className="border-t border-line">
-              <button
-                type="button"
-                onClick={() => onSelectPhase('review', 'Review')}
-                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
-                  selectedPhaseKey === 'review' ? 'bg-surface-sunken' : 'bg-transparent'
-                }`}
-                title="Review — pending reviews and review notes"
-              >
-                <span className="w-6 shrink-0" />
-                <ClipboardCheck className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
-                <span className="flex-1 text-ink">Review</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectPhase('team', 'Team')}
-                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
-                  selectedPhaseKey === 'team' ? 'bg-surface-sunken' : 'bg-transparent'
-                }`}
-                title="Team — people, workload and time"
-              >
-                <span className="w-6 shrink-0" />
-                <Users className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
-                <span className="flex-1 text-ink">Team</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectPhase('reassessment', 'Reassessment')}
-                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-sunken ${
-                  selectedPhaseKey === 'reassessment' ? 'bg-surface-sunken' : 'bg-transparent'
-                }`}
-                title="Change impact & reassessment"
-              >
-                <span className="w-6 shrink-0" />
-                <RefreshCw className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />
-                <span className="flex-1 text-ink">Reassessment</span>
-              </button>
-            </div>
+          {/* PBC (§16), Review (§25), Team (§24) and Reassessment are
+              cross-cutting layers over the whole file, not one of the ten file
+              phases; they expand the same way below the phase tree. */}
+          {renderPhase && (
+            <ol className="divide-y divide-line border-t border-line">
+              {TRACKERS.map(([key, label, TrackerIcon, title]) =>
+                row(
+                  key,
+                  label,
+                  <span className="w-6 shrink-0" />,
+                  <TrackerIcon className="h-4 w-4 shrink-0 text-primary-600" aria-hidden />,
+                  title,
+                ),
+              )}
+            </ol>
           )}
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line bg-surface-raised/40 px-4 py-2 text-[11px] text-ink-faint">

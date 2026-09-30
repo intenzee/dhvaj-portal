@@ -1,3 +1,5 @@
+import type { MasterFact } from './statutory-audit';
+
 /**
  * 02.1 — Entity & Regulatory Profile (Implementation Guide §9.1, §6).
  *
@@ -205,6 +207,11 @@ export interface StatutoryAuditEntityProfile {
   accountingEnvironment: AccountingEnvironment | null;
   /** The reusable financial-data block (Card D). */
   financials: ProfileFinancialRecord[];
+  /**
+   * Facts read from the entity master for this profile (Cards A/C/D), each
+   * with its source — shown prefilled so the team confirms rather than keys.
+   */
+  masterFacts: MasterFact[];
   /** The computed Small Company assessment (Card E). */
   smallCompany: SmallCompanyAssessment;
   /** SA 510 / 402 / 299 carried forward (guide §9.1). */

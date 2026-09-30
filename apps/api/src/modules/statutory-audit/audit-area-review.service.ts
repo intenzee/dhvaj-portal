@@ -1450,6 +1450,7 @@ export class AuditAreaReviewService {
          FROM hsdg.service_workflow_instances w
          JOIN hsdg.engagements e ON e.id = w.engagement_id
          JOIN hsdg.service_workflow_instances pw ON pw.engagement_id = e.predecessor_engagement_id
+                                                 AND pw.status <> 'cancelled'
          JOIN hsdg.audit_area_review pr ON pr.workflow_instance_id = pw.id
         WHERE w.id = $1 LIMIT 1`,
       [wi],

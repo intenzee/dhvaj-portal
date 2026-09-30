@@ -88,7 +88,7 @@ export class AuditWorkService {
     }>(
       `SELECT id, engagement_service_id, engagement_id
          FROM hsdg.service_workflow_instances
-        WHERE engagement_id = $1
+        WHERE engagement_id = $1 AND status <> 'cancelled'
         ORDER BY created_at ASC`,
       [engagementId],
     );
@@ -384,7 +384,7 @@ export class AuditWorkService {
     workflowInstanceId: string,
   ): Promise<void> {
     const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.service_workflow_instances WHERE id = $1 AND engagement_id = $2`,
+      `SELECT 1 FROM hsdg.service_workflow_instances WHERE id = $1 AND engagement_id = $2 AND status <> 'cancelled'`,
       [workflowInstanceId, engagementId],
     );
     if (!rows[0])

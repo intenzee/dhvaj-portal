@@ -245,7 +245,7 @@ export class AuditReassessmentService {
               (archived_at IS NULL AND status <> 'archived'
                  AND (completion_approved_at IS NOT NULL OR signed_off_at IS NOT NULL)) AS reopenable
          FROM hsdg.service_workflow_instances
-        WHERE engagement_id = $1
+        WHERE engagement_id = $1 AND status <> 'cancelled'
         ORDER BY created_at ASC`,
       [engagementId],
     );

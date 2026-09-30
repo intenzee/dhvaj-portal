@@ -74,6 +74,21 @@ export class AuditBusinessUnderstandingController {
     );
   }
 
+  @Post(':id/statutory-audit/:workflowInstanceId/business-understanding/prefill')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Fill 03.2 blanks from the client master (never overwrites)' })
+  prefill(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<BusinessUnderstandingSummary> {
+    return this.understanding.prefillFromMasters(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+    );
+  }
+
   @Post(':id/statutory-audit/:workflowInstanceId/business-understanding/conclusion-draft')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Draft the understanding & analytics conclusion (not persisted)' })

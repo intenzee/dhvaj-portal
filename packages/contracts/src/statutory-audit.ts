@@ -101,6 +101,18 @@ export const AUDIT_PHASES: readonly AuditPhaseDefinition[] = [
   { phaseNo: 10, phaseKey: 'archiving', title: 'Archiving', initialState: 'not_started' },
 ] as const;
 
+/**
+ * One fact the portal already holds (entity / engagement master, or derived),
+ * shown read-only in the audit file so the team never re-keys it (Guide §1
+ * capture-once). `value` is null when the master has no entry yet — the UI
+ * shows it as "Not on master" with the place to correct it.
+ */
+export interface MasterFact {
+  label: string;
+  value: string | null;
+  source: string;
+}
+
 /** One phase of a live audit-file shell. */
 export interface AuditWorkflowPhase {
   id: string;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarPlus, Stamp, FolderOpen } from 'lucide-react';
 import {
@@ -17,8 +17,9 @@ import { PERMISSION } from '@hsdg/contracts';
 import { useToast } from '@/lib/toast';
 import { Card, EmptyState, Badge, Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
+import { DocumentsPanel } from '@/components/documents/documents-panel';
 import { Field, Input } from '@/components/form';
-import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
 import { CompletionBar } from '@/components/completion';
 
 const STATUS_TONE: Record<ComponentInstanceStatus, string> = {
@@ -42,7 +43,15 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
   const [registerFor, setRegisterFor] = useState<ComponentInstanceRecord | null>(null);
-  const [docsFor, setDocsFor] = useState<ComponentInstanceRecord | null>(null);
+  // Periods open their documents inline under their row; several can be open.
+  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
+  const toggleRow = (id: string) =>
+    setOpenRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const work = useQuery({
     queryKey: ['engagement', engagementId, 'component-work'],
@@ -109,13 +118,12 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
             disabled={generate.isPending}
             onClick={() => generate.mutate()}
           >
-            <CalendarPlus className="h-4 w-4" /> {generate.isPending ? 'Generating…' : 'Generate work'}
+            <CalendarPlus className="h-4 w-4" />{' '}
+            {generate.isPending ? 'Generating…' : 'Generate work'}
           </Button>
         )}
       </div>
-      {items.length > 0 && (
-        <ComponentProgressGrid items={items} onOpenDocs={(w) => setDocsFor(w)} />
-      )}
+      {items.length > 0 && <ComponentProgressGrid items={items} engagementId={engagementId} />}
 
       <Card className="overflow-hidden p-0">
         {work.isSuccess && items.length === 0 && (
@@ -141,86 +149,98 @@ export function ComponentWorkSection({ engagementId }: { engagementId: string })
             <tbody>
               {items.map((w) => {
                 const open = w.status === 'scheduled' || w.status === 'active';
+                const isOpen = openRows.has(w.id);
                 return (
-                  <tr key={w.id} className="border-b border-line last:border-0">
-                    <td className="px-4 py-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setDocsFor(w)}
-                        className="text-left font-medium text-primary-700 hover:underline"
-                        title="Open documents for this period"
-                      >
-                        {w.componentName}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2.5 text-ink-muted">
-                      {w.periodLabel}
-                      {w.isFuture && (
-                        <Badge tone="neutral" className="ml-2">
-                          Scheduled
-                        </Badge>
-                      )}
-                    </td>
-                    <td
-                      className={`px-4 py-2.5 ${w.isOverdue ? 'font-medium text-danger-600' : 'text-ink-muted'}`}
+                  <Fragment key={w.id}>
+                    <tr
+                      className={`border-b border-line last:border-0 ${isOpen ? 'bg-surface-sunken/60' : ''}`}
                     >
-                      {w.statutoryDeadline ? formatDate(w.statutoryDeadline) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-ink-muted">
-                      {w.internalSlaDate ? formatDate(w.internalSlaDate) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <Badge tone={STATUS_TONE[w.status] ?? 'neutral'}>{humanize(w.status)}</Badge>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setDocsFor(w)}
-                          title="Open documents for this period"
+                      <td className="px-4 py-2.5">
+                        <button
+                          type="button"
+                          aria-expanded={isOpen}
+                          onClick={() => toggleRow(w.id)}
+                          className="group flex items-center gap-2 text-left font-medium text-primary-700 hover:underline"
+                          title={isOpen ? 'Collapse this period' : 'Open documents for this period'}
                         >
-                          <FolderOpen className="h-4 w-4" /> Documents
-                        </Button>
-                        {canManage && open && w.setsRegistrationType && (
+                          <ExpandToggle open={isOpen} />
+                          {w.componentName}
+                        </button>
+                      </td>
+                      <td className="px-4 py-2.5 text-ink-muted">
+                        {w.periodLabel}
+                        {w.isFuture && (
+                          <Badge tone="neutral" className="ml-2">
+                            Scheduled
+                          </Badge>
+                        )}
+                      </td>
+                      <td
+                        className={`px-4 py-2.5 ${w.isOverdue ? 'font-medium text-danger-600' : 'text-ink-muted'}`}
+                      >
+                        {w.statutoryDeadline ? formatDate(w.statutoryDeadline) : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-ink-muted">
+                        {w.internalSlaDate ? formatDate(w.internalSlaDate) : '—'}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge tone={STATUS_TONE[w.status] ?? 'neutral'}>
+                          {humanize(w.status)}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="flex justify-end gap-2">
                           <Button
                             size="sm"
-                            variant="subtle"
-                            onClick={() => setRegisterFor(w)}
-                            title="Record the registration number into the client master (§40)"
+                            variant="ghost"
+                            aria-expanded={isOpen}
+                            onClick={() => toggleRow(w.id)}
+                            title={isOpen ? 'Hide documents' : 'Open documents for this period'}
                           >
-                            <Stamp className="h-4 w-4" /> Record reg.
+                            <FolderOpen className="h-4 w-4" />{' '}
+                            {isOpen ? 'Hide documents' : 'Documents'}
                           </Button>
-                        )}
-                        {canManage && open && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={complete.isPending}
-                            onClick={() => complete.mutate(w.id)}
-                          >
-                            Complete
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                          {canManage && open && w.setsRegistrationType && (
+                            <Button
+                              size="sm"
+                              variant="subtle"
+                              onClick={() => setRegisterFor(w)}
+                              title="Record the registration number into the client master (§40)"
+                            >
+                              <Stamp className="h-4 w-4" /> Record reg.
+                            </Button>
+                          )}
+                          {canManage && open && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={complete.isPending}
+                              onClick={() => complete.mutate(w.id)}
+                            >
+                              Complete
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-b border-line last:border-0">
+                        <td colSpan={6} className="px-4 pb-4">
+                          <PeriodDocuments
+                            engagementId={engagementId}
+                            w={w}
+                            onClose={() => toggleRow(w.id)}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
         )}
       </Card>
-
-      {docsFor && (
-        <ScopedDocumentsModal
-          engagementId={engagementId}
-          scope={{ componentInstanceId: docsFor.id }}
-          title={docsFor.componentName}
-          subtitle={docsFor.periodLabel}
-          onClose={() => setDocsFor(null)}
-        />
-      )}
 
       {registerFor && (
         <RecordRegistrationModal
@@ -259,13 +279,47 @@ function cellClass(w: ComponentInstanceRecord): string {
  * coloured by status so "which months are done and what's left" is legible at a
  * glance. Clicking a chip opens that period's documents.
  */
+/** One period's documents, opened in place (never a pop-up). */
+function PeriodDocuments({
+  engagementId,
+  w,
+  onClose,
+}: {
+  engagementId: string;
+  w: ComponentInstanceRecord;
+  onClose: () => void;
+}): JSX.Element {
+  return (
+    <InlinePanel
+      open
+      onClose={onClose}
+      title={`${w.componentName} · ${w.periodLabel}`}
+      description={[
+        'Period documents',
+        w.requiredDocsMissing > 0 ? `${w.requiredDocsMissing} required doc(s) missing` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')}
+    >
+      <DocumentsPanel
+        engagementId={engagementId}
+        scope={{ componentInstanceId: w.id }}
+        scopeLabel={w.componentName}
+      />
+    </InlinePanel>
+  );
+}
+
 function ComponentProgressGrid({
   items,
-  onOpenDocs,
+  engagementId,
 }: {
   items: ComponentInstanceRecord[];
-  onOpenDocs: (w: ComponentInstanceRecord) => void;
+  engagementId: string;
 }): JSX.Element {
+  // A period cell opens its documents directly under its component's row;
+  // clicking the same cell again collapses them. One open cell per grid.
+  const [openCell, setOpenCell] = useState<string | null>(null);
   // Group by component, each sorted chronologically by period start.
   const groups = new Map<string, ComponentInstanceRecord[]>();
   for (const w of items) {
@@ -311,13 +365,16 @@ function ComponentProgressGrid({
                   <button
                     key={w.id}
                     type="button"
-                    onClick={() => onOpenDocs(w)}
-                    className={`relative min-w-[3rem] rounded-md border px-2 py-1 text-center text-[11px] font-medium transition hover:opacity-90 ${cellClass(w)}`}
+                    aria-expanded={openCell === w.id}
+                    onClick={() => setOpenCell(openCell === w.id ? null : w.id)}
+                    className={`relative min-w-[3rem] rounded-md border px-2 py-1 text-center text-[11px] font-medium transition hover:opacity-90 ${cellClass(w)} ${
+                      openCell === w.id ? 'ring-2 ring-primary-600 ring-offset-1' : ''
+                    }`}
                     title={`${w.periodLabel} — ${humanize(w.status)}${
                       w.requiredDocsMissing > 0
                         ? ` · ${w.requiredDocsMissing} required doc(s) missing`
                         : ''
-                    }. Click for documents.`}
+                    }. Click to ${openCell === w.id ? 'hide' : 'show'} documents.`}
                   >
                     {shortPeriod(w.periodLabel)}
                     {w.requiredDocsMissing > 0 && (
@@ -329,6 +386,18 @@ function ComponentProgressGrid({
                   </button>
                 ))}
               </div>
+              {(() => {
+                const cell = g.list.find((w) => w.id === openCell);
+                return cell ? (
+                  <div className="basis-full">
+                    <PeriodDocuments
+                      engagementId={engagementId}
+                      w={cell}
+                      onClose={() => setOpenCell(null)}
+                    />
+                  </div>
+                ) : null;
+              })()}
             </div>
           );
         })}
@@ -388,7 +457,9 @@ function RecordRegistrationModal({
       description={`Writes the ${(instance.setsRegistrationType ?? '').toUpperCase()} number the authority issued into the client's Registration Master (§40), then completes this work item.`}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={() => record.mutate()} disabled={!number.trim() || record.isPending}>
             Record &amp; complete
           </Button>
@@ -397,11 +468,19 @@ function RecordRegistrationModal({
     >
       <div className="space-y-3">
         <Field label="Registration number" required>
-          <Input value={number} onChange={(e) => setNumber(e.target.value.toUpperCase())} placeholder="e.g. 27ABCDE1234F1Z5" />
+          <Input
+            value={number}
+            onChange={(e) => setNumber(e.target.value.toUpperCase())}
+            placeholder="e.g. 27ABCDE1234F1Z5"
+          />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="State code">
-            <Input value={stateCode} onChange={(e) => setStateCode(e.target.value)} placeholder="e.g. 27" />
+            <Input
+              value={stateCode}
+              onChange={(e) => setStateCode(e.target.value)}
+              placeholder="e.g. 27"
+            />
           </Field>
           <Field label="Valid from">
             <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />

@@ -1,0 +1,769 @@
+import type { PoolClient } from 'pg';
+import {
+  auditPeriodStartFromFinancialYear,
+  FINANCIAL_UNIT_FACTOR,
+  type DatasetStatus,
+  type FinancialPeriod,
+  type FinancialUnit,
+  type IndustryProfile,
+  type MetricSourceType,
+  type UnderstandingAnswer,
+  type UnderstandingSectionKey,
+  type MasterFact,
+  type UnderstandingContextItem,
+} from '@hsdg/contracts';
+
+/**
+ * Capture-once master facts for an audit file (Guide §1; Section 01 §4, 02.1,
+ * 03.2 "prefill stable facts"). Everything the portal already holds about the
+ * engagement and its entity — identity, registrations, addresses, group,
+ * listing, activities, team and the entity's financial profiles — read ONCE
+ * here so every section displays or seeds it instead of asking the team to
+ * type it again. Corrections belong in the source master, never in the file.
+ *
+ * The reader runs inside the caller's RLS transaction; the helpers below it
+ * are pure and unit-tested.
+ */
+
+export interface MasterFinancialProfile {
+  financialYear: string;
+  revenue: number | null;
+  turnover: number | null;
+  otherIncome: number | null;
+  profitBeforeTax: number | null;
+  netProfit: number | null;
+  netWorth: number | null;
+  paidUpCapital: number | null;
+  totalAssets: number | null;
+  totalBorrowings: number | null;
+  source: string | null;
+  verified: boolean;
+  documentRef: string | null;
+}
+
+export interface MasterRelationship {
+  type: string;
+  counterparty: string;
+  /** True when the engagement entity is the `from` side of the link. */
+  outbound: boolean;
+  shareholdingPct: number | null;
+}
+
+export interface EngagementMasterFacts {
+  engagementCode: string;
+  financialYear: string;
+  periodLabel: string | null;
+  currency: string;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  mandateLetterReference: string | null;
+  mandateLetterDate: string | null;
+  partnerName: string | null;
+  managerName: string | null;
+  officeName: string | null;
+  predecessorEngagementCode: string | null;
+  legalName: string;
+  entityTypeName: string;
+  entityTypeSlug: string;
+  entityCategory: string;
+  pan: string | null;
+  /** CIN / LLPIN — the principal corporate identifier on the registrations master. */
+  corporateId: { type: string; number: string } | null;
+  incorporationDate: string | null;
+  roc: string | null;
+  registeredOffice: string | null;
+  /** Non-registered operating addresses (business / branch). */
+  locations: string[];
+  listingStatus: string;
+  listings: string[];
+  paidUpCapital: number | null;
+  annualTurnover: number | null;
+  businessDescription: string | null;
+  activityFlags: ActivityFlags;
+  primaryIndustry: string | null;
+  groupName: string | null;
+  relationships: MasterRelationship[];
+  /** Financial profile for the audit year, and the year before it. */
+  cyFinancials: MasterFinancialProfile | null;
+  pyFinancials: MasterFinancialProfile | null;
+}
+
+export interface ActivityFlags {
+  manufacturing: boolean;
+  trading: boolean;
+  services: boolean;
+  import: boolean;
+  export: boolean;
+  ecommerce: boolean;
+  regulated: boolean;
+}
+
+// ── Pure helpers ─────────────────────────────────────────────────────────────
+
+/** `2024-25` → `2023-24`. Returns null for a label it cannot read. */
+export function previousFinancialYear(fy: string): string | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(fy.trim());
+  if (!m) return null;
+  const start = Number(m[1]) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+/** Indian financial year → its 31 March period end (`2024-25` → `2025-03-31`). */
+export function periodEndFromFinancialYear(fy: string): string | null {
+  if (!/^\d{4}-\d{2}$/.test(fy.trim())) return null;
+  const start = auditPeriodStartFromFinancialYear(fy.trim());
+  return `${Number(start.slice(0, 4)) + 1}-03-31`;
+}
+
+export function formatAddress(a: {
+  line1: string | null;
+  line2: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+}): string | null {
+  const tail = [a.state, a.pincode].filter(Boolean).join(' ');
+  const parts = [a.line1, a.line2, a.city, tail].map((p) => p?.trim()).filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+}
+
+/** BU-01 options the entity master's activity flags already answer. */
+export function activitiesFromFlags(f: ActivityFlags): string[] {
+  const out: string[] = [];
+  if (f.manufacturing) out.push('Manufacturing');
+  if (f.trading || f.ecommerce) out.push('Trading / distribution');
+  if (f.services) out.push('Services');
+  return out;
+}
+
+/** BU-04 customer-profile options the flags answer (export sales are a fact). */
+export function customerTypesFromFlags(f: ActivityFlags): string[] {
+  return f.export ? ['Export'] : [];
+}
+
+/**
+ * The 03.2 analytics profile the master points to. Only an unambiguous single
+ * activity picks a specific profile; anything mixed stays generic for the
+ * Manager to choose.
+ */
+export function industryProfileFromFacts(
+  f: Pick<EngagementMasterFacts, 'activityFlags' | 'entityTypeSlug'>,
+  specialEntityTypes: readonly string[] = [],
+): IndustryProfile | null {
+  if (specialEntityTypes.includes('nbfc')) return 'nbfc';
+  if (specialEntityTypes.includes('section_8')) return 'section8';
+  const picks: IndustryProfile[] = [];
+  if (f.activityFlags.manufacturing) picks.push('manufacturing');
+  if (f.activityFlags.trading || f.activityFlags.ecommerce) picks.push('trading');
+  if (f.activityFlags.services) picks.push('services');
+  return picks.length === 1 ? picks[0]! : null;
+}
+
+/** 03.2.7 canonical metric → value on a master financial profile. */
+export function datasetValuesFromProfile(
+  p: MasterFinancialProfile,
+): Array<{ metricKey: string; amount: number }> {
+  const pairs: Array<[string, number | null]> = [
+    ['revenue', p.revenue ?? p.turnover],
+    ['other_income', p.otherIncome],
+    ['pbt', p.profitBeforeTax],
+    ['pat', p.netProfit],
+    ['total_assets', p.totalAssets],
+    ['net_worth', p.netWorth],
+    ['total_borrowings', p.totalBorrowings],
+  ];
+  return pairs
+    .filter((x): x is [string, number] => x[1] !== null && Number.isFinite(x[1]))
+    .map(([metricKey, amount]) => ({ metricKey, amount }));
+}
+
+const RELATIONSHIP_LABEL: Record<string, string> = {
+  holding: 'Holding company',
+  subsidiary: 'Subsidiary',
+  wholly_owned_subsidiary: 'Wholly-owned subsidiary',
+  associate: 'Associate',
+  joint_venture: 'Joint venture',
+  step_down_subsidiary: 'Step-down subsidiary',
+  fellow_subsidiary: 'Fellow subsidiary',
+  ultimate_holding: 'Ultimate holding company',
+  intermediate_holding: 'Intermediate holding company',
+  other: 'Related entity',
+};
+
+export function describeRelationship(r: MasterRelationship): string {
+  const label = RELATIONSHIP_LABEL[r.type] ?? r.type.replace(/_/g, ' ');
+  const pct = r.shareholdingPct !== null ? ` (${r.shareholdingPct}%)` : '';
+  return `${label}: ${r.counterparty}${pct}`;
+}
+
+const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+
+/**
+ * The Section 01.1 Engagement Profile card (spec §4): every fact read-only
+ * from the entity / engagement masters, with its source.
+ */
+export function engagementProfileFacts(
+  f: EngagementMasterFacts,
+  audit: { initialAudit: boolean | null },
+): MasterFact[] {
+  const E = 'Entity master';
+  const G = 'Engagement';
+  const rows: Array<[string, string | null, string]> = [
+    ['Client name', f.legalName, E],
+    [f.corporateId?.type.toUpperCase() ?? 'CIN', f.corporateId?.number ?? null, E],
+    ['PAN', f.pan, E],
+    ['Company type', f.entityTypeName, E],
+    ['Date of incorporation', f.incorporationDate, E],
+    ['Registered office', f.registeredOffice, E],
+    ['RoC', f.roc, E],
+    ['Group', f.groupName, E],
+    ['Financial year', f.financialYear, G],
+    [
+      'Audit period',
+      periodEndFromFinancialYear(f.financialYear)
+        ? `${auditPeriodStartFromFinancialYear(f.financialYear)} to ${periodEndFromFinancialYear(f.financialYear)}`
+        : f.periodLabel,
+      G,
+    ],
+    ['Engagement partner', f.partnerName, G],
+    ['Engagement manager', f.managerName, G],
+    ['Office', f.officeName, G],
+    [
+      'First year / continuing audit',
+      audit.initialAudit === null
+        ? null
+        : audit.initialAudit
+          ? 'First-year audit'
+          : 'Continuing audit',
+      'System derived',
+    ],
+    ['Previous engagement', f.predecessorEngagementCode, G],
+    [
+      'Appointment letter',
+      [f.mandateLetterReference, f.mandateLetterDate && `dated ${f.mandateLetterDate}`]
+        .filter(Boolean)
+        .join(' ') || null,
+      G,
+    ],
+    ['Target audit completion', f.plannedEndDate, G],
+  ];
+  return rows.map(([label, value, source]) => ({ label, value, source }));
+}
+
+/**
+ * 02.1 Entity & Regulatory Profile facts held on the master (Cards A/C/D):
+ * classification, group, listing and the audit year's key figures with the
+ * record they came from. Figures the team captured on the profile win.
+ */
+export function regulatoryProfileFacts(
+  f: EngagementMasterFacts,
+  captured: ReadonlyMap<string, number | null>,
+): MasterFact[] {
+  const E = 'Entity master';
+  const cy = f.cyFinancials;
+  const cySrc = cy ? `Financial profile FY ${cy.financialYear}` : null;
+  const figure = (
+    label: string,
+    param: string,
+    fromProfile: number | null | undefined,
+    fromEntity: number | null = null,
+  ): MasterFact => {
+    const own = captured.get(param);
+    if (own != null) return { label, value: inr(own), source: '02.1 (captured)' };
+    if (fromProfile != null) return { label, value: inr(fromProfile), source: cySrc! };
+    if (fromEntity != null) return { label, value: inr(fromEntity), source: E };
+    return { label, value: null, source: E };
+  };
+  return [
+    { label: 'Entity type', value: f.entityTypeName, source: E },
+    {
+      label: f.corporateId?.type.toUpperCase() ?? 'CIN',
+      value: f.corporateId?.number ?? null,
+      source: E,
+    },
+    {
+      label: 'Listing',
+      value: f.listings.join('; ') || f.listingStatus.replace(/_/g, ' '),
+      source: E,
+    },
+    {
+      label: 'Group relationships',
+      value: f.relationships.map(describeRelationship).join('; ') || 'None on record',
+      source: E,
+    },
+    figure('Paid-up capital', 'paid_up_capital', cy?.paidUpCapital, f.paidUpCapital),
+    figure('Turnover', 'turnover', cy?.turnover ?? cy?.revenue, f.annualTurnover),
+    figure('Net worth', 'net_worth', cy?.netWorth),
+    figure('Total assets', 'total_assets', cy?.totalAssets),
+    figure('Borrowings', 'borrowings', cy?.totalBorrowings),
+  ];
+}
+
+/** Master facts that answer 03.2.1 / 03.2.2 context lines (display only). */
+export function understandingContextFacts(f: EngagementMasterFacts): {
+  businessModel: UnderstandingContextItem[];
+  governance: UnderstandingContextItem[];
+  industry: UnderstandingContextItem[];
+} {
+  const E = 'Client master';
+  const businessModel: UnderstandingContextItem[] = [];
+  const add = (list: UnderstandingContextItem[], label: string, value: string | null) => {
+    if (value) list.push({ label, value, source: E });
+  };
+  add(businessModel, 'Business description', f.businessDescription);
+  add(
+    businessModel,
+    'Activities on master',
+    [
+      f.activityFlags.manufacturing && 'Manufacturing',
+      f.activityFlags.trading && 'Trading',
+      f.activityFlags.services && 'Services',
+      f.activityFlags.import && 'Imports',
+      f.activityFlags.export && 'Exports',
+      f.activityFlags.ecommerce && 'E-commerce',
+      f.activityFlags.regulated && 'Regulated activity',
+    ]
+      .filter(Boolean)
+      .join(', ') || null,
+  );
+  add(businessModel, 'Registered office', f.registeredOffice);
+  add(businessModel, 'Other locations', f.locations.join('; ') || null);
+  if (f.annualTurnover !== null)
+    add(businessModel, 'Annual turnover (master)', inr(f.annualTurnover));
+
+  const governance: UnderstandingContextItem[] = [];
+  add(governance, 'Entity type', f.entityTypeName);
+  add(governance, 'Group', f.groupName);
+  for (const r of f.relationships) add(governance, 'Group relationship', describeRelationship(r));
+  add(
+    governance,
+    'Listing',
+    f.listings.join('; ') ||
+      (f.listingStatus !== 'unlisted' ? f.listingStatus.replace(/_/g, ' ') : null),
+  );
+  if (f.paidUpCapital !== null) add(governance, 'Paid-up capital', inr(f.paidUpCapital));
+
+  const industry: UnderstandingContextItem[] = [];
+  add(industry, 'Industry (master)', f.primaryIndustry);
+  return { businessModel, governance, industry };
+}
+
+// ── 03.2 prefill plan ─────────────────────────────────────────────────────────
+
+/** What 03.2 already holds — the plan only ever fills what is missing. */
+export interface UnderstandingState {
+  header: {
+    exists: boolean;
+    periodEnd: string | null;
+    pyPeriodEnd: string | null;
+    currency: string | null;
+    units: FinancialUnit | null;
+    pyUnits: FinancialUnit | null;
+    cySource: string | null;
+    pySource: string | null;
+    dataStatus: DatasetStatus | null;
+  };
+  /** `${metricKey}:${period}` already recorded. */
+  recordedValues: ReadonlySet<string>;
+  /** Sections the team has already saved (never touched by a prefill). */
+  savedSections: ReadonlySet<UnderstandingSectionKey>;
+  industryProfile: IndustryProfile;
+  specialEntityTypes: readonly string[];
+}
+
+export interface UnderstandingPrefillPlan {
+  /** Header columns to set (only those currently blank). */
+  header: Partial<{
+    period_end: string;
+    py_period_end: string;
+    currency: string;
+    units: FinancialUnit;
+    cy_source: string;
+    py_source: string;
+    data_status: DatasetStatus;
+  }>;
+  values: Array<{
+    metricKey: string;
+    period: FinancialPeriod;
+    amount: number;
+    sourceType: MetricSourceType;
+    sourceRef: string;
+  }>;
+  sections: Array<{ key: UnderstandingSectionKey; answers: Record<string, UnderstandingAnswer> }>;
+  industryProfile: IndustryProfile | null;
+}
+
+function profileSourceLabel(p: MasterFinancialProfile): string {
+  const kind =
+    p.source === 'audited_financials'
+      ? 'audited financials'
+      : p.source === 'provisional_financials'
+        ? 'provisional financials'
+        : 'financial profile';
+  return `Client master — FY ${p.financialYear} ${kind}${p.documentRef ? ` (${p.documentRef})` : ''}`;
+}
+
+function valueSourceType(p: MasterFinancialProfile, period: FinancialPeriod): MetricSourceType {
+  if (period === 'py' && (p.source === 'audited_financials' || p.verified)) return 'audited_py_fs';
+  if (period === 'cy' && p.source === 'provisional_financials') return 'draft_fs';
+  return 'other';
+}
+
+function datasetStatusOf(p: MasterFinancialProfile): DatasetStatus {
+  if (p.source === 'audited_financials') return 'final';
+  if (p.source === 'provisional_financials') return 'draft';
+  return 'management_accounts';
+}
+
+/**
+ * Plan the capture-once 03.2 prefill (spec §4 "prefill stable facts", §28).
+ * Pure: blank header fields, unrecorded figures, unsaved sections and a
+ * still-generic analytics profile are filled from the masters; anything the
+ * team has recorded is left exactly as it is.
+ */
+export function planUnderstandingPrefill(
+  m: EngagementMasterFacts,
+  st: UnderstandingState,
+): UnderstandingPrefillPlan {
+  const h = st.header;
+  const header: UnderstandingPrefillPlan['header'] = {};
+  const periodEnd = periodEndFromFinancialYear(m.financialYear);
+  const pyFy = previousFinancialYear(m.financialYear);
+  const pyPeriodEnd = pyFy ? periodEndFromFinancialYear(pyFy) : null;
+  if (!h.periodEnd && periodEnd) header.period_end = periodEnd;
+  if (!h.pyPeriodEnd && pyPeriodEnd) header.py_period_end = pyPeriodEnd;
+  if (!h.currency && /^[A-Z]{3}$/.test(m.currency)) header.currency = m.currency;
+  // Master figures are held in rupees; a header the team set to lakh/crore is
+  // respected and the figures are converted into it.
+  const hasFigures = Boolean(m.cyFinancials || m.pyFinancials);
+  if (!h.units && hasFigures) header.units = 'inr';
+  if (m.cyFinancials) {
+    if (!h.cySource) header.cy_source = profileSourceLabel(m.cyFinancials);
+    if (!h.dataStatus) header.data_status = datasetStatusOf(m.cyFinancials);
+  }
+  if (m.pyFinancials && !h.pySource) header.py_source = profileSourceLabel(m.pyFinancials);
+
+  const values: UnderstandingPrefillPlan['values'] = [];
+  const cyUnits = h.units ?? header.units ?? null;
+  const pyUnits = h.pyUnits ?? cyUnits;
+  const push = (
+    p: MasterFinancialProfile | null,
+    period: FinancialPeriod,
+    units: FinancialUnit | null,
+  ) => {
+    const factor = units ? FINANCIAL_UNIT_FACTOR[units] : null;
+    if (!p || !factor) return;
+    for (const v of datasetValuesFromProfile(p)) {
+      if (st.recordedValues.has(`${v.metricKey}:${period}`)) continue;
+      values.push({
+        metricKey: v.metricKey,
+        period,
+        amount: Math.round((v.amount / factor) * 100) / 100,
+        sourceType: valueSourceType(p, period),
+        sourceRef: profileSourceLabel(p),
+      });
+    }
+  };
+  push(m.cyFinancials, 'cy', cyUnits);
+  push(m.pyFinancials, 'py', pyUnits);
+
+  const sections: UnderstandingPrefillPlan['sections'] = [];
+  if (!st.savedSections.has('business_model')) {
+    const answers: Record<string, UnderstandingAnswer> = {};
+    const activities = activitiesFromFlags(m.activityFlags);
+    if (activities.length) answers.activities = activities;
+    if (m.businessDescription?.trim()) answers.activities_note = m.businessDescription.trim();
+    const customers = customerTypesFromFlags(m.activityFlags);
+    if (customers.length) answers.customer_types = customers;
+    if (m.locations.length) answers.locations = m.locations.join('; ');
+    if (Object.keys(answers).length) sections.push({ key: 'business_model', answers });
+  }
+  if (!st.savedSections.has('governance')) {
+    const parents = m.relationships.filter(
+      (r) =>
+        ['holding', 'ultimate_holding', 'intermediate_holding'].includes(r.type) ||
+        // A subsidiary/associate link where this entity is the `to` side means
+        // the counterparty owns it.
+        (!r.outbound &&
+          ['subsidiary', 'wholly_owned_subsidiary', 'step_down_subsidiary'].includes(r.type)),
+    );
+    if (parents.length) {
+      sections.push({
+        key: 'governance',
+        answers: {
+          promoters: parents.map((r) => [
+            r.counterparty,
+            describeRelationship(r).split(':')[0]! +
+              (r.shareholdingPct !== null ? ` — ${r.shareholdingPct}%` : ''),
+            'Client master',
+          ]),
+        },
+      });
+    }
+  }
+
+  const derived =
+    st.industryProfile === 'generic' ? industryProfileFromFacts(m, st.specialEntityTypes) : null;
+  return { header, values, sections, industryProfile: derived };
+}
+
+// ── Reader ───────────────────────────────────────────────────────────────────
+
+interface FinancialRow {
+  financial_year: string;
+  revenue: string | null;
+  turnover: string | null;
+  other_income: string | null;
+  profit_before_tax: string | null;
+  net_profit: string | null;
+  net_worth: string | null;
+  paid_up_capital: string | null;
+  total_assets: string | null;
+  total_borrowings: string | null;
+  source: string | null;
+  verified: boolean;
+  supporting_document_ref: string | null;
+}
+
+const n = (v: string | null): number | null => (v === null ? null : Number(v));
+
+function toProfile(r: FinancialRow | undefined): MasterFinancialProfile | null {
+  if (!r) return null;
+  return {
+    financialYear: r.financial_year,
+    revenue: n(r.revenue),
+    turnover: n(r.turnover),
+    otherIncome: n(r.other_income),
+    profitBeforeTax: n(r.profit_before_tax),
+    netProfit: n(r.net_profit),
+    netWorth: n(r.net_worth),
+    paidUpCapital: n(r.paid_up_capital),
+    totalAssets: n(r.total_assets),
+    totalBorrowings: n(r.total_borrowings),
+    source: r.source,
+    verified: r.verified,
+    documentRef: r.supporting_document_ref,
+  };
+}
+
+/** Read every master fact for the engagement behind an audit-file shell. */
+export async function readEngagementMasterFacts(
+  client: PoolClient,
+  workflowInstanceId: string,
+): Promise<EngagementMasterFacts | null> {
+  const { rows } = await client.query<{
+    entity_id: string;
+    engagement_code: string;
+    financial_year: string;
+    period_label: string | null;
+    currency: string;
+    planned_start_date: string | null;
+    planned_end_date: string | null;
+    mandate_letter_reference: string | null;
+    mandate_letter_date: string | null;
+    partner_name: string | null;
+    manager_name: string | null;
+    office_name: string | null;
+    predecessor_code: string | null;
+    legal_name: string;
+    type_name: string;
+    type_slug: string;
+    type_category: string;
+    pan: string | null;
+    incorporation_date: string | null;
+    roc: string | null;
+    listing_status: string;
+    paid_up_capital: string | null;
+    annual_turnover: string | null;
+    business_description: string | null;
+    act_manufacturing: boolean;
+    act_trading: boolean;
+    act_services: boolean;
+    act_import: boolean;
+    act_export: boolean;
+    act_ecommerce: boolean;
+    act_regulated: boolean;
+    group_name: string | null;
+  }>(
+    `SELECT e.entity_id, e.engagement_code, e.financial_year, e.period_label, e.currency,
+            e.planned_start_date::text, e.planned_end_date::text,
+            e.mandate_letter_reference, e.mandate_letter_date::text,
+            ep.full_name AS partner_name, em.full_name AS manager_name, o.name AS office_name,
+            pred.engagement_code AS predecessor_code,
+            en.legal_name, et.name AS type_name, et.slug AS type_slug, et.category AS type_category,
+            en.pan, en.incorporation_date::text, en.roc, en.listing_status,
+            en.paid_up_capital, en.annual_turnover, en.business_description,
+            en.act_manufacturing, en.act_trading, en.act_services, en.act_import, en.act_export,
+            en.act_ecommerce, en.act_regulated, g.name AS group_name
+       FROM hsdg.service_workflow_instances wi
+       JOIN hsdg.engagements e ON e.id = wi.engagement_id
+       JOIN hsdg.entities en ON en.id = e.entity_id
+       JOIN hsdg.entity_types et ON et.id = en.entity_type_id
+       LEFT JOIN hsdg.entity_groups g ON g.id = en.group_id
+       LEFT JOIN hsdg.employees ep ON ep.id = e.engagement_partner_id
+       LEFT JOIN hsdg.employees em ON em.id = e.engagement_manager_id
+       LEFT JOIN hsdg.offices o ON o.id = e.office_id
+       LEFT JOIN hsdg.engagements pred ON pred.id = e.predecessor_engagement_id
+      WHERE wi.id = $1`,
+    [workflowInstanceId],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  const entityId = r.entity_id;
+
+  // Sequential on purpose: one pooled client runs one query at a time.
+  const regs = await client.query<{ registration_type: string; registration_number: string }>(
+    `SELECT registration_type, registration_number FROM hsdg.entity_registrations
+        WHERE entity_id = $1 AND registration_type IN ('cin','llpin')
+          AND COALESCE(status, 'active') <> 'cancelled'
+        ORDER BY is_principal DESC NULLS LAST, created_at LIMIT 1`,
+    [entityId],
+  );
+  const addrs = await client.query<{
+    address_type: string;
+    line1: string | null;
+    line2: string | null;
+    city: string | null;
+    state: string | null;
+    pincode: string | null;
+  }>(
+    `SELECT address_type, line1, line2, city, state, pincode FROM hsdg.entity_addresses
+        WHERE entity_id = $1 ORDER BY is_primary DESC, created_at`,
+    [entityId],
+  );
+  const listings = await client.query<{
+    exchange: string;
+    security_type: string;
+    symbol: string | null;
+  }>(
+    `SELECT exchange, security_type, symbol FROM hsdg.entity_listings
+        WHERE entity_id = $1 AND status = 'listed' ORDER BY created_at`,
+    [entityId],
+  );
+  const industry = await client.query<{ name: string }>(
+    `SELECT i.name FROM hsdg.entity_business_activities a
+         JOIN hsdg.industries i ON i.id = a.industry_id
+        WHERE a.entity_id = $1 ORDER BY a.is_primary DESC, a.created_at LIMIT 1`,
+    [entityId],
+  );
+  const rels = await client.query<{
+    relationship_type: string;
+    shareholding_pct: string | null;
+    outbound: boolean;
+    counterparty: string;
+  }>(
+    `SELECT r.relationship_type, r.shareholding_pct, r.from_entity_id = $1 AS outbound,
+              other.legal_name AS counterparty
+         FROM hsdg.entity_relationships r
+         JOIN hsdg.entities other
+           ON other.id = CASE WHEN r.from_entity_id = $1 THEN r.to_entity_id ELSE r.from_entity_id END
+        WHERE $1 IN (r.from_entity_id, r.to_entity_id) AND r.status = 'active'
+        ORDER BY r.created_at`,
+    [entityId],
+  );
+  const fins = await client.query<FinancialRow>(
+    `SELECT DISTINCT ON (financial_year) financial_year, revenue, turnover, other_income,
+              profit_before_tax, net_profit, net_worth, paid_up_capital, total_assets,
+              total_borrowings, source, verified, supporting_document_ref
+         FROM hsdg.entity_financial_profiles
+        WHERE entity_id = $1 AND financial_year = ANY($2::text[])
+        ORDER BY financial_year, is_current DESC, created_at DESC`,
+    [entityId, [r.financial_year, previousFinancialYear(r.financial_year)].filter(Boolean)],
+  );
+
+  const registered = addrs.rows.find((a) => a.address_type === 'registered');
+  const pyFy = previousFinancialYear(r.financial_year);
+  return {
+    engagementCode: r.engagement_code,
+    financialYear: r.financial_year,
+    periodLabel: r.period_label,
+    currency: r.currency,
+    plannedStartDate: r.planned_start_date,
+    plannedEndDate: r.planned_end_date,
+    mandateLetterReference: r.mandate_letter_reference,
+    mandateLetterDate: r.mandate_letter_date,
+    partnerName: r.partner_name,
+    managerName: r.manager_name,
+    officeName: r.office_name,
+    predecessorEngagementCode: r.predecessor_code,
+    legalName: r.legal_name,
+    entityTypeName: r.type_name,
+    entityTypeSlug: r.type_slug,
+    entityCategory: r.type_category,
+    pan: r.pan,
+    corporateId: regs.rows[0]
+      ? { type: regs.rows[0].registration_type, number: regs.rows[0].registration_number }
+      : null,
+    incorporationDate: r.incorporation_date,
+    roc: r.roc,
+    registeredOffice: registered ? formatAddress(registered) : null,
+    locations: addrs.rows
+      .filter((a) => a !== registered && ['business', 'branch'].includes(a.address_type))
+      .map(formatAddress)
+      .filter((a): a is string => a !== null),
+    listingStatus: r.listing_status,
+    listings: listings.rows.map((l) =>
+      [l.exchange.toUpperCase(), l.security_type, l.symbol].filter(Boolean).join(' · '),
+    ),
+    paidUpCapital: n(r.paid_up_capital),
+    annualTurnover: n(r.annual_turnover),
+    businessDescription: r.business_description,
+    activityFlags: {
+      manufacturing: r.act_manufacturing,
+      trading: r.act_trading,
+      services: r.act_services,
+      import: r.act_import,
+      export: r.act_export,
+      ecommerce: r.act_ecommerce,
+      regulated: r.act_regulated,
+    },
+    primaryIndustry: industry.rows[0]?.name ?? null,
+    groupName: r.group_name,
+    relationships: rels.rows.map((x) => ({
+      type: x.relationship_type,
+      counterparty: x.counterparty,
+      outbound: x.outbound,
+      shareholdingPct: n(x.shareholding_pct),
+    })),
+    cyFinancials: toProfile(fins.rows.find((x) => x.financial_year === r.financial_year)),
+    pyFinancials: pyFy ? toProfile(fins.rows.find((x) => x.financial_year === pyFy)) : null,
+  };
+}
+
+/**
+ * First-year vs continuing audit: the 02.1 profile's value when one exists,
+ * else derived from engagement history (an earlier statutory-audit file for
+ * the same entity ⇒ continuing).
+ */
+export async function readInitialAudit(
+  client: PoolClient,
+  workflowInstanceId: string,
+): Promise<boolean | null> {
+  const profile = await client.query<{ initial_audit: boolean }>(
+    `SELECT initial_audit FROM hsdg.audit_entity_profile WHERE workflow_instance_id = $1`,
+    [workflowInstanceId],
+  );
+  if (profile.rows[0]) return profile.rows[0].initial_audit;
+  const prior = await client.query(
+    `SELECT 1
+       FROM hsdg.service_workflow_instances wi
+       JOIN hsdg.engagements e ON e.id = wi.engagement_id
+       JOIN hsdg.service_workflow_instances other ON other.id <> wi.id
+                                                  AND other.status <> 'cancelled'
+                                                  AND other.workflow_key = 'statutory_audit'
+       JOIN hsdg.engagements e2 ON e2.id = other.engagement_id
+      WHERE wi.id = $1 AND e2.entity_id = e.entity_id AND e2.financial_year < e.financial_year
+      LIMIT 1`,
+    [workflowInstanceId],
+  );
+  return (prior.rowCount ?? 0) === 0;
+}
+
+/** Whether the acting user may write the audit file (RLS lead check). */
+export async function isEngagementLead(client: PoolClient, engagementId: string): Promise<boolean> {
+  const { rows } = await client.query<{ lead: boolean }>(
+    `SELECT hsdg.is_engagement_lead($1) AS lead`,
+    [engagementId],
+  );
+  return rows[0]?.lead === true;
+}

@@ -472,6 +472,9 @@ export class EngagementsService {
       if (line.status === 'cancelled') {
         throw new ConflictException('That service is already removed.');
       }
+      // A Statutory Audit line takes its audit file with it (kept, but cancelled
+      // and hidden); refused when that file is already signed off / archived.
+      await this.statutoryAudit.cancelForService(client, ctx, serviceLineId);
       // Cancel live component configurations under this service line first
       // (completed/superseded ones stay as history).
       await client.query(

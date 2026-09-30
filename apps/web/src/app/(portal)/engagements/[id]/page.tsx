@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -40,11 +40,12 @@ import { ServicesSection } from '@/components/actions/services-section';
 import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
-import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
+import { DocumentsPanel } from '@/components/documents/documents-panel';
+import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 import { ClientUploadLinkModal } from '@/components/actions/client-upload-link-modal';
 import { CompletionBar } from '@/components/completion';
-import { Modal } from '@/components/modal';
 import { AuditFileNav } from '@/components/statutory-audit/audit-file-nav';
+import { AcceptancePanel } from '@/components/statutory-audit/acceptance-panel';
 import { FrameworkPanel } from '@/components/statutory-audit/framework-panel';
 import { WorkAreasPanel } from '@/components/statutory-audit/work-areas-panel';
 import { PlanningPanel } from '@/components/statutory-audit/planning-panel';
@@ -115,8 +116,9 @@ const TABS: { key: TabKey; label: string; hint: string }[] = [
   { key: 'notes', label: 'Notes', hint: 'Internal notes for the team.' },
 ];
 
-/** Audit-file phases (and cross-cutting trackers) that open a workspace pop-up. */
+/** Audit-file phases (and cross-cutting trackers) that expand a workspace inline. */
 const AUDIT_PHASE_PANELS = [
+  'acceptance',
   'framework',
   'planning',
   'risk',
@@ -146,10 +148,17 @@ export default function EngagementDetailPage(): JSX.Element {
   const { principal } = useAuth();
   const [tab, setTab] = useState<TabKey>('overview');
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
-  const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
+  // Tasks open their work inline under their row; several can be open at once.
+  const [openTasks, setOpenTasks] = useState<ReadonlySet<string>>(new Set());
+  const toggleTask = (id: string) =>
+    setOpenTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [linkForDep, setLinkForDep] = useState<MyClientDependency | null>(null);
   // Audit-file phase open in the workspace pop-up (null ⇒ none open).
-  const [auditPhase, setAuditPhase] = useState<{ key: string; title: string } | null>(null);
 
   const eng = useQuery({
     queryKey: ['engagement', id],
@@ -310,36 +319,30 @@ export default function EngagementDetailPage(): JSX.Element {
         <div>
           {/* Statutory Audit file navigation (§8, §10) — renders only when the
               engagement carries a statutory-audit service. */}
+          {/* Each phase expands its workspace directly under its row (+ / −),
+              so the audit file is worked in place — no pop-up. */}
           <AuditFileNav
             engagementId={e.id}
-            selectedPhaseKey={auditPhase?.key}
-            onSelectPhase={(key, title) => setAuditPhase({ key, title: title ?? 'Audit file' })}
+            panelKeys={AUDIT_PHASE_PANELS}
+            renderPhase={(key) => (
+              <>
+                {key === 'acceptance' && (
+                  <AcceptancePanel engagementId={e.id} entityId={e.entityId} />
+                )}
+                {key === 'framework' && <FrameworkPanel engagementId={e.id} />}
+                {key === 'planning' && <PlanningPanel engagementId={e.id} team={planningTeam(e)} />}
+                {key === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
+                {key === 'audit_areas' && <WorkAreasPanel engagementId={e.id} team={e.team} />}
+                {key === 'pbc' && <PbcPanel engagementId={e.id} />}
+                {key === 'review' && <ReviewPanel engagementId={e.id} />}
+                {key === 'team' && <TeamPanel engagementId={e.id} />}
+                {key === 'reassessment' && <ReassessmentPanel engagementId={e.id} />}
+                {['completion', 'reporting', 'sign_off', 'archiving'].includes(key) && (
+                  <CompletionPanel engagementId={e.id} />
+                )}
+              </>
+            )}
           />
-          {/* The selected phase opens as a workspace pop-up over the Work tab,
-              so its work is done in one focused surface, not a long page. */}
-          <Modal
-            open={auditPhase !== null && AUDIT_PHASE_PANELS.includes(auditPhase.key)}
-            onClose={() => setAuditPhase(null)}
-            title={auditPhase?.title ?? ''}
-            description="Statutory Audit file"
-            size="workspace"
-          >
-            {auditPhase?.key === 'framework' && <FrameworkPanel engagementId={e.id} />}
-            {auditPhase?.key === 'planning' && (
-              <PlanningPanel engagementId={e.id} team={planningTeam(e)} />
-            )}
-            {auditPhase?.key === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
-            {auditPhase?.key === 'audit_areas' && (
-              <WorkAreasPanel engagementId={e.id} team={e.team} />
-            )}
-            {auditPhase?.key === 'pbc' && <PbcPanel engagementId={e.id} />}
-            {auditPhase?.key === 'review' && <ReviewPanel engagementId={e.id} />}
-            {auditPhase?.key === 'team' && <TeamPanel engagementId={e.id} />}
-            {auditPhase?.key === 'reassessment' && <ReassessmentPanel engagementId={e.id} />}
-            {['completion', 'reporting', 'sign_off', 'archiving'].includes(
-              auditPhase?.key ?? '',
-            ) && <CompletionPanel engagementId={e.id} />}
-          </Modal>
           <section>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-3">
@@ -374,42 +377,78 @@ export default function EngagementDetailPage(): JSX.Element {
                     </tr>
                   </thead>
                   <tbody>
-                    {tasks.data.items.map((t) => (
-                      <tr key={t.id} className="border-b border-line last:border-0">
-                        <td className="px-4 py-2.5">
-                          <button
-                            type="button"
-                            onClick={() => setDocsForTask(t)}
-                            className="text-left font-medium text-primary-700 hover:underline"
-                            title="Open documents for this task"
+                    {tasks.data.items.map((t) => {
+                      const isOpen = openTasks.has(t.id);
+                      return (
+                        <Fragment key={t.id}>
+                          <tr
+                            className={`border-b border-line last:border-0 ${isOpen ? 'bg-surface-sunken/60' : ''}`}
                           >
-                            {t.title}
-                          </button>
-                        </td>
-                        <td className="px-4 py-2.5 text-ink-muted">
-                          {t.assignedToName ?? 'Unassigned'}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <PriorityBadge priority={t.priority} />
-                        </td>
-                        <td className="px-4 py-2.5 text-ink-muted">
-                          {t.dueDate ? formatDate(t.dueDate) : '—'}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <TaskStatusControl task={t} />
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setDocsForTask(t)}
-                            className="inline-flex items-center gap-1 rounded p-1.5 text-ink-muted hover:bg-surface-sunken hover:text-primary-600"
-                            title="Documents"
-                          >
-                            <FolderOpen className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                            <td className="px-4 py-2.5">
+                              <button
+                                type="button"
+                                aria-expanded={isOpen}
+                                onClick={() => toggleTask(t.id)}
+                                className="group flex items-center gap-2 text-left font-medium text-primary-700 hover:underline"
+                                title={isOpen ? 'Collapse this task' : 'Open this task'}
+                              >
+                                <ExpandToggle open={isOpen} />
+                                {t.title}
+                              </button>
+                            </td>
+                            <td className="px-4 py-2.5 text-ink-muted">
+                              {t.assignedToName ?? 'Unassigned'}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <PriorityBadge priority={t.priority} />
+                            </td>
+                            <td className="px-4 py-2.5 text-ink-muted">
+                              {t.dueDate ? formatDate(t.dueDate) : '—'}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <TaskStatusControl task={t} />
+                            </td>
+                            <td className="px-4 py-2.5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => toggleTask(t.id)}
+                                className="inline-flex items-center gap-1 rounded p-1.5 text-ink-muted hover:bg-surface-sunken hover:text-primary-600"
+                                title={isOpen ? 'Hide documents' : 'Documents'}
+                              >
+                                <FolderOpen className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr className="border-b border-line last:border-0">
+                              <td colSpan={6} className="px-4 pb-4">
+                                {/* The task's own files, worked in place under its row. */}
+                                <InlinePanel
+                                  open
+                                  onClose={() => toggleTask(t.id)}
+                                  title={t.title}
+                                  description={[
+                                    'Task documents',
+                                    t.isOverdue ? 'Overdue' : null,
+                                    t.blockedByOpenCount > 0
+                                      ? `Blocked by ${t.blockedByOpenCount} open task(s)`
+                                      : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                >
+                                  <DocumentsPanel
+                                    engagementId={e.id}
+                                    scope={{ taskId: t.id }}
+                                    scopeLabel={t.title}
+                                  />
+                                </InlinePanel>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -572,17 +611,6 @@ export default function EngagementDetailPage(): JSX.Element {
           dependencyId={linkForDep.id}
           requestedInfo={linkForDep.requestedInfo}
           onClose={() => setLinkForDep(null)}
-        />
-      )}
-
-      {/* Per-task documents pop-up (opened from the Work tab). */}
-      {docsForTask && (
-        <ScopedDocumentsModal
-          engagementId={e.id}
-          scope={{ taskId: docsForTask.id }}
-          title={docsForTask.title}
-          subtitle="Task documents"
-          onClose={() => setDocsForTask(null)}
         />
       )}
 

@@ -92,7 +92,7 @@ export class AuditCompletionService {
          LEFT JOIN hsdg.employees ca ON ca.id = wi.completion_approved_by_employee_id
          LEFT JOIN hsdg.employees sa ON sa.id = wi.signed_off_by_employee_id
          LEFT JOIN hsdg.employees aa ON aa.id = wi.archived_by_employee_id
-        WHERE wi.engagement_id = $1
+        WHERE wi.engagement_id = $1 AND wi.status <> 'cancelled'
         ORDER BY wi.created_at ASC`,
       [engagementId],
     );
