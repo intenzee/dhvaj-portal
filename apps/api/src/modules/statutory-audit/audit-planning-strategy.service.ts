@@ -55,6 +55,8 @@ import {
   insertSignal,
   maxSeq,
 } from './planning-shared';
+import { readPriorAuditFile } from './master-facts';
+import { priorYearMattersFromFile } from './planning-prior-year';
 
 interface ConsiderationRow {
   id: string;
@@ -380,7 +382,7 @@ export class AuditPlanningStrategyService {
     });
   }
 
-  /** v1: controlled manual addition with source evidence (no PY portal data yet). */
+  /** Controlled manual addition with source evidence (the import covers last year's file). */
   async createPriorYear(
     ctx: RlsContext,
     engagementId: string,
@@ -416,6 +418,131 @@ export class AuditPlanningStrategyService {
         after: { matterType: input.matterType },
       });
       return this.readPriorYearById(client, id);
+    });
+  }
+
+  /**
+   * Bring last year's matters forward from the prior-year audit file (03.1.6):
+   * significant risks, Areas of Focus, blocking review notes and high-severity
+   * exceptions. Idempotent by source record; never touches a matter already
+   * here. Returns how many were added. Runs in the caller's transaction.
+   */
+  async importPriorYearOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<number> {
+    const prior = await readPriorAuditFile(client, workflowInstanceId);
+    if (!prior) return 0;
+    const pw = prior.workflowInstanceId;
+    const risks = await client.query<{
+      id: string;
+      risk_ref: string;
+      description: string;
+      fs_area: string | null;
+      is_fraud_risk: boolean;
+      response: string | null;
+    }>(
+      `SELECT id, risk_ref, description, fs_area, is_fraud_risk, response
+         FROM hsdg.audit_risks WHERE workflow_instance_id = $1 AND is_significant
+        ORDER BY risk_ref`,
+      [pw],
+    );
+    const focus = await client.query<{
+      id: string;
+      name: string;
+      why_requires_attention: string | null;
+      partner_attention: boolean;
+    }>(
+      `SELECT id, name, why_requires_attention, partner_attention
+         FROM hsdg.audit_area_of_focus WHERE workflow_instance_id = $1 ORDER BY seq`,
+      [pw],
+    );
+    const notes = await client.query<{ id: string; body: string; status: string }>(
+      `SELECT id, body, status FROM hsdg.audit_review_notes
+        WHERE workflow_instance_id = $1 AND is_blocking ORDER BY created_at`,
+      [pw],
+    );
+    const exceptions = await client.query<{
+      id: string;
+      description: string;
+      severity: string;
+      status: string;
+    }>(
+      `SELECT id, description, severity, status FROM hsdg.audit_exceptions
+        WHERE workflow_instance_id = $1 AND severity = 'high' ORDER BY created_at`,
+      [pw],
+    );
+    const planned = priorYearMattersFromFile({
+      financialYear: prior.financialYear,
+      risks: risks.rows.map((r) => ({
+        id: r.id,
+        ref: r.risk_ref,
+        description: r.description,
+        fsArea: r.fs_area,
+        isFraudRisk: r.is_fraud_risk,
+        response: r.response,
+      })),
+      focusAreas: focus.rows.map((f) => ({
+        id: f.id,
+        name: f.name,
+        why: f.why_requires_attention,
+        partnerAttention: f.partner_attention,
+      })),
+      blockingNotes: notes.rows,
+      exceptions: exceptions.rows,
+    });
+    if (planned.length === 0) return 0;
+    const { rows: have } = await client.query<{ source_ref: string }>(
+      `SELECT source_ref FROM hsdg.audit_prior_year_matter
+        WHERE workflow_instance_id = $1 AND source_ref IS NOT NULL`,
+      [workflowInstanceId],
+    );
+    const known = new Set(have.map((h) => h.source_ref));
+    let seq = await maxSeq(client, 'audit_prior_year_matter', workflowInstanceId);
+    let added = 0;
+    for (const m of planned) {
+      if (known.has(m.sourceRef)) continue;
+      seq += 1;
+      await client.query(
+        `INSERT INTO hsdg.audit_prior_year_matter
+           (workflow_instance_id, engagement_id, seq, matter_type, description,
+            source_evidence, source_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          workflowInstanceId,
+          engagementId,
+          seq,
+          m.matterType,
+          m.description,
+          m.sourceEvidence,
+          m.sourceRef,
+        ],
+      );
+      added += 1;
+    }
+    if (added > 0) {
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.prior_year_matters_imported',
+        objectType: 'service_workflow_instance',
+        objectId: workflowInstanceId,
+        after: { added, from: prior.financialYear },
+      });
+    }
+    return added;
+  }
+
+  /** "Bring forward from last year's file" — the same import, on demand. */
+  async importPriorYear(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<{ matters: PriorYearMatterRecord[]; added: number }> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const added = await this.importPriorYearOn(client, ctx, engagementId, workflowInstanceId);
+      return { matters: await this.readPriorYear(client, workflowInstanceId), added };
     });
   }
 

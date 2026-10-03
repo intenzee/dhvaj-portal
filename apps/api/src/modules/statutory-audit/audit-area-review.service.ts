@@ -75,6 +75,7 @@ import {
   cleanList,
   displayCode,
 } from './planning-shared';
+import { readPriorAuditFile } from './master-facts';
 
 /** Phase 03 checklist row 03.5 rolls its state up into. */
 const AREA_ITEM_KEY = 'areas_and_assertions';
@@ -1443,18 +1444,18 @@ export class AuditAreaReviewService {
     });
   }
 
-  /** §20 — prior-year context from the predecessor engagement's latest 03.5 matrix. */
+  /**
+   * §20 — prior-year context from last year's 03.5 matrix: the predecessor
+   * engagement when one is recorded, else the client's latest earlier-year file.
+   */
   private async readPriorYear(client: PoolClient, wi: string): Promise<Map<string, AreaPriorYear>> {
-    const { rows } = await client.query<Row>(
-      `SELECT pr.id AS review_id
-         FROM hsdg.service_workflow_instances w
-         JOIN hsdg.engagements e ON e.id = w.engagement_id
-         JOIN hsdg.service_workflow_instances pw ON pw.engagement_id = e.predecessor_engagement_id
-                                                 AND pw.status <> 'cancelled'
-         JOIN hsdg.audit_area_review pr ON pr.workflow_instance_id = pw.id
-        WHERE w.id = $1 LIMIT 1`,
-      [wi],
-    );
+    const prior = await readPriorAuditFile(client, wi);
+    const { rows } = prior
+      ? await client.query<Row>(
+          `SELECT id AS review_id FROM hsdg.audit_area_review WHERE workflow_instance_id = $1 LIMIT 1`,
+          [prior.workflowInstanceId],
+        )
+      : { rows: [] as Row[] };
     const out = new Map<string, AreaPriorYear>();
     if (!rows[0]) return out;
     const { rows: areas } = await client.query<Row>(

@@ -97,6 +97,26 @@ export class AuditPlanningStrategyController {
     return this.strategy.listPriorYear(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
+  @Post(':id/statutory-audit/:workflowInstanceId/prior-year-matters/import')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: "Bring last year's matters forward from the prior-year audit file (03.1.6)",
+    description:
+      'Adds significant risks, Areas of Focus, blocking review notes and high-severity ' +
+      "exceptions from last year's file for reassessment; never duplicates one.",
+  })
+  importPriorYear(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<{ matters: PriorYearMatterRecord[]; added: number }> {
+    return this.strategy.importPriorYear(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+    );
+  }
+
   @Post(':id/statutory-audit/:workflowInstanceId/prior-year-matters')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({ summary: 'Add a prior-year matter with source evidence' })

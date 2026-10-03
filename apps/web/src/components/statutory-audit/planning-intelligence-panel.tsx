@@ -212,7 +212,7 @@ export function PlanningIntelligencePanel({
             variant="secondary"
             onClick={() => generate.mutate()}
             disabled={generate.isPending}
-            title="Derive signals from confirmed Section 01/02 facts. Safe to re-run."
+            title="Generated automatically on first open; refresh after a Section 01/02 change. Safe to re-run."
           >
             <RefreshCw className="mr-1.5 h-4 w-4" />
             {s.record.intelligenceGeneratedAt ? 'Refresh intelligence' : 'Generate intelligence'}

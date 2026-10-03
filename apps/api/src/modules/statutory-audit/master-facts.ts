@@ -1055,3 +1055,49 @@ export async function readPriorSubAssessment(
   const r = rows[0];
   return r ? { financialYear: r.financial_year, facts: r.facts, conclusion: r.conclusion } : null;
 }
+
+/** Last year's statutory-audit file for the same client (latest earlier FY, live). */
+export interface PriorAuditFile {
+  workflowInstanceId: string;
+  engagementId: string;
+  financialYear: string;
+}
+
+/**
+ * The prior-year file of the same client: the engagement's recorded
+ * predecessor first, else the latest earlier financial year with a live
+ * statutory-audit file. Runs in the caller's RLS transaction.
+ */
+export async function readPriorAuditFile(
+  client: PoolClient,
+  workflowInstanceId: string,
+): Promise<PriorAuditFile | null> {
+  const { rows } = await client.query<{
+    workflow_instance_id: string;
+    engagement_id: string;
+    financial_year: string;
+  }>(
+    `SELECT pw.id AS workflow_instance_id, pe.id AS engagement_id, pe.financial_year
+       FROM hsdg.service_workflow_instances w
+       JOIN hsdg.engagements e ON e.id = w.engagement_id
+       JOIN hsdg.engagements pe
+         ON pe.id = e.predecessor_engagement_id
+         OR (pe.entity_id = e.entity_id AND pe.financial_year < e.financial_year)
+       JOIN hsdg.service_workflow_instances pw
+         ON pw.engagement_id = pe.id AND pw.status <> 'cancelled'
+        AND pw.workflow_key = 'statutory_audit' AND pw.id <> w.id
+      WHERE w.id = $1
+      ORDER BY (pe.id = e.predecessor_engagement_id) DESC NULLS LAST, pe.financial_year DESC,
+               pw.created_at DESC
+      LIMIT 1`,
+    [workflowInstanceId],
+  );
+  const r = rows[0];
+  return r
+    ? {
+        workflowInstanceId: r.workflow_instance_id,
+        engagementId: r.engagement_id,
+        financialYear: r.financial_year,
+      }
+    : null;
+}

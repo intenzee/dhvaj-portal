@@ -76,6 +76,7 @@ import {
   cleanList,
   displayCode,
 } from './planning-shared';
+import { isEngagementLead, readPriorAuditFile } from './master-facts';
 
 /** The Phase 03 checklist row 03.3 rolls its state up into. */
 const MATERIALITY_ITEM_KEY = 'materiality';
@@ -195,8 +196,92 @@ export class AuditMaterialityService {
   ): Promise<MaterialitySummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
+      await this.prefillPriorYearOn(client, ctx, engagementId, workflowInstanceId);
       return this.buildSummary(client, workflowInstanceId);
     });
+  }
+
+  /**
+   * Prior-year materiality (03.3.2) from last year's completed determination:
+   * OM / PM / clearly trivial / benchmark fill the PY columns of the draft, and
+   * a brand-new v1.0 also starts from last year's users and focus (MAT-01/02)
+   * for the team to confirm. Blank fields only; lead only; never touches a
+   * completed version.
+   */
+  private async prefillPriorYearOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<void> {
+    const current = await this.readCurrentRow(client, workflowInstanceId);
+    if (current && (current.status !== 'draft' || current.py_overall_materiality != null)) return;
+    const prior = await readPriorAuditFile(client, workflowInstanceId);
+    if (!prior || !(await isEngagementLead(client, engagementId))) return;
+    const { rows } = await client.query<{
+      version_no: number;
+      selected_om: string | null;
+      selected_pm: string | null;
+      selected_ctt: string | null;
+      selected_benchmark: string | null;
+      principal_users: string[];
+      principal_users_other: string | null;
+      user_focus: string[];
+      user_focus_other: string | null;
+    }>(
+      `SELECT version_no, selected_om::text, selected_pm::text, selected_ctt::text,
+              selected_benchmark, principal_users, principal_users_other, user_focus,
+              user_focus_other
+         FROM hsdg.audit_materiality_determination
+        WHERE workflow_instance_id = $1 AND status = 'complete' AND selected_om IS NOT NULL
+        ORDER BY version_no DESC LIMIT 1`,
+      [prior.workflowInstanceId],
+    );
+    const py = rows[0];
+    if (!py) return;
+    const source = `FY ${prior.financialYear} audit file — materiality ${materialityVersionLabel(py.version_no)}`;
+    if (!current) {
+      await client.query(
+        `INSERT INTO hsdg.audit_materiality_determination
+           (workflow_instance_id, engagement_id, version_no, principal_users, principal_users_other,
+            user_focus, user_focus_other)
+         VALUES ($1, $2, 1, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+        [
+          workflowInstanceId,
+          engagementId,
+          py.principal_users ?? [],
+          py.principal_users_other,
+          py.user_focus ?? [],
+          py.user_focus_other,
+        ],
+      );
+    }
+    const res = await client.query(
+      `UPDATE hsdg.audit_materiality_determination
+          SET py_overall_materiality = COALESCE(py_overall_materiality, $2),
+              py_performance_materiality = COALESCE(py_performance_materiality, $3),
+              py_clearly_trivial = COALESCE(py_clearly_trivial, $4),
+              py_benchmark = COALESCE(py_benchmark, $5),
+              py_source = COALESCE(py_source, $6),
+              version = version + 1
+        WHERE workflow_instance_id = $1 AND status = 'draft' AND py_overall_materiality IS NULL`,
+      [
+        workflowInstanceId,
+        py.selected_om,
+        py.selected_pm,
+        py.selected_ctt,
+        py.selected_benchmark,
+        source,
+      ],
+    );
+    if ((res.rowCount ?? 0) > 0) {
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.materiality_prior_year_prefilled',
+        objectType: 'service_workflow_instance',
+        objectId: workflowInstanceId,
+        after: { from: prior.financialYear, version: py.version_no, automatic: true },
+      });
+    }
   }
 
   async draftConclusion(

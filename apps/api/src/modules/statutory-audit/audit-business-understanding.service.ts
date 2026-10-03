@@ -7,6 +7,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   CUSTOM_METRIC_PREFIX,
+  FINANCIAL_UNIT_FACTOR,
   FINANCIAL_METRIC_DEFS,
   INDUSTRY_PROFILE_LABEL,
   INVESTIGATION_ASSESSMENT,
@@ -62,6 +63,7 @@ import {
   isEngagementLead,
   planUnderstandingPrefill,
   readEngagementMasterFacts,
+  readPriorAuditFile,
   understandingContextFacts,
 } from './master-facts';
 import { INDUSTRY_PROFILE_CONFIG, runPreliminaryAnalytics } from './planning-analytics-engine';
@@ -72,6 +74,7 @@ import {
   displayCode,
   insertSignal,
 } from './planning-shared';
+import { mergePriorSections, priorYearValues } from './planning-prior-year';
 
 /** The Phase 03 checklist row 03.2 rolls its state up into. */
 const UNDERSTANDING_ITEM_KEY = 'engagement_understanding';
@@ -1425,6 +1428,56 @@ export class AuditBusinessUnderstandingService {
       specialEntityTypes: special.rows[0]?.special_entity_types ?? [],
     });
 
+    // Last year's audit file: its section answers seed the unsaved sections,
+    // and its current-year figures become this year's prior-year column.
+    const prior = await readPriorAuditFile(client, workflowInstanceId);
+    const priorSections = prior
+      ? (
+          await client.query<{ section_key: string; answers: Record<string, unknown> }>(
+            `SELECT section_key, answers FROM hsdg.audit_understanding_section
+              WHERE workflow_instance_id = $1`,
+            [prior.workflowInstanceId],
+          )
+        ).rows.map((r) => ({ key: r.section_key, answers: r.answers ?? {} }))
+      : [];
+    const mergedSections = mergePriorSections(
+      plan.sections,
+      priorSections,
+      new Set(sections.rows.map((r) => r.section_key)),
+    );
+    let priorValues: Array<{ metricKey: string; amount: number }> = [];
+    let priorValueSource: { type: MetricSourceType; ref: string } | null = null;
+    if (prior) {
+      const pd = await client.query<{ units: FinancialUnit | null; data_status: string | null }>(
+        `SELECT units, data_status FROM hsdg.audit_financial_dataset WHERE workflow_instance_id = $1`,
+        [prior.workflowInstanceId],
+      );
+      const priorUnits = pd.rows[0]?.units ?? null;
+      if (priorUnits && !header.units && !plan.header.units) plan.header.units = priorUnits;
+      const targetUnits = header.pyUnits ?? header.units ?? plan.header.units ?? null;
+      const pf = priorUnits ? FINANCIAL_UNIT_FACTOR[priorUnits] : null;
+      const tf = targetUnits ? FINANCIAL_UNIT_FACTOR[targetUnits] : null;
+      if (pf && tf) {
+        const pv = await client.query<{ metric_key: string; amount: string }>(
+          `SELECT v.metric_key, v.amount::text FROM hsdg.audit_financial_value v
+            WHERE v.workflow_instance_id = $1 AND v.period = 'cy'
+              AND NOT EXISTS (SELECT 1 FROM hsdg.audit_financial_custom_metric c
+                               WHERE c.workflow_instance_id = v.workflow_instance_id
+                                 AND c.metric_key = v.metric_key)`,
+          [prior.workflowInstanceId],
+        );
+        priorValues = priorYearValues(
+          pv.rows.map((r) => ({ metricKey: r.metric_key, amount: Number(r.amount) })),
+          { priorUnits: pf, targetUnits: tf },
+          new Set(values.map((v) => `${v.metricKey}:${v.period}`)),
+        );
+        priorValueSource = {
+          type: pd.rows[0]?.data_status === 'final' ? 'audited_py_fs' : 'other',
+          ref: `FY ${prior.financialYear} audit file — 03.2 financial dataset`,
+        };
+      }
+    }
+
     const headerCols = Object.entries(plan.header);
     if (headerCols.length) {
       await client.query(
@@ -1443,6 +1496,24 @@ export class AuditBusinessUnderstandingService {
       );
     }
     let valuesAdded = 0;
+    // Last year's own figures first: they win over the master's prior-year profile.
+    for (const v of priorValues) {
+      const ins = await client.query(
+        `INSERT INTO hsdg.audit_financial_value
+           (workflow_instance_id, engagement_id, metric_key, period, amount, source_type, source_ref)
+         VALUES ($1, $2, $3, 'py', $4, $5, $6)
+         ON CONFLICT (workflow_instance_id, metric_key, period) DO NOTHING`,
+        [
+          workflowInstanceId,
+          engagementId,
+          v.metricKey,
+          v.amount,
+          priorValueSource!.type,
+          priorValueSource!.ref,
+        ],
+      );
+      valuesAdded += ins.rowCount ?? 0;
+    }
     for (const v of plan.values) {
       const ins = await client.query(
         `INSERT INTO hsdg.audit_financial_value
@@ -1461,7 +1532,7 @@ export class AuditBusinessUnderstandingService {
       );
       valuesAdded += ins.rowCount ?? 0;
     }
-    for (const sec of plan.sections) {
+    for (const sec of mergedSections) {
       await client.query(
         `INSERT INTO hsdg.audit_understanding_section
            (workflow_instance_id, engagement_id, section_key, answers)
@@ -1481,7 +1552,7 @@ export class AuditBusinessUnderstandingService {
       await this.syncExceptions(client, engagementId, workflowInstanceId);
     }
     await markDone();
-    if (headerCols.length || valuesAdded || plan.sections.length || plan.industryProfile) {
+    if (headerCols.length || valuesAdded || mergedSections.length || plan.industryProfile) {
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.business_understanding_prefilled',
         objectType: 'service_workflow_instance',
@@ -1489,7 +1560,8 @@ export class AuditBusinessUnderstandingService {
         after: {
           header: headerCols.map(([c]) => c),
           values: valuesAdded,
-          sections: plan.sections.map((x) => x.key),
+          sections: mergedSections.map((x) => x.key),
+          priorYear: prior?.financialYear ?? null,
           industryProfile: plan.industryProfile,
         },
       });

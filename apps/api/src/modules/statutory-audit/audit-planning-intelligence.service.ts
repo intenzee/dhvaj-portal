@@ -52,6 +52,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditPlanningStrategyService } from './audit-planning-strategy.service';
 import { AuditAreaReviewService } from './audit-area-review.service';
+import { isEngagementLead } from './master-facts';
 import {
   deriveEngagementSignals,
   type EngagementIntelligenceFacts,
@@ -199,7 +200,15 @@ export class AuditPlanningIntelligenceService {
   ): Promise<PlanningIntelligenceSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      let record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      // First open by a lead derives the engagement intelligence on its own, and
+      // brings last year's matters forward — no "Generate" button to find.
+      if (!record.intelligenceGeneratedAt && (await isEngagementLead(client, engagementId))) {
+        record = mapIntelligence(
+          await this.generateOn(client, ctx, engagementId, workflowInstanceId, true),
+        );
+        await this.strategy.importPriorYearOn(client, ctx, engagementId, workflowInstanceId);
+      }
       return this.buildSummary(client, workflowInstanceId, record);
     });
   }
@@ -217,6 +226,20 @@ export class AuditPlanningIntelligenceService {
   ): Promise<PlanningIntelligenceSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
+      const row = await this.generateOn(client, ctx, engagementId, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, mapIntelligence(row));
+    });
+  }
+
+  /** Derive and upsert the 03.1.1 signals; returns the updated 03.1 record row. */
+  private async generateOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    automatic = false,
+  ): Promise<IntelligenceRow> {
+    {
       await this.ensureRecord(client, engagementId, workflowInstanceId);
 
       const facts = await this.readFacts(client, workflowInstanceId);
@@ -299,10 +322,10 @@ export class AuditPlanningIntelligenceService {
         action: 'statutory_audit.planning_intelligence_generated',
         objectType: 'service_workflow_instance',
         objectId: workflowInstanceId,
-        after: { derived: derived.length, created },
+        after: { derived: derived.length, created, ...(automatic && { automatic }) },
       });
-      return this.buildSummary(client, workflowInstanceId, mapIntelligence(rows[0]!));
-    });
+      return rows[0]!;
+    }
   }
 
   /** Update the 03.1 record: AS-01 orientation, AS-02 scope, strategy summary, status. */

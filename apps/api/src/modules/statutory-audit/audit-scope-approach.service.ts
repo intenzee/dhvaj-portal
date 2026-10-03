@@ -80,6 +80,7 @@ import {
   type ScopeFacts,
   type ScopeState,
 } from './scope-approach-engine';
+import { isEngagementLead } from './master-facts';
 
 /** Phase 03 checklist rows 03.4 rolls its state up into. */
 const SCOPE_ITEM_KEYS = ['audit_approach', 'overall_audit_plan'];
@@ -190,6 +191,11 @@ export class AuditScopeApproachService {
   ): Promise<ScopeApproachSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
+      // First open by a lead builds the population and approach map from
+      // Section 02 / 03.1–03.3 straight away (as 03.5 populates on first entry).
+      if (!(await this.readRecord(client, wi)) && (await isEngagementLead(client, engagementId))) {
+        await this.ensure(client, ctx, engagementId, wi);
+      }
       return this.buildSummary(client, wi);
     });
   }

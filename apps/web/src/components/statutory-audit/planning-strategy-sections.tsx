@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Circle, Info, Plus } from 'lucide-react';
+import { CheckCircle2, Circle, History, Info, Plus } from 'lucide-react';
 import {
   ACCEPTANCE_CARRY_FORWARD_ACTION_LABEL,
   PLANNING_AFFECTED_MODULES,
@@ -400,6 +400,24 @@ export function CarriedMattersSection({
     queryFn: () => apiFetch<AcceptanceCarryForwardRecord[]>(`${base}/acceptance-carry-forward`),
   });
   const [adding, setAdding] = useState(false);
+  const toast = useToast();
+  const bringForward = useMutation({
+    mutationFn: () =>
+      apiFetch<{ matters: PriorYearMatterRecord[]; added: number }>(
+        `${base}/prior-year-matters/import`,
+        { method: 'POST', body: {} },
+      ),
+    onSuccess: (r) => {
+      toast(
+        r.added
+          ? `${r.added} matter(s) brought forward from last year's audit file.`
+          : 'Nothing new on last year’s audit file.',
+      );
+      void priorYear.refetch();
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not bring last year’s matters forward.')),
+  });
 
   return (
     <div className="space-y-5">
@@ -429,10 +447,21 @@ export function CarriedMattersSection({
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium text-ink">03.1.6 · Prior-year intelligence</div>
           {editable && !adding && !initialAudit && (
-            <Button variant="ghost" onClick={() => setAdding(true)}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              Add prior-year matter
-            </Button>
+            <div className="flex flex-wrap gap-1">
+              <Button
+                variant="ghost"
+                onClick={() => bringForward.mutate()}
+                disabled={bringForward.isPending}
+                title="Significant risks, Areas of Focus, blocking review notes and high-severity exceptions from last year's file"
+              >
+                <History className="mr-1.5 h-4 w-4" />
+                Bring forward from last year’s file
+              </Button>
+              <Button variant="ghost" onClick={() => setAdding(true)}>
+                <Plus className="mr-1.5 h-4 w-4" />
+                Add prior-year matter
+              </Button>
+            </div>
           )}
         </div>
         {initialAudit ? (
@@ -440,8 +469,10 @@ export function CarriedMattersSection({
         ) : (
           <>
             <p className="text-xs text-ink-muted">
-              Reassess each prior-year matter for the current year. Nothing rolls forward
-              automatically. If there are none, confirm that on the Overall direction tab.
+              Last year’s significant risks, Areas of Focus, blocking review notes and
+              high-severity exceptions are brought forward from the portal’s prior-year file on
+              first open. Reassess each for the current year — the assessment never rolls forward.
+              If there are none, confirm that on the Overall direction tab.
             </p>
             {priorYear.isLoading && <Spinner label="Loading prior-year matters…" />}
             {!priorYear.isLoading && (priorYear.data ?? []).length === 0 && !adding && (
