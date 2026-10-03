@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditWorkGeneration } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type StatutoryAuditWorkGeneration,
+  type WorkSuggestionResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditWorkService } from './audit-work.service';
@@ -40,6 +44,23 @@ export class AuditWorkController {
     @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
   ): Promise<StatutoryAuditWorkGeneration> {
     return this.work.generate(rlsContextFromPrincipal(principal), id, workflowInstanceId);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/work-areas/suggest')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Refresh suggested work from Sections 03–04 (Section 05 / 06)',
+    description:
+      'Regenerates the work areas (framework workstreams + 03.5 areas), fills blank area ' +
+      'detail and adds procedures never suggested on this file before. A suggestion the team ' +
+      'deleted is never re-added.',
+  })
+  suggest(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<WorkSuggestionResult> {
+    return this.work.suggestWork(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/areas/:workAreaId/detail')

@@ -168,6 +168,10 @@ export interface AuditProcedure {
   expectedEvidence: string | null;
   conclusion: string | null;
   state: ProcedureState;
+  /** Stable key of a suggested procedure (null when the team added it). */
+  sourceKey: string | null;
+  /** Where a suggested procedure came from, e.g. "Section 04 risk R3". */
+  sourceNote: string | null;
   /** Every area this procedure supports — home first, then linked reuse (§14). */
   linkedAreas: ProcedureAreaLink[];
   evidence: AuditEvidence[];
@@ -211,6 +215,17 @@ export interface StatutoryAuditProcedures {
   engagementServiceId: string;
   engagementId: string;
   procedures: AuditProcedure[];
+}
+
+/** Result of "Refresh suggested work" (Section 05 / 06 automation). */
+export interface WorkSuggestionResult {
+  generation: import('./statutory-audit-work').StatutoryAuditWorkGeneration;
+  /** Work areas newly created from the framework and 03.5. */
+  areasAdded: number;
+  /** Area detail fields filled from the file (blanks only). */
+  detailsFilled: number;
+  /** Procedures newly suggested. */
+  proceduresAdded: number;
 }
 
 /**

@@ -939,6 +939,22 @@ export class AuditAreaReviewService {
    * §25 hook for upstream modules (03.3 completion): a completed 03.5 whose
    * completeness is affected becomes Update Required — never silently changed.
    */
+  /**
+   * The retained 03.5 areas as Section 05 / 06 reads them — names, attention,
+   * live figures and active assertions — so the audit work never re-keys them.
+   */
+  async retainedForWork(
+    client: PoolClient,
+    wi: string,
+  ): Promise<{ areas: EngagementAuditArea[]; datasetUnit: FinancialUnit | null }> {
+    const ws = await this.workspace(client, wi);
+    if (!ws.record) return { areas: [], datasetUnit: ws.facts.datasetUnit ?? null };
+    return {
+      areas: ws.areas.filter((a) => a.disposition === 'retained'),
+      datasetUnit: ws.facts.datasetUnit ?? null,
+    };
+  }
+
   async markImpacted(client: PoolClient, wi: string): Promise<void> {
     const ws = await this.workspace(client, wi);
     if (!ws.record || ws.record.status !== 'complete' || !ws.impacts.length) return;

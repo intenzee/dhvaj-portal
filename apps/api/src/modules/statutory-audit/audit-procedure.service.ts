@@ -47,6 +47,8 @@ interface ProcedureRow {
   expected_evidence: string | null;
   conclusion: string | null;
   state: ProcedureState;
+  source_key: string | null;
+  source_note: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -141,7 +143,7 @@ export class AuditProcedureService {
               p.assertions, p.risk_id, r.risk_ref, p.population, p.sampling_method, p.sample_size,
               p.owner_employee_id, owner.full_name AS owner_name,
               p.reviewer_employee_id, reviewer.full_name AS reviewer_name,
-              p.due_date, p.expected_evidence, p.conclusion, p.state, p.version,
+              p.due_date, p.expected_evidence, p.conclusion, p.state, p.source_key, p.source_note, p.version,
               p.created_at, p.updated_at
          FROM hsdg.audit_procedures p
          LEFT JOIN hsdg.audit_risks r ON r.id = p.risk_id
@@ -803,6 +805,8 @@ function mapProcedure(
     expectedEvidence: p.expected_evidence,
     conclusion: p.conclusion,
     state: p.state,
+    sourceKey: p.source_key ?? null,
+    sourceNote: p.source_note ?? null,
     version: p.version,
     createdAt: p.created_at.toISOString(),
     updatedAt: p.updated_at.toISOString(),

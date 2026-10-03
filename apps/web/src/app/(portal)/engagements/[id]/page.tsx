@@ -122,6 +122,7 @@ const AUDIT_PHASE_PANELS = [
   'framework',
   'planning',
   'risk',
+  'controls',
   'audit_areas',
   'pbc',
   'review',
@@ -332,6 +333,13 @@ export default function EngagementDetailPage(): JSX.Element {
                 {key === 'framework' && <FrameworkPanel engagementId={e.id} />}
                 {key === 'planning' && <PlanningPanel engagementId={e.id} team={planningTeam(e)} />}
                 {key === 'risk' && <RiskPanel engagementId={e.id} team={e.team} />}
+                {key === 'controls' && (
+                  <WorkAreasPanel
+                    engagementId={e.id}
+                    team={e.team}
+                    only={['ifc', 'internal_audit_reliance']}
+                  />
+                )}
                 {key === 'audit_areas' && <WorkAreasPanel engagementId={e.id} team={e.team} />}
                 {key === 'pbc' && <PbcPanel engagementId={e.id} />}
                 {key === 'review' && <ReviewPanel engagementId={e.id} />}

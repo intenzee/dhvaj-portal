@@ -114,6 +114,23 @@ export class AuditRiskService {
     });
   }
 
+  /**
+   * Seed the register once if no lead has opened it yet — the audit work
+   * (Section 05 / 06) calls this so its risk responses exist. Caller is a lead.
+   */
+  async ensureSeeded(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<void> {
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.audit_risk_suggestion_log WHERE workflow_instance_id = $1 LIMIT 1`,
+      [workflowInstanceId],
+    );
+    if (!rows[0]) await this.suggestOn(client, ctx, engagementId, workflowInstanceId, true);
+  }
+
   private async suggestOn(
     client: PoolClient,
     ctx: RlsContext,

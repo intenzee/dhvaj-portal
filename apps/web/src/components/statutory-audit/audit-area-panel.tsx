@@ -543,9 +543,13 @@ function ProcedureCard({
             <span className="font-mono text-xs text-ink-faint">{p.procedureRef}</span>
             <Badge tone={STATE_TONE[p.state]}>{humanize(p.state)}</Badge>
             {p.riskRef && <Badge tone="warn">↔ {p.riskRef}</Badge>}
+            {p.sourceKey && <Badge tone="info">Suggested</Badge>}
           </div>
           <p className="mt-1.5 text-sm font-medium text-ink">{p.title}</p>
           {p.objective && <p className="mt-0.5 text-xs text-ink-muted">{p.objective}</p>}
+          {p.sourceNote && (
+            <p className="mt-0.5 text-xs text-primary-700">Suggested from: {p.sourceNote}</p>
+          )}
           <p className="mt-1 text-xs text-ink-muted">
             {p.assertions.length > 0 && <>{p.assertions.map(humanize).join(', ')} · </>}
             Owner: {p.ownerName ?? '—'} · Reviewer: {p.reviewerName ?? '—'}
