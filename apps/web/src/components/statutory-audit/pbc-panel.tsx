@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Lock, Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { ListChecks, Plus, Trash2, AlertTriangle } from 'lucide-react';
 import {
   PBC_STATUS,
   PERMISSION,
   type AuditPbcItem,
+  type PbcStandardListResult,
   type PbcStatus,
   type StatutoryAuditPbc,
   type StatutoryAuditWorkGeneration,
@@ -23,8 +24,8 @@ import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 /**
  * PBC — Master Client Information Tracker (Audit Spec §16). One master list per
  * audit file: each request carries its requirement, client owner, agreed due
- * date, professional status and an optional linked work area. The tracker is
- * populated once Planning is approved (§7, workflow step 13). A received file is
+ * date, professional status and an optional linked work area. "Add standard
+ * requests" fills it from the client master in one step. A received file is
  * surfaced in the linked area by reference — it is never re-uploaded (§16).
  *
  * The tracker is a compact list; a request's detail, status, edit form and
@@ -107,7 +108,8 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
 
   const query = useQuery({
     queryKey: PBC_QK(engagementId),
-    queryFn: () => apiFetch<StatutoryAuditPbc[]>(`/engagements/${engagementId}/statutory-audit/pbc`),
+    queryFn: () =>
+      apiFetch<StatutoryAuditPbc[]>(`/engagements/${engagementId}/statutory-audit/pbc`),
   });
 
   // Work areas populate the "Linked work" select (§16 LINKED WORK).
@@ -136,20 +138,27 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not add PBC request.'),
   });
 
+  const addStandard = useMutation({
+    mutationFn: () =>
+      apiFetch<PbcStandardListResult>(
+        `/engagements/${engagementId}/statutory-audit/${query.data![0]!.workflowInstanceId}/pbc/standard-list`,
+        { method: 'POST', body: {} },
+      ),
+    onSuccess: (res) => {
+      toast(
+        res.added > 0
+          ? `${res.added} standard request(s) added from the client master.`
+          : 'The standard requests are already on the tracker.',
+      );
+      invalidate();
+    },
+    onError: (e) =>
+      toast(e instanceof ApiError ? e.message : 'Could not add the standard requests.'),
+  });
+
   if (query.isLoading) return <Spinner label="Loading PBC tracker…" />;
   const tracker = query.data?.[0];
   if (!tracker) return null;
-
-  if (!tracker.planningApproved) {
-    return (
-      <Card className="p-5">
-        <p className="inline-flex items-center gap-2 text-sm text-ink-muted">
-          <Lock className="h-4 w-4" />
-          Approve Planning (Phase 03) to populate the PBC tracker.
-        </p>
-      </Card>
-    );
-  }
 
   return (
     <div className="space-y-3">
@@ -167,10 +176,21 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
           </p>
         </div>
         {canManage && (
-          <Button onClick={() => setAdding(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add request
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => addStandard.mutate()}
+              disabled={addStandard.isPending}
+              title="Adds the usual audit requests, tailored to this client, with owners and due dates"
+            >
+              <ListChecks className="mr-1.5 h-4 w-4" />
+              Add standard requests
+            </Button>
+            <Button onClick={() => setAdding(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add request
+            </Button>
+          </div>
         )}
       </Card>
 
@@ -194,7 +214,8 @@ export function PbcPanel({ engagementId }: { engagementId: string }): JSX.Elemen
       {tracker.items.length === 0 && (
         <Card className="p-5">
           <EmptyState>
-            No client information requested yet. Add the requirements the client must supply.
+            No client information requested yet. Use “Add standard requests” to start from the usual
+            list for this client, or add a requirement yourself.
           </EmptyState>
         </Card>
       )}
@@ -264,7 +285,9 @@ function PbcRow({
       }),
     onSuccess: () => onChanged(),
     onError: (e) =>
-      toast(e instanceof ApiError ? e.message : 'Could not change status. Rejecting needs a reason.'),
+      toast(
+        e instanceof ApiError ? e.message : 'Could not change status. Rejecting needs a reason.',
+      ),
   });
 
   const remove = useMutation({
@@ -471,7 +494,11 @@ function PbcForm({
           />
         </Field>
         <Field label="Due date">
-          <Input type="date" value={draft.dueDate} onChange={(e) => set('dueDate', e.target.value)} />
+          <Input
+            type="date"
+            value={draft.dueDate}
+            onChange={(e) => set('dueDate', e.target.value)}
+          />
         </Field>
         <Field label="Received date">
           <Input

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Lock, Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import {
   PERMISSION,
   RISK_ASSERTION,
@@ -158,17 +158,6 @@ export function RiskPanel({
   const register = query.data?.[0];
   if (!register) return null;
 
-  if (!register.planningApproved) {
-    return (
-      <Card className="p-5">
-        <p className="inline-flex items-center gap-2 text-sm text-ink-muted">
-          <Lock className="h-4 w-4" />
-          Approve Planning (Phase 03) to open the risk register.
-        </p>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-3">
       <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -272,7 +261,9 @@ function RiskRow({
 
   const remove = useMutation({
     mutationFn: () =>
-      apiFetch(`/engagements/${engagementId}/statutory-audit/risks/${risk.id}`, { method: 'DELETE' }),
+      apiFetch(`/engagements/${engagementId}/statutory-audit/risks/${risk.id}`, {
+        method: 'DELETE',
+      }),
     onSuccess: () => {
       toast(`${risk.riskRef}: removed.`);
       onChanged();
@@ -422,69 +413,119 @@ function RiskForm({
       </Field>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Source">
-          <Select value={draft.source} onChange={(e) => set('source', e.target.value as RiskSource)}>
+          <Select
+            value={draft.source}
+            onChange={(e) => set('source', e.target.value as RiskSource)}
+          >
             {Object.values(RISK_SOURCE).map((s) => (
-              <option key={s} value={s}>{humanize(s)}</option>
+              <option key={s} value={s}>
+                {humanize(s)}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="FS area">
-          <Input placeholder="e.g. Revenue" value={draft.fsArea} onChange={(e) => set('fsArea', e.target.value)} />
+          <Input
+            placeholder="e.g. Revenue"
+            value={draft.fsArea}
+            onChange={(e) => set('fsArea', e.target.value)}
+          />
         </Field>
         <Field label="Assertion">
-          <Select value={draft.assertion} onChange={(e) => set('assertion', e.target.value as RiskAssertion | '')}>
+          <Select
+            value={draft.assertion}
+            onChange={(e) => set('assertion', e.target.value as RiskAssertion | '')}
+          >
             <option value="">—</option>
             {Object.values(RISK_ASSERTION).map((a) => (
-              <option key={a} value={a}>{humanize(a)}</option>
+              <option key={a} value={a}>
+                {humanize(a)}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="Rating">
-          <Select value={draft.rating} onChange={(e) => set('rating', e.target.value as RiskRating)}>
+          <Select
+            value={draft.rating}
+            onChange={(e) => set('rating', e.target.value as RiskRating)}
+          >
             {Object.values(RISK_RATING).map((r) => (
-              <option key={r} value={r}>{humanize(r)}</option>
+              <option key={r} value={r}>
+                {humanize(r)}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="Owner">
-          <Select value={draft.ownerEmployeeId} onChange={(e) => set('ownerEmployeeId', e.target.value)}>
+          <Select
+            value={draft.ownerEmployeeId}
+            onChange={(e) => set('ownerEmployeeId', e.target.value)}
+          >
             <option value="">—</option>
             {team.map((m) => (
-              <option key={m.employeeId} value={m.employeeId}>{m.employeeName}</option>
+              <option key={m.employeeId} value={m.employeeId}>
+                {m.employeeName}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="Reviewer">
-          <Select value={draft.reviewerEmployeeId} onChange={(e) => set('reviewerEmployeeId', e.target.value)}>
+          <Select
+            value={draft.reviewerEmployeeId}
+            onChange={(e) => set('reviewerEmployeeId', e.target.value)}
+          >
             <option value="">—</option>
             {team.map((m) => (
-              <option key={m.employeeId} value={m.employeeId}>{m.employeeName}</option>
+              <option key={m.employeeId} value={m.employeeId}>
+                {m.employeeName}
+              </option>
             ))}
           </Select>
         </Field>
         <Field label="Status">
-          <Select value={draft.status} onChange={(e) => set('status', e.target.value as RiskStatus)}>
+          <Select
+            value={draft.status}
+            onChange={(e) => set('status', e.target.value as RiskStatus)}
+          >
             {Object.values(RISK_STATUS).map((s) => (
-              <option key={s} value={s}>{humanize(s)}</option>
+              <option key={s} value={s}>
+                {humanize(s)}
+              </option>
             ))}
           </Select>
         </Field>
       </div>
       <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-2 text-sm text-ink">
-          <input type="checkbox" checked={draft.isSignificant} onChange={(e) => set('isSignificant', e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={draft.isSignificant}
+            onChange={(e) => set('isSignificant', e.target.checked)}
+          />
           Significant risk
         </label>
         <label className="flex items-center gap-2 text-sm text-ink">
-          <input type="checkbox" checked={draft.isFraudRisk} onChange={(e) => set('isFraudRisk', e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={draft.isFraudRisk}
+            onChange={(e) => set('isFraudRisk', e.target.checked)}
+          />
           Fraud risk
         </label>
       </div>
       <Field label="Planned response">
-        <Textarea rows={2} value={draft.response} onChange={(e) => set('response', e.target.value)} />
+        <Textarea
+          rows={2}
+          value={draft.response}
+          onChange={(e) => set('response', e.target.value)}
+        />
       </Field>
       <Field label="Conclusion">
-        <Textarea rows={2} value={draft.conclusion} onChange={(e) => set('conclusion', e.target.value)} />
+        <Textarea
+          rows={2}
+          value={draft.conclusion}
+          onChange={(e) => set('conclusion', e.target.value)}
+        />
       </Field>
       <div className="flex gap-2">
         <Button

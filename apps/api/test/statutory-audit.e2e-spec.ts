@@ -213,7 +213,7 @@ describe('Statutory Audit (e2e §35/§36)', () => {
 
   // ── §36: provisioning ───────────────────────────────────────────────────────
 
-  it('Add Statutory Audit → one shell; Acceptance opens, Framework locked until approved (§8.2)', async () => {
+  it('Add Statutory Audit → one shell; Acceptance in progress, every other section open (§8.2)', async () => {
     const { engId } = await provisionAuditFile();
     const shells = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/statutory-audit`)
@@ -224,31 +224,94 @@ describe('Statutory Audit (e2e §35/§36)', () => {
     const phase = (key: string) =>
       shells.body[0].phases.find((p: { phaseKey: string }) => p.phaseKey === key);
     expect(phase('acceptance').state).toBe('in_progress');
-    expect(phase('framework').state).toBe('locked');
-    expect(phase('completion').state).toBe('locked');
+    // No phase locks: the team can work any section in any order.
+    expect(phase('framework').state).toBe('not_started');
+    expect(phase('completion').state).toBe('not_started');
   });
 
-  it('Framework is gated until Section 01 is Partner-approved, then unlocks (§8.5)', async () => {
+  it('Framework works before Section 01 is Partner-approved (no phase lock)', async () => {
     const { engId, shellId } = await provisionAuditFile();
-    // Framework mutations are refused while acceptance is unapproved.
-    await request(app.getHttpServer())
-      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/run-suggestions`)
-      .set(bearer(pa))
-      .expect(409);
-    await acceptSection01(engId, shellId);
-    // Now the Framework phase is in_progress and suggestions run.
     await request(app.getHttpServer())
       .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/run-suggestions`)
       .set(bearer(pa))
       .expect(201);
-    const shells = await request(app.getHttpServer())
-      .get(`/api/v1/engagements/${engId}/statutory-audit`)
+  });
+
+  it('Framework opens with the system suggestions already run; Accept all concludes them (§19)', async () => {
+    const { engId, shellId } = await provisionAuditFile();
+    // First open by the lead runs the engine — nothing left un-assessed that it answers.
+    const fw = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/statutory-audit/framework`)
       .set(bearer(pa))
       .expect(200);
-    const framework = shells.body[0].phases.find(
-      (p: { phaseKey: string }) => p.phaseKey === 'framework',
-    );
-    expect(framework.state).toBe('in_progress');
+    const before = fw.body[0].assessments as Array<{
+      areaKey: string;
+      state: string;
+      systemSuggestion: string | null;
+    }>;
+    const scheduleIii = before.find((a) => a.areaKey === 'schedule_iii')!;
+    expect(scheduleIii.state).toMatch(/^system_suggested_/);
+    const suggested = before.filter((a) => a.state.startsWith('system_suggested_'));
+    expect(suggested.length).toBeGreaterThan(0);
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/accept-suggestions`)
+      .set(bearer(pa))
+      .expect(201);
+    const after = res.body.assessments as Array<{
+      areaKey: string;
+      state: string;
+      conclusion: string | null;
+      isOverridden: boolean;
+    }>;
+    for (const s of suggested) {
+      const a = after.find((x) => x.areaKey === s.areaKey)!;
+      expect(a.conclusion).toBe(s.systemSuggestion);
+      expect(a.state).toBe(s.systemSuggestion);
+      expect(a.isOverridden).toBe(false);
+    }
+    // Nothing left to accept → a clear 400, not a silent no-op.
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/accept-suggestions`)
+      .set(bearer(pa))
+      .expect(400);
+    // An outsider cannot accept on someone else's file.
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/accept-suggestions`)
+      .set(bearer(pb))
+      .expect((r) => expect([403, 404]).toContain(r.status));
+  });
+
+  it('Standard PBC list adds tailored requests once, linked and owned (§16)', async () => {
+    const { engId, shellId } = await provisionAuditFile();
+    const first = await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/pbc/standard-list`)
+      .set(bearer(pa))
+      .expect(201);
+    expect(first.body.added).toBeGreaterThan(5);
+    const items = first.body.tracker.items as Array<{
+      pbcRef: string;
+      requirement: string;
+      status: string;
+      dueDate: string | null;
+    }>;
+    expect(items).toHaveLength(first.body.added);
+    expect(items[0]!.pbcRef).toBe('PBC-001');
+    expect(items.every((i) => i.status === 'requested' && i.dueDate)).toBe(true);
+    expect(items.some((i) => /trial balance/i.test(i.requirement))).toBe(true);
+
+    // Re-running only adds what is missing.
+    const again = await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/pbc/standard-list`)
+      .set(bearer(pa))
+      .expect(201);
+    expect(again.body.added).toBe(0);
+    expect(again.body.tracker.items).toHaveLength(items.length);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/pbc/standard-list`)
+      .set(bearer(pb))
+      .expect((r) => expect([403, 404]).toContain(r.status));
   });
 
   it('A blocking Acceptance Matter prevents Partner approval until resolved (§8.4)', async () => {
@@ -302,7 +365,7 @@ describe('Statutory Audit (e2e §35/§36)', () => {
       .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/work-areas/generate`)
       .set(bearer(pa))
       .expect(409);
-    // The Audit Areas phase stays locked until work is generated.
+    // Nothing is generated, so the Audit Areas phase has not started.
     const shells = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/statutory-audit`)
       .set(bearer(pa))
@@ -310,7 +373,7 @@ describe('Statutory Audit (e2e §35/§36)', () => {
     const areasPhase = shells.body[0].phases.find(
       (p: { phaseKey: string }) => p.phaseKey === 'audit_areas',
     );
-    expect(areasPhase.state).toBe('locked');
+    expect(areasPhase.state).toBe('not_started');
   });
 
   it('Run generation twice → no duplicate work areas, and Audit Areas unlocks', async () => {

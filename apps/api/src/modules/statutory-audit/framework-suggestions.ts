@@ -92,6 +92,26 @@ const unresolved = (what: string): AreaSuggestion =>
     `${what} not found in the Audit Rules Library for this audit period — Information Insufficient.`,
   );
 
+/**
+ * Areas the engine answers from facts (every other area is descriptive and is
+ * left `not_assessed` for the professional). An undecided area in this set that
+ * is still `not_assessed` means the engine has never run on the file.
+ */
+export const SUGGESTED_AREA_KEYS: readonly FrameworkAreaKey[] = [
+  FRAMEWORK_AREA_KEY.indAsAs,
+  FRAMEWORK_AREA_KEY.scheduleIii,
+  FRAMEWORK_AREA_KEY.caro,
+  FRAMEWORK_AREA_KEY.ifc,
+  FRAMEWORK_AREA_KEY.cfs,
+  FRAMEWORK_AREA_KEY.internalAudit,
+  FRAMEWORK_AREA_KEY.secretarialAudit,
+  FRAMEWORK_AREA_KEY.csr,
+  FRAMEWORK_AREA_KEY.rule11,
+  FRAMEWORK_AREA_KEY.section143,
+  FRAMEWORK_AREA_KEY.costRecords,
+  FRAMEWORK_AREA_KEY.otherRegulatory,
+];
+
 /** Short "rule X effective YYYY-MM-DD" trailer for a traceable basis string. */
 function ruleTag(r: ResolvedRule): string {
   return `rule ${r.ruleCode} effective ${r.effectiveFrom}`;

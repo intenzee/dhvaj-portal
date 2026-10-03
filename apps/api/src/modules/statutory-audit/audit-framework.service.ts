@@ -20,7 +20,8 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditMattersService } from './audit-matters.service';
-import { suggestArea, type FrameworkFacts } from './framework-suggestions';
+import { SUGGESTED_AREA_KEYS, suggestArea, type FrameworkFacts } from './framework-suggestions';
+import { isEngagementLead } from './master-facts';
 
 interface AssessmentRow {
   id: string;
@@ -84,7 +85,42 @@ export class AuditFrameworkService {
     ctx: RlsContext,
     engagementId: string,
   ): Promise<StatutoryAuditFramework[]> {
-    return this.db.withRlsContext(ctx, (client) => this.readFrameworks(client, engagementId));
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.autoSuggestOn(client, ctx, engagementId);
+      return this.readFrameworks(client, engagementId);
+    });
+  }
+
+  /**
+   * First open by a lead runs the suggestion engine on its own, so the team
+   * starts from the client master's answers instead of a blank framework and a
+   * button to find. One-shot by construction: it only fires while an area the
+   * engine answers is still `not_assessed`, which a run never leaves behind.
+   */
+  private async autoSuggestOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+  ): Promise<void> {
+    const { rows } = await client.query<{ workflow_instance_id: string }>(
+      `SELECT DISTINCT a.workflow_instance_id
+         FROM hsdg.audit_framework_assessments a
+         JOIN hsdg.service_workflow_instances swi ON swi.id = a.workflow_instance_id
+        WHERE a.engagement_id = $1 AND swi.status <> 'cancelled'
+          AND a.state = 'not_assessed' AND a.area_key = ANY($2::text[])`,
+      [engagementId, SUGGESTED_AREA_KEYS],
+    );
+    if (rows.length === 0 || !(await isEngagementLead(client, engagementId))) return;
+    for (const r of rows) {
+      const updated = await this.applySuggestionsOn(client, engagementId, r.workflow_instance_id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.framework_suggestions_run',
+        objectType: 'service_workflow_instance',
+        objectId: r.workflow_instance_id,
+        after: { updated, automatic: true },
+      });
+      await this.matters.syncFrameworkOn(client, ctx, engagementId, r.workflow_instance_id);
+    }
   }
 
   private async readFrameworks(
@@ -177,39 +213,7 @@ export class AuditFrameworkService {
   ): Promise<StatutoryAuditFramework> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
-      const facts = await loadFacts(client, engagementId);
-
-      // Resolve every statutory threshold from the Rules Library by the
-      // engagement's audit period (guide §4) — no number is hard-coded.
-      const fyRes = await client.query<{ financial_year: string }>(
-        `SELECT financial_year FROM hsdg.engagements WHERE id = $1`,
-        [engagementId],
-      );
-      const auditPeriodStart = fyRes.rows[0]
-        ? auditPeriodStartFromFinancialYear(fyRes.rows[0].financial_year)
-        : new Date().toISOString().slice(0, 10);
-      const resolve = await this.rules.buildResolverOn(client, auditPeriodStart);
-
-      const { rows } = await client.query<{ id: string; area_key: string; state: FrameworkState }>(
-        `SELECT id, area_key, state
-           FROM hsdg.audit_framework_assessments
-          WHERE workflow_instance_id = $1`,
-        [workflowInstanceId],
-      );
-      let updated = 0;
-      for (const row of rows) {
-        // Never overwrite a professional conclusion (§19).
-        if (FRAMEWORK_DECIDED_STATES.includes(row.state)) continue;
-        const s = suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
-        if (!s.suggestion && s.state === 'not_assessed') continue; // descriptive — leave alone
-        await client.query(
-          `UPDATE hsdg.audit_framework_assessments
-              SET system_suggestion = $2, system_basis = $3, state = $4
-            WHERE id = $1`,
-          [row.id, s.suggestion, s.basis || null, s.state],
-        );
-        updated += 1;
-      }
+      const updated = await this.applySuggestionsOn(client, engagementId, workflowInstanceId);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.framework_suggestions_run',
         objectType: 'service_workflow_instance',
@@ -217,6 +221,93 @@ export class AuditFrameworkService {
         after: { updated },
       });
       // Generate/reconcile Framework Matters from the new states (§10).
+      await this.matters.syncFrameworkOn(client, ctx, engagementId, workflowInstanceId);
+      const [framework] = await this.readFrameworks(client, engagementId);
+      return framework!;
+    });
+  }
+
+  /**
+   * Run the engine over every undecided area of one shell. Returns how many
+   * areas it updated; never touches a decided or approved area (§19).
+   */
+  private async applySuggestionsOn(
+    client: PoolClient,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<number> {
+    const facts = await loadFacts(client, engagementId, workflowInstanceId);
+
+    // Resolve every statutory threshold from the Rules Library by the
+    // engagement's audit period (guide §4) — no number is hard-coded.
+    const fyRes = await client.query<{ financial_year: string }>(
+      `SELECT financial_year FROM hsdg.engagements WHERE id = $1`,
+      [engagementId],
+    );
+    const auditPeriodStart = fyRes.rows[0]
+      ? auditPeriodStartFromFinancialYear(fyRes.rows[0].financial_year)
+      : new Date().toISOString().slice(0, 10);
+    const resolve = await this.rules.buildResolverOn(client, auditPeriodStart);
+
+    const { rows } = await client.query<{ id: string; area_key: string; state: FrameworkState }>(
+      `SELECT id, area_key, state
+           FROM hsdg.audit_framework_assessments
+          WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    let updated = 0;
+    for (const row of rows) {
+      // Never overwrite a professional conclusion (§19).
+      if (FRAMEWORK_DECIDED_STATES.includes(row.state)) continue;
+      const s = suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
+      if (!s.suggestion && s.state === 'not_assessed') continue; // descriptive — leave alone
+      await client.query(
+        `UPDATE hsdg.audit_framework_assessments
+              SET system_suggestion = $2, system_basis = $3, state = $4
+            WHERE id = $1`,
+        [row.id, s.suggestion, s.basis || null, s.state],
+      );
+      updated += 1;
+    }
+    return updated;
+  }
+
+  // ── Accept every system suggestion at once ─────────────────────────────────
+
+  /**
+   * Record the system suggestion as the professional conclusion on every
+   * undecided area that has one (the same outcome as accepting each area in
+   * turn, so no basis is needed). Areas awaiting information or judgement are
+   * left for the team. Lead-only (engagement.manage).
+   */
+  async acceptSuggestions(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<StatutoryAuditFramework> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertShell(client, engagementId, workflowInstanceId);
+      const { rows } = await client.query<{ id: string; area_key: string }>(
+        `UPDATE hsdg.audit_framework_assessments
+            SET conclusion = system_suggestion, is_overridden = false,
+                state = system_suggestion, decided_by_employee_id = $2,
+                decided_at = now(), version = version + 1
+          WHERE workflow_instance_id = $1 AND system_suggestion IS NOT NULL
+            AND state IN ('system_suggested_applicable', 'system_suggested_not_applicable')
+          RETURNING id, area_key`,
+        [workflowInstanceId, ctx.employeeId ?? null],
+      );
+      if (rows.length === 0) {
+        throw new BadRequestException(
+          'No system suggestions are waiting — every remaining area needs information or a judgement.',
+        );
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.framework_suggestions_accepted',
+        objectType: 'service_workflow_instance',
+        objectId: workflowInstanceId,
+        after: { areas: rows.map((r) => r.area_key) },
+      });
       await this.matters.syncFrameworkOn(client, ctx, engagementId, workflowInstanceId);
       const [framework] = await this.readFrameworks(client, engagementId);
       return framework!;
@@ -514,7 +605,11 @@ function mapAssessment(a: AssessmentRow, evidence: EvidenceRow[]): FrameworkAsse
 }
 
 /** Load the entity facts the suggestion engine reads (best-effort; unknowns null). */
-async function loadFacts(client: PoolClient, engagementId: string): Promise<FrameworkFacts> {
+async function loadFacts(
+  client: PoolClient,
+  engagementId: string,
+  workflowInstanceId: string,
+): Promise<FrameworkFacts> {
   const facts: FrameworkFacts = {
     isCompany: null,
     isPrivateCompany: null,
@@ -544,6 +639,8 @@ async function loadFacts(client: PoolClient, engagementId: string): Promise<Fram
     facts.isPrivateCompany = ['private_limited', 'opc'].includes(type.rows[0].slug);
   }
 
+  // The audit year's financial profile first, then the current one (a client
+  // master often only carries the latest year). Turnover falls back to revenue.
   const fin = await client.query<{
     net_worth: string | null;
     turnover: string | null;
@@ -552,11 +649,12 @@ async function loadFacts(client: PoolClient, engagementId: string): Promise<Fram
     total_borrowings: string | null;
     public_deposits: string | null;
   }>(
-    `SELECT fp.net_worth, fp.turnover, fp.net_profit, fp.paid_up_capital,
-            fp.total_borrowings, fp.public_deposits
+    `SELECT fp.net_worth, COALESCE(fp.turnover, fp.revenue) AS turnover, fp.net_profit,
+            fp.paid_up_capital, fp.total_borrowings, fp.public_deposits
        FROM hsdg.entity_financial_profiles fp
        JOIN hsdg.engagements e ON e.entity_id = fp.entity_id
-      WHERE e.id = $1 AND fp.is_current
+      WHERE e.id = $1 AND (fp.financial_year = e.financial_year OR fp.is_current)
+      ORDER BY (fp.financial_year = e.financial_year) DESC, fp.is_current DESC, fp.created_at DESC
       LIMIT 1`,
     [engagementId],
   );
@@ -568,6 +666,39 @@ async function loadFacts(client: PoolClient, engagementId: string): Promise<Fram
     facts.paidUpCapital = num(r.paid_up_capital);
     facts.totalBorrowings = num(r.total_borrowings);
     facts.publicDeposits = num(r.public_deposits);
+  }
+
+  // Figures the team captured on the 02.1 profile win over the master.
+  const captured = await client.query<{ parameter: string; current_value: string | null }>(
+    `SELECT f.parameter, f.current_value::text
+       FROM hsdg.audit_profile_financials f
+       JOIN hsdg.audit_entity_profile p ON p.id = f.profile_id
+      WHERE p.workflow_instance_id = $1`,
+    [workflowInstanceId],
+  );
+  for (const c of captured.rows) {
+    const v = num(c.current_value);
+    if (v == null) continue;
+    if (c.parameter === 'net_worth') facts.netWorth = v;
+    if (c.parameter === 'turnover') facts.turnover = v;
+    if (c.parameter === 'paid_up_capital') facts.paidUpCapital = v;
+    if (c.parameter === 'borrowings') facts.totalBorrowings = v;
+    if (c.parameter === 'public_deposits') facts.publicDeposits = v;
+  }
+
+  // Last resort: the headline figures on the client record itself.
+  if (facts.paidUpCapital == null || facts.turnover == null) {
+    const ent = await client.query<{
+      paid_up_capital: string | null;
+      annual_turnover: string | null;
+    }>(
+      `SELECT ent.paid_up_capital, ent.annual_turnover
+         FROM hsdg.engagements e JOIN hsdg.entities ent ON ent.id = e.entity_id
+        WHERE e.id = $1`,
+      [engagementId],
+    );
+    facts.paidUpCapital ??= num(ent.rows[0]?.paid_up_capital ?? null);
+    facts.turnover ??= num(ent.rows[0]?.annual_turnover ?? null);
   }
 
   const listed = await client.query(

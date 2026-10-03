@@ -116,3 +116,10 @@ export function isPbcOverdue(
   if (!PBC_OUTSTANDING_STATUSES.includes(item.status)) return false;
   return item.dueDate < today;
 }
+
+/** Result of adding the standard request list to a tracker (§16). */
+export interface PbcStandardListResult {
+  tracker: StatutoryAuditPbc;
+  /** How many requests were new (already-listed requirements are skipped). */
+  added: number;
+}

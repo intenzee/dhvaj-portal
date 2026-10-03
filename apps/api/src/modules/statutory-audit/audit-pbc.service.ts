@@ -10,12 +10,23 @@ import {
   nextPbcRef,
   PBC_STATUS,
   type AuditPbcItem,
+  type PbcStandardListResult,
   type PbcStatus,
   type StatutoryAuditPbc,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { readEngagementMasterFacts, readInitialAudit } from './master-facts';
+import {
+  pickClientOwner,
+  planStandardPbcList,
+  samePbcRequirement,
+  type ClientContact,
+} from './pbc-standard-list';
+
+/** Days the client gets to answer a generated request when no start date is planned. */
+const STANDARD_LIST_RESPONSE_DAYS = 7;
 
 interface PbcRow {
   id: string;
@@ -204,6 +215,134 @@ export class AuditPbcService {
         }
       }
       throw new ConflictException('Could not assign a PBC reference; retry.');
+    });
+  }
+
+  // ── Standard request list (§16) ─────────────────────────────────────────────
+
+  /**
+   * Add the standard PBC request list, tailored from the client master
+   * (activities, borrowings, group, first-year audit) and linked to the file's
+   * active work areas, each with the client contact who usually answers it.
+   * Requests already on the tracker are skipped, so re-running only adds what
+   * is missing. Returns the tracker and how many requests were added.
+   */
+  async addStandardList(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<PbcStandardListResult> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertShell(client, engagementId, workflowInstanceId);
+      const master = await readEngagementMasterFacts(client, workflowInstanceId);
+      if (!master) throw new NotFoundException('Statutory-audit workflow not found.');
+      const initialAudit = (await readInitialAudit(client, workflowInstanceId)) ?? false;
+
+      const { rows: areas } = await client.query<{ id: string; work_area_key: string }>(
+        `SELECT id, work_area_key FROM hsdg.audit_work_areas
+          WHERE workflow_instance_id = $1 AND is_active`,
+        [workflowInstanceId],
+      );
+      const areaIdByKey = new Map(areas.map((a) => [a.work_area_key, a.id]));
+
+      const { rows: contactRows } = await client.query<{
+        full_name: string;
+        designation: string | null;
+        contact_type: string | null;
+        is_primary: boolean;
+      }>(
+        `SELECT c.full_name, c.designation, c.contact_type, c.is_primary
+           FROM hsdg.entity_contacts c
+           JOIN hsdg.engagements e ON e.entity_id = c.entity_id
+          WHERE e.id = $1
+          ORDER BY c.is_primary DESC, c.created_at`,
+        [engagementId],
+      );
+      const contacts: ClientContact[] = contactRows.map((c) => ({
+        fullName: c.full_name,
+        designation: c.designation,
+        contactType: c.contact_type,
+        isPrimary: c.is_primary,
+      }));
+
+      const plan = planStandardPbcList({
+        isCompany: master.entityCategory === 'company',
+        activityFlags: master.activityFlags,
+        borrowings:
+          master.cyFinancials?.totalBorrowings ?? master.pyFinancials?.totalBorrowings ?? null,
+        hasGroupRelationships: master.relationships.length > 0,
+        hasSubsidiaries: master.relationships.some(
+          (r) =>
+            r.outbound &&
+            [
+              'subsidiary',
+              'wholly_owned_subsidiary',
+              'step_down_subsidiary',
+              'associate',
+              'joint_venture',
+            ].includes(r.type),
+        ),
+        initialAudit,
+        activeWorkAreas: new Set(areaIdByKey.keys()),
+      });
+
+      const { rows: existing } = await client.query<{ pbc_ref: string; requirement: string }>(
+        `SELECT pbc_ref, requirement FROM hsdg.audit_pbc_items WHERE engagement_id = $1`,
+        [engagementId],
+      );
+      const refs = existing.map((r) => r.pbc_ref);
+      const toAdd = plan.filter(
+        (p) => !existing.some((e) => samePbcRequirement(e.requirement, p.requirement)),
+      );
+
+      const today = new Date().toISOString().slice(0, 10);
+      const fallbackDue = new Date(Date.now() + STANDARD_LIST_RESPONSE_DAYS * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      const dueDate =
+        master.plannedStartDate && master.plannedStartDate > today
+          ? master.plannedStartDate
+          : fallbackDue;
+
+      for (const p of toAdd) {
+        const pbcRef = nextPbcRef(refs);
+        refs.push(pbcRef);
+        try {
+          await client.query(
+            `INSERT INTO hsdg.audit_pbc_items
+               (workflow_instance_id, engagement_id, pbc_ref, requirement, client_owner,
+                work_area_id, status, requested_date, due_date, note, requested_by_employee_id)
+             VALUES ($1,$2,$3,$4,$5,$6,'requested',$7,$8,$9,$10)`,
+            [
+              workflowInstanceId,
+              engagementId,
+              pbcRef,
+              p.requirement,
+              pickClientOwner(p.ownerRole, contacts),
+              p.workAreaKey ? (areaIdByKey.get(p.workAreaKey) ?? null) : null,
+              today,
+              dueDate,
+              'Added from the standard request list.',
+              ctx.employeeId ?? null,
+            ],
+          );
+        } catch (err) {
+          if ((err as { code?: string }).code === '23505') {
+            throw new ConflictException('The tracker changed while adding requests; retry.');
+          }
+          throw err;
+        }
+      }
+      if (toAdd.length > 0) {
+        await this.audit.recordWith(client, ctx, {
+          action: 'statutory_audit.pbc_standard_list_added',
+          objectType: 'service_workflow_instance',
+          objectId: workflowInstanceId,
+          after: { added: toAdd.length },
+        });
+      }
+      const [tracker] = await this.readTracker(client, engagementId);
+      return { tracker: tracker!, added: toAdd.length };
     });
   }
 

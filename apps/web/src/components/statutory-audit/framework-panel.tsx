@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Sparkles, CheckCircle2, Trash2, Plus } from 'lucide-react';
+import { Sparkles, CheckCircle2, CheckCheck, Trash2, Plus } from 'lucide-react';
 import {
   PERMISSION,
   type FrameworkAssessment,
@@ -85,6 +85,19 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not run suggestions.'),
   });
 
+  const acceptAll = useMutation({
+    mutationFn: (workflowInstanceId: string) =>
+      apiFetch<StatutoryAuditFramework>(
+        `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/framework/accept-suggestions`,
+        { method: 'POST', body: {} },
+      ),
+    onSuccess: () => {
+      toast('System suggestions accepted as the conclusions.');
+      invalidate();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not accept the suggestions.'),
+  });
+
   const approve = useMutation({
     mutationFn: (workflowInstanceId: string) =>
       apiFetch<StatutoryAuditFramework>(
@@ -104,6 +117,11 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
 
   const approved = framework.approval != null;
   const ready = framework.undecidedCount === 0;
+  const waiting = framework.assessments.filter(
+    (a) =>
+      a.systemSuggestion != null &&
+      (a.state === 'system_suggested_applicable' || a.state === 'system_suggested_not_applicable'),
+  ).length;
 
   return (
     <div className="space-y-3">
@@ -116,7 +134,9 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
               <>
                 Approved
                 {framework.approval?.version ? ` (v${framework.approval.version})` : ''}
-                {framework.approval?.approvedByName ? ` · ${framework.approval.approvedByName}` : ''}
+                {framework.approval?.approvedByName
+                  ? ` · ${framework.approval.approvedByName}`
+                  : ''}
               </>
             ) : ready ? (
               'All areas decided — ready to approve the Framework Memo.'
@@ -135,6 +155,17 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
               <Sparkles className="mr-1.5 h-4 w-4" />
               Run system assessment
             </Button>
+            {waiting > 0 && !approved && (
+              <Button
+                variant="secondary"
+                onClick={() => acceptAll.mutate(framework.workflowInstanceId)}
+                disabled={acceptAll.isPending}
+                title="Record each waiting system suggestion as the conclusion"
+              >
+                <CheckCheck className="mr-1.5 h-4 w-4" />
+                Accept {waiting} suggestion{waiting === 1 ? '' : 's'}
+              </Button>
+            )}
             <Button
               onClick={() => approve.mutate(framework.workflowInstanceId)}
               disabled={approve.isPending || approved || !ready}
@@ -181,7 +212,12 @@ function FrameworkAreaCard({
     mutationFn: (conclusion: FrameworkConclusion) =>
       apiFetch(`/engagements/${engagementId}/statutory-audit/framework/${assessment.id}/decision`, {
         method: 'POST',
-        body: { conclusion, basis: basis || undefined, impact: impact || undefined, version: assessment.version },
+        body: {
+          conclusion,
+          basis: basis || undefined,
+          impact: impact || undefined,
+          version: assessment.version,
+        },
       }),
     onSuccess: () => {
       toast(`${assessment.title}: conclusion recorded.`);
@@ -259,7 +295,9 @@ function FrameworkAreaCard({
               <span className="font-medium text-ink">
                 {assessment.conclusion === 'applicable' ? 'Applicable' : 'Not applicable'}
               </span>
-              {assessment.isOverridden && <span className="ml-1 text-warning-700">(overridden)</span>}
+              {assessment.isOverridden && (
+                <span className="ml-1 text-warning-700">(overridden)</span>
+              )}
               {assessment.decidedByName && ` · ${assessment.decidedByName}`}
             </p>
           )}
@@ -307,7 +345,10 @@ function FrameworkAreaCard({
               <p className="text-xs text-ink-faint">No evidence linked yet.</p>
             )}
             {assessment.evidence.map((ev) => (
-              <div key={ev.id} className="flex items-center justify-between gap-2 text-xs text-ink-muted">
+              <div
+                key={ev.id}
+                className="flex items-center justify-between gap-2 text-xs text-ink-muted"
+              >
                 <span>{ev.note ?? `Document ${ev.documentId?.slice(0, 8)}`}</span>
                 {canManage && (
                   <button

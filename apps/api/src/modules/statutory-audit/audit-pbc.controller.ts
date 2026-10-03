@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditPbc } from '@hsdg/contracts';
+import { PERMISSION, type PbcStandardListResult, type StatutoryAuditPbc } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditPbcService } from './audit-pbc.service';
@@ -40,6 +40,24 @@ export class AuditPbcController {
     @Body() dto: CreatePbcItemDto,
   ): Promise<StatutoryAuditPbc> {
     return this.pbc.createItem(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/pbc/standard-list')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Add the standard PBC request list, tailored from the client master (§16)',
+    description:
+      'Adds the usual statutory-audit requests plus those the client master calls for ' +
+      '(inventory, borrowings, imports/exports, group, first-year audit), each with a client ' +
+      'owner from the contacts master and linked to its work area. Requests already on the ' +
+      'tracker are skipped.',
+  })
+  addStandardList(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<PbcStandardListResult> {
+    return this.pbc.addStandardList(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/pbc/:pbcId')

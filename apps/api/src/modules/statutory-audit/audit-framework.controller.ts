@@ -49,6 +49,26 @@ export class AuditFrameworkController {
     );
   }
 
+  @Post(':id/statutory-audit/:workflowInstanceId/framework/accept-suggestions')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Accept every waiting system suggestion as the conclusion, in one step',
+    description:
+      'Concludes each undecided area that carries a system suggestion exactly as suggested; ' +
+      'areas pending information or judgement are left for the team. 400 when none are waiting.',
+  })
+  acceptSuggestions(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<StatutoryAuditFramework> {
+    return this.framework.acceptSuggestions(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+    );
+  }
+
   @Post(':id/statutory-audit/framework/:assessmentId/decision')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({ summary: 'Record the professional conclusion for a framework area (§19)' })
