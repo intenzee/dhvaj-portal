@@ -4,6 +4,7 @@ import {
   PERMISSION,
   type SoftwareSystemInput,
   type StatutoryAuditOtherReporting,
+  type StatutoryAuditOtherReportingMasterFillResult,
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
@@ -40,6 +41,21 @@ export class AuditOtherReportingController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<StatutoryAuditOtherReporting[]> {
     return this.other.listForEngagement(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/other-reporting/fill-from-master')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Fill the 02.7 facts from the client master and portal records',
+    description:
+      'Fills blank facts from the directors on the contacts master and the accounting software on the prior-year file and re-runs the engine; never overwrites what the team entered.',
+  })
+  fillFromMaster(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<StatutoryAuditOtherReportingMasterFillResult> {
+    return this.other.fillFromMaster(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/other-reporting/facts')

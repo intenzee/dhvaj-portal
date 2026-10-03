@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditIcfr } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type StatutoryAuditIcfr,
+  type StatutoryAuditIcfrMasterFillResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditIcfrService } from './audit-icfr.service';
@@ -24,6 +28,21 @@ export class AuditIcfrController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<StatutoryAuditIcfr[]> {
     return this.icfr.listForEngagement(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/icfr/fill-from-master')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Fill the 02.5 facts from the client master and portal records',
+    description:
+      'Fills blank facts from the ROC filing record (AOC-4 / MGT-7 on the compliance calendar) and re-runs the engine; never overwrites what the team entered.',
+  })
+  fillFromMaster(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<StatutoryAuditIcfrMasterFillResult> {
+    return this.icfr.fillFromMaster(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/icfr/facts')

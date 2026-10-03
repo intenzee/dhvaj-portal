@@ -1,5 +1,7 @@
 import type { PoolClient } from 'pg';
 import {
+  FRAMEWORK_AREA_KEY,
+  SUB_SECTION_KEY,
   auditPeriodStartFromFinancialYear,
   FINANCIAL_UNIT_FACTOR,
   type DatasetStatus,
@@ -815,4 +817,92 @@ export async function isEngagementLead(client: PoolClient, engagementId: string)
     [engagementId],
   );
   return rows[0]?.lead === true;
+}
+
+// ── 02.5 / 02.7 sources beyond the entity master ─────────────────────────────
+
+/** One AOC-4 / MGT-7 obligation tracked on the compliance calendar. */
+export interface RocFiling {
+  form: 'AOC-4' | 'MGT-7';
+  deadline: string;
+  status: 'open' | 'completed' | 'waived';
+  /** ISO date the filing was marked done, when it was. */
+  completedOn: string | null;
+}
+
+export interface ClientDirector {
+  fullName: string;
+  designation: string | null;
+}
+
+export interface ReportingSources {
+  rocFilings: RocFiling[];
+  directors: ClientDirector[];
+  /** Last year's 02.7 facts for the same entity, with its financial year. */
+  priorOtherReporting: { financialYear: string; facts: Record<string, unknown> } | null;
+}
+
+/**
+ * Read the facts 02.5 ICFR and 02.7 other reporting can take from the portal:
+ * the ROC filing record (compliance calendar), the directors on the contacts
+ * master and last year's 02.7 file. Runs inside the caller's RLS transaction,
+ * so only what the user may see is read.
+ */
+export async function readReportingSources(
+  client: PoolClient,
+  workflowInstanceId: string,
+): Promise<ReportingSources> {
+  const roc = await client.query<{
+    code: string;
+    deadline: string;
+    status: RocFiling['status'];
+    completed_on: string | null;
+  }>(
+    `SELECT cr.code,
+            COALESCE(ci.statutory_deadline_override, ci.statutory_deadline)::text AS deadline,
+            ci.status, (ci.completed_at AT TIME ZONE 'Asia/Kolkata')::date::text AS completed_on
+       FROM hsdg.service_workflow_instances wi
+       JOIN hsdg.engagements e ON e.id = wi.engagement_id
+       JOIN hsdg.engagements e2 ON e2.entity_id = e.entity_id
+       JOIN hsdg.compliance_instances ci ON ci.engagement_id = e2.id
+       JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+      WHERE wi.id = $1 AND cr.code IN ('ROC_AOC4_DUE', 'ROC_MGT7_DUE')
+      ORDER BY 2`,
+    [workflowInstanceId],
+  );
+  const dirs = await client.query<{ full_name: string; designation: string | null }>(
+    `SELECT c.full_name, c.designation
+       FROM hsdg.service_workflow_instances wi
+       JOIN hsdg.engagements e ON e.id = wi.engagement_id
+       JOIN hsdg.entity_contacts c ON c.entity_id = e.entity_id
+      WHERE wi.id = $1
+        AND (c.contact_type = 'director' OR c.designation ILIKE '%director%')
+      ORDER BY c.created_at`,
+    [workflowInstanceId],
+  );
+  const prior = await client.query<{ financial_year: string; facts: Record<string, unknown> }>(
+    `SELECT e2.financial_year, s.facts
+       FROM hsdg.service_workflow_instances wi
+       JOIN hsdg.engagements e ON e.id = wi.engagement_id
+       JOIN hsdg.engagements e2 ON e2.entity_id = e.entity_id AND e2.financial_year < e.financial_year
+       JOIN hsdg.service_workflow_instances wi2 ON wi2.engagement_id = e2.id
+                                              AND wi2.status <> 'cancelled'
+       JOIN hsdg.audit_framework_subassessment s ON s.workflow_instance_id = wi2.id
+      WHERE wi.id = $1 AND s.sub_section_key = $2 AND s.area_key = $3 AND s.facts IS NOT NULL
+      ORDER BY e2.financial_year DESC, s.updated_at DESC
+      LIMIT 1`,
+    [workflowInstanceId, SUB_SECTION_KEY.otherReporting, FRAMEWORK_AREA_KEY.otherRegulatory],
+  );
+  return {
+    rocFilings: roc.rows.map((r) => ({
+      form: r.code === 'ROC_AOC4_DUE' ? 'AOC-4' : 'MGT-7',
+      deadline: r.deadline,
+      status: r.status,
+      completedOn: r.completed_on,
+    })),
+    directors: dirs.rows.map((d) => ({ fullName: d.full_name, designation: d.designation })),
+    priorOtherReporting: prior.rows[0]
+      ? { financialYear: prior.rows[0].financial_year, facts: prior.rows[0].facts }
+      : null,
+  };
 }

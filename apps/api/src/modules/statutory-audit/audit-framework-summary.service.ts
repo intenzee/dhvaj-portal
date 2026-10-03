@@ -28,6 +28,8 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditCaroService } from './audit-caro.service';
 import { AuditConsolidationService } from './audit-consolidation.service';
+import { AuditIcfrService } from './audit-icfr.service';
+import { AuditOtherReportingService } from './audit-other-reporting.service';
 
 /** The six Section-02 sub-sections the summary aggregates, in dashboard order. */
 const SECTIONS: Array<{ sub: SubSectionKey; area: string; title: string }> = [
@@ -89,6 +91,8 @@ export class AuditFrameworkSummaryService {
     private readonly audit: AuditService,
     private readonly caro: AuditCaroService,
     private readonly consolidation: AuditConsolidationService,
+    private readonly icfr: AuditIcfrService,
+    private readonly otherReporting: AuditOtherReportingService,
   ) {}
 
   // ── Read / aggregate ─────────────────────────────────────────────────────────
@@ -104,14 +108,18 @@ export class AuditFrameworkSummaryService {
           ORDER BY created_at ASC`,
         [engagementId],
       );
-      // Facts the client master answers (02.4 CARO, 02.6 consolidation) are
+      // Facts the portal already holds (02.4 CARO, 02.5 ICFR, 02.6, 02.7) are
       // filled on first sight, so the summary shows outcomes, not blanks.
       for (const s of shells) {
         await this.caro.seedOn(client, s.id, engagementId);
         await this.consolidation.seedOn(client, s.id, engagementId);
+        await this.icfr.seedOn(client, s.id, engagementId);
+        await this.otherReporting.seedOn(client, s.id, engagementId);
       }
       await this.caro.prefillOn(client, ctx, engagementId);
       await this.consolidation.prefillOn(client, ctx, engagementId);
+      await this.icfr.prefillOn(client, ctx, engagementId);
+      await this.otherReporting.prefillOn(client, ctx, engagementId);
       const out: StatutoryAuditFrameworkSummary[] = [];
       for (const s of shells)
         out.push(await this.build(client, engagementId, s.id, s.engagement_service_id));

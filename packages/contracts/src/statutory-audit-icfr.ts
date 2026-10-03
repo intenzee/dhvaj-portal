@@ -22,6 +22,7 @@
  * `<`) resolve from the Audit Rules Library by the engagement's audit period.
  */
 
+import type { MasterFact } from './statutory-audit';
 import type { FrameworkState } from './statutory-audit-framework';
 import type { FrameworkSubAssessment } from './statutory-audit-subassessment';
 
@@ -118,6 +119,11 @@ export interface StatutoryAuditIcfr {
   assessment: FrameworkSubAssessment;
   /** Typed view of the engine's structured detail (reporting / exemption / monetary test). */
   detail: IcfrDetail | null;
+  /**
+   * What the client master and portal records say for these facts, with the
+   * source — filled in on first open so the team confirms rather than types.
+   */
+  masterFacts: MasterFact[];
   capturedFacts: IcfrCapturedFacts;
   /** The base facts assembled from confirmed 02.1 + masters + captured facts. */
   baseFacts: IcfrFacts;
@@ -138,4 +144,11 @@ export interface RecordIcfrDecisionInput {
   basis?: string | null;
   impact?: string | null;
   version: number;
+}
+
+/** Result of filling 02.5 facts from the client master and portal records. */
+export interface StatutoryAuditIcfrMasterFillResult {
+  icfr: StatutoryAuditIcfr;
+  /** What was filled (empty when there was nothing new to add). */
+  filled: string[];
 }

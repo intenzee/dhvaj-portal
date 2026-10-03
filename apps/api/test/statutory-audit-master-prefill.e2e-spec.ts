@@ -41,13 +41,16 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     return res.body.id as string;
   };
 
-  const newAuditFile = async (entityId: string): Promise<{ engId: string; shellId: string }> => {
+  const newAuditFile = async (
+    entityId: string,
+    financialYear = '2024-25',
+  ): Promise<{ engId: string; shellId: string }> => {
     const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const eng = await post(pa, '/api/v1/engagements', {
       entityId,
       serviceId: itr,
-      financialYear: '2024-25',
+      financialYear,
       periodLabel: `P${stamp()}`,
       status: 'accepted',
     }).expect(201);
@@ -176,5 +179,80 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     }>;
     expect(sections.find((s) => s.subSectionKey === '02.4')?.systemOutcome).toBe('applicable');
     expect(sections.find((s) => s.subSectionKey === '02.6')?.systemOutcome).toBeTruthy();
+  });
+
+  it('02.5 / 02.7: directors from contacts, software from last year, filing record shown', async () => {
+    const entityId = await newEntity('private_limited', 'Prefill Reporting');
+    await post(pa, `/api/v1/entities/${entityId}/contacts`, {
+      fullName: 'Vikram Shah',
+      designation: 'Managing Director',
+      contactType: 'director',
+    }).expect(201);
+
+    // Last year's file lists the accounting software.
+    const prior = await newAuditFile(entityId, '2023-24');
+    const priorBase = `/api/v1/engagements/${prior.engId}/statutory-audit`;
+    const priorOr = await request(app.getHttpServer())
+      .get(`${priorBase}/other-reporting`)
+      .set(bearer(pa))
+      .expect(200);
+    await post(pa, `${priorBase}/${prior.shellId}/other-reporting/facts`, {
+      softwareSystems: [
+        { name: 'Tally Prime', hasAuditTrailFeature: true, auditTrailOperatedAllYear: true },
+      ],
+      version: priorOr.body[0].assessment.version,
+    }).expect(201);
+
+    const { engId, shellId } = await newAuditFile(entityId);
+    const base = `/api/v1/engagements/${engId}/statutory-audit`;
+    const or = await request(app.getHttpServer())
+      .get(`${base}/other-reporting`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(or.body[0].capturedFacts.hasManagingOrWholeTimeDirector).toBe(true);
+    expect(or.body[0].capturedFacts.softwareSystems).toEqual([
+      { name: 'Tally Prime', hasAuditTrailFeature: true, auditTrailOperatedAllYear: false },
+    ]);
+    expect(or.body[0].capturedFacts.fraudIdentified).toBe(false);
+
+    const icfr = await request(app.getHttpServer()).get(`${base}/icfr`).set(bearer(pa)).expect(200);
+    expect(icfr.body[0].capturedFacts.filingDefault).toBe(false);
+    expect((icfr.body[0].masterFacts as Array<{ label: string }>).map((f) => f.label)).toContain(
+      'ROC filing record (§92 / §137)',
+    );
+
+    const again = await post(pa, `${base}/${shellId}/other-reporting/fill-from-master`, {}).expect(
+      201,
+    );
+    expect(again.body.filled).toEqual([]);
+    const res = await post(pb, `${base}/${shellId}/icfr/fill-from-master`, {});
+    expect([403, 404]).toContain(res.status);
+  });
+
+  it('02.5: an overdue AOC-4 on the compliance calendar marks the ROC filing default', async () => {
+    const entityId = await newEntity('private_limited', 'Prefill Late Filer');
+    const roc = await findId('/api/v1/services?search=ROC_ANNUAL&limit=100');
+    const rocEng = await post(pa, '/api/v1/engagements', {
+      entityId,
+      serviceId: roc,
+      financialYear: '2023-24',
+      periodLabel: `R${stamp()}`,
+      status: 'accepted',
+    }).expect(201);
+    // AOC-4 for FY 2023-24 fell due in 2024 and is still open → a §137 default.
+    await post(pa, `/api/v1/engagements/${rocEng.body.id}/compliance`, {
+      complianceRuleCode: 'ROC_AOC4_DUE',
+    }).expect(201);
+
+    const { engId } = await newAuditFile(entityId);
+    const icfr = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/statutory-audit/icfr`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(icfr.body[0].capturedFacts.filingDefault).toBe(true);
+    const record = (icfr.body[0].masterFacts as Array<{ label: string; value: string }>).find(
+      (f) => f.label === 'ROC filing record (§92 / §137)',
+    );
+    expect(record?.value).toMatch(/^Default — AOC-4 due \d{4}-\d{2}-\d{2} not filed/);
   });
 });

@@ -229,7 +229,7 @@ export function GroupCaroCard({ engagementId }: { engagementId: string }): JSX.E
   );
 }
 
-function Facts({ facts }: { facts: MasterFact[] }): JSX.Element {
+export function Facts({ facts }: { facts: MasterFact[] }): JSX.Element {
   return (
     <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       {facts.map((f) => (

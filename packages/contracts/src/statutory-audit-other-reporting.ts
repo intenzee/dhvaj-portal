@@ -20,6 +20,7 @@
  * Audit Rules Library, and Rule 11(g)'s effective date is the provision's.
  */
 
+import type { MasterFact } from './statutory-audit';
 import type { FrameworkState } from './statutory-audit-framework';
 import type { FrameworkSubAssessment } from './statutory-audit-subassessment';
 
@@ -179,6 +180,11 @@ export interface StatutoryAuditOtherReporting {
   engagementId: string;
   assessment: FrameworkSubAssessment;
   detail: OtherReportingDetail | null;
+  /**
+   * What the client master and portal records say for these facts, with the
+   * source — filled in on first open so the team confirms rather than types.
+   */
+  masterFacts: MasterFact[];
   capturedFacts: OtherReportingCapturedFacts;
   baseFacts: OtherReportingBaseFacts;
   upstreamReady: boolean;
@@ -209,4 +215,11 @@ export interface RecordOtherReportingDecisionInput {
   basis?: string | null;
   impact?: string | null;
   version: number;
+}
+
+/** Result of filling 02.7 facts from the client master and portal records. */
+export interface StatutoryAuditOtherReportingMasterFillResult {
+  otherReporting: StatutoryAuditOtherReporting;
+  /** What was filled (empty when there was nothing new to add). */
+  filled: string[];
 }

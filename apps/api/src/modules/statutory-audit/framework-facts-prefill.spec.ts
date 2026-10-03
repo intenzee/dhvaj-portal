@@ -1,14 +1,25 @@
-import type { CaroCapturedFacts, ConsolidationCapturedFacts } from '@hsdg/contracts';
+import type {
+  CaroCapturedFacts,
+  ConsolidationCapturedFacts,
+  IcfrCapturedFacts,
+  OtherReportingCapturedFacts,
+} from '@hsdg/contracts';
 import {
   caroFromMaster,
   consolidationFromMaster,
   fillCaro,
   fillConsolidation,
+  fillIcfr,
+  fillOtherReporting,
+  icfrFromSources,
+  lateRocFilings,
+  otherReportingFromSources,
 } from './framework-facts-prefill';
 import type {
   EngagementMasterFacts,
   MasterFinancialProfile,
   MasterRelationship,
+  RocFiling,
 } from './master-facts';
 
 const rel = (p: Partial<MasterRelationship>): MasterRelationship => ({
@@ -188,5 +199,126 @@ describe('02.6 consolidation from the client master', () => {
       ),
     );
     expect(next.investees.map((i) => i.name)).toEqual(['Mine']);
+  });
+});
+
+describe('02.5 ICFR from the compliance calendar', () => {
+  const TODAY = '2026-10-03';
+  const BLANK: IcfrCapturedFacts = { peakCoveredBorrowings: null, filingDefault: false };
+  const filing = (p: Partial<RocFiling>): RocFiling => ({
+    form: 'AOC-4',
+    deadline: '2025-10-30',
+    status: 'completed',
+    completedOn: '2025-10-20',
+    ...p,
+  });
+
+  it('finds late and overdue filings, ignoring waived and not-yet-due ones', () => {
+    const late = lateRocFilings(
+      [
+        filing({}),
+        filing({ form: 'MGT-7', deadline: '2025-11-29', completedOn: '2025-12-10' }),
+        filing({ deadline: '2026-09-30', status: 'open', completedOn: null }),
+        filing({ deadline: '2026-11-30', status: 'open', completedOn: null }),
+        filing({ deadline: '2024-10-30', status: 'waived', completedOn: null }),
+      ],
+      TODAY,
+    );
+    expect(late.map((f) => [f.form, f.deadline])).toEqual([
+      ['MGT-7', '2025-11-29'],
+      ['AOC-4', '2026-09-30'],
+    ]);
+  });
+
+  it('switches the filing default on when the record shows one', () => {
+    const fill = icfrFromSources(
+      master(),
+      [filing({ status: 'open', completedOn: null, deadline: '2026-09-30' })],
+      TODAY,
+    );
+    const { next, filled } = fillIcfr(BLANK, fill);
+    expect(next.filingDefault).toBe(true);
+    expect(next.peakCoveredBorrowings).toBeNull();
+    expect(filled).toEqual(['ROC filing default']);
+  });
+
+  it('records on-time filings as no default and leaves an unknown record alone', () => {
+    expect(icfrFromSources(master(), [filing({})], TODAY).values.filingDefault).toBe(false);
+    const none = icfrFromSources(master(), [], TODAY);
+    expect(none.values.filingDefault).toBeUndefined();
+    expect(none.facts[0]!.value).toBeNull();
+  });
+});
+
+describe('02.7 other reporting from contacts and last year', () => {
+  const BLANK: OtherReportingCapturedFacts = {
+    softwareSystems: [],
+    managerialRemunerationPaid: null,
+    section198NetProfit: null,
+    hasManagingOrWholeTimeDirector: false,
+    fraudIdentified: false,
+    fraudAmount: null,
+    fraudEventDate: null,
+    intermediaryFundsAdvanced: false,
+    ultimateBeneficiaryFundsReceived: false,
+    fundingRepresentationsObtained: false,
+    dividendCompliesSec123: null,
+    pendingLitigationDisclosed: null,
+    foreseeableLossesProvided: null,
+    iepfTransferDelay: null,
+  };
+
+  it('finds a managing or whole-time director among the contacts', () => {
+    const fill = otherReportingFromSources(
+      [
+        { fullName: 'Asha Rao', designation: 'Director' },
+        { fullName: 'Vikram Shah', designation: 'Whole-time Director' },
+      ],
+      null,
+    );
+    expect(fill.values.hasManagingOrWholeTimeDirector).toBe(true);
+    expect(
+      otherReportingFromSources([{ fullName: 'A', designation: 'Independent Director' }], null)
+        .values.hasManagingOrWholeTimeDirector,
+    ).toBe(false);
+  });
+
+  it('carries the accounting software from last year, with this year unconfirmed', () => {
+    const fill = otherReportingFromSources([], {
+      financialYear: '2023-24',
+      facts: {
+        hasManagingOrWholeTimeDirector: true,
+        softwareSystems: [
+          { name: 'Tally Prime', hasAuditTrailFeature: true, auditTrailOperatedAllYear: true },
+          { name: '  ', hasAuditTrailFeature: true, auditTrailOperatedAllYear: true },
+        ],
+      },
+    });
+    const { next, filled } = fillOtherReporting(BLANK, fill);
+    expect(next.softwareSystems).toEqual([
+      { name: 'Tally Prime', hasAuditTrailFeature: true, auditTrailOperatedAllYear: false },
+    ]);
+    expect(next.hasManagingOrWholeTimeDirector).toBe(true);
+    // Audit findings are never filled.
+    expect(next.fraudIdentified).toBe(false);
+    expect(next.managerialRemunerationPaid).toBeNull();
+    expect(filled).toEqual(['managing / whole-time director', '1 accounting system(s)']);
+  });
+
+  it('never replaces software the team already listed', () => {
+    const own = {
+      ...BLANK,
+      softwareSystems: [
+        { name: 'SAP', hasAuditTrailFeature: true, auditTrailOperatedAllYear: true },
+      ],
+    };
+    const { next } = fillOtherReporting(
+      own,
+      otherReportingFromSources([], {
+        financialYear: '2023-24',
+        facts: { softwareSystems: [{ name: 'Tally', hasAuditTrailFeature: true }] },
+      }),
+    );
+    expect(next.softwareSystems.map((x) => x.name)).toEqual(['SAP']);
   });
 });
