@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -40,6 +40,16 @@ const STATE_META: Record<AuditPhaseState, { icon: LucideIcon; className: string;
     locked: { icon: CircleDashed, className: 'text-ink-faint', label: 'Not Started' },
   };
 
+const OPEN_PHASE_EVENT = 'audit-file:open-phase';
+
+/**
+ * Open a phase of the audit file from anywhere inside it (e.g. a completion
+ * item's "Open audit work" link) and scroll to it.
+ */
+export function openAuditPhase(phaseKey: string): void {
+  window.dispatchEvent(new CustomEvent<string>(OPEN_PHASE_EVENT, { detail: phaseKey }));
+}
+
 /** Distinct legend entries in professional-file order. */
 const LEGEND: AuditPhaseState[] = ['complete', 'in_progress', 'not_started', 'needs_attention'];
 
@@ -69,6 +79,21 @@ export function AuditFileNav({
       return next;
     });
 
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      const key = (e as CustomEvent<string>).detail;
+      if (!panelKeys.includes(key)) return;
+      setOpen((prev) => new Set(prev).add(key));
+      requestAnimationFrame(() =>
+        document
+          .getElementById(`audit-phase-${key}`)
+          ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
+      );
+    };
+    window.addEventListener(OPEN_PHASE_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_PHASE_EVENT, onOpen);
+  }, [panelKeys]);
+
   // Silent when there is no audit file — this section is additive to Work.
   if (!query.data || query.data.length === 0) return null;
 
@@ -82,7 +107,7 @@ export function AuditFileNav({
     const expandable = Boolean(renderPhase) && panelKeys.includes(key);
     const isOpen = expandable && open.has(key);
     return (
-      <li key={key}>
+      <li key={key} id={`audit-phase-${key}`}>
         <button
           type="button"
           disabled={!expandable}

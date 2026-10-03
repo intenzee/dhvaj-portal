@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditCompletion } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type CompletionSuggestionResult,
+  type StatutoryAuditCompletion,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditCompletionService } from './audit-completion.service';
@@ -37,6 +41,19 @@ export class AuditCompletionController {
     @Body() dto: UpdateCompletionItemDto,
   ): Promise<StatutoryAuditCompletion> {
     return this.completion.updateItem(rlsContextFromPrincipal(principal), id, itemId, dto);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/completion/suggest')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Refresh the completion / reporting checklist from the file (untouched items only)',
+  })
+  suggest(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<CompletionSuggestionResult> {
+    return this.completion.suggest(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/completion/approve')

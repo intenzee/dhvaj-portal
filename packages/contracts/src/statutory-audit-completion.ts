@@ -96,6 +96,40 @@ export interface AuditCompletionItem {
   note: string | null;
   version: number;
   updatedAt: string;
+  /** The state still follows the file (nobody has set it yet). */
+  stateSuggested: boolean;
+  /** The note is a draft written from the file (nobody has edited it yet). */
+  noteSuggested: boolean;
+  /** What the file says about this item right now. */
+  evidence: CompletionItemEvidence;
+}
+
+/** Where the work behind a checklist item is done — a phase of the audit file. */
+export interface CompletionGoTo {
+  /** Audit-file phase / tracker key (e.g. `audit_areas`, `risk`, `framework`). */
+  phaseKey: string;
+  label: string;
+}
+
+/**
+ * The live facts behind one checklist item, read from the rest of the file:
+ * linked procedures, risks, exceptions, materiality and framework conclusions.
+ */
+export interface CompletionItemEvidence {
+  /** Short, plain facts ("2 of 3 linked procedures complete"). */
+  facts: string[];
+  /** The state the evidence supports (never `complete` — that is a judgement). */
+  suggestedState: CompletionItemState;
+  /** The linked work is all done — the item is ready to be marked complete. */
+  ready: boolean;
+  goTo: CompletionGoTo | null;
+}
+
+/** Result of refreshing the checklist from the file. */
+export interface CompletionSuggestionResult {
+  completion: StatutoryAuditCompletion;
+  /** Items whose suggested state or drafted note changed. */
+  itemsUpdated: number;
 }
 
 /**

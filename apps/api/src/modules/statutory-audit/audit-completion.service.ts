@@ -15,11 +15,20 @@ import {
   type CompletionGate,
   type CompletionItemState,
   type CompletionSection,
+  type CompletionSuggestionResult,
+  type FrameworkConclusion,
   type StatutoryAuditCompletion,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import {
+  planCompletionItems,
+  type CompletionFacts,
+  type CompletionProcedure,
+  type PlannedCompletionItem,
+} from './completion-automation';
+import { isEngagementLead } from './master-facts';
 
 interface ShellRow {
   id: string;
@@ -47,6 +56,8 @@ interface ItemRow {
   note: string | null;
   version: number;
   updated_at: Date;
+  state_suggested: boolean;
+  note_suggested: boolean;
 }
 
 /**
@@ -75,7 +86,212 @@ export class AuditCompletionService {
     ctx: RlsContext,
     engagementId: string,
   ): Promise<StatutoryAuditCompletion[]> {
-    return this.db.withRlsContext(ctx, (client) => this.readCompletion(client, engagementId));
+    return this.db.withRlsContext(ctx, async (client) => {
+      // A lead opening the checklist brings it up to date with the file.
+      if (await isEngagementLead(client, engagementId)) {
+        await this.syncEngagement(client, engagementId);
+      }
+      return this.readCompletion(client, engagementId);
+    });
+  }
+
+  /** "Refresh from the file" — re-draft every untouched item now. */
+  async suggest(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<CompletionSuggestionResult> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      if (!(await isEngagementLead(client, engagementId))) {
+        throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
+      }
+      const itemsUpdated = await this.syncEngagement(client, engagementId, workflowInstanceId);
+      return {
+        completion: await this.readOne(client, engagementId, workflowInstanceId),
+        itemsUpdated,
+      };
+    });
+  }
+
+  /**
+   * Bring the untouched checklist items in line with the file: a state nobody
+   * has set follows the evidence; a blank or still-drafted note takes the
+   * draft. Never touches what a person set, a signed-off / archived file, or
+   * the Completion section once completion is approved.
+   */
+  private async syncEngagement(
+    client: PoolClient,
+    engagementId: string,
+    onlyShell?: string,
+  ): Promise<number> {
+    const { rows: shells } = await client.query<{
+      id: string;
+      completion_approved: boolean;
+      frozen: boolean;
+    }>(
+      `SELECT id, completion_approved_at IS NOT NULL AS completion_approved,
+              (signed_off_at IS NOT NULL OR archived_at IS NOT NULL
+                OR status IN ('archived','cancelled')) AS frozen
+         FROM hsdg.service_workflow_instances
+        WHERE engagement_id = $1 AND workflow_key = 'statutory_audit'`,
+      [engagementId],
+    );
+    let updated = 0;
+    for (const shell of shells) {
+      if (onlyShell && shell.id !== onlyShell) continue;
+      if (onlyShell && shell.frozen) {
+        throw new ConflictException('This audit file is signed off; the checklist is final.');
+      }
+      if (shell.frozen) continue;
+      const plan = planCompletionItems(await this.loadFacts(client, engagementId, shell.id));
+      const { rows: items } = await client.query<ItemRow>(
+        `SELECT * FROM hsdg.audit_completion_items WHERE workflow_instance_id = $1`,
+        [shell.id],
+      );
+      for (const item of items) {
+        if (item.section === 'completion' && shell.completion_approved) continue;
+        const p = plan.get(item.item_key);
+        if (!p) continue;
+        const sets: string[] = [];
+        const params: unknown[] = [item.id, item.version];
+        if (item.state_suggested && p.evidence.suggestedState !== item.state) {
+          params.push(p.evidence.suggestedState);
+          sets.push(`state = $${params.length}`);
+        }
+        const draft = p.draftNote;
+        if (draft && (item.note == null || item.note_suggested) && draft !== item.note) {
+          params.push(draft);
+          sets.push(`note = $${params.length}`, 'note_suggested = true');
+        }
+        if (sets.length === 0) continue;
+        const r = await client.query(
+          `UPDATE hsdg.audit_completion_items
+              SET ${sets.join(', ')}, version = version + 1
+            WHERE id = $1 AND version = $2`,
+          params,
+        );
+        updated += r.rowCount ?? 0;
+      }
+    }
+    return updated;
+  }
+
+  /** Everything the checklist reads from the rest of the file, for one shell. */
+  private async loadFacts(
+    client: PoolClient,
+    engagementId: string,
+    wi: string,
+  ): Promise<CompletionFacts> {
+    const eng = await client.query<{ financial_year: string | null }>(
+      `SELECT financial_year FROM hsdg.engagements WHERE id = $1`,
+      [engagementId],
+    );
+    const fw = await client.query<{
+      area_key: string;
+      conclusion: FrameworkConclusion | null;
+      basis: string | null;
+    }>(
+      `SELECT area_key, conclusion, basis FROM hsdg.audit_framework_assessments
+          WHERE workflow_instance_id = $1`,
+      [wi],
+    );
+    const areas = await client.query<{
+      work_area_key: string;
+      title: string;
+      conclusion_state: string;
+    }>(
+      `SELECT work_area_key, title, conclusion_state FROM hsdg.audit_work_areas
+          WHERE workflow_instance_id = $1 AND is_active ORDER BY sort_order`,
+      [wi],
+    );
+    const procs = await client.query<{
+      procedure_ref: string;
+      title: string;
+      state: CompletionProcedure['state'];
+      source_key: string | null;
+      risk_id: string | null;
+      work_area_key: string;
+      work_area_title: string;
+    }>(
+      `SELECT p.procedure_ref, p.title, p.state, p.source_key, p.risk_id,
+                a.work_area_key, a.title AS work_area_title
+           FROM hsdg.audit_procedures p
+           JOIN hsdg.audit_work_areas a ON a.id = p.work_area_id
+          WHERE p.workflow_instance_id = $1
+          ORDER BY p.procedure_ref`,
+      [wi],
+    );
+    const risks = await client.query<{
+      id: string;
+      risk_ref: string;
+      description: string;
+      fs_area: string | null;
+      source_key: string | null;
+      is_significant: boolean;
+      status: string;
+    }>(
+      `SELECT id, risk_ref, description, fs_area, source_key, is_significant, status
+           FROM hsdg.audit_risks WHERE workflow_instance_id = $1 ORDER BY created_at`,
+      [wi],
+    );
+    const exceptions = await client.query<{
+      status: 'open' | 'resolved' | 'carried_forward';
+      severity: 'low' | 'medium' | 'high';
+      description: string;
+      procedure_ref: string;
+    }>(
+      `SELECT x.status, x.severity, x.description, p.procedure_ref
+           FROM hsdg.audit_exceptions x
+           JOIN hsdg.audit_procedures p ON p.id = x.procedure_id
+          WHERE x.workflow_instance_id = $1
+          ORDER BY x.created_at`,
+      [wi],
+    );
+    const mat = await client.query<{ om: string | null; pm: string | null; ctt: string | null }>(
+      `SELECT selected_om::text AS om, selected_pm::text AS pm, selected_ctt::text AS ctt
+           FROM hsdg.audit_materiality_determination
+          WHERE workflow_instance_id = $1 ORDER BY version_no DESC LIMIT 1`,
+      [wi],
+    );
+    const num = (v: string | null): number | null => (v == null ? null : Number(v));
+    return {
+      financialYear: eng.rows[0]?.financial_year ?? null,
+      framework: new Map(
+        fw.rows.map((r) => [r.area_key, { conclusion: r.conclusion, basis: r.basis }]),
+      ),
+      areas: areas.rows.map((a) => ({
+        key: a.work_area_key,
+        title: a.title,
+        concluded: a.conclusion_state === 'submitted',
+      })),
+      procedures: procs.rows.map((p) => ({
+        ref: p.procedure_ref,
+        title: p.title,
+        state: p.state,
+        sourceKey: p.source_key,
+        riskId: p.risk_id,
+        workAreaKey: p.work_area_key,
+        workAreaTitle: p.work_area_title,
+      })),
+      risks: risks.rows.map((r) => ({
+        id: r.id,
+        ref: r.risk_ref,
+        description: r.description,
+        fsArea: r.fs_area,
+        sourceKey: r.source_key,
+        isSignificant: r.is_significant,
+        status: r.status,
+      })),
+      exceptions: exceptions.rows.map((x) => ({
+        status: x.status,
+        severity: x.severity,
+        description: x.description,
+        procedureRef: x.procedure_ref,
+      })),
+      materiality: mat.rows[0]
+        ? { om: num(mat.rows[0].om), pm: num(mat.rows[0].pm), ctt: num(mat.rows[0].ctt) }
+        : null,
+    };
   }
 
   private async readCompletion(
@@ -100,7 +316,8 @@ export class AuditCompletionService {
     const shellIds = shells.map((s) => s.id);
 
     const { rows: items } = await client.query<ItemRow>(
-      `SELECT id, workflow_instance_id, section, item_key, title, state, note, version, updated_at
+      `SELECT id, workflow_instance_id, section, item_key, title, state, note, version, updated_at,
+              state_suggested, note_suggested
          FROM hsdg.audit_completion_items
         WHERE workflow_instance_id = ANY($1::uuid[])
         ORDER BY section ASC, sort_order ASC`,
@@ -127,8 +344,19 @@ export class AuditCompletionService {
     const blockingByShell = new Map(blocking.map((b) => [b.workflow_instance_id, Number(b.n)]));
     const openAreasByShell = new Map(openAreas.map((a) => [a.workflow_instance_id, Number(a.n)]));
 
+    const plans = new Map<string, Map<string, PlannedCompletionItem>>();
+    for (const shell of shells) {
+      plans.set(
+        shell.id,
+        planCompletionItems(await this.loadFacts(client, engagementId, shell.id)),
+      );
+    }
+
     return shells.map((shell) => {
-      const shellItems = items.filter((i) => i.workflow_instance_id === shell.id).map(mapItem);
+      const plan = plans.get(shell.id)!;
+      const shellItems = items
+        .filter((i) => i.workflow_instance_id === shell.id)
+        .map((i) => mapItem(i, plan.get(i.item_key)));
       const gate: CompletionGate = {
         completionItemsResolved: sectionResolved(shellItems, 'completion'),
         reportingItemsResolved: sectionResolved(shellItems, 'reporting'),
@@ -184,8 +412,15 @@ export class AuditCompletionService {
         params.push(value);
         sets.push(`${col} = $${params.length}`);
       };
-      if (input.state !== undefined) set('state', input.state);
-      if (input.note !== undefined) set('note', input.note?.trim() || null);
+      // Whatever a person sets is theirs — the file never re-drafts it.
+      if (input.state !== undefined) {
+        set('state', input.state);
+        sets.push('state_suggested = false');
+      }
+      if (input.note !== undefined) {
+        set('note', input.note?.trim() || null);
+        sets.push('note_suggested = false');
+      }
       if (sets.length === 0) {
         const [completion] = await this.readCompletion(client, engagementId);
         return completion!;
@@ -233,7 +468,11 @@ export class AuditCompletionService {
                 completion_approved_by_employee_id = $2,
                 completion_memo = $3
           WHERE id = $1 AND completion_approved_at IS NULL`,
-        [workflowInstanceId, ctx.employeeId ?? null, input.memo?.trim() || null],
+        [
+          workflowInstanceId,
+          ctx.employeeId ?? null,
+          input.memo?.trim() || (await this.memoItem(client, workflowInstanceId)),
+        ],
       );
       if ((result.rowCount ?? 0) === 0) {
         throw new ConflictException('Completion was approved concurrently; refresh and retry.');
@@ -328,6 +567,16 @@ export class AuditCompletionService {
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
+  /** The Completion Memo item's note — the default approval memo. */
+  private async memoItem(client: PoolClient, workflowInstanceId: string): Promise<string | null> {
+    const { rows } = await client.query<{ note: string | null }>(
+      `SELECT note FROM hsdg.audit_completion_items
+        WHERE workflow_instance_id = $1 AND item_key = 'completion_memo'`,
+      [workflowInstanceId],
+    );
+    return rows[0]?.note?.trim() || null;
+  }
+
   /** Load the §29 gate for one shell, asserting it exists on this engagement. */
   private async loadGate(
     client: PoolClient,
@@ -388,7 +637,7 @@ export class AuditCompletionService {
   }
 }
 
-function mapItem(r: ItemRow): AuditCompletionItem {
+function mapItem(r: ItemRow, plan: PlannedCompletionItem | undefined): AuditCompletionItem {
   return {
     id: r.id,
     section: r.section,
@@ -398,6 +647,9 @@ function mapItem(r: ItemRow): AuditCompletionItem {
     note: r.note,
     version: r.version,
     updatedAt: r.updated_at.toISOString(),
+    stateSuggested: r.state_suggested,
+    noteSuggested: r.note_suggested,
+    evidence: plan?.evidence ?? { facts: [], suggestedState: r.state, ready: false, goTo: null },
   };
 }
 
