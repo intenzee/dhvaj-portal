@@ -6,6 +6,7 @@ import type {
   MasterFact,
   OtherReportingCapturedFacts,
   SoftwareSystemInput,
+  SpecialEntityType,
 } from '@hsdg/contracts';
 import {
   groupStructure,
@@ -361,4 +362,110 @@ export function fillOtherReporting(
     filled.push(`${v.softwareSystems.length} accounting system(s)`);
   }
   return { next, filled };
+}
+
+// ── 02.1 Special entity types ────────────────────────────────────────────────
+
+export interface SpecialTypesFill {
+  types: SpecialEntityType[];
+  /** Each type found, with the master record that shows it. */
+  facts: MasterFact[];
+}
+
+const NBFC_TEXT = /\bnbfc\b|non[- ]?banking/i;
+const NBFC_TEXT_ALL = /\bnbfc\b|non[- ]?banking/gi;
+
+/**
+ * The 02.1 special-entity matrix (Card B) from the client master: industries
+ * on the business-activities master, the government-company flag, the
+ * regulated-sector and special-status facts, and the name suffixes the law
+ * mandates ("Nidhi Limited", "Producer Company"). Only positive evidence adds a
+ * type; nothing is ever inferred from an absence.
+ */
+export function specialEntityTypesFromMaster(m: EngagementMasterFacts): SpecialTypesFill {
+  const found = new Map<SpecialEntityType, string>();
+  const add = (t: SpecialEntityType, why: string) => {
+    if (!found.has(t)) found.set(t, why);
+  };
+  const isCompany = m.entityCategory === 'company';
+  const industryName: Record<string, string> = {
+    banking: 'Banking',
+    nbfc: 'NBFC',
+    insurance: 'Insurance',
+  };
+
+  for (const slug of m.industrySlugs ?? []) {
+    if (slug === 'banking') add('bank', `Industry: ${industryName[slug]}`);
+    if (slug === 'nbfc') add('nbfc', `Industry: ${industryName[slug]}`);
+    if (slug === 'insurance') add('insurance', `Industry: ${industryName[slug]}`);
+  }
+
+  const reg = m.regulatory ?? { isGovernmentCompany: null, regulatedSector: [], specialStatus: [] };
+  if (reg.isGovernmentCompany) add('government', 'Regulatory fact: Government company');
+
+  const readText = (text: string, label: string) => {
+    const why = `${label}: ${text}`;
+    const t = text.toLowerCase();
+    if (NBFC_TEXT.test(t)) add('nbfc', why);
+    // "Non-Banking" is an NBFC, not a bank — test for a bank without it.
+    const rest = t.replace(NBFC_TEXT_ALL, ' ');
+    if (/\bbank(ing)?\b/.test(rest)) add('bank', why);
+    if (/insur/.test(t)) add('insurance', why);
+    if (/\bhfc\b|housing financ/.test(t)) add('hfc', why);
+    if (/\bnidhi\b/.test(t)) add('nidhi', why);
+    if (/producer compan/.test(t)) add('producer', why);
+    if (/\bdormant\b/.test(t)) add('dormant', why);
+    if (/government (company|undertaking)|\bpsu\b|\bcpse\b/.test(t)) add('government', why);
+    if (isCompany && /section\s*8\b|\bsec\.?\s*8\b|not[- ]for[- ]profit|charitable/.test(t))
+      add('section_8', why);
+  };
+
+  for (const text of reg.regulatedSector) {
+    const before = found.size;
+    readText(text, 'Regulated sector');
+    // A regulated sector the matrix has no box for is "other regulator".
+    if (found.size === before && /sebi|rbi|irdai|pfrda|ifsca|regulat|other/i.test(text))
+      add('other_regulator', `Regulated sector: ${text}`);
+  }
+  for (const text of reg.specialStatus) readText(text, 'Special regulatory status');
+
+  if (isCompany && /\bnidhi limited\b/i.test(m.legalName)) add('nidhi', `Name: ${m.legalName}`);
+  if (isCompany && /\bproducer company\b/i.test(m.legalName))
+    add('producer', `Name: ${m.legalName}`);
+
+  const types = [...found.keys()];
+  return {
+    types,
+    facts: [
+      {
+        label: 'Special entity type(s)',
+        value: types.length
+          ? types.map((t) => `${SPECIAL_LABEL[t]} (${found.get(t)})`).join('; ')
+          : 'None shown on the client master',
+        source: 'Client master — industries & regulatory facts',
+      },
+    ],
+  };
+}
+
+const SPECIAL_LABEL: Record<SpecialEntityType, string> = {
+  bank: 'Banking company',
+  insurance: 'Insurance company',
+  nbfc: 'NBFC',
+  hfc: 'Housing finance company',
+  section_8: 'Section 8 company',
+  government: 'Government company',
+  nidhi: 'Nidhi company',
+  producer: 'Producer company',
+  dormant: 'Dormant company',
+  other_regulator: 'Other regulator',
+};
+
+/** Add the master's types to the profile's; never removes one the team set. */
+export function fillSpecialTypes(
+  current: readonly SpecialEntityType[],
+  fill: SpecialTypesFill,
+): { next: SpecialEntityType[]; filled: string[] } {
+  const added = fill.types.filter((t) => !current.includes(t));
+  return { next: [...current, ...added], filled: added.map((t) => SPECIAL_LABEL[t]) };
 }

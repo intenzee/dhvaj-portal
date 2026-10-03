@@ -89,11 +89,23 @@ export interface EngagementMasterFacts {
   businessDescription: string | null;
   activityFlags: ActivityFlags;
   primaryIndustry: string | null;
+  /** Every industry on the business-activities master (slugs, e.g. `nbfc`). */
+  industrySlugs: string[];
+  /** Structured regulatory facts on the master (§15). */
+  regulatory: RegulatoryMasterFacts;
   groupName: string | null;
   relationships: MasterRelationship[];
   /** Financial profile for the audit year, and the year before it. */
   cyFinancials: MasterFinancialProfile | null;
   pyFinancials: MasterFinancialProfile | null;
+}
+
+export interface RegulatoryMasterFacts {
+  isGovernmentCompany: boolean | null;
+  /** `regulated_sector` entries (free text, e.g. "NBFC", "Banking"). */
+  regulatedSector: string[];
+  /** `special_regulatory_status` entries (free text, e.g. "Section 8 company"). */
+  specialStatus: string[];
 }
 
 export interface ActivityFlags {
@@ -689,6 +701,27 @@ export async function readEngagementMasterFacts(
         WHERE a.entity_id = $1 ORDER BY a.is_primary DESC, a.created_at LIMIT 1`,
     [entityId],
   );
+  const industries = await client.query<{ slug: string }>(
+    `SELECT DISTINCT i.slug FROM hsdg.entity_business_activities a
+         JOIN hsdg.industries i ON i.id = a.industry_id
+        WHERE a.entity_id = $1`,
+    [entityId],
+  );
+  const attrs = await client.query<{
+    attribute_code: string;
+    value_text: string | null;
+    value_boolean: boolean | null;
+  }>(
+    `SELECT attribute_code, value_text, value_boolean FROM hsdg.entity_regulatory_attributes
+        WHERE entity_id = $1
+          AND attribute_code IN ('is_government_company', 'regulated_sector', 'special_regulatory_status')`,
+    [entityId],
+  );
+  const texts = (code: string) =>
+    attrs.rows
+      .filter((a) => a.attribute_code === code && a.value_text?.trim())
+      .map((a) => a.value_text!.trim());
+  const gov = attrs.rows.find((a) => a.attribute_code === 'is_government_company');
   const rels = await client.query<{
     relationship_type: string;
     shareholding_pct: string | null;
@@ -767,6 +800,12 @@ export async function readEngagementMasterFacts(
       regulated: r.act_regulated,
     },
     primaryIndustry: industry.rows[0]?.name ?? null,
+    industrySlugs: industries.rows.map((x) => x.slug),
+    regulatory: {
+      isGovernmentCompany: gov?.value_boolean ?? null,
+      regulatedSector: texts('regulated_sector'),
+      specialStatus: texts('special_regulatory_status'),
+    },
     groupName: r.group_name,
     relationships: rels.rows.map((x) => ({
       type: x.relationship_type,

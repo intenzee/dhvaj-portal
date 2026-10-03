@@ -11,9 +11,11 @@ import {
   fillConsolidation,
   fillIcfr,
   fillOtherReporting,
+  fillSpecialTypes,
   icfrFromSources,
   lateRocFilings,
   otherReportingFromSources,
+  specialEntityTypesFromMaster,
 } from './framework-facts-prefill';
 import type {
   EngagementMasterFacts,
@@ -320,5 +322,96 @@ describe('02.7 other reporting from contacts and last year', () => {
       }),
     );
     expect(next.softwareSystems.map((x) => x.name)).toEqual(['SAP']);
+  });
+});
+
+describe('02.1 special entity types from the client master', () => {
+  const company = (p: Partial<EngagementMasterFacts> = {}) =>
+    master({
+      legalName: 'Acme Private Limited',
+      entityCategory: 'company',
+      industrySlugs: [],
+      regulatory: { isGovernmentCompany: null, regulatedSector: [], specialStatus: [] },
+      ...p,
+    });
+  const types = (m: EngagementMasterFacts) => specialEntityTypesFromMaster(m).types;
+
+  it('reads banking / NBFC / insurance from the industries master', () => {
+    expect(types(company({ industrySlugs: ['nbfc', 'trading'] }))).toEqual(['nbfc']);
+    expect(types(company({ industrySlugs: ['banking', 'insurance'] }))).toEqual([
+      'bank',
+      'insurance',
+    ]);
+  });
+
+  it('reads "Non-Banking Financial Company" as an NBFC, never a bank', () => {
+    const t = types(
+      company({
+        regulatory: {
+          isGovernmentCompany: null,
+          regulatedSector: ['Non-Banking Financial Company (RBI)'],
+          specialStatus: [],
+        },
+      }),
+    );
+    expect(t).toEqual(['nbfc']);
+  });
+
+  it('reads the government flag and the special-status text', () => {
+    const t = types(
+      company({
+        regulatory: {
+          isGovernmentCompany: true,
+          regulatedSector: ['Housing Finance (HFC)'],
+          specialStatus: ['Section 8 company', 'Dormant u/s 455'],
+        },
+      }),
+    );
+    expect(t).toEqual(['government', 'hfc', 'section_8', 'dormant']);
+  });
+
+  it('reads the mandated "Nidhi Limited" / "Producer Company" name suffixes', () => {
+    expect(types(company({ legalName: 'Shree Ganesh Nidhi Limited' }))).toEqual(['nidhi']);
+    expect(types(company({ legalName: 'Kisan Farmers Producer Company Limited' }))).toEqual([
+      'producer',
+    ]);
+  });
+
+  it('files an unrecognised regulated sector under "other regulator"', () => {
+    const t = types(
+      company({
+        regulatory: {
+          isGovernmentCompany: null,
+          regulatedSector: ['SEBI-registered intermediary'],
+          specialStatus: [],
+        },
+      }),
+    );
+    expect(t).toEqual(['other_regulator']);
+  });
+
+  it('infers nothing without positive evidence, and no Section 8 for a non-company', () => {
+    expect(types(company())).toEqual([]);
+    expect(
+      types(
+        company({
+          entityCategory: 'trust',
+          regulatory: {
+            isGovernmentCompany: null,
+            regulatedSector: [],
+            specialStatus: ['Charitable trust'],
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("adds to the team's list and never removes from it", () => {
+    const { next, filled } = fillSpecialTypes(
+      ['dormant'],
+      specialEntityTypesFromMaster(company({ industrySlugs: ['nbfc'] })),
+    );
+    expect(next).toEqual(['dormant', 'nbfc']);
+    expect(filled).toEqual(['NBFC']);
   });
 });

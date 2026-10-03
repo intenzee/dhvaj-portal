@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditEntityProfile } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type StatutoryAuditEntityProfile,
+  type StatutoryAuditEntityProfileMasterFillResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditProfileService } from './audit-profile.service';
@@ -49,6 +53,22 @@ export class AuditProfileController {
       accountingEnvironment: dto.accountingEnvironment,
       version: dto.version,
     });
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/profile/fill-from-master')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Fill the 02.1 special entity types from the client master',
+    description:
+      'Adds the special entity types the client master shows (industries, regulatory facts, ' +
+      'mandated name suffixes); never removes a type the team set. 409 once confirmed.',
+  })
+  fillFromMaster(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<StatutoryAuditEntityProfileMasterFillResult> {
+    return this.profile.fillFromMaster(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/profile/financials')

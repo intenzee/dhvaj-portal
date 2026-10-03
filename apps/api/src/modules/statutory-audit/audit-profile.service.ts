@@ -19,6 +19,7 @@ import {
   type SmallCompanyOutcome,
   type SpecialEntityType,
   type StatutoryAuditEntityProfile,
+  type StatutoryAuditEntityProfileMasterFillResult,
   type UpdateEntityProfileInput,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -26,7 +27,12 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { assessSmallCompany, deriveSaTriggers, type SmallCompanyFacts } from './entity-profile';
-import { readEngagementMasterFacts, regulatoryProfileFacts } from './master-facts';
+import { fillSpecialTypes, specialEntityTypesFromMaster } from './framework-facts-prefill';
+import {
+  isEngagementLead,
+  readEngagementMasterFacts,
+  regulatoryProfileFacts,
+} from './master-facts';
 
 /** Relationship types that make an entity a holding OR subsidiary (§2(85)). */
 const HOLDING_SUBSIDIARY_TYPES = [
@@ -142,6 +148,7 @@ export class AuditProfileService {
         [engagementId],
       );
       for (const s of shells) await this.seedProfileOn(client, s.id, engagementId);
+      await this.prefillOn(client, ctx, engagementId);
       return this.readProfiles(client, engagementId);
     });
   }
@@ -211,10 +218,13 @@ export class AuditProfileService {
       const missingFacts = this.missingFacts(facts, smallCompany);
       const master = await readEngagementMasterFacts(client, p.workflow_instance_id);
       const masterFacts = master
-        ? regulatoryProfileFacts(
-            master,
-            new Map(fins.map((f) => [f.parameter, num(f.current_value)])),
-          )
+        ? [
+            ...regulatoryProfileFacts(
+              master,
+              new Map(fins.map((f) => [f.parameter, num(f.current_value)])),
+            ),
+            ...specialEntityTypesFromMaster(master).facts,
+          ]
         : [];
       out.push({
         workflowInstanceId: p.workflow_instance_id,
@@ -384,6 +394,79 @@ export class AuditProfileService {
     if (sc.outcome === SMALL_COMPANY_OUTCOME.pending)
       missing.push('Small Company status cannot be computed yet (paid-up capital / turnover).');
     return missing;
+  }
+
+  // ── Special entity types from the client master (Card B, capture once) ────
+
+  /**
+   * First open by a lead fills the special-entity matrix from the client
+   * master (industries, regulatory facts, mandated name suffixes). Only an
+   * untouched draft profile (version 1, no types) is filled, so a team's later
+   * choice — including clearing the list — is never refilled. Public so the
+   * 02.9 summary can trigger it before the downstream sections read it.
+   */
+  async prefillOn(client: PoolClient, ctx: RlsContext, engagementId: string): Promise<void> {
+    const { rows } = await client.query<{ id: string; workflow_instance_id: string }>(
+      `SELECT p.id, p.workflow_instance_id
+         FROM hsdg.audit_entity_profile p
+         JOIN hsdg.service_workflow_instances swi ON swi.id = p.workflow_instance_id
+        WHERE p.engagement_id = $1 AND swi.status <> 'cancelled'
+          AND p.state = 'draft' AND p.version = 1 AND cardinality(p.special_entity_types) = 0`,
+      [engagementId],
+    );
+    if (rows.length === 0 || !(await isEngagementLead(client, engagementId))) return;
+    for (const r of rows) {
+      const master = await readEngagementMasterFacts(client, r.workflow_instance_id);
+      if (!master) continue;
+      const { next, filled } = fillSpecialTypes([], specialEntityTypesFromMaster(master));
+      if (filled.length === 0) continue; // nothing to add; stays eligible for later
+      await client.query(
+        `UPDATE hsdg.audit_entity_profile
+            SET special_entity_types = $2, version = version + 1
+          WHERE id = $1 AND version = 1`,
+        [r.id, next],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.profile_special_types_prefilled',
+        objectType: 'audit_entity_profile',
+        objectId: r.id,
+        after: { specialEntityTypes: next, automatic: true },
+      });
+    }
+  }
+
+  /** "Fill from client master": adds the master's special types; never removes one. */
+  async fillFromMaster(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<StatutoryAuditEntityProfileMasterFillResult> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const current = await this.loadProfile(client, engagementId, workflowInstanceId);
+      this.assertEditable(current);
+      const master = await readEngagementMasterFacts(client, workflowInstanceId);
+      if (!master) throw new NotFoundException('Statutory-audit workflow not found.');
+      const { next, filled } = fillSpecialTypes(
+        (current.special_entity_types ?? []) as SpecialEntityType[],
+        specialEntityTypesFromMaster(master),
+      );
+      if (filled.length > 0) {
+        await client.query(
+          `UPDATE hsdg.audit_entity_profile
+              SET special_entity_types = $2, version = version + 1
+            WHERE id = $1`,
+          [current.id, next],
+        );
+        await this.audit.recordWith(client, ctx, {
+          action: 'statutory_audit.profile_special_types_prefilled',
+          objectType: 'audit_entity_profile',
+          objectId: current.id,
+          after: { specialEntityTypes: next },
+        });
+      }
+      const [profile] = await this.readForShell(client, engagementId, workflowInstanceId);
+      return { profile: profile!, filled };
+    });
   }
 
   // ── Update captured facts (Cards B / G / H / I) ─────────────────────────────

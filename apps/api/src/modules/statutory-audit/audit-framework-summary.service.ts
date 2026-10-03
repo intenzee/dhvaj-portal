@@ -30,6 +30,7 @@ import { AuditCaroService } from './audit-caro.service';
 import { AuditConsolidationService } from './audit-consolidation.service';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditOtherReportingService } from './audit-other-reporting.service';
+import { AuditProfileService } from './audit-profile.service';
 
 /** The six Section-02 sub-sections the summary aggregates, in dashboard order. */
 const SECTIONS: Array<{ sub: SubSectionKey; area: string; title: string }> = [
@@ -93,6 +94,7 @@ export class AuditFrameworkSummaryService {
     private readonly consolidation: AuditConsolidationService,
     private readonly icfr: AuditIcfrService,
     private readonly otherReporting: AuditOtherReportingService,
+    private readonly profile: AuditProfileService,
   ) {}
 
   // ── Read / aggregate ─────────────────────────────────────────────────────────
@@ -111,11 +113,14 @@ export class AuditFrameworkSummaryService {
       // Facts the portal already holds (02.4 CARO, 02.5 ICFR, 02.6, 02.7) are
       // filled on first sight, so the summary shows outcomes, not blanks.
       for (const s of shells) {
+        await this.profile.seedProfileOn(client, s.id, engagementId);
         await this.caro.seedOn(client, s.id, engagementId);
         await this.consolidation.seedOn(client, s.id, engagementId);
         await this.icfr.seedOn(client, s.id, engagementId);
         await this.otherReporting.seedOn(client, s.id, engagementId);
       }
+      // 02.1 first: CARO / ICFR read its special entity types.
+      await this.profile.prefillOn(client, ctx, engagementId);
       await this.caro.prefillOn(client, ctx, engagementId);
       await this.consolidation.prefillOn(client, ctx, engagementId);
       await this.icfr.prefillOn(client, ctx, engagementId);

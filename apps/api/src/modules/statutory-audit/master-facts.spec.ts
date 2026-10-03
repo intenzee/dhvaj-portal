@@ -86,6 +86,8 @@ function master(partial: Partial<EngagementMasterFacts> = {}): EngagementMasterF
     businessDescription: 'Auto components',
     activityFlags: { ...NO_FLAGS, manufacturing: true, export: true },
     primaryIndustry: null,
+    industrySlugs: [],
+    regulatory: { isGovernmentCompany: null, regulatedSector: [], specialStatus: [] },
     groupName: null,
     relationships: [],
     cyFinancials: fin(),

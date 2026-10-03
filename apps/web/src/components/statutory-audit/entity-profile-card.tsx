@@ -1,18 +1,41 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { Database } from 'lucide-react';
-import type { SmallCompanyOutcome, StatutoryAuditEntityProfile } from '@hsdg/contracts';
-import { apiFetch } from '@/lib/api';
-import { Badge, Card } from '@/components/ui';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Database, RefreshCw } from 'lucide-react';
+import {
+  PERMISSION,
+  type SmallCompanyOutcome,
+  type SpecialEntityType,
+  type StatutoryAuditEntityProfile,
+  type StatutoryAuditEntityProfileMasterFillResult,
+} from '@hsdg/contracts';
+import { apiFetch, ApiError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { can } from '@/lib/principal';
+import { useToast } from '@/lib/toast';
+import { Badge, Button, Card } from '@/components/ui';
 
 /**
  * 02.1 Entity & Regulatory Profile, read-only (spec 02.1 §4 "manager opens
  * 02.1 and sees entity/engagement data pre-populated"). Classification, group,
  * listing and the deciding figures come from the entity master with their
  * source, and the small-company / SA-trigger results are computed from them —
- * nothing here is typed in by the audit team.
+ * nothing here is typed in by the audit team. The special entity types (bank,
+ * NBFC, Section 8, …) are read off the client's industries and regulatory facts.
  */
+
+const SPECIAL_LABEL: Record<SpecialEntityType, string> = {
+  bank: 'Banking company',
+  insurance: 'Insurance company',
+  nbfc: 'NBFC',
+  hfc: 'Housing finance company',
+  section_8: 'Section 8 company',
+  government: 'Government company',
+  nidhi: 'Nidhi company',
+  producer: 'Producer company',
+  dormant: 'Dormant company',
+  other_regulator: 'Other regulator',
+};
 
 const SMALL_LABEL: Record<SmallCompanyOutcome, string> = {
   small: 'Small company',
@@ -22,12 +45,35 @@ const SMALL_LABEL: Record<SmallCompanyOutcome, string> = {
 };
 
 export function EntityProfileCard({ engagementId }: { engagementId: string }): JSX.Element | null {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { principal } = useAuth();
+  const canManage = can(principal, PERMISSION.engagementManage);
   const query = useQuery({
     queryKey: ['engagement', engagementId, 'statutory-audit-profile'],
     queryFn: () =>
-      apiFetch<StatutoryAuditEntityProfile[]>(`/engagements/${engagementId}/statutory-audit/profile`),
+      apiFetch<StatutoryAuditEntityProfile[]>(
+        `/engagements/${engagementId}/statutory-audit/profile`,
+      ),
   });
   const p = query.data?.[0];
+  const fill = useMutation({
+    mutationFn: () =>
+      apiFetch<StatutoryAuditEntityProfileMasterFillResult>(
+        `/engagements/${engagementId}/statutory-audit/${p!.workflowInstanceId}/profile/fill-from-master`,
+        { method: 'POST', body: {} },
+      ),
+    onSuccess: (res) => {
+      toast(
+        res.filled.length
+          ? `Added from the client master: ${res.filled.join(', ')}.`
+          : 'Nothing new on the client master.',
+      );
+      void qc.invalidateQueries({ queryKey: ['engagement', engagementId] });
+    },
+    onError: (e) =>
+      toast(e instanceof ApiError ? e.message : 'Could not fill from the client master.'),
+  });
   if (!p) return null;
   const triggered = p.saTriggers.filter((t) => t.triggered).map((t) => t.code);
 
@@ -44,6 +90,23 @@ export function EntityProfileCard({ engagementId }: { engagementId: string }): J
           </Badge>
           <Badge tone="neutral">{p.initialAudit ? 'First-year audit' : 'Continuing audit'}</Badge>
           {triggered.length > 0 && <Badge tone="warn">{triggered.join(' · ')}</Badge>}
+          {p.specialEntityTypes.map((t) => (
+            <Badge key={t} tone="warn">
+              {SPECIAL_LABEL[t]}
+            </Badge>
+          ))}
+          {canManage && p.state === 'draft' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => fill.mutate()}
+              disabled={fill.isPending}
+              title="Add the special entity types the client master shows; never removes one"
+            >
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              Fill from client master
+            </Button>
+          )}
         </div>
       </div>
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">

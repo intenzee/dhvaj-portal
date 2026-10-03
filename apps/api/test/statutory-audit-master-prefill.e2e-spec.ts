@@ -255,4 +255,55 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     );
     expect(record?.value).toMatch(/^Default — AOC-4 due \d{4}-\d{2}-\d{2} not filed/);
   });
+
+  it('02.1: special entity types come from the master and feed CARO', async () => {
+    const entityId = await newEntity('private_limited', 'Prefill Foundation');
+    await post(pa, `/api/v1/entities/${entityId}/business-activities`, {
+      industrySlug: 'nbfc',
+    }).expect(201);
+    await post(pa, `/api/v1/entities/${entityId}/regulatory-attributes`, {
+      attributeCode: 'special_regulatory_status',
+      valueText: 'Section 8 company',
+    }).expect(201);
+
+    const { engId, shellId } = await newAuditFile(entityId);
+    const base = `/api/v1/engagements/${engId}/statutory-audit`;
+    // The 02.9 summary fills 02.1 first, so CARO sees the Section 8 exemption.
+    const summary = await request(app.getHttpServer())
+      .get(`${base}/framework-summary`)
+      .set(bearer(pa))
+      .expect(200);
+    const caro = (
+      summary.body[0].sections as Array<{ subSectionKey: string; systemOutcome: string | null }>
+    ).find((x) => x.subSectionKey === '02.4');
+    expect(caro?.systemOutcome).toBe('not_applicable_exempt');
+
+    const profile = await request(app.getHttpServer())
+      .get(`${base}/profile`)
+      .set(bearer(pa))
+      .expect(200);
+    expect([...profile.body[0].specialEntityTypes].sort()).toEqual(['nbfc', 'section_8']);
+    expect(
+      (profile.body[0].masterFacts as Array<{ label: string; value: string }>).find(
+        (f) => f.label === 'Special entity type(s)',
+      )?.value,
+    ).toMatch(/NBFC \(Industry: NBFC\)/);
+
+    // The team narrows the list; a refill adds back only what the master shows,
+    // and a cleared list is never refilled automatically.
+    await post(pa, `${base}/${shellId}/profile`, {
+      specialEntityTypes: [],
+      version: profile.body[0].version,
+    }).expect(201);
+    const reopened = await request(app.getHttpServer())
+      .get(`${base}/profile`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(reopened.body[0].specialEntityTypes).toEqual([]);
+    const refill = await post(pa, `${base}/${shellId}/profile/fill-from-master`, {}).expect(201);
+    expect([...refill.body.filled].sort()).toEqual(['NBFC', 'Section 8 company']);
+
+    const res = await post(pb, `${base}/${shellId}/profile/fill-from-master`, {});
+    expect([403, 404]).toContain(res.status);
+  });
 });

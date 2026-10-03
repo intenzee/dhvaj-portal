@@ -91,6 +91,7 @@ describe('02.1 entity profile card', () => {
       {
         initialAudit: false,
         smallCompany: { outcome: 'not_small', basis: 'Exceeds the paid-up ceiling.' },
+        specialEntityTypes: [],
         saTriggers: [{ code: 'SA 510', triggered: false, basis: '' }],
         missingFacts: [],
         masterFacts: [

@@ -85,8 +85,9 @@ export const PROFILE_FINANCIAL_PARAMETER = {
 } as const;
 export type ProfileFinancialParameter =
   (typeof PROFILE_FINANCIAL_PARAMETER)[keyof typeof PROFILE_FINANCIAL_PARAMETER];
-export const PROFILE_FINANCIAL_PARAMETERS: ProfileFinancialParameter[] =
-  Object.values(PROFILE_FINANCIAL_PARAMETER);
+export const PROFILE_FINANCIAL_PARAMETERS: ProfileFinancialParameter[] = Object.values(
+  PROFILE_FINANCIAL_PARAMETER,
+);
 
 /** Where a captured figure came from (guide §9.1 Card D — source/preparer). */
 export const PROFILE_FINANCIAL_SOURCE = {
@@ -116,8 +117,7 @@ export const SMALL_COMPANY_OUTCOME = {
 } as const;
 export type SmallCompanyOutcome =
   (typeof SMALL_COMPANY_OUTCOME)[keyof typeof SMALL_COMPANY_OUTCOME];
-export const SMALL_COMPANY_OUTCOMES: SmallCompanyOutcome[] =
-  Object.values(SMALL_COMPANY_OUTCOME);
+export const SMALL_COMPANY_OUTCOMES: SmallCompanyOutcome[] = Object.values(SMALL_COMPANY_OUTCOME);
 
 /** The SA triggers 02.1 carries forward to 02.8 and Planning (guide §9.1). */
 export const SA_TRIGGER_CODE = {
@@ -251,4 +251,11 @@ export interface CaptureProfileFinancialInput {
 /** Confirm the profile — freezes the fact set for 02.2–02.9 (Completion). */
 export interface ConfirmProfileInput {
   note?: string | null;
+}
+
+/** Result of filling the special-entity matrix from the client master. */
+export interface StatutoryAuditEntityProfileMasterFillResult {
+  profile: StatutoryAuditEntityProfile;
+  /** The special entity types added (empty when the master had nothing new). */
+  filled: string[];
 }
