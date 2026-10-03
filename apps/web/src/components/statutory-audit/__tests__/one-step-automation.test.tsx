@@ -49,7 +49,8 @@ describe('one-step automation for the team', () => {
         url.endsWith('/caro') ||
         url.endsWith('/consolidation') ||
         url.endsWith('/icfr') ||
-        url.endsWith('/other-reporting')
+        url.endsWith('/other-reporting') ||
+        url.endsWith('/financial-reporting')
       )
         return Promise.resolve([]);
       if (url.endsWith('/accept-suggestions')) return Promise.resolve({});

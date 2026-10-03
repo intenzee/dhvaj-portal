@@ -11,6 +11,7 @@
  * engagement's audit period, so a future change affects future periods only.
  */
 
+import type { MasterFact } from './statutory-audit';
 import type { FrameworkState } from './statutory-audit-framework';
 import type { FrameworkSubAssessment } from './statutory-audit-subassessment';
 
@@ -27,8 +28,9 @@ export const REPORTING_FRAMEWORK_OUTCOME = {
 } as const;
 export type ReportingFrameworkOutcome =
   (typeof REPORTING_FRAMEWORK_OUTCOME)[keyof typeof REPORTING_FRAMEWORK_OUTCOME];
-export const REPORTING_FRAMEWORK_OUTCOMES: ReportingFrameworkOutcome[] =
-  Object.values(REPORTING_FRAMEWORK_OUTCOME);
+export const REPORTING_FRAMEWORK_OUTCOMES: ReportingFrameworkOutcome[] = Object.values(
+  REPORTING_FRAMEWORK_OUTCOME,
+);
 
 /** Outcomes a professional may record as the conclusion (decisive ones only). */
 export const REPORTING_FRAMEWORK_CONCLUSIONS: ReportingFrameworkOutcome[] = [
@@ -109,6 +111,11 @@ export interface StatutoryAuditFinancialReporting {
   assessment: FrameworkSubAssessment;
   /** Typed view of the engine's structured detail (SMC / first-time / threshold). */
   detail: FinancialReportingDetail | null;
+  /**
+   * What the client master and earlier audit files say for these facts, with
+   * the source — filled in on first open so the team confirms rather than types.
+   */
+  masterFacts: MasterFact[];
   capturedFacts: FinancialReportingCapturedFacts;
   /** The base facts assembled from confirmed 02.1 + masters (read-only display). */
   baseFacts: FinancialReportingFacts;
@@ -131,4 +138,11 @@ export interface RecordFinancialReportingDecisionInput {
   basis?: string | null;
   impact?: string | null;
   version: number;
+}
+
+/** Result of filling the 02.2 facts from the client master and earlier files. */
+export interface StatutoryAuditFinancialReportingMasterFillResult {
+  financialReporting: StatutoryAuditFinancialReporting;
+  /** What was filled (empty when there was nothing new to add). */
+  filled: string[];
 }

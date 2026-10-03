@@ -53,6 +53,11 @@ export interface MasterRelationship {
   counterpartyTypeSlug: string | null;
   /** The counterparty has a security listed on an exchange. */
   counterpartyListed: boolean;
+  /**
+   * Why the counterparty applies Ind AS, when the portal shows it does: listed
+   * on a main board (NSE/BSE), or its own audit file concluded Ind AS.
+   */
+  counterpartyIndAs: 'listed' | 'ind_as_file' | null;
 }
 
 export interface EngagementMasterFacts {
@@ -84,6 +89,8 @@ export interface EngagementMasterFacts {
   branchCount: number;
   listingStatus: string;
   listings: string[];
+  /** Raw exchanges of the live listings (`nse`, `bse`, `sme`, `other`). */
+  listingExchanges: string[];
   paidUpCapital: number | null;
   annualTurnover: number | null;
   businessDescription: string | null;
@@ -729,18 +736,30 @@ export async function readEngagementMasterFacts(
     counterparty: string;
     counterparty_type: string | null;
     counterparty_listed: boolean;
+    counterparty_ind_as: 'listed' | 'ind_as_file' | null;
   }>(
     `SELECT r.relationship_type, r.shareholding_pct, r.from_entity_id = $1 AS outbound,
               other.legal_name AS counterparty, ot.slug AS counterparty_type,
               EXISTS (SELECT 1 FROM hsdg.entity_listings l
-                       WHERE l.entity_id = other.id AND l.status = 'listed') AS counterparty_listed
+                       WHERE l.entity_id = other.id AND l.status = 'listed') AS counterparty_listed,
+              CASE
+                WHEN EXISTS (SELECT 1 FROM hsdg.entity_listings l
+                              WHERE l.entity_id = other.id AND l.status = 'listed'
+                                AND l.exchange IN ('nse', 'bse')) THEN 'listed'
+                WHEN EXISTS (SELECT 1 FROM hsdg.audit_framework_subassessment s
+                               JOIN hsdg.service_workflow_instances swi
+                                 ON swi.id = s.workflow_instance_id AND swi.status <> 'cancelled'
+                               JOIN hsdg.engagements oe ON oe.id = swi.engagement_id
+                              WHERE oe.entity_id = other.id AND s.sub_section_key = $2
+                                AND s.area_key = $3 AND s.conclusion = 'ind_as') THEN 'ind_as_file'
+              END AS counterparty_ind_as
          FROM hsdg.entity_relationships r
          JOIN hsdg.entities other
            ON other.id = CASE WHEN r.from_entity_id = $1 THEN r.to_entity_id ELSE r.from_entity_id END
          LEFT JOIN hsdg.entity_types ot ON ot.id = other.entity_type_id
         WHERE $1 IN (r.from_entity_id, r.to_entity_id) AND r.status = 'active'
         ORDER BY r.created_at`,
-    [entityId],
+    [entityId, SUB_SECTION_KEY.financialReporting, FRAMEWORK_AREA_KEY.financialReportingFramework],
   );
   const fins = await client.query<FinancialRow>(
     `SELECT DISTINCT ON (financial_year) financial_year, revenue, turnover, other_income,
@@ -784,6 +803,7 @@ export async function readEngagementMasterFacts(
       .filter((a): a is string => a !== null),
     branchCount: addrs.rows.filter((a) => a.address_type === 'branch').length,
     listingStatus: r.listing_status,
+    listingExchanges: listings.rows.map((l) => l.exchange),
     listings: listings.rows.map((l) =>
       [l.exchange.toUpperCase(), l.security_type, l.symbol].filter(Boolean).join(' · '),
     ),
@@ -814,6 +834,7 @@ export async function readEngagementMasterFacts(
       shareholdingPct: n(x.shareholding_pct),
       counterpartyTypeSlug: x.counterparty_type,
       counterpartyListed: x.counterparty_listed,
+      counterpartyIndAs: x.counterparty_ind_as,
     })),
     cyFinancials: toProfile(fins.rows.find((x) => x.financial_year === r.financial_year)),
     pyFinancials: pyFy ? toProfile(fins.rows.find((x) => x.financial_year === pyFy)) : null,
@@ -944,4 +965,38 @@ export async function readReportingSources(
       ? { financialYear: prior.rows[0].financial_year, facts: prior.rows[0].facts }
       : null,
   };
+}
+
+/** The latest earlier-year file's assessment for one framework section of this entity. */
+export interface PriorSubAssessment {
+  financialYear: string;
+  facts: Record<string, unknown> | null;
+  conclusion: string | null;
+}
+
+export async function readPriorSubAssessment(
+  client: PoolClient,
+  workflowInstanceId: string,
+  keys: { sub: string; area: string },
+): Promise<PriorSubAssessment | null> {
+  const { rows } = await client.query<{
+    financial_year: string;
+    facts: Record<string, unknown> | null;
+    conclusion: string | null;
+  }>(
+    `SELECT e2.financial_year, s.facts, s.conclusion
+       FROM hsdg.service_workflow_instances wi
+       JOIN hsdg.engagements e ON e.id = wi.engagement_id
+       JOIN hsdg.engagements e2 ON e2.entity_id = e.entity_id AND e2.financial_year < e.financial_year
+       JOIN hsdg.service_workflow_instances wi2 ON wi2.engagement_id = e2.id
+                                              AND wi2.status <> 'cancelled'
+       JOIN hsdg.audit_framework_subassessment s ON s.workflow_instance_id = wi2.id
+      WHERE wi.id = $1 AND s.sub_section_key = $2 AND s.area_key = $3
+        AND (s.facts IS NOT NULL OR s.conclusion IS NOT NULL)
+      ORDER BY e2.financial_year DESC, s.updated_at DESC
+      LIMIT 1`,
+    [workflowInstanceId, keys.sub, keys.area],
+  );
+  const r = rows[0];
+  return r ? { financialYear: r.financial_year, facts: r.facts, conclusion: r.conclusion } : null;
 }

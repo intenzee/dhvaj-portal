@@ -20,11 +20,18 @@ import {
   type ReportingFrameworkOutcome,
   type SetFinancialReportingFactsInput,
   type StatutoryAuditFinancialReporting,
+  type StatutoryAuditFinancialReportingMasterFillResult,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
+import { fillFinancialReporting, financialReportingFromSources } from './framework-facts-prefill';
+import {
+  isEngagementLead,
+  readEngagementMasterFacts,
+  readPriorSubAssessment,
+} from './master-facts';
 import { assessFinancialReporting } from './financial-reporting';
 
 const SUB = SUB_SECTION_KEY.financialReporting;
@@ -118,6 +125,7 @@ export class AuditFinancialReportingService {
         [engagementId, SUB, AREA],
       );
       for (const s of shells) await this.seedOn(client, s.id, engagementId);
+      await this.prefillOn(client, ctx, engagementId);
       return this.read(client, engagementId);
     });
   }
@@ -143,6 +151,7 @@ export class AuditFinancialReportingService {
 
     const out: StatutoryAuditFinancialReporting[] = [];
     for (const r of rows) {
+      const fill = await this.masterFill(client, r.workflow_instance_id);
       const captured = { ...DEFAULT_CAPTURED, ...(r.facts ?? {}) };
       const { facts, auditPeriodStart, profileConfirmed } = await this.assembleFacts(
         client,
@@ -193,6 +202,7 @@ export class AuditFinancialReportingService {
         capturedFacts: captured,
         baseFacts: facts,
         profileConfirmed,
+        masterFacts: fill?.facts ?? [],
       });
     }
     return out;
@@ -246,6 +256,95 @@ export class AuditFinancialReportingService {
   }
 
   // ── Run the suggestion engine (§9.2) ────────────────────────────────────────
+
+  // ── Fill from the client master and portal records (Guide §1) ──────────────
+
+  /** What the portal already knows for 02.2, or null when the shell is gone. */
+  private async masterFill(client: PoolClient, workflowInstanceId: string) {
+    const master = await readEngagementMasterFacts(client, workflowInstanceId);
+    if (!master) return null;
+    const prior = await readPriorSubAssessment(client, workflowInstanceId, {
+      sub: SUB,
+      area: AREA,
+    });
+    return financialReportingFromSources(master, prior);
+  }
+
+  /**
+   * First open by a lead fills the never-touched 02.2 facts from the portal
+   * and runs the engine. One-shot: only rows whose facts were never stored, so
+   * the team's later edits are never refilled. Public so the 02.9 summary can
+   * trigger it too.
+   */
+  async prefillOn(client: PoolClient, ctx: RlsContext, engagementId: string): Promise<void> {
+    const { rows } = await client.query<{
+      id: string;
+      workflow_instance_id: string;
+      state: FrameworkState;
+    }>(
+      `SELECT s.id, s.workflow_instance_id, s.state
+         FROM hsdg.audit_framework_subassessment s
+         JOIN hsdg.service_workflow_instances swi ON swi.id = s.workflow_instance_id
+        WHERE s.engagement_id = $1 AND s.sub_section_key = $2 AND s.area_key = $3
+          AND s.facts IS NULL AND swi.status <> 'cancelled'`,
+      [engagementId, SUB, AREA],
+    );
+    const open = rows.filter((r) => !isDecided(r.state));
+    if (open.length === 0 || !(await isEngagementLead(client, engagementId))) return;
+    for (const r of open) {
+      const fill = await this.masterFill(client, r.workflow_instance_id);
+      if (!fill) continue;
+      const { next, filled } = fillFinancialReporting({ ...DEFAULT_CAPTURED }, fill);
+      await client.query(
+        `UPDATE hsdg.audit_framework_subassessment
+            SET facts = $2::jsonb, version = version + 1
+          WHERE id = $1 AND facts IS NULL`,
+        [r.id, JSON.stringify(next)],
+      );
+      await this.persistSuggestion(client, engagementId, r.id, r.workflow_instance_id, next);
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.financial_reporting_prefilled',
+        objectType: 'audit_framework_subassessment',
+        objectId: r.id,
+        after: { filled, automatic: true },
+      });
+    }
+  }
+
+  /** "Fill from client master": fills blanks / switches on facts; never overwrites the team. */
+  async fillFromMaster(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<StatutoryAuditFinancialReportingMasterFillResult> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const row = await this.loadRow(client, engagementId, workflowInstanceId);
+      this.assertNotApproved(row);
+      const fill = await this.masterFill(client, workflowInstanceId);
+      if (!fill) throw new NotFoundException('Statutory-audit workflow not found.');
+      const { next, filled } = fillFinancialReporting(
+        { ...DEFAULT_CAPTURED, ...(row.facts ?? {}) },
+        fill,
+      );
+      if (filled.length > 0 || row.facts == null) {
+        await client.query(
+          `UPDATE hsdg.audit_framework_subassessment
+              SET facts = $2::jsonb, version = version + 1
+            WHERE id = $1`,
+          [row.id, JSON.stringify(next)],
+        );
+        await this.persistSuggestion(client, engagementId, row.id, workflowInstanceId, next);
+        await this.audit.recordWith(client, ctx, {
+          action: 'statutory_audit.financial_reporting_prefilled',
+          objectType: 'audit_framework_subassessment',
+          objectId: row.id,
+          after: { filled },
+        });
+      }
+      const [result] = await this.readForShell(client, engagementId, workflowInstanceId);
+      return { financialReporting: result!, filled };
+    });
+  }
 
   async runSuggestions(
     ctx: RlsContext,

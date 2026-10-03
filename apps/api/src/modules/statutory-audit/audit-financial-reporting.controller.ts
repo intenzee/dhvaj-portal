@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditFinancialReporting } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type StatutoryAuditFinancialReporting,
+  type StatutoryAuditFinancialReportingMasterFillResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
@@ -27,6 +31,22 @@ export class AuditFinancialReportingController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<StatutoryAuditFinancialReporting[]> {
     return this.frf.listForEngagement(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/financial-reporting/fill-from-master')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Fill the 02.2 facts from the client master and earlier audit files',
+    description:
+      "Fills the SME-exchange listing, prior Ind AS (last year's file) and the Rule 4 group " +
+      'trigger (a group company listed on NSE/BSE or on Ind AS); never overwrites the team.',
+  })
+  fillFromMaster(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<StatutoryAuditFinancialReportingMasterFillResult> {
+    return this.frf.fillFromMaster(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/financial-reporting/facts')

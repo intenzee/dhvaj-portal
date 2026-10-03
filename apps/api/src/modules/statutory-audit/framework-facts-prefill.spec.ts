@@ -1,6 +1,7 @@
 import type {
   CaroCapturedFacts,
   ConsolidationCapturedFacts,
+  FinancialReportingCapturedFacts,
   IcfrCapturedFacts,
   OtherReportingCapturedFacts,
 } from '@hsdg/contracts';
@@ -9,6 +10,8 @@ import {
   consolidationFromMaster,
   fillCaro,
   fillConsolidation,
+  fillFinancialReporting,
+  financialReportingFromSources,
   fillIcfr,
   fillOtherReporting,
   fillSpecialTypes,
@@ -31,6 +34,7 @@ const rel = (p: Partial<MasterRelationship>): MasterRelationship => ({
   shareholdingPct: null,
   counterpartyTypeSlug: 'private_limited',
   counterpartyListed: false,
+  counterpartyIndAs: null,
   ...p,
 });
 
@@ -56,6 +60,7 @@ const master = (p: Partial<EngagementMasterFacts> = {}): EngagementMasterFacts =
     financialYear: '2024-25',
     listingStatus: 'unlisted',
     listings: [],
+    listingExchanges: [],
     branchCount: 0,
     relationships: [],
     cyFinancials: fin(),
@@ -413,5 +418,104 @@ describe('02.1 special entity types from the client master', () => {
     );
     expect(next).toEqual(['dormant', 'nbfc']);
     expect(filled).toEqual(['NBFC']);
+  });
+});
+
+describe('02.2 financial reporting facts from the master and last year', () => {
+  const BLANK: FinancialReportingCapturedFacts = {
+    isListedOnSmeExchange: false,
+    priorIndAs: false,
+    voluntaryIndAs: false,
+    groupTriggersIndAs: false,
+  };
+
+  it('flags an SME-only listing, not a main-board one', () => {
+    const sme = financialReportingFromSources(
+      master({ listingExchanges: ['sme'], listings: ['SME · equity · ACME'] }),
+      null,
+    );
+    expect(sme.values.isListedOnSmeExchange).toBe(true);
+    const main = financialReportingFromSources(
+      master({ listingExchanges: ['sme', 'nse'], listings: ['SME', 'NSE'] }),
+      null,
+    );
+    expect(main.values.isListedOnSmeExchange).toBe(false);
+  });
+
+  it('carries Ind AS from last year (irrevocable), whatever the reason', () => {
+    const concluded = financialReportingFromSources(master(), {
+      financialYear: '2023-24',
+      facts: null,
+      conclusion: 'ind_as',
+    });
+    expect(concluded.values.priorIndAs).toBe(true);
+    const voluntary = financialReportingFromSources(master(), {
+      financialYear: '2023-24',
+      facts: { voluntaryIndAs: true },
+      conclusion: null,
+    });
+    expect(voluntary.values.priorIndAs).toBe(true);
+    const as = financialReportingFromSources(master(), {
+      financialYear: '2023-24',
+      facts: {},
+      conclusion: 'accounting_standards',
+    });
+    expect(as.values.priorIndAs).toBe(false);
+  });
+
+  it('triggers Ind AS through a group company on Ind AS, not a fellow subsidiary', () => {
+    const viaParent = financialReportingFromSources(
+      master({
+        relationships: [
+          rel({ type: 'holding', counterparty: 'Listed Parent', counterpartyIndAs: 'listed' }),
+        ],
+      }),
+      null,
+    );
+    expect(viaParent.values.groupTriggersIndAs).toBe(true);
+    expect(viaParent.facts.find((f) => f.label === 'Group company applying Ind AS')?.value).toBe(
+      'Listed Parent (holding company; listed on NSE/BSE)',
+    );
+    const viaSub = financialReportingFromSources(
+      master({
+        relationships: [
+          rel({ type: 'subsidiary', counterparty: 'Sub', counterpartyIndAs: 'ind_as_file' }),
+        ],
+      }),
+      null,
+    );
+    expect(viaSub.values.groupTriggersIndAs).toBe(true);
+    const fellow = financialReportingFromSources(
+      master({
+        relationships: [
+          rel({ type: 'fellow_subsidiary', outbound: true, counterpartyIndAs: 'listed' }),
+        ],
+      }),
+      null,
+    );
+    expect(fellow.values.groupTriggersIndAs).toBe(false);
+  });
+
+  it('switches facts on, never off, and never sets voluntary adoption', () => {
+    const fill = financialReportingFromSources(
+      master({
+        listingExchanges: ['sme'],
+        listings: ['SME'],
+        relationships: [rel({ type: 'holding', counterpartyIndAs: 'listed' })],
+      }),
+      { financialYear: '2023-24', facts: null, conclusion: 'ind_as' },
+    );
+    const { next, filled } = fillFinancialReporting(BLANK, fill);
+    expect(next).toEqual({
+      isListedOnSmeExchange: true,
+      priorIndAs: true,
+      voluntaryIndAs: false,
+      groupTriggersIndAs: true,
+    });
+    expect(filled).toHaveLength(3);
+    const team = { ...BLANK, voluntaryIndAs: true, groupTriggersIndAs: true };
+    expect(
+      fillFinancialReporting(team, financialReportingFromSources(master(), null)).next,
+    ).toEqual(team);
   });
 });

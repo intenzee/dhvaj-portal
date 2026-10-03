@@ -50,6 +50,7 @@ function rel(partial: Partial<MasterRelationship>): MasterRelationship {
     shareholdingPct: null,
     counterpartyTypeSlug: 'private_limited',
     counterpartyListed: false,
+    counterpartyIndAs: null,
     ...partial,
   };
 }
@@ -81,6 +82,7 @@ function master(partial: Partial<EngagementMasterFacts> = {}): EngagementMasterF
     branchCount: 0,
     listingStatus: 'unlisted',
     listings: [],
+    listingExchanges: [],
     paidUpCapital: null,
     annualTurnover: 150_000_000,
     businessDescription: 'Auto components',

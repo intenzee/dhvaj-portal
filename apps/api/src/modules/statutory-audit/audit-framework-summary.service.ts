@@ -28,6 +28,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditCaroService } from './audit-caro.service';
 import { AuditConsolidationService } from './audit-consolidation.service';
+import { AuditFinancialReportingService } from './audit-financial-reporting.service';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditProfileService } from './audit-profile.service';
@@ -95,6 +96,7 @@ export class AuditFrameworkSummaryService {
     private readonly icfr: AuditIcfrService,
     private readonly otherReporting: AuditOtherReportingService,
     private readonly profile: AuditProfileService,
+    private readonly financialReporting: AuditFinancialReportingService,
   ) {}
 
   // ── Read / aggregate ─────────────────────────────────────────────────────────
@@ -110,10 +112,11 @@ export class AuditFrameworkSummaryService {
           ORDER BY created_at ASC`,
         [engagementId],
       );
-      // Facts the portal already holds (02.4 CARO, 02.5 ICFR, 02.6, 02.7) are
+      // Facts the portal already holds (02.1, 02.2, 02.4–02.7) are
       // filled on first sight, so the summary shows outcomes, not blanks.
       for (const s of shells) {
         await this.profile.seedProfileOn(client, s.id, engagementId);
+        await this.financialReporting.seedOn(client, s.id, engagementId);
         await this.caro.seedOn(client, s.id, engagementId);
         await this.consolidation.seedOn(client, s.id, engagementId);
         await this.icfr.seedOn(client, s.id, engagementId);
@@ -121,6 +124,7 @@ export class AuditFrameworkSummaryService {
       }
       // 02.1 first: CARO / ICFR read its special entity types.
       await this.profile.prefillOn(client, ctx, engagementId);
+      await this.financialReporting.prefillOn(client, ctx, engagementId);
       await this.caro.prefillOn(client, ctx, engagementId);
       await this.consolidation.prefillOn(client, ctx, engagementId);
       await this.icfr.prefillOn(client, ctx, engagementId);

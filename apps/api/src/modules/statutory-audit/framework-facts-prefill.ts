@@ -1,6 +1,7 @@
 import type {
   CaroCapturedFacts,
   ConsolidationCapturedFacts,
+  FinancialReportingCapturedFacts,
   IcfrCapturedFacts,
   InvesteeInput,
   MasterFact,
@@ -12,6 +13,7 @@ import {
   groupStructure,
   type ClientDirector,
   type EngagementMasterFacts,
+  type PriorSubAssessment,
   type RocFiling,
 } from './master-facts';
 
@@ -468,4 +470,106 @@ export function fillSpecialTypes(
 ): { next: SpecialEntityType[]; filled: string[] } {
   const added = fill.types.filter((t) => !current.includes(t));
   return { next: [...current, ...added], filled: added.map((t) => SPECIAL_LABEL[t]) };
+}
+
+// ── 02.2 Financial reporting framework ───────────────────────────────────────
+
+export interface FinancialReportingMasterFill {
+  values: Partial<FinancialReportingCapturedFacts>;
+  facts: MasterFact[];
+}
+
+const GROUP_KIND_LABEL: Record<string, string> = {
+  subsidiary: 'subsidiary',
+  associate: 'associate',
+  joint_venture: 'joint venture',
+};
+
+/**
+ * 02.2 facts from the portal:
+ *   • SME-exchange listing — every live listing is on an SME platform;
+ *   • prior Ind AS — last year's file concluded Ind AS (or carried it), and
+ *     Ind AS once applied is irrevocable;
+ *   • group trigger (Rule 4) — a holding, subsidiary, associate or JV is
+ *     listed on a main board or concluded Ind AS on its own audit file.
+ * Voluntary adoption is this year's choice and stays with the team.
+ */
+export function financialReportingFromSources(
+  m: EngagementMasterFacts,
+  prior: PriorSubAssessment | null,
+): FinancialReportingMasterFill {
+  const values: Partial<FinancialReportingCapturedFacts> = {};
+  const facts: MasterFact[] = [];
+
+  const exchanges = m.listingExchanges ?? [];
+  if (exchanges.length) {
+    values.isListedOnSmeExchange = exchanges.every((x) => x === 'sme');
+    facts.push({
+      label: 'Listing',
+      value: values.isListedOnSmeExchange
+        ? `SME platform only — ${m.listings.join('; ')}`
+        : `Main board — ${m.listings.join('; ')}`,
+      source: 'Client master — listings',
+    });
+  }
+
+  const priorIndAs =
+    prior != null &&
+    (prior.conclusion === 'ind_as' ||
+      prior.facts?.priorIndAs === true ||
+      prior.facts?.voluntaryIndAs === true);
+  values.priorIndAs = priorIndAs;
+  facts.push({
+    label: 'Ind AS in a prior year',
+    value: prior
+      ? priorIndAs
+        ? `Yes — FY ${prior.financialYear} file ${prior.conclusion === 'ind_as' ? 'concluded Ind AS' : 'records Ind AS'}`
+        : `No — FY ${prior.financialYear} file ${prior.conclusion ? `concluded ${prior.conclusion.replace(/_/g, ' ')}` : 'not concluded'}`
+      : null,
+    source: prior ? 'Last year’s audit file' : 'No earlier audit file on the portal',
+  });
+
+  const g = groupStructure(m.relationships);
+  const triggers = [
+    ...g.parents.map((p) => ({ r: p, as: 'holding company' })),
+    ...g.investees.map((i) => ({ r: i, as: GROUP_KIND_LABEL[i.kind] ?? 'group company' })),
+  ].filter((x) => x.r.counterpartyIndAs != null);
+  values.groupTriggersIndAs = triggers.length > 0;
+  facts.push({
+    label: 'Group company applying Ind AS',
+    value: triggers.length
+      ? triggers
+          .map(
+            (x) =>
+              `${x.r.counterparty} (${x.as}; ${x.r.counterpartyIndAs === 'listed' ? 'listed on NSE/BSE' : 'Ind AS on its audit file'})`,
+          )
+          .join('; ')
+      : g.parents.length + g.investees.length
+        ? 'None of the group companies on record applies Ind AS'
+        : 'No group companies on record',
+    source: 'Client master — group relationships',
+  });
+  return { values, facts };
+}
+
+export function fillFinancialReporting(
+  current: FinancialReportingCapturedFacts,
+  fill: FinancialReportingMasterFill,
+): { next: FinancialReportingCapturedFacts; filled: string[] } {
+  const next = { ...current };
+  const filled: string[] = [];
+  const v = fill.values;
+  if (v.isListedOnSmeExchange && !next.isListedOnSmeExchange) {
+    next.isListedOnSmeExchange = true;
+    filled.push('SME-exchange listing');
+  }
+  if (v.priorIndAs && !next.priorIndAs) {
+    next.priorIndAs = true;
+    filled.push('Ind AS in a prior year');
+  }
+  if (v.groupTriggersIndAs && !next.groupTriggersIndAs) {
+    next.groupTriggersIndAs = true;
+    filled.push('group company applying Ind AS');
+  }
+  return { next, filled };
 }

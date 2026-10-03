@@ -306,4 +306,66 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     const res = await post(pb, `${base}/${shellId}/profile/fill-from-master`, {});
     expect([403, 404]).toContain(res.status);
   });
+
+  it("02.2: SME listing, last year's Ind AS and a listed parent fill the facts", async () => {
+    const entityId = await newEntity('public_limited', 'Prefill SME Co');
+    await post(pa, `/api/v1/entities/${entityId}/listings`, {
+      exchange: 'sme',
+      securityType: 'equity',
+      status: 'listed',
+    }).expect(201);
+    const parentId = await newEntity('public_limited', 'Prefill Listed Parent');
+    await post(pa, `/api/v1/entities/${parentId}/listings`, {
+      exchange: 'nse',
+      securityType: 'equity',
+      status: 'listed',
+    }).expect(201);
+    // "SME Co IS subsidiary OF Listed Parent".
+    await post(pa, `/api/v1/entities/${entityId}/relationships`, {
+      toEntityId: parentId,
+      relationshipType: 'subsidiary',
+      shareholdingPct: 55,
+    }).expect(201);
+
+    // Last year's file concluded Ind AS.
+    const prior = await newAuditFile(entityId, '2023-24');
+    const priorBase = `/api/v1/engagements/${prior.engId}/statutory-audit`;
+    const priorFr = await request(app.getHttpServer())
+      .get(`${priorBase}/financial-reporting`)
+      .set(bearer(pa))
+      .expect(200);
+    await post(pa, `${priorBase}/${prior.shellId}/financial-reporting/decision`, {
+      conclusion: 'ind_as',
+      basis: 'Ind AS applied (e2e).',
+      version: priorFr.body[0].assessment.version,
+    }).expect(201);
+
+    const { engId, shellId } = await newAuditFile(entityId);
+    const base = `/api/v1/engagements/${engId}/statutory-audit`;
+    const fr = await request(app.getHttpServer())
+      .get(`${base}/financial-reporting`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(fr.body[0].capturedFacts).toEqual({
+      isListedOnSmeExchange: true,
+      priorIndAs: true,
+      voluntaryIndAs: false,
+      groupTriggersIndAs: true,
+    });
+    expect(fr.body[0].assessment.systemOutcome).toBe('ind_as');
+    expect(
+      (fr.body[0].masterFacts as Array<{ label: string; value: string }>).find(
+        (f) => f.label === 'Group company applying Ind AS',
+      )?.value,
+    ).toMatch(/holding company; listed on NSE\/BSE/);
+
+    const again = await post(
+      pa,
+      `${base}/${shellId}/financial-reporting/fill-from-master`,
+      {},
+    ).expect(201);
+    expect(again.body.filled).toEqual([]);
+    const res = await post(pb, `${base}/${shellId}/financial-reporting/fill-from-master`, {});
+    expect([403, 404]).toContain(res.status);
+  });
 });
