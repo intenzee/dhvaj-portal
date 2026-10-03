@@ -1,6 +1,11 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type InvesteeInput, type StatutoryAuditConsolidation } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type InvesteeInput,
+  type StatutoryAuditConsolidation,
+  type StatutoryAuditConsolidationMasterFillResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditConsolidationService } from './audit-consolidation.service';
@@ -41,6 +46,26 @@ export class AuditConsolidationController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<StatutoryAuditConsolidation[]> {
     return this.consolidation.listForEngagement(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/consolidation/fill-from-master')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Fill the 02.6 facts from the client master',
+    description:
+      'Fills blank facts from the client master (group relationships, listings, branches, ' +
+      'financial profile) and re-runs the engine; never overwrites what the team entered.',
+  })
+  fillFromMaster(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<StatutoryAuditConsolidationMasterFillResult> {
+    return this.consolidation.fillFromMaster(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+    );
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/consolidation/facts')

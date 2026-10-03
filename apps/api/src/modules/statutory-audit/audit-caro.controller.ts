@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditCaro } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type StatutoryAuditCaro,
+  type StatutoryAuditCaroMasterFillResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditCaroService } from './audit-caro.service';
@@ -24,6 +28,22 @@ export class AuditCaroController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<StatutoryAuditCaro[]> {
     return this.caro.listForEngagement(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/caro/fill-from-master')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Fill the 02.4 facts from the client master',
+    description:
+      'Fills blank facts from the client master (group relationships, listings, branches, ' +
+      'financial profile) and re-runs the engine; never overwrites what the team entered.',
+  })
+  fillFromMaster(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<StatutoryAuditCaroMasterFillResult> {
+    return this.caro.fillFromMaster(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/caro/facts')

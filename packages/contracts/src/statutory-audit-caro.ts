@@ -20,6 +20,7 @@
  * only and a pre-2021 period gets no CARO 2020 rule.
  */
 
+import type { MasterFact } from './statutory-audit';
 import type { FrameworkState } from './statutory-audit-framework';
 import type { FrameworkSubAssessment } from './statutory-audit-subassessment';
 
@@ -129,6 +130,11 @@ export interface StatutoryAuditCaro {
   capturedFacts: CaroCapturedFacts;
   /** The base facts assembled from confirmed 02.1 + masters + captured facts. */
   baseFacts: CaroFacts;
+  /**
+   * What the client master says for these facts, with its source — filled in
+   * on first open so the team confirms rather than types (Guide §1).
+   */
+  masterFacts: MasterFact[];
   /** True once 02.1 is confirmed — 02.4 reads its frozen classifications. */
   upstreamReady: boolean;
 }
@@ -148,4 +154,11 @@ export interface RecordCaroDecisionInput {
   basis?: string | null;
   impact?: string | null;
   version: number;
+}
+
+/** Result of filling 02.4 facts from the client master. */
+export interface StatutoryAuditCaroMasterFillResult {
+  caro: StatutoryAuditCaro;
+  /** What was filled (empty when the master had nothing new to add). */
+  filled: string[];
 }

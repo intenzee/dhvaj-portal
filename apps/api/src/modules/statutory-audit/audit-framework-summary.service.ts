@@ -26,6 +26,8 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { AuditCaroService } from './audit-caro.service';
+import { AuditConsolidationService } from './audit-consolidation.service';
 
 /** The six Section-02 sub-sections the summary aggregates, in dashboard order. */
 const SECTIONS: Array<{ sub: SubSectionKey; area: string; title: string }> = [
@@ -85,6 +87,8 @@ export class AuditFrameworkSummaryService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly caro: AuditCaroService,
+    private readonly consolidation: AuditConsolidationService,
   ) {}
 
   // ── Read / aggregate ─────────────────────────────────────────────────────────
@@ -100,6 +104,14 @@ export class AuditFrameworkSummaryService {
           ORDER BY created_at ASC`,
         [engagementId],
       );
+      // Facts the client master answers (02.4 CARO, 02.6 consolidation) are
+      // filled on first sight, so the summary shows outcomes, not blanks.
+      for (const s of shells) {
+        await this.caro.seedOn(client, s.id, engagementId);
+        await this.consolidation.seedOn(client, s.id, engagementId);
+      }
+      await this.caro.prefillOn(client, ctx, engagementId);
+      await this.consolidation.prefillOn(client, ctx, engagementId);
       const out: StatutoryAuditFrameworkSummary[] = [];
       for (const s of shells)
         out.push(await this.build(client, engagementId, s.id, s.engagement_service_id));

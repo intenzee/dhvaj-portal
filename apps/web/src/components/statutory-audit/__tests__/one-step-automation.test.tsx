@@ -44,7 +44,8 @@ beforeEach(() => apiFetch.mockReset());
 describe('one-step automation for the team', () => {
   it('accepts every waiting framework suggestion in one click', async () => {
     apiFetch.mockImplementation((url: string) => {
-      if (url.endsWith('/profile')) return Promise.resolve([]);
+      if (url.endsWith('/profile') || url.endsWith('/caro') || url.endsWith('/consolidation'))
+        return Promise.resolve([]);
       if (url.endsWith('/accept-suggestions')) return Promise.resolve({});
       return Promise.resolve([
         {

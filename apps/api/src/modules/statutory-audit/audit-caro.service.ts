@@ -21,11 +21,14 @@ import {
   type RecordCaroDecisionInput,
   type SetCaroFactsInput,
   type StatutoryAuditCaro,
+  type StatutoryAuditCaroMasterFillResult,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
+import { fillCaro, caroFromMaster } from './framework-facts-prefill';
+import { isEngagementLead, readEngagementMasterFacts } from './master-facts';
 import { assessCaro } from './caro';
 
 const SUB = SUB_SECTION_KEY.caro;
@@ -112,6 +115,7 @@ export class AuditCaroService {
         [engagementId, SUB, AREA],
       );
       for (const s of shells) await this.seedOn(client, s.id, engagementId);
+      await this.prefillOn(client, ctx, engagementId);
       return this.read(client, engagementId);
     });
   }
@@ -132,6 +136,7 @@ export class AuditCaroService {
 
     const out: StatutoryAuditCaro[] = [];
     for (const r of rows) {
+      const master = await readEngagementMasterFacts(client, r.workflow_instance_id);
       const captured = { ...DEFAULT_CAPTURED, ...(r.facts ?? {}) };
       const { facts, upstreamReady } = await this.assembleFacts(
         client,
@@ -160,6 +165,7 @@ export class AuditCaroService {
         capturedFacts: captured,
         baseFacts: facts,
         upstreamReady,
+        masterFacts: master ? caroFromMaster(master).facts : [],
       });
     }
     return out;
@@ -210,6 +216,88 @@ export class AuditCaroService {
       });
       const [caro] = await this.readForShell(client, engagementId, workflowInstanceId);
       return caro!;
+    });
+  }
+
+  // ── Fill from the client master (Guide §1, capture once) ───────────────────
+
+  /**
+   * First open by a lead fills the never-touched 02.4 facts from the client
+   * master and runs the engine, so the assessment starts answered instead of
+   * "information insufficient". One-shot: only rows whose facts were never
+   * stored, so a team's later edits are never refilled. Public so the 02.9
+   * summary can trigger it too.
+   */
+  async prefillOn(client: PoolClient, ctx: RlsContext, engagementId: string): Promise<void> {
+    const { rows } = await client.query<{
+      id: string;
+      workflow_instance_id: string;
+      state: FrameworkState;
+    }>(
+      `SELECT s.id, s.workflow_instance_id, s.state
+         FROM hsdg.audit_framework_subassessment s
+         JOIN hsdg.service_workflow_instances swi ON swi.id = s.workflow_instance_id
+        WHERE s.engagement_id = $1 AND s.sub_section_key = $2 AND s.area_key = $3
+          AND s.facts IS NULL AND swi.status <> 'cancelled'`,
+      [engagementId, SUB, AREA],
+    );
+    const open = rows.filter((r) => !isDecided(r.state));
+    if (open.length === 0 || !(await isEngagementLead(client, engagementId))) return;
+    for (const r of open) {
+      const master = await readEngagementMasterFacts(client, r.workflow_instance_id);
+      if (!master) continue;
+      const { next, filled } = fillCaro({ ...DEFAULT_CAPTURED }, caroFromMaster(master));
+      await client.query(
+        `UPDATE hsdg.audit_framework_subassessment
+            SET facts = $2::jsonb, version = version + 1
+          WHERE id = $1 AND facts IS NULL`,
+        [r.id, JSON.stringify(next)],
+      );
+      await this.persistSuggestion(client, engagementId, r.id, next);
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.caro_prefilled',
+        objectType: 'audit_framework_subassessment',
+        objectId: r.id,
+        after: { filled, automatic: true },
+      });
+    }
+  }
+
+  /**
+   * "Fill from client master": fills blank facts (and switches on yes/no facts
+   * the master shows) without overwriting anything the team entered.
+   */
+  async fillFromMaster(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<StatutoryAuditCaroMasterFillResult> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const row = await this.loadRow(client, engagementId, workflowInstanceId);
+      this.assertNotApproved(row);
+      const master = await readEngagementMasterFacts(client, workflowInstanceId);
+      if (!master) throw new NotFoundException('Statutory-audit workflow not found.');
+      const { next, filled } = fillCaro(
+        { ...DEFAULT_CAPTURED, ...(row.facts ?? {}) },
+        caroFromMaster(master),
+      );
+      if (filled.length > 0 || row.facts == null) {
+        await client.query(
+          `UPDATE hsdg.audit_framework_subassessment
+              SET facts = $2::jsonb, version = version + 1
+            WHERE id = $1`,
+          [row.id, JSON.stringify(next)],
+        );
+        await this.persistSuggestion(client, engagementId, row.id, next);
+        await this.audit.recordWith(client, ctx, {
+          action: 'statutory_audit.caro_prefilled',
+          objectType: 'audit_framework_subassessment',
+          objectId: row.id,
+          after: { filled },
+        });
+      }
+      const [caro] = await this.readForShell(client, engagementId, workflowInstanceId);
+      return { caro: caro!, filled };
     });
   }
 

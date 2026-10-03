@@ -17,7 +17,7 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
-import { readEngagementMasterFacts, readInitialAudit } from './master-facts';
+import { groupStructure, readEngagementMasterFacts, readInitialAudit } from './master-facts';
 import {
   pickClientOwner,
   planStandardPbcList,
@@ -271,17 +271,7 @@ export class AuditPbcService {
         borrowings:
           master.cyFinancials?.totalBorrowings ?? master.pyFinancials?.totalBorrowings ?? null,
         hasGroupRelationships: master.relationships.length > 0,
-        hasSubsidiaries: master.relationships.some(
-          (r) =>
-            r.outbound &&
-            [
-              'subsidiary',
-              'wholly_owned_subsidiary',
-              'step_down_subsidiary',
-              'associate',
-              'joint_venture',
-            ].includes(r.type),
-        ),
+        hasSubsidiaries: groupStructure(master.relationships).investees.length > 0,
         initialAudit,
         activeWorkAreas: new Set(areaIdByKey.keys()),
       });

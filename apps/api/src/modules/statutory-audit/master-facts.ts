@@ -47,6 +47,10 @@ export interface MasterRelationship {
   /** True when the engagement entity is the `from` side of the link. */
   outbound: boolean;
   shareholdingPct: number | null;
+  /** The counterparty's entity type (e.g. `public_limited`), for CARO's public-company test. */
+  counterpartyTypeSlug: string | null;
+  /** The counterparty has a security listed on an exchange. */
+  counterpartyListed: boolean;
 }
 
 export interface EngagementMasterFacts {
@@ -74,6 +78,8 @@ export interface EngagementMasterFacts {
   registeredOffice: string | null;
   /** Non-registered operating addresses (business / branch). */
   locations: string[];
+  /** Branch addresses on the master (§143(8) branch-auditor framework). */
+  branchCount: number;
   listingStatus: string;
   listings: string[];
   paidUpCapital: number | null;
@@ -194,6 +200,48 @@ export function describeRelationship(r: MasterRelationship): string {
   const label = RELATIONSHIP_LABEL[r.type] ?? r.type.replace(/_/g, ' ');
   const pct = r.shareholdingPct !== null ? ` (${r.shareholdingPct}%)` : '';
   return `${label}: ${r.counterparty}${pct}`;
+}
+
+/**
+ * Read the group structure off the relationships master. An edge reads "from
+ * IS <type> OF to" (entity_relationships migration), so for this entity:
+ *   • outbound subsidiary-type / inbound holding-type → the counterparty is a parent;
+ *   • inbound subsidiary/associate/JV-type / outbound holding-type → an investee.
+ * Fellow subsidiaries and "other" links are neither.
+ */
+const SUBSIDIARY_TYPES = ['subsidiary', 'wholly_owned_subsidiary', 'step_down_subsidiary'];
+const HOLDING_TYPES = ['holding', 'ultimate_holding', 'intermediate_holding'];
+
+export type InvesteeKind = 'subsidiary' | 'associate' | 'joint_venture';
+
+export interface GroupStructure {
+  parents: Array<MasterRelationship & { whollyOwned: boolean }>;
+  investees: Array<MasterRelationship & { kind: InvesteeKind }>;
+}
+
+export function groupStructure(rels: readonly MasterRelationship[]): GroupStructure {
+  const parents: GroupStructure['parents'] = [];
+  const investees: GroupStructure['investees'] = [];
+  for (const r of rels) {
+    const isParent =
+      (r.outbound && SUBSIDIARY_TYPES.includes(r.type)) ||
+      (!r.outbound && HOLDING_TYPES.includes(r.type));
+    if (isParent) {
+      parents.push({
+        ...r,
+        whollyOwned: r.type === 'wholly_owned_subsidiary' || r.shareholdingPct === 100,
+      });
+      continue;
+    }
+    if (!r.outbound && SUBSIDIARY_TYPES.includes(r.type))
+      investees.push({ ...r, kind: 'subsidiary' });
+    else if (r.outbound && HOLDING_TYPES.includes(r.type))
+      investees.push({ ...r, kind: 'subsidiary' });
+    else if (!r.outbound && r.type === 'associate') investees.push({ ...r, kind: 'associate' });
+    else if (!r.outbound && r.type === 'joint_venture')
+      investees.push({ ...r, kind: 'joint_venture' });
+  }
+  return { parents, investees };
 }
 
 const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
@@ -479,14 +527,7 @@ export function planUnderstandingPrefill(
     if (Object.keys(answers).length) sections.push({ key: 'business_model', answers });
   }
   if (!st.savedSections.has('governance')) {
-    const parents = m.relationships.filter(
-      (r) =>
-        ['holding', 'ultimate_holding', 'intermediate_holding'].includes(r.type) ||
-        // A subsidiary/associate link where this entity is the `to` side means
-        // the counterparty owns it.
-        (!r.outbound &&
-          ['subsidiary', 'wholly_owned_subsidiary', 'step_down_subsidiary'].includes(r.type)),
-    );
+    const { parents } = groupStructure(m.relationships);
     if (parents.length) {
       sections.push({
         key: 'governance',
@@ -651,12 +692,17 @@ export async function readEngagementMasterFacts(
     shareholding_pct: string | null;
     outbound: boolean;
     counterparty: string;
+    counterparty_type: string | null;
+    counterparty_listed: boolean;
   }>(
     `SELECT r.relationship_type, r.shareholding_pct, r.from_entity_id = $1 AS outbound,
-              other.legal_name AS counterparty
+              other.legal_name AS counterparty, ot.slug AS counterparty_type,
+              EXISTS (SELECT 1 FROM hsdg.entity_listings l
+                       WHERE l.entity_id = other.id AND l.status = 'listed') AS counterparty_listed
          FROM hsdg.entity_relationships r
          JOIN hsdg.entities other
            ON other.id = CASE WHEN r.from_entity_id = $1 THEN r.to_entity_id ELSE r.from_entity_id END
+         LEFT JOIN hsdg.entity_types ot ON ot.id = other.entity_type_id
         WHERE $1 IN (r.from_entity_id, r.to_entity_id) AND r.status = 'active'
         ORDER BY r.created_at`,
     [entityId],
@@ -701,6 +747,7 @@ export async function readEngagementMasterFacts(
       .filter((a) => a !== registered && ['business', 'branch'].includes(a.address_type))
       .map(formatAddress)
       .filter((a): a is string => a !== null),
+    branchCount: addrs.rows.filter((a) => a.address_type === 'branch').length,
     listingStatus: r.listing_status,
     listings: listings.rows.map((l) =>
       [l.exchange.toUpperCase(), l.security_type, l.symbol].filter(Boolean).join(' · '),
@@ -724,6 +771,8 @@ export async function readEngagementMasterFacts(
       counterparty: x.counterparty,
       outbound: x.outbound,
       shareholdingPct: n(x.shareholding_pct),
+      counterpartyTypeSlug: x.counterparty_type,
+      counterpartyListed: x.counterparty_listed,
     })),
     cyFinancials: toProfile(fins.rows.find((x) => x.financial_year === r.financial_year)),
     pyFinancials: pyFy ? toProfile(fins.rows.find((x) => x.financial_year === pyFy)) : null,

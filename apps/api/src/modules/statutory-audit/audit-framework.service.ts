@@ -709,12 +709,17 @@ async function loadFacts(
   );
   facts.isListed = (listed.rowCount ?? 0) > 0;
 
+  // An edge reads "from IS <type> OF to": an investee is the `from` side of a
+  // subsidiary/associate/JV edge into this entity, or the `to` side of a
+  // holding edge out of it (see groupStructure in master-facts).
   const subs = await client.query(
     `SELECT 1 FROM hsdg.entity_relationships r
-       JOIN hsdg.engagements e ON e.entity_id = r.from_entity_id
-      WHERE e.id = $1 AND r.status = 'active'
-        AND r.relationship_type IN
-            ('subsidiary','wholly_owned_subsidiary','associate','joint_venture','step_down_subsidiary','fellow_subsidiary')
+       JOIN hsdg.engagements e ON e.id = $1
+      WHERE r.status = 'active'
+        AND ((r.to_entity_id = e.entity_id AND r.relationship_type IN
+               ('subsidiary','wholly_owned_subsidiary','step_down_subsidiary','associate','joint_venture'))
+          OR (r.from_entity_id = e.entity_id AND r.relationship_type IN
+               ('holding','ultimate_holding','intermediate_holding')))
       LIMIT 1`,
     [engagementId],
   );

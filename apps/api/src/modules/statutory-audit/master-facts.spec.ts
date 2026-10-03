@@ -1,6 +1,7 @@
 import {
   activitiesFromFlags,
   engagementProfileFacts,
+  groupStructure,
   industryProfileFromFacts,
   periodEndFromFinancialYear,
   planUnderstandingPrefill,
@@ -8,6 +9,7 @@ import {
   regulatoryProfileFacts,
   type EngagementMasterFacts,
   type MasterFinancialProfile,
+  type MasterRelationship,
   type UnderstandingState,
 } from './master-facts';
 
@@ -40,6 +42,18 @@ function fin(partial: Partial<MasterFinancialProfile> = {}): MasterFinancialProf
   };
 }
 
+function rel(partial: Partial<MasterRelationship>): MasterRelationship {
+  return {
+    type: 'holding',
+    counterparty: 'Other Ltd',
+    outbound: false,
+    shareholdingPct: null,
+    counterpartyTypeSlug: 'private_limited',
+    counterpartyListed: false,
+    ...partial,
+  };
+}
+
 function master(partial: Partial<EngagementMasterFacts> = {}): EngagementMasterFacts {
   return {
     engagementCode: 'ENG00001',
@@ -64,6 +78,7 @@ function master(partial: Partial<EngagementMasterFacts> = {}): EngagementMasterF
     roc: null,
     registeredOffice: 'Plot 12, Mumbai, Maharashtra 400093',
     locations: ['Chakan, Pune'],
+    branchCount: 0,
     listingStatus: 'unlisted',
     listings: [],
     paidUpCapital: null,
@@ -218,13 +233,20 @@ describe('planUnderstandingPrefill', () => {
     const plan = planUnderstandingPrefill(
       master({
         relationships: [
-          { type: 'holding', counterparty: 'Parent Ltd', outbound: false, shareholdingPct: 74 },
-          {
+          // "Parent Ltd IS holding OF this entity" (inbound).
+          rel({
+            type: 'holding',
+            counterparty: 'Parent Ltd',
+            outbound: false,
+            shareholdingPct: 74,
+          }),
+          // "Child Pvt Ltd IS subsidiary OF this entity" (inbound) — an investee, not a promoter.
+          rel({
             type: 'subsidiary',
             counterparty: 'Child Pvt Ltd',
-            outbound: true,
+            outbound: false,
             shareholdingPct: 100,
-          },
+          }),
         ],
       }),
       state(),
@@ -262,5 +284,38 @@ describe('fact cards', () => {
     expect(facts.find((f) => f.label === 'Total assets')?.source).toBe(
       'Financial profile FY 2024-25',
     );
+  });
+});
+
+describe('groupStructure — "from IS <type> OF to"', () => {
+  it('reads parents and investees from both directions', () => {
+    const g = groupStructure([
+      rel({ type: 'subsidiary', counterparty: 'Parent A', outbound: true, shareholdingPct: 60 }),
+      rel({ type: 'holding', counterparty: 'Parent B', outbound: false }),
+      rel({ type: 'wholly_owned_subsidiary', counterparty: 'Sub C', outbound: false }),
+      rel({ type: 'holding', counterparty: 'Sub D', outbound: true, shareholdingPct: 80 }),
+      rel({ type: 'associate', counterparty: 'Assoc E', outbound: false, shareholdingPct: 30 }),
+      rel({ type: 'joint_venture', counterparty: 'JV F', outbound: false }),
+      rel({ type: 'associate', counterparty: 'Investor G', outbound: true }),
+      rel({ type: 'fellow_subsidiary', counterparty: 'Fellow H', outbound: true }),
+    ]);
+    expect(g.parents.map((p) => [p.counterparty, p.whollyOwned])).toEqual([
+      ['Parent A', false],
+      ['Parent B', false],
+    ]);
+    expect(g.investees.map((i) => [i.counterparty, i.kind])).toEqual([
+      ['Sub C', 'subsidiary'],
+      ['Sub D', 'subsidiary'],
+      ['Assoc E', 'associate'],
+      ['JV F', 'joint_venture'],
+    ]);
+  });
+
+  it('treats a 100% or wholly-owned link to a parent as wholly owned', () => {
+    const g = groupStructure([
+      rel({ type: 'wholly_owned_subsidiary', counterparty: 'P1', outbound: true }),
+      rel({ type: 'holding', counterparty: 'P2', outbound: false, shareholdingPct: 100 }),
+    ]);
+    expect(g.parents.every((p) => p.whollyOwned)).toBe(true);
   });
 });

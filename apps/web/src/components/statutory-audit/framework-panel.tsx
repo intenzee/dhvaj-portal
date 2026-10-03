@@ -18,6 +18,7 @@ import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Textarea } from '@/components/form';
 import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 import { EntityProfileCard } from './entity-profile-card';
+import { GroupCaroCard } from './group-caro-card';
 
 /**
  * Framework (Phase 02) screen (Audit Spec §18–§20): the applicability/assessment
@@ -126,6 +127,7 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
   return (
     <div className="space-y-3">
       <EntityProfileCard engagementId={engagementId} />
+      <GroupCaroCard engagementId={engagementId} />
       <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div>
           <h2 className="text-sm font-semibold text-ink">Audit Framework · Phase 02</h2>

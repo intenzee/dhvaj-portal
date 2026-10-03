@@ -20,6 +20,7 @@
  * engagement's audit period, so historical versions freeze.
  */
 
+import type { MasterFact } from './statutory-audit';
 import type { FrameworkState } from './statutory-audit-framework';
 import type { FrameworkSubAssessment } from './statutory-audit-subassessment';
 import type { ReportingFrameworkOutcome } from './statutory-audit-financial-reporting';
@@ -68,8 +69,7 @@ export const CONSOLIDATION_METHOD = {
   jointOperationLineByLine: 'joint_operation_line_by_line',
   none: 'none',
 } as const;
-export type ConsolidationMethod =
-  (typeof CONSOLIDATION_METHOD)[keyof typeof CONSOLIDATION_METHOD];
+export type ConsolidationMethod = (typeof CONSOLIDATION_METHOD)[keyof typeof CONSOLIDATION_METHOD];
 
 /** One investee input captured on the sub-assessment (guide §9.6). */
 export interface InvesteeInput {
@@ -186,6 +186,11 @@ export interface StatutoryAuditConsolidation {
   detail: ConsolidationDetail | null;
   capturedFacts: ConsolidationCapturedFacts;
   baseFacts: ConsolidationFacts;
+  /**
+   * What the client master says for these facts, with its source — filled in
+   * on first open so the team confirms rather than types (Guide §1).
+   */
+  masterFacts: MasterFact[];
   /** True once 02.1 is confirmed AND 02.2 concluded — 02.6 reads their frozen outputs. */
   upstreamReady: boolean;
 }
@@ -208,4 +213,11 @@ export interface RecordConsolidationDecisionInput {
   basis?: string | null;
   impact?: string | null;
   version: number;
+}
+
+/** Result of filling 02.6 facts from the client master. */
+export interface StatutoryAuditConsolidationMasterFillResult {
+  consolidation: StatutoryAuditConsolidation;
+  /** What was filled (empty when the master had nothing new to add). */
+  filled: string[];
 }
