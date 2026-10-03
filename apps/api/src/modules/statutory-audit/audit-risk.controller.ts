@@ -1,6 +1,10 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type StatutoryAuditRiskRegister } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type RiskSuggestionResult,
+  type StatutoryAuditRiskRegister,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditRiskService } from './audit-risk.service';
@@ -39,6 +43,23 @@ export class AuditRiskController {
     @Body() dto: CreateRiskDto,
   ): Promise<StatutoryAuditRiskRegister> {
     return this.risk.createRisk(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/risks/suggest')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Add the suggested risks Sections 02–03 point to (Section 04)',
+    description:
+      'SA 240 presumed risks, planning signals at Enhanced / Partner attention, prior-year ' +
+      'matters still relevant, Enhanced 03.5 areas, related parties and opening balances. ' +
+      'Never re-suggests one the team deleted. The register also seeds itself on first open.',
+  })
+  suggest(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<RiskSuggestionResult> {
+    return this.risk.suggestRisks(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Post(':id/statutory-audit/risks/:riskId')

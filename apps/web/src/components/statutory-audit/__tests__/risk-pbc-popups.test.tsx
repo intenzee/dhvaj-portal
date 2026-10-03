@@ -26,6 +26,8 @@ const risk = {
   isFraudRisk: true,
   response: 'Cut-off testing around year end',
   conclusion: null,
+  sourceKey: 'signal:1',
+  sourceNote: 'Planning signal PS-001 (Enhanced)',
   ownerEmployeeId: null,
   ownerName: 'Manager X',
   reviewerEmployeeId: null,
@@ -83,6 +85,7 @@ describe('Risk register inline panels', () => {
     await user.click(row);
     const panel = screen.getByRole('region', { name: 'R-001 · Risk' });
     expect(within(panel).getByText(/Cut-off testing/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Suggested from: Planning signal PS-001/)).toBeInTheDocument();
 
     // Edit happens inside the same inline panel.
     await user.click(within(panel).getByRole('button', { name: 'Edit' }));

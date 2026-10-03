@@ -897,19 +897,23 @@ export async function readEngagementMasterFacts(
 }
 
 /**
- * First-year vs continuing audit: the 02.1 profile's value when one exists,
- * else derived from engagement history (an earlier statutory-audit file for
+ * First-year vs continuing audit: the 02.1 profile's value when the team set
+ * it, else derived from engagement history (an earlier statutory-audit file for
  * the same entity ⇒ continuing).
  */
 export async function readInitialAudit(
   client: PoolClient,
   workflowInstanceId: string,
 ): Promise<boolean | null> {
-  const profile = await client.query<{ initial_audit: boolean }>(
-    `SELECT initial_audit FROM hsdg.audit_entity_profile WHERE workflow_instance_id = $1`,
+  const profile = await client.query<{ initial_audit: boolean; initial_audit_derived: boolean }>(
+    `SELECT initial_audit, initial_audit_derived FROM hsdg.audit_entity_profile
+      WHERE workflow_instance_id = $1`,
     [workflowInstanceId],
   );
-  if (profile.rows[0]) return profile.rows[0].initial_audit;
+  // A value the team set wins; a system-derived one is re-derived from history.
+  if (profile.rows[0] && !profile.rows[0].initial_audit_derived) {
+    return profile.rows[0].initial_audit;
+  }
   const prior = await client.query(
     `SELECT 1
        FROM hsdg.service_workflow_instances wi

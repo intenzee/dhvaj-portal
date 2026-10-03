@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, Sparkles } from 'lucide-react';
 import {
   PERMISSION,
   RISK_ASSERTION,
@@ -14,6 +14,7 @@ import {
   type RiskRating,
   type RiskSource,
   type RiskStatus,
+  type RiskSuggestionResult,
   type StatutoryAuditRiskRegister,
 } from '@hsdg/contracts';
 import type { TeamMember } from '@/lib/types';
@@ -154,6 +155,23 @@ export function RiskPanel({
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not add risk.'),
   });
 
+  const suggest = useMutation({
+    mutationFn: () =>
+      apiFetch<RiskSuggestionResult>(
+        `/engagements/${engagementId}/statutory-audit/${query.data![0]!.workflowInstanceId}/risks/suggest`,
+        { method: 'POST', body: {} },
+      ),
+    onSuccess: (r) => {
+      toast(
+        r.added
+          ? `${r.added} suggested risk(s) added from Sections 02–03.`
+          : 'No new suggestions — the register already covers what Sections 02–03 point to.',
+      );
+      invalidate();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not refresh the suggestions.'),
+  });
+
   if (query.isLoading) return <Spinner label="Loading risks…" />;
   const register = query.data?.[0];
   if (!register) return null;
@@ -174,10 +192,21 @@ export function RiskPanel({
           </p>
         </div>
         {canManage && (
-          <Button onClick={() => setAdding(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add risk
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => suggest.mutate()}
+              disabled={suggest.isPending}
+              title="SA 240 presumptions, Enhanced / Partner signals, prior-year matters, Enhanced 03.5 areas, related parties, opening balances — a deleted suggestion never comes back"
+            >
+              <Sparkles className="mr-1.5 h-4 w-4" />
+              Refresh suggested risks
+            </Button>
+            <Button onClick={() => setAdding(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add risk
+            </Button>
+          </div>
         )}
       </Card>
 
@@ -292,6 +321,7 @@ function RiskRow({
         <span className="flex shrink-0 flex-wrap justify-end gap-1.5">
           {risk.isSignificant && <Badge tone="danger">Significant</Badge>}
           {risk.isFraudRisk && <Badge tone="danger">Fraud</Badge>}
+          {risk.sourceKey && <Badge tone="info">Suggested</Badge>}
           <Badge tone={RATING_TONE[risk.rating]}>{humanize(risk.rating)}</Badge>
           <Badge tone={STATUS_TONE[risk.status]}>{humanize(risk.status)}</Badge>
         </span>
@@ -339,6 +369,9 @@ function RiskRow({
                 {risk.isFraudRisk && <Badge tone="danger">Fraud</Badge>}
               </div>
               <p className="mt-1.5 text-sm text-ink">{risk.description}</p>
+              {risk.sourceNote && (
+                <p className="mt-1 text-xs text-primary-700">Suggested from: {risk.sourceNote}</p>
+              )}
               <p className="mt-1 text-xs text-ink-muted">
                 {humanize(risk.source)}
                 {risk.fsArea && ` · ${risk.fsArea}`}

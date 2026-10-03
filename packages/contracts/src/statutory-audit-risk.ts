@@ -84,6 +84,10 @@ export interface AuditRisk {
   reviewerName: string | null;
   status: RiskStatus;
   conclusion: string | null;
+  /** Where a suggested risk came from (e.g. `sa240:management_override`); null when added by hand. */
+  sourceKey: string | null;
+  /** Plain-language origin of a suggested risk, e.g. "Planning signal PS-003 (Enhanced)". */
+  sourceNote: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -99,4 +103,11 @@ export interface StatutoryAuditRiskRegister {
   risks: AuditRisk[];
   /** Significant risks that still lack a planned response — a blocking issue (§29). */
   significantRisksWithoutResponse: number;
+}
+
+/** Result of refreshing the suggested risks on a register. */
+export interface RiskSuggestionResult {
+  register: StatutoryAuditRiskRegister;
+  /** How many suggestions were new (a deleted suggestion is never re-suggested). */
+  added: number;
 }

@@ -12,7 +12,10 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { isEngagementLead, readEngagementMasterFacts, readInitialAudit } from './master-facts';
 import { nextRiskRef } from './plan-risk';
+import { displayCode } from './planning-shared';
+import { suggestRisks, type RiskSuggestionFacts } from './risk-suggestions';
 
 interface RiskRow {
   id: string;
@@ -32,6 +35,8 @@ interface RiskRow {
   reviewer_name: string | null;
   status: RiskStatus;
   conclusion: string | null;
+  source_key: string | null;
+  source_note: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -73,7 +78,194 @@ export class AuditRiskService {
     ctx: RlsContext,
     engagementId: string,
   ): Promise<StatutoryAuditRiskRegister[]> {
-    return this.db.withRlsContext(ctx, (client) => this.readRegister(client, engagementId));
+    return this.db.withRlsContext(ctx, async (client) => {
+      // First open by a lead seeds the register with the suggested risks.
+      const { rows: shells } = await client.query<{ id: string }>(
+        `SELECT swi.id FROM hsdg.service_workflow_instances swi
+          WHERE swi.engagement_id = $1 AND swi.status <> 'cancelled'
+            AND NOT EXISTS (SELECT 1 FROM hsdg.audit_risk_suggestion_log l
+                             WHERE l.workflow_instance_id = swi.id)`,
+        [engagementId],
+      );
+      if (shells.length && (await isEngagementLead(client, engagementId))) {
+        for (const sh of shells) await this.suggestOn(client, ctx, engagementId, sh.id, true);
+      }
+      return this.readRegister(client, engagementId);
+    });
+  }
+
+  // ── Suggested risks (Section 04, capture once) ─────────────────────────────
+
+  /**
+   * "Refresh suggested risks": adds any risk Sections 02–03 now point to that
+   * was never suggested on this file before (a deleted suggestion stays
+   * deleted). Lead-only. Returns the register and how many were added.
+   */
+  async suggestRisks(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<{ register: StatutoryAuditRiskRegister; added: number }> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertShell(client, engagementId, workflowInstanceId);
+      const added = await this.suggestOn(client, ctx, engagementId, workflowInstanceId, false);
+      const [register] = await this.readRegister(client, engagementId);
+      return { register: register!, added };
+    });
+  }
+
+  private async suggestOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    automatic: boolean,
+  ): Promise<number> {
+    const facts = await this.readSuggestionFacts(client, workflowInstanceId);
+    const planned = suggestRisks(facts);
+    const { rows: logged } = await client.query<{ source_key: string }>(
+      `SELECT source_key FROM hsdg.audit_risk_suggestion_log WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    const seen = new Set(logged.map((l) => l.source_key));
+    const fresh = planned.filter((p) => !seen.has(p.sourceKey));
+    if (fresh.length === 0) {
+      // Mark the file as seeded even when there is nothing to add.
+      if (automatic && logged.length === 0) {
+        await client.query(
+          `INSERT INTO hsdg.audit_risk_suggestion_log (workflow_instance_id, engagement_id, source_key)
+           VALUES ($1, $2, 'seeded') ON CONFLICT DO NOTHING`,
+          [workflowInstanceId, engagementId],
+        );
+      }
+      return 0;
+    }
+    // Owner = engagement manager, reviewer = engagement partner.
+    const { rows: leads } = await client.query<{
+      engagement_partner_id: string | null;
+      engagement_manager_id: string | null;
+    }>(`SELECT engagement_partner_id, engagement_manager_id FROM hsdg.engagements WHERE id = $1`, [
+      engagementId,
+    ]);
+    const owner = leads[0]?.engagement_manager_id ?? leads[0]?.engagement_partner_id ?? null;
+    const reviewer = leads[0]?.engagement_partner_id ?? null;
+    const { rows: existing } = await client.query<{ risk_ref: string }>(
+      `SELECT risk_ref FROM hsdg.audit_risks WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    const refs = existing.map((r) => r.risk_ref);
+    for (const r of fresh) {
+      const riskRef = nextRiskRef(refs);
+      refs.push(riskRef);
+      await client.query(
+        `INSERT INTO hsdg.audit_risks
+           (workflow_instance_id, engagement_id, risk_ref, description, source, fs_area,
+            assertion, rating, is_significant, is_fraud_risk, response, owner_employee_id,
+            reviewer_employee_id, status, source_key, source_note)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         ON CONFLICT DO NOTHING`,
+        [
+          workflowInstanceId,
+          engagementId,
+          riskRef,
+          r.description,
+          r.source,
+          r.fsArea,
+          r.assertion,
+          r.rating,
+          r.isSignificant,
+          r.isFraudRisk,
+          r.response,
+          owner,
+          reviewer,
+          r.response ? 'response_planned' : 'identified',
+          r.sourceKey,
+          r.sourceNote,
+        ],
+      );
+      await client.query(
+        `INSERT INTO hsdg.audit_risk_suggestion_log (workflow_instance_id, engagement_id, source_key)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [workflowInstanceId, engagementId, r.sourceKey],
+      );
+    }
+    await this.audit.recordWith(client, ctx, {
+      action: 'statutory_audit.risks_suggested',
+      objectType: 'service_workflow_instance',
+      objectId: workflowInstanceId,
+      after: { added: fresh.map((r) => r.sourceKey), automatic },
+    });
+    return fresh.length;
+  }
+
+  private async readSuggestionFacts(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<RiskSuggestionFacts> {
+    const master = await readEngagementMasterFacts(client, workflowInstanceId);
+    const signals = await client.query<{
+      id: string;
+      seq: number;
+      source: string;
+      observation: string;
+      why_may_matter: string | null;
+      attention: RiskSuggestionFacts['signals'][number]['attention'];
+      manager_assessment: string | null;
+      status: string;
+    }>(
+      `SELECT id, seq, source, observation, why_may_matter, attention, manager_assessment, status
+         FROM hsdg.audit_planning_signal WHERE workflow_instance_id = $1 ORDER BY seq`,
+      [workflowInstanceId],
+    );
+    const py = await client.query<{
+      id: string;
+      seq: number;
+      matter_type: string;
+      description: string;
+      assessment: string | null;
+    }>(
+      `SELECT id, seq, matter_type, description, assessment
+         FROM hsdg.audit_prior_year_matter WHERE workflow_instance_id = $1 ORDER BY seq`,
+      [workflowInstanceId],
+    );
+    const areas = await client.query<{
+      id: string;
+      area_name: string;
+      attention_reason: string | null;
+    }>(
+      `SELECT a.id, a.area_name, a.attention_reason
+         FROM hsdg.audit_engagement_area a
+         JOIN hsdg.audit_area_review r ON r.id = a.review_id
+        WHERE r.workflow_instance_id = $1 AND a.disposition = 'retained' AND a.attention = 'enhanced'
+        ORDER BY a.seq`,
+      [workflowInstanceId],
+    );
+    return {
+      isInitialAudit: (await readInitialAudit(client, workflowInstanceId)) === true,
+      hasGroupRelationships: (master?.relationships.length ?? 0) > 0,
+      signals: signals.rows.map((x) => ({
+        id: x.id,
+        code: displayCode('PS', x.seq) ?? 'PS',
+        source: x.source,
+        observation: x.observation,
+        whyMayMatter: x.why_may_matter,
+        attention: x.attention,
+        managerAssessment: x.manager_assessment,
+        status: x.status,
+      })),
+      priorYearMatters: py.rows.map((x) => ({
+        id: x.id,
+        code: displayCode('PY', x.seq) ?? 'PY',
+        matterType: x.matter_type,
+        description: x.description,
+        assessment: x.assessment,
+      })),
+      enhancedAreas: areas.rows.map((x) => ({
+        id: x.id,
+        name: x.area_name,
+        reason: x.attention_reason,
+      })),
+    };
   }
 
   private async readRegister(
@@ -99,7 +291,8 @@ export class AuditRiskService {
               r.assertion, r.rating, r.is_significant, r.is_fraud_risk, r.response,
               r.owner_employee_id, owner.full_name AS owner_name,
               r.reviewer_employee_id, reviewer.full_name AS reviewer_name,
-              r.status, r.conclusion, r.version, r.created_at, r.updated_at
+              r.status, r.conclusion, r.source_key, r.source_note, r.version, r.created_at,
+              r.updated_at
          FROM hsdg.audit_risks r
          LEFT JOIN hsdg.employees owner ON owner.id = r.owner_employee_id
          LEFT JOIN hsdg.employees reviewer ON reviewer.id = r.reviewer_employee_id
@@ -327,6 +520,8 @@ function mapRisk(r: RiskRow): AuditRisk {
     reviewerName: r.reviewer_name,
     status: r.status,
     conclusion: r.conclusion,
+    sourceKey: r.source_key,
+    sourceNote: r.source_note,
     version: r.version,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),

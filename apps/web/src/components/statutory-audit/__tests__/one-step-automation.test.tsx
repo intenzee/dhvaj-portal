@@ -107,4 +107,26 @@ describe('one-step automation for the team', () => {
     render(wrap(<RiskPanel engagementId="e1" team={[]} />));
     expect(await screen.findByRole('button', { name: /Add risk/ })).toBeInTheDocument();
   });
+
+  it('refreshes the suggested risks from Sections 02–03 in one click', async () => {
+    apiFetch.mockImplementation((url: string) =>
+      url.endsWith('/risks/suggest')
+        ? Promise.resolve({ added: 1, register: {} })
+        : Promise.resolve([
+            {
+              workflowInstanceId: 'wf1',
+              planningApproved: false,
+              significantRisksWithoutResponse: 0,
+              risks: [],
+            },
+          ]),
+    );
+    const user = userEvent.setup();
+    render(wrap(<RiskPanel engagementId="e1" team={[]} />));
+    await user.click(await screen.findByRole('button', { name: /Refresh suggested risks/ }));
+    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/statutory-audit/wf1/risks/suggest', {
+      method: 'POST',
+      body: {},
+    });
+  });
 });
