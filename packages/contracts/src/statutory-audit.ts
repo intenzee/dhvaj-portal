@@ -89,11 +89,21 @@ export interface AuditPhaseDefinition {
  * state along, but they never gate access. Access is RLS (§35).
  */
 export const AUDIT_PHASES: readonly AuditPhaseDefinition[] = [
-  { phaseNo: 1, phaseKey: 'acceptance', title: 'Engagement & Acceptance', initialState: 'in_progress' },
+  {
+    phaseNo: 1,
+    phaseKey: 'acceptance',
+    title: 'Engagement & Acceptance',
+    initialState: 'in_progress',
+  },
   { phaseNo: 2, phaseKey: 'framework', title: 'Audit Framework', initialState: 'not_started' },
   { phaseNo: 3, phaseKey: 'planning', title: 'Planning', initialState: 'not_started' },
   { phaseNo: 4, phaseKey: 'risk', title: 'Risk Assessment', initialState: 'not_started' },
-  { phaseNo: 5, phaseKey: 'controls', title: 'Internal Controls / IFC', initialState: 'not_started' },
+  {
+    phaseNo: 5,
+    phaseKey: 'controls',
+    title: 'Internal Controls / IFC',
+    initialState: 'not_started',
+  },
   { phaseNo: 6, phaseKey: 'audit_areas', title: 'Audit Areas', initialState: 'not_started' },
   { phaseNo: 7, phaseKey: 'completion', title: 'Completion', initialState: 'not_started' },
   { phaseNo: 8, phaseKey: 'reporting', title: 'Reporting', initialState: 'not_started' },
@@ -107,10 +117,38 @@ export const AUDIT_PHASES: readonly AuditPhaseDefinition[] = [
  * capture-once). `value` is null when the master has no entry yet — the UI
  * shows it as "Not on master" with the place to correct it.
  */
+/**
+ * A part of the client master that can be edited on Client 360. A link
+ * `/entities/:id?edit=<section>` opens that section's form directly.
+ */
+export const CLIENT_MASTER_SECTION = {
+  details: 'details',
+  registrations: 'registrations',
+  contacts: 'contacts',
+  financials: 'financials',
+  addresses: 'addresses',
+  relationships: 'relationships',
+  industries: 'industries',
+  listings: 'listings',
+  regulatory: 'regulatory',
+} as const;
+export type ClientMasterSection =
+  (typeof CLIENT_MASTER_SECTION)[keyof typeof CLIENT_MASTER_SECTION];
+
+/** Where to add or correct a master fact: the client and the form that holds it. */
+export interface MasterFactFix {
+  entityId: string;
+  section: ClientMasterSection;
+  /** The audit year, so a figures form opens on the right year. */
+  financialYear?: string | null;
+}
+
 export interface MasterFact {
   label: string;
   value: string | null;
   source: string;
+  /** Present when the fact lives on the client master — the form to add or correct it. */
+  fix?: MasterFactFix;
 }
 
 /** One phase of a live audit-file shell. */

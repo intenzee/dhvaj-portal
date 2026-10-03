@@ -29,6 +29,7 @@ import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { assessSmallCompany, deriveSaTriggers, type SmallCompanyFacts } from './entity-profile';
 import { fillSpecialTypes, specialEntityTypesFromMaster } from './framework-facts-prefill';
 import {
+  fixFor,
   isEngagementLead,
   readEngagementMasterFacts,
   regulatoryProfileFacts,
@@ -253,6 +254,12 @@ export class AuditProfileService {
             : null,
         needsReevaluation: p.needs_reevaluation,
         missingFacts,
+        missingFactFixes: missingFacts.map((m) =>
+          master
+            ? (fixFor(master, m.startsWith('Entity classification') ? 'details' : 'financials') ??
+              null)
+            : null,
+        ),
         readyToConfirm: missingFacts.length === 0,
         version: p.version,
       });
@@ -411,7 +418,8 @@ export class AuditProfileService {
          FROM hsdg.audit_entity_profile p
          JOIN hsdg.service_workflow_instances swi ON swi.id = p.workflow_instance_id
         WHERE p.engagement_id = $1 AND swi.status <> 'cancelled'
-          AND p.state = 'draft' AND p.version = 1 AND cardinality(p.special_entity_types) = 0`,
+          AND p.state = 'draft' AND p.version = 1 AND cardinality(p.special_entity_types) = 0
+          AND p.accounting_environment IS NULL AND NOT p.joint_audit`,
       [engagementId],
     );
     if (rows.length === 0 || !(await isEngagementLead(client, engagementId))) return;
@@ -419,20 +427,60 @@ export class AuditProfileService {
       const master = await readEngagementMasterFacts(client, r.workflow_instance_id);
       if (!master) continue;
       const { next, filled } = fillSpecialTypes([], specialEntityTypesFromMaster(master));
-      if (filled.length === 0) continue; // nothing to add; stays eligible for later
+      // Cards H / I rarely change year to year: carry last year's answers.
+      const prior = await this.priorProfile(client, r.workflow_instance_id);
+      const environment = prior?.accounting_environment ?? null;
+      const joint = prior?.joint_audit === true;
+      if (filled.length === 0 && !environment && !joint) continue; // stays eligible for later
       await client.query(
         `UPDATE hsdg.audit_entity_profile
-            SET special_entity_types = $2, version = version + 1
+            SET special_entity_types = $2, accounting_environment = $3, joint_audit = $4,
+                version = version + 1
           WHERE id = $1 AND version = 1`,
-        [r.id, next],
+        [r.id, next, environment, joint],
       );
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.profile_special_types_prefilled',
         objectType: 'audit_entity_profile',
         objectId: r.id,
-        after: { specialEntityTypes: next, automatic: true },
+        after: {
+          specialEntityTypes: next,
+          accountingEnvironment: environment,
+          jointAudit: joint,
+          carriedFrom: prior?.financial_year ?? null,
+          automatic: true,
+        },
       });
     }
+  }
+
+  /** Last year's 02.1 profile for the same client (confirmed first), if any. */
+  private async priorProfile(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<{
+    financial_year: string;
+    accounting_environment: AccountingEnvironment | null;
+    joint_audit: boolean;
+  } | null> {
+    const { rows } = await client.query<{
+      financial_year: string;
+      accounting_environment: AccountingEnvironment | null;
+      joint_audit: boolean;
+    }>(
+      `SELECT e2.financial_year, p2.accounting_environment, p2.joint_audit
+         FROM hsdg.service_workflow_instances wi
+         JOIN hsdg.engagements e ON e.id = wi.engagement_id
+         JOIN hsdg.engagements e2 ON e2.entity_id = e.entity_id AND e2.financial_year < e.financial_year
+         JOIN hsdg.service_workflow_instances wi2 ON wi2.engagement_id = e2.id
+                                                AND wi2.status <> 'cancelled'
+         JOIN hsdg.audit_entity_profile p2 ON p2.workflow_instance_id = wi2.id
+        WHERE wi.id = $1
+        ORDER BY e2.financial_year DESC, (p2.state = 'confirmed') DESC
+        LIMIT 1`,
+      [workflowInstanceId],
+    );
+    return rows[0] ?? null;
   }
 
   /** "Fill from client master": adds the master's special types; never removes one. */

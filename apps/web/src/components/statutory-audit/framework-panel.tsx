@@ -18,6 +18,7 @@ import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Textarea } from '@/components/form';
 import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 import { EntityProfileCard } from './entity-profile-card';
+import { FixLink } from './master-fact-list';
 import { GroupCaroCard } from './group-caro-card';
 import { ReportingFactsCard } from './reporting-facts-card';
 import { ReportingFrameworkCard } from './reporting-framework-card';
@@ -271,6 +272,12 @@ function FrameworkAreaCard({
         </span>
         <Badge tone={STATE_TONE[assessment.state]}>{STATE_LABEL[assessment.state]}</Badge>
       </button>
+      {assessment.fix && (
+        <p className="mt-1.5 pl-9 text-xs text-warning-700">
+          {assessment.systemBasis ?? 'Information missing on the client master.'}{' '}
+          <FixLink fix={assessment.fix} missing />
+        </p>
+      )}
 
       {/* The area's work (conclusion + evidence) opens in a pop-up. */}
       <InlinePanel

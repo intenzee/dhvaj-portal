@@ -21,6 +21,7 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Field, Select, Textarea } from '@/components/form';
+import { MasterFactList } from './master-fact-list';
 
 /**
  * Section 01 — Engagement & Acceptance (spec §3–§13). The engagement profile
@@ -212,22 +213,11 @@ function ProfileCard({ facts, entityId }: { facts: MasterFact[]; entityId?: stri
           </Link>
         )}
       </div>
-      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        {facts.map((f) => (
-          <div key={f.label} className="flex flex-col">
-            <dt className="text-[11px] uppercase tracking-wide text-ink-faint">
-              {f.label} <span className="normal-case tracking-normal">· {f.source}</span>
-            </dt>
-            <dd className={f.value ? 'text-ink' : 'italic text-ink-faint'}>
-              {f.value ?? 'Not on master'}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <MasterFactList facts={facts} />
       {missing > 0 && (
         <p className="mt-3 text-xs text-ink-muted">
-          {missing} item(s) are not on the master yet. Add them on the client / engagement record —
-          the audit file never keeps a separate copy.
+          {missing} item(s) are not on the master yet. Use “Add on client master” beside each one
+          — the audit file never keeps a separate copy.
         </p>
       )}
     </Card>

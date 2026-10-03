@@ -254,7 +254,7 @@ export class AuditOtherReportingService {
     const master = await readEngagementMasterFacts(client, workflowInstanceId);
     if (!master) return null;
     const src = await readReportingSources(client, workflowInstanceId);
-    return otherReportingFromSources(src.directors, src.priorOtherReporting);
+    return otherReportingFromSources(src.directors, src.priorOtherReporting, master);
   }
 
   /**

@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Badge, Button, Card } from '@/components/ui';
+import { FixLink, MasterFactList } from './master-fact-list';
 
 /**
  * 02.1 Entity & Regulatory Profile, read-only (spec 02.1 §4 "manager opens
@@ -109,24 +110,19 @@ export function EntityProfileCard({ engagementId }: { engagementId: string }): J
           )}
         </div>
       </div>
-      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-        {p.masterFacts.map((f) => (
-          <div key={f.label} className="flex flex-col">
-            <dt className="text-[11px] uppercase tracking-wide text-ink-faint">
-              {f.label} <span className="normal-case tracking-normal">· {f.source}</span>
-            </dt>
-            <dd className={f.value ? 'text-ink' : 'italic text-ink-faint'}>
-              {f.value ?? 'Not on master'}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <MasterFactList facts={p.masterFacts} columns={3} />
       <p className="text-xs text-ink-muted">{p.smallCompany.basis}</p>
       {p.missingFacts.length > 0 && (
         <ul className="space-y-0.5 text-xs text-warning-700">
-          {p.missingFacts.map((m) => (
-            <li key={m}>• {m} Add it on the client master.</li>
-          ))}
+          {p.missingFacts.map((m, i) => {
+            const fix = p.missingFactFixes?.[i];
+            return (
+              <li key={m} className="flex flex-wrap items-baseline gap-x-2">
+                <span>• {m}</span>
+                {fix && <FixLink fix={fix} missing />}
+              </li>
+            );
+          })}
         </ul>
       )}
     </Card>

@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Network, RefreshCw } from 'lucide-react';
 import {
   PERMISSION,
-  type MasterFact,
   type StatutoryAuditCaro,
   type StatutoryAuditCaroMasterFillResult,
   type StatutoryAuditConsolidation,
@@ -18,6 +17,7 @@ import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Badge, Button, Card } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
+import { MasterFactList } from './master-fact-list';
 
 /**
  * 02.4 CARO and 02.6 consolidation facts, filled from the client master (Guide
@@ -229,19 +229,5 @@ export function GroupCaroCard({ engagementId }: { engagementId: string }): JSX.E
   );
 }
 
-export function Facts({ facts }: { facts: MasterFact[] }): JSX.Element {
-  return (
-    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-      {facts.map((f) => (
-        <div key={f.label} className="flex flex-col">
-          <dt className="text-[11px] uppercase tracking-wide text-ink-faint">
-            {f.label} <span className="normal-case tracking-normal">· {f.source}</span>
-          </dt>
-          <dd className={f.value ? 'text-ink' : 'italic text-ink-faint'}>
-            {f.value ?? 'Not on master'}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
+/** The shared fact list (with fix links), kept under its old name for the sibling cards. */
+export const Facts = MasterFactList;

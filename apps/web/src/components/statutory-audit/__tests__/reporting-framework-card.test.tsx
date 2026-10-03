@@ -21,32 +21,41 @@ function wrap(ui: ReactNode): ReactNode {
 beforeEach(() => {
   apiFetch.mockReset();
   apiFetch.mockImplementation((url: string) =>
-    url.endsWith('/financial-reporting')
+    url.endsWith('/schedule-iii')
       ? Promise.resolve([
           {
             workflowInstanceId: 'wf1',
-            assessment: {
-              state: 'system_suggested_applicable',
-              systemOutcome: 'ind_as',
-              systemBasis: null,
-              version: 2,
-            },
-            capturedFacts: {
-              isListedOnSmeExchange: false,
-              priorIndAs: true,
-              voluntaryIndAs: false,
-              groupTriggersIndAs: false,
-            },
-            masterFacts: [
-              {
-                label: 'Ind AS in a prior year',
-                value: 'Yes — FY 2023-24 file concluded Ind AS',
-                source: 'Last year’s audit file',
-              },
-            ],
+            upstreamReady: false,
+            assessment: { systemOutcome: 'division_ii' },
+            detail: { cashFlowRequired: true, cashFlowExemptionReason: null },
           },
         ])
-      : Promise.resolve({ filled: [] }),
+      : url.endsWith('/financial-reporting')
+        ? Promise.resolve([
+            {
+              workflowInstanceId: 'wf1',
+              assessment: {
+                state: 'system_suggested_applicable',
+                systemOutcome: 'ind_as',
+                systemBasis: null,
+                version: 2,
+              },
+              capturedFacts: {
+                isListedOnSmeExchange: false,
+                priorIndAs: true,
+                voluntaryIndAs: false,
+                groupTriggersIndAs: false,
+              },
+              masterFacts: [
+                {
+                  label: 'Ind AS in a prior year',
+                  value: 'Yes — FY 2023-24 file concluded Ind AS',
+                  source: 'Last year’s audit file',
+                },
+              ],
+            },
+          ])
+        : Promise.resolve({ filled: [] }),
   );
 });
 
@@ -55,6 +64,9 @@ describe('02.2 reporting framework card', () => {
     render(wrap(<ReportingFrameworkCard engagementId="e1" />));
     expect(await screen.findByText('Yes — FY 2023-24 file concluded Ind AS')).toBeInTheDocument();
     expect(screen.getByText(/Suggested: Ind as/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/02.3 Schedule III: Division ii \(provisional\)/i),
+    ).toBeInTheDocument();
   });
 
   it('fills from the portal and asks only about voluntary adoption', async () => {

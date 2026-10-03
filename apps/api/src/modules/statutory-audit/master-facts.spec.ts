@@ -57,6 +57,7 @@ function rel(partial: Partial<MasterRelationship>): MasterRelationship {
 
 function master(partial: Partial<EngagementMasterFacts> = {}): EngagementMasterFacts {
   return {
+    entityId: 'ent-1',
     engagementCode: 'ENG00001',
     financialYear: '2024-25',
     periodLabel: 'FY',

@@ -7,6 +7,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   FRAMEWORK_AREA_KEY,
+  REPORTING_FRAMEWORK_CONCLUSIONS,
   REPORTING_FRAMEWORK_OUTCOME,
   SCHEDULE_III_CONCLUSIONS,
   SUB_SECTION_KEY,
@@ -135,7 +136,7 @@ export class AuditScheduleIiiService {
 
     const out: StatutoryAuditScheduleIii[] = [];
     for (const r of rows) {
-      const { facts, upstreamReady } = await this.assembleFacts(
+      const { facts, upstreamReady, provisional } = await this.assembleFacts(
         client,
         engagementId,
         r.workflow_instance_id,
@@ -147,7 +148,13 @@ export class AuditScheduleIiiService {
         assessment = mapAssessment(r);
         detail = r.system_detail;
       } else {
-        const res = await this.runEngine(client, engagementId, facts, r.workflow_instance_id);
+        const res = await this.runEngine(
+          client,
+          engagementId,
+          facts,
+          r.workflow_instance_id,
+          provisional,
+        );
         assessment = liveAssessment(r, res);
         detail = res.detail;
       }
@@ -163,6 +170,25 @@ export class AuditScheduleIiiService {
       });
     }
     return out;
+  }
+
+  /**
+   * Store the live suggestion on every undecided 02.3 row of the engagement,
+   * so the 02.9 summary shows the Division instead of "not assessed". Lead-only
+   * writes (RLS); safe to repeat. Called by the summary after 02.1 / 02.2 fill.
+   */
+  async refreshOn(client: PoolClient, engagementId: string): Promise<void> {
+    const { rows } = await client.query<{ id: string; workflow_instance_id: string }>(
+      `SELECT s.id, s.workflow_instance_id
+         FROM hsdg.audit_framework_subassessment s
+         JOIN hsdg.service_workflow_instances swi ON swi.id = s.workflow_instance_id
+        WHERE s.engagement_id = $1 AND s.sub_section_key = $2 AND s.area_key = $3
+          AND swi.status <> 'cancelled'`,
+      [engagementId, SUB, AREA],
+    );
+    for (const r of rows) {
+      await this.persistSuggestion(client, engagementId, r.id, r.workflow_instance_id);
+    }
   }
 
   // ── Run the suggestion engine (§9.3) ────────────────────────────────────────
@@ -201,8 +227,23 @@ export class AuditScheduleIiiService {
         throw new BadRequestException('Not a valid Schedule III conclusion.');
       }
 
-      const { facts } = await this.assembleFacts(client, engagementId, workflowInstanceId);
-      const res = await this.runEngine(client, engagementId, facts, workflowInstanceId);
+      const { facts, provisional } = await this.assembleFacts(
+        client,
+        engagementId,
+        workflowInstanceId,
+      );
+      if (provisional) {
+        throw new ConflictException(
+          '02.3 is provisional until the 02.2 reporting framework is concluded — conclude 02.2 first.',
+        );
+      }
+      const res = await this.runEngine(
+        client,
+        engagementId,
+        facts,
+        workflowInstanceId,
+        provisional,
+      );
 
       const isOverridden =
         DECISIVE.has(res.outcome) && input.conclusion !== (res.outcome as ScheduleIiiOutcome);
@@ -262,12 +303,16 @@ export class AuditScheduleIiiService {
     engagementId: string,
     facts: ScheduleIiiFacts,
     workflowInstanceId: string,
+    provisional = false,
   ): Promise<ScheduleIiiResult> {
     void engagementId;
     void workflowInstanceId;
     const auditPeriodStart = await this.auditPeriodStart(client, engagementId);
     const resolve = await this.rules.buildResolverOn(client, auditPeriodStart);
     const res = assessScheduleIii(facts, resolve);
+    if (provisional) {
+      res.basis = `Provisional — routed from the 02.2 system suggestion; conclude 02.2 to freeze it. ${res.basis}`;
+    }
 
     // Freeze the Division's Schedule III provision (period-correct version).
     if (res.detail.divisionProvisionCode) {
@@ -298,8 +343,12 @@ export class AuditScheduleIiiService {
       [rowId],
     );
     if (rows[0] && isDecided(rows[0].state)) return;
-    const { facts } = await this.assembleFacts(client, engagementId, workflowInstanceId);
-    const res = await this.runEngine(client, engagementId, facts, workflowInstanceId);
+    const { facts, provisional } = await this.assembleFacts(
+      client,
+      engagementId,
+      workflowInstanceId,
+    );
+    const res = await this.runEngine(client, engagementId, facts, workflowInstanceId, provisional);
     await client.query(
       `UPDATE hsdg.audit_framework_subassessment
           SET system_outcome = $2, system_basis = $3, system_detail = $4::jsonb,
@@ -365,7 +414,7 @@ export class AuditScheduleIiiService {
     client: PoolClient,
     engagementId: string,
     workflowInstanceId: string,
-  ): Promise<{ facts: ScheduleIiiFacts; upstreamReady: boolean }> {
+  ): Promise<{ facts: ScheduleIiiFacts; upstreamReady: boolean; provisional: boolean }> {
     // 02.1 profile: special entities + small-company outcome + confirmation.
     const profile = await client.query<{
       special_entity_types: string[];
@@ -399,9 +448,10 @@ export class AuditScheduleIiiService {
     const fr = await client.query<{
       state: string;
       conclusion: string | null;
+      system_outcome: string | null;
       system_detail: { firstTimeIndAs?: boolean } | null;
     }>(
-      `SELECT state, conclusion, system_detail
+      `SELECT state, conclusion, system_outcome, system_detail
          FROM hsdg.audit_framework_subassessment
         WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3`,
       [workflowInstanceId, FR_SUB, FR_AREA],
@@ -409,11 +459,20 @@ export class AuditScheduleIiiService {
     let reportingFramework: ReportingFrameworkOutcome | null = null;
     let firstTimeIndAs = false;
     const frRow = fr.rows[0];
+    let provisional = false;
     if (frRow && FR_DECIDED.has(frRow.state) && frRow.conclusion) {
       reportingFramework = frRow.conclusion as ReportingFrameworkOutcome;
-      if (reportingFramework === REPORTING_FRAMEWORK_OUTCOME.indAs) {
-        firstTimeIndAs = frRow.system_detail?.firstTimeIndAs === true;
-      }
+    } else if (
+      frRow?.system_outcome &&
+      (REPORTING_FRAMEWORK_CONCLUSIONS as readonly string[]).includes(frRow.system_outcome)
+    ) {
+      // 02.2 is not concluded yet: route from its decisive system suggestion so
+      // the team sees the Division now, flagged provisional until 02.2 is decided.
+      reportingFramework = frRow.system_outcome as ReportingFrameworkOutcome;
+      provisional = true;
+    }
+    if (reportingFramework === REPORTING_FRAMEWORK_OUTCOME.indAs) {
+      firstTimeIndAs = frRow?.system_detail?.firstTimeIndAs === true;
     }
 
     // Turnover (02.1 captured, else the entity master) selects the rounding band.
@@ -430,7 +489,8 @@ export class AuditScheduleIiiService {
         firstTimeIndAs,
         turnover,
       },
-      upstreamReady: profileConfirmed && reportingFramework != null,
+      upstreamReady: profileConfirmed && reportingFramework != null && !provisional,
+      provisional,
     };
   }
 
@@ -446,11 +506,14 @@ export class AuditScheduleIiiService {
     );
     const fromProfile = num(captured.rows[0]?.current_value ?? null);
     if (fromProfile != null) return fromProfile;
+    // The audit year's financial profile first, then the current one.
     const fin = await client.query<{ turnover: string | null }>(
-      `SELECT fp.turnover
+      `SELECT COALESCE(fp.turnover, fp.revenue) AS turnover
          FROM hsdg.entity_financial_profiles fp
          JOIN hsdg.engagements e ON e.entity_id = fp.entity_id
-        WHERE e.id = $1 AND fp.is_current LIMIT 1`,
+        WHERE e.id = $1 AND (fp.financial_year = e.financial_year OR fp.is_current)
+        ORDER BY (fp.financial_year = e.financial_year) DESC, fp.is_current DESC, fp.created_at DESC
+        LIMIT 1`,
       [engagementId],
     );
     return num(fin.rows[0]?.turnover ?? null);

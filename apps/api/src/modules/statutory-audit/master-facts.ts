@@ -11,7 +11,9 @@ import {
   type MetricSourceType,
   type UnderstandingAnswer,
   type UnderstandingSectionKey,
+  type ClientMasterSection,
   type MasterFact,
+  type MasterFactFix,
   type UnderstandingContextItem,
 } from '@hsdg/contracts';
 
@@ -61,6 +63,8 @@ export interface MasterRelationship {
 }
 
 export interface EngagementMasterFacts {
+  /** The client (entity) the engagement is for — the target of every fix link. */
+  entityId: string;
   engagementCode: string;
   financialYear: string;
   periodLabel: string | null;
@@ -265,6 +269,30 @@ export function groupStructure(rels: readonly MasterRelationship[]): GroupStruct
   return { parents, investees };
 }
 
+/** The form on Client 360 that adds or corrects a master fact. */
+export function fixFor(
+  m: Pick<EngagementMasterFacts, 'entityId' | 'financialYear'>,
+  section: ClientMasterSection,
+): MasterFactFix | undefined {
+  if (!m.entityId) return undefined;
+  return section === 'financials'
+    ? { entityId: m.entityId, section, financialYear: m.financialYear }
+    : { entityId: m.entityId, section };
+}
+
+/** Attach fix links to facts by label (facts not listed are left as they are). */
+export function withFixes(
+  m: Pick<EngagementMasterFacts, 'entityId' | 'financialYear'>,
+  facts: MasterFact[],
+  sections: Record<string, ClientMasterSection>,
+): MasterFact[] {
+  return facts.map((f) => {
+    const section = sections[f.label];
+    const fix = section ? fixFor(m, section) : undefined;
+    return fix ? { ...f, fix } : f;
+  });
+}
+
 const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
 /**
@@ -316,7 +344,20 @@ export function engagementProfileFacts(
     ],
     ['Target audit completion', f.plannedEndDate, G],
   ];
-  return rows.map(([label, value, source]) => ({ label, value, source }));
+  const corpLabel = f.corporateId?.type.toUpperCase() ?? 'CIN';
+  return withFixes(
+    f,
+    rows.map(([label, value, source]) => ({ label, value, source })),
+    {
+      'Client name': 'details',
+      [corpLabel]: 'registrations',
+      PAN: 'details',
+      'Company type': 'details',
+      'Date of incorporation': 'details',
+      'Registered office': 'addresses',
+      RoC: 'details',
+    },
+  );
 }
 
 /**
@@ -343,7 +384,7 @@ export function regulatoryProfileFacts(
     if (fromEntity != null) return { label, value: inr(fromEntity), source: E };
     return { label, value: null, source: E };
   };
-  return [
+  const facts: MasterFact[] = [
     { label: 'Entity type', value: f.entityTypeName, source: E },
     {
       label: f.corporateId?.type.toUpperCase() ?? 'CIN',
@@ -366,6 +407,19 @@ export function regulatoryProfileFacts(
     figure('Total assets', 'total_assets', cy?.totalAssets),
     figure('Borrowings', 'borrowings', cy?.totalBorrowings),
   ];
+  // A figure the team captured on 02.1 is corrected there, not on the master.
+  const figureLabels = ['Paid-up capital', 'Turnover', 'Net worth', 'Total assets', 'Borrowings'];
+  return withFixes(f, facts, {
+    'Entity type': 'details',
+    [f.corporateId?.type.toUpperCase() ?? 'CIN']: 'registrations',
+    Listing: 'listings',
+    'Group relationships': 'relationships',
+    ...Object.fromEntries(
+      facts
+        .filter((x) => figureLabels.includes(x.label) && x.source !== '02.1 (captured)')
+        .map((x) => [x.label, 'financials' as const]),
+    ),
+  });
 }
 
 /** Master facts that answer 03.2.1 / 03.2.2 context lines (display only). */
@@ -774,6 +828,7 @@ export async function readEngagementMasterFacts(
   const registered = addrs.rows.find((a) => a.address_type === 'registered');
   const pyFy = previousFinancialYear(r.financial_year);
   return {
+    entityId,
     engagementCode: r.engagement_code,
     financialYear: r.financial_year,
     periodLabel: r.period_label,

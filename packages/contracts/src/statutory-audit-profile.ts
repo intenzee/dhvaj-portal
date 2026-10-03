@@ -1,4 +1,4 @@
-import type { MasterFact } from './statutory-audit';
+import type { MasterFact, MasterFactFix } from './statutory-audit';
 
 /**
  * 02.1 — Entity & Regulatory Profile (Implementation Guide §9.1, §6).
@@ -222,6 +222,8 @@ export interface StatutoryAuditEntityProfile {
   needsReevaluation: boolean;
   /** Facts still missing that CONFIRM PROFILE needs (empty ⇒ ready). */
   missingFacts: string[];
+  /** For each missing fact (same order), the client-master form that supplies it. */
+  missingFactFixes: Array<MasterFactFix | null>;
   /** True when the classification is known and no deciding fact is missing. */
   readyToConfirm: boolean;
   version: number;

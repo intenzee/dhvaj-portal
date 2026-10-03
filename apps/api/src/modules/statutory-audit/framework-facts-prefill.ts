@@ -10,7 +10,9 @@ import type {
   SpecialEntityType,
 } from '@hsdg/contracts';
 import {
+  fixFor,
   groupStructure,
+  withFixes,
   type ClientDirector,
   type EngagementMasterFacts,
   type PriorSubAssessment,
@@ -90,7 +92,14 @@ export function caroFromMaster(m: EngagementMasterFacts): CaroMasterFill {
         : null,
     source: 'Team to confirm',
   });
-  return { values, facts };
+  return {
+    values,
+    facts: withFixes(m, facts, {
+      'Holding / subsidiary of a public company': 'relationships',
+      'Paid-up capital + reserves': 'financials',
+      'Total revenue (incl. other income)': 'financials',
+    }),
+  };
 }
 
 /** Apply a master fill to captured CARO facts. Returns the merged facts and what changed. */
@@ -180,7 +189,15 @@ export function consolidationFromMaster(m: EngagementMasterFacts): Consolidation
     value: m.branchCount > 0 ? `${m.branchCount} branch address(es)` : 'None on record',
     source: 'Client master — addresses',
   });
-  return { values, facts };
+  return {
+    values,
+    facts: withFixes(m, facts, {
+      'Subsidiaries, associates and JVs': 'relationships',
+      'Owned by a parent': 'relationships',
+      'Securities listed or being listed': 'listings',
+      Branches: 'addresses',
+    }),
+  };
 }
 
 export function fillConsolidation(
@@ -272,7 +289,7 @@ export function icfrFromSources(
         : null,
     source: 'Team to confirm',
   });
-  return { values, facts };
+  return { values, facts: withFixes(m, facts, {}) };
 }
 
 export function fillIcfr(
@@ -307,6 +324,7 @@ const MD_WTD = /managing director|whole[- ]?time director|\b(md|wtd)\b/i;
 export function otherReportingFromSources(
   directors: readonly ClientDirector[],
   prior: { financialYear: string; facts: Record<string, unknown> } | null,
+  m?: Pick<EngagementMasterFacts, 'entityId' | 'financialYear'>,
 ): OtherReportingMasterFill {
   const values: Partial<OtherReportingCapturedFacts> = {};
   const facts: MasterFact[] = [];
@@ -345,7 +363,10 @@ export function otherReportingFromSources(
       : null,
     source: systems.length ? 'Last year’s audit file' : 'Team to confirm',
   });
-  return { values, facts };
+  return {
+    values,
+    facts: m ? withFixes(m, facts, { 'Managing / whole-time director': 'contacts' }) : facts,
+  };
 }
 
 export function fillOtherReporting(
@@ -445,6 +466,7 @@ export function specialEntityTypesFromMaster(m: EngagementMasterFacts): SpecialT
           ? types.map((t) => `${SPECIAL_LABEL[t]} (${found.get(t)})`).join('; ')
           : 'None shown on the client master',
         source: 'Client master — industries & regulatory facts',
+        fix: fixFor(m, 'regulatory'),
       },
     ],
   };
@@ -549,7 +571,13 @@ export function financialReportingFromSources(
         : 'No group companies on record',
     source: 'Client master — group relationships',
   });
-  return { values, facts };
+  return {
+    values,
+    facts: withFixes(m, facts, {
+      Listing: 'listings',
+      'Group company applying Ind AS': 'relationships',
+    }),
+  };
 }
 
 export function fillFinancialReporting(

@@ -368,4 +368,109 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     const res = await post(pb, `${base}/${shellId}/financial-reporting/fill-from-master`, {});
     expect([403, 404]).toContain(res.status);
   });
+
+  it("02.3 routes from the 02.2 suggestion (provisional) and can't be concluded early", async () => {
+    const entityId = await newEntity('private_limited', 'Prefill Sch III');
+    await post(pa, `/api/v1/entities/${entityId}/financial-profiles`, {
+      financialYear: '2024-25',
+      turnover: 80000000,
+      netWorth: 20000000,
+      source: 'provisional_financials',
+    }).expect(201);
+    const { engId, shellId } = await newAuditFile(entityId);
+    const base = `/api/v1/engagements/${engId}/statutory-audit`;
+    const summary = await request(app.getHttpServer())
+      .get(`${base}/framework-summary`)
+      .set(bearer(pa))
+      .expect(200);
+    const s3 = (
+      summary.body[0].sections as Array<{ subSectionKey: string; systemOutcome: string | null }>
+    ).find((x) => x.subSectionKey === '02.3');
+    expect(s3?.systemOutcome).toBe('division_i'); // AS → Division I, before 02.2 is concluded
+
+    const sch = await request(app.getHttpServer())
+      .get(`${base}/schedule-iii`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(sch.body[0].assessment.systemBasis).toMatch(/^Provisional/);
+    expect(sch.body[0].upstreamReady).toBe(false);
+    await post(pa, `${base}/${shellId}/schedule-iii/decision`, {
+      conclusion: 'division_i',
+      version: sch.body[0].assessment.version,
+    }).expect(409);
+  });
+
+  it('every client-master fact and pending area links to the form that fixes it', async () => {
+    const entityId = await newEntity('private_limited', 'Prefill Links');
+    const { engId } = await newAuditFile(entityId);
+    const base = `/api/v1/engagements/${engId}/statutory-audit`;
+
+    const caro = await request(app.getHttpServer()).get(`${base}/caro`).set(bearer(pa)).expect(200);
+    const facts = caro.body[0].masterFacts as Array<{
+      label: string;
+      fix?: { entityId: string; section: string; financialYear?: string };
+    }>;
+    expect(facts.find((f) => f.label === 'Holding / subsidiary of a public company')?.fix).toEqual({
+      entityId,
+      section: 'relationships',
+    });
+
+    const profile = await request(app.getHttpServer())
+      .get(`${base}/profile`)
+      .set(bearer(pa))
+      .expect(200);
+    // No figures on the master: small-company status is pending → link to the figures form.
+    const p = profile.body[0];
+    const i = (p.missingFacts as string[]).findIndex((m) => m.startsWith('Small Company'));
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(p.missingFactFixes[i]).toEqual({
+      entityId,
+      section: 'financials',
+      financialYear: '2024-25',
+    });
+
+    const fw = await request(app.getHttpServer())
+      .get(`${base}/framework`)
+      .set(bearer(pa))
+      .expect(200);
+    const pending = (
+      fw.body[0].assessments as Array<{ state: string; areaKey: string; fix: unknown }>
+    ).filter((a) => a.state === 'pending_information');
+    expect(pending.length).toBeGreaterThan(0);
+    for (const a of pending) {
+      expect(a.fix).toEqual(
+        expect.objectContaining({
+          entityId,
+          section: a.areaKey === 'cfs' ? 'relationships' : 'financials',
+        }),
+      );
+    }
+  });
+
+  it("02.1 carries last year's accounting environment and joint audit forward", async () => {
+    const entityId = await newEntity('private_limited', 'Prefill Carry');
+    const prior = await newAuditFile(entityId, '2023-24');
+    const priorBase = `/api/v1/engagements/${prior.engId}/statutory-audit`;
+    const pp = await request(app.getHttpServer())
+      .get(`${priorBase}/profile`)
+      .set(bearer(pa))
+      .expect(200);
+    await post(pa, `${priorBase}/${prior.shellId}/profile`, {
+      accountingEnvironment: 'outsourced_service_organisation',
+      jointAudit: true,
+      version: pp.body[0].version,
+    }).expect(201);
+
+    const { engId } = await newAuditFile(entityId);
+    const profile = await request(app.getHttpServer())
+      .get(`/api/v1/engagements/${engId}/statutory-audit/profile`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(profile.body[0].accountingEnvironment).toBe('outsourced_service_organisation');
+    expect(profile.body[0].jointAudit).toBe(true);
+    const triggered = (profile.body[0].saTriggers as Array<{ code: string; triggered: boolean }>)
+      .filter((t) => t.triggered)
+      .map((t) => t.code);
+    expect(triggered).toEqual(expect.arrayContaining(['SA 402', 'SA 299']));
+  });
 });

@@ -32,6 +32,8 @@ import { AuditFinancialReportingService } from './audit-financial-reporting.serv
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditProfileService } from './audit-profile.service';
+import { isEngagementLead } from './master-facts';
+import { AuditScheduleIiiService } from './audit-schedule-iii.service';
 
 /** The six Section-02 sub-sections the summary aggregates, in dashboard order. */
 const SECTIONS: Array<{ sub: SubSectionKey; area: string; title: string }> = [
@@ -97,6 +99,7 @@ export class AuditFrameworkSummaryService {
     private readonly otherReporting: AuditOtherReportingService,
     private readonly profile: AuditProfileService,
     private readonly financialReporting: AuditFinancialReportingService,
+    private readonly scheduleIii: AuditScheduleIiiService,
   ) {}
 
   // ── Read / aggregate ─────────────────────────────────────────────────────────
@@ -117,6 +120,7 @@ export class AuditFrameworkSummaryService {
       for (const s of shells) {
         await this.profile.seedProfileOn(client, s.id, engagementId);
         await this.financialReporting.seedOn(client, s.id, engagementId);
+        await this.scheduleIii.seedOn(client, s.id, engagementId);
         await this.caro.seedOn(client, s.id, engagementId);
         await this.consolidation.seedOn(client, s.id, engagementId);
         await this.icfr.seedOn(client, s.id, engagementId);
@@ -125,6 +129,9 @@ export class AuditFrameworkSummaryService {
       // 02.1 first: CARO / ICFR read its special entity types.
       await this.profile.prefillOn(client, ctx, engagementId);
       await this.financialReporting.prefillOn(client, ctx, engagementId);
+      // 02.3 captures nothing: it routes from 02.1 / 02.2, so refresh it now.
+      if (await isEngagementLead(client, engagementId))
+        await this.scheduleIii.refreshOn(client, engagementId);
       await this.caro.prefillOn(client, ctx, engagementId);
       await this.consolidation.prefillOn(client, ctx, engagementId);
       await this.icfr.prefillOn(client, ctx, engagementId);

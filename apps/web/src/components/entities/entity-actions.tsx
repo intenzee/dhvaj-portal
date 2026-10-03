@@ -4,7 +4,10 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil } from 'lucide-react';
 import {
+  CONTACT_TYPES,
   ENTITY_STATUSES,
+  LEGAL_STATUSES,
+  LISTING_STATUSES,
   PAN_REGEX,
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
@@ -18,7 +21,7 @@ import { PERMISSION } from '@hsdg/contracts';
 import type { EntityDetail, EntityType, OfficeRow } from '@/lib/types';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
-import { Field, Input, Select } from '@/components/form';
+import { Field, Input, Select, Textarea } from '@/components/form';
 
 /** Manage buttons shown on Client 360 for users who can manage entities. */
 export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.Element | null {
@@ -56,7 +59,7 @@ function useEntityInvalidate(entityId: string): () => void {
   };
 }
 
-function EditEntityModal({
+export function EditEntityModal({
   entity,
   onClose,
 }: {
@@ -73,9 +76,23 @@ function EditEntityModal({
   const [pan, setPan] = useState(entity.pan ?? '');
   const [status, setStatus] = useState<string>(entity.status);
   const [incorporationDate, setIncorporationDate] = useState(entity.incorporationDate ?? '');
+  const [legalStatus, setLegalStatus] = useState(entity.legalStatus ?? '');
+  const [listingStatus, setListingStatus] = useState(entity.listingStatus ?? 'unlisted');
+  const [roc, setRoc] = useState(entity.roc ?? '');
+  const [paidUpCapital, setPaidUpCapital] = useState(
+    entity.paidUpCapital != null ? String(entity.paidUpCapital) : '',
+  );
+  const [businessDescription, setBusinessDescription] = useState(entity.businessDescription ?? '');
+  const [activities, setActivities] = useState(entity.activities);
 
-  const types = useQuery({ queryKey: ['entity-types'], queryFn: () => apiFetch<EntityType[]>('/entity-types') });
-  const offices = useQuery({ queryKey: ['admin', 'offices'], queryFn: () => apiFetch<OfficeRow[]>('/offices') });
+  const types = useQuery({
+    queryKey: ['entity-types'],
+    queryFn: () => apiFetch<EntityType[]>('/entity-types'),
+  });
+  const offices = useQuery({
+    queryKey: ['admin', 'offices'],
+    queryFn: () => apiFetch<OfficeRow[]>('/offices'),
+  });
 
   const panValid = pan === '' || PAN_REGEX.test(pan.trim().toUpperCase());
 
@@ -92,6 +109,17 @@ function EditEntityModal({
       if (status !== entity.status) body.status = status;
       if ((incorporationDate || null) !== (entity.incorporationDate ?? null))
         body.incorporationDate = incorporationDate || null;
+      if ((legalStatus || null) !== (entity.legalStatus ?? null))
+        body.legalStatus = legalStatus || null;
+      if (listingStatus !== (entity.listingStatus ?? 'unlisted'))
+        body.listingStatus = listingStatus;
+      if ((roc.trim() || null) !== (entity.roc ?? null)) body.roc = roc.trim() || null;
+      const capital = paidUpCapital.trim() === '' ? null : Number(paidUpCapital);
+      if (capital !== (entity.paidUpCapital ?? null)) body.paidUpCapital = capital;
+      if ((businessDescription.trim() || null) !== (entity.businessDescription ?? null))
+        body.businessDescription = businessDescription.trim() || null;
+      if (JSON.stringify(activities) !== JSON.stringify(entity.activities))
+        body.activities = activities;
       return apiFetch(`/entities/${entity.id}`, { method: 'PATCH', body });
     },
     onSuccess: () => {
@@ -99,7 +127,8 @@ function EditEntityModal({
       invalidate();
       onClose();
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not update the entity.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not update the entity.', 'error'),
   });
 
   return (
@@ -113,7 +142,10 @@ function EditEntityModal({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={legalName.trim().length === 0 || !panValid || save.isPending} onClick={() => save.mutate()}>
+          <Button
+            disabled={legalName.trim().length === 0 || !panValid || save.isPending}
+            onClick={() => save.mutate()}
+          >
             {save.isPending ? 'Saving…' : 'Save changes'}
           </Button>
         </>
@@ -166,15 +198,75 @@ function EditEntityModal({
             />
           </Field>
           <Field label="Incorporation date">
-            <Input type="date" value={incorporationDate} onChange={(e) => setIncorporationDate(e.target.value)} />
+            <Input
+              type="date"
+              value={incorporationDate}
+              onChange={(e) => setIncorporationDate(e.target.value)}
+            />
           </Field>
         </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Legal / operational status">
+            <Select value={legalStatus} onChange={(e) => setLegalStatus(e.target.value)}>
+              <option value="">Not assessed</option>
+              {LEGAL_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {humanize(s)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Listing status">
+            <Select value={listingStatus} onChange={(e) => setListingStatus(e.target.value)}>
+              {LISTING_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {humanize(s)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="RoC">
+            <Input value={roc} onChange={(e) => setRoc(e.target.value)} placeholder="RoC Mumbai" />
+          </Field>
+          <Field label="Paid-up capital (₹)">
+            <Input
+              type="number"
+              min={0}
+              value={paidUpCapital}
+              onChange={(e) => setPaidUpCapital(e.target.value)}
+            />
+          </Field>
+        </div>
+        <Field label="Business description">
+          <Textarea
+            rows={2}
+            value={businessDescription}
+            onChange={(e) => setBusinessDescription(e.target.value)}
+          />
+        </Field>
+        <fieldset>
+          <legend className="mb-1 text-sm font-medium text-ink">Activities</legend>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {(Object.keys(activities) as Array<keyof typeof activities>).map((k) => (
+              <label key={k} className="flex items-center gap-1.5 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={activities[k]}
+                  onChange={(e) => setActivities({ ...activities, [k]: e.target.checked })}
+                />
+                {humanize(k)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
       </div>
     </Modal>
   );
 }
 
-function AddRegistrationModal({
+export function AddRegistrationModal({
   entityId,
   onClose,
 }: {
@@ -184,7 +276,9 @@ function AddRegistrationModal({
   const toast = useToast();
   const invalidate = useEntityInvalidate(entityId);
 
-  const [registrationType, setRegistrationType] = useState<string>(REGISTRATION_TYPES[0] ?? 'gstin');
+  const [registrationType, setRegistrationType] = useState<string>(
+    REGISTRATION_TYPES[0] ?? 'gstin',
+  );
   const [registrationNumber, setRegistrationNumber] = useState('');
   const [status, setStatus] = useState<string>('active');
   const [validFrom, setValidFrom] = useState('');
@@ -205,7 +299,8 @@ function AddRegistrationModal({
       invalidate();
       onClose();
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not add the registration.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not add the registration.', 'error'),
   });
 
   return (
@@ -218,7 +313,10 @@ function AddRegistrationModal({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={registrationNumber.trim().length === 0 || add.isPending} onClick={() => add.mutate()}>
+          <Button
+            disabled={registrationNumber.trim().length === 0 || add.isPending}
+            onClick={() => add.mutate()}
+          >
             {add.isPending ? 'Adding…' : 'Add registration'}
           </Button>
         </>
@@ -260,7 +358,7 @@ function AddRegistrationModal({
   );
 }
 
-function AddContactModal({
+export function AddContactModal({
   entityId,
   onClose,
 }: {
@@ -276,6 +374,7 @@ function AddContactModal({
   const [phone, setPhone] = useState('');
   const [isPrimary, setIsPrimary] = useState(false);
   const [isSignatory, setIsSignatory] = useState(false);
+  const [contactType, setContactType] = useState('');
 
   const emailValid = email === '' || /.+@.+\..+/.test(email);
 
@@ -290,6 +389,7 @@ function AddContactModal({
           ...(phone.trim() ? { phone: phone.trim() } : {}),
           isPrimary,
           isSignatory,
+          ...(contactType ? { contactType } : {}),
         },
       }),
     onSuccess: () => {
@@ -297,7 +397,8 @@ function AddContactModal({
       invalidate();
       onClose();
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not add the contact.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not add the contact.', 'error'),
   });
 
   return (
@@ -310,7 +411,10 @@ function AddContactModal({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={fullName.trim().length === 0 || !emailValid || add.isPending} onClick={() => add.mutate()}>
+          <Button
+            disabled={fullName.trim().length === 0 || !emailValid || add.isPending}
+            onClick={() => add.mutate()}
+          >
             {add.isPending ? 'Adding…' : 'Add contact'}
           </Button>
         </>
@@ -322,9 +426,26 @@ function AddContactModal({
             <Input value={fullName} onChange={(e) => setFullName(e.target.value)} />
           </Field>
           <Field label="Designation">
-            <Input value={designation} onChange={(e) => setDesignation(e.target.value)} placeholder="Director" />
+            <Input
+              value={designation}
+              onChange={(e) => setDesignation(e.target.value)}
+              placeholder="Director"
+            />
           </Field>
         </div>
+        <Field
+          label="Role"
+          hint="Used to route PBC requests and to spot a managing / whole-time director."
+        >
+          <Select value={contactType} onChange={(e) => setContactType(e.target.value)}>
+            <option value="">—</option>
+            {CONTACT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {humanize(t)}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Email" hint={email && !emailValid ? 'Invalid email.' : undefined}>
             <Input
@@ -335,16 +456,28 @@ function AddContactModal({
             />
           </Field>
           <Field label="Phone">
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98xxxxxxx0" />
+            <Input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+91 98xxxxxxx0"
+            />
           </Field>
         </div>
         <div className="flex gap-4">
           <label className="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={isPrimary}
+              onChange={(e) => setIsPrimary(e.target.checked)}
+            />
             Primary contact
           </label>
           <label className="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" checked={isSignatory} onChange={(e) => setIsSignatory(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={isSignatory}
+              onChange={(e) => setIsSignatory(e.target.checked)}
+            />
             Signatory
           </label>
         </div>

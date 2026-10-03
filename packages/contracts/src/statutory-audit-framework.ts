@@ -13,6 +13,8 @@
  * the service, the suggestion engine and the Framework screen.
  */
 
+import type { MasterFactFix } from './statutory-audit';
+
 /** Stable machine keys for the framework assessment areas (§18). */
 export const FRAMEWORK_AREA_KEY = {
   entityRegulatoryProfile: 'entity_regulatory_profile',
@@ -143,6 +145,12 @@ export interface FrameworkAssessment {
   sortOrder: number;
   version: number;
   evidence: FrameworkEvidence[];
+  /**
+   * When the area is pending information the client master holds (figures,
+   * group structure), the form that supplies it — so "pending" is one click
+   * from fixed.
+   */
+  fix?: MasterFactFix | null;
 }
 
 /** A framework memo approval — versioned, immutable history (§18, §30, §33). */

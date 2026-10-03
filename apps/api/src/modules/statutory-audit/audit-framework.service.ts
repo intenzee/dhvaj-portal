@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  FRAMEWORK_AREA_KEY,
   FRAMEWORK_DECIDED_STATES,
   auditPeriodStartFromFinancialYear,
   type FrameworkAreaKey,
@@ -21,7 +22,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditMattersService } from './audit-matters.service';
 import { SUGGESTED_AREA_KEYS, suggestArea, type FrameworkFacts } from './framework-suggestions';
-import { isEngagementLead } from './master-facts';
+import { fixFor, isEngagementLead } from './master-facts';
 
 interface AssessmentRow {
   id: string;
@@ -131,11 +132,14 @@ export class AuditFrameworkService {
       id: string;
       engagement_service_id: string;
       engagement_id: string;
+      entity_id: string;
+      financial_year: string;
     }>(
-      `SELECT id, engagement_service_id, engagement_id
-         FROM hsdg.service_workflow_instances
-        WHERE engagement_id = $1 AND status <> 'cancelled'
-        ORDER BY created_at ASC`,
+      `SELECT swi.id, swi.engagement_service_id, swi.engagement_id, e.entity_id, e.financial_year
+         FROM hsdg.service_workflow_instances swi
+         JOIN hsdg.engagements e ON e.id = swi.engagement_id
+        WHERE swi.engagement_id = $1 AND swi.status <> 'cancelled'
+        ORDER BY swi.created_at ASC`,
       [engagementId],
     );
     if (shells.length === 0) return [];
@@ -184,7 +188,16 @@ export class AuditFrameworkService {
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
         engagementId: shell.engagement_id,
-        assessments: shellAssessments.map((a) => mapAssessment(a, evidence)),
+        assessments: shellAssessments.map((a) => ({
+          ...mapAssessment(a, evidence),
+          fix:
+            a.state === 'pending_information'
+              ? (fixFor(
+                  { entityId: shell.entity_id, financialYear: shell.financial_year },
+                  a.area_key === FRAMEWORK_AREA_KEY.cfs ? 'relationships' : 'financials',
+                ) ?? null)
+              : null,
+        })),
         approval: latestApproval
           ? {
               id: latestApproval.id,

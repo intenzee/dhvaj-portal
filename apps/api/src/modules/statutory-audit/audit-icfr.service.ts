@@ -542,11 +542,14 @@ export class AuditIcfrService {
     );
     const fromProfile = num(captured.rows[0]?.current_value ?? null);
     if (fromProfile != null) return fromProfile;
+    // The audit year's financial profile first, then the current one.
     const fin = await client.query<{ turnover: string | null }>(
-      `SELECT fp.turnover
+      `SELECT COALESCE(fp.turnover, fp.revenue) AS turnover
          FROM hsdg.entity_financial_profiles fp
          JOIN hsdg.engagements e ON e.entity_id = fp.entity_id
-        WHERE e.id = $1 AND fp.is_current LIMIT 1`,
+        WHERE e.id = $1 AND (fp.financial_year = e.financial_year OR fp.is_current)
+        ORDER BY (fp.financial_year = e.financial_year) DESC, fp.is_current DESC, fp.created_at DESC
+        LIMIT 1`,
       [engagementId],
     );
     return num(fin.rows[0]?.turnover ?? null);

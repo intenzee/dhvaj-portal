@@ -172,9 +172,18 @@ export interface FinancialProfile {
   id: string;
   financialYear: string;
   turnover: number | null;
+  revenue?: number | null;
+  otherIncome?: number | null;
   netWorth: number | null;
   netProfit: number | null;
+  profitBeforeTax?: number | null;
+  reservesSurplus?: number | null;
+  totalAssets?: number | null;
   totalBorrowings: number | null;
+  bankPfiBorrowings?: number | null;
+  publicDeposits?: number | null;
+  debentures?: number | null;
+  outstandingLoans?: number | null;
   paidUpCapital: number | null;
   source: string;
   verified: boolean;
