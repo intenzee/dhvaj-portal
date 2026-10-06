@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { AlertTriangle, Radar, RotateCcw, X } from 'lucide-react';
 import {
   REASSESSMENT_CHANGE_LABEL,
   REASSESSMENT_CHANGE_TYPE,
   PERMISSION,
   type AuditReassessment,
   type ReassessmentChangeType,
+  type ReassessmentDetection,
   type StatutoryAuditReassessment,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -24,6 +25,12 @@ import { Field, Select, Textarea } from '@/components/form';
  * downstream work (framework areas, audit areas, phases) for reconsideration —
  * it never deletes it. Open reassessments are a professional to-do; resolving one
  * records that the flagged work has been addressed. An archived file is locked.
+ *
+ * The file detects changes against what the work was planned on (materiality,
+ * unanswered significant risks, Section 02 vs the work, subsidiaries, a moved
+ * completion date): each is raised in one click — with its reason, targeted
+ * scope and follow-through — or dismissed for good. Each open reassessment
+ * shows its progress and when it is ready to resolve.
  */
 
 const QK = (id: string) => ['engagement', id, 'statutory-audit-reassessment'];
@@ -101,6 +108,28 @@ function ReassessmentFile({
         </div>
       </Card>
 
+      {/* Older API builds send no detections. */}
+      {(file.detections ?? []).length > 0 && !file.locked && (
+        <Card className="overflow-hidden p-0">
+          <div className="flex items-center gap-1.5 border-b border-line bg-surface-raised/60 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            <Radar className="h-3.5 w-3.5" aria-hidden />
+            Changes detected in the file
+          </div>
+          <ul className="divide-y divide-line">
+            {file.detections.map((d) => (
+              <DetectionRow
+                key={d.key}
+                engagementId={engagementId}
+                workflowInstanceId={file.workflowInstanceId}
+                detection={d}
+                canManage={canManage}
+                onChanged={invalidate}
+              />
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {/* Raise a reassessment */}
       {canManage && !file.locked && (
         <Card className="space-y-3 p-4">
@@ -172,6 +201,79 @@ function ReassessmentFile({
   );
 }
 
+function DetectionRow({
+  engagementId,
+  workflowInstanceId,
+  detection: d,
+  canManage,
+  onChanged,
+}: {
+  engagementId: string;
+  workflowInstanceId: string;
+  detection: ReassessmentDetection;
+  canManage: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/reassessments`;
+  const raise = useMutation({
+    mutationFn: () => apiFetch(base, { method: 'POST', body: { detectionKey: d.key } }),
+    onSuccess: () => {
+      toast('Reassessment raised — affected work flagged.');
+      onChanged();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not raise it.'),
+  });
+  const dismiss = useMutation({
+    mutationFn: () =>
+      apiFetch(`${base}/detections/dismiss`, { method: 'POST', body: { detectionKey: d.key } }),
+    onSuccess: () => {
+      toast('Dismissed — it will not be offered again.');
+      onChanged();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not dismiss.'),
+  });
+  return (
+    <li className="space-y-1 px-4 py-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-ink">{REASSESSMENT_CHANGE_LABEL[d.changeType]}</p>
+          <p className="mt-0.5 text-xs text-ink-muted">{d.reason}</p>
+        </div>
+        {canManage && (
+          <div className="flex shrink-0 gap-1.5">
+            <Button size="sm" disabled={raise.isPending} onClick={() => raise.mutate()}>
+              <AlertTriangle className="h-4 w-4" />
+              Raise
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={dismiss.isPending}
+              onClick={() => dismiss.mutate()}
+              aria-label={`Dismiss: ${REASSESSMENT_CHANGE_LABEL[d.changeType]}`}
+              title="Dismiss — never offer this change again"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </div>
+      <ul className="space-y-0.5 text-[11px] text-ink-faint">
+        {d.facts.map((f) => (
+          <li key={f}>• {f}</li>
+        ))}
+      </ul>
+      {(d.scopeLabel || d.followThrough) && (
+        <p className="text-[11px] text-ink-muted">
+          {d.scopeLabel && <>Flags {d.scopeLabel}. </>}
+          {d.followThrough}
+        </p>
+      )}
+    </li>
+  );
+}
+
 function EventRow({
   engagementId,
   event,
@@ -207,10 +309,17 @@ function EventRow({
               {REASSESSMENT_CHANGE_LABEL[event.changeType]}
             </span>
             <Badge tone={isOpen ? 'warn' : 'success'}>{isOpen ? 'Open' : 'Resolved'}</Badge>
+            {event.readyToResolve && <Badge tone="success">Ready to resolve</Badge>}
+            {event.detectionKey && <Badge tone="neutral">Detected</Badge>}
           </div>
           <p className="mt-1 text-xs text-ink-muted">{event.reason}</p>
           {event.affectedSummary && (
             <p className="mt-1 text-xs text-ink-faint">{event.affectedSummary}</p>
+          )}
+          {isOpen && event.progress && (
+            <p className="mt-1 text-xs text-ink-muted">
+              {event.progress.done} of {event.progress.total} flagged area(s) re-concluded
+            </p>
           )}
           <p className="mt-1 text-[11px] text-ink-faint">
             {event.raisedByName ?? 'Someone'} · {new Date(event.createdAt).toLocaleDateString()}

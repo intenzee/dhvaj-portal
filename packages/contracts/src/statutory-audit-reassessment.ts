@@ -145,6 +145,32 @@ export interface AuditReassessment {
   resolvedByName: string | null;
   resolvedAt: string | null;
   version: number;
+  /** Set when it was raised from a detected change. */
+  detectionKey: string | null;
+  /** Flagged work areas re-concluded / flagged (null when it flagged no areas). */
+  progress: { done: number; total: number } | null;
+  /** Open, and everything it flagged has been re-done — resolve it. */
+  readyToResolve: boolean;
+}
+
+/**
+ * A change the file detected against what the work was planned on — raised in
+ * one click (with its reason and a targeted scope) or dismissed for good.
+ */
+export interface ReassessmentDetection {
+  /** Stable key, including the values that changed. */
+  key: string;
+  changeType: ReassessmentChangeType;
+  /** Pre-written professional reason. */
+  reason: string;
+  /** What the file shows. */
+  facts: string[];
+  /** The work areas raising it would flag (empty: the type's usual layers). */
+  scopeAreaIds: string[];
+  /** Plain words for the scope, e.g. "3 areas: Revenue, Cash & Bank …". */
+  scopeLabel: string | null;
+  /** What raising it also does, e.g. moving due dates. */
+  followThrough: string | null;
 }
 
 /** The Reassessment dashboard for one statutory-audit shell (§30). */
@@ -156,6 +182,8 @@ export interface StatutoryAuditReassessment {
   locked: boolean;
   openCount: number;
   events: AuditReassessment[];
+  /** Changes detected in the file, not yet raised or dismissed. */
+  detections: ReassessmentDetection[];
 }
 
 /** Count the still-open reassessments in a list. Pure. */

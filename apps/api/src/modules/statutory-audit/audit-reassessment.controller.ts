@@ -4,7 +4,11 @@ import { PERMISSION, type StatutoryAuditReassessment } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditReassessmentService } from './audit-reassessment.service';
-import { RaiseReassessmentDto, ResolveReassessmentDto } from './dto/reassessment.dto';
+import {
+  DismissDetectionDto,
+  RaiseReassessmentDto,
+  ResolveReassessmentDto,
+} from './dto/reassessment.dto';
 
 /**
  * Statutory Audit — Change-Impact / Reassessment endpoints (Audit Spec §29, §30).
@@ -37,6 +41,23 @@ export class AuditReassessmentController {
     @Body() dto: RaiseReassessmentDto,
   ): Promise<StatutoryAuditReassessment> {
     return this.reassessment.raise(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/reassessments/detections/dismiss')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Never offer a detected change again on this file (§30)' })
+  dismissDetection(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: DismissDetectionDto,
+  ): Promise<StatutoryAuditReassessment> {
+    return this.reassessment.dismissDetection(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto.detectionKey,
+    );
   }
 
   @Post(':id/statutory-audit/reassessments/:reassessmentId/resolve')
