@@ -27,6 +27,44 @@ export interface AuditTeamMember {
   actualHours: number;
   /** Whether this person reviews any procedure or area on the file (§24 "Review"). */
   isReviewer: boolean;
+  /** Firm grade (Article, Senior, Manager, Partner), when known. */
+  grade: string | null;
+  /** Hours the file implies for this person's work (prepare + review + file time). */
+  estimatedHours: number;
+  /** The planned hours are the estimate, kept in line with the file until someone sets them. */
+  plannedSuggested: boolean;
+  /** How the estimate was worked out. */
+  planBasis: string | null;
+  /** Owned procedures complete / owned procedures. */
+  progress: { done: number; total: number };
+  /** What needs this person's or the manager's attention. */
+  flags: TeamFlag[];
+}
+
+/** Something about a person's work that needs attention. */
+export interface TeamFlag {
+  key: string;
+  label: string;
+  tone: 'info' | 'warn' | 'danger';
+}
+
+/** One proposed change of owner or reviewer from "Balance the work". */
+export interface TeamBalanceMove {
+  procedureId: string;
+  ref: string;
+  title: string;
+  field: 'owner' | 'reviewer';
+  fromEmployeeId: string | null;
+  fromName: string | null;
+  toEmployeeId: string;
+  toName: string;
+  reason: string;
+}
+
+/** Result of applying the proposed moves. */
+export interface TeamBalanceResult {
+  team: StatutoryAuditTeam;
+  moved: number;
 }
 
 /** The Team dashboard for one statutory-audit shell — the shape the screen reads (§24). */
@@ -44,6 +82,10 @@ export interface StatutoryAuditTeam {
     actualHours: number;
     workItems: number;
   };
+  /** Procedures with no owner. */
+  unassigned: number;
+  /** "Balance the work" — proposed owner / reviewer changes (apply in one click). */
+  balance: TeamBalanceMove[];
 }
 
 /** A work item assigned to a person, for the per-person drilldown (§24). */

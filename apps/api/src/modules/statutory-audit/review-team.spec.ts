@@ -110,6 +110,12 @@ describe('sumMembers (§24)', () => {
     plannedHours: planned,
     actualHours: actual,
     isReviewer: false,
+    grade: null,
+    estimatedHours: 0,
+    plannedSuggested: false,
+    planBasis: null,
+    progress: { done: 0, total: 0 },
+    flags: [],
   });
   it('totals a picked field to one decimal', () => {
     const members = [m(10.5, 4.2), m(20, 8.1)];

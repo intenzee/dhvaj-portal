@@ -1,10 +1,15 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type AuditTeamMemberDetail, type StatutoryAuditTeam } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type AuditTeamMemberDetail,
+  type StatutoryAuditTeam,
+  type TeamBalanceResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditTeamService } from './audit-team.service';
-import { SetTeamAllocationDto } from './dto/team.dto';
+import { ApplyTeamBalanceDto, SetTeamAllocationDto } from './dto/team.dto';
 
 /**
  * Statutory Audit — Team endpoints (Audit Spec §24). People + workload + time:
@@ -41,6 +46,29 @@ export class AuditTeamController {
       id,
       workflowInstanceId,
       employeeId,
+    );
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/team/balance')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Balance the work — apply the proposed owner / reviewer changes',
+    description:
+      'Hands not-started procedures still with the manager / EP to the team by grade and load, ' +
+      'and routes review (EP on significant risks, manager on the rest). Each move applies only ' +
+      'if the procedure is still not started and still with the same person.',
+  })
+  balance(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: ApplyTeamBalanceDto,
+  ): Promise<TeamBalanceResult> {
+    return this.team.applyBalance(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto.procedureIds,
     );
   }
 
