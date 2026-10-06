@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -10,8 +12,10 @@ import {
   Min,
 } from 'class-validator';
 import {
+  REVIEW_DECISION,
   REVIEW_LEVEL,
   REVIEW_TARGET_TYPE,
+  type ReviewDecision,
   type ReviewLevel,
   type ReviewTargetType,
 } from '@hsdg/contracts';
@@ -88,4 +92,53 @@ export class ClearReviewNoteDto {
   @IsInt()
   @Min(1)
   version!: number;
+}
+
+/** A reviewer's one-click decision on a queued procedure or area. */
+export class ReviewDecisionDto {
+  @ApiProperty({ enum: ['procedure', 'work_area'] })
+  @IsIn(['procedure', 'work_area'])
+  targetType!: ReviewTargetType;
+
+  @ApiProperty()
+  @IsUUID()
+  targetId!: string;
+
+  @ApiProperty({ enum: Object.values(REVIEW_DECISION) })
+  @IsIn(Object.values(REVIEW_DECISION))
+  decision!: ReviewDecision;
+
+  @ApiPropertyOptional({ description: 'Return: what the preparer needs to do.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  note?: string | null;
+
+  @ApiPropertyOptional({ description: 'Return: also raise the notes the file suggests.' })
+  @IsOptional()
+  @IsBoolean()
+  raiseSuggested?: boolean;
+}
+
+/** Raise the suggested notes on a queued item (all, or the keys given). */
+export class RaiseSuggestedNotesDto {
+  @ApiProperty()
+  @IsUUID()
+  targetId!: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  sourceKeys?: string[];
+}
+
+/** Never offer a suggested note again on this file. */
+export class DismissSuggestionDto {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(200)
+  sourceKey!: string;
 }

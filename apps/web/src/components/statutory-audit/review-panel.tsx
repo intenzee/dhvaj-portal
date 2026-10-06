@@ -2,7 +2,18 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, MessageSquarePlus, Reply, Trash2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  CornerUpLeft,
+  MessageSquarePlus,
+  Reply,
+  Sparkles,
+  Trash2,
+  X,
+  XCircle,
+} from 'lucide-react';
 import {
   PERMISSION,
   type AuditReviewNote,
@@ -26,6 +37,11 @@ import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
  *
  * Notes are a compact list; a note's detail and its respond / clear / remove
  * actions open in a pop-up, as does recording a note against a queue item.
+ *
+ * Review reads the file: each queued item shows its pre-review checks and the
+ * notes those checks suggest (raised in one click, or dismissed for good);
+ * Approve / Return are one step; a note raised from a suggestion says when the
+ * issue has been fixed in the file; "Waiting on you" shows the viewer's share.
  */
 
 const REVIEW_QK = (id: string) => ['engagement', id, 'statutory-audit-review'];
@@ -39,6 +55,7 @@ const NOTE_TONE: Record<string, string> = {
 export function ReviewPanel({ engagementId }: { engagementId: string }): JSX.Element | null {
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
+  const [mine, setMine] = useState(false);
 
   const query = useQuery({
     queryKey: REVIEW_QK(engagementId),
@@ -51,6 +68,13 @@ export function ReviewPanel({ engagementId }: { engagementId: string }): JSX.Ele
   if (!review) return null;
 
   const s = review.summary;
+  // Older API builds send no "for me" counts.
+  const forMe = review.forMe ?? { toReview: 0, toAnswer: 0, toClear: 0 };
+  const forMeTotal = forMe.toReview + forMe.toAnswer + forMe.toClear;
+  const queue = mine ? review.queue.filter((q) => q.isMine) : review.queue;
+  const notes = mine
+    ? review.notes.filter((n) => n.forMeToAnswer || n.forMeToClear)
+    : review.notes;
 
   return (
     <div className="space-y-3">
@@ -72,16 +96,32 @@ export function ReviewPanel({ engagementId }: { engagementId: string }): JSX.Ele
             {s.blockingOpenNotes} blocking review note(s) open — completion is prevented (§29).
           </p>
         )}
+        {forMeTotal > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-medium text-ink">Waiting on you:</span>
+            {forMe.toReview > 0 && <Badge tone="info">{forMe.toReview} to review</Badge>}
+            {forMe.toAnswer > 0 && <Badge tone="warn">{forMe.toAnswer} to answer</Badge>}
+            {forMe.toClear > 0 && <Badge tone="success">{forMe.toClear} to clear</Badge>}
+            <label className="ml-auto inline-flex items-center gap-1.5 text-ink-muted">
+              <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />
+              Only mine
+            </label>
+          </div>
+        )}
       </Card>
 
       {/* Pending-review queue (§25) */}
       <Card className="p-4">
         <h3 className="text-sm font-semibold text-ink">Review queue</h3>
-        {review.queue.length === 0 ? (
-          <EmptyState>Nothing is awaiting review. Submit a procedure or area conclusion.</EmptyState>
+        {queue.length === 0 ? (
+          <EmptyState>
+            {mine
+              ? 'Nothing is waiting for your review.'
+              : 'Nothing is awaiting review. Submit a procedure or area conclusion.'}
+          </EmptyState>
         ) : (
           <ul className="mt-2 divide-y divide-line">
-            {review.queue.map((q) => (
+            {queue.map((q) => (
               <QueueRow
                 key={`${q.targetType}:${q.targetId}`}
                 engagementId={engagementId}
@@ -97,11 +137,11 @@ export function ReviewPanel({ engagementId }: { engagementId: string }): JSX.Ele
       {/* Review notes (§344) */}
       <Card className="p-4">
         <h3 className="text-sm font-semibold text-ink">Review notes</h3>
-        {review.notes.length === 0 ? (
-          <EmptyState>No review notes raised.</EmptyState>
+        {notes.length === 0 ? (
+          <EmptyState>{mine ? 'No review notes waiting on you.' : 'No review notes raised.'}</EmptyState>
         ) : (
           <ul className="mt-2 divide-y divide-line">
-            {review.notes.map((n) => (
+            {notes.map((n) => (
               <NoteRow key={n.id} engagementId={engagementId} note={n} canManage={canManage} />
             ))}
           </ul>
@@ -171,6 +211,49 @@ function QueueRow({
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not record note.'),
   });
 
+  const base = `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/review`;
+  const done = (msg: string) => () => {
+    toast(msg);
+    void qc.invalidateQueries({ queryKey: REVIEW_QK(engagementId) });
+    // Approve / return change the procedure or area itself.
+    void qc.invalidateQueries({ queryKey: ['engagement', engagementId] });
+  };
+  const failed = (fallback: string) => (e: unknown) =>
+    toast(e instanceof ApiError ? e.message : fallback);
+  const suggested = item.suggestedNotes ?? [];
+  const [returning, setReturning] = useState(false);
+  const [returnNote, setReturnNote] = useState('');
+  const [withSuggested, setWithSuggested] = useState(true);
+
+  const raiseSuggested = useMutation({
+    mutationFn: (sourceKeys?: string[]) =>
+      apiFetch(`${base}/suggestions/raise`, {
+        method: 'POST',
+        body: { targetId: item.targetId, ...(sourceKeys ? { sourceKeys } : {}) },
+      }),
+    onSuccess: done('Review note(s) raised.'),
+    onError: failed('Could not raise the notes.'),
+  });
+  const dismiss = useMutation({
+    mutationFn: (sourceKey: string) =>
+      apiFetch(`${base}/suggestions/dismiss`, { method: 'POST', body: { sourceKey } }),
+    onSuccess: done('Suggestion dismissed — it will not be offered again.'),
+    onError: failed('Could not dismiss.'),
+  });
+  const decide = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch(`${base}/decide`, {
+        method: 'POST',
+        body: { targetType: item.targetType, targetId: item.targetId, ...body },
+      }),
+    onSuccess: (_d, body) => {
+      setReturning(false);
+      setReturnNote('');
+      done(body.decision === 'approve' ? 'Approved.' : 'Returned to the preparer.')();
+    },
+    onError: failed('Could not record the decision.'),
+  });
+
   return (
     <li className="py-2.5">
       <div className="flex items-start justify-between gap-3">
@@ -192,14 +275,153 @@ function QueueRow({
             {item.reviewerName && ` · Reviewer: ${item.reviewerName}`}
             {item.dueDate && ` · Due ${formatDate(item.dueDate)}`}
           </p>
+          {(item.checks ?? []).length > 0 && (
+            <ul className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+              {item.checks.map((c) => (
+                <li
+                  key={c.key}
+                  className={`inline-flex items-center gap-1 ${c.ok ? 'text-ink-muted' : 'text-danger-600'}`}
+                >
+                  {c.ok ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+                  ) : (
+                    <XCircle className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {c.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          {(item.context ?? []).map((c) => (
+            <p key={c} className="mt-0.5 text-[11px] text-ink-faint">
+              {c}
+            </p>
+          ))}
         </div>
-        {canManage && (
-          <Button variant="secondary" className="h-8 shrink-0" onClick={() => setNoting(true)}>
-            <MessageSquarePlus className="mr-1 h-4 w-4" />
-            Record note
-          </Button>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          {item.ready && <Badge tone="success">Ready to approve</Badge>}
+          {(item.openNotes ?? 0) > 0 && <Badge tone="warn">{item.openNotes} open note(s)</Badge>}
+          {canManage && (
+            <>
+              <Button
+                className="h-8"
+                disabled={decide.isPending}
+                onClick={() => decide.mutate({ decision: 'approve' })}
+              >
+                <Check className="mr-1 h-4 w-4" />
+                Approve
+              </Button>
+              <Button variant="secondary" className="h-8" onClick={() => setReturning(true)}>
+                <CornerUpLeft className="mr-1 h-4 w-4" />
+                Return
+              </Button>
+              <Button
+                variant="secondary"
+                className="h-8"
+                onClick={() => setNoting(true)}
+                title="Record note"
+              >
+                <MessageSquarePlus className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+      {suggested.length > 0 && (
+        <div className="mt-2 rounded-lg border border-line bg-surface-sunken/40 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="inline-flex items-center gap-1 text-xs font-medium text-ink">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden />
+              Suggested review notes
+            </p>
+            {canManage && suggested.length > 1 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={raiseSuggested.isPending}
+                onClick={() => raiseSuggested.mutate(undefined)}
+              >
+                Raise all
+              </Button>
+            )}
+          </div>
+          <ul className="mt-1 space-y-1">
+            {suggested.map((n) => (
+              <li key={n.sourceKey} className="flex items-start gap-2 text-xs">
+                <span className="min-w-0 flex-1 text-ink-muted">
+                  {n.isBlocking && <Badge tone="danger">Blocking</Badge>} {n.body}
+                </span>
+                {canManage && (
+                  <span className="flex shrink-0 gap-1">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={raiseSuggested.isPending}
+                      onClick={() => raiseSuggested.mutate([n.sourceKey])}
+                    >
+                      Raise
+                    </Button>
+                    <button
+                      type="button"
+                      title="Dismiss — never suggest again"
+                      aria-label={`Dismiss: ${n.body}`}
+                      className="text-ink-faint hover:text-ink"
+                      onClick={() => dismiss.mutate(n.sourceKey)}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <InlinePanel
+        open={returning && canManage}
+        onClose={() => setReturning(false)}
+        title="Return to the preparer"
+        description={item.label}
+      >
+        <div className="space-y-3">
+          <Field label="What needs doing">
+            <Textarea
+              rows={3}
+              value={returnNote}
+              placeholder="Optional when the suggested notes say it…"
+              onChange={(e) => setReturnNote(e.target.value)}
+            />
+          </Field>
+          {suggested.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-ink-muted">
+              <input
+                type="checkbox"
+                checked={withSuggested}
+                onChange={(e) => setWithSuggested(e.target.checked)}
+              />
+              Also raise the {suggested.length} suggested note(s)
+            </label>
+          )}
+          <div className="flex gap-2">
+            <Button
+              className="h-8"
+              disabled={decide.isPending}
+              onClick={() =>
+                decide.mutate({
+                  decision: 'return',
+                  ...(returnNote.trim() ? { note: returnNote } : {}),
+                  raiseSuggested: withSuggested && suggested.length > 0,
+                })
+              }
+            >
+              Return
+            </Button>
+            <Button variant="secondary" className="h-8" onClick={() => setReturning(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </InlinePanel>
       <InlinePanel
         open={noting && canManage}
         onClose={() => setNoting(false)}
@@ -319,6 +541,9 @@ function NoteRow({
           </span>
         </span>
         <span className="flex shrink-0 flex-wrap justify-end gap-1.5">
+          {note.resolvedInFile && <Badge tone="success">Fixed in the file</Badge>}
+          {note.forMeToAnswer && <Badge tone="warn">Yours to answer</Badge>}
+          {note.forMeToClear && <Badge tone="info">Yours to clear</Badge>}
           {note.isBlocking && note.status !== 'cleared' && <Badge tone="danger">Blocking</Badge>}
           <Badge tone={note.reviewLevel === 'partner' ? 'info' : 'neutral'}>
             {note.reviewLevel === 'partner' ? 'Partner' : 'Manager'}
@@ -350,6 +575,11 @@ function NoteRow({
               )}
             </div>
             <p className="mt-1.5 text-sm text-ink">{note.body}</p>
+            {note.resolvedInFile && (
+              <p className="mt-1 text-xs text-success-700">
+                The issue this note raised is fixed in the file — ready to clear.
+              </p>
+            )}
             <p className="mt-1 text-[11px] text-ink-faint">
               Raised by {note.raisedByName ?? 'reviewer'} · {formatDate(note.createdAt)}
             </p>

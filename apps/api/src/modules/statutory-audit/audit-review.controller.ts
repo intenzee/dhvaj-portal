@@ -6,7 +6,10 @@ import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditReviewService } from './audit-review.service';
 import {
   ClearReviewNoteDto,
+  DismissSuggestionDto,
   RaiseReviewNoteDto,
+  RaiseSuggestedNotesDto,
+  ReviewDecisionDto,
   RespondReviewNoteDto,
   UpdateReviewNoteDto,
 } from './dto/review.dto';
@@ -43,6 +46,58 @@ export class AuditReviewController {
     @Body() dto: RaiseReviewNoteDto,
   ): Promise<StatutoryAuditReview> {
     return this.review.raiseNote(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/review/decide')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Approve or return a queued procedure / area in one step (§25)',
+    description:
+      'Approve completes a procedure (its completion rules apply) or signs off an area ' +
+      'conclusion; refused while review notes on it are live. Return sends it back with the ' +
+      'typed note and / or the suggested notes.',
+  })
+  decide(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: ReviewDecisionDto,
+  ): Promise<StatutoryAuditReview> {
+    return this.review.decide(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/review/suggestions/raise')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Raise the review notes the file suggests for a queued item' })
+  raiseSuggested(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: RaiseSuggestedNotesDto,
+  ): Promise<StatutoryAuditReview> {
+    return this.review.raiseSuggested(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto,
+    );
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/review/suggestions/dismiss')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Never offer a suggested review note again on this file' })
+  dismissSuggestion(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: DismissSuggestionDto,
+  ): Promise<StatutoryAuditReview> {
+    return this.review.dismissSuggestion(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto.sourceKey,
+    );
   }
 
   @Post(':id/statutory-audit/review/notes/:noteId')

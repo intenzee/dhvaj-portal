@@ -51,6 +51,12 @@ describe('summarizeReview (§25)', () => {
     state: 'ready_for_review',
     dueDate: null,
     isOverdue: false,
+    checks: [],
+    context: [],
+    ready: false,
+    suggestedNotes: [],
+    openNotes: 0,
+    isMine: false,
     ...over,
   });
 

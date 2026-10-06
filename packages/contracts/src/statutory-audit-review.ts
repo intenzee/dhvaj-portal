@@ -75,6 +75,29 @@ export interface AuditReviewNote {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** Set when the note was raised from a suggestion. */
+  sourceKey: string | null;
+  /** The issue the suggestion was about is now fixed in the file — ready to clear. */
+  resolvedInFile: boolean;
+  /** The viewer owns the work it is on (theirs to answer). */
+  forMeToAnswer: boolean;
+  /** The viewer raised it / reviews the work and it has been answered (theirs to clear). */
+  forMeToClear: boolean;
+}
+
+/** One pre-review check on a queued item, read from the file. */
+export interface ReviewCheck {
+  key: string;
+  label: string;
+  ok: boolean;
+}
+
+/** A review note the file suggests for a queued item — raised with one click. */
+export interface SuggestedReviewNote {
+  /** Stable key; a dismissed suggestion is never offered again. */
+  sourceKey: string;
+  body: string;
+  isBlocking: boolean;
 }
 
 /**
@@ -96,7 +119,33 @@ export interface ReviewQueueItem {
   dueDate: string | null;
   /** True when the review is past its due date (§25 "Overdue Reviews"). */
   isOverdue: boolean;
+  /** Pre-review checks read from the file. */
+  checks: ReviewCheck[];
+  /** Context the reviewer should know (significant risks, misstatements …). */
+  context: string[];
+  /** Every check passes — ready to approve. */
+  ready: boolean;
+  /** Notes suggested by the failed checks (not yet raised or dismissed). */
+  suggestedNotes: SuggestedReviewNote[];
+  /** Live review notes on this item. */
+  openNotes: number;
+  /** The viewer is its reviewer. */
+  isMine: boolean;
 }
+
+/** The viewer's own review work. */
+export interface ReviewForMe {
+  toReview: number;
+  toAnswer: number;
+  toClear: number;
+}
+
+/** A reviewer's one-click decision on a queued item. */
+export const REVIEW_DECISION = {
+  approve: 'approve',
+  return: 'return',
+} as const;
+export type ReviewDecision = (typeof REVIEW_DECISION)[keyof typeof REVIEW_DECISION];
 
 /** The four headline counts of the Review dashboard (§25). */
 export interface ReviewSummary {
@@ -116,6 +165,7 @@ export interface StatutoryAuditReview {
   summary: ReviewSummary;
   queue: ReviewQueueItem[];
   notes: AuditReviewNote[];
+  forMe: ReviewForMe;
 }
 
 /** Whether a review note is still live (§25 "Open Review Notes"). */
