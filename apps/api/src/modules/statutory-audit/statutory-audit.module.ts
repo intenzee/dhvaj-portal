@@ -57,6 +57,10 @@ import { AuditCompletionService } from './audit-completion.service';
 import { AuditCompletionController } from './audit-completion.controller';
 import { AuditReassessmentService } from './audit-reassessment.service';
 import { AuditReassessmentController } from './audit-reassessment.controller';
+import { AuditUndoService } from './audit-undo.service';
+import { AuditUndoController } from './audit-undo.controller';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { ChangeSetInterceptor } from '../../common/context/change-set.interceptor';
 
 /**
  * Statutory Audit — the professional audit-file experience (Audit Spec §5–§8).
@@ -100,8 +104,12 @@ import { AuditReassessmentController } from './audit-reassessment.controller';
     AuditTeamController,
     AuditCompletionController,
     AuditReassessmentController,
+    AuditUndoController,
   ],
   providers: [
+    // One change set per mutating request — the unit of audit-file undo.
+    { provide: APP_INTERCEPTOR, useClass: ChangeSetInterceptor },
+    AuditUndoService,
     StatutoryAuditWorkflowService,
     AuditAcceptanceService,
     AuditProfileService,

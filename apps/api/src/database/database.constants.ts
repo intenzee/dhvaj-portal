@@ -18,3 +18,12 @@ export const RLS_SETTINGS = {
   /** Acting user's employee id — drives engagement-assignment access (Phase 5). */
   employeeId: 'hsdg.employee_id',
 } as const;
+
+/**
+ * Transaction-local settings naming the change set a mutating request writes
+ * under, read by the audit-file undo trigger (see 1765600000000_audit_file_undo).
+ */
+export const CHANGE_SET_SETTINGS = {
+  id: 'hsdg.change_set',
+  label: 'hsdg.change_label',
+} as const;

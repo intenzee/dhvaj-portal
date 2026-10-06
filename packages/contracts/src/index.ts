@@ -47,6 +47,7 @@ export * from './statutory-audit-review';
 export * from './statutory-audit-team';
 export * from './statutory-audit-completion';
 export * from './statutory-audit-reassessment';
+export * from './statutory-audit-undo';
 export * from './time';
 export * from './commercial';
 export * from './notes';

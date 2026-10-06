@@ -30,6 +30,21 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Fired on `window` after any successful change to an audit file, so the
+ * Undo / Redo control can offer the step that was just taken.
+ */
+export const AUDIT_FILE_CHANGED = 'audit-file:changed';
+
+/** A write to the audit file (not the undo / redo calls themselves). */
+export function isAuditFileWrite(path: string, method: string): boolean {
+  return (
+    method !== 'GET' &&
+    /\/statutory-audit(\/|$|\?)/.test(path) &&
+    !/\/statutory-audit\/(undo|redo)$/.test(path)
+  );
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
@@ -50,6 +65,11 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: 'no-store',
   });
+
+  const method = (options.method ?? 'GET').toUpperCase();
+  if (res.ok && typeof window !== 'undefined' && isAuditFileWrite(path, method)) {
+    window.dispatchEvent(new CustomEvent<string>(AUDIT_FILE_CHANGED, { detail: path }));
+  }
 
   if (res.status === 204) return undefined as T;
 

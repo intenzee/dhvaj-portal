@@ -17,6 +17,7 @@ import type { AuditPhaseState, StatutoryAuditWorkflow } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { Card } from '@/components/ui';
 import { ExpandToggle } from '@/components/inline-panel';
+import { UndoControls } from './undo-controls';
 
 /**
  * The Work-tab left audit-file navigation (Audit Spec §8, §10) — the versioned
@@ -139,7 +140,7 @@ export function AuditFileNav({
 
   return (
     <>
-      {query.data.map((wf) => (
+      {query.data.map((wf, index) => (
         <Card key={wf.workflowInstanceId} className="mb-4 overflow-hidden p-0">
           <div className="flex items-center justify-between border-b border-line bg-surface-raised/70 px-4 py-2.5">
             <div>
@@ -148,6 +149,8 @@ export function AuditFileNav({
                 Statutory Audit · {wf.templateVersion}
               </p>
             </div>
+            {/* One undo history per engagement, shown on the first file. */}
+            {index === 0 && <UndoControls engagementId={engagementId} />}
           </div>
 
           <ol className="divide-y divide-line">

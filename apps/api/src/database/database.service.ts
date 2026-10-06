@@ -5,9 +5,12 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
+import { ClsService } from 'nestjs-cls';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
-import { PG_POOL, RLS_SETTINGS } from './database.constants';
+import { CHANGE_SET_SETTINGS, PG_POOL, RLS_SETTINGS } from './database.constants';
+import { CLS_CHANGE_LABEL, CLS_CHANGE_SET } from '../common/context/change-set.interceptor';
 import type { RlsContext } from './rls-context';
 
 /**
@@ -27,7 +30,10 @@ import type { RlsContext } from './rls-context';
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
 
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    @Optional() private readonly cls?: ClsService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.assertLeastPrivilege();
@@ -105,7 +111,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
               set_config($3, $4, true),
               set_config($5, $6, true),
               set_config($7, $8, true),
-              set_config($9, $10, true)`,
+              set_config($9, $10, true),
+              set_config($11, $12, true),
+              set_config($13, $14, true)`,
       [
         RLS_SETTINGS.userId,
         context.userId,
@@ -117,8 +125,18 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         context.orgId ?? '',
         RLS_SETTINGS.employeeId,
         context.employeeId ?? '',
+        // The request's change set, so the audit-file undo log can group
+        // everything one click changed (empty outside a mutating request).
+        CHANGE_SET_SETTINGS.id,
+        this.ambient(CLS_CHANGE_SET),
+        CHANGE_SET_SETTINGS.label,
+        this.ambient(CLS_CHANGE_LABEL),
       ],
     );
+  }
+
+  private ambient(key: string): string {
+    return (this.cls?.isActive() ? this.cls.get<string | undefined>(key) : undefined) ?? '';
   }
 
   /**

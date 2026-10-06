@@ -9,7 +9,9 @@ const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => apiFetch(...args),
   ApiError: class ApiError extends Error {},
+  AUDIT_FILE_CHANGED: 'audit-file:changed',
 }));
+jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
 
 function wrap(ui: ReactNode): ReactNode {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
