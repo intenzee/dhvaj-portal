@@ -11,6 +11,7 @@ import {
   canSignOff,
   sectionResolved,
   PBC_OUTSTANDING_STATUSES,
+  UDIN_PATTERN,
   type AuditCompletionItem,
   type AuditWorkflowStatus,
   type CompletionGate,
@@ -31,6 +32,8 @@ import {
 } from './completion-automation';
 import { isEngagementLead } from './master-facts';
 import { planSignOff, type SignOffFacts } from './sign-off-automation';
+import { addDays, addYears, day, planArchive, type ArchiveFacts } from './archive-automation';
+import { priorYearMattersFromFile } from './planning-prior-year';
 
 interface ShellRow {
   id: string;
@@ -46,7 +49,15 @@ interface ShellRow {
   archived_at: Date | null;
   archived_by_name: string | null;
   archive_note: string | null;
+  report_date: string | null;
+  udin: string | null;
+  retain_until: string | null;
 }
+
+type ArchiveExtras = Pick<
+  ArchiveFacts,
+  'openReviewNotes' | 'evidenceCount' | 'completeWithoutEvidence' | 'carryForward' | 'nextYear'
+>;
 
 type SignOffExtras = Pick<
   SignOffFacts,
@@ -312,7 +323,9 @@ export class AuditCompletionService {
               wi.completion_approved_at, ca.full_name AS completion_approved_by_name,
               wi.completion_memo,
               wi.signed_off_at, sa.full_name AS signed_off_by_name, wi.signoff_memo,
-              wi.archived_at, aa.full_name AS archived_by_name, wi.archive_note
+              wi.archived_at, aa.full_name AS archived_by_name, wi.archive_note,
+              wi.report_date::text AS report_date, wi.udin,
+              wi.retain_until::text AS retain_until
          FROM hsdg.service_workflow_instances wi
          LEFT JOIN hsdg.employees ca ON ca.id = wi.completion_approved_by_employee_id
          LEFT JOIN hsdg.employees sa ON sa.id = wi.signed_off_by_employee_id
@@ -364,6 +377,10 @@ export class AuditCompletionService {
     for (const shell of shells) {
       extras.set(shell.id, await this.loadSignOffExtras(client, engagementId, shell.id));
     }
+    const archiveExtras = new Map<string, ArchiveExtras>();
+    for (const shell of shells) {
+      archiveExtras.set(shell.id, await this.loadArchiveExtras(client, engagementId, shell.id));
+    }
 
     return shells.map((shell) => {
       const plan = plans.get(shell.id)!;
@@ -386,6 +403,21 @@ export class AuditCompletionService {
         completionApprovedAt: shell.completion_approved_at,
         completionApprovedByName: shell.completion_approved_by_name,
       });
+      const archivePack = planArchive(
+        this.archiveFacts(
+          facts.get(shell.id)!,
+          extras.get(shell.id)!,
+          archiveExtras.get(shell.id)!,
+          {
+            signedOffAt: shell.signed_off_at,
+            signedOffByName: shell.signed_off_by_name,
+            archivedAt: shell.archived_at,
+            archivedByName: shell.archived_by_name,
+            reportDate: shell.report_date ? new Date(shell.report_date) : null,
+            udin: shell.udin,
+          },
+        ),
+      );
       return {
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
@@ -403,8 +435,142 @@ export class AuditCompletionService {
         archivedByName: shell.archived_by_name,
         archiveNote: shell.archive_note,
         signOffPack,
+        reportDate: shell.report_date ?? (shell.signed_off_at ? day(shell.signed_off_at) : null),
+        udin: shell.udin,
+        retainUntil: shell.retain_until,
+        archivePack,
       };
     });
+  }
+
+  /** Assemble Section 10's facts from what the read already loaded. */
+  private archiveFacts(
+    base: CompletionFacts,
+    signOff: SignOffExtras,
+    extras: ArchiveExtras,
+    shell: Pick<
+      ArchiveFacts,
+      'signedOffAt' | 'signedOffByName' | 'archivedAt' | 'archivedByName' | 'reportDate' | 'udin'
+    >,
+  ): ArchiveFacts {
+    return {
+      ...base,
+      ...extras,
+      ...shell,
+      today: new Date(),
+      pbcOutstanding: signOff.pbcOutstanding,
+      openReassessments: signOff.openReassessments.length,
+    };
+  }
+
+  /** What Section 10 reads beyond the completion and sign-off facts, for one shell. */
+  private async loadArchiveExtras(
+    client: PoolClient,
+    engagementId: string,
+    wi: string,
+  ): Promise<ArchiveExtras> {
+    const notes = await client.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM hsdg.audit_review_notes
+        WHERE workflow_instance_id = $1 AND status IN ('open','responded')`,
+      [wi],
+    );
+    const evidence = await client.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM hsdg.audit_evidence WHERE workflow_instance_id = $1`,
+      [wi],
+    );
+    const bare = await client.query<{ label: string }>(
+      `SELECT p.procedure_ref || ' ' || p.title AS label
+         FROM hsdg.audit_procedures p
+        WHERE p.workflow_instance_id = $1 AND p.state = 'complete'
+          AND NOT EXISTS (SELECT 1 FROM hsdg.audit_evidence_procedures ep
+                           WHERE ep.procedure_id = p.id)
+        ORDER BY p.procedure_ref`,
+      [wi],
+    );
+    // Exactly what next year's 03.1.6 import reads from this file.
+    const risks = await client.query<{
+      id: string;
+      risk_ref: string;
+      description: string;
+      fs_area: string | null;
+      is_fraud_risk: boolean;
+      response: string | null;
+    }>(
+      `SELECT id, risk_ref, description, fs_area, is_fraud_risk, response
+         FROM hsdg.audit_risks WHERE workflow_instance_id = $1 AND is_significant
+        ORDER BY risk_ref`,
+      [wi],
+    );
+    const focus = await client.query<{
+      id: string;
+      name: string;
+      why_requires_attention: string | null;
+      partner_attention: boolean;
+    }>(
+      `SELECT id, name, why_requires_attention, partner_attention
+         FROM hsdg.audit_area_of_focus WHERE workflow_instance_id = $1 ORDER BY seq`,
+      [wi],
+    );
+    const blocking = await client.query<{ id: string; body: string; status: string }>(
+      `SELECT id, body, status FROM hsdg.audit_review_notes
+        WHERE workflow_instance_id = $1 AND is_blocking ORDER BY created_at`,
+      [wi],
+    );
+    const high = await client.query<{
+      id: string;
+      description: string;
+      severity: string;
+      status: string;
+    }>(
+      `SELECT id, description, severity, status FROM hsdg.audit_exceptions
+        WHERE workflow_instance_id = $1 AND severity = 'high' ORDER BY created_at`,
+      [wi],
+    );
+    const eng = await client.query<{ financial_year: string; entity_id: string }>(
+      `SELECT financial_year, entity_id FROM hsdg.engagements WHERE id = $1`,
+      [engagementId],
+    );
+    const carryForward = priorYearMattersFromFile({
+      financialYear: eng.rows[0]?.financial_year ?? '',
+      risks: risks.rows.map((r) => ({
+        id: r.id,
+        ref: r.risk_ref,
+        description: r.description,
+        fsArea: r.fs_area,
+        isFraudRisk: r.is_fraud_risk,
+        response: r.response,
+      })),
+      focusAreas: focus.rows.map((f) => ({
+        id: f.id,
+        name: f.name,
+        why: f.why_requires_attention,
+        partnerAttention: f.partner_attention,
+      })),
+      blockingNotes: blocking.rows,
+      exceptions: high.rows,
+    }).map((m) => m.description);
+    const next = eng.rows[0]
+      ? await client.query<{ financial_year: string }>(
+          `SELECT ne.financial_year
+             FROM hsdg.engagements ne
+             JOIN hsdg.service_workflow_instances nw
+               ON nw.engagement_id = ne.id AND nw.workflow_key = 'statutory_audit'
+              AND nw.status <> 'cancelled'
+            WHERE ne.id <> $1
+              AND (ne.predecessor_engagement_id = $1
+                   OR (ne.entity_id = $2 AND ne.financial_year > $3))
+            ORDER BY (ne.predecessor_engagement_id = $1) DESC NULLS LAST, ne.financial_year
+            LIMIT 1`,
+          [engagementId, eng.rows[0].entity_id, eng.rows[0].financial_year],
+        )
+      : { rows: [] };
+    return {
+      openReviewNotes: Number(notes.rows[0]?.n ?? 0),
+      evidenceCount: Number(evidence.rows[0]?.n ?? 0),
+      completeWithoutEvidence: bare.rows.map((r) => r.label),
+      carryForward,
+      nextYear: next.rows[0] ? { financialYear: next.rows[0].financial_year } : null,
+    };
   }
 
   /** What Section 09 reads beyond the completion facts, for one shell. */
@@ -610,21 +776,46 @@ export class AuditCompletionService {
     ctx: RlsContext,
     engagementId: string,
     workflowInstanceId: string,
-    input: { note?: string | null },
+    input: { note?: string | null; reportDate?: string | null; udin?: string | null },
   ): Promise<StatutoryAuditCompletion> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const gate = await this.loadGate(client, engagementId, workflowInstanceId);
-      if (!canArchive(gate)) {
+      const shell = await this.loadShell(client, engagementId, workflowInstanceId);
+      if (!canArchive(shell.gate)) {
         throw new BadRequestException('Archive requires the file to be signed off first (§27.10).');
       }
+      // The report date defaults to the sign-off date; it can't be in the future
+      // (one day of slack: the server's date is UTC, the firm's is IST).
+      const reportDate = input.reportDate?.trim() || shell.reportDate;
+      if (reportDate && reportDate > day(addDays(new Date(), 1))) {
+        throw new BadRequestException("The auditor's report date can't be in the future.");
+      }
+      const udin = input.udin?.trim().toUpperCase() || null;
+      if (udin && !UDIN_PATTERN.test(udin)) {
+        throw new BadRequestException(
+          'UDIN must be 18 characters: the 2-digit year, the 6-digit membership number and 10 letters or digits.',
+        );
+      }
+      // No note typed → the Section 10 note drafted with this report date / UDIN.
+      let note = input.note?.trim() || null;
+      if (!note) {
+        const changed = reportDate !== shell.reportDate || udin !== shell.udin;
+        note = changed
+          ? (await this.replanArchive(client, engagementId, workflowInstanceId, reportDate, udin))
+              .draftNote
+          : shell.archivePack.draftNote;
+      }
+      const retainUntil = reportDate ? day(addYears(new Date(reportDate), 7)) : null;
       const result = await client.query(
         `UPDATE hsdg.service_workflow_instances
             SET archived_at = now(),
                 archived_by_employee_id = $2,
                 archive_note = $3,
+                report_date = $4,
+                udin = $5,
+                retain_until = $6,
                 status = 'archived'
           WHERE id = $1 AND archived_at IS NULL`,
-        [workflowInstanceId, ctx.employeeId ?? null, input.note?.trim() || null],
+        [workflowInstanceId, ctx.employeeId ?? null, note, reportDate, udin, retainUntil],
       );
       if ((result.rowCount ?? 0) === 0) {
         throw new ConflictException('The file was archived concurrently; refresh and retry.');
@@ -635,9 +826,42 @@ export class AuditCompletionService {
         action: 'statutory_audit.archived',
         objectType: 'service_workflow_instance',
         objectId: workflowInstanceId,
+        after: { reportDate, udin, retainUntil },
       });
       return this.readOne(client, engagementId, workflowInstanceId);
     });
+  }
+
+  /** The archive pack with the report date / UDIN being recorded now. */
+  private async replanArchive(
+    client: PoolClient,
+    engagementId: string,
+    wi: string,
+    reportDate: string | null,
+    udin: string | null,
+  ) {
+    const { rows } = await client.query<ShellRow>(
+      `SELECT wi.signed_off_at, sa.full_name AS signed_off_by_name
+         FROM hsdg.service_workflow_instances wi
+         LEFT JOIN hsdg.employees sa ON sa.id = wi.signed_off_by_employee_id
+        WHERE wi.id = $1`,
+      [wi],
+    );
+    return planArchive(
+      this.archiveFacts(
+        await this.loadFacts(client, engagementId, wi),
+        await this.loadSignOffExtras(client, engagementId, wi),
+        await this.loadArchiveExtras(client, engagementId, wi),
+        {
+          signedOffAt: rows[0]?.signed_off_at ?? null,
+          signedOffByName: rows[0]?.signed_off_by_name ?? null,
+          archivedAt: null,
+          archivedByName: null,
+          reportDate: reportDate ? new Date(reportDate) : null,
+          udin,
+        },
+      ),
+    );
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────

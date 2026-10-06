@@ -116,6 +116,20 @@ const file: StatutoryAuditCompletion = {
       },
     ],
   },
+  reportDate: null,
+  udin: null,
+  retainUntil: null,
+  archivePack: {
+    checks: [],
+    ready: false,
+    attention: 0,
+    reportDate: null,
+    assemblyDueBy: null,
+    daysToAssemble: null,
+    retainUntil: null,
+    carryForward: [],
+    draftNote: 'Final audit file — not yet signed off.',
+  },
 };
 
 /** The same file with every §29 gate met — ready for the partner. */
@@ -192,5 +206,98 @@ describe('completion checklist from the file', () => {
       method: 'POST',
       body: { memo: 'Signed after the going-concern discussion.' },
     });
+  });
+
+  it('archives a signed-off file with the report date, UDIN and drafted note', async () => {
+    const signed: StatutoryAuditCompletion = {
+      ...ready,
+      gate: { ...ready.gate, reportingItemsResolved: true, signedOff: true },
+      signedOffAt: '2025-08-20T10:00:00Z',
+      signedOffByName: 'Partner A',
+      reportDate: '2025-08-20',
+      archivePack: {
+        checks: [
+          {
+            key: 'signed_off',
+            label: 'Partner signed off (09)',
+            ok: true,
+            blocking: true,
+            facts: ['Signed off by Partner A on 2025-08-20.'],
+            goTo: null,
+          },
+          {
+            key: 'loose_ends',
+            label: 'Nothing left open',
+            ok: false,
+            blocking: false,
+            facts: ['• 2 review note(s) not cleared.'],
+            goTo: { phaseKey: 'review', label: 'Open review notes' },
+          },
+          {
+            key: 'carry_forward',
+            label: "Carried to next year's file",
+            ok: true,
+            blocking: false,
+            facts: ["1 matter(s) will be brought forward to next year's planning (03.1.6):"],
+            goTo: null,
+          },
+        ],
+        ready: true,
+        attention: 1,
+        reportDate: '2025-08-20',
+        assemblyDueBy: '2025-10-19',
+        daysToAssemble: 48,
+        retainUntil: '2032-08-20',
+        carryForward: ['Significant risk — Revenue'],
+        draftNote: 'Final audit file for financial year 2024-25 assembled and archived.',
+      },
+    };
+    apiFetch.mockResolvedValue([signed]);
+    const user = userEvent.setup();
+    render(wrap(<CompletionPanel engagementId="e1" />));
+
+    expect(await screen.findByText('Archiving (10)')).toBeInTheDocument();
+    expect(screen.getByText('Assemble by 2025-10-19 · 48 day(s) left')).toBeInTheDocument();
+    expect(screen.getByText('• 2 review note(s) not cleared.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open review notes/ })).toBeInTheDocument();
+    expect(screen.getByLabelText('Archive note')).toHaveValue(
+      'Final audit file for financial year 2024-25 assembled and archived.',
+    );
+
+    // A malformed UDIN keeps the archive button disabled.
+    const udin = screen.getByPlaceholderText(/25123456ABCDEFGHIJ/);
+    await user.type(udin, 'abc');
+    expect(screen.getByText('UDIN is 18 characters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Archive & lock/ })).toBeDisabled();
+
+    // Untouched note → the server records its draft; UDIN goes up-cased.
+    await user.clear(udin);
+    await user.type(udin, '25123456abcdefghij');
+    await user.click(screen.getByRole('button', { name: /Archive & lock/ }));
+    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/statutory-audit/wf1/archive', {
+      method: 'POST',
+      body: { udin: '25123456ABCDEFGHIJ' },
+    });
+  });
+
+  it('shows the archive record once the file is locked', async () => {
+    apiFetch.mockResolvedValue([
+      {
+        ...ready,
+        gate: { ...ready.gate, signedOff: true, archived: true },
+        status: 'archived',
+        archivedAt: '2025-09-01T09:00:00Z',
+        archivedByName: 'Partner A',
+        archiveNote: 'Final audit file archived.',
+        reportDate: '2025-08-20',
+        udin: '25123456ABCDEFGHIJ',
+        retainUntil: '2032-08-20',
+      },
+    ]);
+    render(wrap(<CompletionPanel engagementId="e1" />));
+    expect(await screen.findByText('Archive record (10)')).toBeInTheDocument();
+    expect(screen.getByText('25123456ABCDEFGHIJ')).toBeInTheDocument();
+    expect(screen.getByText('2032-08-20')).toBeInTheDocument();
+    expect(screen.queryByText('Archiving (10)')).not.toBeInTheDocument();
   });
 });

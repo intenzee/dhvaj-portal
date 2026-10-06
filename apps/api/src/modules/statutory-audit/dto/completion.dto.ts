@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { COMPLETION_ITEM_STATE, type CompletionItemState } from '@hsdg/contracts';
 
 /** Update a Completion / Reporting checklist item (§27.07/§27.08; version required). */
@@ -37,4 +37,17 @@ export class ArchiveFileDto {
   @IsString()
   @MaxLength(4000)
   note?: string | null;
+
+  @ApiPropertyOptional({
+    description: "Date of the auditor's report (yyyy-mm-dd); defaults to the sign-off date.",
+  })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  reportDate?: string | null;
+
+  @ApiPropertyOptional({ description: "ICAI UDIN of the auditor's report (18 characters)." })
+  @IsOptional()
+  @IsString()
+  @MaxLength(18)
+  udin?: string | null;
 }

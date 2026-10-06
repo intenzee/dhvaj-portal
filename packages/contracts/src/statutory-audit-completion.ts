@@ -174,7 +174,44 @@ export interface StatutoryAuditCompletion {
   archiveNote: string | null;
   /** Section 09 — the partner's sign-off pack, drafted from the file. */
   signOffPack: SignOffPack;
+  /** Date of the auditor's report (recorded on archiving; sign-off date until then). */
+  reportDate: string | null;
+  /** ICAI UDIN of the auditor's report, recorded on archiving. */
+  udin: string | null;
+  /** Keep the file until (report date + 7 years, SQC 1), set on archiving. */
+  retainUntil: string | null;
+  /** Section 10 — the archive pack, drafted from the file. */
+  archivePack: ArchivePack;
 }
+
+/**
+ * Section 10 — the archive pack: whether the file can be archived (the
+ * sign-off gate), the SA 230 assembly deadline and SQC 1 retention, what
+ * archiving will freeze while still open, evidence gaps, and what next
+ * year's file will bring forward. Only `blocking` checks stop archiving.
+ */
+export interface ArchivePack {
+  checks: SignOffCheck[];
+  /** The file can be archived now (signed off, not yet archived). */
+  ready: boolean;
+  /** How many advisory checks need attention before archiving. */
+  attention: number;
+  /** Auditor's report date used for the deadlines (yyyy-mm-dd). */
+  reportDate: string | null;
+  /** Assemble the final file by (report date + 60 days, SA 230 / SQC 1). */
+  assemblyDueBy: string | null;
+  /** Days left to the assembly deadline (negative when overdue). */
+  daysToAssemble: number | null;
+  /** Keep the file until (report date + 7 years, SQC 1). */
+  retainUntil: string | null;
+  /** What next year's planning (03.1.6) will bring forward from this file. */
+  carryForward: string[];
+  /** Drafted archive note, recorded when archiving without one. */
+  draftNote: string;
+}
+
+/** ICAI UDIN: 18 characters — 2-digit year, 6-digit membership no., 10 alphanumerics. */
+export const UDIN_PATTERN = /^\d{8}[A-Z0-9]{10}$/;
 
 /**
  * Section 09 — one line of the partner's sign-off pack. A `blocking` check

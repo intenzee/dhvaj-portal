@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  Archive,
   ArrowRight,
   CheckCircle2,
   Lock,
@@ -18,6 +19,7 @@ import {
   canSignOff,
   COMPLETION_ITEM_STATE,
   PERMISSION,
+  UDIN_PATTERN,
   type AuditCompletionItem,
   type CompletionItemState,
   type CompletionSection,
@@ -31,7 +33,7 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
-import { Select, Textarea } from '@/components/form';
+import { Input, Select, Textarea } from '@/components/form';
 import { openAuditPhase } from './audit-file-nav';
 
 /**
@@ -140,6 +142,25 @@ function CompletionFile({
     if (!memoEdited) setMemo(pack.draftMemo);
   }, [pack.draftMemo, memoEdited]);
 
+  // Section 10 — the archive form starts from the file: report date = sign-off
+  // date, the drafted note. An untouched note archives with the server's draft.
+  const ap = file.archivePack;
+  const [reportDate, setReportDate] = useState(file.reportDate ?? '');
+  const [udin, setUdin] = useState(file.udin ?? '');
+  const [archiveNote, setArchiveNote] = useState(ap.draftNote);
+  const [noteEdited, setNoteEdited] = useState(false);
+  useEffect(() => {
+    if (!noteEdited) setArchiveNote(ap.draftNote);
+  }, [ap.draftNote, noteEdited]);
+  useEffect(() => setReportDate(file.reportDate ?? ''), [file.reportDate]);
+  const udinClean = udin.trim().toUpperCase();
+  const udinError = udinClean && !UDIN_PATTERN.test(udinClean) ? 'UDIN is 18 characters.' : null;
+  const archiveBody = (): Record<string, unknown> => ({
+    ...(reportDate && reportDate !== file.reportDate ? { reportDate } : {}),
+    ...(udinClean ? { udin: udinClean } : {}),
+    ...(noteEdited && archiveNote.trim() ? { note: archiveNote } : {}),
+  });
+
   return (
     <div className="space-y-3">
       {/* Status header */}
@@ -211,6 +232,25 @@ function CompletionFile({
         </Card>
       )}
 
+      {file.gate.signedOff && !file.gate.archived && (
+        <ArchiveCard
+          file={file}
+          canEdit={canManage}
+          reportDate={reportDate}
+          onReportDate={setReportDate}
+          udin={udin}
+          onUdin={setUdin}
+          udinError={udinError}
+          note={archiveNote}
+          drafted={!noteEdited}
+          onNote={(v) => {
+            setArchiveNote(v);
+            setNoteEdited(v !== ap.draftNote);
+          }}
+        />
+      )}
+      {file.gate.archived && <ArchiveRecord file={file} />}
+
       {/* Gated actions */}
       <Card className="space-y-3 p-4">
         <h3 className="text-sm font-semibold text-ink">Partner actions</h3>
@@ -242,8 +282,10 @@ function CompletionFile({
           <Button
             variant="secondary"
             size="sm"
-            disabled={!canManage || !canArchive(file.gate) || archive.isPending}
-            onClick={() => archive.mutate({})}
+            disabled={
+              !canManage || !canArchive(file.gate) || archive.isPending || Boolean(udinError)
+            }
+            onClick={() => archive.mutate(archiveBody())}
           >
             <Lock className="h-4 w-4" />
             {file.gate.archived ? 'Archived' : 'Archive & lock'}
@@ -324,6 +366,142 @@ function SignOffCard({
           )}
         </div>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * Section 10 — the archive pack: the sign-off gate, the SA 230 assembly
+ * deadline and SQC 1 retention, what archiving would freeze, evidence gaps
+ * and what next year's file brings forward; then the report date, UDIN and
+ * the drafted archive note.
+ */
+function ArchiveCard({
+  file,
+  canEdit,
+  reportDate,
+  onReportDate,
+  udin,
+  onUdin,
+  udinError,
+  note,
+  drafted,
+  onNote,
+}: {
+  file: StatutoryAuditCompletion;
+  canEdit: boolean;
+  reportDate: string;
+  onReportDate: (v: string) => void;
+  udin: string;
+  onUdin: (v: string) => void;
+  udinError: string | null;
+  note: string;
+  drafted: boolean;
+  onNote: (v: string) => void;
+}): JSX.Element {
+  const pack = file.archivePack;
+  const days = pack.daysToAssemble;
+  const gates = pack.checks.filter((c) => c.blocking);
+  const notes = pack.checks.filter((c) => !c.blocking);
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between border-b border-line bg-surface-raised/60 px-4 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+          Archiving (10)
+        </span>
+        {days == null ? null : days >= 0 ? (
+          <Badge tone={days <= 7 ? 'warn' : 'info'}>
+            Assemble by {pack.assemblyDueBy} · {days} day(s) left
+          </Badge>
+        ) : (
+          <Badge tone="danger">Assembly overdue by {-days} day(s)</Badge>
+        )}
+      </div>
+      <div className="space-y-3 px-4 py-3">
+        <CheckList title="Before archiving" checks={gates} />
+        <CheckList
+          title={pack.attention > 0 ? `Worth closing first (${pack.attention})` : 'Worth closing first'}
+          checks={notes}
+        />
+        {canEdit && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-ink">
+              Auditor&apos;s report date
+              <Input
+                type="date"
+                value={reportDate}
+                onChange={(e) => onReportDate(e.target.value)}
+                className="mt-1 h-8 text-xs"
+              />
+              <span className="mt-0.5 block text-[11px] font-normal text-ink-faint">
+                Defaults to the sign-off date. Retention runs 7 years from it.
+              </span>
+            </label>
+            <label className="text-xs font-medium text-ink">
+              UDIN
+              <Input
+                value={udin}
+                onChange={(e) => onUdin(e.target.value)}
+                placeholder="e.g. 25123456ABCDEFGHIJ"
+                maxLength={18}
+                className="mt-1 h-8 font-mono text-xs uppercase"
+              />
+              <span className="mt-0.5 block text-[11px] font-normal text-ink-faint">
+                {udinError ?? 'From the ICAI UDIN portal, for the auditor’s report.'}
+              </span>
+            </label>
+          </div>
+        )}
+        <div>
+          <p className="text-xs font-medium text-ink">Archive note</p>
+          {canEdit ? (
+            <Textarea
+              rows={6}
+              value={note}
+              onChange={(e) => onNote(e.target.value)}
+              className="mt-1 min-h-0 text-xs"
+              aria-label="Archive note"
+            />
+          ) : (
+            <p className="mt-1 whitespace-pre-line text-xs text-ink-muted">{note}</p>
+          )}
+          {drafted && (
+            <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-ink-faint">
+              <Sparkles className="h-3 w-3" aria-hidden />
+              Drafted from the file — recorded with the report date and UDIN above when you
+              archive.
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** The locked file's archive record (Section 10). */
+function ArchiveRecord({ file }: { file: StatutoryAuditCompletion }): JSX.Element {
+  return (
+    <Card className="space-y-2 p-4">
+      <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-ink">
+        <Archive className="h-4 w-4" aria-hidden />
+        Archive record (10)
+      </h3>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+        <dt className="text-ink-faint">Report date</dt>
+        <dd className="text-ink">{file.reportDate ?? '—'}</dd>
+        <dt className="text-ink-faint">UDIN</dt>
+        <dd className="font-mono text-ink">{file.udin ?? '—'}</dd>
+        <dt className="text-ink-faint">Archived</dt>
+        <dd className="text-ink">
+          {file.archivedAt?.slice(0, 10)}
+          {file.archivedByName ? ` by ${file.archivedByName}` : ''}
+        </dd>
+        <dt className="text-ink-faint">Keep until</dt>
+        <dd className="text-ink">{file.retainUntil ?? '—'}</dd>
+      </dl>
+      {file.archiveNote && (
+        <p className="whitespace-pre-line text-xs text-ink-muted">{file.archiveNote}</p>
+      )}
     </Card>
   );
 }
