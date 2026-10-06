@@ -1,10 +1,20 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type PbcStandardListResult, type StatutoryAuditPbc } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type PbcStandardListResult,
+  type PbcSuggestionResult,
+  type StatutoryAuditPbc,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditPbcService } from './audit-pbc.service';
-import { CreatePbcItemDto, SetPbcStatusDto, UpdatePbcItemDto } from './dto/pbc.dto';
+import {
+  CreatePbcItemDto,
+  MarkPbcChasedDto,
+  SetPbcStatusDto,
+  UpdatePbcItemDto,
+} from './dto/pbc.dto';
 
 /**
  * Statutory Audit — PBC Master Client Information Tracker endpoints (Audit Spec §16).
@@ -42,10 +52,44 @@ export class AuditPbcController {
     return this.pbc.createItem(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
   }
 
+  @Post(':id/statutory-audit/:workflowInstanceId/pbc/suggest')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Refresh the suggested PBC requests from the file (§16)',
+    description:
+      'Adds what the file calls for (standard list, 03.5 areas, Section 04 risks, completion ' +
+      "stage, last year's custom requests) and fills blank owners, linked areas and due dates. " +
+      'A request the team deleted is never suggested again.',
+  })
+  suggest(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<PbcSuggestionResult> {
+    return this.pbc.suggest(rlsContextFromPrincipal(principal), id, workflowInstanceId);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/pbc/chased')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Record that the client was reminded about PBC requests today' })
+  markChased(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: MarkPbcChasedDto,
+  ): Promise<StatutoryAuditPbc> {
+    return this.pbc.markChased(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto.pbcIds,
+    );
+  }
+
   @Post(':id/statutory-audit/:workflowInstanceId/pbc/standard-list')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
-    summary: 'Add the standard PBC request list, tailored from the client master (§16)',
+    summary: 'Add the suggested PBC requests (older clients; same as /pbc/suggest) (§16)',
     description:
       'Adds the usual statutory-audit requests plus those the client master calls for ' +
       '(inventory, borrowings, imports/exports, group, first-year audit), each with a client ' +

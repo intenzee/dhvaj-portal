@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsIn,
   IsInt,
@@ -145,4 +148,14 @@ export class SetPbcStatusDto {
   @IsInt()
   @Min(1)
   version!: number;
+}
+
+/** Record that the client was reminded about these requests today. */
+export class MarkPbcChasedDto {
+  @ApiProperty({ type: [String], description: 'The PBC requests the reminder covered.' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  pbcIds!: string[];
 }

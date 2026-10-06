@@ -77,18 +77,22 @@ describe('one-step automation for the team', () => {
     );
   });
 
-  it('opens the PBC tracker before Planning is approved and adds the standard requests', async () => {
+  it('opens the PBC tracker before Planning is approved and refreshes the suggested requests', async () => {
     apiFetch.mockImplementation((url: string) => {
       if (url.endsWith('/work-areas')) return Promise.resolve([]);
-      if (url.endsWith('/standard-list')) return Promise.resolve({ added: 12, tracker: {} });
+      if (url.endsWith('/pbc/suggest'))
+        return Promise.resolve({ added: 12, filled: 0, tracker: {} });
       return Promise.resolve([
         { workflowInstanceId: 'wf1', planningApproved: false, overdueCount: 0, items: [] },
       ]);
     });
     const user = userEvent.setup();
     render(wrap(<PbcPanel engagementId="e1" />));
-    await user.click(await screen.findByRole('button', { name: /Add standard requests/ }));
-    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/statutory-audit/wf1/pbc/standard-list', {
+    expect(
+      await screen.findByText(/builds itself from the file once Planning is approved/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Refresh suggested requests/ }));
+    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/statutory-audit/wf1/pbc/suggest', {
       method: 'POST',
       body: {},
     });

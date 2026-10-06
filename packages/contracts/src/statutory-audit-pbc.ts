@@ -68,6 +68,12 @@ export interface AuditPbcItem {
   requestedByName: string | null;
   /** True when the request is outstanding and past its due date (§29). */
   isOverdue: boolean;
+  /** Stable key when the request was suggested from the file; null when typed. */
+  sourceKey: string | null;
+  /** Where a suggested request came from, e.g. "Section 04 risk R3". */
+  sourceNote: string | null;
+  /** When the client was last reminded about this request. */
+  lastChasedOn: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -86,7 +92,53 @@ export interface StatutoryAuditPbc {
   items: AuditPbcItem[];
   /** How many items are outstanding and past their due date (§29 "PBC overdue"). */
   overdueCount: number;
+  summary: PbcSummary;
+  /** Drafted reminders, one per client contact, for overdue / due-soon requests. */
+  chase: PbcChaseGroup[];
 }
+
+/** Where the tracker stands at a glance. */
+export interface PbcSummary {
+  /** The client still owes these (requested / rejected / clarification). */
+  outstanding: number;
+  overdue: number;
+  /** Outstanding and due within the next few days. */
+  dueSoon: number;
+  /** Received or under review — waiting on the team, not the client. */
+  toReview: number;
+  accepted: number;
+}
+
+/**
+ * One drafted reminder to a client contact: their overdue and due-soon
+ * requests, with a subject and body ready to send.
+ */
+export interface PbcChaseGroup {
+  /** The client owner as shown on the requests. */
+  owner: string;
+  /** From the client's contacts master, when the owner is found there. */
+  email: string | null;
+  pbcIds: string[];
+  /** One line per request (ref, requirement, due / overdue). */
+  lines: string[];
+  overdue: number;
+  /** The most recent reminder among these requests. */
+  lastChasedOn: string | null;
+  subject: string;
+  body: string;
+}
+
+/** Result of refreshing the suggested requests from the file. */
+export interface PbcSuggestionResult {
+  tracker: StatutoryAuditPbc;
+  /** New requests added. */
+  added: number;
+  /** Blank owner / linked area / due date filled on existing requests. */
+  filled: number;
+}
+
+/** Days ahead that count as "due soon" for the chase list. */
+export const PBC_DUE_SOON_DAYS = 3;
 
 /**
  * The next human-facing PBC reference ("PBC-001", "PBC-002", …), one past the

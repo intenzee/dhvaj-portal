@@ -5,14 +5,19 @@
 -- date of the auditor's report (defaults to the sign-off date), its ICAI UDIN,
 -- and the date the file must be kept until (report date + 7 years, SQC 1).
 -- The 60-day assembly deadline (SA 230) is derived from the report date.
+--
+-- Ordered after 1765600000000_audit_file_undo (it first shipped with the same
+-- timestamp, which node-pg-migrate's order check rejects) and idempotent, so a
+-- database that already ran it under its old name can run it again safely.
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- Up Migration
 
 ALTER TABLE hsdg.service_workflow_instances
-  ADD COLUMN report_date  date,
-  ADD COLUMN udin         text CHECK (udin IS NULL OR udin ~ '^[0-9]{8}[A-Z0-9]{10}$'),
-  ADD COLUMN retain_until date;
+  ADD COLUMN IF NOT EXISTS report_date  date,
+  ADD COLUMN IF NOT EXISTS udin         text
+    CHECK (udin IS NULL OR udin ~ '^[0-9]{8}[A-Z0-9]{10}$'),
+  ADD COLUMN IF NOT EXISTS retain_until date;
 
 -- Files already archived: report date = sign-off date, kept seven years.
 UPDATE hsdg.service_workflow_instances
