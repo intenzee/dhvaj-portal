@@ -95,7 +95,7 @@ export function periodEndLabel(financialYear: string | null): string {
   return `31 March ${end}`;
 }
 
-function money(n: number | null | undefined): string | null {
+export function money(n: number | null | undefined): string | null {
   return n == null ? null : `₹${n.toLocaleString('en-IN')}`;
 }
 

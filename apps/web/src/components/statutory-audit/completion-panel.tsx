@@ -2,18 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, CheckCircle2, Lock, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Lock,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  XCircle,
+} from 'lucide-react';
 import {
   canApproveCompletion,
   canArchive,
   canSignOff,
-  signOffBlockers,
   COMPLETION_ITEM_STATE,
   PERMISSION,
   type AuditCompletionItem,
   type CompletionItemState,
   type CompletionSection,
   type CompletionSuggestionResult,
+  type SignOffCheck,
   type StatutoryAuditCompletion,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -56,7 +65,9 @@ export function CompletionPanel({ engagementId }: { engagementId: string }): JSX
   const query = useQuery({
     queryKey: QK(engagementId),
     queryFn: () =>
-      apiFetch<StatutoryAuditCompletion[]>(`/engagements/${engagementId}/statutory-audit/completion`),
+      apiFetch<StatutoryAuditCompletion[]>(
+        `/engagements/${engagementId}/statutory-audit/completion`,
+      ),
   });
 
   if (query.isLoading) return <Spinner label="Loading completion…" />;
@@ -120,9 +131,14 @@ function CompletionFile({
     onError: (e: unknown) => toast(e instanceof ApiError ? e.message : 'Could not refresh.'),
   });
 
-  const blockers = signOffBlockers(file.gate);
-  const blockerTarget = (b: string): string | null =>
-    /audit area/.test(b) ? 'audit_areas' : /review note/.test(b) ? 'review' : null;
+  // The partner's memo starts as the draft; signing with it unchanged
+  // records the draft (the server drafts the same text).
+  const pack = file.signOffPack;
+  const [memo, setMemo] = useState(pack.draftMemo);
+  const [memoEdited, setMemoEdited] = useState(false);
+  useEffect(() => {
+    if (!memoEdited) setMemo(pack.draftMemo);
+  }, [pack.draftMemo, memoEdited]);
 
   return (
     <div className="space-y-3">
@@ -155,9 +171,7 @@ function CompletionFile({
             {file.completionApprovedByName && (
               <p>Completion approved by {file.completionApprovedByName}.</p>
             )}
-            {file.signedOffByName && (
-              <p>Signed off by {file.signedOffByName}.</p>
-            )}
+            {file.signedOffByName && <p>Signed off by {file.signedOffByName}.</p>}
             {file.archivedByName && <p>Archived by {file.archivedByName} — file locked.</p>}
           </div>
         )}
@@ -178,33 +192,28 @@ function CompletionFile({
         canManage={canManage && !locked}
       />
 
+      {!file.gate.signedOff && (
+        <SignOffCard
+          pack={pack}
+          memo={memo}
+          drafted={!memoEdited}
+          canEdit={canManage && !locked}
+          onMemo={(v) => {
+            setMemo(v);
+            setMemoEdited(v !== pack.draftMemo);
+          }}
+        />
+      )}
+      {file.gate.signedOff && file.signoffMemo && (
+        <Card className="p-4">
+          <h3 className="text-sm font-semibold text-ink">Partner sign-off (09)</h3>
+          <p className="mt-2 whitespace-pre-line text-xs text-ink-muted">{file.signoffMemo}</p>
+        </Card>
+      )}
+
       {/* Gated actions */}
       <Card className="space-y-3 p-4">
         <h3 className="text-sm font-semibold text-ink">Partner actions</h3>
-
-        {blockers.length > 0 && !file.gate.signedOff && (
-          <ul className="space-y-1 rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700">
-            {blockers.map((b) => {
-              const target = blockerTarget(b);
-              return (
-                <li key={b}>
-                  •{' '}
-                  {target ? (
-                    <button
-                      type="button"
-                      className="underline underline-offset-2"
-                      onClick={() => openAuditPhase(target)}
-                    >
-                      {b}
-                    </button>
-                  ) : (
-                    b
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
 
         {!file.gate.completionApproved && (
           <p className="text-xs text-ink-muted">
@@ -225,7 +234,7 @@ function CompletionFile({
             variant="primary"
             size="sm"
             disabled={!canManage || !canSignOff(file.gate) || signOff.isPending}
-            onClick={() => signOff.mutate({})}
+            onClick={() => signOff.mutate(memoEdited && memo.trim() ? { memo } : {})}
           >
             <ShieldCheck className="h-4 w-4" />
             {file.gate.signedOff ? 'Signed off' : 'Sign off'}
@@ -241,6 +250,121 @@ function CompletionFile({
           </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * Section 09 — the partner's sign-off pack: each §29 gate and what the
+ * partner should know, read from the file with a link to put it right, and
+ * the drafted sign-off memo.
+ */
+function SignOffCard({
+  pack,
+  memo,
+  drafted,
+  canEdit,
+  onMemo,
+}: {
+  pack: StatutoryAuditCompletion['signOffPack'];
+  memo: string;
+  drafted: boolean;
+  canEdit: boolean;
+  onMemo: (memo: string) => void;
+}): JSX.Element {
+  const gates = pack.checks.filter((c) => c.blocking);
+  const notes = pack.checks.filter((c) => !c.blocking);
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between border-b border-line bg-surface-raised/60 px-4 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+          Partner sign-off (09)
+        </span>
+        {pack.ready ? (
+          <Badge tone="success">Ready to sign off</Badge>
+        ) : (
+          <Badge tone="warn">
+            {gates.filter((g) => !g.ok).length} of {gates.length} gates open
+          </Badge>
+        )}
+      </div>
+      <div className="space-y-3 px-4 py-3">
+        {pack.engagementPartnerName && (
+          <p className="text-xs text-ink-muted">
+            Signed by the engagement partner, {pack.engagementPartnerName}.
+          </p>
+        )}
+        <CheckList title="Before sign-off" checks={gates} />
+        <CheckList
+          title={
+            pack.attention > 0
+              ? `For the partner's attention (${pack.attention})`
+              : "For the partner's attention"
+          }
+          checks={notes}
+        />
+        <div>
+          <p className="text-xs font-medium text-ink">Sign-off memo</p>
+          {canEdit ? (
+            <Textarea
+              rows={8}
+              value={memo}
+              onChange={(e) => onMemo(e.target.value)}
+              className="mt-1 min-h-0 text-xs"
+              aria-label="Sign-off memo"
+            />
+          ) : (
+            <p className="mt-1 whitespace-pre-line text-xs text-ink-muted">{memo}</p>
+          )}
+          {drafted && (
+            <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-ink-faint">
+              <Sparkles className="h-3 w-3" aria-hidden />
+              Drafted from the file — recorded as written when you sign off.
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function CheckList({ title, checks }: { title: string; checks: SignOffCheck[] }): JSX.Element {
+  return (
+    <div>
+      <p className="text-xs font-medium text-ink">{title}</p>
+      <ul className="mt-1 divide-y divide-line rounded-lg border border-line">
+        {checks.map((c) => {
+          const Icon = c.ok ? CheckCircle2 : c.blocking ? XCircle : AlertTriangle;
+          const tone = c.ok
+            ? 'text-emerald-600'
+            : c.blocking
+              ? 'text-danger-600'
+              : 'text-amber-600';
+          return (
+            <li key={c.key} className="flex gap-2 px-3 py-2 text-sm">
+              <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone}`} aria-hidden />
+              <div className="min-w-0">
+                <p className="font-medium text-ink">{c.label}</p>
+                <ul className="mt-0.5 space-y-0.5 text-xs text-ink-muted">
+                  {c.facts.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+                {c.goTo && (
+                  <button
+                    type="button"
+                    onClick={() => openAuditPhase(c.goTo!.phaseKey)}
+                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:underline"
+                  >
+                    {c.goTo.label}
+                    <ArrowRight className="h-3 w-3" aria-hidden />
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -273,12 +397,7 @@ function ChecklistCard({
       </div>
       <ul className="divide-y divide-line">
         {rows.map((item) => (
-          <ItemRow
-            key={item.id}
-            engagementId={engagementId}
-            item={item}
-            canManage={canManage}
-          />
+          <ItemRow key={item.id} engagementId={engagementId} item={item} canManage={canManage} />
         ))}
       </ul>
     </Card>
@@ -358,7 +477,9 @@ function ItemRow({
             className="mt-1 min-h-0 text-xs"
           />
         ) : (
-          item.note && <p className="mt-1 whitespace-pre-line text-xs text-ink-muted">{item.note}</p>
+          item.note && (
+            <p className="mt-1 whitespace-pre-line text-xs text-ink-muted">{item.note}</p>
+          )
         )}
         {item.noteSuggested && item.note && (
           <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-ink-faint">

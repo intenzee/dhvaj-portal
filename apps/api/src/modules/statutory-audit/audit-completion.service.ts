@@ -10,6 +10,7 @@ import {
   canArchive,
   canSignOff,
   sectionResolved,
+  PBC_OUTSTANDING_STATUSES,
   type AuditCompletionItem,
   type AuditWorkflowStatus,
   type CompletionGate,
@@ -29,6 +30,7 @@ import {
   type PlannedCompletionItem,
 } from './completion-automation';
 import { isEngagementLead } from './master-facts';
+import { planSignOff, type SignOffFacts } from './sign-off-automation';
 
 interface ShellRow {
   id: string;
@@ -45,6 +47,11 @@ interface ShellRow {
   archived_by_name: string | null;
   archive_note: string | null;
 }
+
+type SignOffExtras = Pick<
+  SignOffFacts,
+  'blockingNotes' | 'pbcOutstanding' | 'pbcOverdue' | 'openReassessments' | 'engagementPartnerName'
+>;
 
 interface ItemRow {
   id: string;
@@ -143,6 +150,8 @@ export class AuditCompletionService {
         throw new ConflictException('This audit file is signed off; the checklist is final.');
       }
       if (shell.frozen) continue;
+      // Completion approved → Section 09 is under way.
+      if (shell.completion_approved) await this.unlockPhase(client, shell.id, 'sign_off');
       const plan = planCompletionItems(await this.loadFacts(client, engagementId, shell.id));
       const { rows: items } = await client.query<ItemRow>(
         `SELECT * FROM hsdg.audit_completion_items WHERE workflow_instance_id = $1`,
@@ -345,11 +354,15 @@ export class AuditCompletionService {
     const openAreasByShell = new Map(openAreas.map((a) => [a.workflow_instance_id, Number(a.n)]));
 
     const plans = new Map<string, Map<string, PlannedCompletionItem>>();
+    const facts = new Map<string, CompletionFacts>();
     for (const shell of shells) {
-      plans.set(
-        shell.id,
-        planCompletionItems(await this.loadFacts(client, engagementId, shell.id)),
-      );
+      const f = await this.loadFacts(client, engagementId, shell.id);
+      facts.set(shell.id, f);
+      plans.set(shell.id, planCompletionItems(f));
+    }
+    const extras = new Map<string, SignOffExtras>();
+    for (const shell of shells) {
+      extras.set(shell.id, await this.loadSignOffExtras(client, engagementId, shell.id));
     }
 
     return shells.map((shell) => {
@@ -366,6 +379,13 @@ export class AuditCompletionService {
         signedOff: shell.signed_off_at != null,
         archived: shell.archived_at != null || shell.status === 'archived',
       };
+      const signOffPack = planSignOff({
+        ...facts.get(shell.id)!,
+        ...extras.get(shell.id)!,
+        items: shellItems,
+        completionApprovedAt: shell.completion_approved_at,
+        completionApprovedByName: shell.completion_approved_by_name,
+      });
       return {
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
@@ -382,8 +402,55 @@ export class AuditCompletionService {
         archivedAt: iso(shell.archived_at),
         archivedByName: shell.archived_by_name,
         archiveNote: shell.archive_note,
+        signOffPack,
       };
     });
+  }
+
+  /** What Section 09 reads beyond the completion facts, for one shell. */
+  private async loadSignOffExtras(
+    client: PoolClient,
+    engagementId: string,
+    wi: string,
+  ): Promise<SignOffExtras> {
+    const notes = await client.query<{ body: string; target_label: string | null }>(
+      `SELECT n.body,
+              COALESCE(p.procedure_ref || ' ' || p.title, a.title) AS target_label
+         FROM hsdg.audit_review_notes n
+         LEFT JOIN hsdg.audit_procedures p
+                ON n.target_type = 'procedure' AND p.id = n.target_id
+         LEFT JOIN hsdg.audit_work_areas a
+                ON n.target_type = 'work_area' AND a.id = n.target_id
+        WHERE n.workflow_instance_id = $1
+          AND n.is_blocking AND n.status IN ('open','responded')
+        ORDER BY n.created_at`,
+      [wi],
+    );
+    const pbc = await client.query<{ outstanding: string; overdue: string }>(
+      `SELECT COUNT(*)::text AS outstanding,
+              COUNT(*) FILTER (WHERE due_date < current_date)::text AS overdue
+         FROM hsdg.audit_pbc_items
+        WHERE workflow_instance_id = $1 AND status = ANY($2::text[])`,
+      [wi, PBC_OUTSTANDING_STATUSES],
+    );
+    const re = await client.query<{ change_type: string; reason: string }>(
+      `SELECT change_type, reason FROM hsdg.audit_reassessments
+        WHERE workflow_instance_id = $1 AND status = 'open' ORDER BY created_at`,
+      [wi],
+    );
+    const partner = await client.query<{ full_name: string | null }>(
+      `SELECT p.full_name FROM hsdg.engagements e
+         LEFT JOIN hsdg.employees p ON p.id = e.engagement_partner_id
+        WHERE e.id = $1`,
+      [engagementId],
+    );
+    return {
+      blockingNotes: notes.rows.map((n) => ({ body: n.body, targetLabel: n.target_label })),
+      pbcOutstanding: Number(pbc.rows[0]?.outstanding ?? 0),
+      pbcOverdue: Number(pbc.rows[0]?.overdue ?? 0),
+      openReassessments: re.rows.map((r) => `${r.change_type.replace(/_/g, ' ')}: ${r.reason}`),
+      engagementPartnerName: partner.rows[0]?.full_name ?? null,
+    };
   }
 
   // ── Update a checklist item (§27.07/§27.08) ─────────────────────────────────
@@ -480,6 +547,8 @@ export class AuditCompletionService {
       // Phase 07 complete; unlock Phase 08 (Reporting) — §7 progressive unlock.
       await this.setPhase(client, workflowInstanceId, 'completion', 'complete');
       await this.unlockPhase(client, workflowInstanceId, 'reporting');
+      // Section 09 starts: the sign-off pack is now what the partner works.
+      await this.unlockPhase(client, workflowInstanceId, 'sign_off');
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.completion_approved',
         objectType: 'service_workflow_instance',
@@ -498,7 +567,8 @@ export class AuditCompletionService {
     input: { memo?: string | null },
   ): Promise<StatutoryAuditCompletion> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const gate = await this.loadGate(client, engagementId, workflowInstanceId);
+      const shell = await this.loadShell(client, engagementId, workflowInstanceId);
+      const gate = shell.gate;
       if (!canSignOff(gate)) {
         throw new BadRequestException(
           'Sign-off prerequisites are not met: completion must be approved, every reporting item resolved, all audit areas concluded, and no blocking review note open (§28, §29).',
@@ -511,7 +581,12 @@ export class AuditCompletionService {
                 signoff_memo = $3,
                 status = 'completed'
           WHERE id = $1 AND signed_off_at IS NULL`,
-        [workflowInstanceId, ctx.employeeId ?? null, input.memo?.trim() || null],
+        [
+          workflowInstanceId,
+          ctx.employeeId ?? null,
+          // No memo typed → the drafted Section 09 sign-off memo is recorded.
+          input.memo?.trim() || shell.signOffPack.draftMemo,
+        ],
       );
       if ((result.rowCount ?? 0) === 0) {
         throw new ConflictException('The file was signed off concurrently; refresh and retry.');
@@ -583,12 +658,21 @@ export class AuditCompletionService {
     engagementId: string,
     workflowInstanceId: string,
   ): Promise<CompletionGate> {
+    return (await this.loadShell(client, engagementId, workflowInstanceId)).gate;
+  }
+
+  /** One shell's completion view, asserting it exists on this engagement. */
+  private async loadShell(
+    client: PoolClient,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<StatutoryAuditCompletion> {
     const all = await this.readCompletion(client, engagementId);
     const shell = all.find((c) => c.workflowInstanceId === workflowInstanceId);
     if (!shell) {
       throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
     }
-    return shell.gate;
+    return shell;
   }
 
   /** Re-read the engagement and return the mutated shell (post-mutation view). */

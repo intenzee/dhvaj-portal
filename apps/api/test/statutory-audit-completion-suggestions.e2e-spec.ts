@@ -210,8 +210,27 @@ describe('Statutory Audit — Section 07 completion from the file (e2e)', () => 
     const approved = await post(pa, `${base}/${shellId}/completion/approve`, {}).expect(201);
     expect(approved.body.completionMemo).toBe(memo);
 
+    // Section 09: the sign-off pack reads the file and says what is left.
+    const pack = (approved.body as StatutoryAuditCompletion).signOffPack;
+    const chk = (key: string) => pack.checks.find((x) => x.key === key)!;
+    expect(chk('completion_approved').ok).toBe(true);
+    expect(chk('reporting_resolved')).toMatchObject({
+      ok: false,
+      blocking: true,
+      goTo: { phaseKey: 'reporting' },
+    });
+    expect(chk('misstatements').facts[1]).toContain('Post-year-end write-off not adjusted');
+    expect(pack.ready).toBe(false);
+    expect(pack.draftMemo).toMatch(/^Partner sign-off — financial year 2024-25/);
+    const phases = (await get(pa, base)).body[0].phases as Array<{
+      phaseKey: string;
+      state: string;
+    }>;
+    expect(phases.find((p) => p.phaseKey === 'sign_off')?.state).toBe('in_progress');
+
     // An outsider cannot refresh the checklist.
     const res = await post(pb, `${base}/${shellId}/completion/suggest`, {});
     expect([403, 404]).toContain(res.status);
-  });
+    // Builds a whole file end to end (01 → 07/09), so it needs more than jest's 5s.
+  }, 30_000);
 });

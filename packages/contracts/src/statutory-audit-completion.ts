@@ -172,6 +172,37 @@ export interface StatutoryAuditCompletion {
   archivedAt: string | null;
   archivedByName: string | null;
   archiveNote: string | null;
+  /** Section 09 — the partner's sign-off pack, drafted from the file. */
+  signOffPack: SignOffPack;
+}
+
+/**
+ * Section 09 — one line of the partner's sign-off pack. A `blocking` check
+ * is a §29 gate (sign-off is refused until it is `ok`); the others are what a
+ * partner should know before signing (misstatements, significant risks, PBC,
+ * reassessments) and never stop sign-off.
+ */
+export interface SignOffCheck {
+  key: string;
+  label: string;
+  ok: boolean;
+  blocking: boolean;
+  facts: string[];
+  /** Where to put it right, when it is not ok. */
+  goTo: CompletionGoTo | null;
+}
+
+/** Section 09 — the partner's sign-off pack, read from the whole file. */
+export interface SignOffPack {
+  checks: SignOffCheck[];
+  /** Every blocking check is ok (same rule as the §29 gate). */
+  ready: boolean;
+  /** How many advisory checks need the partner's attention. */
+  attention: number;
+  /** The engagement partner, who signs. */
+  engagementPartnerName: string | null;
+  /** Drafted partner sign-off memo, used when signing off without one. */
+  draftMemo: string;
 }
 
 /** Whether a checklist item counts as resolved (complete or not applicable). Pure. */
