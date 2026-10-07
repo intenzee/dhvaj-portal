@@ -1,3 +1,4 @@
+import type { SectionPack } from './statutory-audit-section-pack';
 /**
  * Statutory Audit — Framework (Phase 02) vocabulary (Audit Spec §18–§20, §33).
  *
@@ -172,4 +173,6 @@ export interface StatutoryAuditFramework {
   approval: FrameworkApproval | null;
   /** How many areas still lack a professional conclusion (0 ⇒ ready to approve). */
   undecidedCount: number;
+  /** What approval needs, what to know and a draft framework memo. */
+  pack: SectionPack;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, AlertTriangle, Sparkles } from 'lucide-react';
 import {
@@ -26,6 +26,8 @@ import { humanize } from '@/lib/format';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
+import { useAuditAnchor } from './audit-file-nav';
+import { SectionPackChecks } from './section-pack-card';
 
 /**
  * Risk Assessment (Phase 04) screen (Audit Spec §22). The risk register — each
@@ -132,6 +134,11 @@ export function RiskPanel({
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
   const [adding, setAdding] = useState(false);
+  // "Go to" links name a risk (`risk-<id>`): open it for editing.
+  const [focus, setFocus] = useState<{ id: string; at: number } | null>(null);
+  useAuditAnchor('risk', (anchor) => {
+    if (anchor.startsWith('risk-')) setFocus({ id: anchor.slice('risk-'.length), at: Date.now() });
+  });
 
   const query = useQuery({
     queryKey: RISK_QK(engagementId),
@@ -210,6 +217,16 @@ export function RiskPanel({
         )}
       </Card>
 
+      <Card className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-ink">Ready for the audit work?</h3>
+          <Badge tone={register.pack.ready ? 'success' : 'warn'}>
+            {register.pack.ready ? 'Ready' : 'Not yet'}
+          </Badge>
+        </div>
+        <SectionPackChecks pack={register.pack} needsTitle="What the audit work needs" />
+      </Card>
+
       <InlinePanel
         open={adding && canManage}
         onClose={() => setAdding(false)}
@@ -241,6 +258,7 @@ export function RiskPanel({
                 key={risk.id}
                 engagementId={engagementId}
                 risk={risk}
+                focusAt={focus?.id === risk.id ? focus.at : null}
                 team={team}
                 canManage={canManage}
                 onChanged={invalidate}
@@ -256,12 +274,15 @@ export function RiskPanel({
 function RiskRow({
   engagementId,
   risk,
+  focusAt,
   team,
   canManage,
   onChanged,
 }: {
   engagementId: string;
   risk: AuditRisk;
+  /** Set when a "Go to" link targets this risk — opens it for editing. */
+  focusAt: number | null;
   team: TeamMember[];
   canManage: boolean;
   onChanged: () => void;
@@ -273,6 +294,11 @@ function RiskRow({
     setOpen(false);
     setEditing(false);
   };
+  useEffect(() => {
+    if (focusAt == null) return;
+    setOpen(true);
+    setEditing(canManage);
+  }, [focusAt, canManage]);
 
   const update = useMutation({
     mutationFn: (draft: RiskDraft) =>
@@ -301,7 +327,7 @@ function RiskRow({
   });
 
   return (
-    <li>
+    <li id={`audit-anchor-risk-${risk.id}`}>
       <button
         type="button"
         aria-expanded={open}

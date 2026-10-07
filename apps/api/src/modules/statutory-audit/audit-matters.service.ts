@@ -20,6 +20,25 @@ import { deriveFrameworkMatters, type DerivedMatter } from './matters-generation
 /** Marker written by the generator when it auto-closes a cleared matter (§10). */
 const AUTO_RESOLVED = 'Auto-resolved: source condition cleared.';
 
+/**
+ * What the file already says about a matter — the explanation recorded on the
+ * adverse acceptance answer, or the basis recorded on the framework area — so
+ * accepting it is one step, never re-typed.
+ */
+const SUGGESTED_RESOLUTION = `COALESCE(
+    (SELECT NULLIF(trim(a.narrative), '')
+       FROM hsdg.audit_acceptance_answers a
+       JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
+      WHERE s.workflow_instance_id = m.workflow_instance_id
+        AND m.source = 'acceptance:' || s.segment_key || ':' || a.question_key
+      LIMIT 1),
+    (SELECT NULLIF(trim(fa.basis), '')
+       FROM hsdg.audit_framework_assessments fa
+      WHERE fa.workflow_instance_id = m.workflow_instance_id
+        AND m.source LIKE 'framework:' || fa.area_key || ':%'
+      LIMIT 1)
+  ) AS suggested_resolution`;
+
 interface MatterRow {
   id: string;
   workflow_instance_id: string;
@@ -44,6 +63,7 @@ interface MatterRow {
   version: number;
   created_at: Date;
   updated_at: Date;
+  suggested_resolution: string | null;
 }
 
 /**
@@ -83,7 +103,7 @@ export class AuditMattersService {
               m.source_ref, m.title, m.category, m.severity, m.is_blocking, m.is_auto,
               owner.full_name AS owner_name, m.due_date::text, m.status, m.resolution,
               appr.full_name AS approver_name, m.approved_at, m.document_id, m.note,
-              m.version, m.created_at, m.updated_at
+              m.version, m.created_at, m.updated_at, ${SUGGESTED_RESOLUTION}
          FROM hsdg.audit_matter m
          LEFT JOIN hsdg.employees owner ON owner.id = m.owner_employee_id
          LEFT JOIN hsdg.employees appr ON appr.id = m.approver_employee_id
@@ -322,6 +342,27 @@ export class AuditMattersService {
     return Number(rows[0]?.n ?? 0);
   }
 
+  /** Open matters of a section, for the section's pack (titles, blocking, severity). */
+  async listOpenMatters(
+    client: PoolClient,
+    workflowInstanceId: string,
+    section: MatterSection,
+  ): Promise<{ title: string; isBlocking: boolean; severity: string | null }[]> {
+    const { rows } = await client.query<{
+      title: string;
+      is_blocking: boolean;
+      severity: string | null;
+    }>(
+      `SELECT title, is_blocking, severity
+         FROM hsdg.audit_matter
+        WHERE workflow_instance_id = $1 AND section = $2
+          AND status IN ('open','under_review','blocking')
+        ORDER BY is_blocking DESC, seq ASC`,
+      [workflowInstanceId, section],
+    );
+    return rows.map((r) => ({ title: r.title, isBlocking: r.is_blocking, severity: r.severity }));
+  }
+
   /** Throw when an open blocking matter exists for the section. */
   async assertNoOpenBlockingMatters(
     client: PoolClient,
@@ -346,7 +387,7 @@ export class AuditMattersService {
               m.source_ref, m.title, m.category, m.severity, m.is_blocking, m.is_auto,
               owner.full_name AS owner_name, m.due_date::text, m.status, m.resolution,
               appr.full_name AS approver_name, m.approved_at, m.document_id, m.note,
-              m.version, m.created_at, m.updated_at
+              m.version, m.created_at, m.updated_at, ${SUGGESTED_RESOLUTION}
          FROM hsdg.audit_matter m
          LEFT JOIN hsdg.employees owner ON owner.id = m.owner_employee_id
          LEFT JOIN hsdg.employees appr ON appr.id = m.approver_employee_id
@@ -388,6 +429,7 @@ function mapMatter(m: MatterRow): AuditMatterRecord {
     dueDate: m.due_date,
     status: m.status,
     resolution: m.resolution,
+    suggestedResolution: m.suggested_resolution,
     approverName: m.approver_name,
     approvedAt: m.approved_at ? m.approved_at.toISOString() : null,
     documentId: m.document_id,

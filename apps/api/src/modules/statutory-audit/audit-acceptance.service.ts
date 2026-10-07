@@ -1,3 +1,4 @@
+import { acceptanceMemoFor, planAcceptance } from './section-packs';
 import {
   BadRequestException,
   ConflictException,
@@ -128,11 +129,13 @@ export class AuditAcceptanceService {
       id: string;
       engagement_service_id: string;
       engagement_id: string;
+      financial_year: string | null;
     }>(
-      `SELECT id, engagement_service_id, engagement_id
-         FROM hsdg.service_workflow_instances
-        WHERE engagement_id = $1 AND status <> 'cancelled'
-        ORDER BY created_at ASC`,
+      `SELECT swi.id, swi.engagement_service_id, swi.engagement_id, e.financial_year
+         FROM hsdg.service_workflow_instances swi
+         JOIN hsdg.engagements e ON e.id = swi.engagement_id
+        WHERE swi.engagement_id = $1 AND swi.status <> 'cancelled'
+        ORDER BY swi.created_at ASC`,
       [engagementId],
     );
     if (shells.length === 0) return [];
@@ -195,18 +198,20 @@ export class AuditAcceptanceService {
       ).length;
       const approval = approvals.find((a) => a.workflow_instance_id === shell.id) ?? null;
       const master = await readEngagementMasterFacts(client, shell.id);
+      const openMatters = await this.matters.listOpenMatters(client, shell.id, 'acceptance');
       const engagementProfile = master
         ? engagementProfileFacts(master, {
             initialAudit: await readInitialAudit(client, shell.id),
           })
         : [];
+      const mappedSegments = shellSegments.map((s) => mapSegment(s, answers));
       out.push({
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
         engagementId: shell.engagement_id,
         phaseState: phases.find((p) => p.workflow_instance_id === shell.id)?.state ?? 'in_progress',
         engagementProfile,
-        segments: shellSegments.map((s) => mapSegment(s, answers)),
+        segments: mappedSegments,
         approval: approval
           ? {
               id: approval.id,
@@ -220,6 +225,12 @@ export class AuditAcceptanceService {
         unresolvedSegmentCount: unresolved,
         openBlockingMatterCount: openBlocking,
         readyForApproval: unresolved === 0 && openBlocking === 0 && approval === null,
+        pack: planAcceptance({
+          financialYear: shell.financial_year,
+          segments: mappedSegments,
+          openMatters,
+          missingMasterFacts: engagementProfile.filter((f) => f.value == null).map((f) => f.label),
+        }),
       });
     }
     return out;
@@ -373,6 +384,10 @@ export class AuditAcceptanceService {
         await this.matters.assertNoOpenBlockingMatters(client, workflowInstanceId, 'acceptance');
       }
 
+      // A blank memo records the one drafted from the file.
+      const drafted = (await this.readForShell(client, engagementId, workflowInstanceId))[0]?.pack
+        .draftMemo;
+      const draftMemo = drafted ? acceptanceMemoFor(drafted, input.conclusion) : null;
       const { rows: verRows } = await client.query<{ next: number }>(
         `SELECT COALESCE(MAX(version), 0) + 1 AS next
            FROM hsdg.audit_acceptance_approvals WHERE workflow_instance_id = $1`,
@@ -398,7 +413,7 @@ export class AuditAcceptanceService {
             engagementId,
             version,
             input.conclusion,
-            input.memo?.trim() || null,
+            input.memo?.trim() || draftMemo,
             JSON.stringify(answerSnap),
             ctx.employeeId ?? null,
           ],

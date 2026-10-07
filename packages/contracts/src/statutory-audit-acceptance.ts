@@ -1,3 +1,4 @@
+import type { AcceptancePack } from './statutory-audit-section-pack';
 import type { MasterFact } from './statutory-audit';
 
 /**
@@ -167,6 +168,8 @@ export interface StatutoryAuditAcceptance {
   openBlockingMatterCount: number;
   /** True when every segment is resolved and no blocking matter is open. */
   readyForApproval: boolean;
+  /** What approval needs, what to know, a suggested conclusion and a draft memo. */
+  pack: AcceptancePack;
 }
 
 /** Record one Yes/No/NA answer (with narrative on exception). */

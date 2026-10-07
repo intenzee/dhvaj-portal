@@ -1,3 +1,4 @@
+import { planFramework } from './section-packs';
 import {
   BadRequestException,
   ConflictException,
@@ -178,6 +179,15 @@ export class AuditFrameworkService {
       [shellIds],
     );
 
+    const openMatters = new Map(
+      await Promise.all(
+        shells.map(
+          async (sh) =>
+            [sh.id, await this.matters.listOpenMatters(client, sh.id, 'framework')] as const,
+        ),
+      ),
+    );
+
     return shells.map((shell) => {
       const shellAssessments = assessments.filter((a) => a.workflow_instance_id === shell.id);
       const latestApproval = approvals.find((ap) => ap.workflow_instance_id === shell.id) ?? null;
@@ -208,6 +218,18 @@ export class AuditFrameworkService {
             }
           : null,
         undecidedCount,
+        pack: planFramework({
+          financialYear: shell.financial_year,
+          areas: shellAssessments.map((a) => ({
+            title: a.title,
+            kind: a.kind,
+            state: a.state,
+            conclusion: a.conclusion,
+            isOverridden: a.is_overridden,
+            basis: a.basis,
+          })),
+          openMatters: openMatters.get(shell.id) ?? [],
+        }),
       };
     });
   }
@@ -510,6 +532,11 @@ export class AuditFrameworkService {
       await this.matters.syncFrameworkOn(client, ctx, engagementId, workflowInstanceId);
       await this.matters.assertNoOpenBlockingMatters(client, workflowInstanceId, 'framework');
 
+      // A blank memo records the one drafted from the file.
+      const draftMemo =
+        (await this.readFrameworks(client, engagementId)).find(
+          (f) => f.workflowInstanceId === workflowInstanceId,
+        )?.pack.draftMemo ?? null;
       const { rows: verRows } = await client.query<{ next: number }>(
         `SELECT COALESCE(MAX(version), 0) + 1 AS next
            FROM hsdg.audit_framework_approvals WHERE workflow_instance_id = $1`,
@@ -531,7 +558,7 @@ export class AuditFrameworkService {
             workflowInstanceId,
             engagementId,
             version,
-            input.memo?.trim() || null,
+            input.memo?.trim() || draftMemo,
             JSON.stringify(snapshot),
             ctx.employeeId ?? null,
           ],

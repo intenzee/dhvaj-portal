@@ -109,6 +109,8 @@ export interface CompletionGoTo {
   /** Audit-file phase / tracker key (e.g. `audit_areas`, `risk`, `framework`). */
   phaseKey: string;
   label: string;
+  /** A place inside the section to scroll to (e.g. `segment-independence_ethics`). */
+  anchor?: string;
 }
 
 /**

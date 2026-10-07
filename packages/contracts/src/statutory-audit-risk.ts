@@ -1,3 +1,4 @@
+import type { SectionPack } from './statutory-audit-section-pack';
 /**
  * Statutory Audit — Risk Assessment (Phase 04) vocabulary (Audit Spec §22, §30).
  *
@@ -103,6 +104,8 @@ export interface StatutoryAuditRiskRegister {
   risks: AuditRisk[];
   /** Significant risks that still lack a planned response — a blocking issue (§29). */
   significantRisksWithoutResponse: number;
+  /** Whether the register is ready to drive the audit work, and what to know. */
+  pack: SectionPack;
 }
 
 /** Result of refreshing the suggested risks on a register. */

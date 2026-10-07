@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -43,12 +43,60 @@ const STATE_META: Record<AuditPhaseState, { icon: LucideIcon; className: string;
 
 const OPEN_PHASE_EVENT = 'audit-file:open-phase';
 
+export interface OpenAuditPhaseDetail {
+  phaseKey: string;
+  /** A place inside the phase (`id="audit-anchor-<anchor>"`) to scroll to. */
+  anchor?: string;
+}
+
 /**
  * Open a phase of the audit file from anywhere inside it (e.g. a completion
- * item's "Open audit work" link) and scroll to it.
+ * item's "Open audit work" link) and scroll to it — or to a place inside it.
  */
-export function openAuditPhase(phaseKey: string): void {
-  window.dispatchEvent(new CustomEvent<string>(OPEN_PHASE_EVENT, { detail: phaseKey }));
+export function openAuditPhase(phaseKey: string, anchor?: string): void {
+  pendingAnchor = anchor ? { phaseKey, anchor, at: Date.now() } : null;
+  window.dispatchEvent(
+    new CustomEvent<OpenAuditPhaseDetail>(OPEN_PHASE_EVENT, { detail: { phaseKey, anchor } }),
+  );
+}
+
+/** The last "Go to" target, for a panel that mounts just after the link opened it. */
+let pendingAnchor: { phaseKey: string; anchor: string; at: number } | null = null;
+
+/**
+ * Let a panel act on a "Go to" link aimed inside it (e.g. select the segment
+ * the link names) — whether the panel was already open or opens because of it.
+ */
+export function useAuditAnchor(phaseKey: string, onAnchor: (anchor: string) => void): void {
+  const handler = useRef(onAnchor);
+  handler.current = onAnchor;
+  useEffect(() => {
+    if (pendingAnchor?.phaseKey === phaseKey && Date.now() - pendingAnchor.at < 3000) {
+      handler.current(pendingAnchor.anchor);
+      pendingAnchor = null;
+    }
+    const on = (e: Event): void => {
+      const d = (e as CustomEvent<OpenAuditPhaseDetail>).detail;
+      if (d.phaseKey === phaseKey && d.anchor) handler.current(d.anchor);
+    };
+    window.addEventListener(OPEN_PHASE_EVENT, on);
+    return () => window.removeEventListener(OPEN_PHASE_EVENT, on);
+  }, [phaseKey]);
+}
+
+/** Scroll to the anchor once the opened phase has rendered it (else the phase row). */
+function scrollToTarget(phaseKey: string, anchor: string | undefined, tries = 20): void {
+  const el = anchor ? document.getElementById(`audit-anchor-${anchor}`) : null;
+  if (!el && anchor && tries > 0) {
+    setTimeout(() => scrollToTarget(phaseKey, anchor, tries - 1), 100);
+    return;
+  }
+  const target = el ?? document.getElementById(`audit-phase-${phaseKey}`);
+  target?.scrollIntoView?.({ behavior: 'smooth', block: el ? 'center' : 'start' });
+  if (el) {
+    el.classList.add('ring-2', 'ring-primary-400', 'rounded-lg');
+    setTimeout(() => el.classList.remove('ring-2', 'ring-primary-400'), 1600);
+  }
 }
 
 /** Distinct legend entries in professional-file order. */
@@ -82,14 +130,10 @@ export function AuditFileNav({
 
   useEffect(() => {
     const onOpen = (e: Event): void => {
-      const key = (e as CustomEvent<string>).detail;
+      const { phaseKey: key, anchor } = (e as CustomEvent<OpenAuditPhaseDetail>).detail;
       if (!panelKeys.includes(key)) return;
       setOpen((prev) => new Set(prev).add(key));
-      requestAnimationFrame(() =>
-        document
-          .getElementById(`audit-phase-${key}`)
-          ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
-      );
+      requestAnimationFrame(() => scrollToTarget(key, anchor));
     };
     window.addEventListener(OPEN_PHASE_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_PHASE_EVENT, onOpen);

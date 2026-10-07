@@ -1,3 +1,4 @@
+import type { SectionPack } from './statutory-audit-section-pack';
 /**
  * Statutory Audit — Planning (Phase 03) vocabulary (Audit Spec §21, §30).
  *
@@ -129,4 +130,6 @@ export interface StatutoryAuditPlanning {
   approval: PlanningApproval | null;
   /** How many sub-areas are not yet complete (0 ⇒ every area documented). */
   incompleteCount: number;
+  /** What approval needs, what to know and a draft planning memo. */
+  pack: SectionPack;
 }

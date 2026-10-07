@@ -1,3 +1,4 @@
+import { planPlanning } from './section-packs';
 import {
   BadRequestException,
   ConflictException,
@@ -83,11 +84,13 @@ export class AuditPlanningService {
       id: string;
       engagement_service_id: string;
       engagement_id: string;
+      financial_year: string | null;
     }>(
-      `SELECT id, engagement_service_id, engagement_id
-         FROM hsdg.service_workflow_instances
-        WHERE engagement_id = $1 AND status <> 'cancelled'
-        ORDER BY created_at ASC`,
+      `SELECT swi.id, swi.engagement_service_id, swi.engagement_id, e.financial_year
+         FROM hsdg.service_workflow_instances swi
+         JOIN hsdg.engagements e ON e.id = swi.engagement_id
+        WHERE swi.engagement_id = $1 AND swi.status <> 'cancelled'
+        ORDER BY swi.created_at ASC`,
       [engagementId],
     );
     if (shells.length === 0) return [];
@@ -145,6 +148,28 @@ export class AuditPlanningService {
         materiality: mat ? mapMateriality(mat) : null,
         approval: latestApproval ? mapApproval(latestApproval) : null,
         incompleteCount: incompletePlanningCount(shellItems.map((i) => i.state)),
+        pack: planPlanning({
+          financialYear: shell.financial_year,
+          frameworkApproved: frameworkApprovedSet.has(shell.id),
+          items: shellItems.map((i) => ({
+            itemKey: i.item_key,
+            title: i.title,
+            state: i.state,
+            narrative: i.narrative,
+          })),
+          materiality: mat
+            ? {
+                overall: mat.overall_materiality == null ? null : Number(mat.overall_materiality),
+                performance:
+                  mat.performance_materiality == null ? null : Number(mat.performance_materiality),
+                trivial:
+                  mat.clearly_trivial_threshold == null
+                    ? null
+                    : Number(mat.clearly_trivial_threshold),
+                benchmark: mat.benchmark,
+              }
+            : null,
+        }),
       };
     });
   }
@@ -315,6 +340,11 @@ export class AuditPlanningService {
         throw new BadRequestException(`${incomplete} planning sub-area(s) are not yet complete.`);
       }
 
+      // A blank memo records the one drafted from the file.
+      const draftMemo =
+        (await this.readPlanning(client, engagementId)).find(
+          (p) => p.workflowInstanceId === workflowInstanceId,
+        )?.pack.draftMemo ?? null;
       const { rows: existingApproval } = await client.query<{ next: number }>(
         `SELECT COALESCE(MAX(version), 0) + 1 AS next
            FROM hsdg.audit_planning_approvals WHERE workflow_instance_id = $1`,
@@ -364,7 +394,7 @@ export class AuditPlanningService {
             workflowInstanceId,
             engagementId,
             version,
-            input.memo?.trim() || null,
+            input.memo?.trim() || draftMemo,
             JSON.stringify(snapshot),
             ctx.employeeId ?? null,
           ],

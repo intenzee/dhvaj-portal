@@ -15,13 +15,15 @@ import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
-import { Textarea } from '@/components/form';
+import { Field, Textarea } from '@/components/form';
 import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 import { EntityProfileCard } from './entity-profile-card';
 import { FixLink } from './master-fact-list';
 import { GroupCaroCard } from './group-caro-card';
 import { ReportingFactsCard } from './reporting-facts-card';
 import { ReportingFrameworkCard } from './reporting-framework-card';
+import { MattersCard } from './matters-card';
+import { SectionPackChecks } from './section-pack-card';
 
 /**
  * Framework (Phase 02) screen (Audit Spec §18–§20): the applicability/assessment
@@ -102,11 +104,13 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not accept the suggestions.'),
   });
 
+  const [memo, setMemo] = useState<string | null>(null);
   const approve = useMutation({
     mutationFn: (workflowInstanceId: string) =>
       apiFetch<StatutoryAuditFramework>(
         `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/framework/approve`,
-        { method: 'POST', body: {} },
+        // An unedited memo is left to the server, which records the draft.
+        { method: 'POST', body: memo?.trim() ? { memo } : {} },
       ),
     onSuccess: () => {
       toast('Framework approved — Phase 02 complete.');
@@ -120,7 +124,7 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
   if (!framework) return null;
 
   const approved = framework.approval != null;
-  const ready = framework.undecidedCount === 0;
+  const ready = framework.pack.ready;
   const waiting = framework.assessments.filter(
     (a) =>
       a.systemSuggestion != null &&
@@ -147,8 +151,10 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
               </>
             ) : ready ? (
               'All areas decided — ready to approve the Framework Memo.'
-            ) : (
+            ) : framework.undecidedCount > 0 ? (
               `${framework.undecidedCount} area(s) still need a professional conclusion.`
+            ) : (
+              'A blocking matter is open — resolve it below.'
             )}
           </p>
         </div>
@@ -176,7 +182,7 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
             <Button
               onClick={() => approve.mutate(framework.workflowInstanceId)}
               disabled={approve.isPending || approved || !ready}
-              title={!ready ? 'Every area needs a conclusion first' : undefined}
+              title={!ready ? 'See "What approval needs" below' : undefined}
             >
               <CheckCircle2 className="mr-1.5 h-4 w-4" />
               {approved ? 'Approved' : 'Approve framework'}
@@ -184,6 +190,41 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
           </div>
         )}
       </Card>
+
+      <Card className="space-y-3 p-4">
+        <h3 className="text-sm font-semibold text-ink">Framework memo</h3>
+        {approved ? (
+          <p className="whitespace-pre-line text-sm text-ink-muted">
+            {framework.approval?.memo ?? 'No memo recorded.'}
+          </p>
+        ) : (
+          <>
+            <SectionPackChecks pack={framework.pack} />
+            <Field
+              label="Memo"
+              hint={
+                memo == null
+                  ? 'Drafted from the conclusions — recorded as is on approval unless you edit it.'
+                  : undefined
+              }
+            >
+              <Textarea
+                rows={7}
+                value={memo ?? framework.pack.draftMemo ?? ''}
+                disabled={!canManage}
+                onChange={(e) => setMemo(e.target.value)}
+              />
+            </Field>
+          </>
+        )}
+      </Card>
+
+      <MattersCard
+        engagementId={engagementId}
+        workflowInstanceId={framework.workflowInstanceId}
+        section="framework"
+        canManage={canManage && !approved}
+      />
 
       {framework.assessments.map((a) => (
         <FrameworkAreaCard

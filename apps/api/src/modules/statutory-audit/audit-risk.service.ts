@@ -1,3 +1,4 @@
+import { planRisk } from './section-packs';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
@@ -326,6 +327,16 @@ export class AuditRiskService {
     );
     const planApprovedSet = new Set(planApproved.map((r) => r.workflow_instance_id));
 
+    const { rows: procedures } = await client.query<{
+      workflow_instance_id: string;
+      risk_id: string | null;
+    }>(
+      `SELECT workflow_instance_id, risk_id
+         FROM hsdg.audit_procedures
+        WHERE workflow_instance_id = ANY($1::uuid[]) AND risk_id IS NOT NULL`,
+      [shellIds],
+    );
+
     return shells.map((shell) => {
       const shellRisks = risks.filter((r) => r.workflow_instance_id === shell.id);
       return {
@@ -334,6 +345,13 @@ export class AuditRiskService {
         engagementId: shell.engagement_id,
         planningApproved: planApprovedSet.has(shell.id),
         risks: shellRisks.map(mapRisk),
+        pack: planRisk({
+          planningApproved: planApprovedSet.has(shell.id),
+          risks: shellRisks.map(mapRisk),
+          procedures: procedures
+            .filter((p) => p.workflow_instance_id === shell.id)
+            .map((p) => ({ riskId: p.risk_id })),
+        }),
         // A significant risk requires an explicit response (§29).
         significantRisksWithoutResponse: shellRisks.filter(
           (r) =>

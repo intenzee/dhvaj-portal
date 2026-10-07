@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle,
   Archive,
   ArrowRight,
   CheckCircle2,
@@ -11,7 +10,6 @@ import {
   RefreshCw,
   ShieldCheck,
   Sparkles,
-  XCircle,
 } from 'lucide-react';
 import {
   canApproveCompletion,
@@ -24,7 +22,6 @@ import {
   type CompletionItemState,
   type CompletionSection,
   type CompletionSuggestionResult,
-  type SignOffCheck,
   type StatutoryAuditCompletion,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -35,6 +32,7 @@ import { humanize } from '@/lib/format';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Input, Select, Textarea } from '@/components/form';
 import { openAuditPhase } from './audit-file-nav';
+import { PackCheckList } from './section-pack-card';
 
 /**
  * Completion / Reporting / Sign-off / Archive (Audit Spec §27–§29) — SA-8. Two
@@ -336,8 +334,8 @@ function SignOffCard({
             Signed by the engagement partner, {pack.engagementPartnerName}.
           </p>
         )}
-        <CheckList title="Before sign-off" checks={gates} />
-        <CheckList
+        <PackCheckList title="Before sign-off" checks={gates} />
+        <PackCheckList
           title={
             pack.attention > 0
               ? `For the partner's attention (${pack.attention})`
@@ -418,8 +416,8 @@ function ArchiveCard({
         )}
       </div>
       <div className="space-y-3 px-4 py-3">
-        <CheckList title="Before archiving" checks={gates} />
-        <CheckList
+        <PackCheckList title="Before archiving" checks={gates} />
+        <PackCheckList
           title={pack.attention > 0 ? `Worth closing first (${pack.attention})` : 'Worth closing first'}
           checks={notes}
         />
@@ -503,47 +501,6 @@ function ArchiveRecord({ file }: { file: StatutoryAuditCompletion }): JSX.Elemen
         <p className="whitespace-pre-line text-xs text-ink-muted">{file.archiveNote}</p>
       )}
     </Card>
-  );
-}
-
-function CheckList({ title, checks }: { title: string; checks: SignOffCheck[] }): JSX.Element {
-  return (
-    <div>
-      <p className="text-xs font-medium text-ink">{title}</p>
-      <ul className="mt-1 divide-y divide-line rounded-lg border border-line">
-        {checks.map((c) => {
-          const Icon = c.ok ? CheckCircle2 : c.blocking ? XCircle : AlertTriangle;
-          const tone = c.ok
-            ? 'text-emerald-600'
-            : c.blocking
-              ? 'text-danger-600'
-              : 'text-amber-600';
-          return (
-            <li key={c.key} className="flex gap-2 px-3 py-2 text-sm">
-              <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone}`} aria-hidden />
-              <div className="min-w-0">
-                <p className="font-medium text-ink">{c.label}</p>
-                <ul className="mt-0.5 space-y-0.5 text-xs text-ink-muted">
-                  {c.facts.map((f) => (
-                    <li key={f}>{f}</li>
-                  ))}
-                </ul>
-                {c.goTo && (
-                  <button
-                    type="button"
-                    onClick={() => openAuditPhase(c.goTo!.phaseKey)}
-                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:underline"
-                  >
-                    {c.goTo.label}
-                    <ArrowRight className="h-3 w-3" aria-hidden />
-                  </button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
   );
 }
 

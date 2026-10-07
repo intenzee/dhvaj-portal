@@ -16,12 +16,14 @@ import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
-import { Textarea } from '@/components/form';
+import { Field, Textarea } from '@/components/form';
 import { PlanningIntelligencePanel } from './planning-intelligence-panel';
 import { BusinessUnderstandingPanel } from './business-understanding-panel';
 import { MaterialityPanel } from './materiality-panel';
 import { ScopeApproachPanel } from './scope-approach-panel';
 import { AuditAreasPanel } from './audit-areas-panel';
+import { useAuditAnchor } from './audit-file-nav';
+import { SectionPackChecks } from './section-pack-card';
 
 /** The sub-area backed by the full 03.1 Planning Intelligence workflow. */
 const INTELLIGENCE_ITEM_KEY = 'audit_strategy';
@@ -78,12 +80,22 @@ export function PlanningPanel({
   };
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // "Go to" links name a sub-area (`planning-<itemKey>`); open it beside the index.
+  const [anchorKey, setAnchorKey] = useState<string | null>(null);
+  useAuditAnchor('planning', (anchor) => {
+    if (anchor.startsWith('planning-')) {
+      setSelectedId(null);
+      setAnchorKey(anchor.slice('planning-'.length));
+    }
+  });
+  const [memo, setMemo] = useState<string | null>(null);
 
   const approve = useMutation({
     mutationFn: (workflowInstanceId: string) =>
       apiFetch<StatutoryAuditPlanning>(
         `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/planning/approve`,
-        { method: 'POST', body: {} },
+        // An unedited memo is left to the server, which records the draft.
+        { method: 'POST', body: memo?.trim() ? { memo } : {} },
       ),
     onSuccess: () => {
       toast('Planning approved — Phase 03 complete.');
@@ -100,11 +112,12 @@ export function PlanningPanel({
   // the next thing to do.
   const selected =
     planning.items.find((i) => i.id === selectedId) ??
+    planning.items.find((i) => i.itemKey === anchorKey) ??
     planning.items.find((i) => i.state !== 'complete') ??
     planning.items[0];
 
   const approved = planning.approval != null;
-  const ready = planning.frameworkApproved && planning.incompleteCount === 0;
+  const ready = planning.pack.ready;
   const editable = canManage && !approved;
 
   return (
@@ -135,7 +148,7 @@ export function PlanningPanel({
           <Button
             onClick={() => approve.mutate(planning.workflowInstanceId)}
             disabled={approve.isPending || approved || !ready}
-            title={!ready ? 'Framework approved + every sub-area complete first' : undefined}
+            title={!ready ? 'See "What approval needs" below' : undefined}
           >
             <CheckCircle2 className="mr-1.5 h-4 w-4" />
             {approved ? 'Approved' : 'Approve planning'}
@@ -145,6 +158,34 @@ export function PlanningPanel({
 
       <PublishedMaterialityCard materiality={planning.materiality} />
 
+      <Card className="space-y-3 p-4">
+        <h3 className="text-sm font-semibold text-ink">Planning approval</h3>
+        {approved ? (
+          <p className="whitespace-pre-line text-sm text-ink-muted">
+            {planning.approval?.memo ?? 'No memo recorded.'}
+          </p>
+        ) : (
+          <>
+            <SectionPackChecks pack={planning.pack} />
+            <Field
+              label="Planning memo"
+              hint={
+                memo == null
+                  ? 'Drafted from the file — recorded as is on approval unless you edit it.'
+                  : undefined
+              }
+            >
+              <Textarea
+                rows={6}
+                value={memo ?? planning.pack.draftMemo ?? ''}
+                disabled={!canManage}
+                onChange={(e) => setMemo(e.target.value)}
+              />
+            </Field>
+          </>
+        )}
+      </Card>
+
       {/* Sub-areas as a compact index; the selected one is worked on beside it,
           so the planning file never becomes one long scrolling page. */}
       <div className="grid gap-3 md:grid-cols-[17rem_minmax(0,1fr)]">
@@ -153,7 +194,7 @@ export function PlanningPanel({
             {planning.items.map((item) => {
               const isSelected = item.id === selected?.id;
               return (
-                <li key={item.id}>
+                <li key={item.id} id={`audit-anchor-planning-${item.itemKey}`}>
                   <button
                     type="button"
                     onClick={() => setSelectedId(item.id)}

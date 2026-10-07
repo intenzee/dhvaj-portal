@@ -158,7 +158,7 @@ describe('completion checklist from the file', () => {
     });
     const opened: string[] = [];
     window.addEventListener('audit-file:open-phase', (e) =>
-      opened.push((e as CustomEvent<string>).detail),
+      opened.push((e as CustomEvent<{ phaseKey: string }>).detail.phaseKey),
     );
     const user = userEvent.setup();
     render(wrap(<CompletionPanel engagementId="e1" />));

@@ -81,6 +81,8 @@ export interface AuditMatterRecord {
   dueDate: string | null;
   status: MatterStatus;
   resolution: string | null;
+  /** What the file already records about it (the answer's explanation / the area's basis). */
+  suggestedResolution: string | null;
   approverName: string | null;
   approvedAt: string | null;
   /** Evidence link — points at a document row, never a duplicate copy (§16). */

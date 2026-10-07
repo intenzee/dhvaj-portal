@@ -56,6 +56,7 @@ describe('Section 01 acceptance prefill', () => {
         unresolvedSegmentCount: 2,
         openBlockingMatterCount: 0,
         readyForApproval: false,
+        pack: { checks: [], ready: false, attention: 0, draftMemo: null, suggestedConclusion: 'accept' },
       },
     ]);
   });

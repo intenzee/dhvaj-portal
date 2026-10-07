@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Database, ExternalLink } from 'lucide-react';
@@ -22,6 +22,9 @@ import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
 import { Field, Select, Textarea } from '@/components/form';
 import { MasterFactList } from './master-fact-list';
+import { useAuditAnchor } from './audit-file-nav';
+import { MattersCard } from './matters-card';
+import { SectionPackChecks } from './section-pack-card';
 
 /**
  * Section 01 — Engagement & Acceptance (spec §3–§13). The engagement profile
@@ -64,6 +67,12 @@ export function AcceptancePanel({
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // "Go to" links from the approval checks select the segment they name.
+  useAuditAnchor('acceptance', (anchor) => {
+    if (anchor.startsWith('segment-')) setSelectedKey(anchor.slice('segment-'.length));
+    else if (anchor === 'engagement-profile') setSelectedKey('engagement_profile');
+    else if (anchor === 'acceptance-matters') setSelectedKey('final_acceptance');
+  });
 
   const query = useQuery({
     queryKey: QK(engagementId),
@@ -118,7 +127,7 @@ export function AcceptancePanel({
           <p className="text-xs text-ink-muted">
             {approved
               ? `Approved — ${CONCLUSION_LABEL[acc.approval!.conclusion]}${acc.approval!.approvedByName ? ` · ${acc.approval!.approvedByName}` : ''}`
-              : `${acc.unresolvedSegmentCount} segment(s) open · ${acc.openBlockingMatterCount} blocking matter(s)`}
+              : `${acc.unresolvedSegmentCount} segment(s) open · ${acc.openBlockingMatterCount} blocking matter(s)${acc.pack.attention > 0 ? ` · ${acc.pack.attention} to note` : ''}${acc.unresolvedSegmentCount === 0 ? ` · suggested: ${CONCLUSION_LABEL[acc.pack.suggestedConclusion]}` : ''}`}
           </p>
         </div>
         <Badge tone={approved ? 'success' : acc.readyForApproval ? 'info' : 'warn'}>
@@ -130,7 +139,7 @@ export function AcceptancePanel({
         <Card className="overflow-hidden p-0">
           <ol className="divide-y divide-line">
             {segments.map((s, i) => (
-              <li key={s.id}>
+              <li key={s.id} id={`audit-anchor-segment-${s.segmentKey}`}>
                 <button
                   type="button"
                   onClick={() => setSelectedKey(s.segmentKey)}
@@ -151,7 +160,8 @@ export function AcceptancePanel({
 
         <div className="space-y-3">
           {selected.segmentKey === 'engagement_profile' && (
-            <ProfileCard facts={acc.engagementProfile} entityId={entityId} />
+            <ProfileCard
+              id="audit-anchor-engagement-profile" facts={acc.engagementProfile} entityId={entityId} />
           )}
           {selected.segmentKey === 'previous_auditor' &&
             continuing === 'Continuing audit' &&
@@ -189,16 +199,30 @@ export function AcceptancePanel({
               onState={(state) => setState.mutate({ segment: selected, state })}
             />
           )}
+          <MattersCard
+            engagementId={engagementId}
+            workflowInstanceId={acc.workflowInstanceId}
+            section="acceptance"
+            canManage={editable}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-function ProfileCard({ facts, entityId }: { facts: MasterFact[]; entityId?: string }): JSX.Element {
+function ProfileCard({
+  id,
+  facts,
+  entityId,
+}: {
+  id?: string;
+  facts: MasterFact[];
+  entityId?: string;
+}): JSX.Element {
   const missing = facts.filter((f) => !f.value).length;
   return (
-    <Card className="p-4">
+    <Card id={id} className="p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <Database className="h-4 w-4 text-ink-faint" aria-hidden />
@@ -328,13 +352,24 @@ function ApprovalCard({
   onSaved: () => void;
   onError: (e: unknown) => void;
 }): JSX.Element {
-  const [conclusion, setConclusion] = useState<AcceptanceConclusion>('accept');
-  const [memo, setMemo] = useState('');
+  const [conclusion, setConclusion] = useState<AcceptanceConclusion>(acc.pack.suggestedConclusion);
+  const [conclusionChosen, setConclusionChosen] = useState(false);
+  useEffect(() => {
+    if (!conclusionChosen) setConclusion(acc.pack.suggestedConclusion);
+  }, [acc.pack.suggestedConclusion, conclusionChosen]);
+  // The memo is drafted from the file; an unedited draft is recorded server-side,
+  // ending on the conclusion chosen here.
+  const draft = acc.pack.draftMemo ?? '';
+  const [memo, setMemo] = useState(draft);
+  const [memoEdited, setMemoEdited] = useState(false);
+  useEffect(() => {
+    if (!memoEdited) setMemo(draft);
+  }, [draft, memoEdited]);
   const approve = useMutation({
     mutationFn: () =>
       apiFetch(`/engagements/${engagementId}/statutory-audit/${acc.workflowInstanceId}/acceptance/approve`, {
         method: 'POST',
-        body: { conclusion, memo: memo || undefined },
+        body: { conclusion, memo: memoEdited && memo.trim() ? memo : undefined },
       }),
     onSuccess: onSaved,
     onError,
@@ -345,7 +380,9 @@ function ApprovalCard({
       <Card className="space-y-1 p-4 text-sm">
         <h3 className="font-semibold text-ink">Partner approval</h3>
         <p className="text-ink">{CONCLUSION_LABEL[acc.approval.conclusion]}</p>
-        {acc.approval.memo && <p className="text-ink-muted">{acc.approval.memo}</p>}
+        {acc.approval.memo && (
+          <p className="whitespace-pre-line text-ink-muted">{acc.approval.memo}</p>
+        )}
         <p className="text-xs text-ink-faint">
           {acc.approval.approvedByName} · {new Date(acc.approval.approvedAt).toLocaleDateString()}
         </p>
@@ -358,13 +395,17 @@ function ApprovalCard({
       <p className="text-xs text-ink-muted">
         {acc.readyForApproval
           ? 'Every segment is resolved and no blocking matter is open.'
-          : `${acc.unresolvedSegmentCount} segment(s) still open and ${acc.openBlockingMatterCount} blocking matter(s) — resolve them first (a decline can be recorded at any time).`}
+          : 'Not ready yet — see below for what is open and where to put it right (a decline can be recorded at any time).'}
       </p>
+      <SectionPackChecks pack={acc.pack} />
       <Field label="Conclusion">
         <Select
           value={conclusion}
           disabled={!canManage}
-          onChange={(e) => setConclusion(e.target.value as AcceptanceConclusion)}
+          onChange={(e) => {
+            setConclusion(e.target.value as AcceptanceConclusion);
+            setConclusionChosen(true);
+          }}
         >
           {ACCEPTANCE_CONCLUSIONS.map((c) => (
             <option key={c} value={c}>
@@ -373,8 +414,24 @@ function ApprovalCard({
           ))}
         </Select>
       </Field>
-      <Field label="Acceptance memo">
-        <Textarea rows={3} value={memo} disabled={!canManage} onChange={(e) => setMemo(e.target.value)} />
+      {acc.unresolvedSegmentCount === 0 && (
+        <p className="-mt-2 text-[11px] text-ink-faint">
+          Suggested from the answers: {CONCLUSION_LABEL[acc.pack.suggestedConclusion]}.
+        </p>
+      )}
+      <Field
+        label="Acceptance memo"
+        hint={memoEdited ? undefined : 'Drafted from the file — recorded as is, ending on the conclusion chosen above, unless you edit it.'}
+      >
+        <Textarea
+          rows={8}
+          value={memo}
+          disabled={!canManage}
+          onChange={(e) => {
+            setMemo(e.target.value);
+            setMemoEdited(true);
+          }}
+        />
       </Field>
       <Button
         disabled={!canManage || approve.isPending || (!acc.readyForApproval && conclusion !== 'decline')}

@@ -60,6 +60,7 @@ describe('one-step automation for the team', () => {
           workflowInstanceId: 'wf1',
           approval: null,
           undecidedCount: 3,
+          pack: { checks: [], ready: false, attention: 0, draftMemo: null },
           assessments: [
             area('caro', 'system_suggested_applicable', 'applicable'),
             area('csr', 'system_suggested_not_applicable', 'not_applicable'),
@@ -105,6 +106,7 @@ describe('one-step automation for the team', () => {
         workflowInstanceId: 'wf1',
         planningApproved: false,
         significantRisksWithoutResponse: 0,
+        pack: { checks: [], ready: false, attention: 0, draftMemo: null },
         risks: [],
       },
     ]);
@@ -121,6 +123,7 @@ describe('one-step automation for the team', () => {
               workflowInstanceId: 'wf1',
               planningApproved: false,
               significantRisksWithoutResponse: 0,
+              pack: { checks: [], ready: false, attention: 0, draftMemo: null },
               risks: [],
             },
           ]),

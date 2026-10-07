@@ -68,6 +68,7 @@ describe('Risk register inline panels', () => {
         workflowInstanceId: 'wf1',
         planningApproved: true,
         significantRisksWithoutResponse: 0,
+        pack: { checks: [], ready: false, attention: 0, draftMemo: null },
         risks: [risk],
       },
     ]);
