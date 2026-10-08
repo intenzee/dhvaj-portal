@@ -13,7 +13,9 @@ import {
   type AreaConclusionState,
   type AreaRiskLevel,
   type AuditWorkArea,
+  type ExceptionStatus,
   type FrameworkConclusion,
+  type ProcedureState,
   type StatutoryAuditWorkGeneration,
   type WorkAreaState,
   type WorkSuggestionResult,
@@ -34,6 +36,15 @@ import {
   type FsAreaInput,
   type RiskInput,
 } from './work-automation';
+import {
+  conclusionReady,
+  draftAreaConclusion,
+  planWork,
+  proceduresIn,
+  type WorkPackFacts,
+  type WorkPackProcedure,
+  type WorkPackRisk,
+} from './work-packs';
 
 interface WorkAreaRow {
   id: string;
@@ -61,6 +72,7 @@ interface WorkAreaRow {
   conclusion: string | null;
   conclusion_state: AreaConclusionState;
   detail_version: number;
+  reviewed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -141,7 +153,7 @@ export class AuditWorkService {
               a.reviewer_employee_id, reviewer.full_name AS reviewer_name,
               a.risk_level, a.materiality, a.due_date, a.financial_current, a.financial_prior,
               a.financial_source, a.conclusion, a.conclusion_state, a.detail_version,
-              a.created_at, a.updated_at
+              a.reviewed_at, a.created_at, a.updated_at
          FROM hsdg.audit_work_areas a
          LEFT JOIN hsdg.employees owner ON owner.id = a.owner_employee_id
          LEFT JOIN hsdg.employees reviewer ON reviewer.id = a.reviewer_employee_id
@@ -162,23 +174,144 @@ export class AuditWorkService {
       [shellIds],
     );
 
+    const facts = await this.readPackFacts(client, shellIds);
+    const today = new Date().toISOString().slice(0, 10);
+
     return shells.map((shell) => {
       const shellAreas = areas.filter((a) => a.workflow_instance_id === shell.id);
+      const procedures = facts.procedures.get(shell.id) ?? [];
       const approvalVersion =
         approvals.find((ap) => ap.workflow_instance_id === shell.id)?.version ?? null;
       const generatedVersions = shellAreas
         .map((a) => a.generated_from_version)
         .filter((v): v is number => v != null);
+      const workFacts: WorkPackFacts = {
+        frameworkApproved: approvalVersion != null,
+        areas: shellAreas.map((a) => ({
+          id: a.id,
+          workAreaKey: a.work_area_key,
+          title: a.title,
+          isActive: a.is_active,
+          ownerName: a.owner_name,
+          reviewerName: a.reviewer_name,
+          dueDate: a.due_date,
+          materiality: num(a.materiality),
+          conclusion: a.conclusion,
+          conclusionState: a.conclusion_state,
+          reviewed: a.reviewed_at != null,
+        })),
+        procedures,
+        risks: facts.risks.get(shell.id) ?? [],
+        today,
+      };
       return {
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
         engagementId: shell.engagement_id,
         frameworkApproved: approvalVersion != null,
         generatedFromVersion: generatedVersions.length ? Math.max(...generatedVersions) : null,
-        areas: shellAreas.map(mapWorkArea),
+        areas: shellAreas.map((a) =>
+          mapWorkArea(
+            a,
+            draftAreaConclusion(
+              { title: a.title, materiality: num(a.materiality) },
+              proceduresIn(a.id, procedures),
+            ),
+          ),
+        ),
         activeCount: shellAreas.filter((a) => a.is_active).length,
+        pack: planWork(workFacts, 'audit_areas'),
+        controlsPack: planWork(workFacts, 'controls'),
       };
     });
+  }
+
+  /** Procedures (with their areas, evidence and exceptions) and risks, per shell. */
+  private async readPackFacts(
+    client: PoolClient,
+    shellIds: string[],
+  ): Promise<{
+    procedures: Map<string, WorkPackProcedure[]>;
+    risks: Map<string, WorkPackRisk[]>;
+  }> {
+    const { rows: procs } = await client.query<{
+      id: string;
+      workflow_instance_id: string;
+      procedure_ref: string;
+      title: string;
+      state: ProcedureState;
+      conclusion: string | null;
+      work_area_id: string;
+      risk_id: string | null;
+      linked: string[] | null;
+      evidence: number;
+    }>(
+      `SELECT p.id, p.workflow_instance_id, p.procedure_ref, p.title, p.state, p.conclusion,
+              p.work_area_id, p.risk_id,
+              (SELECT array_agg(pa.work_area_id) FROM hsdg.audit_procedure_areas pa
+                WHERE pa.procedure_id = p.id) AS linked,
+              (SELECT count(*)::int FROM hsdg.audit_evidence_procedures ep
+                WHERE ep.procedure_id = p.id) AS evidence
+         FROM hsdg.audit_procedures p
+        WHERE p.workflow_instance_id = ANY($1::uuid[])
+        ORDER BY p.created_at ASC`,
+      [shellIds],
+    );
+    const { rows: exceptions } = await client.query<{
+      procedure_id: string;
+      description: string;
+      status: ExceptionStatus;
+      resolution: string | null;
+    }>(
+      `SELECT x.procedure_id, x.description, x.status, x.resolution
+         FROM hsdg.audit_exceptions x
+         JOIN hsdg.audit_procedures p ON p.id = x.procedure_id
+        WHERE p.workflow_instance_id = ANY($1::uuid[])
+        ORDER BY x.created_at ASC`,
+      [shellIds],
+    );
+    const { rows: risks } = await client.query<{
+      id: string;
+      workflow_instance_id: string;
+      risk_ref: string;
+      description: string;
+      is_significant: boolean;
+    }>(
+      `SELECT id, workflow_instance_id, risk_ref, description, is_significant
+         FROM hsdg.audit_risks WHERE workflow_instance_id = ANY($1::uuid[])
+        ORDER BY created_at ASC`,
+      [shellIds],
+    );
+
+    const procedures = new Map<string, WorkPackProcedure[]>();
+    for (const p of procs) {
+      const list = procedures.get(p.workflow_instance_id) ?? [];
+      list.push({
+        ref: p.procedure_ref,
+        title: p.title,
+        state: p.state,
+        conclusion: p.conclusion,
+        areaIds: [p.work_area_id, ...(p.linked ?? []).filter((id) => id !== p.work_area_id)],
+        riskId: p.risk_id,
+        evidenceCount: p.evidence,
+        exceptions: exceptions
+          .filter((x) => x.procedure_id === p.id)
+          .map((x) => ({ description: x.description, status: x.status, resolution: x.resolution })),
+      });
+      procedures.set(p.workflow_instance_id, list);
+    }
+    const byShell = new Map<string, WorkPackRisk[]>();
+    for (const r of risks) {
+      const list = byShell.get(r.workflow_instance_id) ?? [];
+      list.push({
+        id: r.id,
+        riskRef: r.risk_ref,
+        description: r.description,
+        isSignificant: r.is_significant,
+      });
+      byShell.set(r.workflow_instance_id, list);
+    }
+    return { procedures, risks: byShell };
   }
 
   // ── Generation (§20) ────────────────────────────────────────────────────────
@@ -474,7 +607,33 @@ export class AuditWorkService {
       if (input.financialPrior !== undefined) set('financial_prior', input.financialPrior ?? null);
       if (input.financialSource !== undefined)
         set('financial_source', input.financialSource?.trim() || null);
-      if (input.conclusion !== undefined) set('conclusion', input.conclusion?.trim() || null);
+      let conclusion =
+        input.conclusion === undefined ? undefined : input.conclusion?.trim() || null;
+      if (input.conclusionState === 'submitted') {
+        // Submitted with the conclusion blank: record the one drafted from the
+        // area's procedures — only once every procedure is complete.
+        const gen = (await this.readGeneration(client, engagementId)).find((g) =>
+          g.areas.some((a) => a.id === workAreaId),
+        );
+        const area = gen?.areas.find((a) => a.id === workAreaId);
+        const blank = conclusion === undefined ? !area?.detail.conclusion : conclusion == null;
+        if (blank) {
+          const facts = await this.readPackFacts(client, [gen!.workflowInstanceId]);
+          const procs = proceduresIn(
+            workAreaId,
+            facts.procedures.get(gen!.workflowInstanceId) ?? [],
+          );
+          if (!conclusionReady(procs) || !area?.draftConclusion) {
+            throw new BadRequestException(
+              procs.length === 0
+                ? 'Write the conclusion — this area has no procedures to draft it from.'
+                : `Write the conclusion, or complete the ${procs.filter((p) => p.state !== 'complete').length} open procedure(s) to have it drafted.`,
+            );
+          }
+          conclusion = area.draftConclusion;
+        }
+      }
+      if (conclusion !== undefined) set('conclusion', conclusion);
       if (input.conclusionState !== undefined) set('conclusion_state', input.conclusionState);
 
       if (sets.length === 0) throw new BadRequestException('No area-detail fields to update.');
@@ -743,7 +902,7 @@ export class AuditWorkService {
   }
 }
 
-function mapWorkArea(a: WorkAreaRow): AuditWorkArea {
+function mapWorkArea(a: WorkAreaRow, draftConclusion: string | null): AuditWorkArea {
   const current = num(a.financial_current);
   const prior = num(a.financial_prior);
   return {
@@ -773,6 +932,8 @@ function mapWorkArea(a: WorkAreaRow): AuditWorkArea {
       conclusionState: a.conclusion_state,
       detailVersion: a.detail_version,
     },
+    draftConclusion,
+    reviewed: a.reviewed_at != null,
     createdAt: a.created_at.toISOString(),
     updatedAt: a.updated_at.toISOString(),
   };

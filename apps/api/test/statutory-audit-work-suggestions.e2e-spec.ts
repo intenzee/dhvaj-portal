@@ -198,6 +198,54 @@ describe('Statutory Audit — Section 05 suggested work (e2e)', () => {
       )?.detail.riskLevel,
     ).toBe('high');
 
+    // ── The pack: what finishing the work needs, with a link to the area.
+    const gen2 = kept.body.generation as StatutoryAuditWorkGeneration;
+    const packCheck = (key: string) => gen2.pack.checks.find((c) => c.key === key)!;
+    expect(gen2.pack.ready).toBe(false);
+    expect(packCheck('procedures_complete').goTo?.anchor).toMatch(/^area-/);
+    expect(packCheck('significant_risks').ok).toBe(false);
+    // IFC is not applicable here, so Section 05 has nothing to do.
+    expect(gen2.controlsPack.ready).toBe(true);
+
+    // Complete the CARO procedures; a blank submission records the drafted conclusion.
+    const caro = gen2.areas.find((a) => a.workAreaKey === 'caro')!;
+    const caroProcs = after.filter((p) => p.linkedAreas[0]?.workAreaId === caro.id);
+    expect(caroProcs.length).toBeGreaterThan(0);
+    // Not while procedures are open.
+    await post(pa, `${base}/areas/${caro.id}/detail`, {
+      conclusionState: 'submitted',
+      detailVersion: caro.detail.detailVersion,
+    }).expect(400);
+    for (const p of caroProcs) {
+      const upd = await post(pa, `${base}/procedures/${p.id}`, {
+        objective: p.objective ?? 'CARO clause reporting.',
+        conclusion: `${p.title} — reported.`,
+        version: p.version,
+      }).expect(201);
+      const v = (upd.body.procedures as AuditProcedure[]).find((x) => x.id === p.id)!.version;
+      await post(pa, `${base}/procedures/${p.id}/state`, { state: 'complete', version: v }).expect(
+        201,
+      );
+    }
+    let caroNow = (
+      (await get(pa, `${base}/work-areas`)).body[0] as StatutoryAuditWorkGeneration
+    ).areas.find((a) => a.id === caro.id)!;
+    expect(caroNow.draftConclusion?.split('\n').at(-1)).toMatch(
+      /^Conclusion: based on the procedures performed/,
+    );
+    const submitted = await post(pa, `${base}/areas/${caro.id}/detail`, {
+      conclusionState: 'submitted',
+      detailVersion: caroNow.detail.detailVersion,
+    }).expect(201);
+    caroNow = (submitted.body as StatutoryAuditWorkGeneration).areas.find((a) => a.id === caro.id)!;
+    expect(caroNow.detail.conclusionState).toBe('submitted');
+    expect(caroNow.detail.conclusion).toBe(caroNow.draftConclusion);
+    expect(
+      (submitted.body as StatutoryAuditWorkGeneration).pack.checks
+        .find((c) => c.key === 'conclusions_reviewed')!
+        .facts.join(' '),
+    ).toContain(caro.title);
+
     // An outsider cannot build or refresh work.
     const res = await post(pb, `${base}/${shellId}/work-areas/suggest`, {});
     expect([403, 404]).toContain(res.status);

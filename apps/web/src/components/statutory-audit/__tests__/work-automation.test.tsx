@@ -47,6 +47,8 @@ const workArea = (key: string, title: string, source: string, detail = {}) => ({
     detailVersion: 2,
     ...detail,
   },
+  draftConclusion: null as string | null,
+  reviewed: false,
   createdAt: '',
   updatedAt: '',
 });
@@ -68,6 +70,47 @@ const generation = {
       materiality: 75,
     }),
   ],
+  pack: {
+    checks: [
+      {
+        key: 'procedures_complete',
+        label: 'Every procedure complete',
+        ok: false,
+        blocking: true,
+        facts: [
+          '1 of 2 procedure(s) complete; still open:',
+          '• P2 Cut-off testing — in progress (Revenue)',
+        ],
+        goTo: { phaseKey: 'audit_areas', label: 'Open Revenue', anchor: 'area-id-fs_rev' },
+      },
+      {
+        key: 'evidence',
+        label: 'Completed procedures carry evidence',
+        ok: false,
+        blocking: false,
+        facts: ['1 completed procedure(s) with no evidence linked:'],
+        goTo: null,
+      },
+    ],
+    ready: false,
+    attention: 1,
+    draftMemo: null,
+  },
+  controlsPack: {
+    checks: [
+      {
+        key: 'procedures_complete',
+        label: 'Every procedure complete',
+        ok: true,
+        blocking: true,
+        facts: ['1 of 1 procedure(s) complete.'],
+        goTo: null,
+      },
+    ],
+    ready: true,
+    attention: 0,
+    draftMemo: null,
+  },
 };
 
 beforeEach(() => {
@@ -115,5 +158,28 @@ describe('audit work builds itself', () => {
     expect(screen.queryByText('Revenue')).not.toBeInTheDocument();
     expect(screen.queryByText('CARO 2020 (21-clause) Workstream')).not.toBeInTheDocument();
     expect(screen.getByText('Controls work · Phase 05')).toBeInTheDocument();
+    expect(screen.getByText('Ready for completion')).toBeInTheDocument();
+  });
+
+  it('says what finishing the work needs and goes straight to the area, its conclusion drafted', async () => {
+    const draft =
+      'Revenue — procedures performed:\n• P2 Cut-off testing: No exceptions.\nExceptions: none identified.\nConclusion: based on the procedures performed, sufficient appropriate evidence has been obtained and no material misstatement was identified in Revenue.';
+    const withDraft = {
+      ...generation,
+      areas: generation.areas.map((a) =>
+        a.workAreaKey === 'fs_rev' ? { ...a, draftConclusion: draft } : a,
+      ),
+    };
+    apiFetch.mockImplementation((url: string) =>
+      Promise.resolve(url.endsWith('/procedures') ? [] : [withDraft]),
+    );
+    const user = userEvent.setup();
+    render(wrap(<WorkAreasPanel engagementId="e1" team={[]} />));
+    expect(await screen.findByText('What finishing the work needs')).toBeInTheDocument();
+    expect(screen.getByText('• P2 Cut-off testing — in progress (Revenue)')).toBeInTheDocument();
+    expect(screen.getByText(/Worth knowing \(1 — never blocks\)/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Open Revenue/ }));
+    expect(await screen.findByLabelText('Area conclusion')).toHaveValue(draft);
+    expect(screen.getByText(/Drafted from the procedures/)).toBeInTheDocument();
   });
 });

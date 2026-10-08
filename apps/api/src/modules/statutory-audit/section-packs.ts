@@ -34,13 +34,13 @@ import { money, periodEndLabel } from './completion-automation';
 
 const MAX_LISTED = 4;
 
-function listed(names: readonly string[]): string[] {
+export function listed(names: readonly string[]): string[] {
   const out = names.slice(0, MAX_LISTED).map((n) => `• ${n}`);
   if (names.length > MAX_LISTED) out.push(`+${names.length - MAX_LISTED} more`);
   return out;
 }
 
-function check(
+export function check(
   key: string,
   label: string,
   ok: boolean,
@@ -51,7 +51,7 @@ function check(
   return { key, label, ok, blocking, facts, goTo: ok ? null : goTo };
 }
 
-function pack(checks: SignOffCheck[], draftMemo: string | null): SectionPack {
+export function pack(checks: SignOffCheck[], draftMemo: string | null): SectionPack {
   return {
     checks,
     ready: checks.filter((c) => c.blocking).every((c) => c.ok),

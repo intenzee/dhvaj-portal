@@ -155,6 +155,14 @@ export interface AuditWorkArea {
    * preserved across framework regeneration. See `AuditAreaDetail`.
    */
   detail: import('./statutory-audit-procedures').AuditAreaDetail;
+  /**
+   * The conclusion drafted from the area's procedures (what was done, the
+   * exceptions and how they were dealt with) — recorded when the area is
+   * submitted with the conclusion left blank. Null when it has no procedures.
+   */
+  draftConclusion: string | null;
+  /** Whether a reviewer has approved the submitted conclusion. */
+  reviewed: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -174,4 +182,8 @@ export interface StatutoryAuditWorkGeneration {
   areas: AuditWorkArea[];
   /** How many work areas are currently active (applicable). */
   activeCount: number;
+  /** What finishing the audit work (Section 06) needs, from the file. */
+  pack: import('./statutory-audit-section-pack').SectionPack;
+  /** The same for the controls workstreams (Section 05). */
+  controlsPack: import('./statutory-audit-section-pack').SectionPack;
 }

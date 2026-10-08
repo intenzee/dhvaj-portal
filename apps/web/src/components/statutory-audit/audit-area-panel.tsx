@@ -103,7 +103,7 @@ export function AuditAreaScreen({
   );
 
   return (
-    <div className="space-y-3">
+    <div id={`audit-anchor-area-${area.id}`} className="space-y-3">
       <button
         type="button"
         onClick={onBack}
@@ -335,7 +335,15 @@ function ConclusionCard({
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
-  const [conclusion, setConclusion] = useState(area.detail.conclusion ?? '');
+  // A blank conclusion starts from the one drafted from the procedures, once
+  // every procedure is complete; until then the draft only says what is open.
+  const draftFinal =
+    area.draftConclusion != null && !/\nConclusion: not yet reached/.test(area.draftConclusion);
+  const [conclusion, setConclusion] = useState(
+    area.detail.conclusion ?? (draftFinal ? area.draftConclusion! : ''),
+  );
+  const drafted = !area.detail.conclusion && draftFinal && conclusion === area.draftConclusion;
+  const openLine = !draftFinal ? area.draftConclusion?.split('\n').at(-1) : null;
 
   const save = useMutation({
     mutationFn: (conclusionState: 'draft' | 'submitted') =>
@@ -360,7 +368,24 @@ function ConclusionCard({
       </div>
       {canManage ? (
         <>
-          <Textarea rows={3} value={conclusion} onChange={(e) => setConclusion(e.target.value)} placeholder="Structured conclusion…" />
+          <Textarea
+            rows={drafted ? 8 : 3}
+            value={conclusion}
+            aria-label="Area conclusion"
+            onChange={(e) => setConclusion(e.target.value)}
+            placeholder="Structured conclusion…"
+          />
+          {drafted && (
+            <p className="text-[11px] text-ink-faint">
+              Drafted from the procedures, their conclusions and exceptions — edit as needed.
+            </p>
+          )}
+          {openLine && !conclusion.trim() && (
+            <p className="text-[11px] text-ink-faint">
+              {openLine.replace(/^Conclusion: /, 'Draft ')} The conclusion drafts itself once
+              they are complete.
+            </p>
+          )}
           <div className="flex gap-2">
             <Button variant="secondary" disabled={save.isPending} onClick={() => save.mutate('draft')}>Save Draft</Button>
             <Button disabled={save.isPending || conclusion.trim().length === 0} onClick={() => save.mutate('submitted')}>

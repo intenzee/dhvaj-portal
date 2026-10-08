@@ -6,6 +6,7 @@ import { RefreshCw, Lock, ChevronRight } from 'lucide-react';
 import {
   PERMISSION,
   type AuditWorkArea,
+  type SectionPack,
   type StatutoryAuditWorkGeneration,
   type WorkAreaState,
   type WorkSuggestionResult,
@@ -17,6 +18,8 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { AuditAreaScreen } from './audit-area-panel';
+import { useAuditAnchor } from './audit-file-nav';
+import { SectionPackChecks } from './section-pack-card';
 
 /**
  * Audit work (Phases 05–06) — Framework → Dynamic Work Generation (§20) plus
@@ -29,7 +32,8 @@ import { AuditAreaScreen } from './audit-area-panel';
  * as inactive, never removed (§20).
  *
  * `only` narrows the list to some workstreams (Phase 05 shows the controls
- * work: IFC and internal-audit reliance).
+ * work: IFC and internal-audit reliance). Above the list, what finishing the
+ * work needs — each open item links to the area it sits in (`area-<id>`).
  */
 
 const STATE_TONE: Record<WorkAreaState, string> = {
@@ -74,6 +78,10 @@ export function WorkAreasPanel({
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.engagementManage);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const phaseKey = only ? 'controls' : 'audit_areas';
+  useAuditAnchor(phaseKey, (anchor) => {
+    if (anchor.startsWith('area-')) setSelectedId(anchor.slice('area-'.length));
+  });
 
   const query = useQuery({
     queryKey: WORK_QK(engagementId),
@@ -169,6 +177,8 @@ export function WorkAreasPanel({
         )}
       </Card>
 
+      <WorkPackCard pack={only ? gen.controlsPack : gen.pack} controls={!!only} />
+
       {gen.frameworkApproved && active.length === 0 && (
         <Card className="p-5">
           <EmptyState>
@@ -207,6 +217,38 @@ export function WorkAreasPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function WorkPackCard({
+  pack,
+  controls,
+}: {
+  pack: SectionPack;
+  controls: boolean;
+}): JSX.Element {
+  const [open, setOpen] = useState(!pack.ready);
+  return (
+    <Card className="space-y-3 p-4">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 text-left"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="text-sm font-semibold text-ink">
+          {controls ? 'Is the controls work finished?' : 'Is the audit work finished?'}
+        </span>
+        <span className="flex items-center gap-2">
+          {pack.attention > 0 && <Badge tone="warn">{pack.attention} to note</Badge>}
+          <Badge tone={pack.ready ? 'success' : 'neutral'}>
+            {pack.ready ? 'Ready for completion' : 'Work open'}
+          </Badge>
+          <ChevronRight className={`h-4 w-4 text-ink-faint transition ${open ? 'rotate-90' : ''}`} />
+        </span>
+      </button>
+      {open && <SectionPackChecks pack={pack} needsTitle="What finishing the work needs" />}
+    </Card>
   );
 }
 
