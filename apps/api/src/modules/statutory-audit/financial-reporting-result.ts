@@ -87,7 +87,10 @@ export async function readFinancialReportingMemoFacts(
     secondaryTriggers: (d?.secondaryTriggers ?? []).join('; ') || 'None',
     ruleApplied: primaryRule ? `${primaryRule.ruleCode} — ${primaryRule.label}` : '—',
     limitApplied: d?.limitApplied ?? 'Not applicable',
-    factsUsed: (d?.factsUsed ?? []).map((f) => ({ label: f.label, value: `${f.value} (${f.source})` })),
+    factsUsed: (d?.factsUsed ?? []).map((f) => ({
+      label: f.label,
+      value: `${f.value} (${f.source})`,
+    })),
     systemConclusion: label(a.systemOutcome),
     systemBasis: a.systemBasis ?? '',
     professionalConclusion: decided

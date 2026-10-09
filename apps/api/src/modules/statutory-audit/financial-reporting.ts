@@ -80,7 +80,11 @@ interface PhaseSpec {
 
 const CORPORATE_PHASES: PhaseSpec[] = [
   { entityClass: 'corporate_p1', criterion: FRF_CRITERION.netWorth, label: 'Phase I' },
-  { entityClass: 'corporate_listed_p2', criterion: FRF_CRITERION.listed, label: 'Phase II (listed)' },
+  {
+    entityClass: 'corporate_listed_p2',
+    criterion: FRF_CRITERION.listed,
+    label: 'Phase II (listed)',
+  },
   {
     entityClass: 'corporate_unlisted_p2',
     criterion: FRF_CRITERION.netWorth,
@@ -89,7 +93,11 @@ const CORPORATE_PHASES: PhaseSpec[] = [
 ];
 const NBFC_PHASES: PhaseSpec[] = [
   { entityClass: 'nbfc_p1', criterion: FRF_CRITERION.netWorth, label: 'NBFC Phase I' },
-  { entityClass: 'nbfc_listed_p2', criterion: FRF_CRITERION.listed, label: 'NBFC Phase II (listed)' },
+  {
+    entityClass: 'nbfc_listed_p2',
+    criterion: FRF_CRITERION.listed,
+    label: 'NBFC Phase II (listed)',
+  },
   {
     entityClass: 'nbfc_unlisted_p2',
     criterion: FRF_CRITERION.netWorth,
@@ -138,19 +146,17 @@ function exact(
 const cr = (v: number | null | undefined) => (v == null ? '—' : formatInrCrore(v));
 const fmtDate = (iso: string) => {
   const d = new Date(`${iso}T00:00:00Z`);
-  return d.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).replace(/ /g, '-');
+  return d
+    .toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+    .replace(/ /g, '-');
 };
 
-function applied(
-  r: ResolvedRule,
-  label: string,
-  result: FrfAppliedRule['result'],
-): FrfAppliedRule {
+function applied(r: ResolvedRule, label: string, result: FrfAppliedRule['result']): FrfAppliedRule {
   return {
     ruleCode: r.ruleCode,
     ruleVersionId: r.ruleVersionId,
@@ -186,7 +192,8 @@ function branchOf(
   f: FinancialReportingFacts,
   resolve: RuleResolver,
 ): { branch: EntityBranch; route: ResolvedRule | null; routeType: string | null } {
-  if (f.isCompany === false) return { branch: ENTITY_BRANCH.nonCompany, route: null, routeType: null };
+  if (f.isCompany === false)
+    return { branch: ENTITY_BRANCH.nonCompany, route: null, routeType: null };
   const types = new Set(f.specialEntityTypes ?? []);
   if (f.isBank) types.add('bank');
   if (f.isInsurance) types.add('insurance');
@@ -219,7 +226,12 @@ function netWorthPoints(f: FinancialReportingFacts, periodStart: string): NetWor
   if (f.netWorth != null && pts.length === 0) {
     // The single 02.1 figure is the preceding year's audited standalone net worth.
     const asAt = `${Number(periodStart.slice(0, 4))}-03-31`;
-    pts.push({ asAt, financialYear: fyOf(asAt), value: f.netWorth, source: '02.1 applicability financials' });
+    pts.push({
+      asAt,
+      financialYear: fyOf(asAt),
+      value: f.netWorth,
+      source: '02.1 applicability financials',
+    });
   }
   return pts.sort((a, b) => a.asAt.localeCompare(b.asAt));
 }
@@ -356,7 +368,12 @@ function smcAssessment(
         detail: 'No SMC limit in the Rules Library for this period.',
       });
     else if (value == null)
-      conditions.push({ key, label, result: FRF_TEST_RESULT.insufficient, detail: 'Not captured.' });
+      conditions.push({
+        key,
+        label,
+        result: FRF_TEST_RESULT.insufficient,
+        detail: 'Not captured.',
+      });
     else
       conditions.push({
         key,
@@ -406,7 +423,8 @@ function smcAssessment(
     borrowingsThreshold: borrowRule?.threshold ?? null,
     conditions,
     ruleCodes: [turnRule?.ruleCode, borrowRule?.ruleCode].filter((c): c is string => !!c),
-    authorityProvisionId: turnRule?.authorityProvisionId ?? borrowRule?.authorityProvisionId ?? null,
+    authorityProvisionId:
+      turnRule?.authorityProvisionId ?? borrowRule?.authorityProvisionId ?? null,
     rules: [turnRule, borrowRule].filter((r): r is ResolvedRule => r != null),
   };
 }
@@ -889,7 +907,8 @@ function finish(
     forceReview?: boolean;
   },
 ): FinancialReportingResult {
-  const missingBlocks = base.missing.length > 0 && o.outcome === REPORTING_FRAMEWORK_OUTCOME.informationInsufficient;
+  const missingBlocks =
+    base.missing.length > 0 && o.outcome === REPORTING_FRAMEWORK_OUTCOME.informationInsufficient;
   const confidence: FrfConfidence =
     o.outcome === REPORTING_FRAMEWORK_OUTCOME.informationInsufficient
       ? missingBlocks
@@ -917,8 +936,10 @@ function finish(
     firstTimeIndAs: o.firstTimeIndAs ?? false,
     indAsThreshold: o.indAsThreshold ?? null,
     isNbfc: base.isNbfc,
-    applicabilityType: o.outcome === REPORTING_FRAMEWORK_OUTCOME.indAs ? (o.applicabilityType ?? null) : null,
-    effectiveFromFy: o.outcome === REPORTING_FRAMEWORK_OUTCOME.indAs ? (o.effectiveFromFy ?? null) : null,
+    applicabilityType:
+      o.outcome === REPORTING_FRAMEWORK_OUTCOME.indAs ? (o.applicabilityType ?? null) : null,
+    effectiveFromFy:
+      o.outcome === REPORTING_FRAMEWORK_OUTCOME.indAs ? (o.effectiveFromFy ?? null) : null,
     primaryTrigger: o.primaryTrigger ?? null,
     secondaryTriggers: base.secondary,
     entityBranch: base.branch,

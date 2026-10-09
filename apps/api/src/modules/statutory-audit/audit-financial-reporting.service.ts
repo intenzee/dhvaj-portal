@@ -284,7 +284,10 @@ export async function assembleFinancialReportingFacts(
   let priorFramework: PriorFramework | null = captured.priorFramework ?? null;
   let priorFrameworkSource = captured.priorFrameworkSource ?? null;
   if (!priorFramework) {
-    const prior = await readPriorSubAssessment(client, workflowInstanceId, { sub: SUB, area: AREA });
+    const prior = await readPriorSubAssessment(client, workflowInstanceId, {
+      sub: SUB,
+      area: AREA,
+    });
     if (prior?.conclusion === 'ind_as' || prior?.conclusion === 'accounting_standards') {
       priorFramework = prior.conclusion;
       priorFrameworkSource = `FY ${prior.financialYear} audit file on the portal`;
@@ -446,9 +449,7 @@ export async function loadFinancialReportingOn(
       partnerApproved: r.partner_approved_at != null,
       blockingReviewOpen,
     });
-    const fill = opts.withMasterFill
-      ? await masterFillOn(client, r.workflow_instance_id)
-      : null;
+    const fill = opts.withMasterFill ? await masterFillOn(client, r.workflow_instance_id) : null;
     out.push({
       workflowInstanceId: r.workflow_instance_id,
       engagementServiceId: r.engagement_service_id,
@@ -862,7 +863,9 @@ export class AuditFinancialReportingService {
             'The system could not determine the framework — override with a conclusion and basis, or mark Information Pending.',
           );
         if (input.conclusion && input.conclusion !== res.outcome)
-          throw new BadRequestException('Confirm takes the system assessment; use Override to change it.');
+          throw new BadRequestException(
+            'Confirm takes the system assessment; use Override to change it.',
+          );
         conclusion = res.outcome;
       } else {
         if (!input.conclusion || !REPORTING_FRAMEWORK_CONCLUSIONS.includes(input.conclusion))
@@ -973,10 +976,12 @@ export class AuditFinancialReportingService {
     captured: FinancialReportingCapturedFacts,
   ): Promise<void> {
     // Never overwrite a professional conclusion (§19).
-    const { rows } = await client.query<{ state: FrameworkState; professional_action: string | null }>(
-      `SELECT state, professional_action FROM hsdg.audit_framework_subassessment WHERE id = $1`,
-      [rowId],
-    );
+    const { rows } = await client.query<{
+      state: FrameworkState;
+      professional_action: string | null;
+    }>(`SELECT state, professional_action FROM hsdg.audit_framework_subassessment WHERE id = $1`, [
+      rowId,
+    ]);
     if (rows[0] && isDecided(rows[0].state)) return;
     const { facts } = await assembleFinancialReportingFacts(
       client,

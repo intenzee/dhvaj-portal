@@ -25,7 +25,12 @@ import { ReviewModelsController, WorkflowFamiliesController } from './reference.
     WorkflowFamiliesController,
     AuditRulesController,
   ],
-  providers: [CatalogueService, CatalogueTemplatesService, AuditRulesService, AuditRulesAdminService],
+  providers: [
+    CatalogueService,
+    CatalogueTemplatesService,
+    AuditRulesService,
+    AuditRulesAdminService,
+  ],
   exports: [CatalogueService, CatalogueTemplatesService, AuditRulesService],
 })
 export class CatalogueModule {}
