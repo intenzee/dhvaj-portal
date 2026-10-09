@@ -5,6 +5,7 @@ import {
   FRAMEWORK_AREA_KEY,
   SUB_SECTION_KEY,
   type CaroClauseConclusion,
+  type CaroConclusionSummary,
   type CaroOutcome,
 } from '@hsdg/contracts';
 import { formatLongDate } from './acceptance-merge-values';
@@ -24,6 +25,7 @@ export interface CaroMemoInput {
   basis: string | null;
   isOverridden: boolean;
   technicalBasis: string | null;
+  supportingEvidence: string | null;
   decidedByName: string | null;
   decidedAt: string | null;
   professionalAction: string | null;
@@ -31,6 +33,8 @@ export interface CaroMemoInput {
   partnerApprovedByName: string | null;
   partnerApprovedAt: string | null;
   exemptionReason: string | null;
+  /** The engine's structured conclusion (spec §8), when the engine ran. */
+  summary: CaroConclusionSummary | null;
   programme: {
     orderTitle: string;
     orderVersionLabel: string;
@@ -64,8 +68,11 @@ export async function readCaroMemoInput(
     pending_reason: string | null;
     partner_name: string | null;
     partner_approved_at: Date | null;
-    system_detail: { exemptionReason?: string | null } | null;
-    facts: { technicalBasis?: string | null } | null;
+    system_detail: {
+      exemptionReason?: string | null;
+      conclusion?: CaroConclusionSummary | null;
+    } | null;
+    facts: { technicalBasis?: string | null; supportingEvidence?: string | null } | null;
   }>(
     `SELECT s.system_outcome, s.system_basis, s.conclusion, s.basis, s.is_overridden,
             d.full_name AS decided_by_name, s.decided_at, s.professional_action, s.pending_reason,
@@ -112,6 +119,7 @@ export async function readCaroMemoInput(
     basis: r.basis,
     isOverridden: r.is_overridden,
     technicalBasis: r.facts?.technicalBasis ?? null,
+    supportingEvidence: r.facts?.supportingEvidence ?? null,
     decidedByName: r.decided_by_name,
     decidedAt: r.decided_at ? r.decided_at.toISOString() : null,
     professionalAction: r.professional_action,
@@ -119,6 +127,7 @@ export async function readCaroMemoInput(
     partnerApprovedByName: r.partner_name,
     partnerApprovedAt: r.partner_approved_at ? r.partner_approved_at.toISOString() : null,
     exemptionReason: r.system_detail?.exemptionReason ?? null,
+    summary: r.system_detail?.conclusion ?? null,
     programme: prog[0]
       ? {
           orderTitle: prog[0].order_title,
@@ -138,6 +147,20 @@ export async function readCaroMemoInput(
   };
 }
 
+const ROUTE_LABEL: Record<string, string> = {
+  non_company: 'Not a company',
+  direct_exemption: 'Direct exemption',
+  private_company: 'Private company',
+  public_company: 'Public company',
+  undetermined: 'Not yet determined',
+};
+const PRIVATE_EXEMPTION_LABEL: Record<CaroConclusionSummary['privateExemption'], string> = {
+  qualified: 'Qualified',
+  not_qualified: 'Not qualified',
+  pending: 'Pending',
+  not_required: 'Not required',
+};
+
 const outcomeLabel = (o: string | null): string | null =>
   o ? (OUTCOME_LABEL[o as CaroOutcome] ?? o.replace(/_/g, ' ')) : null;
 
@@ -156,14 +179,29 @@ export function caroMergeValues(m: CaroMemoInput | null): Record<string, string 
   const reportable = m.clauses.filter((c) => c.conclusion === 'reportable_matter');
   const naFacts = sfs.filter((c) => c.relevance === 'not_applicable_to_facts');
   const approved = m.clauses.filter((c) => c.reviewState === 'approved');
+  const sum = m.summary;
   return {
     'caro.applicability': outcomeLabel(decided ? m.conclusion : m.systemOutcome),
     'caro.systemConclusion': outcomeLabel(m.systemOutcome),
     'caro.systemBasis': t(m.systemBasis),
     'caro.exemptionBasis': t(m.exemptionReason) ?? (m.systemOutcome ? 'None' : null),
+    'caro.entityRoute': sum ? (ROUTE_LABEL[sum.entityRoute] ?? sum.entityRoute) : null,
+    'caro.directExemption': sum ? (sum.directExemption ?? 'None') : null,
+    'caro.privateExemption': sum ? PRIVATE_EXEMPTION_LABEL[sum.privateExemption] : null,
+    'caro.failedCondition': sum
+      ? sum.failedCondition
+        ? [
+            sum.failedCondition,
+            sum.actualValue ? `actual ${sum.actualValue}` : null,
+            sum.configuredLimit ? `configured limit ${sum.configuredLimit}` : null,
+          ]
+            .filter(Boolean)
+            .join(' — ')
+        : 'None'
+      : null,
     'caro.orderVersion': m.programme
       ? `${m.programme.orderTitle} — ${m.programme.orderVersionLabel}`
-      : null,
+      : (sum?.orderVersion ?? null),
     'caro.standaloneScope': !m.programme
       ? decided
         ? 'No paragraph 3 clause programme — CARO does not apply'
@@ -191,6 +229,7 @@ export function caroMergeValues(m: CaroMemoInput | null): Record<string, string 
     'caro.overridden': m.isOverridden ? 'Yes' : 'No',
     'caro.overrideReason': m.isOverridden ? t(m.basis) : 'Not applicable',
     'caro.technicalBasis': m.isOverridden ? t(m.technicalBasis) : 'Not applicable',
+    'caro.supportingEvidence': m.isOverridden ? t(m.supportingEvidence) : 'Not applicable',
     'caro.partnerApproval': m.partnerApprovedAt
       ? `Approved by ${m.partnerApprovedByName ?? 'the Engagement Partner'} on ${formatLongDate(m.partnerApprovedAt.slice(0, 10))}`
       : m.isOverridden

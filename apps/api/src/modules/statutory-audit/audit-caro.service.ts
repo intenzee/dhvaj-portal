@@ -41,6 +41,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
+import { caroProgrammeContextsOn } from './caro-programme-read';
 import { fillCaro, caroFromMaster } from './framework-facts-prefill';
 import { isEngagementLead, readEngagementMasterFacts } from './master-facts';
 import { AuditMattersService } from './audit-matters.service';
@@ -1103,24 +1104,12 @@ export class AuditCaroService {
     return (rowCount ?? 0) > 0;
   }
 
-  /**
-   * The report contexts whose Level-2 clause programme is instantiated (Track B
-   * owns hsdg.audit_caro_programme; null before that migration runs).
-   */
+  /** The report contexts whose Level-2 clause programme is instantiated and live. */
   private async programmeContexts(
     client: PoolClient,
     workflowInstanceId: string,
   ): Promise<string[] | null> {
-    const t = await client.query<{ t: string | null }>(
-      `SELECT to_regclass('hsdg.audit_caro_programme')::text AS t`,
-    );
-    if (!t.rows[0]?.t) return null;
-    const { rows } = await client.query<{ report_context: string }>(
-      `SELECT DISTINCT report_context FROM hsdg.audit_caro_programme
-        WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL`,
-      [workflowInstanceId],
-    );
-    return rows.map((r) => r.report_context);
+    return caroProgrammeContextsOn(client, workflowInstanceId);
   }
 
   /** An open blocking Framework Matter raised on the CARO area (spec §19). */

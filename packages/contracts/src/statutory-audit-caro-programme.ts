@@ -18,13 +18,9 @@
  * and procedures all come from `caro_clause_library`.
  */
 
-// ── Vocabulary ───────────────────────────────────────────────────────────────
+import type { CaroReportContext } from './statutory-audit-caro';
 
-export const CARO_REPORT_CONTEXT = {
-  standalone: 'standalone',
-  consolidated: 'consolidated',
-} as const;
-export type CaroReportContext = (typeof CARO_REPORT_CONTEXT)[keyof typeof CARO_REPORT_CONTEXT];
+// ── Vocabulary ───────────────────────────────────────────────────────────────
 
 export const CARO_REPORT_CONTEXT_LABEL: Record<CaroReportContext, string> = {
   standalone: 'Standalone financial statements',

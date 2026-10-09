@@ -30,7 +30,7 @@ import {
   type CompletionProcedure,
   type PlannedCompletionItem,
 } from './completion-automation';
-import { readCaroClauseStatus } from './audit-caro-programme.service';
+import { readCaroClauseStatus } from './caro-programme-read';
 import { isEngagementLead } from './master-facts';
 import { planSignOff, type SignOffFacts } from './sign-off-automation';
 import { addDays, addYears, day, planArchive, type ArchiveFacts } from './archive-automation';
