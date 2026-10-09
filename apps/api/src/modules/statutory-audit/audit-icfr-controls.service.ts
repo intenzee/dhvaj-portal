@@ -2363,7 +2363,11 @@ export class AuditIcfrControlsService {
 
   private async assertWorkstreamActive(client: PoolClient, workflowInstanceId: string) {
     const ws = await this.loadWorkstream(client, workflowInstanceId);
-    if (!ws || ws.status !== 'active')
+    if (!ws)
+      throw new BadRequestException(
+        'The ICFR workstream is configured once 02.5 finds section 143(3)(i) reporting applies — until then a control can be relied on for the FS audit only.',
+      );
+    if (ws.status !== 'active')
       throw new BadRequestException(
         'Section 143(3)(i) reporting does not apply (02.5) — a control can be relied on for the FS audit only.',
       );

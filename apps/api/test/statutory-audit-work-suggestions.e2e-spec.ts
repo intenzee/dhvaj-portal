@@ -160,6 +160,7 @@ describe('Statutory Audit — Section 05 suggested work (e2e)', () => {
     expect(procs.filter((p) => p.sourceKey?.startsWith('caro:'))).toHaveLength(47);
     expect(procs.some((p) => p.sourceKey === 'std:caro:clauses')).toBe(false);
     expect(bySource.has('std:ifc:walkthroughs')).toBe(false); // IFC not applicable
+    expect(procs.some((p) => p.sourceKey?.startsWith('icfr:'))).toBe(false); // no 02.5 workstream
     expect(procs.every((p) => p.ownerEmployeeId && p.reviewerEmployeeId)).toBe(true);
 
     // The team deletes a suggestion; a refresh never brings it back.
