@@ -30,6 +30,8 @@ import { AuditCaroProgrammeService } from './audit-caro-programme.service';
 import { AuditCaroProgrammeController } from './audit-caro-programme.controller';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditIcfrController } from './audit-icfr.controller';
+import { AuditIcfrControlsService } from './audit-icfr-controls.service';
+import { AuditIcfrControlsController } from './audit-icfr-controls.controller';
 import { AuditConsolidationService } from './audit-consolidation.service';
 import { AuditConsolidationController } from './audit-consolidation.controller';
 import { AuditOtherReportingService } from './audit-other-reporting.service';
@@ -105,6 +107,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditCaroController,
     AuditCaroProgrammeController,
     AuditIcfrController,
+    AuditIcfrControlsController,
     AuditConsolidationController,
     AuditOtherReportingController,
     AuditFrameworkSummaryController,
@@ -145,6 +148,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditCaroService,
     AuditCaroProgrammeService,
     AuditIcfrService,
+    AuditIcfrControlsService,
     AuditConsolidationService,
     AuditOtherReportingService,
     AuditFrameworkSummaryService,
@@ -176,6 +180,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditCaroService,
     AuditCaroProgrammeService,
     AuditIcfrService,
+    AuditIcfrControlsService,
     AuditConsolidationService,
     AuditOtherReportingService,
     AuditFrameworkSummaryService,
