@@ -1571,11 +1571,11 @@ export const ENGAGEMENT_LETTER_DONE: readonly string[] = ['approved', 'issued', 
 export interface CompletionSegment {
   segmentKey: string;
   state: string;
-  answers: ReadonlyArray<{
+  answers: readonly {
     questionKey: string;
     answer: string | null;
     details?: AcceptanceDetails | null;
-  }>;
+  }[];
 }
 
 /**
