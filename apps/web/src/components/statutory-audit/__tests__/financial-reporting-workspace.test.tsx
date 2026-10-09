@@ -14,7 +14,10 @@ jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
 // The evidence, references and downstream panels fetch their own data; they
 // have their own tests.
 jest.mock('../framework-evidence', () => ({ FrameworkEvidence: () => null }));
-jest.mock('../framework-references', () => ({ FrameworkReferences: () => null }));
+const mockReferences = jest.fn((_props: { anchors?: string[] }) => null);
+jest.mock('../framework-references', () => ({
+  FrameworkReferences: (props: { anchors?: string[] }) => mockReferences(props),
+}));
 jest.mock('../framework-downstream', () => ({ FinancialReportingDownstream: () => null }));
 
 const URL = '/engagements/e1/statutory-audit/wf1/financial-reporting';
@@ -137,6 +140,12 @@ describe('02.2 financial reporting workspace', () => {
     // First-time adoption shows for Ind AS; the SMC sub-assessment does not.
     expect(screen.getByText(/FRF-06 Is this the company/)).toBeInTheDocument();
     expect(screen.queryByText(/SMC sub-assessment/)).not.toBeInTheDocument();
+  });
+
+  it('offers View Current Ind AS alongside the applicability provision (§20)', () => {
+    render(wrap(<FinancialReportingWorkspace engagementId="e1" fr={fixture()} canManage />));
+    const anchors = mockReferences.mock.calls.flatMap(([p]) => p.anchors ?? []);
+    expect(anchors).toEqual(expect.arrayContaining(['indas_applicability', 'current_indas']));
   });
 
   it('confirms the system assessment', async () => {

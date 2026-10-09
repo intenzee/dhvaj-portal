@@ -241,7 +241,7 @@ export function FinancialReportingWorkspace({
         <RulesTable rules={d?.rulesApplied ?? []} triggeredOnly />
         <FrameworkReferences
           contextKey="02.2"
-          anchors={['indas_applicability']}
+          anchors={['indas_applicability', 'current_indas']}
           provisionIds={a.authorityProvisionId ? [a.authorityProvisionId] : []}
           effectiveOn={effectiveOn}
         />
