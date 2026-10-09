@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -57,10 +58,13 @@ interface MatterRow {
   source: string;
   source_ref: string | null;
   title: string;
+  description: string | null;
+  action: string | null;
   category: string;
   severity: string | null;
   is_blocking: boolean;
   is_auto: boolean;
+  owner_employee_id: string | null;
   owner_name: string | null;
   due_date: string | null;
   status: MatterStatus;
@@ -110,6 +114,7 @@ export class AuditMattersService {
     const { rows } = await client.query<MatterRow>(
       `SELECT m.id, m.workflow_instance_id, m.engagement_id, m.seq, m.section, m.source,
               m.source_ref, m.title, m.category, m.severity, m.is_blocking, m.is_auto,
+              m.description, m.action, m.owner_employee_id,
               owner.full_name AS owner_name, m.due_date::text, m.status, m.resolution,
               appr.full_name AS approver_name, m.approved_at, m.document_id, m.note,
               m.version, m.created_at, m.updated_at, ${SUGGESTED_RESOLUTION}
@@ -238,8 +243,14 @@ export class AuditMattersService {
         const ins = await client.query(
           `INSERT INTO hsdg.audit_matter
              (workflow_instance_id, engagement_id, seq, section, source, title,
-              category, severity, is_blocking, is_auto, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, 'open')
+              category, severity, is_blocking, is_auto, status, owner_employee_id, due_date)
+           SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, true, 'open',
+                  -- Section 01 matters (spec §11): owned by the Engagement Manager
+                  -- (else the Partner) and due in a week, until the team changes it.
+                  CASE WHEN $4 = 'acceptance'
+                       THEN COALESCE(e.engagement_manager_id, e.engagement_partner_id) END,
+                  CASE WHEN $4 = 'acceptance' THEN current_date + 7 END
+             FROM hsdg.engagements e WHERE e.id = $2
            ON CONFLICT (workflow_instance_id, source) DO NOTHING`,
           [
             workflowInstanceId,
@@ -293,10 +304,21 @@ export class AuditMattersService {
     input: UpdateMatterInput,
   ): Promise<AuditMatterRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const { rows } = await client.query<{ workflow_instance_id: string; status: MatterStatus }>(
-        `SELECT workflow_instance_id, status
-           FROM hsdg.audit_matter
-          WHERE id = $1 AND engagement_id = $2`,
+      const { rows } = await client.query<{
+        workflow_instance_id: string;
+        status: MatterStatus;
+        section: MatterSection;
+        severity: string | null;
+        resolution: string | null;
+        owner_employee_id: string | null;
+        due_date: string | null;
+        engagement_partner_id: string | null;
+      }>(
+        `SELECT m.workflow_instance_id, m.status, m.section, m.severity, m.resolution,
+                m.owner_employee_id, m.due_date::text, e.engagement_partner_id
+           FROM hsdg.audit_matter m
+           JOIN hsdg.engagements e ON e.id = m.engagement_id
+          WHERE m.id = $1 AND m.engagement_id = $2`,
         [matterId, engagementId],
       );
       const current = rows[0];
@@ -304,12 +326,42 @@ export class AuditMattersService {
 
       const nextStatus = input.status ?? current.status;
       const resolution = input.resolution?.trim() || null;
-      if (nextStatus === MATTER_STATUS.acceptedWithApproval && !resolution) {
+      // Becoming accepted (not an edit to an already-accepted matter).
+      const accepting =
+        nextStatus === MATTER_STATUS.acceptedWithApproval &&
+        current.status !== MATTER_STATUS.acceptedWithApproval;
+      if (accepting && !resolution) {
         throw new BadRequestException(
           'Accepting a matter with approval requires a resolution/basis.',
         );
       }
-      const setsApprover = nextStatus === MATTER_STATUS.acceptedWithApproval;
+      // Section 01 register rules (spec §11).
+      if (current.section === 'acceptance') {
+        const closing =
+          nextStatus === MATTER_STATUS.resolved ||
+          nextStatus === MATTER_STATUS.acceptedWithApproval;
+        if (closing && !resolution && !current.resolution) {
+          throw new BadRequestException('Record the resolution before closing the matter.');
+        }
+        const owner = input.ownerEmployeeId ?? current.owner_employee_id;
+        if (!owner) throw new BadRequestException('Every acceptance matter needs an owner.');
+        const due = input.dueDate ?? current.due_date;
+        if (!closing && !due) {
+          throw new BadRequestException('Give the matter a due date while it is unresolved.');
+        }
+        // Methodology: significant acceptance matters are accepted by the
+        // Engagement Partner.
+        if (
+          accepting &&
+          (current.severity === 'high' || current.severity === 'critical') &&
+          ctx.employeeId !== current.engagement_partner_id
+        ) {
+          throw new ForbiddenException(
+            'Only the Engagement Partner can accept a high or critical acceptance matter.',
+          );
+        }
+      }
+      const setsApprover = accepting;
 
       const result = await client.query(
         `UPDATE hsdg.audit_matter
@@ -319,6 +371,8 @@ export class AuditMattersService {
                 due_date = COALESCE($6::date, due_date),
                 document_id = COALESCE($7, document_id),
                 note = COALESCE($8, note),
+                description = CASE WHEN $11 THEN NULLIF(trim($12), '') ELSE description END,
+                action = CASE WHEN $13 THEN NULLIF(trim($14), '') ELSE action END,
                 approver_employee_id = CASE WHEN $9 THEN $10 ELSE approver_employee_id END,
                 approved_at = CASE WHEN $9 THEN now() ELSE approved_at END,
                 version = version + 1
@@ -334,6 +388,10 @@ export class AuditMattersService {
           input.note?.trim() || null,
           setsApprover,
           setsApprover ? (ctx.employeeId ?? null) : null,
+          input.description !== undefined,
+          input.description ?? '',
+          input.action !== undefined,
+          input.action ?? '',
         ],
       );
       if ((result.rowCount ?? 0) === 0) {
@@ -412,6 +470,7 @@ export class AuditMattersService {
     const { rows } = await client.query<MatterRow>(
       `SELECT m.id, m.workflow_instance_id, m.engagement_id, m.seq, m.section, m.source,
               m.source_ref, m.title, m.category, m.severity, m.is_blocking, m.is_auto,
+              m.description, m.action, m.owner_employee_id,
               owner.full_name AS owner_name, m.due_date::text, m.status, m.resolution,
               appr.full_name AS approver_name, m.approved_at, m.document_id, m.note,
               m.version, m.created_at, m.updated_at, ${SUGGESTED_RESOLUTION}
@@ -448,10 +507,13 @@ function mapMatter(m: MatterRow): AuditMatterRecord {
     source: m.source,
     sourceRef: m.source_ref,
     title: m.title,
+    description: m.description,
+    action: m.action,
     category: m.category,
     severity: m.severity,
     isBlocking: m.is_blocking,
     isAuto: m.is_auto,
+    ownerEmployeeId: m.owner_employee_id,
     ownerName: m.owner_name,
     dueDate: m.due_date,
     status: m.status,

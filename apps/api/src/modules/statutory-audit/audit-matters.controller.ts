@@ -65,6 +65,8 @@ export class AuditMattersController {
   ): Promise<AuditMatterRecord> {
     return this.matters.updateMatter(rlsContextFromPrincipal(principal), id, matterId, {
       status: dto.status,
+      description: dto.description,
+      action: dto.action,
       resolution: dto.resolution,
       ownerEmployeeId: dto.ownerEmployeeId,
       dueDate: dto.dueDate,

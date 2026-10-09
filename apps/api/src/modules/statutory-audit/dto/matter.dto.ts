@@ -26,6 +26,20 @@ export class UpdateMatterDto {
   @MaxLength(4000)
   resolution?: string;
 
+  @ApiPropertyOptional({
+    description: "The team's description (empty restores the generated one).",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  description?: string;
+
+  @ApiPropertyOptional({ description: 'Action / safeguard taken or planned.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  action?: string;
+
   @ApiPropertyOptional({ description: 'Assign an owner (employee id).' })
   @IsOptional()
   @IsUUID()

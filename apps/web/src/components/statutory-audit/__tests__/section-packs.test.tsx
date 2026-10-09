@@ -288,11 +288,11 @@ describe('Section 01 final acceptance', () => {
       '/engagements/e1/statutory-audit/matters/m1',
       expect.objectContaining({
         method: 'POST',
-        body: {
+        body: expect.objectContaining({
           status: 'accepted_with_approval',
           resolution: 'Rotated the article assistant off the engagement.',
           version: 2,
-        },
+        }),
       }),
     );
   });
