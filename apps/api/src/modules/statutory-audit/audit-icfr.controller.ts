@@ -8,7 +8,7 @@ import {
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditIcfrService } from './audit-icfr.service';
-import { RecordIcfrDecisionDto, SetIcfrFactsDto } from './dto/icfr.dto';
+import { PartnerApproveIcfrDto, RecordIcfrDecisionDto, SetIcfrFactsDto } from './dto/icfr.dto';
 
 /**
  * Statutory Audit — 02.5 Internal Financial Controls / ICFR Reporting endpoints
@@ -48,7 +48,8 @@ export class AuditIcfrController {
   @Post(':id/statutory-audit/:workflowInstanceId/icfr/facts')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
-    summary: 'Capture the 02.5 ICFR facts (peak covered borrowings, §92/§137 filing default)',
+    summary:
+      'Capture the 02.5 ICFR facts — IFC-01 audited turnover, IFC-02 borrowing schedule / peak, IFC-03 §137 / §92 filings',
   })
   setFacts(
     @CurrentPrincipal() principal: Principal,
@@ -56,11 +57,7 @@ export class AuditIcfrController {
     @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
     @Body() dto: SetIcfrFactsDto,
   ): Promise<StatutoryAuditIcfr> {
-    return this.icfr.setFacts(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
-      peakCoveredBorrowings: dto.peakCoveredBorrowings,
-      filingDefault: dto.filingDefault,
-      version: dto.version,
-    });
+    return this.icfr.setFacts(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/icfr/run-suggestions')
@@ -76,18 +73,40 @@ export class AuditIcfrController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/icfr/decision')
   @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'Record the professional ICFR conclusion (override needs a basis)' })
+  @ApiOperation({
+    summary:
+      'IFC-04: Confirm / Override (reason + technical basis + evidence) / Information Pending',
+  })
   decision(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
     @Body() dto: RecordIcfrDecisionDto,
   ): Promise<StatutoryAuditIcfr> {
-    return this.icfr.recordDecision(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
-      conclusion: dto.conclusion,
-      basis: dto.basis,
-      impact: dto.impact,
-      version: dto.version,
-    });
+    return this.icfr.recordDecision(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto,
+    );
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/icfr/partner-approve')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'IFC-04: Engagement Partner approval of a significant override / complex assessment',
+  })
+  partnerApprove(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: PartnerApproveIcfrDto,
+  ): Promise<StatutoryAuditIcfr> {
+    return this.icfr.partnerApprove(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto,
+    );
   }
 }

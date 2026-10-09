@@ -390,8 +390,28 @@ function FrameworkAreaCard({
             </p>
           )}
 
+          {/* ICFR reporting is concluded in 02.5 (IFC-04) — this area mirrors it. */}
+          {assessment.areaKey === 'ifc' && (
+            <p className="rounded-md border border-line px-3 py-2 text-xs text-ink-muted">
+              Concluded in the 02.5 ICFR Reporting workspace (exemption routes, IFC-04 and Partner
+              approval); this row mirrors it.{' '}
+              <button
+                type="button"
+                className="font-medium text-primary-600 underline"
+                onClick={() => {
+                  setOpen(false);
+                  document
+                    .getElementById('framework-02-5')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+              >
+                Open the 02.5 ICFR workspace
+              </button>
+            </p>
+          )}
+
           {/* Decision controls */}
-          {canManage && assessment.areaKey !== 'caro' && (
+          {canManage && assessment.areaKey !== 'caro' && assessment.areaKey !== 'ifc' && (
             <div className="space-y-2">
               <Textarea
                 placeholder="Basis / rationale (required when overriding the system suggestion)"

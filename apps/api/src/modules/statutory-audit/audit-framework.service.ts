@@ -22,6 +22,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditCaroService } from './audit-caro.service';
+import { AuditIcfrService } from './audit-icfr.service';
 import { AuditMattersService } from './audit-matters.service';
 import { SUGGESTED_AREA_KEYS, suggestArea, type FrameworkFacts } from './framework-suggestions';
 import { fixFor, isEngagementLead } from './master-facts';
@@ -81,6 +82,7 @@ export class AuditFrameworkService {
     private readonly rules: AuditRulesService,
     private readonly matters: AuditMattersService,
     private readonly caro: AuditCaroService,
+    private readonly icfr: AuditIcfrService,
   ) {}
 
   // ── Read ──────────────────────────────────────────────────────────────────
@@ -303,11 +305,14 @@ export class AuditFrameworkService {
     for (const row of rows) {
       // Never overwrite a professional conclusion (§19).
       if (FRAMEWORK_DECIDED_STATES.includes(row.state)) continue;
-      // CARO is assessed by 02.4 — the area mirrors its result (one CARO answer).
+      // CARO is assessed by 02.4 and ICFR by 02.5 — those areas mirror their
+      // sub-assessment's result (one answer each).
       const s =
         row.area_key === FRAMEWORK_AREA_KEY.caro
           ? await this.caro.legacySuggestionOn(client, ctx, engagementId, workflowInstanceId)
-          : suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
+          : row.area_key === FRAMEWORK_AREA_KEY.ifc
+            ? await this.icfr.legacySuggestionOn(client, ctx, engagementId, workflowInstanceId)
+            : suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
       if (!s.suggestion && s.state === 'not_assessed') continue; // descriptive — leave alone
       await client.query(
         `UPDATE hsdg.audit_framework_assessments
@@ -342,13 +347,16 @@ export class AuditFrameworkService {
                 decided_at = now(), version = version + 1
           WHERE workflow_instance_id = $1 AND system_suggestion IS NOT NULL
             AND state IN ('system_suggested_applicable', 'system_suggested_not_applicable')
-            AND area_key <> 'caro'
+            AND area_key NOT IN ('caro', 'ifc')
           RETURNING id, area_key, conclusion`,
         [workflowInstanceId, ctx.employeeId ?? null],
       );
       // CARO: accepting is the 02.4 CARO-06 Confirm (which mirrors this area).
       if (await this.caro.acceptSuggestionOn(client, ctx, engagementId, workflowInstanceId))
         rows.push({ id: '', area_key: 'caro' });
+      // ICFR: accepting is the 02.5 IFC-04 Confirm (which mirrors this area).
+      if (await this.icfr.acceptSuggestionOn(client, ctx, engagementId, workflowInstanceId))
+        rows.push({ id: '', area_key: 'ifc' });
       const csr = rows.find((r) => r.area_key === 'csr') as
         { conclusion?: string | null } | undefined;
       if (csr)
@@ -420,6 +428,24 @@ export class AuditFrameworkService {
           objectType: 'audit_framework_assessment',
           objectId: assessmentId,
           after: { conclusion: input.conclusion, via: '02.4' },
+        });
+        const [framework] = await this.readFrameworks(client, engagementId);
+        return framework!;
+      }
+      if (current.area_key === FRAMEWORK_AREA_KEY.ifc) {
+        // ICFR is concluded in 02.5 (IFC-04); this records it there and mirrors back.
+        await this.icfr.decideFromFrameworkOn(
+          client,
+          ctx,
+          engagementId,
+          current.workflow_instance_id,
+          input,
+        );
+        await this.audit.recordWith(client, ctx, {
+          action: 'statutory_audit.framework_decision',
+          objectType: 'audit_framework_assessment',
+          objectId: assessmentId,
+          after: { conclusion: input.conclusion, via: '02.5' },
         });
         const [framework] = await this.readFrameworks(client, engagementId);
         return framework!;

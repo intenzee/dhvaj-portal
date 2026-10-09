@@ -518,6 +518,10 @@ export interface IcfrApprovedResult {
   periodStart: string;
 }
 
+/** One IFC-03 filing as entered (optional fields default to null). */
+export type IcfrFilingRecordInput = Pick<IcfrFilingRecord, 'form' | 'section' | 'source'> &
+  Partial<Pick<IcfrFilingRecord, 'period' | 'dueDate' | 'filedOn' | 'srn' | 'note'>>;
+
 /** Capture the 02.5-specific facts (IFC-01 / IFC-02 / IFC-03). */
 export interface SetIcfrFactsInput {
   peakCoveredBorrowings?: number | null;
@@ -525,7 +529,7 @@ export interface SetIcfrFactsInput {
   borrowingSchedule?: IcfrBorrowingPoint[] | null;
   borrowingDataBasis?: IcfrBorrowingDataBasis | null;
   filingDefault?: boolean | null;
-  filings?: IcfrFilingRecord[] | null;
+  filings?: IcfrFilingRecordInput[] | null;
   filingEvidence?: string | null;
   auditedTurnover?: number | null;
   auditedTurnoverPeriod?: string | null;

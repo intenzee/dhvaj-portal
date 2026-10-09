@@ -168,16 +168,12 @@ export function suggestArea(
       // simplified CARO test here.
       return judgement('CARO 2020 applicability is assessed in 02.4.');
 
-    case FRAMEWORK_AREA_KEY.ifc: {
-      // IFC reporting u/s 143(3)(i): all companies (certain small private cos exempt).
-      if (f.isCompany === false)
-        return notApplies('Not a company — IFC reporting u/s 143(3)(i) does not apply.');
-      if (f.isCompany == null)
-        return judgement('Entity type unknown — confirm IFC reporting applicability.');
-      return applies(
-        'Company — IFC-over-financial-reporting is reportable u/s 143(3)(i) (confirm any small-private-company exemption).',
-      );
-    }
+    case FRAMEWORK_AREA_KEY.ifc:
+      // §143(3)(i) ICFR reporting is assessed by 02.5 (icfr.ts): entity route,
+      // OPC / Small Company routes, both monetary conditions and the §92 / §137
+      // filing condition. The framework service mirrors that result onto this
+      // area — never a second "any company applies" test here.
+      return judgement('ICFR reporting applicability is assessed in 02.5.');
 
     case FRAMEWORK_AREA_KEY.cfs: {
       // Consolidation: a company with subsidiaries/associates/JVs prepares CFS.

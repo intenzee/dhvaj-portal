@@ -4,7 +4,9 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileCheck2, RefreshCw } from 'lucide-react';
 import {
+  ICFR_OUTCOME_LABEL,
   PERMISSION,
+  type IcfrOutcome,
   type SoftwareSystemInput,
   type StatutoryAuditIcfr,
   type StatutoryAuditIcfrMasterFillResult,
@@ -17,8 +19,9 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Badge, Button, Card } from '@/components/ui';
-import { Field, Input } from '@/components/form';
+import { ExpandToggle } from '@/components/inline-panel';
 import { Facts } from './group-caro-card';
+import { IcfrWorkspace } from './icfr-workspace';
 
 /**
  * 02.5 ICFR and 02.7 other-reporting facts the portal already holds (Guide
@@ -26,11 +29,14 @@ import { Facts } from './group-caro-card';
  * whole-time director from the contacts master and the accounting software
  * from last year's file — shown with their source. The team is asked only for
  * what nothing on the portal answers: peak covered borrowings, and whether each
- * system's audit trail ran all this year.
+ * system's audit trail ran all this year. The full 02.5 workspace (IFC-01 to
+ * IFC-04) opens in place under the ICFR summary.
  */
 
 const icfrQk = (id: string) => ['engagement', id, 'statutory-audit-icfr'];
 const orQk = (id: string) => ['engagement', id, 'statutory-audit-other-reporting'];
+
+const icfrLabel = (o: string) => ICFR_OUTCOME_LABEL[o as IcfrOutcome] ?? humanize(o);
 
 const decided = (s?: string) =>
   s === 'applicable' || s === 'not_applicable' || s === 'overridden' || s === 'approved';
@@ -93,20 +99,7 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
     onError: (e) => fail(e, 'fill from the client master'),
   });
 
-  const [peak, setPeak] = useState('');
-  const savePeak = useMutation({
-    mutationFn: () =>
-      apiFetch(`${base}/icfr/facts`, {
-        method: 'POST',
-        body: { peakCoveredBorrowings: Number(peak), version: icfr!.assessment.version },
-      }),
-    onSuccess: () => {
-      toast('Peak borrowings saved.');
-      setPeak('');
-      refresh();
-    },
-    onError: (e) => fail(e, 'save the peak borrowings'),
-  });
+  const [icfrOpen, setIcfrOpen] = useState(false);
 
   const saveSystems = useMutation({
     mutationFn: (softwareSystems: SoftwareSystemInput[]) =>
@@ -151,41 +144,31 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-ink">ICFR reporting</span>
             {icfr.assessment.systemOutcome && (
-              <Badge tone="info">Suggested: {humanize(icfr.assessment.systemOutcome)}</Badge>
+              <Badge tone="info">System: {icfrLabel(icfr.assessment.systemOutcome)}</Badge>
+            )}
+            {decided(icfr.assessment.state) && icfr.assessment.conclusion && (
+              <Badge tone="success">Concluded: {icfrLabel(icfr.assessment.conclusion)}</Badge>
+            )}
+            {icfr.completion?.complete && <Badge tone="success">02.5 COMPLETE</Badge>}
+            {icfr.assessment.needsReevaluation && (
+              <Badge tone="warn">02.5 needs re-evaluation</Badge>
             )}
           </div>
           <Facts facts={icfr.masterFacts} />
           {icfr.assessment.systemBasis && (
             <p className="text-xs text-ink-muted">{icfr.assessment.systemBasis}</p>
           )}
-          {editable && !decided(icfr.assessment.state) && (
-            <form
-              className="flex flex-wrap items-end gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (peak.trim() !== '' && Number(peak) >= 0) savePeak.mutate();
-              }}
-            >
-              <Field
-                label="Peak borrowings from banks, FIs and bodies corporate (₹)"
-                hint={
-                  icfr.capturedFacts.peakCoveredBorrowings != null
-                    ? `Saved: ₹${icfr.capturedFacts.peakCoveredBorrowings.toLocaleString('en-IN')}`
-                    : 'The only ICFR figure the portal does not hold.'
-                }
-              >
-                <Input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={peak}
-                  onChange={(e) => setPeak(e.target.value)}
-                />
-              </Field>
-              <Button type="submit" size="sm" disabled={savePeak.isPending || peak.trim() === ''}>
-                Save
-              </Button>
-            </form>
+          <button
+            type="button"
+            aria-expanded={icfrOpen}
+            onClick={() => setIcfrOpen((o) => !o)}
+            className="group flex items-center gap-2.5 text-left text-sm font-medium text-ink"
+          >
+            <ExpandToggle open={icfrOpen} />
+            {icfrOpen ? 'Hide the 02.5 ICFR workspace' : 'Open the 02.5 ICFR workspace'}
+          </button>
+          {icfrOpen && (
+            <IcfrWorkspace engagementId={engagementId} icfr={icfr} canManage={canManage} />
           )}
         </section>
       )}
