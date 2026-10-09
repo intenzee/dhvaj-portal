@@ -9,8 +9,9 @@ import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui';
 import { UsersSection } from '@/components/admin/users-section';
 import { OfficesSection } from '@/components/admin/offices-section';
 import { TemplatesSection } from '@/components/admin/templates-section';
+import { RulesLibrarySection } from '@/components/admin/rules-library-section';
 
-type Tab = 'users' | 'offices' | 'templates';
+type Tab = 'users' | 'offices' | 'templates' | 'rules';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -32,13 +33,15 @@ export default function AdministrationPage(): JSX.Element {
     { id: 'offices', label: 'Offices' },
     // Firm templates are configured with service.manage (MP / admin).
     ...(can(principal, PERMISSION.serviceManage) ? [{ id: 'templates' as const, label: 'Templates' }] : []),
+    // The Rules Library is methodology configuration (service.manage — MP / admin).
+    ...(can(principal, PERMISSION.serviceManage) ? [{ id: 'rules' as const, label: 'Rules Library' }] : []),
   ];
 
   return (
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices and firm templates. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices, firm templates and the Rules Library. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -59,7 +62,15 @@ export default function AdministrationPage(): JSX.Element {
 
       <Card>
         <CardBody>
-          {tab === 'users' ? <UsersSection /> : tab === 'offices' ? <OfficesSection /> : <TemplatesSection />}
+          {tab === 'users' ? (
+            <UsersSection />
+          ) : tab === 'offices' ? (
+            <OfficesSection />
+          ) : tab === 'rules' ? (
+            <RulesLibrarySection />
+          ) : (
+            <TemplatesSection />
+          )}
         </CardBody>
       </Card>
     </div>

@@ -3,6 +3,8 @@ import { AuditModule } from '../audit/audit.module';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueTemplatesService } from './catalogue-templates.service';
 import { AuditRulesService } from './audit-rules.service';
+import { AuditRulesAdminService } from './audit-rules-admin.service';
+import { AuditRulesController } from './audit-rules.controller';
 import { ServicesController } from './services.controller';
 import { ServiceLinesController } from './service-lines.controller';
 import { CatalogueTemplatesController } from './catalogue-templates.controller';
@@ -21,8 +23,9 @@ import { ReviewModelsController, WorkflowFamiliesController } from './reference.
     CatalogueTemplatesController,
     ReviewModelsController,
     WorkflowFamiliesController,
+    AuditRulesController,
   ],
-  providers: [CatalogueService, CatalogueTemplatesService, AuditRulesService],
+  providers: [CatalogueService, CatalogueTemplatesService, AuditRulesService, AuditRulesAdminService],
   exports: [CatalogueService, CatalogueTemplatesService, AuditRulesService],
 })
 export class CatalogueModule {}

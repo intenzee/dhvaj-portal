@@ -114,6 +114,37 @@ export interface AuditRuleVersionRecord {
   notes: string | null;
   createdAt: string;
   bands: AuditRuleBandRecord[];
+  /** Code of the cited provision (admin listing only). */
+  authorityProvisionCode?: string | null;
+  /**
+   * The date a later version takes over (admin listing only): versions are
+   * append-only, so the next version's `effectiveFrom` ends this one's reach.
+   */
+  supersededFrom?: string | null;
+}
+
+/**
+ * Rules Library administration (DHVAJ 02.2 spec §2): an authorised methodology
+ * administrator appends a new dated version — a changed threshold, effective
+ * date, exemption condition or authoritative link — without a code deployment.
+ * Versions are append-only: periods before `effectiveFrom` keep resolving to
+ * the earlier version, so historical engagements never change.
+ */
+export interface AddAuditRuleVersionInput {
+  /** YYYY-MM-DD; must be after the latest existing version's start. */
+  effectiveFrom: string;
+  /** Rupees for `inr` rules; null for condition-only rules. */
+  threshold: number | null;
+  thresholdHigh?: number | null;
+  /** Structured parameters the engine reads (e.g. Rule 4 timing); a JSON object. */
+  condition?: Record<string, unknown> | null;
+  outcome?: string | null;
+  authorityProvisionId?: string | null;
+  guidanceReference?: string | null;
+  /** Why the rule changed — notification / amendment reference. Mandatory. */
+  notes: string;
+  /** The rule's current `version` (stale-write guard). */
+  version: number;
 }
 
 /** An audit applicability rule with its version history. Firm-wide config. */
@@ -134,6 +165,16 @@ export interface AuditRuleRecord {
   versions: AuditRuleVersionRecord[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** A provision a rule version can cite (Rules Library screen picker). */
+export interface AuditRuleProvisionOption {
+  id: string;
+  code: string;
+  title: string;
+  provisionNumber: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
 }
 
 /** The methodology bundle frozen onto an engagement at framework approval. */
