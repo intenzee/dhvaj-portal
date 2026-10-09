@@ -488,6 +488,18 @@ export function ScheduleIiiWorkspace({
       {/* Disclosure library (§11, §12) */}
       <Section id="sch-disclosures" title="Schedule III disclosure library">
         <DisclosureLibrary library={d?.disclosureLibrary ?? []} versionTitle={fv?.title ?? null} />
+        <FrameworkReferences
+          contextKey={SCH_REFERENCE_CONTEXT}
+          provisionIds={[
+            ...new Set(
+              (d?.disclosureLibrary ?? [])
+                .filter((x) => x.applicability !== 'not_triggered')
+                .map((x) => x.provisionId)
+                .filter((x): x is string => !!x),
+            ),
+          ]}
+          effectiveOn={effectiveOn}
+        />
       </Section>
 
       {/* SCH-04 comparatives (§13) */}
@@ -968,6 +980,7 @@ function DisclosureLibrary({
                   {APPLICABILITY_LABEL[x.applicability]}
                 </Badge>
                 <span className="text-ink">{x.label}</span>
+                <span className="font-mono text-[11px] text-ink-faint">{x.code}</span>
                 <span className="text-xs text-ink-faint">{x.reason}</span>
                 {x.crossLink && <Badge tone="neutral">See {x.crossLink}</Badge>}
               </li>
@@ -1014,6 +1027,14 @@ function Comparatives({
         )}
       </dl>
       <p className="text-ink">{cmp.basis}</p>
+      {cmp.priorEngagementId && (
+        <a
+          href={`/engagements/${cmp.priorEngagementId}`}
+          className="text-xs font-medium text-primary-600 hover:underline"
+        >
+          Open the prior-year engagement
+        </a>
+      )}
       {cmp.status === 'required' && cmp.priorYearFileCount === 0 && (
         <p className="text-xs text-warning-700">
           Link the prior-year financial statements below (Add File / Link Existing File).

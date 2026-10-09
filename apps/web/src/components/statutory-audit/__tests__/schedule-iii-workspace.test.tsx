@@ -130,7 +130,7 @@ const detail = (over: Partial<ScheduleIiiDetail> = {}): ScheduleIiiDetail => ({
       applicability: 'included_pending_fact',
       reason: 'Immovable property not yet known — kept in',
       provisionCode: 'SCH_III_DIV_II',
-      provisionId: null,
+      provisionId: 'p-div2',
       crossLink: null,
       effectiveFrom: '2021-04-01',
     },
@@ -182,7 +182,7 @@ const detail = (over: Partial<ScheduleIiiDetail> = {}): ScheduleIiiDetail => ({
     firstFinancialYear: false,
     incorporationDate: '2010-05-01',
     priorPeriod: '2023-24',
-    priorEngagementId: null,
+    priorEngagementId: 'e0',
     priorYearFileCount: 0,
     basis: 'Not the first financial year — comparatives are presented.',
   },
@@ -353,6 +353,11 @@ describe('02.3 Schedule III workspace', () => {
     expect(screen.getByText(/2 of 3 requirements apply/)).toBeInTheDocument();
     expect(screen.getByText('Property / title deeds (1)')).toBeInTheDocument();
     expect(screen.getByText('Included — fact pending')).toBeInTheDocument();
+    // Requirement IDs, and each applicable requirement's provision via the library.
+    expect(screen.getByText('D2_TITLE_DEEDS')).toBeInTheDocument();
+    expect(referenceProps).toHaveBeenCalledWith(
+      expect.objectContaining({ provisionIds: ['p-div2'] }),
+    );
     expect(screen.queryByText('Corporate social responsibility')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: /Show not-triggered/ }));
     expect(screen.getByText('Corporate social responsibility')).toBeInTheDocument();
@@ -466,6 +471,10 @@ describe('02.3 Schedule III workspace', () => {
     render(wrap(<ScheduleIiiWorkspace engagementId="e1" sch={sch()} canManage />));
     await expand(/SCH-04 Comparative information/);
     expect(screen.getByText('2023-24')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open the prior-year engagement' })).toHaveAttribute(
+      'href',
+      '/engagements/e0',
+    );
     expect(screen.getByText(/Link the prior-year financial statements below/)).toBeInTheDocument();
     await expand(/SCH-04 prior-year financial statements/);
     expect(screen.getByText('evidence:sch_04')).toBeInTheDocument();
