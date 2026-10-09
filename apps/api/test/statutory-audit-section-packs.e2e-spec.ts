@@ -95,9 +95,7 @@ describe('Statutory Audit — Sections 01–04 packs (e2e)', () => {
     });
     acc = await acceptance();
     expect(check(acc.pack.checks, 'blocking_matters')).toMatchObject({ ok: false });
-    expect(check(acc.pack.checks, 'adverse_answers').facts.join(' ')).toMatch(
-      /IND-02/,
-    );
+    expect(check(acc.pack.checks, 'adverse_answers').facts.join(' ')).toMatch(/IND-02/);
     expect(acc.pack.suggestedConclusion).toBe('accept_with_conditions');
     expect(acc.pack.ready).toBe(false);
 
