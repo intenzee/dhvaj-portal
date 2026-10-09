@@ -9,6 +9,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   DEFAULT_TEMPLATE_VARIANT,
+  TEMPLATE_CONTENT_TYPE,
   TEMPLATE_MERGE_FIELDS,
   selectTemplateVariant,
   templateDefinition,
@@ -28,8 +29,7 @@ import { AuditService } from '../audit/audit.service';
 import { STORAGE_PROVIDER, type StorageProvider } from '../documents/storage/storage-provider';
 import { decodeUpload } from '../documents/documents.upload';
 import { scanDocxFields } from './docx-merge';
-
-const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+import { scanXlsxFields } from './xlsx-merge';
 
 /** Every merge field the engine knows, keyed to its label (for `[label]` gaps). */
 export const KNOWN_MERGE_FIELDS: ReadonlyMap<string, string> = new Map(
@@ -190,25 +190,41 @@ export class DocumentTemplatesService {
     });
   }
 
-  /** Upload a new .docx version (draft). Its merge fields are scanned and reported. */
+  /**
+   * Upload a new version (draft) — a Word .docx, or an Excel .xlsx for the
+   * FS-workbook templates. Its merge fields are scanned and reported.
+   */
   async uploadVersion(
     ctx: RlsContext,
     templateId: string,
     input: UploadTemplateVersionInput,
   ): Promise<DocumentTemplateRecord> {
-    if (!/\.docx$/i.test(input.filename)) {
-      throw new BadRequestException('Upload the template as a Word (.docx) file.');
+    const templateKey = await this.db.withRlsContext(
+      ctx,
+      async (client) => (await this.loadTemplate(client, templateId)).template_key,
+    );
+    const format = templateDefinition(templateKey)?.format ?? 'docx';
+    if (!new RegExp(`\\.${format}$`, 'i').test(input.filename)) {
+      throw new BadRequestException(
+        format === 'xlsx'
+          ? 'Upload the template as an Excel (.xlsx) workbook.'
+          : 'Upload the template as a Word (.docx) file.',
+      );
     }
+    const contentType = TEMPLATE_CONTENT_TYPE[format];
     const decoded = decodeUpload(input.contentBase64, this.config.get('DOCUMENT_MAX_BYTES'));
     let fields: string[];
     try {
-      fields = await scanDocxFields(decoded.buffer);
+      fields =
+        format === 'xlsx'
+          ? await scanXlsxFields(decoded.buffer)
+          : await scanDocxFields(decoded.buffer);
     } catch (err) {
       throw new BadRequestException((err as Error).message);
     }
     const unknownFields = fields.filter((f) => !KNOWN_MERGE_FIELDS.has(f));
     const reference = this.storage.newReference('templates', templateId);
-    await this.storage.write(reference, decoded.buffer, DOCX_CONTENT_TYPE);
+    await this.storage.write(reference, decoded.buffer, contentType);
     try {
       return await this.db.withRlsContext(ctx, async (client) => {
         await this.loadTemplate(client, templateId);
@@ -223,7 +239,7 @@ export class DocumentTemplatesService {
             randomUUID(),
             templateId,
             input.filename,
-            DOCX_CONTENT_TYPE,
+            contentType,
             decoded.sizeBytes,
             decoded.checksumSha256,
             reference,

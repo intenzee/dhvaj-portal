@@ -21,7 +21,9 @@ import {
   type LinkFrameworkFileInput,
   FRAMEWORK_EVIDENCE_QUESTION_LABEL,
   FRAMEWORK_EVIDENCE_QUESTIONS,
+  type DocumentTemplateKey,
   type FrameworkEvidenceQuestion,
+  type SubSectionKey,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -42,11 +44,55 @@ import {
 import { readFinancialReportingMemoFacts } from './financial-reporting-result';
 import { frameworkMemoMergeValues } from './framework-memo-values';
 import { isEngagementLead } from './master-facts';
+import { readScheduleIiiMemoInput, scheduleIiiMergeValues } from './schedule-iii-memo-values';
 
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const MEMO_KEY = DOCUMENT_TEMPLATE_KEY.financialReportingFrameworkMemo;
-const NO_TEMPLATE =
-  'No approved DHVAJ template for the Financial Reporting Framework memo yet — an administrator must upload and approve one under Settings → Document templates.';
+
+/** The Section 02 sub-assessments that create a technical memo, and from which template. */
+interface MemoSpec {
+  subSectionKey: SubSectionKey;
+  templateKey: DocumentTemplateKey;
+  areaKey: string;
+  /** Missing-template message. */
+  noTemplate: string;
+  /** The sub-assessment is not open yet. */
+  notOpen: string;
+  /** The memo's `frf.*` / `sch.*` merge values. */
+  values: (
+    client: PoolClient,
+    workflowInstanceId: string,
+  ) => Promise<Record<string, string | null>>;
+}
+const noTemplate = (what: string) =>
+  `No approved DHVAJ template for the ${what} memo yet — an administrator must upload and approve one under Settings → Document templates.`;
+const MEMOS: Partial<Record<SubSectionKey, MemoSpec>> = {
+  [SUB_SECTION_KEY.financialReporting]: {
+    subSectionKey: SUB_SECTION_KEY.financialReporting,
+    templateKey: DOCUMENT_TEMPLATE_KEY.financialReportingFrameworkMemo,
+    areaKey: FRAMEWORK_AREA_KEY.financialReportingFramework,
+    noTemplate: noTemplate('Financial Reporting Framework'),
+    notOpen: 'Open 02.2 Financial Reporting Framework before creating its memo.',
+    values: async (client, wf) =>
+      frameworkMemoMergeValues(await readFinancialReportingMemoFacts(client, wf)),
+  },
+  [SUB_SECTION_KEY.scheduleIii]: {
+    subSectionKey: SUB_SECTION_KEY.scheduleIii,
+    templateKey: DOCUMENT_TEMPLATE_KEY.scheduleIiiPresentationMemo,
+    areaKey: FRAMEWORK_AREA_KEY.scheduleIii,
+    noTemplate: noTemplate('Schedule III Presentation Framework'),
+    notOpen: 'Open 02.3 Schedule III & Presentation before creating its memo.',
+    values: async (client, wf) =>
+      scheduleIiiMergeValues(await readScheduleIiiMemoInput(client, wf)),
+  },
+};
+
+/** Which sub-assessment a checklist question belongs to (02.2 §6–§7; 02.3 §7, §13). */
+const QUESTION_SUB_SECTION: Record<FrameworkEvidenceQuestion, SubSectionKey> = {
+  frf_02: SUB_SECTION_KEY.financialReporting,
+  frf_03: SUB_SECTION_KEY.financialReporting,
+  sch_02: SUB_SECTION_KEY.scheduleIii,
+  sch_04: SUB_SECTION_KEY.scheduleIii,
+};
 
 interface SubRow {
   id: string;
@@ -75,7 +121,8 @@ interface FileRow {
 }
 
 /**
- * Section 02 evidence and the 02.2 technical memo (DHVAJ 02.2 spec §7, §18).
+ * Section 02 evidence and the 02.2 / 02.3 technical memos (DHVAJ 02.2 spec §7,
+ * §18; 02.3 spec §17, §18).
  *
  * Files sit on a sub-assessment and point at engagement documents — stored in
  * the engagement's SharePoint workspace when Microsoft 365 is on, linked from
@@ -129,9 +176,14 @@ export class AuditFrameworkEvidenceService {
     const readOnly =
       sub.state === 'approved' || !(await isEngagementLead(client, sub.engagement_id));
     let memo: FrameworkMemoAvailability | null = null;
-    if (sub.sub_section_key === SUB_SECTION_KEY.financialReporting) {
+    const spec = MEMOS[sub.sub_section_key as SubSectionKey];
+    if (spec) {
       const live = files.find((f) => f.kind === 'technical_memo') ?? null;
-      const resolved = await this.resolveMemoTemplate(client, sub.workflow_instance_id);
+      const resolved = await this.resolveMemoTemplate(
+        client,
+        spec.templateKey,
+        sub.workflow_instance_id,
+      );
       memo = {
         templateAvailable: resolved !== null,
         reason: live
@@ -140,7 +192,7 @@ export class AuditFrameworkEvidenceService {
             ? 'Section 02 is approved; reopen it before adding a memo.'
             : resolved
               ? null
-              : NO_TEMPLATE,
+              : spec.noTemplate,
         memoFileId: live?.id ?? null,
       };
     }
@@ -261,20 +313,22 @@ export class AuditFrameworkEvidenceService {
     });
   }
 
-  // ── Create Technical Memo (02.2 §18) ────────────────────────────────────
+  // ── Create Technical Memo (02.2 §18, 02.3 §17) ──────────────────────────
 
   async createMemo(
     principal: Principal,
     engagementId: string,
     workflowInstanceId: string,
     input: CreateFrameworkMemoInput,
+    subSectionKey: SubSectionKey = SUB_SECTION_KEY.financialReporting,
   ): Promise<FrameworkMemoCreated> {
     const ctx = rlsContextFromPrincipal(principal);
-    const tdef = templateDefinition(MEMO_KEY)!;
+    const spec = MEMOS[subSectionKey]!;
+    const tdef = templateDefinition(spec.templateKey)!;
 
-    // 1. The 02.2 sub-assessment, the approved template and the merge values.
+    // 1. The sub-assessment, the approved template and the merge values.
     const prepared = await this.db.withRlsContext(ctx, async (client) => {
-      const sub = await this.load022(client, engagementId, workflowInstanceId);
+      const sub = await this.loadMemoSub(client, engagementId, workflowInstanceId, spec);
       assertEditable(sub);
       const { rows: live } = await client.query(
         `SELECT 1 FROM hsdg.audit_framework_files
@@ -289,16 +343,18 @@ export class AuditFrameworkEvidenceService {
       if (!mergeInput) throw new NotFoundException('Engagement facts could not be read.');
       const resolved = await this.templates.resolveOn(
         client,
-        MEMO_KEY,
+        spec.templateKey,
         templateSelectionFacts(mergeInput.master),
         input.variantKey,
       );
-      if (!resolved) throw new BadRequestException(NO_TEMPLATE);
-      const facts = await readFinancialReportingMemoFacts(client, workflowInstanceId);
+      if (!resolved) throw new BadRequestException(spec.noTemplate);
       return {
         sub,
         resolved,
-        values: { ...buildMergeValues(mergeInput), ...frameworkMemoMergeValues(facts) },
+        values: {
+          ...buildMergeValues(mergeInput),
+          ...(await spec.values(client, workflowInstanceId)),
+        },
         clientName: mergeInput.master.legalName,
       };
     });
@@ -320,9 +376,9 @@ export class AuditFrameworkEvidenceService {
       classification: 'confidential',
     });
 
-    // 4. … and link it to 02.2, remembering the exact template version.
+    // 4. … and link it to the sub-assessment, remembering the exact template version.
     const { evidence, fileId } = await this.db.withRlsContext(ctx, async (client) => {
-      const sub = await this.load022(client, engagementId, workflowInstanceId);
+      const sub = await this.loadMemoSub(client, engagementId, workflowInstanceId, spec);
       const id = await this.insertFile(
         client,
         ctx,
@@ -330,6 +386,7 @@ export class AuditFrameworkEvidenceService {
         doc.id,
         'technical_memo',
         {
+          templateKey: spec.templateKey,
           versionId: prepared.resolved.versionId,
           variantKey: prepared.resolved.variantKey,
           versionNo: prepared.resolved.versionNo,
@@ -360,7 +417,12 @@ export class AuditFrameworkEvidenceService {
     sub: SubRow,
     documentId: string,
     kind: FrameworkFileKind,
-    template: { versionId: string; variantKey: string; versionNo: number } | null,
+    template: {
+      templateKey: DocumentTemplateKey;
+      versionId: string;
+      variantKey: string;
+      versionNo: number;
+    } | null,
     how: 'added' | 'linked' | 'created_from_template',
     extra: Record<string, unknown> = {},
     question: FrameworkEvidenceQuestion | null = null,
@@ -381,7 +443,7 @@ export class AuditFrameworkEvidenceService {
           documentId,
           kind,
           template?.versionId ?? null,
-          template ? MEMO_KEY : null,
+          template?.templateKey ?? null,
           template?.variantKey ?? null,
           template?.versionNo ?? null,
           ctx.employeeId ?? null,
@@ -410,20 +472,24 @@ export class AuditFrameworkEvidenceService {
         documentId,
         kind,
         ...(question ? { questionKey: question } : {}),
-        ...(template ? { templateKey: MEMO_KEY, ...template } : {}),
+        ...(template ?? {}),
         ...extra,
       },
     });
     return id;
   }
 
-  private async resolveMemoTemplate(client: PoolClient, workflowInstanceId: string) {
+  private async resolveMemoTemplate(
+    client: PoolClient,
+    templateKey: DocumentTemplateKey,
+    workflowInstanceId: string,
+  ) {
     const firm = await this.templates.readFirm(client);
     const mergeInput = await readMergeInput(client, workflowInstanceId, firm);
     const facts = mergeInput
       ? templateSelectionFacts(mergeInput.master)
       : { listed: false, entityTypeSlug: null, hasGroup: false };
-    return this.templates.resolveOn(client, MEMO_KEY, facts);
+    return this.templates.resolveOn(client, templateKey, facts);
   }
 
   private async loadFile(
@@ -459,10 +525,11 @@ export class AuditFrameworkEvidenceService {
     return rows[0];
   }
 
-  private async load022(
+  private async loadMemoSub(
     client: PoolClient,
     engagementId: string,
     workflowInstanceId: string,
+    spec: MemoSpec,
   ): Promise<SubRow> {
     const { rows } = await client.query<SubRow>(
       `SELECT s.id, s.workflow_instance_id, s.engagement_id, s.sub_section_key, s.state
@@ -471,18 +538,9 @@ export class AuditFrameworkEvidenceService {
            ON swi.id = s.workflow_instance_id AND swi.status <> 'cancelled'
         WHERE s.workflow_instance_id = $1 AND s.engagement_id = $2
           AND s.sub_section_key = $3 AND s.area_key = $4`,
-      [
-        workflowInstanceId,
-        engagementId,
-        SUB_SECTION_KEY.financialReporting,
-        FRAMEWORK_AREA_KEY.financialReportingFramework,
-      ],
+      [workflowInstanceId, engagementId, spec.subSectionKey, spec.areaKey],
     );
-    if (!rows[0]) {
-      throw new NotFoundException(
-        'Open 02.2 Financial Reporting Framework before creating its memo.',
-      );
-    }
+    if (!rows[0]) throw new NotFoundException(spec.notOpen);
     return rows[0];
   }
 }
@@ -513,15 +571,15 @@ function mapFile(r: FileRow): FrameworkFileRecord {
   };
 }
 
-/** Checklist questions carry evidence only on the 02.2 assessment (§6, §7). */
+/** A checklist question carries evidence only on its own sub-assessment (02.2 FRF, 02.3 SCH). */
 function questionFor(
   sub: SubRow,
   questionKey: FrameworkEvidenceQuestion | undefined,
 ): FrameworkEvidenceQuestion | null {
   if (!questionKey) return null;
   if (
-    sub.sub_section_key !== SUB_SECTION_KEY.financialReporting ||
-    !FRAMEWORK_EVIDENCE_QUESTIONS.includes(questionKey)
+    !FRAMEWORK_EVIDENCE_QUESTIONS.includes(questionKey) ||
+    QUESTION_SUB_SECTION[questionKey] !== sub.sub_section_key
   ) {
     throw new BadRequestException('That question does not take evidence here.');
   }

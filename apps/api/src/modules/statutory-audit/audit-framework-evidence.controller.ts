@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/commo
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
+  SUB_SECTION_KEY,
   type FileVersionHistory,
   type FrameworkEvidenceView,
   type FrameworkMemoCreated,
@@ -16,8 +17,8 @@ import {
 } from './dto/framework-evidence.dto';
 
 /**
- * Statutory Audit — Section 02 evidence and the 02.2 technical memo (DHVAJ
- * 02.2 spec §7, §18). Reads gated by
+ * Statutory Audit — Section 02 evidence and the 02.2 / 02.3 technical memos
+ * (DHVAJ 02.2 spec §7, §18; 02.3 spec §17). Reads gated by
  * `engagement.read`, changes by `engagement.manage`; RLS does the real gating
  * (members read; only leads change the audit file).
  */
@@ -105,5 +106,22 @@ export class AuditFrameworkEvidenceController {
     @Body() dto: CreateFrameworkMemoDto,
   ): Promise<FrameworkMemoCreated> {
     return this.evidence.createMemo(principal, id, wf, dto);
+  }
+
+  @Post('schedule-iii/memo')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Create the Schedule III Presentation Framework technical memo (02.3 §17)',
+    description:
+      'Merges the 02.3 assessment into the approved Word template, stores it in the ' +
+      'engagement workspace and links it to 02.3; returns the Microsoft 365 link when on.',
+  })
+  createScheduleIiiMemo(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wf: string,
+    @Body() dto: CreateFrameworkMemoDto,
+  ): Promise<FrameworkMemoCreated> {
+    return this.evidence.createMemo(principal, id, wf, dto, SUB_SECTION_KEY.scheduleIii);
   }
 }

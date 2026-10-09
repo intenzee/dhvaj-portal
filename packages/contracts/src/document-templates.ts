@@ -19,6 +19,15 @@ export const DOCUMENT_TEMPLATE_KEY = {
   clientAcknowledgement: 'client_acknowledgement',
   /** 02.2 §18 — only for complex cases, overrides or consultations. */
   financialReportingFrameworkMemo: 'financial_reporting_framework_memo',
+  /** 02.3 §17 — complex or overridden presentation-framework cases. */
+  scheduleIiiPresentationMemo: 'schedule_iii_presentation_memo',
+  /**
+   * 02.3 §16 — the Financial Statements Workbook (Excel), one key per Schedule
+   * III framework; each framework version names its key (`templateKey`).
+   */
+  fsWorkbookAsDivI: 'fs_workbook_as_div_i',
+  fsWorkbookIndAsDivII: 'fs_workbook_indas_div_ii',
+  fsWorkbookIndAsDivIII: 'fs_workbook_indas_div_iii',
 } as const;
 export type DocumentTemplateKey =
   (typeof DOCUMENT_TEMPLATE_KEY)[keyof typeof DOCUMENT_TEMPLATE_KEY];
@@ -30,42 +39,91 @@ export interface DocumentTemplateDefinition {
   /** File name of a created document; `{client}` is replaced with the client's name. */
   filenamePattern: string;
   /** The audit-file section that creates it (Section 01 lists only its own). */
-  section: '01' | '02.2';
+  section: '01' | '02.2' | '02.3';
+  /** The file the firm uploads: a Word document (merged) or an Excel workbook. */
+  format: TemplateFormat;
 }
 
-/** The formats created from a template (Section 01 spec §10.2; 02.2 spec §18). */
+/** Template file formats. Word templates are merged; Excel workbooks fill `{{…}}` text cells. */
+export type TemplateFormat = 'docx' | 'xlsx';
+export const TEMPLATE_CONTENT_TYPE: Record<TemplateFormat, string> = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+
+/** The formats created from a template (Section 01 spec §10.2; 02.2 §18; 02.3 §16, §17). */
 export const DOCUMENT_TEMPLATE_DEFINITIONS: readonly DocumentTemplateDefinition[] = [
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.previousAuditorCommunication,
     title: 'Communication to Previous Auditor',
     filenamePattern: 'Communication to Previous Auditor - {client}.docx',
     section: '01',
+    format: 'docx',
   },
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.auditorConsentCertificate,
     title: 'Auditor Consent / Eligibility Certificate',
     filenamePattern: 'Auditor Consent and Eligibility Certificate - {client}.docx',
     section: '01',
+    format: 'docx',
   },
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.engagementLetter,
     title: 'Statutory Audit Engagement Letter',
     filenamePattern: 'Statutory Audit Engagement Letter - {client}.docx',
     section: '01',
+    format: 'docx',
   },
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.clientAcknowledgement,
     title: 'Client Acknowledgement / Acceptance',
     filenamePattern: 'Client Acknowledgement - {client}.docx',
     section: '01',
+    format: 'docx',
   },
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.financialReportingFrameworkMemo,
     title: 'Financial Reporting Framework Technical Memo',
     filenamePattern: 'Financial Reporting Framework Memo - {client}.docx',
     section: '02.2',
+    format: 'docx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.scheduleIiiPresentationMemo,
+    title: 'Schedule III Presentation Framework Technical Memo',
+    filenamePattern: 'Schedule III Presentation Framework Memo - {client}.docx',
+    section: '02.3',
+    format: 'docx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.fsWorkbookAsDivI,
+    title: 'Financial Statements Workbook — AS / Schedule III Division I',
+    filenamePattern: 'Financial Statements Workbook {fy} - {client}.xlsx',
+    section: '02.3',
+    format: 'xlsx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.fsWorkbookIndAsDivII,
+    title: 'Financial Statements Workbook — Ind AS / Schedule III Division II',
+    filenamePattern: 'Financial Statements Workbook {fy} - {client}.xlsx',
+    section: '02.3',
+    format: 'xlsx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.fsWorkbookIndAsDivIII,
+    title: 'Financial Statements Workbook — Ind AS NBFC / Schedule III Division III',
+    filenamePattern: 'Financial Statements Workbook {fy} - {client}.xlsx',
+    section: '02.3',
+    format: 'xlsx',
   },
 ] as const;
+
+/** The FS workbook template keys (02.3 §16). */
+export const FS_WORKBOOK_TEMPLATE_KEYS: DocumentTemplateKey[] = [
+  DOCUMENT_TEMPLATE_KEY.fsWorkbookAsDivI,
+  DOCUMENT_TEMPLATE_KEY.fsWorkbookIndAsDivII,
+  DOCUMENT_TEMPLATE_KEY.fsWorkbookIndAsDivIII,
+];
 
 export function templateDefinition(key: string): DocumentTemplateDefinition | undefined {
   return DOCUMENT_TEMPLATE_DEFINITIONS.find((d) => d.templateKey === key);
@@ -85,6 +143,13 @@ export interface TemplateConditions {
   entityTypeSlugs?: string[];
   /** The client has subsidiaries, associates or joint ventures (group audit wording). */
   hasGroup?: boolean;
+  /**
+   * Template effective version (02.3 §16): the variant applies to audit periods
+   * starting on/after `periodFrom` and on/before `periodTo` (YYYY-MM-DD). A
+   * dated variant never matches when the audit period is unknown.
+   */
+  periodFrom?: string;
+  periodTo?: string;
 }
 
 /** The facts a variant is chosen against. */
@@ -92,6 +157,8 @@ export interface TemplateSelectionFacts {
   listed: boolean;
   entityTypeSlug: string | null;
   hasGroup: boolean;
+  /** Audit period start (YYYY-MM-DD) — selects dated variants. */
+  periodStart?: string | null;
 }
 
 export function templateConditionsMatch(c: TemplateConditions, f: TemplateSelectionFacts): boolean {
@@ -100,6 +167,8 @@ export function templateConditionsMatch(c: TemplateConditions, f: TemplateSelect
   if (c.entityTypeSlugs && c.entityTypeSlugs.length > 0) {
     if (!f.entityTypeSlug || !c.entityTypeSlugs.includes(f.entityTypeSlug)) return false;
   }
+  if (c.periodFrom && (!f.periodStart || f.periodStart < c.periodFrom)) return false;
+  if (c.periodTo && (!f.periodStart || f.periodStart > c.periodTo)) return false;
   return true;
 }
 
@@ -107,7 +176,8 @@ export function templateSpecificity(c: TemplateConditions): number {
   return (
     (c.listed !== undefined ? 1 : 0) +
     (c.hasGroup !== undefined ? 1 : 0) +
-    (c.entityTypeSlugs && c.entityTypeSlugs.length > 0 ? 1 : 0)
+    (c.entityTypeSlugs && c.entityTypeSlugs.length > 0 ? 1 : 0) +
+    (c.periodFrom || c.periodTo ? 1 : 0)
   );
 }
 
@@ -141,7 +211,10 @@ export interface TemplateMergeField {
   source: string;
 }
 
-/** Every merge field available to the firm's templates (the `frf.*` ones fill the 02.2 memo). */
+/**
+ * Every merge field available to the firm's templates (the `frf.*` ones fill the
+ * 02.2 memo; the `sch.*` ones the 02.3 memo and the FS workbook).
+ */
 export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'firm.name', label: 'Firm name', source: 'Firm settings' },
   { key: 'firm.frn', label: 'Firm registration number (FRN)', source: 'Firm settings' },
@@ -197,6 +270,36 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'frf.pendingReason', label: 'Information pending', source: '02.2 FRF-05' },
   { key: 'frf.decidedBy', label: 'Concluded by', source: '02.2 FRF-05' },
   { key: 'frf.decidedAt', label: 'Concluded on', source: '02.2 FRF-05' },
+  { key: 'sch.presentationFramework', label: 'Presentation framework', source: '02.3 conclusion' },
+  { key: 'sch.systemConclusion', label: 'Schedule III system conclusion', source: '02.3 system' },
+  { key: 'sch.systemBasis', label: 'Schedule III system basis', source: '02.3 system' },
+  { key: 'sch.frameworkVersion', label: 'Schedule III version', source: '02.3 version control' },
+  {
+    key: 'sch.guidanceVersion',
+    label: 'ICAI Guidance Note version',
+    source: '02.3 version control',
+  },
+  { key: 'sch.components', label: 'Financial statement components', source: '02.3 components' },
+  { key: 'sch.cashFlow', label: 'Cash flow statement', source: '02.3 SCH-03' },
+  { key: 'sch.rounding', label: 'Rounding framework', source: '02.3 SCH-05' },
+  {
+    key: 'sch.presentationMateriality',
+    label: 'Presentation materiality',
+    source: '02.3 presentation materiality',
+  },
+  { key: 'sch.specialisedFormat', label: 'Specialised statutory format', source: '02.3 SCH-02' },
+  { key: 'sch.comparatives', label: 'Comparative information', source: '02.3 SCH-04' },
+  { key: 'sch.disclosureLibrary', label: 'Disclosure library', source: '02.3 disclosure library' },
+  { key: 'sch.factsUsed', label: 'Schedule III facts used', source: '02.1 / 02.2 facts' },
+  { key: 'sch.rulesApplied', label: 'Schedule III rules applied', source: '02.3 rule basis' },
+  { key: 'sch.professionalConclusion', label: 'Schedule III conclusion', source: '02.3 SCH-06' },
+  { key: 'sch.overridden', label: 'Schedule III overridden (Yes / No)', source: '02.3 SCH-06' },
+  { key: 'sch.overrideReason', label: 'Schedule III override reason', source: '02.3 SCH-06' },
+  { key: 'sch.technicalBasis', label: 'Schedule III technical basis', source: '02.3 SCH-06' },
+  { key: 'sch.partnerApproval', label: 'Schedule III partner approval', source: '02.3 SCH-06' },
+  { key: 'sch.pendingReason', label: 'Schedule III information pending', source: '02.3 SCH-06' },
+  { key: 'sch.decidedBy', label: 'Schedule III concluded by', source: '02.3 SCH-06' },
+  { key: 'sch.decidedAt', label: 'Schedule III concluded on', source: '02.3 SCH-06' },
   { key: 'today', label: "Today's date", source: 'System' },
 ] as const;
 

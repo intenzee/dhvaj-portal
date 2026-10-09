@@ -31,6 +31,7 @@ export * from './statutory-audit-subassessment';
 export * from './statutory-audit-financial-reporting';
 export * from './statutory-audit-framework-evidence';
 export * from './statutory-audit-schedule-iii';
+export * from './statutory-audit-fs-workbook';
 export * from './statutory-audit-caro';
 export * from './statutory-audit-icfr';
 export * from './statutory-audit-consolidation';

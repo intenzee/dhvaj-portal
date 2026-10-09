@@ -21,6 +21,8 @@ import { AuditFrameworkDownstreamService } from './audit-framework-downstream.se
 import { AuditFrameworkEvidenceController } from './audit-framework-evidence.controller';
 import { AuditFrameworkEvidenceService } from './audit-framework-evidence.service';
 import { AuditScheduleIiiService } from './audit-schedule-iii.service';
+import { AuditFsWorkbookController } from './audit-fs-workbook.controller';
+import { AuditFsWorkbookService } from './audit-fs-workbook.service';
 import { AuditScheduleIiiController } from './audit-schedule-iii.controller';
 import { AuditCaroService } from './audit-caro.service';
 import { AuditCaroController } from './audit-caro.controller';
@@ -97,6 +99,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditFrameworkEvidenceController,
     AuditFrameworkDownstreamController,
     AuditScheduleIiiController,
+    AuditFsWorkbookController,
     AuditCaroController,
     AuditIcfrController,
     AuditConsolidationController,
@@ -135,6 +138,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditFrameworkEvidenceService,
     AuditFrameworkDownstreamService,
     AuditScheduleIiiService,
+    AuditFsWorkbookService,
     AuditCaroService,
     AuditIcfrService,
     AuditConsolidationService,

@@ -36,6 +36,22 @@ export class TemplateConditionsDto {
   @IsOptional()
   @IsBoolean()
   hasGroup?: boolean;
+
+  @ApiPropertyOptional({
+    example: '2025-04-01',
+    description: 'Template effective version: audit periods starting on/after this date.',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'periodFrom must be YYYY-MM-DD' })
+  periodFrom?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-03-31',
+    description: 'Audit periods starting on/before this date.',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'periodTo must be YYYY-MM-DD' })
+  periodTo?: string;
 }
 
 export class CreateTemplateVariantDto {
