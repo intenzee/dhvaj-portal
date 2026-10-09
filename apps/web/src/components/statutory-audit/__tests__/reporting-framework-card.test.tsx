@@ -40,6 +40,14 @@ beforeEach(() => {
                 systemBasis: null,
                 version: 2,
               },
+              baseFacts: {
+                auditPeriodStart: '2024-04-01',
+                listingStatus: 'unlisted',
+                isCompany: true,
+                isPrivateCompany: true,
+                specialEntityTypes: [],
+                priorFramework: 'ind_as',
+              },
               capturedFacts: {
                 isListedOnSmeExchange: false,
                 priorIndAs: true,
@@ -69,7 +77,7 @@ describe('02.2 reporting framework card', () => {
     ).toBeInTheDocument();
   });
 
-  it('fills from the portal and asks only about voluntary adoption', async () => {
+  it('fills from the portal and opens the 02.2 workspace in place', async () => {
     const user = userEvent.setup();
     render(wrap(<ReportingFrameworkCard engagementId="e1" />));
     await user.click(await screen.findByRole('button', { name: /Fill from client master/ }));
@@ -77,10 +85,14 @@ describe('02.2 reporting framework card', () => {
       '/engagements/e1/statutory-audit/wf1/financial-reporting/fill-from-master',
       { method: 'POST', body: {} },
     );
-    await user.click(screen.getByRole('checkbox', { name: /voluntarily adopts Ind AS/ }));
+    expect(screen.queryByTestId('frf-workspace')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Open the 02.2 workspace/ }));
+    expect(screen.getByTestId('frf-workspace')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /02.2B Voluntary adoption/ }));
+    await user.selectOptions(screen.getByLabelText(/FRF-03/), 'yes');
     expect(apiFetch).toHaveBeenCalledWith(
       '/engagements/e1/statutory-audit/wf1/financial-reporting/facts',
-      { method: 'POST', body: { voluntaryIndAs: true, version: 2 } },
+      { method: 'POST', body: { voluntaryAnswer: 'yes', version: 2 } },
     );
   });
 });

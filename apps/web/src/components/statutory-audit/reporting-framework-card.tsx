@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, RefreshCw } from 'lucide-react';
 import {
@@ -14,15 +15,17 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { humanize } from '@/lib/format';
 import { Badge, Button, Card } from '@/components/ui';
+import { ExpandToggle } from '@/components/inline-panel';
 import { Facts } from './group-caro-card';
+import { FinancialReportingWorkspace } from './financial-reporting-workspace';
 
 /**
- * 02.2 Applicable financial reporting framework facts (Guide §1): SME-exchange
- * listing, Ind AS in a prior year and the Rule 4 group trigger are read off the
- * client master and earlier audit files and shown with their source. The team
- * is asked only whether the company voluntarily adopts Ind AS this year. The
- * 02.3 Schedule III Division routed from it is shown alongside (provisional until
- * 02.2 is concluded).
+ * 02.2 Applicable financial reporting framework (Guide §1, Section 02.2 spec):
+ * the header shows the completion status, the current conclusion and the
+ * system suggestion, with the client-master facts and the 02.3 Schedule III
+ * Division routed from it (provisional until 02.2 is concluded). The full
+ * 02.2 workspace — framework tests, SMC, FRF-01..06, Partner approval and the
+ * completion checklist — opens in place under the header (+/−).
  */
 
 const qk = (id: string) => ['engagement', id, 'statutory-audit-financial-reporting'];
@@ -75,21 +78,18 @@ export function ReportingFrameworkCard({
     onError: (e) => fail(e, 'fill from the client master'),
   });
 
-  const setVoluntary = useMutation({
-    mutationFn: (voluntaryIndAs: boolean) =>
-      apiFetch(`${base}/financial-reporting/facts`, {
-        method: 'POST',
-        body: { voluntaryIndAs, version: fr!.assessment.version },
-      }),
-    onSuccess: () => {
-      toast('Saved.');
-      refresh();
-    },
-    onError: (e) => fail(e, 'save'),
-  });
+  const [open, setOpen] = useState(false);
 
   if (!fr) return null;
-  const editable = canManage && !decided(fr.assessment.state);
+  const approved = fr.approved ?? fr.assessment.state === 'approved';
+  const editable = canManage && !approved;
+  const status = approved
+    ? 'Approved'
+    : fr.completion?.complete
+      ? '02.2 COMPLETE'
+      : decided(fr.assessment.state)
+        ? 'Concluded — checklist open'
+        : 'In progress';
 
   return (
     <Card className="space-y-3 p-4">
@@ -99,6 +99,11 @@ export function ReportingFrameworkCard({
           Reporting framework &amp; Schedule III · 02.2 / 02.3
         </h3>
         <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={approved || fr.completion?.complete ? 'success' : 'warn'}>{status}</Badge>
+          {decided(fr.assessment.state) && fr.assessment.conclusion && (
+            <Badge tone="neutral">Concluded: {humanize(fr.assessment.conclusion)}</Badge>
+          )}
+          {fr.blockingReviewOpen && <Badge tone="danger">Framework Review open</Badge>}
           {fr.assessment.systemOutcome && (
             <Badge tone="info">Suggested: {humanize(fr.assessment.systemOutcome)}</Badge>
           )}
@@ -131,16 +136,17 @@ export function ReportingFrameworkCard({
       {fr.assessment.systemBasis && (
         <p className="text-xs text-ink-muted">{fr.assessment.systemBasis}</p>
       )}
-      {editable && (
-        <label className="inline-flex items-center gap-1.5 text-sm text-ink">
-          <input
-            type="checkbox"
-            checked={fr.capturedFacts.voluntaryIndAs}
-            disabled={setVoluntary.isPending}
-            onChange={(e) => setVoluntary.mutate(e.target.checked)}
-          />
-          The company voluntarily adopts Ind AS this year
-        </label>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="group flex items-center gap-2.5 text-left text-sm font-medium text-ink"
+      >
+        <ExpandToggle open={open} />
+        {open ? 'Hide the 02.2 workspace' : 'Open the 02.2 workspace'}
+      </button>
+      {open && (
+        <FinancialReportingWorkspace engagementId={engagementId} fr={fr} canManage={canManage} />
       )}
     </Card>
   );
