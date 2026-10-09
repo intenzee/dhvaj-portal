@@ -48,10 +48,11 @@ export function TemplatesSection(): JSX.Element {
       <FirmDetails />
       <div className="space-y-3">
         <div>
-          <h3 className="text-sm font-semibold text-ink">Section 01 templates</h3>
+          <h3 className="text-sm font-semibold text-ink">Audit file templates</h3>
           <p className="text-xs text-ink-muted">
-            Until a template has an approved version, Create from Template explains that an administrator must upload
-            one. Write merge fields in Word as <code className="font-mono">{'{{client.name}}'}</code>.
+            Until a template has an approved version, Create from Template explains that an
+            administrator must upload one. Write merge fields in Word as{' '}
+            <code className="font-mono">{'{{client.name}}'}</code>.
           </p>
         </div>
         {templates.isLoading ? (
@@ -61,7 +62,7 @@ export function TemplatesSection(): JSX.Element {
             <TemplateGroup
               key={d.templateKey}
               templateKey={d.templateKey}
-              title={d.title}
+              title={`${d.title} · Section ${d.section}`}
               variants={(templates.data ?? []).filter((t) => t.templateKey === d.templateKey)}
             />
           ))
@@ -76,7 +77,10 @@ export function TemplatesSection(): JSX.Element {
 function FirmDetails(): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: FIRM_KEY, queryFn: () => apiFetch<FirmSettings>('/firm-settings') });
+  const q = useQuery({
+    queryKey: FIRM_KEY,
+    queryFn: () => apiFetch<FirmSettings>('/firm-settings'),
+  });
   const [form, setForm] = useState({ firmName: '', frn: '', address: '', email: '' });
   useEffect(() => {
     if (q.data)
@@ -118,21 +122,33 @@ function FirmDetails(): JSX.Element {
         <h3 className="text-sm font-semibold text-ink">Firm details</h3>
         <p className="text-xs text-ink-muted">
           Merged into templates as <code className="font-mono">{'{{firm.name}}'}</code>,{' '}
-          <code className="font-mono">{'{{firm.frn}}'}</code> and <code className="font-mono">{'{{firm.address}}'}</code>.
+          <code className="font-mono">{'{{firm.frn}}'}</code> and{' '}
+          <code className="font-mono">{'{{firm.address}}'}</code>.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Firm name" required>
-          <Input value={form.firmName} onChange={(e) => setForm({ ...form, firmName: e.target.value })} />
+          <Input
+            value={form.firmName}
+            onChange={(e) => setForm({ ...form, firmName: e.target.value })}
+          />
         </Field>
         <Field label="Firm registration number (FRN)">
           <Input value={form.frn} onChange={(e) => setForm({ ...form, frn: e.target.value })} />
         </Field>
         <Field label="Email">
-          <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Input
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
         </Field>
         <Field label="Address">
-          <Textarea rows={2} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <Textarea
+            rows={2}
+            value={form.address}
+            onChange={(e) => setForm({ ...form, address: e.target.value })}
+          />
         </Field>
       </div>
       <Button size="sm" type="submit" disabled={!form.firmName.trim() || save.isPending}>
@@ -147,7 +163,9 @@ function conditionsText(c: TemplateConditions): string {
   if (c.listed !== undefined) parts.push(c.listed ? 'listed' : 'unlisted');
   if (c.hasGroup !== undefined) parts.push(c.hasGroup ? 'has a group' : 'no group');
   if (c.entityTypeSlugs?.length) parts.push(`entity type ${c.entityTypeSlugs.join(' / ')}`);
-  return parts.length ? `Applies when ${parts.join(', ')}` : 'Default — applies when no other variant does';
+  return parts.length
+    ? `Applies when ${parts.join(', ')}`
+    : 'Default — applies when no other variant does';
 }
 
 function TemplateGroup({
@@ -161,9 +179,13 @@ function TemplateGroup({
 }): JSX.Element {
   return (
     <div className="rounded-lg border border-line">
-      <div className="border-b border-line bg-surface-sunken/40 px-3 py-2 text-sm font-medium text-ink">{title}</div>
+      <div className="border-b border-line bg-surface-sunken/40 px-3 py-2 text-sm font-medium text-ink">
+        {title}
+      </div>
       <ul className="divide-y divide-line">
-        {variants.length === 0 && <li className="px-3 py-2 text-xs text-ink-muted">No variants ({templateKey}).</li>}
+        {variants.length === 0 && (
+          <li className="px-3 py-2 text-xs text-ink-muted">No variants ({templateKey}).</li>
+        )}
         {variants.map((v) => (
           <VariantRow key={v.id} variant={v} />
         ))}
@@ -178,14 +200,19 @@ function VariantRow({ variant: v }: { variant: DocumentTemplateRecord }): JSX.El
   const [open, setOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState('');
-  const onError = (e: unknown) => toast(e instanceof ApiError ? e.message : 'Could not save.', 'error');
+  const onError = (e: unknown) =>
+    toast(e instanceof ApiError ? e.message : 'Could not save.', 'error');
   const done = () => void qc.invalidateQueries({ queryKey: TEMPLATES_KEY });
 
   const upload = useMutation({
     mutationFn: async (file: File) =>
       apiFetch<DocumentTemplateRecord>(`/document-templates/${v.id}/versions`, {
         method: 'POST',
-        body: { filename: file.name, contentBase64: await blobToBase64(file), notes: notes.trim() || undefined },
+        body: {
+          filename: file.name,
+          contentBase64: await blobToBase64(file),
+          notes: notes.trim() || undefined,
+        },
       }),
     onSuccess: () => {
       setNotes('');
@@ -205,7 +232,10 @@ function VariantRow({ variant: v }: { variant: DocumentTemplateRecord }): JSX.El
   });
   const toggle = useMutation({
     mutationFn: () =>
-      apiFetch(`/document-templates/${v.id}`, { method: 'PATCH', body: { isActive: !v.isActive, version: v.version } }),
+      apiFetch(`/document-templates/${v.id}`, {
+        method: 'PATCH',
+        body: { isActive: !v.isActive, version: v.version },
+      }),
     onSuccess: done,
     onError,
   });
@@ -225,8 +255,14 @@ function VariantRow({ variant: v }: { variant: DocumentTemplateRecord }): JSX.El
             {v.title}
             <span className="font-mono text-[11px] text-ink-faint">{v.variantKey}</span>
             {!v.isActive && <Badge>Switched off</Badge>}
-            {cur ? <Badge tone="success">Approved v{cur.versionNo}</Badge> : <Badge tone="warn">No approved file</Badge>}
-            {v.versions.some((x) => x.status === 'draft') && <Badge tone="info">Draft awaiting approval</Badge>}
+            {cur ? (
+              <Badge tone="success">Approved v{cur.versionNo}</Badge>
+            ) : (
+              <Badge tone="warn">No approved file</Badge>
+            )}
+            {v.versions.some((x) => x.status === 'draft') && (
+              <Badge tone="info">Draft awaiting approval</Badge>
+            )}
           </span>
           <span className="block text-[11px] text-ink-faint">{conditionsText(v.appliesWhen)}</span>
         </span>
@@ -254,7 +290,11 @@ function VariantRow({ variant: v }: { variant: DocumentTemplateRecord }): JSX.El
                 <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
               </Field>
             </div>
-            <Button size="sm" disabled={upload.isPending} onClick={() => fileInput.current?.click()}>
+            <Button
+              size="sm"
+              disabled={upload.isPending}
+              onClick={() => fileInput.current?.click()}
+            >
               <Upload className="h-4 w-4" /> {upload.isPending ? 'Uploading…' : 'Upload .docx'}
             </Button>
             <input
@@ -270,7 +310,12 @@ function VariantRow({ variant: v }: { variant: DocumentTemplateRecord }): JSX.El
               }}
             />
             {v.variantKey !== DEFAULT_TEMPLATE_VARIANT && (
-              <Button size="sm" variant="secondary" disabled={toggle.isPending} onClick={() => toggle.mutate()}>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={toggle.isPending}
+                onClick={() => toggle.mutate()}
+              >
                 {v.isActive ? 'Switch variant off' : 'Switch variant on'}
               </Button>
             )}
@@ -299,7 +344,9 @@ function VersionLine({
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-ink">v{x.versionNo}</span>
           <span className="text-ink-muted">{x.filename}</span>
-          <Badge tone={x.status === 'approved' ? 'success' : x.status === 'draft' ? 'info' : 'neutral'}>
+          <Badge
+            tone={x.status === 'approved' ? 'success' : x.status === 'draft' ? 'info' : 'neutral'}
+          >
             {x.status === 'approved' ? 'Approved' : x.status === 'draft' ? 'Draft' : 'Superseded'}
           </Badge>
         </span>
@@ -308,8 +355,11 @@ function VersionLine({
             size="sm"
             variant="ghost"
             onClick={() =>
-              void downloadFile(`/document-templates/${templateId}/versions/${x.id}/download`, x.filename).catch(
-                (e: unknown) => toast(e instanceof ApiError ? e.message : 'Download failed.', 'error'),
+              void downloadFile(
+                `/document-templates/${templateId}/versions/${x.id}/download`,
+                x.filename,
+              ).catch((e: unknown) =>
+                toast(e instanceof ApiError ? e.message : 'Download failed.', 'error'),
               )
             }
           >
@@ -324,7 +374,9 @@ function VersionLine({
       </div>
       <p className="text-[11px] text-ink-faint">
         Uploaded by {x.uploadedByName ?? '—'} on {formatDate(x.uploadedAt)}
-        {x.approvedAt ? ` · approved by ${x.approvedByName ?? '—'} on ${formatDate(x.approvedAt)}` : ''}
+        {x.approvedAt
+          ? ` · approved by ${x.approvedByName ?? '—'} on ${formatDate(x.approvedAt)}`
+          : ''}
         {x.notes ? ` · ${x.notes}` : ''}
       </p>
       <p className="text-[11px] text-ink-muted">
@@ -343,7 +395,9 @@ function AddVariant(): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [templateKey, setTemplateKey] = useState<DocumentTemplateKey>(DOCUMENT_TEMPLATE_DEFINITIONS[0]!.templateKey);
+  const [templateKey, setTemplateKey] = useState<DocumentTemplateKey>(
+    DOCUMENT_TEMPLATE_DEFINITIONS[0]!.templateKey,
+  );
   const [variantKey, setVariantKey] = useState('');
   const [title, setTitle] = useState('');
   const [listed, setListed] = useState('');
@@ -361,7 +415,12 @@ function AddVariant(): JSX.Element {
       if (slugs.length) appliesWhen.entityTypeSlugs = slugs;
       return apiFetch('/document-templates', {
         method: 'POST',
-        body: { templateKey, variantKey: variantKey.trim(), title: title.trim() || undefined, appliesWhen },
+        body: {
+          templateKey,
+          variantKey: variantKey.trim(),
+          title: title.trim() || undefined,
+          appliesWhen,
+        },
       });
     },
     onSuccess: () => {
@@ -390,7 +449,10 @@ function AddVariant(): JSX.Element {
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Template" required>
-            <Select value={templateKey} onChange={(e) => setTemplateKey(e.target.value as DocumentTemplateKey)}>
+            <Select
+              value={templateKey}
+              onChange={(e) => setTemplateKey(e.target.value as DocumentTemplateKey)}
+            >
               {DOCUMENT_TEMPLATE_DEFINITIONS.map((d) => (
                 <option key={d.templateKey} value={d.templateKey}>
                   {d.title}
@@ -398,7 +460,11 @@ function AddVariant(): JSX.Element {
               ))}
             </Select>
           </Field>
-          <Field label="Variant key" required hint="Lowercase letters, digits and _ (e.g. listed_company).">
+          <Field
+            label="Variant key"
+            required
+            hint="Lowercase letters, digits and _ (e.g. listed_company)."
+          >
             <Input value={variantKey} onChange={(e) => setVariantKey(e.target.value)} />
           </Field>
           <Field label="Title">
@@ -418,11 +484,19 @@ function AddVariant(): JSX.Element {
               <option value="no">No group</option>
             </Select>
           </Field>
-          <Field label="Entity types" hint="Comma-separated entity-type slugs, e.g. public_limited.">
+          <Field
+            label="Entity types"
+            hint="Comma-separated entity-type slugs, e.g. public_limited."
+          >
             <Input value={entityTypes} onChange={(e) => setEntityTypes(e.target.value)} />
           </Field>
         </div>
-        <Button className="mt-3" size="sm" disabled={!validKey || create.isPending} onClick={() => create.mutate()}>
+        <Button
+          className="mt-3"
+          size="sm"
+          disabled={!validKey || create.isPending}
+          onClick={() => create.mutate()}
+        >
           Add variant
         </Button>
       </InlinePanel>
@@ -453,7 +527,8 @@ function MergeFieldReference(): JSX.Element {
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-ink-faint">
-        A field with no value is shown as [Label] in the created file so it is easy to spot and complete.
+        A field with no value is shown as [Label] in the created file so it is easy to spot and
+        complete.
       </p>
     </details>
   );

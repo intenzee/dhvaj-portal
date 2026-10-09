@@ -16,6 +16,8 @@ import { AuditProfileController } from './audit-profile.controller';
 import { AuthorityProvisionsController } from './authority-provisions.controller';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
 import { AuditFinancialReportingController } from './audit-financial-reporting.controller';
+import { AuditFrameworkEvidenceController } from './audit-framework-evidence.controller';
+import { AuditFrameworkEvidenceService } from './audit-framework-evidence.service';
 import { AuditScheduleIiiService } from './audit-schedule-iii.service';
 import { AuditScheduleIiiController } from './audit-schedule-iii.controller';
 import { AuditCaroService } from './audit-caro.service';
@@ -90,6 +92,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditProfileController,
     AuthorityProvisionsController,
     AuditFinancialReportingController,
+    AuditFrameworkEvidenceController,
     AuditScheduleIiiController,
     AuditCaroController,
     AuditIcfrController,
@@ -126,6 +129,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditAcceptanceSignoffService,
     AuditProfileService,
     AuditFinancialReportingService,
+    AuditFrameworkEvidenceService,
     AuditScheduleIiiService,
     AuditCaroService,
     AuditIcfrService,

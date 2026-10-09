@@ -137,7 +137,7 @@ export class AuditAcceptanceFilesService {
       ? templateSelectionFacts(master)
       : { listed: false, entityTypeSlug: null, hasGroup: false };
     const templates: AcceptanceTemplateAvailability[] = [];
-    for (const def of DOCUMENT_TEMPLATE_DEFINITIONS) {
+    for (const def of DOCUMENT_TEMPLATE_DEFINITIONS.filter((d) => d.section === '01')) {
       const resolved = await this.templates.resolveOn(client, def.templateKey, facts);
       templates.push({
         templateKey: def.templateKey,

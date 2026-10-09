@@ -2,7 +2,16 @@
 
 import { useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { FilePlus2, FileText, History, Link2, Lock, Trash2, Upload, ExternalLink } from 'lucide-react';
+import {
+  FilePlus2,
+  FileText,
+  History,
+  Link2,
+  Lock,
+  Trash2,
+  Upload,
+  ExternalLink,
+} from 'lucide-react';
 import {
   ACCEPTANCE_FILE_DATE_META,
   ACCEPTANCE_FILE_META_LABEL,
@@ -28,7 +37,11 @@ import type { DocumentRow } from '@/lib/types';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { DocumentPreview } from '@/components/document-preview';
-import { acceptanceFilesBase, useAcceptanceFiles, useAcceptanceFilesRefresh } from './acceptance-files';
+import {
+  acceptanceFilesBase,
+  useAcceptanceFiles,
+  useAcceptanceFilesRefresh,
+} from './acceptance-files';
 
 /**
  * A Section 01 file card (spec §2): one slot — the consent certificate, the
@@ -112,15 +125,21 @@ function SlotCard({
   const refresh = useAcceptanceFilesRefresh(engagementId, workflowInstanceId);
   const base = acceptanceFilesBase(engagementId, workflowInstanceId);
   const files = view.files.filter((f) => f.slotKey === slotKey);
-  const template = def.templateKey ? view.templates.find((t) => t.templateKey === def.templateKey) : undefined;
+  const template = def.templateKey
+    ? view.templates.find((t) => t.templateKey === def.templateKey)
+    : undefined;
   const canAddMore = def.multiple || files.length === 0;
   const [linking, setLinking] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const onError = (e: unknown) => toast(e instanceof ApiError ? e.message : 'Could not save.', 'error');
+  const onError = (e: unknown) =>
+    toast(e instanceof ApiError ? e.message : 'Could not save.', 'error');
   const create = useMutation({
     mutationFn: () =>
-      apiFetch<AcceptanceFilesView>(`${base}/create-from-template`, { method: 'POST', body: { slotKey } }),
+      apiFetch<AcceptanceFilesView>(`${base}/create-from-template`, {
+        method: 'POST',
+        body: { slotKey },
+      }),
     onSuccess: (v) => {
       refresh(v);
       toast('Created from the DHVAJ template.');
@@ -190,11 +209,21 @@ function SlotCard({
                 {create.isPending ? 'Creating…' : 'Create from DHVAJ Template'}
               </Button>
             )}
-            <Button size="sm" variant="secondary" disabled={add.isPending} onClick={() => fileInput.current?.click()}>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={add.isPending}
+              onClick={() => fileInput.current?.click()}
+            >
               <Upload className="h-4 w-4" />
               {add.isPending ? 'Uploading…' : 'Add File'}
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => setLinking((o) => !o)} aria-expanded={linking}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setLinking((o) => !o)}
+              aria-expanded={linking}
+            >
               <Link2 className="h-4 w-4" /> Link Existing File
             </Button>
             <input
@@ -214,7 +243,10 @@ function SlotCard({
           )}
           {def.templateKey && template?.available && (
             <p className="text-[11px] text-ink-faint">
-              Template {template.variantKey && template.variantKey !== 'standard' ? `${template.variantKey} ` : ''}
+              Template{' '}
+              {template.variantKey && template.variantKey !== 'standard'
+                ? `${template.variantKey} `
+                : ''}
               v{template.versionNo} — prefilled from the masters and Section 01 answers.
             </p>
           )}
@@ -263,10 +295,13 @@ function FileRow({
   const [openDoc, setOpenDoc] = useState<DocumentRow | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [step, setStep] = useState<AcceptanceFileTransition | null>(null);
-  const steps = editable ? availableFileTransitions(def, file.status, view.callerIsEngagementPartner) : [];
+  const steps = editable
+    ? availableFileTransitions(def, file.status, view.callerIsEngagementPartner)
+    : [];
   const partnerSteps = def.transitions.filter((t) => t.from === file.status && t.partnerOnly);
   const awaitingPartner = editable && !view.callerIsEngagementPartner && partnerSteps.length > 0;
-  const onError = (e: unknown) => toast(e instanceof ApiError ? e.message : 'Could not save.', 'error');
+  const onError = (e: unknown) =>
+    toast(e instanceof ApiError ? e.message : 'Could not save.', 'error');
 
   const move = useMutation({
     mutationFn: (v: { to: AcceptanceFileStatus; meta?: Record<string, string | null> }) =>
@@ -281,13 +316,16 @@ function FileRow({
     onError,
   });
   const unlink = useMutation({
-    mutationFn: () => apiFetch<AcceptanceFilesView>(`${base}/${file.id}/unlink`, { method: 'POST' }),
+    mutationFn: () =>
+      apiFetch<AcceptanceFilesView>(`${base}/${file.id}/unlink`, { method: 'POST' }),
     onSuccess: (v) => onChanged(v),
     onError,
   });
   const open = async (): Promise<void> => {
     try {
-      setOpenDoc(await apiFetch<DocumentRow>(`/engagements/${engagementId}/documents/${file.documentId}`));
+      setOpenDoc(
+        await apiFetch<DocumentRow>(`/engagements/${engagementId}/documents/${file.documentId}`),
+      );
     } catch (e) {
       onError(e);
     }
@@ -296,7 +334,8 @@ function FileRow({
   const metaShown = Object.entries(file.meta).filter(
     ([k, v]) => v && k !== 'reopenReason' && ACCEPTANCE_FILE_META_LABEL[k],
   );
-  const removable = editable && !file.editLocked && (def.lifecycle.length === 0 || file.status === 'draft');
+  const removable =
+    editable && !file.editLocked && (def.lifecycle.length === 0 || file.status === 'draft');
 
   return (
     <li className="rounded-md border border-line bg-surface-sunken/40 px-3 py-2">
@@ -305,7 +344,9 @@ function FileRow({
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm text-ink">{file.filename ?? file.title}</span>
             {def.lifecycle.length > 0 && (
-              <Badge tone={STATUS_TONE[file.status] ?? 'neutral'}>{ACCEPTANCE_FILE_STATUS_LABEL[file.status]}</Badge>
+              <Badge tone={STATUS_TONE[file.status] ?? 'neutral'}>
+                {ACCEPTANCE_FILE_STATUS_LABEL[file.status]}
+              </Badge>
             )}
             {file.editLocked && (
               <span className="inline-flex items-center gap-1 text-[11px] text-ink-faint">
@@ -324,7 +365,9 @@ function FileRow({
           </p>
           {metaShown.length > 0 && (
             <p className="text-[11px] text-ink-muted">
-              {metaShown.map(([k, v]) => `${ACCEPTANCE_FILE_META_LABEL[k]}: ${metaValue(k, v!)}`).join(' · ')}
+              {metaShown
+                .map(([k, v]) => `${ACCEPTANCE_FILE_META_LABEL[k]}: ${metaValue(k, v!)}`)
+                .join(' · ')}
             </p>
           )}
         </div>
@@ -332,7 +375,12 @@ function FileRow({
           <Button size="sm" variant="ghost" onClick={() => void open()}>
             <ExternalLink className="h-4 w-4" /> Open
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setShowHistory((o) => !o)} aria-expanded={showHistory}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowHistory((o) => !o)}
+            aria-expanded={showHistory}
+          >
             <History className="h-4 w-4" /> Version History
           </Button>
           {removable && (
@@ -341,7 +389,11 @@ function FileRow({
               variant="ghost"
               disabled={unlink.isPending}
               onClick={() => {
-                if (window.confirm('Remove this file from the card? The document stays on the engagement.'))
+                if (
+                  window.confirm(
+                    'Remove this file from the card? The document stays on the engagement.',
+                  )
+                )
                   unlink.mutate();
               }}
             >
@@ -370,7 +422,8 @@ function FileRow({
           ))}
           {awaitingPartner && (
             <span className="text-[11px] text-ink-faint">
-              Awaiting the Engagement Partner to {partnerSteps.map((t) => t.label.toLowerCase()).join(' or ')}.
+              Awaiting the Engagement Partner to{' '}
+              {partnerSteps.map((t) => t.label.toLowerCase()).join(' or ')}.
             </span>
           )}
         </div>
@@ -406,7 +459,11 @@ function FileRow({
 function metaValue(key: string, value: string): string {
   if ((ACCEPTANCE_FILE_DATE_META as readonly string[]).includes(key)) return formatDate(value);
   const modes: ReadonlyArray<{ value: string; label: string }> =
-    key === 'sentMode' ? PREVIOUS_AUDITOR_SENT_MODES : key === 'deliveryMode' ? ENGAGEMENT_LETTER_DELIVERY_MODES : [];
+    key === 'sentMode'
+      ? PREVIOUS_AUDITOR_SENT_MODES
+      : key === 'deliveryMode'
+        ? ENGAGEMENT_LETTER_DELIVERY_MODES
+        : [];
   return modes.find((m) => m.value === value)?.label ?? value;
 }
 
@@ -434,7 +491,10 @@ function StepForm({
   if (step.to === 'sent' || step.to === 'issued') fields.push('remarks');
   const [meta, setMeta] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      fields.map((k) => [k, (ACCEPTANCE_FILE_DATE_META as readonly string[]).includes(k) ? today : '']),
+      fields.map((k) => [
+        k,
+        (ACCEPTANCE_FILE_DATE_META as readonly string[]).includes(k) ? today : '',
+      ]),
     ),
   );
   const error = fileTransitionError(def, from, step.to, meta, isPartner);
@@ -456,12 +516,18 @@ function StepForm({
           if ((ACCEPTANCE_FILE_DATE_META as readonly string[]).includes(k)) {
             return (
               <Field key={k} label={label} required={required}>
-                <Input type="date" value={meta[k]} max={today} onChange={(e) => set(k, e.target.value)} />
+                <Input
+                  type="date"
+                  value={meta[k]}
+                  max={today}
+                  onChange={(e) => set(k, e.target.value)}
+                />
               </Field>
             );
           }
           if (k === 'sentMode' || k === 'deliveryMode') {
-            const modes = k === 'sentMode' ? PREVIOUS_AUDITOR_SENT_MODES : ENGAGEMENT_LETTER_DELIVERY_MODES;
+            const modes =
+              k === 'sentMode' ? PREVIOUS_AUDITOR_SENT_MODES : ENGAGEMENT_LETTER_DELIVERY_MODES;
             return (
               <Field key={k} label={label} required={required}>
                 <Select value={meta[k]} onChange={(e) => set(k, e.target.value)}>
@@ -480,7 +546,11 @@ function StepForm({
               <Field
                 label={label}
                 required={required}
-                hint={k === 'reopenReason' ? 'Recorded in the audit trail with who reopened it and when.' : undefined}
+                hint={
+                  k === 'reopenReason'
+                    ? 'Recorded in the audit trail with who reopened it and when.'
+                    : undefined
+                }
               >
                 <Textarea rows={2} value={meta[k]} onChange={(e) => set(k, e.target.value)} />
               </Field>
@@ -501,7 +571,7 @@ function StepForm({
   );
 }
 
-function VersionHistory({ base, fileId }: { base: string; fileId: string }): JSX.Element {
+export function VersionHistory({ base, fileId }: { base: string; fileId: string }): JSX.Element {
   const q = useQuery({
     queryKey: ['acceptance-file-versions', base, fileId],
     queryFn: () => apiFetch<FileVersionHistory>(`${base}/${fileId}/versions`),
@@ -587,7 +657,10 @@ export function LinkPicker({
             <li key={d.id} className="flex items-center justify-between gap-2 py-1.5">
               <span className="min-w-0 truncate text-xs text-ink">
                 {d.title}
-                <span className="text-ink-faint"> · {d.currentFilename ?? 'no file'} · v{d.currentVersionNo}</span>
+                <span className="text-ink-faint">
+                  {' '}
+                  · {d.currentFilename ?? 'no file'} · v{d.currentVersionNo}
+                </span>
               </span>
               <Button
                 size="sm"

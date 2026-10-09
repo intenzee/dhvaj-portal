@@ -17,8 +17,11 @@ export const DOCUMENT_TEMPLATE_KEY = {
   auditorConsentCertificate: 'auditor_consent_certificate',
   engagementLetter: 'engagement_letter',
   clientAcknowledgement: 'client_acknowledgement',
+  /** 02.2 §18 — only for complex cases, overrides or consultations. */
+  financialReportingFrameworkMemo: 'financial_reporting_framework_memo',
 } as const;
-export type DocumentTemplateKey = (typeof DOCUMENT_TEMPLATE_KEY)[keyof typeof DOCUMENT_TEMPLATE_KEY];
+export type DocumentTemplateKey =
+  (typeof DOCUMENT_TEMPLATE_KEY)[keyof typeof DOCUMENT_TEMPLATE_KEY];
 export const DOCUMENT_TEMPLATE_KEYS: DocumentTemplateKey[] = Object.values(DOCUMENT_TEMPLATE_KEY);
 
 export interface DocumentTemplateDefinition {
@@ -26,29 +29,41 @@ export interface DocumentTemplateDefinition {
   title: string;
   /** File name of a created document; `{client}` is replaced with the client's name. */
   filenamePattern: string;
+  /** The audit-file section that creates it (Section 01 lists only its own). */
+  section: '01' | '02.2';
 }
 
-/** The formats Section 01 creates from a template (spec §10.2). */
+/** The formats created from a template (Section 01 spec §10.2; 02.2 spec §18). */
 export const DOCUMENT_TEMPLATE_DEFINITIONS: readonly DocumentTemplateDefinition[] = [
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.previousAuditorCommunication,
     title: 'Communication to Previous Auditor',
     filenamePattern: 'Communication to Previous Auditor - {client}.docx',
+    section: '01',
   },
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.auditorConsentCertificate,
     title: 'Auditor Consent / Eligibility Certificate',
     filenamePattern: 'Auditor Consent and Eligibility Certificate - {client}.docx',
+    section: '01',
   },
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.engagementLetter,
     title: 'Statutory Audit Engagement Letter',
     filenamePattern: 'Statutory Audit Engagement Letter - {client}.docx',
+    section: '01',
   },
   {
     templateKey: DOCUMENT_TEMPLATE_KEY.clientAcknowledgement,
     title: 'Client Acknowledgement / Acceptance',
     filenamePattern: 'Client Acknowledgement - {client}.docx',
+    section: '01',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.financialReportingFrameworkMemo,
+    title: 'Financial Reporting Framework Technical Memo',
+    filenamePattern: 'Financial Reporting Framework Memo - {client}.docx',
+    section: '02.2',
   },
 ] as const;
 
@@ -97,10 +112,9 @@ export function templateSpecificity(c: TemplateConditions): number {
 }
 
 /** Pick the applicable variant: the most specific one whose conditions hold. */
-export function selectTemplateVariant<T extends { appliesWhen: TemplateConditions; variantKey: string }>(
-  variants: readonly T[],
-  facts: TemplateSelectionFacts,
-): T | null {
+export function selectTemplateVariant<
+  T extends { appliesWhen: TemplateConditions; variantKey: string },
+>(variants: readonly T[], facts: TemplateSelectionFacts): T | null {
   const matching = variants.filter((v) => templateConditionsMatch(v.appliesWhen, facts));
   matching.sort(
     (a, b) =>
@@ -127,7 +141,7 @@ export interface TemplateMergeField {
   source: string;
 }
 
-/** Every merge field available to Section 01 templates. */
+/** Every merge field available to the firm's templates (the `frf.*` ones fill the 02.2 memo). */
 export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'firm.name', label: 'Firm name', source: 'Firm settings' },
   { key: 'firm.frn', label: 'Firm registration number (FRN)', source: 'Firm settings' },
@@ -152,10 +166,37 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'previousAuditor.firmName', label: 'Previous auditor firm', source: '01.3 details' },
   { key: 'previousAuditor.frn', label: 'Previous auditor FRN', source: '01.3 details' },
   { key: 'previousAuditor.partnerName', label: 'Previous auditor partner', source: '01.3 details' },
-  { key: 'previousAuditor.membershipNo', label: 'Previous auditor membership no.', source: '01.3 details' },
+  {
+    key: 'previousAuditor.membershipNo',
+    label: 'Previous auditor membership no.',
+    source: '01.3 details',
+  },
   { key: 'previousAuditor.email', label: 'Previous auditor email', source: '01.3 details' },
   { key: 'previousAuditor.address', label: 'Previous auditor address', source: '01.3 details' },
-  { key: 'previousAuditor.lastAuditPeriod', label: 'Previous auditor last period', source: '01.3 details' },
+  {
+    key: 'previousAuditor.lastAuditPeriod',
+    label: 'Previous auditor last period',
+    source: '01.3 details',
+  },
+  { key: 'frf.framework', label: 'Applicable framework', source: '02.2 conclusion' },
+  { key: 'frf.applicabilityType', label: 'Applicability type', source: '02.2 system conclusion' },
+  { key: 'frf.effectiveFrom', label: 'Framework effective from', source: '02.2 system conclusion' },
+  { key: 'frf.primaryTrigger', label: 'Primary trigger', source: '02.2 system conclusion' },
+  { key: 'frf.secondaryTriggers', label: 'Secondary triggers', source: '02.2 system conclusion' },
+  { key: 'frf.ruleApplied', label: 'Rule applied', source: '02.2 rule basis' },
+  { key: 'frf.limitApplied', label: 'Limit applied', source: '02.2 rule basis' },
+  { key: 'frf.factsUsed', label: 'Facts used', source: '02.1 / 02.2 facts' },
+  { key: 'frf.systemConclusion', label: 'System conclusion', source: '02.2 system conclusion' },
+  { key: 'frf.systemBasis', label: 'System basis', source: '02.2 system conclusion' },
+  { key: 'frf.professionalConclusion', label: 'Professional conclusion', source: '02.2 FRF-05' },
+  { key: 'frf.overridden', label: 'Overridden (Yes / No)', source: '02.2 FRF-05' },
+  { key: 'frf.overrideReason', label: 'Override reason', source: '02.2 FRF-05' },
+  { key: 'frf.smcStatus', label: 'SMC status', source: '02.2 SMC sub-assessment' },
+  { key: 'frf.firstTimeAdoption', label: 'First-time Ind AS adoption', source: '02.2 FRF-06' },
+  { key: 'frf.partnerApproval', label: 'Partner approval', source: '02.2 FRF-05' },
+  { key: 'frf.pendingReason', label: 'Information pending', source: '02.2 FRF-05' },
+  { key: 'frf.decidedBy', label: 'Concluded by', source: '02.2 FRF-05' },
+  { key: 'frf.decidedAt', label: 'Concluded on', source: '02.2 FRF-05' },
   { key: 'today', label: "Today's date", source: 'System' },
 ] as const;
 
