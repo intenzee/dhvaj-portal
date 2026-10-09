@@ -188,15 +188,78 @@ export async function readLeads(
   };
 }
 
-/** Team independence summary (01.5). Filled in by the declarations reader. */
-export const EMPTY_INDEPENDENCE: IndependenceSummary = {
-  required: 0,
-  completed: 0,
-  pending: 0,
-  threatsDisclosed: 0,
-  rows: [],
-  mine: null,
+const TEAM_ROLE_LABEL: Record<string, string> = {
+  partner: 'Engagement Partner',
+  manager: 'Engagement Manager',
+  in_charge: 'In-charge',
+  member: 'Team member',
+  reviewer: 'Reviewer',
+  specialist: 'Specialist',
 };
+
+/**
+ * Team independence summary (01.5, spec §8): everyone on the engagement —
+ * the Engagement Partner, the Engagement Manager and the engagement team —
+ * and the declaration each has given for this audit file.
+ */
+export async function readIndependence(
+  client: PoolClient,
+  engagementId: string,
+  workflowInstanceId: string,
+): Promise<IndependenceSummary> {
+  const { rows } = await client.query<{
+    employee_id: string;
+    full_name: string | null;
+    role: string;
+    status: 'independent' | 'threat_disclosed' | null;
+    disclosure: string | null;
+    declared_at: Date | null;
+    is_me: boolean;
+  }>(
+    `WITH team AS (
+       SELECT engagement_partner_id AS employee_id, 'partner' AS role, 1 AS rank
+         FROM hsdg.engagements WHERE id = $1 AND engagement_partner_id IS NOT NULL
+       UNION ALL
+       SELECT engagement_manager_id, 'manager', 2
+         FROM hsdg.engagements WHERE id = $1 AND engagement_manager_id IS NOT NULL
+       UNION ALL
+       SELECT employee_id, role_on_engagement, 3
+         FROM hsdg.engagement_team WHERE engagement_id = $1
+     ), people AS (
+       SELECT DISTINCT ON (employee_id) employee_id, role
+         FROM team ORDER BY employee_id, rank
+     )
+     SELECT p.employee_id, e.full_name, p.role, d.status, d.disclosure, d.declared_at,
+            (p.employee_id = hsdg.ctx_employee_id()) AS is_me
+       FROM people p
+       LEFT JOIN hsdg.employees e ON e.id = p.employee_id
+       LEFT JOIN hsdg.audit_independence_declarations d
+              ON d.workflow_instance_id = $2 AND d.employee_id = p.employee_id
+      ORDER BY CASE p.role WHEN 'partner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END,
+               e.full_name`,
+    [engagementId, workflowInstanceId],
+  );
+  const mapped = rows.map((r) => ({
+    row: {
+      employeeId: r.employee_id,
+      employeeName: r.full_name ?? 'Team member',
+      role: TEAM_ROLE_LABEL[r.role] ?? r.role,
+      status: r.status ?? ('pending' as const),
+      disclosure: r.disclosure,
+      declaredAt: r.declared_at ? r.declared_at.toISOString() : null,
+    },
+    isMe: r.is_me === true,
+  }));
+  const completed = mapped.filter((m) => m.row.status !== 'pending').length;
+  return {
+    required: mapped.length,
+    completed,
+    pending: mapped.length - completed,
+    threatsDisclosed: mapped.filter((m) => m.row.status === 'threat_disclosed').length,
+    rows: mapped.map((m) => m.row),
+    mine: mapped.find((m) => m.isMe)?.row ?? null,
+  };
+}
 
 export async function readAcceptanceContext(
   client: PoolClient,
@@ -213,7 +276,7 @@ export async function readAcceptanceContext(
     firstYear: fy.firstYear,
     firstYearSource: fy.source,
     otherServices,
-    independence: EMPTY_INDEPENDENCE,
+    independence: await readIndependence(client, engagementId, workflowInstanceId),
     fileStatuses,
     priorYear,
     ...leads,

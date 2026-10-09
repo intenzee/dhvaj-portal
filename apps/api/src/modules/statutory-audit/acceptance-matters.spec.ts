@@ -30,16 +30,29 @@ describe('deriveAcceptanceMatters (Section 01 matters, guide §8.4)', () => {
     expect(issue('cannot_accept')).toMatchObject({ severity: 'critical', isBlocking: true });
   });
 
-  it('honours a "yes-is-adverse" question (e.g. prohibited services)', () => {
-    const clean = deriveAcceptanceMatters([
-      ans({ segmentKey: 'independence_ethics', questionKey: 'prohibited_services', answer: 'no' }),
-    ]);
-    expect(clean).toEqual([]);
-    const raised = deriveAcceptanceMatters([
-      ans({ segmentKey: 'independence_ethics', questionKey: 'prohibited_services', answer: 'yes' }),
-    ])[0]!;
-    expect(raised.category).toBe('independence');
-    expect(raised.isBlocking).toBe(true);
+  it('an independence threat is a matter at its significance; significant ones block', () => {
+    const ind = (questionKey: string, answer: string, details: Record<string, unknown>) =>
+      deriveAcceptanceMatters([
+        ans({ segmentKey: 'independence_ethics', questionKey, answer, details }),
+      ])[0];
+    expect(ind('ind_01', 'no', {})).toBeUndefined();
+    expect(
+      ind('ind_01', 'yes', {
+        significance: 'low',
+        conclusion: 'acceptable',
+        description: 'Shares.',
+      }),
+    ).toMatchObject({ category: 'independence', severity: 'low', isBlocking: false });
+    expect(ind('ind_02', 'yes', { significance: 'high', conclusion: 'safeguards' })).toMatchObject({
+      severity: 'high',
+      isBlocking: true,
+    });
+    expect(
+      ind('ind_04', 'yes', { significance: 'low', conclusion: 'not_acceptable' }),
+    ).toMatchObject({ isBlocking: true });
+    const svc = ind('ind_03:5f0e', 'threat', { significance: 'medium', conclusion: 'safeguards' })!;
+    expect(svc.source).toBe('acceptance:independence_ethics:ind_03:5f0e');
+    expect(svc.isBlocking).toBe(false);
   });
 
   it("a previous auditor's matter is weighted by its impact on acceptance", () => {

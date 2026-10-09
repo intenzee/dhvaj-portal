@@ -288,6 +288,76 @@ const PENDING_INFO = (text: string): AcceptanceOption => ({
   pending: text,
 });
 
+// ── 01.5 vocabulary ─────────────────────────────────────────────────────────
+
+/** Threat categories (Code of Ethics) for an Independence Matter (spec §8). */
+export const INDEPENDENCE_THREAT = [
+  { value: 'self_interest', label: 'Self-interest' },
+  { value: 'self_review', label: 'Self-review' },
+  { value: 'advocacy', label: 'Advocacy' },
+  { value: 'familiarity', label: 'Familiarity' },
+  { value: 'intimidation', label: 'Intimidation' },
+  { value: 'other', label: 'Other' },
+] as const satisfies readonly AcceptanceChoice[];
+
+export const MATTER_SIGNIFICANCE = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'critical', label: 'Critical' },
+] as const satisfies readonly AcceptanceChoice[];
+
+export const INDEPENDENCE_MATTER_CONCLUSION = [
+  { value: 'acceptable', label: 'Threat at an acceptable level' },
+  { value: 'safeguards', label: 'Reduced to an acceptable level by safeguards' },
+  { value: 'not_acceptable', label: 'Cannot be reduced to an acceptable level' },
+] as const satisfies readonly AcceptanceChoice[];
+
+/** The Independence Matter fields (spec §8) recorded on a "Yes" / threat answer. */
+const independenceMatterFields = (person: boolean): AcceptanceDetailField[] => [
+  {
+    key: 'threat',
+    label: 'Threat / category',
+    type: 'select',
+    options: INDEPENDENCE_THREAT,
+    required: true,
+  },
+  ...(person ? [{ key: 'person', label: 'Person / service involved', type: 'text' } as const] : []),
+  { key: 'description', label: 'Description', type: 'textarea', required: true },
+  {
+    key: 'significance',
+    label: 'Significance',
+    type: 'select',
+    options: MATTER_SIGNIFICANCE,
+    required: true,
+  },
+  { key: 'consultation', label: 'Consultation required', type: 'yesno', required: true },
+  {
+    key: 'conclusion',
+    label: 'Conclusion',
+    type: 'select',
+    options: INDEPENDENCE_MATTER_CONCLUSION,
+    required: true,
+  },
+  {
+    key: 'safeguard',
+    label: 'Safeguard',
+    type: 'textarea',
+    required: true,
+    showIf: { field: 'conclusion', in: ['safeguards'] },
+  },
+];
+
+const SIGNIFICANCE_RANK: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+
+/** Significance at or above the configured level needs the Partner's approval. */
+export function independenceNeedsPartnerApproval(significance: unknown): boolean {
+  return (
+    (SIGNIFICANCE_RANK[String(significance)] ?? 0) >=
+    SIGNIFICANCE_RANK[ACCEPTANCE_METHODOLOGY.independencePartnerApprovalFrom]!
+  );
+}
+
 // ── The catalogue ───────────────────────────────────────────────────────────
 
 export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
@@ -829,18 +899,99 @@ export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
       },
     ],
   },
-  ...legacy('independence_ethics', [
-    [
-      'independence_threats',
-      'Threats to independence have been identified that need safeguards.',
-      'yes',
+  // 01.5 Independence & Ethics (spec §8). Team declarations are summarised
+  // from the portal (see SEGMENT_RULES.independence_ethics); IND-03 lists the
+  // client's other active services automatically.
+  {
+    segmentKey: 'independence_ethics',
+    questionKey: 'ind_01',
+    code: 'IND-01',
+    prompt: 'Has any financial interest in the client or relevant related entity been identified?',
+    control: 'choice',
+    options: [YES_EXC, NO_CLEAR],
+    details: [{ when: ['yes'], fields: independenceMatterFields(true) }],
+  },
+  {
+    segmentKey: 'independence_ethics',
+    questionKey: 'ind_02',
+    code: 'IND-02',
+    prompt:
+      'Has any business, employment, family or other relationship been identified that may create an independence threat?',
+    control: 'choice',
+    options: [YES_EXC, NO_CLEAR],
+    details: [{ when: ['yes'], fields: independenceMatterFields(true) }],
+  },
+  {
+    segmentKey: 'independence_ethics',
+    questionKey: 'ind_03',
+    code: 'IND-03',
+    prompt:
+      'Is DHVAJ providing any other service to the client that requires evaluation from an independence perspective?',
+    control: 'services',
+    options: [
+      { value: 'no_threat', label: 'No Threat', tone: 'clear' },
+      { value: 'threat', label: 'Threat Identified', tone: 'exception' },
+      {
+        value: 'further_review',
+        label: 'Further Review Required',
+        tone: 'pending',
+        pending: 'Another service needs further independence review',
+      },
     ],
-    [
-      'prohibited_services',
-      'The firm provides services prohibited under Sec 144 to this client.',
-      'yes',
+    details: [
+      { when: ['threat'], fields: independenceMatterFields(false) },
+      {
+        when: ['further_review'],
+        fields: [{ key: 'note', label: 'What needs review', type: 'text' }],
+      },
     ],
-  ]),
+  },
+  {
+    segmentKey: 'independence_ethics',
+    questionKey: 'ind_04',
+    code: 'IND-04',
+    prompt: 'Has any other conflict of interest or ethical threat been identified?',
+    control: 'choice',
+    options: [YES_EXC, NO_CLEAR],
+    details: [{ when: ['yes'], fields: independenceMatterFields(true) }],
+  },
+  {
+    segmentKey: 'independence_ethics',
+    questionKey: 'ind_conclusion',
+    code: '',
+    prompt: 'Final Independence Conclusion',
+    control: 'select',
+    options: [
+      { value: 'satisfied', label: 'Independence requirements satisfied', tone: 'clear' },
+      {
+        value: 'satisfied_safeguards',
+        label: 'Satisfied subject to documented safeguards',
+        tone: 'clear',
+      },
+      {
+        value: 'consultation',
+        label: 'Further consultation required',
+        tone: 'pending',
+        pending: 'Independence — further consultation required',
+      },
+      {
+        value: 'not_satisfied',
+        label: 'Independence requirements not satisfied - blocks acceptance',
+        tone: 'exception',
+        attention: 'Independence requirements not satisfied — blocks acceptance',
+      },
+    ],
+    details: [
+      {
+        when: ['satisfied_safeguards'],
+        fields: [{ key: 'safeguard', label: 'Safeguards', type: 'textarea', required: true }],
+      },
+      {
+        when: ['not_satisfied'],
+        fields: [{ key: 'basis', label: 'Basis', type: 'textarea', required: true }],
+      },
+    ],
+  },
   ...legacy('audit_preconditions', [
     [
       'acceptable_framework',
@@ -915,6 +1066,11 @@ export interface AcceptanceEvalContext {
   fileStatuses: Readonly<Record<string, string>>;
   /** Matter sources (`acceptance:<segment>:<question>…`) open AND blocking. */
   openBlockingSources: readonly string[];
+  /**
+   * Matter sources a person has resolved or accepted with approval. The
+   * Partner-attention line of the answer behind such a matter is settled.
+   */
+  settledSources?: readonly string[];
 }
 
 export const EMPTY_EVAL_CONTEXT: AcceptanceEvalContext = {
@@ -1049,6 +1205,28 @@ export function evaluateSegment(
   let answered = 0;
   let touched = false;
   for (const q of visible) {
+    // IND-03: one assessment per other active service; the question is done
+    // when every service is assessed (nothing to assess is done too).
+    if (q.control === 'services') {
+      if (q.optional) continue;
+      required += 1;
+      let allDone = true;
+      for (const id of ctx.otherServiceIds) {
+        const key = `${q.questionKey}:${id}`;
+        const sub = effective[key];
+        if (sub?.answer != null) touched = true;
+        const o = optionOf(q, sub?.answer);
+        if (o?.pending) pend(o.pending, key);
+        if (o?.attention) attn(o.attention, key);
+        const missing = missingDetailFields(q, sub);
+        if (sub?.answer != null && missing.length > 0) {
+          pend(`${q.code}: ${missing.map((f) => f.label).join(', ')} still to record`, key);
+        }
+        if (sub?.answer == null || missing.length > 0 || o?.pending) allDone = false;
+      }
+      if (allDone) answered += 1;
+      continue;
+    }
     const s = effective[q.questionKey];
     const recorded = s && !derived.includes(q.questionKey);
     if (recorded && (s.answer != null || Object.keys(s.details ?? {}).length > 0)) touched = true;
@@ -1074,6 +1252,19 @@ export function evaluateSegment(
     items.push(...extra.items);
     required += extra.required ?? 0;
     answered += extra.answered ?? 0;
+  }
+  // An attention line whose matter the Engagement Partner has dealt with
+  // (resolved / accepted with approval) no longer holds the segment.
+  const settled = new Set(ctx.settledSources ?? []);
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i]!;
+    if (
+      it.kind === 'attention' &&
+      it.questionKey &&
+      settled.has(acceptanceSource(segmentKey, it.questionKey))
+    ) {
+      items.splice(i, 1);
+    }
   }
   const pending = items.filter((i) => i.kind === 'pending').map((i) => i.text);
   const attention = items.filter((i) => i.kind === 'attention').map((i) => i.text);
@@ -1171,6 +1362,46 @@ const SEGMENT_RULES: Record<string, SegmentRule> = {
         return [];
       }),
     }),
+  },
+  independence_ethics: {
+    extra: (answers, ctx) => {
+      const items: AttentionItem[] = [];
+      if (ctx.declarationsPending > 0) {
+        items.push({
+          kind: 'pending',
+          text: `${ctx.declarationsPending} team independence declaration${ctx.declarationsPending === 1 ? '' : 's'} pending`,
+          questionKey: null,
+        });
+      }
+      // A matter that cannot be safeguarded leaves independence not satisfied.
+      const keys = Object.keys(answers).filter((k) =>
+        ['ind_01', 'ind_02', 'ind_03', 'ind_04'].includes(k.split(':')[0]!),
+      );
+      const conclusion = answers.ind_conclusion?.answer;
+      if (
+        (conclusion === 'satisfied' || conclusion === 'satisfied_safeguards') &&
+        keys.some((k) => answers[k]?.details?.conclusion === 'not_acceptable')
+      ) {
+        items.push({
+          kind: 'attention',
+          text: 'A threat that cannot be reduced is recorded — the conclusion cannot be "satisfied"',
+          questionKey: 'ind_conclusion',
+        });
+      }
+      // Significant matters need the Engagement Partner's approval (methodology).
+      for (const k of keys) {
+        const a = answers[k];
+        const isThreat = a?.answer === 'yes' || a?.answer === 'threat';
+        if (isThreat && independenceNeedsPartnerApproval(a.details?.significance)) {
+          items.push({
+            kind: 'attention',
+            text: `${k.startsWith('ind_03') ? 'IND-03 service' : k.replace('ind_0', 'IND-0')}: significant independence matter needs Engagement Partner approval`,
+            questionKey: k,
+          });
+        }
+      }
+      return { items };
+    },
   },
   acceptance_continuance: {
     // "Proceed Subject to Resolution" holds while this segment's matters are open.

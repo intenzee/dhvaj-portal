@@ -263,6 +263,91 @@ describe('Section 01 question engine', () => {
     });
   });
 
+  describe('01.5 Independence & Ethics', () => {
+    const clean: AnswersByKey = {
+      ind_01: ans('no'),
+      ind_02: ans('no'),
+      ind_04: ans('no'),
+      ind_conclusion: ans('satisfied'),
+    };
+    const threat = {
+      threat: 'familiarity',
+      description: "Article assistant is the CFO's nephew.",
+      significance: 'high',
+      consultation: 'no',
+      conclusion: 'safeguards',
+      safeguard: 'Rotated off the engagement.',
+    };
+
+    it('completes with no other services once every declaration is in', () => {
+      expect(evaluateSegment('independence_ethics', clean, ctx()).state).toBe('complete');
+      const waiting = evaluateSegment(
+        'independence_ethics',
+        clean,
+        ctx({ declarationsPending: 2 }),
+      );
+      expect(waiting.state).toBe('in_progress');
+      expect(waiting.pending).toContain('2 team independence declarations pending');
+    });
+
+    it('IND-03 assesses each other active service', () => {
+      const c = ctx({ otherServiceIds: ['s1', 's2'] });
+      const one = evaluateSegment(
+        'independence_ethics',
+        { ...clean, 'ind_03:s1': ans('no_threat') },
+        c,
+      );
+      expect(one.state).toBe('in_progress');
+      expect(one).toMatchObject({ required: 5, answered: 4 });
+      const both = evaluateSegment(
+        'independence_ethics',
+        { ...clean, 'ind_03:s1': ans('no_threat'), 'ind_03:s2': ans('further_review') },
+        c,
+      );
+      expect(both.items).toContainEqual({
+        kind: 'pending',
+        text: 'Another service needs further independence review',
+        questionKey: 'ind_03:s2',
+      });
+    });
+
+    it('a significant threat needs Partner approval until its matter is settled', () => {
+      const answers = { ...clean, ind_02: ans('yes', threat) };
+      const open = evaluateSegment('independence_ethics', answers, ctx());
+      expect(open.state).toBe('attention_required');
+      expect(open.attention[0]).toMatch(/IND-02: significant independence matter/);
+      const settled = evaluateSegment(
+        'independence_ethics',
+        answers,
+        ctx({ settledSources: ['acceptance:independence_ethics:ind_02'] }),
+      );
+      expect(settled.state).toBe('complete');
+      const low = evaluateSegment(
+        'independence_ethics',
+        { ...clean, ind_02: ans('yes', { ...threat, significance: 'low' }) },
+        ctx(),
+      );
+      expect(low.state).toBe('complete');
+    });
+
+    it('cannot conclude "satisfied" over a threat that cannot be reduced', () => {
+      const ev = evaluateSegment(
+        'independence_ethics',
+        {
+          ...clean,
+          ind_04: ans('yes', {
+            ...threat,
+            significance: 'low',
+            conclusion: 'not_acceptable',
+          }),
+        },
+        ctx(),
+      );
+      expect(ev.state).toBe('attention_required');
+      expect(ev.attention.join(' ')).toMatch(/cannot be "satisfied"/);
+    });
+  });
+
   describe('01.7 Engagement Letter', () => {
     const letter = (status?: string) =>
       evaluateSegment(

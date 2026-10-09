@@ -18,7 +18,7 @@ import { AuditService } from '../audit/audit.service';
 import { deriveFrameworkMatters, type DerivedMatter } from './matters-generation';
 
 /** Marker written by the generator when it auto-closes a cleared matter (§10). */
-const AUTO_RESOLVED = 'Auto-resolved: source condition cleared.';
+export const AUTO_RESOLVED = 'Auto-resolved: source condition cleared.';
 
 /**
  * What the file already says about a matter — the explanation recorded on the
@@ -29,11 +29,11 @@ const SUGGESTED_RESOLUTION = `COALESCE(
     (SELECT COALESCE(
               NULLIF(trim(a.narrative), ''),
               NULLIF(trim(a.details ->> 'actionRequired'), ''),
+              NULLIF(trim(a.details ->> 'safeguard'), ''),
               NULLIF(trim(a.details ->> 'explanation'), ''),
               NULLIF(trim(a.details ->> 'assessment'), ''),
               NULLIF(trim(a.details ->> 'managerAssessment'), ''),
               NULLIF(trim(a.details ->> 'description'), ''),
-              NULLIF(trim(a.details ->> 'safeguard'), ''),
               NULLIF(trim(a.details ->> 'basis'), ''))
        FROM hsdg.audit_acceptance_answers a
        JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id

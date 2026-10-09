@@ -51,6 +51,8 @@ export async function answerSection01Clean(
   app: INestApplication,
   token: string,
   engId: string,
+  /** Other team members (manager / team) who must also declare independence. */
+  otherTeamTokens: readonly string[] = [],
 ): Promise<StatutoryAuditAcceptance> {
   const http = app.getHttpServer();
   const base = `/api/v1/engagements/${engId}/statutory-audit/acceptance`;
@@ -100,6 +102,16 @@ export async function answerSection01Clean(
     }
     acc = await read();
     if (posted === 0) break;
+  }
+  // 01.5: everyone on the team declares (the caller, plus any other tokens given).
+  for (const t of [token, ...otherTeamTokens]) {
+    await request(http)
+      .post(
+        `/api/v1/engagements/${engId}/statutory-audit/${acc.workflowInstanceId}/acceptance/independence/declaration`,
+      )
+      .set('Authorization', `Bearer ${t}`)
+      .send({ status: 'independent' })
+      .expect(201);
   }
   await progressEngagementLetter(app, token, engId, acc.workflowInstanceId);
   return read();

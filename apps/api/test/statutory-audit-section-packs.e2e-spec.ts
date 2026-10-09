@@ -84,13 +84,19 @@ describe('Statutory Audit — Sections 01–04 packs (e2e)', () => {
 
     // Answer everything favourably except one independence threat, explained.
     await answerSection01Clean(app, pa, engId);
-    await answerSection01(app, pa, engId, 'independence_ethics', 'independence_threats', 'yes', {
-      explanation: 'Article assistant rotated off the engagement.',
+    await answerSection01(app, pa, engId, 'independence_ethics', 'ind_02', 'yes', {
+      threat: 'familiarity',
+      person: 'Article assistant',
+      description: "The article assistant is the CFO's nephew.",
+      significance: 'high',
+      consultation: 'no',
+      conclusion: 'safeguards',
+      safeguard: 'Article assistant rotated off the engagement.',
     });
     acc = await acceptance();
     expect(check(acc.pack.checks, 'blocking_matters')).toMatchObject({ ok: false });
     expect(check(acc.pack.checks, 'adverse_answers').facts.join(' ')).toMatch(
-      /Threats to independence/,
+      /IND-02/,
     );
     expect(acc.pack.suggestedConclusion).toBe('accept_with_conditions');
     expect(acc.pack.ready).toBe(false);
@@ -98,7 +104,7 @@ describe('Statutory Audit — Sections 01–04 packs (e2e)', () => {
     // The matter carries the explanation already given — accepted in one step.
     const matters = (await get(pa, `${base}/${shellId}/matters?section=acceptance`))
       .body as AuditMatterRecord[];
-    const threat = matters.find((m) => m.source.endsWith(':independence_threats'))!;
+    const threat = matters.find((m) => m.source.endsWith(':ind_02'))!;
     expect(threat.suggestedResolution).toBe('Article assistant rotated off the engagement.');
     await post(pa, `${base}/matters/${threat.id}`, {
       status: 'accepted_with_approval',

@@ -107,7 +107,8 @@ describe('Statutory Audit — Team from the file (e2e)', () => {
     const shellId = (await get(pa, base)).body[0].workflowInstanceId as string;
 
     // Section 01 accepted, Section 02 approved.
-    await answerSection01Clean(app, pa, engId);
+    // The Engagement Manager declares independence too (01.5).
+    await answerSection01Clean(app, pa, engId, [await token('manager.x@dhvaj.in')]);
     await recommendSection01(app, pa, engId, shellId);
     await post(pa, `${base}/${shellId}/acceptance/approve`, {
       conclusion: 'accept',

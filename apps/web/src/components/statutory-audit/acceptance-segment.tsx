@@ -22,6 +22,7 @@ import { Badge, Button, Card } from '@/components/ui';
 import { Input, Select, Textarea } from '@/components/form';
 import { cn } from '@/lib/cn';
 import { AcceptanceFileCard } from './acceptance-file-card';
+import { TeamIndependence } from './acceptance-independence';
 
 /**
  * One Section 01 segment, rendered from the question engine (spec §4–§9, §13):
@@ -156,6 +157,7 @@ export function AcceptanceSegmentEditor({
       )}
 
       {intro}
+      {segment.segmentKey === 'independence_ethics' && <TeamIndependence acc={acc} />}
       {segment.segmentKey === 'acceptance_continuance' && acc.context.firstYear === false && (
         <PriorYearAcceptance acc={acc} />
       )}

@@ -2,6 +2,7 @@ import { planAcceptance } from './section-packs';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,6 +20,7 @@ import {
   type AcceptanceSegmentKey,
   type AnswersByKey,
   type RecordAcceptanceAnswerInput,
+  type RecordIndependenceDeclarationInput,
   type SegmentEvaluation,
   type SegmentState,
   type StatutoryAuditAcceptance,
@@ -26,9 +28,9 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
-import { AuditMattersService } from './audit-matters.service';
+import { AUTO_RESOLVED, AuditMattersService } from './audit-matters.service';
 import { deriveAcceptanceMatters } from './acceptance-matters';
-import { readAcceptanceContext } from './acceptance-context';
+import { readAcceptanceContext, readIndependence } from './acceptance-context';
 import { validateAcceptanceAnswer } from './acceptance-validation';
 import { engagementProfileFacts, readEngagementMasterFacts } from './master-facts';
 
@@ -327,6 +329,65 @@ export class AuditAcceptanceService {
     });
   }
 
+  // ── 01.5 Team independence declarations (spec §8) ──────────────────────────
+
+  /**
+   * The signed-in person declares their own independence for this audit file
+   * (re-declaring replaces it). Only someone on the engagement can declare,
+   * and only for themselves (RLS enforces the same).
+   */
+  async recordDeclaration(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    input: RecordIndependenceDeclarationInput,
+  ): Promise<StatutoryAuditAcceptance> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows: shell } = await client.query(
+        `SELECT 1 FROM hsdg.audit_acceptance_segments
+          WHERE workflow_instance_id = $1 AND engagement_id = $2 LIMIT 1`,
+        [workflowInstanceId, engagementId],
+      );
+      if (!shell[0]) throw new NotFoundException('Audit file not found.');
+      await this.assertNotApproved(client, workflowInstanceId);
+      const team = await readIndependence(client, engagementId, workflowInstanceId);
+      if (!ctx.employeeId || !team.mine) {
+        throw new ForbiddenException(
+          'Only the Engagement Partner, Manager and team declare independence for this engagement.',
+        );
+      }
+      const disclosure = input.disclosure?.trim() || null;
+      if (input.status === 'threat_disclosed' && !disclosure) {
+        throw new BadRequestException('Describe the threat you are disclosing.');
+      }
+      await client.query(
+        `INSERT INTO hsdg.audit_independence_declarations
+           (workflow_instance_id, engagement_id, employee_id, status, disclosure)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (workflow_instance_id, employee_id) DO UPDATE
+           SET status = EXCLUDED.status,
+               disclosure = EXCLUDED.disclosure,
+               declared_at = now(),
+               version = hsdg.audit_independence_declarations.version + 1`,
+        [
+          workflowInstanceId,
+          engagementId,
+          ctx.employeeId,
+          input.status,
+          input.status === 'threat_disclosed' ? disclosure : null,
+        ],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.independence_declared',
+        objectType: 'service_workflow_instance',
+        objectId: workflowInstanceId,
+        after: { status: input.status },
+      });
+      const [acc] = await this.readForShell(client, engagementId, workflowInstanceId);
+      return acc!;
+    });
+  }
+
   // ── Segment state ───────────────────────────────────────────────────────────
 
   /**
@@ -383,12 +444,22 @@ export class AuditAcceptanceService {
           AND status IN ('open','under_review','blocking')`,
       [workflowInstanceId],
     );
+    // Matters a person resolved or accepted with approval settle the Partner
+    // attention of the answer behind them (auto-closures do not count).
+    const { rows: settled } = await client.query<{ source: string }>(
+      `SELECT source FROM hsdg.audit_matter
+        WHERE workflow_instance_id = $1 AND section = 'acceptance'
+          AND status IN ('resolved','accepted_with_approval')
+          AND resolution IS DISTINCT FROM $2`,
+      [workflowInstanceId, AUTO_RESOLVED],
+    );
     const evalCtx = {
       firstYear: context.firstYear,
       otherServiceIds: context.otherServices.map((o) => o.engagementServiceId),
       declarationsPending: context.independence.pending,
       fileStatuses: context.fileStatuses,
       openBlockingSources: blocking.map((b) => b.source),
+      settledSources: settled.map((b) => b.source),
     };
     const out = new Map<string, SegmentEvaluation>();
     for (const s of segments) {

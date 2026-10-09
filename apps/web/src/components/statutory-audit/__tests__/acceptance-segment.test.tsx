@@ -1,7 +1,15 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AcceptanceSegment, StatutoryAuditAcceptance } from '@hsdg/contracts';
 import { AcceptanceSegmentEditor } from '../acceptance-segment';
+
+const apiFetch = jest.fn();
+jest.mock('@/lib/api', () => ({
+  apiFetch: (...args: unknown[]) => apiFetch(...args),
+  ApiError: class ApiError extends Error {},
+}));
+jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
 
 jest.mock('../acceptance-file-card', () => ({
   AcceptanceFileCard: ({ slotKey }: { slotKey: string }) => <div>file card: {slotKey}</div>,
@@ -149,5 +157,63 @@ describe('01.3 Previous Auditor editor', () => {
     expect(screen.getByText('file card: previous_auditor_communication')).toBeInTheDocument();
     expect(screen.getByText('Auditor / Firm Name')).toBeInTheDocument();
     expect(screen.getByText(/Has a response been received/)).toBeInTheDocument();
+  });
+});
+
+describe('01.5 Independence editor', () => {
+  it('summarises team declarations and records my own', async () => {
+    const seg = {
+      ...segment([]),
+      id: 's5',
+      segmentKey: 'independence_ethics',
+      title: 'Independence & Ethics',
+    } as AcceptanceSegment;
+    const me = {
+      employeeId: 'u1',
+      employeeName: 'Partner A',
+      role: 'Engagement Partner',
+      status: 'pending' as const,
+      disclosure: null,
+      declaredAt: null,
+    };
+    const a = {
+      ...acc,
+      context: {
+        ...acc.context,
+        independence: {
+          required: 2,
+          completed: 1,
+          pending: 1,
+          threatsDisclosed: 0,
+          rows: [
+            me,
+            {
+              employeeId: 'u2',
+              employeeName: 'Manager X',
+              role: 'Engagement Manager',
+              status: 'independent' as const,
+              disclosure: null,
+              declaredAt: '2026-10-01T00:00:00Z',
+            },
+          ],
+          mine: me,
+        },
+      },
+    } as StatutoryAuditAcceptance;
+    apiFetch.mockResolvedValue({});
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AcceptanceSegmentEditor acc={a} segment={seg} editable busy={false} onAnswer={jest.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('Required declarations').nextSibling).toHaveTextContent('2');
+    expect(screen.getByText(/IND-03/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'View Team Declarations' }));
+    expect(screen.getByText('Manager X')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'I am independent' }));
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/engagements/e1/statutory-audit/wf1/acceptance/independence/declaration',
+      { method: 'POST', body: { status: 'independent' } },
+    );
   });
 });

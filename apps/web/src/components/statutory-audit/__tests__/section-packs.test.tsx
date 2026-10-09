@@ -103,7 +103,7 @@ const matter = {
   engagementId: 'e1',
   matterCode: 'M-001',
   section: 'acceptance',
-  source: 'acceptance:independence_ethics:independence_threats',
+  source: 'acceptance:independence_ethics:ind_02',
   sourceRef: null,
   title: 'Threats to independence — adverse response requires action/safeguard.',
   category: 'independence',

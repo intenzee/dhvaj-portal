@@ -13,6 +13,19 @@ import {
 } from 'class-validator';
 import { SEGMENT_STATES, type SegmentState } from '@hsdg/contracts';
 
+/** 01.5 — the signed-in team member's own independence declaration (spec §8). */
+export class RecordIndependenceDeclarationDto {
+  @ApiProperty({ enum: ['independent', 'threat_disclosed'] })
+  @IsIn(['independent', 'threat_disclosed'])
+  status!: 'independent' | 'threat_disclosed';
+
+  @ApiPropertyOptional({ description: 'Required when a threat is disclosed.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  disclosure?: string | null;
+}
+
 /** Record one Section 01 answer with its detail fields (spec §4–§9). */
 export class RecordAcceptanceAnswerDto {
   @ApiProperty({ description: 'Question key, e.g. `app_01`, or `ind_03:<engagement service id>`.' })
@@ -22,7 +35,8 @@ export class RecordAcceptanceAnswerDto {
 
   @ApiProperty({
     nullable: true,
-    description: "The chosen option's value, an ISO date, or `recorded` for a form; null clears it.",
+    description:
+      "The chosen option's value, an ISO date, or `recorded` for a form; null clears it.",
   })
   @ValidateIf((_, v) => v !== null)
   @IsString()

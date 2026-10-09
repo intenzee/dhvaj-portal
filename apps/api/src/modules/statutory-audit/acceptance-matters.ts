@@ -2,6 +2,7 @@ import {
   ACCEPTANCE_MATTER_CATEGORY,
   ACCEPTANCE_METHODOLOGY,
   ELIGIBILITY_CHECKS,
+  independenceNeedsPartnerApproval,
   acceptanceSource,
   answerLabel,
   isExceptionAnswer,
@@ -115,6 +116,22 @@ const scopeLimitation: Rule = (a) => {
 };
 
 /**
+ * IND-01/02/04 "Yes" and an IND-03 service with a threat (spec §8): an
+ * Independence Matter at the recorded significance. It blocks acceptance when
+ * the threat cannot be reduced, or when its significance needs the Engagement
+ * Partner's approval (methodology).
+ */
+const independenceMatter: Rule = (a) => {
+  if (a.answer !== 'yes' && a.answer !== 'threat') return [];
+  const sig = a.details?.significance;
+  const severity: MatterSeverityLevel =
+    sig === 'low' || sig === 'medium' || sig === 'high' || sig === 'critical' ? sig : 'high';
+  const isBlocking =
+    a.details?.conclusion === 'not_acceptable' || independenceNeedsPartnerApproval(severity);
+  return [{ category: C.independence, severity, isBlocking }];
+};
+
+/**
  * Per-question rules. A question with no rule raises no matter (e.g. EP-01's
  * correction is put right on the master, it is not an acceptance concern).
  */
@@ -135,8 +152,11 @@ const RULES: Record<string, Rule> = {
     partner_attention: [C.other, 'high', true],
     do_not_accept: [C.other, 'critical', true],
   }),
-  independence_threats: legacy({ category: C.independence, severity: 'high', isBlocking: true }),
-  prohibited_services: legacy({ category: C.independence, severity: 'critical', isBlocking: true }),
+  ind_01: independenceMatter,
+  ind_02: independenceMatter,
+  ind_03: independenceMatter,
+  ind_04: independenceMatter,
+  ind_conclusion: when({ not_satisfied: [C.independence, 'critical', true] }),
   acceptable_framework: legacy({
     category: C.preconditions,
     severity: 'critical',

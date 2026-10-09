@@ -115,6 +115,18 @@ function said(a: { questionKey: string; answer: string | null }): string {
   return q ? answerLabel(q, a.answer) : (a.answer ?? '');
 }
 
+const EXPLAINED_PRIORITY = [
+  'safeguard',
+  'actionRequired',
+  'explanation',
+  'managerAssessment',
+  'assessment',
+  'basis',
+  'description',
+  'matter',
+  'matterCommunicated',
+];
+
 /** The explanation recorded with an answer (any text detail field). */
 function explained(a: {
   questionKey: string;
@@ -123,12 +135,18 @@ function explained(a: {
   narrative: string | null;
 }): string | null {
   const q = questionByKey(a.questionKey.split(':')[0]!);
-  const texts = q
-    ? detailFieldsFor(q, a)
-        .filter((f) => f.type === 'textarea' || f.type === 'text')
-        .map((f) => a.details[f.key])
-        .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-    : [];
+  // What was done about it first (safeguard / action), then the reasoning,
+  // then any other text recorded with the answer.
+  const fields = q ? detailFieldsFor(q, a) : [];
+  const rank = (key: string) => {
+    const i = EXPLAINED_PRIORITY.indexOf(key);
+    return i < 0 ? EXPLAINED_PRIORITY.length : i;
+  };
+  const texts = fields
+    .filter((f) => f.type === 'textarea' || f.type === 'text')
+    .sort((x, y) => rank(x.key) - rank(y.key))
+    .map((f) => a.details[f.key])
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
   return texts[0]?.trim() ?? a.narrative?.trim() ?? null;
 }
 

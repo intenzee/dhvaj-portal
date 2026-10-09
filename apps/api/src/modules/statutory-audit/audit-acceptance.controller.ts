@@ -4,7 +4,11 @@ import { PERMISSION, type StatutoryAuditAcceptance } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditAcceptanceService } from './audit-acceptance.service';
-import { RecordAcceptanceAnswerDto, SetSegmentStateDto } from './dto/acceptance.dto';
+import {
+  RecordAcceptanceAnswerDto,
+  RecordIndependenceDeclarationDto,
+  SetSegmentStateDto,
+} from './dto/acceptance.dto';
 
 /**
  * Statutory Audit — Section 01 Engagement & Acceptance endpoints (Guide §8).
@@ -42,6 +46,26 @@ export class AuditAcceptanceController {
       narrative: dto.narrative,
       documentId: dto.documentId,
     });
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/acceptance/independence/declaration')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: "01.5 — record the signed-in team member's independence declaration" })
+  declare(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: RecordIndependenceDeclarationDto,
+  ): Promise<StatutoryAuditAcceptance> {
+    return this.acceptance.recordDeclaration(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      {
+        status: dto.status,
+        disclosure: dto.disclosure,
+      },
+    );
   }
 
   @Post(':id/statutory-audit/acceptance/segments/:segmentId/state')
