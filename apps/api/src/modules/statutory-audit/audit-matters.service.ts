@@ -16,7 +16,7 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
-import { deriveFrameworkMatters, type DerivedMatter } from './matters-generation';
+import { deriveFinancialReportingMatters, deriveFrameworkMatters, type DerivedMatter } from './matters-generation';
 
 /** Marker written by the generator when it auto-closes a cleared matter (§10). */
 export const AUTO_RESOLVED = 'Auto-resolved: source condition cleared.';
@@ -174,6 +174,26 @@ export class AuditMattersService {
         isOverridden: a.is_overridden,
       })),
     );
+    // 02.2 (spec §15, §19): a specialised / further-assessment result opens a
+    // BLOCKING Framework Review until it is concluded and Partner-approved; an
+    // FRF-05 "Information Pending" conclusion blocks until the fact is captured.
+    const { rows: frf } = await client.query<{
+      state: string;
+      conclusion: string | null;
+      blocking_review: boolean;
+      partner_approved: boolean;
+      professional_action: string | null;
+      pending_reason: string | null;
+    }>(
+      `SELECT state, conclusion,
+              COALESCE((system_detail->>'blockingReview')::boolean, false) AS blocking_review,
+              partner_approved_at IS NOT NULL AS partner_approved,
+              professional_action, pending_reason
+         FROM hsdg.audit_framework_subassessment
+        WHERE workflow_instance_id = $1 AND sub_section_key = '02.2'`,
+      [workflowInstanceId],
+    );
+    derived.push(...deriveFinancialReportingMatters(frf[0] ?? null));
     await this.reconcileOn(client, ctx, engagementId, workflowInstanceId, 'framework', derived);
   }
 

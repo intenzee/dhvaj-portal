@@ -167,6 +167,11 @@ export interface ResolvedRule {
   effectiveFrom: string;
   authorityProvisionId: string | null;
   guidanceReference: string | null;
+  /**
+   * Structured parameters of the version (e.g. the Rule 4 net-worth measurement
+   * base date) — rule DATA the engines read instead of hard-coding.
+   */
+  condition?: Record<string, unknown> | null;
   bands: AuditRuleBandRecord[];
 }
 

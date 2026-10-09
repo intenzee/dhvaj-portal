@@ -62,12 +62,13 @@ export class AuditRulesService {
       outcome: string | null;
       authority_provision_id: string | null;
       guidance_reference: string | null;
+      condition: Record<string, unknown> | null;
     }>(
       `SELECT r.id AS rule_id, r.code, r.area_key, r.entity_class, r.criterion,
               r.operator, r.unit, r.measurement_basis,
               v.id AS version_id, v.version, v.effective_from::text, v.effective_to::text,
               v.threshold::text, v.threshold_high::text, v.outcome,
-              v.authority_provision_id, v.guidance_reference
+              v.authority_provision_id, v.guidance_reference, v.condition
          FROM hsdg.audit_rule r
          JOIN hsdg.audit_rule_version v ON v.audit_rule_id = r.id
         WHERE r.is_active = true`,
@@ -111,6 +112,7 @@ export class AuditRulesService {
         outcome: row.outcome,
         authorityProvisionId: row.authority_provision_id,
         guidanceReference: row.guidance_reference,
+        condition: row.condition,
         bands: [],
       });
     }
@@ -319,4 +321,16 @@ function mapProvision(row: AuthorityProvisionRow): AuthorityProvisionRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/**
+ * Build a period {@link RuleResolver} on an open client without Nest DI — for
+ * pure read helpers (e.g. the 02.2 downstream result) that run inside another
+ * service's transaction. `buildResolverOn` only reads through the given client.
+ */
+export function buildRuleResolverOn(
+  client: PoolClient,
+  auditPeriodStart: string,
+): Promise<RuleResolver> {
+  return new AuditRulesService(undefined as never).buildResolverOn(client, auditPeriodStart);
 }

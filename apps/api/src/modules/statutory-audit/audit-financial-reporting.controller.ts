@@ -9,6 +9,7 @@ import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
 import {
+  PartnerApproveFinancialReportingDto,
   RecordFinancialReportingDecisionDto,
   SetFinancialReportingFactsDto,
 } from './dto/financial-reporting.dto';
@@ -53,7 +54,7 @@ export class AuditFinancialReportingController {
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
     summary:
-      'Capture the 02.2-specific facts (prior/voluntary Ind AS, SME exchange, group trigger)',
+      'Capture the 02.2 answers (FRF-01..04, 06, group and SMC facts); a changed fact clears a recorded conclusion',
   })
   setFacts(
     @CurrentPrincipal() principal: Principal,
@@ -66,6 +67,18 @@ export class AuditFinancialReportingController {
       priorIndAs: dto.priorIndAs,
       voluntaryIndAs: dto.voluntaryIndAs,
       groupTriggersIndAs: dto.groupTriggersIndAs,
+      priorFramework: dto.priorFramework,
+      priorFrameworkSource: dto.priorFrameworkSource,
+      indAsAlreadyApplicable: dto.indAsAlreadyApplicable,
+      firstIndAsFy: dto.firstIndAsFy,
+      originalTrigger: dto.originalTrigger,
+      voluntaryAnswer: dto.voluntaryAnswer,
+      voluntaryFirstIndAsFy: dto.voluntaryFirstIndAsFy,
+      groupAnswer: dto.groupAnswer,
+      groupNonSmc: dto.groupNonSmc,
+      smcMaxBorrowings: dto.smcMaxBorrowings,
+      firstTimeAdoption: dto.firstTimeAdoption,
+      firstTimeAdoptionReason: dto.firstTimeAdoptionReason,
       version: dto.version,
     });
   }
@@ -86,7 +99,8 @@ export class AuditFinancialReportingController {
   @Post(':id/statutory-audit/:workflowInstanceId/financial-reporting/decision')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
-    summary: 'Record the professional reporting-framework conclusion (override needs a basis)',
+    summary:
+      'FRF-05 — Confirm System Assessment / Override (basis required) / Information Pending',
   })
   decision(
     @CurrentPrincipal() principal: Principal,
@@ -95,9 +109,28 @@ export class AuditFinancialReportingController {
     @Body() dto: RecordFinancialReportingDecisionDto,
   ): Promise<StatutoryAuditFinancialReporting> {
     return this.frf.recordDecision(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
+      action: dto.action,
       conclusion: dto.conclusion,
       basis: dto.basis,
       impact: dto.impact,
+      pendingReason: dto.pendingReason,
+      version: dto.version,
+    });
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/financial-reporting/partner-approve')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'FRF-05 — Engagement Partner approval of a significant override / complex conclusion',
+  })
+  partnerApprove(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: PartnerApproveFinancialReportingDto,
+  ): Promise<StatutoryAuditFinancialReporting> {
+    return this.frf.partnerApprove(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
+      note: dto.note,
       version: dto.version,
     });
   }

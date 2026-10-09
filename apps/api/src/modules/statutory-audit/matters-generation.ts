@@ -70,3 +70,48 @@ export function deriveFrameworkMatters(areas: readonly FrameworkMatterInput[]): 
   }
   return out;
 }
+
+/** The 02.2 row facts the Framework Review derivation reads. */
+export interface FinancialReportingMatterInput {
+  state: string;
+  conclusion: string | null;
+  /** The engine marked the result specialised / further assessment (spec §19). */
+  blocking_review: boolean;
+  partner_approved: boolean;
+  professional_action: string | null;
+  pending_reason: string | null;
+}
+
+/**
+ * 02.2 matters (Section 02.2 spec §15, §19):
+ *   • a specialised / further-assessment result → a BLOCKING Framework Review,
+ *     open until the conclusion is recorded AND Partner-approved;
+ *   • an FRF-05 "Information Pending" conclusion → a BLOCKING information matter
+ *     naming the missing fact.
+ * When the condition clears the reconcile path auto-closes the matter.
+ */
+export function deriveFinancialReportingMatters(
+  row: FinancialReportingMatterInput | null,
+): DerivedMatter[] {
+  if (!row) return [];
+  const out: DerivedMatter[] = [];
+  const decided = ['applicable', 'not_applicable', 'overridden', 'approved'].includes(row.state);
+  if (row.blocking_review && !(decided && row.conclusion && row.partner_approved)) {
+    out.push({
+      source: 'framework:02.2:review',
+      category: FRAMEWORK_MATTER_CATEGORY.blocking,
+      isBlocking: true,
+      title:
+        '02.2 Financial Reporting Framework: specialised / further assessment — Framework Review open until concluded and Partner-approved.',
+    });
+  }
+  if (row.professional_action === 'information_pending') {
+    out.push({
+      source: 'framework:02.2:information',
+      category: FRAMEWORK_MATTER_CATEGORY.informationPending,
+      isBlocking: true,
+      title: `02.2 Financial Reporting Framework: information pending — ${row.pending_reason ?? 'a deciding fact is missing'}.`,
+    });
+  }
+  return out;
+}

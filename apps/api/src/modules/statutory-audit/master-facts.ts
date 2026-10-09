@@ -62,6 +62,8 @@ export interface MasterRelationship {
    * on a main board (NSE/BSE), or its own audit file concluded Ind AS.
    */
   counterpartyIndAs: 'listed' | 'ind_as_file' | null;
+  /** The counterparty's own audit file concluded Accounting Standards (02.2 group test). */
+  counterpartyAsFile?: boolean;
   /** The counterparty's country of incorporation (ISO code). */
   counterpartyCountry?: string | null;
   /** The firm has a live statutory-audit file for the counterparty for the same year. */
@@ -832,6 +834,7 @@ export async function readEngagementMasterFacts(
     counterparty_type: string | null;
     counterparty_listed: boolean;
     counterparty_ind_as: 'listed' | 'ind_as_file' | null;
+    counterparty_as_file: boolean;
     counterparty_country: string | null;
     firm_audits_counterparty: boolean;
   }>(
@@ -855,7 +858,14 @@ export async function readEngagementMasterFacts(
                                JOIN hsdg.engagements oe ON oe.id = swi.engagement_id
                               WHERE oe.entity_id = other.id AND s.sub_section_key = $2
                                 AND s.area_key = $3 AND s.conclusion = 'ind_as') THEN 'ind_as_file'
-              END AS counterparty_ind_as
+              END AS counterparty_ind_as,
+              EXISTS (SELECT 1 FROM hsdg.audit_framework_subassessment s
+                        JOIN hsdg.service_workflow_instances swi
+                          ON swi.id = s.workflow_instance_id AND swi.status <> 'cancelled'
+                        JOIN hsdg.engagements oe ON oe.id = swi.engagement_id
+                       WHERE oe.entity_id = other.id AND s.sub_section_key = $2
+                         AND s.area_key = $3 AND s.conclusion = 'accounting_standards')
+                AS counterparty_as_file
          FROM hsdg.entity_relationships r
          JOIN hsdg.entities other
            ON other.id = CASE WHEN r.from_entity_id = $1 THEN r.to_entity_id ELSE r.from_entity_id END
@@ -953,6 +963,7 @@ export async function readEngagementMasterFacts(
       counterpartyTypeSlug: x.counterparty_type,
       counterpartyListed: x.counterparty_listed,
       counterpartyIndAs: x.counterparty_ind_as,
+      counterpartyAsFile: x.counterparty_as_file,
       counterpartyCountry: x.counterparty_country,
       firmAuditsCounterparty: x.firm_audits_counterparty,
     })),

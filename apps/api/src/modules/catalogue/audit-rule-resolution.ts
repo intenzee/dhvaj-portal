@@ -61,6 +61,8 @@ export interface ResolvableRuleVersion {
   outcome: string | null;
   authorityProvisionId: string | null;
   guidanceReference: string | null;
+  /** Structured version parameters (e.g. Rule 4 measurement base date). */
+  condition?: Record<string, unknown> | null;
   bands: AuditRuleBandRecord[];
 }
 
@@ -85,6 +87,7 @@ function toResolved(r: ResolvableRuleVersion): ResolvedRule {
     effectiveFrom: r.effectiveFrom,
     authorityProvisionId: r.authorityProvisionId,
     guidanceReference: r.guidanceReference,
+    condition: r.condition ?? null,
     bands: r.bands,
   };
 }
