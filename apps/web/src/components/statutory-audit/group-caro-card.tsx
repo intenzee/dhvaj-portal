@@ -18,6 +18,8 @@ import { humanize } from '@/lib/format';
 import { Badge, Button, Card } from '@/components/ui';
 import { Field, Select } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
+import { CaroEvidence } from './caro-evidence';
+import { CaroProgramme } from './caro-programme';
 import { CaroWorkspace, CARO_OUTCOME_LABEL } from './caro-workspace';
 import { MasterFactList } from './master-fact-list';
 
@@ -174,7 +176,25 @@ export function GroupCaroCard({ engagementId }: { engagementId: string }): JSX.E
             {caroOpen ? 'Hide the 02.4 CARO workspace' : 'Open the 02.4 CARO workspace'}
           </button>
           {caroOpen && (
-            <CaroWorkspace engagementId={engagementId} caro={caro} canManage={canManage} />
+            <CaroWorkspace
+              engagementId={engagementId}
+              caro={caro}
+              canManage={canManage}
+              programme={
+                <CaroProgramme
+                  engagementId={engagementId}
+                  workflowInstanceId={caro.workflowInstanceId}
+                  canManage={canManage}
+                />
+              }
+              evidence={
+                <CaroEvidence
+                  engagementId={engagementId}
+                  workflowInstanceId={caro.workflowInstanceId}
+                  canManage={canManage}
+                />
+              }
+            />
           )}
         </section>
       )}
