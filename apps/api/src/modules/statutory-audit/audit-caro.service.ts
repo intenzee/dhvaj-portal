@@ -188,7 +188,12 @@ export class AuditCaroService {
   private async read(
     client: PoolClient,
     engagementId: string,
-    opts: { workflowInstanceId?: string; viewerEmployeeId?: string | null } = {},
+    opts: {
+      workflowInstanceId?: string;
+      viewerEmployeeId?: string | null;
+      /** Downstream reads: skip the display-only master facts and prior year. */
+      lean?: boolean;
+    } = {},
   ): Promise<StatutoryAuditCaro[]> {
     const { rows } = await client.query<SubRow>(
       `${ROW_SQL}
@@ -200,7 +205,9 @@ export class AuditCaroService {
 
     const out: StatutoryAuditCaro[] = [];
     for (const r of rows) {
-      const master = await readEngagementMasterFacts(client, r.workflow_instance_id);
+      const master = opts.lean
+        ? null
+        : await readEngagementMasterFacts(client, r.workflow_instance_id);
       const captured = { ...DEFAULT_CAPTURED, ...(r.facts ?? {}) };
       const { facts, upstreamReady } = await this.assembleFacts(
         client,
@@ -289,7 +296,7 @@ export class AuditCaroService {
         },
         completion,
         reevaluation: { required: r.needs_reevaluation, changes },
-        priorYear: await this.priorYear(client, r, live.detail),
+        priorYear: opts.lean ? null : await this.priorYear(client, r, live.detail),
         approved: r.state === 'approved',
         viewerIsPartner:
           opts.viewerEmployeeId != null && opts.viewerEmployeeId === r.engagement_partner_id,
@@ -335,7 +342,10 @@ export class AuditCaroService {
       [workflowInstanceId],
     );
     if (!rows[0]) return null;
-    const [caro] = await this.read(client, rows[0].engagement_id, { workflowInstanceId });
+    const [caro] = await this.read(client, rows[0].engagement_id, {
+      workflowInstanceId,
+      lean: true,
+    });
     if (!caro) return null;
     const decided = isDecided(caro.assessment.state, caro.assessment.conclusion);
     const outcome = ((decided ? caro.assessment.conclusion : caro.assessment.systemOutcome) ??

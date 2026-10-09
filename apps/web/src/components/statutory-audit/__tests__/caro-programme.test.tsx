@@ -74,6 +74,7 @@ function item(over: Partial<CaroClauseItem> = {}): CaroClauseItem {
       conclusion: 'reportable_matter',
       reportingLanguage: 'Verification was not carried out.',
       findings: [],
+      evidence: ['FY24 verification report'],
     },
     approvalBlockers: ["Decide the clause's relevance to the entity's facts."],
     version: 1,
@@ -174,6 +175,7 @@ describe('02.4 CARO Work Programme', () => {
     expect(screen.getByText(/Section 06 procedure/)).toHaveTextContent('P-07');
     expect(screen.getByText(/Related audit work: Property, Plant & Equipment/)).toBeInTheDocument();
     expect(screen.getByText(/FY 2023-24 \(reference only/)).toBeInTheDocument();
+    expect(screen.getByText(/Prior evidence .*FY24 verification report/)).toBeInTheDocument();
     expect(screen.getByText(/decide the clause's relevance/i)).toBeInTheDocument();
   });
 
@@ -286,6 +288,42 @@ describe('02.4 CARO Work Programme', () => {
     expect(within(comps).getByText('Sub One Pvt Ltd')).toBeInTheDocument();
     expect(within(comps).getByText('From 02.6')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Record Partner review' })).toBeInTheDocument();
+  });
+});
+
+describe('02.4 CARO findings', () => {
+  it('a finding raised in error is withdrawn, never deleted', async () => {
+    const finding = {
+      id: 'f1',
+      code: 'CF-001',
+      itemId: 'i1',
+      clauseRef: '3(i)(b)',
+      description: 'Raised on the wrong clause.',
+      severity: 'low' as const,
+      workAreaKey: 'caro',
+      workAreaTitle: 'CARO',
+      procedureId: null,
+      procedureRef: null,
+      amount: null,
+      includeInReport: false,
+      managementResponse: null,
+      status: 'open' as const,
+      resolution: null,
+      raisedByName: 'Asha',
+      withdrawn: false,
+      createdAt: '2025-06-01T10:00:00Z',
+      version: 3,
+    };
+    apiFetch
+      .mockResolvedValueOnce(programme({ standalone: [item({ findings: [finding] })] }))
+      .mockResolvedValueOnce(programme());
+    render(panel());
+    await userEvent.click(await screen.findByRole('button', { name: 'Expand clause 3(i)(b)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Withdraw finding CF-001' }));
+    expect(apiFetch).toHaveBeenLastCalledWith(`${BASE}/findings/f1`, {
+      method: 'PATCH',
+      body: { withdrawn: true, version: 3 },
+    });
   });
 });
 

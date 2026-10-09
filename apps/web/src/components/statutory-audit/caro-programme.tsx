@@ -420,6 +420,12 @@ function ClauseDetail({
           {item.priorYear.findings.length > 0 && (
             <p>Findings: {item.priorYear.findings.join('; ')}</p>
           )}
+          {item.priorYear.evidence.length > 0 && (
+            <p>
+              Prior evidence (cross-reference only — current-year evidence is still required):{' '}
+              {item.priorYear.evidence.join('; ')}
+            </p>
+          )}
         </div>
       )}
 
@@ -956,14 +962,36 @@ function FindingRow({
         <p className="text-ink-muted">Management response: {f.managementResponse}</p>
       )}
       {f.resolution && <p className="text-ink-muted">Resolution: {f.resolution}</p>}
-      {editable && f.status === 'open' && !resolving && (
-        <button
-          type="button"
-          className="mt-0.5 text-primary-600 hover:underline"
-          onClick={() => setResolving(true)}
-        >
-          Resolve…
-        </button>
+      {editable && !resolving && (
+        <div className="mt-0.5 flex gap-3">
+          {f.status === 'open' && (
+            <button
+              type="button"
+              className="text-primary-600 hover:underline"
+              onClick={() => setResolving(true)}
+            >
+              Resolve…
+            </button>
+          )}
+          <button
+            type="button"
+            className="text-ink-faint hover:text-danger-700"
+            disabled={busy}
+            aria-label={`Withdraw finding ${f.code}`}
+            onClick={() =>
+              void act(
+                () =>
+                  apiFetch<StatutoryAuditCaroProgramme>(`${base}/findings/${f.id}`, {
+                    method: 'PATCH',
+                    body: { withdrawn: true, version: f.version },
+                  }),
+                `${f.code} withdrawn — kept on the audit trail.`,
+              )
+            }
+          >
+            Withdraw
+          </button>
+        </div>
       )}
       {editable && resolving && (
         <div className="mt-1 flex gap-1.5">
@@ -1094,6 +1122,17 @@ function ComponentRow({
         <span className="font-medium text-ink">{c.componentName}</span>
         {c.relationship && <span className="text-ink-faint">{c.relationship}</span>}
         <Badge>{c.source === '02.6' ? 'From 02.6' : 'Added'}</Badge>
+        {editable && c.source === 'manual' && (
+          <button
+            type="button"
+            className="text-ink-faint hover:text-danger-700"
+            disabled={busy}
+            aria-label={`Withdraw ${c.componentName}`}
+            onClick={() => void patch({ withdrawn: true })}
+          >
+            Withdraw
+          </button>
+        )}
       </div>
       <div className="grid gap-2 sm:grid-cols-4">
         <Field label="CARO applicable">

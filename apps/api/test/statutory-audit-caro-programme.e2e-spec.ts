@@ -281,6 +281,30 @@ describe('Statutory Audit — 02.4 CARO clause programme (e2e)', () => {
     p = (await review(clause(p, '3(i)(b)'), 'approve')).body;
   });
 
+  it('a finding raised in error is withdrawn — kept on the trail, out of the counts', async () => {
+    let p = await getProgramme();
+    const inv = clause(p, '3(ii)(a)');
+    p = (
+      await request(http())
+        .post(`${caroUrl()}/clauses/${inv.id}/findings`)
+        .set(bearer(pa))
+        .send({ description: 'Raised on the wrong clause.', severity: 'low' })
+        .expect(201)
+    ).body;
+    const f = clause(p, '3(ii)(a)').findings[0]!;
+    expect(f.code).toBe('CF-002');
+    expect(p.summary.openFindings).toBe(2);
+    p = (
+      await request(http())
+        .patch(`${caroUrl()}/findings/${f.id}`)
+        .set(bearer(pa))
+        .send({ withdrawn: true, version: f.version })
+        .expect(200)
+    ).body;
+    expect(clause(p, '3(ii)(a)').findings[0]).toMatchObject({ code: 'CF-002', withdrawn: true });
+    expect(p.summary.openFindings).toBe(1);
+  });
+
   it('reuses evidence already on the file — a link, never a second upload', async () => {
     const caro = await getCaro();
     const ev = (

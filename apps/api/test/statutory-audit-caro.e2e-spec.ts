@@ -384,6 +384,68 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
     expect(after.completion!.items.find((i) => i.key === 'clause_3_xxi')?.met).toBe(true);
   });
 
+  it('3(xxi): companies in the CFS carry CARO applicability and remarks; a hand-added one is withdrawn, not deleted', async () => {
+    const url = `${base()}/${shellId}/caro`;
+    const read = async () =>
+      (await request(app.getHttpServer()).get(`${url}/programme`).set(bearer(pa)).expect(200))
+        .body as {
+        consolidated: {
+          id: string;
+          approvalBlockers: string[];
+          components: Array<{
+            id: string;
+            componentName: string;
+            source: string;
+            withdrawn: boolean;
+            version: number;
+          }>;
+        };
+      };
+    let p = await read();
+    const xxi = p.consolidated;
+    p = (
+      await request(app.getHttpServer())
+        .post(`${url}/clauses/${xxi.id}/components`)
+        .set(bearer(pa))
+        .send({ componentName: 'Acme Subsidiary Pvt Ltd', relationship: 'subsidiary' })
+        .expect(201)
+    ).body;
+    await request(app.getHttpServer())
+      .post(`${url}/clauses/${xxi.id}/components`)
+      .set(bearer(pa))
+      .send({ componentName: '  acme subsidiary pvt ltd ' })
+      .expect(409); // the same company twice
+    let comp = p.consolidated.components.find(
+      (c) => c.componentName === 'Acme Subsidiary Pvt Ltd',
+    )!;
+    expect(comp).toMatchObject({ source: 'manual', withdrawn: false });
+    expect(p.consolidated.approvalBlockers).toContain(
+      'Decide whether CARO applies to each company included in the CFS.',
+    );
+    p = (
+      await request(app.getHttpServer())
+        .patch(`${url}/components/${comp.id}`)
+        .set(bearer(pa))
+        .send({ caroApplicable: 'yes', qualificationIdentified: true, version: comp.version })
+        .expect(200)
+    ).body;
+    expect(p.consolidated.approvalBlockers).toContain(
+      'Capture the CARO paragraph numbers of each qualification or adverse remark.',
+    );
+    comp = p.consolidated.components.find((c) => c.id === comp.id)!;
+    p = (
+      await request(app.getHttpServer())
+        .patch(`${url}/components/${comp.id}`)
+        .set(bearer(pa))
+        .send({ withdrawn: true, version: comp.version })
+        .expect(200)
+    ).body;
+    expect(p.consolidated.components.find((c) => c.id === comp.id)?.withdrawn).toBe(true);
+    expect(p.consolidated.approvalBlockers).not.toContain(
+      'Capture the CARO paragraph numbers of each qualification or adverse remark.',
+    );
+  });
+
   it('an outsider (not on the engagement) cannot read or mutate 02.4 (§35)', async () => {
     const res = await request(app.getHttpServer())
       .get(`${base()}/caro`)

@@ -263,6 +263,8 @@ export interface CaroPriorClause {
   conclusion: CaroClauseConclusion | null;
   reportingLanguage: string | null;
   findings: string[];
+  /** Prior-year evidence titles — cross-reference only; this year's evidence is still required. */
+  evidence: string[];
 }
 
 export interface CaroRelatedWorkArea {
@@ -429,6 +431,8 @@ export interface UpdateCaroFindingInput {
   managementResponse?: string | null;
   status?: 'open' | 'resolved';
   resolution?: string | null;
+  /** Withdraw a finding raised in error (kept on the trail, never deleted). */
+  withdrawn?: boolean;
   version: number;
 }
 
@@ -444,6 +448,8 @@ export interface UpdateCaroComponentInput {
   qualificationIdentified?: boolean | null;
   paragraphRefs?: string | null;
   remarks?: string | null;
+  /** Withdraw a company the team added by hand (02.6 companies follow 02.6). */
+  withdrawn?: boolean;
   version: number;
 }
 

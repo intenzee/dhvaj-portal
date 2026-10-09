@@ -56,7 +56,7 @@ import {
   workClauses,
   type ProgrammePlan,
 } from './caro-programme';
-import { isEngagementLead, readPriorAuditFile } from './master-facts';
+import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
 
 /** The Section 06 work area every CARO clause procedure lives in. */
 const CARO_WORK_AREA_KEY = 'caro';
@@ -528,6 +528,10 @@ export class AuditCaroProgrammeService {
         input.workAreaKey,
         input.procedureId,
       );
+      // Serialise the CF-00n sequence per audit file (concurrent raises).
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('caro_finding:' || $1))`, [
+        workflowInstanceId,
+      ]);
       const { rows: seq } = await client.query<{ next: number }>(
         `SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM hsdg.audit_caro_finding
           WHERE workflow_instance_id = $1`,
@@ -615,6 +619,11 @@ export class AuditCaroProgrammeService {
         set('management_response', trimOrNull(input.managementResponse));
       if (input.status !== undefined) set('status', input.status);
       if (input.resolution !== undefined) set('resolution', trimOrNull(input.resolution));
+      // Withdrawn, never deleted: a finding raised in error stays on the trail.
+      if (input.withdrawn !== undefined)
+        sets.push(
+          input.withdrawn ? 'withdrawn_at = COALESCE(withdrawn_at, now())' : 'withdrawn_at = NULL',
+        );
       if (sets.length === 0) return;
       await client.query(
         `UPDATE hsdg.audit_caro_finding SET ${sets.join(', ')}, version = version + 1 WHERE id = $1`,
@@ -677,8 +686,13 @@ export class AuditCaroProgrammeService {
     input: UpdateCaroComponentInput,
   ): Promise<StatutoryAuditCaroProgramme> {
     return this.mutate(ctx, engagementId, workflowInstanceId, async (client) => {
-      const { rows } = await client.query<{ id: string; item_id: string; version: number }>(
-        `SELECT c.id, c.item_id, c.version
+      const { rows } = await client.query<{
+        id: string;
+        item_id: string;
+        version: number;
+        source: '02.6' | 'manual';
+      }>(
+        `SELECT c.id, c.item_id, c.version, c.source
            FROM hsdg.audit_caro_component c
            JOIN hsdg.audit_caro_clause_item i ON i.id = c.item_id
           WHERE c.id = $1 AND i.workflow_instance_id = $2`,
@@ -710,6 +724,16 @@ export class AuditCaroProgrammeService {
         set('qualification_identified', input.qualificationIdentified);
       if (input.paragraphRefs !== undefined) set('paragraph_refs', trimOrNull(input.paragraphRefs));
       if (input.remarks !== undefined) set('remarks', trimOrNull(input.remarks));
+      if (input.withdrawn !== undefined) {
+        // Only a company the team added is withdrawn by hand; 02.6 owns the rest.
+        if (c.source !== 'manual')
+          throw new BadRequestException(
+            'This company comes from the 02.6 group structure — change it there.',
+          );
+        sets.push(
+          input.withdrawn ? 'withdrawn_at = COALESCE(withdrawn_at, now())' : 'withdrawn_at = NULL',
+        );
+      }
       if (sets.length === 0) return;
       await client.query(
         `UPDATE hsdg.audit_caro_component SET ${sets.join(', ')}, version = version + 1 WHERE id = $1`,
@@ -850,7 +874,10 @@ export class AuditCaroProgrammeService {
     return existing!.id;
   }
 
-  /** Insert missing clause items; reactivate withdrawn ones. Returns rows touched. */
+  /**
+   * Insert missing clause items and reactivate withdrawn ones in one statement.
+   * A programme already in line costs a single read. Returns rows touched.
+   */
   private async ensureItems(
     client: PoolClient,
     programmeId: string,
@@ -858,44 +885,62 @@ export class AuditCaroProgrammeService {
     workflowInstanceId: string,
     clauses: ReturnType<typeof workClauses>,
   ): Promise<number> {
-    let touched = 0;
-    for (const c of clauses) {
-      const res = await client.query(
-        `INSERT INTO hsdg.audit_caro_clause_item
-           (programme_id, workflow_instance_id, engagement_id, library_clause_id, clause_code,
-            parent_clause_code, clause_ref, parent_title, title, requirement, report_context,
-            provision_code, guidance_provision_code, guidance_reference, relevance_hint,
-            schedule_iii_keys, audit_area_codes, procedures, requires_partner_review, sort_order)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-         ON CONFLICT (programme_id, clause_code) DO UPDATE
-            SET status = 'active', withdrawn_at = NULL, version = audit_caro_clause_item.version + 1
-          WHERE audit_caro_clause_item.status = 'withdrawn'`,
-        [
-          programmeId,
-          workflowInstanceId,
-          engagementId,
-          c.id,
-          c.clauseCode,
-          c.parentClauseCode,
-          c.clauseRef,
-          c.parentTitle,
-          c.title,
-          c.requirement,
-          c.reportContext,
-          c.provisionCode,
-          c.guidanceProvisionCode,
-          c.guidanceReference,
-          c.relevanceHint,
-          c.scheduleIiiKeys,
-          c.auditAreaCodes,
-          JSON.stringify(c.procedures),
-          c.requiresPartnerReview,
-          c.sortOrder,
-        ],
-      );
-      touched += res.rowCount ?? 0;
-    }
-    return touched;
+    const { rows: live } = await client.query<{ clause_code: string }>(
+      `SELECT clause_code FROM hsdg.audit_caro_clause_item
+        WHERE programme_id = $1 AND status = 'active'`,
+      [programmeId],
+    );
+    const have = new Set(live.map((r) => r.clause_code));
+    const needed = clauses.filter((c) => !have.has(c.clauseCode));
+    if (needed.length === 0) return 0;
+    const res = await client.query(
+      `INSERT INTO hsdg.audit_caro_clause_item
+         (programme_id, workflow_instance_id, engagement_id, library_clause_id, clause_code,
+          parent_clause_code, clause_ref, parent_title, title, requirement, report_context,
+          provision_code, guidance_provision_code, guidance_reference, relevance_hint,
+          schedule_iii_keys, audit_area_codes, procedures, requires_partner_review, sort_order)
+       SELECT $1, $2, $3, c.id, c.clause_code, c.parent_clause_code, c.clause_ref,
+              c.parent_title, c.title, c.requirement, c.report_context, c.provision_code,
+              c.guidance_provision_code, c.guidance_reference, c.relevance_hint,
+              c.schedule_iii_keys, c.audit_area_codes, c.procedures,
+              c.requires_partner_review, c.sort_order
+         FROM jsonb_to_recordset($4::jsonb) AS c(
+                id uuid, clause_code text, parent_clause_code text, clause_ref text,
+                parent_title text, title text, requirement text, report_context text,
+                provision_code text, guidance_provision_code text, guidance_reference text,
+                relevance_hint text, schedule_iii_keys text[], audit_area_codes text[],
+                procedures jsonb, requires_partner_review boolean, sort_order integer)
+       ON CONFLICT (programme_id, clause_code) DO UPDATE
+          SET status = 'active', withdrawn_at = NULL, version = audit_caro_clause_item.version + 1
+        WHERE audit_caro_clause_item.status = 'withdrawn'`,
+      [
+        programmeId,
+        workflowInstanceId,
+        engagementId,
+        JSON.stringify(
+          needed.map((c) => ({
+            id: c.id,
+            clause_code: c.clauseCode,
+            parent_clause_code: c.parentClauseCode,
+            clause_ref: c.clauseRef,
+            parent_title: c.parentTitle,
+            title: c.title,
+            requirement: c.requirement,
+            report_context: c.reportContext,
+            provision_code: c.provisionCode,
+            guidance_provision_code: c.guidanceProvisionCode,
+            guidance_reference: c.guidanceReference,
+            relevance_hint: c.relevanceHint,
+            schedule_iii_keys: c.scheduleIiiKeys,
+            audit_area_codes: c.auditAreaCodes,
+            procedures: c.procedures,
+            requires_partner_review: c.requiresPartnerReview,
+            sort_order: c.sortOrder,
+          })),
+        ),
+      ],
+    );
+    return res.rowCount ?? 0;
   }
 
   /** 3(xxi): one row per company in the 02.6 perimeter (one source — no re-entry). */
@@ -963,7 +1008,10 @@ export class AuditCaroProgrammeService {
     const orderVersion = programme?.order_version_id
       ? await this.orderVersionById(client, programme.order_version_id)
       : null;
-    const items = programme ? await this.readItems(client, workflowInstanceId, programme.id) : [];
+    const prior = await readPriorAuditFile(client, workflowInstanceId);
+    const items = programme
+      ? await this.readItems(client, workflowInstanceId, programme.id, prior)
+      : [];
     // A withdrawn programme still shows its (withdrawn) items for the record.
     const show = (i: CaroClauseItem) => !i.withdrawn || programme?.status === 'withdrawn';
     const standalone = items.filter(
@@ -992,7 +1040,7 @@ export class AuditCaroProgrammeService {
           openFindings: i.findings.filter((f) => f.status === 'open' && !f.withdrawn).length,
         })),
       ),
-      priorYear: await this.priorYearContext(client, workflowInstanceId),
+      priorYear: await this.priorYearContext(client, prior),
       readOnly,
     };
   }
@@ -1001,6 +1049,7 @@ export class AuditCaroProgrammeService {
     client: PoolClient,
     workflowInstanceId: string,
     programmeId: string,
+    priorFile: PriorAuditFile | null,
   ): Promise<CaroClauseItem[]> {
     const { rows } = await client.query<ItemRow>(
       `${ITEM_SELECT} WHERE i.programme_id = $1 ORDER BY i.sort_order, i.clause_ref`,
@@ -1014,7 +1063,7 @@ export class AuditCaroProgrammeService {
       this.readComponents(client, ids),
       this.readWorkAreas(client, workflowInstanceId),
       this.readDivision(client, workflowInstanceId),
-      this.readPriorClauses(client, workflowInstanceId),
+      this.readPriorClauses(client, priorFile),
     ]);
     const areaTitle = new Map(areas.map((a) => [a.work_area_key, a.title]));
     return rows.map((r) => {
@@ -1286,9 +1335,8 @@ export class AuditCaroProgrammeService {
 
   private async readPriorClauses(
     client: PoolClient,
-    workflowInstanceId: string,
+    prior: PriorAuditFile | null,
   ): Promise<Map<string, CaroPriorClause> | null> {
-    const prior = await readPriorAuditFile(client, workflowInstanceId);
     if (!prior) return null;
     const { rows } = await client.query<{
       clause_code: string;
@@ -1296,10 +1344,19 @@ export class AuditCaroProgrammeService {
       draft_reporting: string | null;
       review_state: string;
       findings: string[] | null;
+      evidence: string[] | null;
     }>(
       `SELECT i.clause_code, i.conclusion, i.draft_reporting, i.review_state,
               ARRAY(SELECT f.description FROM hsdg.audit_caro_finding f
-                     WHERE f.item_id = i.id AND f.withdrawn_at IS NULL ORDER BY f.seq) AS findings
+                     WHERE f.item_id = i.id AND f.withdrawn_at IS NULL ORDER BY f.seq) AS findings,
+              ARRAY(SELECT COALESCE(d.title, ev.title)
+                      FROM hsdg.audit_caro_clause_evidence l
+                      LEFT JOIN hsdg.audit_evidence ev ON ev.id = l.audit_evidence_id
+                      LEFT JOIN hsdg.documents d ON d.id = COALESCE(l.document_id, ev.document_id)
+                                                AND d.deleted_at IS NULL
+                     WHERE l.item_id = i.id AND l.removed_at IS NULL
+                       AND COALESCE(d.title, ev.title) IS NOT NULL
+                     ORDER BY l.linked_at) AS evidence
          FROM hsdg.audit_caro_clause_item i
         WHERE i.workflow_instance_id = $1 AND i.status = 'active'`,
       [prior.workflowInstanceId],
@@ -1312,6 +1369,7 @@ export class AuditCaroProgrammeService {
           conclusion: r.conclusion,
           reportingLanguage: r.review_state === 'approved' ? r.draft_reporting : null,
           findings: r.findings ?? [],
+          evidence: r.evidence ?? [],
         },
       ]),
     );
@@ -1319,9 +1377,8 @@ export class AuditCaroProgrammeService {
 
   private async priorYearContext(
     client: PoolClient,
-    workflowInstanceId: string,
+    prior: PriorAuditFile | null,
   ): Promise<CaroPriorYearContext | null> {
-    const prior = await readPriorAuditFile(client, workflowInstanceId);
     if (!prior) return null;
     const { rows: sub } = await client.query<{ outcome: string | null }>(
       `SELECT COALESCE(conclusion, system_outcome) AS outcome

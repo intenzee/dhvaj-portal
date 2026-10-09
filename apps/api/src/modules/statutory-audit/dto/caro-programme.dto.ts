@@ -210,6 +210,11 @@ export class UpdateCaroFindingDto implements UpdateCaroFindingInput {
   @MaxLength(4000)
   resolution?: string | null;
 
+  @ApiPropertyOptional({ description: 'Withdraw (kept on the trail, never deleted).' })
+  @IsOptional()
+  @IsBoolean()
+  withdrawn?: boolean;
+
   @ApiProperty()
   @IsInt()
   @Min(1)
@@ -268,6 +273,11 @@ export class UpdateCaroComponentDto implements UpdateCaroComponentInput {
   @IsString()
   @MaxLength(4000)
   remarks?: string | null;
+
+  @ApiPropertyOptional({ description: 'Withdraw (kept on the trail, never deleted).' })
+  @IsOptional()
+  @IsBoolean()
+  withdrawn?: boolean;
 
   @ApiProperty()
   @IsInt()
