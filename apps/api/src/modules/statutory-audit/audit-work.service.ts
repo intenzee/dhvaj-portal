@@ -26,6 +26,7 @@ import { AuditService } from '../audit/audit.service';
 import { planWorkAreas, type FrameworkConclusionMap } from './work-generation';
 import { AuditAreaReviewService } from './audit-area-review.service';
 import { AuditRiskService } from './audit-risk.service';
+import { AuditFrameworkDownstreamService } from './audit-framework-downstream.service';
 import { isEngagementLead } from './master-facts';
 import {
   areaForRisk,
@@ -94,6 +95,7 @@ export class AuditWorkService {
     private readonly audit: AuditService,
     private readonly areaReview: AuditAreaReviewService,
     private readonly risk: AuditRiskService,
+    private readonly downstream: AuditFrameworkDownstreamService,
   ) {}
 
   // ── Read ──────────────────────────────────────────────────────────────────
@@ -446,7 +448,22 @@ export class AuditWorkService {
         )
         .map((r) => [r.area_key, r.conclusion]),
     );
-    const desired = [...planWorkAreas(conclusions), ...planPlanningWorkAreas(fsAreas)];
+    // The approved 02.2 result's downstream actions (02.2 §19): the Ind AS / AS
+    // review framework and the Ind AS 101 transition work. A key the framework
+    // blueprint already plans keeps the blueprint's provenance.
+    const planned = [...planWorkAreas(conclusions), ...planPlanningWorkAreas(fsAreas)];
+    const plannedKeys = new Set<string>(planned.map((d) => d.workAreaKey));
+    const fromDownstream = (await this.downstream.workAreasOn(client, workflowInstanceId))
+      .filter((a) => !plannedKeys.has(a.workAreaKey))
+      .map((a) => ({
+        workAreaKey: a.workAreaKey,
+        title: a.title,
+        scope: a.scope,
+        source: `framework:02.2:${a.actionKey}`,
+        originAreaKey: 'financial_reporting_framework',
+        sortOrder: a.sortOrder,
+      }));
+    const desired = [...planned, ...fromDownstream];
     const desiredKeys = new Set<string>(desired.map((d) => d.workAreaKey));
 
     // Existing areas (to diff — never blindly delete/recreate).
@@ -827,6 +844,7 @@ export class AuditWorkService {
       areaKeys: new Set(areaByKey.keys()),
       fsAreas,
       risks: await this.readRisks(client, wi),
+      smcRelaxations: await this.downstream.smcRelaxationsOn(client, wi),
     });
     const { rows: logged } = await client.query<{ source_key: string }>(
       `SELECT source_key FROM hsdg.audit_work_suggestion_log WHERE workflow_instance_id = $1`,

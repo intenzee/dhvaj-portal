@@ -29,6 +29,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditCaroService } from './audit-caro.service';
 import { AuditConsolidationService } from './audit-consolidation.service';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
+import { AuditFrameworkDownstreamService } from './audit-framework-downstream.service';
 import { readFinancialReportingResult } from './financial-reporting-result';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditOtherReportingService } from './audit-other-reporting.service';
@@ -101,6 +102,7 @@ export class AuditFrameworkSummaryService {
     private readonly profile: AuditProfileService,
     private readonly financialReporting: AuditFinancialReportingService,
     private readonly scheduleIii: AuditScheduleIiiService,
+    private readonly frameworkDownstream: AuditFrameworkDownstreamService,
   ) {}
 
   // ── Read / aggregate ─────────────────────────────────────────────────────────
@@ -471,6 +473,8 @@ export class AuditFrameworkSummaryService {
             AND state IN ('applicable','not_applicable','overridden')`,
         [workflowInstanceId],
       );
+      // 02.2 §19: the approved framework result activates its downstream work.
+      await this.frameworkDownstream.applyOn(client, ctx, workflowInstanceId);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.framework_ep_approved',
         objectType: 'audit_framework_baseline',

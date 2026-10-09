@@ -12,6 +12,11 @@ jest.mock('@/lib/api', () => ({
 jest.mock('@/lib/auth', () => ({ useAuth: () => ({ principal: {} }) }));
 jest.mock('@/lib/principal', () => ({ can: () => true }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
+// The evidence, references and downstream panels fetch their own data; they
+// have their own tests.
+jest.mock('../framework-evidence', () => ({ FrameworkEvidence: () => null }));
+jest.mock('../framework-references', () => ({ FrameworkReferences: () => null }));
+jest.mock('../framework-downstream', () => ({ FinancialReportingDownstream: () => null }));
 
 function wrap(ui: ReactNode): ReactNode {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

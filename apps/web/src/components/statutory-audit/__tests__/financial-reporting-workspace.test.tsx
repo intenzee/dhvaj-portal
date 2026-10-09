@@ -11,6 +11,11 @@ jest.mock('@/lib/api', () => ({
   ApiError: class ApiError extends Error {},
 }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
+// The evidence, references and downstream panels fetch their own data; they
+// have their own tests.
+jest.mock('../framework-evidence', () => ({ FrameworkEvidence: () => null }));
+jest.mock('../framework-references', () => ({ FrameworkReferences: () => null }));
+jest.mock('../framework-downstream', () => ({ FinancialReportingDownstream: () => null }));
 
 const URL = '/engagements/e1/statutory-audit/wf1/financial-reporting';
 
@@ -241,7 +246,12 @@ describe('02.2 financial reporting workspace', () => {
       borrowings: 0,
       borrowingsThreshold: 500_000_000,
       conditions: [
-        { key: 'turnover', label: 'Turnover within the limit', result: 'met', detail: '₹100 crore' },
+        {
+          key: 'turnover',
+          label: 'Turnover within the limit',
+          result: 'met',
+          detail: '₹100 crore',
+        },
       ],
       authorityProvisionId: null,
     } as never;

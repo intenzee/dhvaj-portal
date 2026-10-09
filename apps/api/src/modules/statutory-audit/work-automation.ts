@@ -1,4 +1,10 @@
-import type { AreaRiskLevel, AssertionId, ProcedureAssertion, RiskRating } from '@hsdg/contracts';
+import type {
+  AreaRiskLevel,
+  AssertionId,
+  ProcedureAssertion,
+  RiskRating,
+  SmcRelaxation,
+} from '@hsdg/contracts';
 
 /**
  * Section 05 / 06 audit work, from what the file already knows (Guide §1,
@@ -505,6 +511,33 @@ const WORKSTREAM_TEMPLATES: Record<string, Template[]> = {
       assertions: ['presentation_and_disclosure'],
     },
   ],
+  // 02.2 §17/§19: activated only by a first-time Ind AS conclusion.
+  ind_as_first_time_adoption: [
+    {
+      key: 'opening_balance_sheet',
+      title: 'Opening Ind AS balance sheet at the date of transition (Ind AS 101)',
+      objective:
+        'Agree the opening Ind AS balance sheet to the previous-GAAP closing balances and test the transition adjustments: recognition and derecognition, reclassification and measurement under Ind AS.',
+      evidence: 'Transition-date balance sheet; adjustment schedule with computations.',
+      assertions: ['existence', 'completeness', 'accuracy', 'classification'],
+    },
+    {
+      key: 'exemptions_exceptions',
+      title: 'Ind AS 101 exceptions and optional exemptions applied',
+      objective:
+        'Confirm the mandatory exceptions were applied and that each optional exemption elected (deemed cost, business combinations, cumulative translation differences …) is permitted and consistently applied.',
+      evidence: 'Management’s schedule of exemptions elected; supporting computations.',
+      assertions: ['accuracy', 'presentation_and_disclosure'],
+    },
+    {
+      key: 'reconciliations',
+      title: 'Previous-GAAP reconciliations and first Ind AS disclosures',
+      objective:
+        'Check the reconciliations of equity and total comprehensive income from previous GAAP to Ind AS and the other first-time adoption disclosures required by Ind AS 101.',
+      evidence: 'Equity and total comprehensive income reconciliations; disclosure checklist.',
+      assertions: ['presentation_and_disclosure'],
+    },
+  ],
   schedule_iii_work: [
     {
       key: 'presentation',
@@ -560,6 +593,11 @@ export function suggestProcedures(input: {
   areaKeys: ReadonlySet<string>;
   fsAreas: readonly FsAreaInput[];
   risks: readonly RiskInput[];
+  /**
+   * The SMC exemptions/relaxations an approved 02.2 AS + SMC conclusion
+   * activated (02.2 §19) — the AS review marks these items. Empty otherwise.
+   */
+  smcRelaxations?: readonly SmcRelaxation[];
 }): SuggestedProcedure[] {
   const out: SuggestedProcedure[] = [];
   const has = (k: string) => input.areaKeys.has(k);
@@ -651,6 +689,29 @@ export function suggestProcedures(input: {
         expectedEvidence: t.evidence,
       });
     }
+  }
+  // AS + SMC (02.2 §19): the AS compliance review applies the SMC
+  // exemptions/relaxations — the exempt items are listed on the procedure.
+  const smc = input.smcRelaxations ?? [];
+  if (smc.length > 0 && has('schedule_iii_work')) {
+    out.push({
+      sourceKey: 'std:schedule_iii_work:smc_relaxations',
+      sourceNote: '02.2 — AS applies and the company is an SMC',
+      workAreaKey: 'schedule_iii_work',
+      title: 'Apply the SMC exemptions and relaxations in the AS compliance review',
+      objective: clip(
+        `Mark these items as exempt or relaxed on the AS compliance checklist and check that the financial statements disclose the SMC status: ${smc
+          .map(
+            (r) =>
+              `${r.standardLabel}${r.paragraphs ? ` (paras ${r.paragraphs})` : ''} — ${r.relaxation}`,
+          )
+          .join(' ')}`,
+        4000,
+      ),
+      assertions: ['presentation_and_disclosure'],
+      riskId: null,
+      expectedEvidence: 'AS compliance checklist with the SMC items marked; SMC status note.',
+    });
   }
   return out;
 }
