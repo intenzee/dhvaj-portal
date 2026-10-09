@@ -24,6 +24,7 @@ import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditMattersService } from './audit-matters.service';
 import { SUGGESTED_AREA_KEYS, suggestArea, type FrameworkFacts } from './framework-suggestions';
 import { fixFor, isEngagementLead } from './master-facts';
+import { flagScheduleIiiReevaluationOn } from './schedule-iii-reevaluation';
 
 interface AssessmentRow {
   id: string;
@@ -329,9 +330,16 @@ export class AuditFrameworkService {
                 decided_at = now(), version = version + 1
           WHERE workflow_instance_id = $1 AND system_suggestion IS NOT NULL
             AND state IN ('system_suggested_applicable', 'system_suggested_not_applicable')
-          RETURNING id, area_key`,
+          RETURNING id, area_key, conclusion`,
         [workflowInstanceId, ctx.employeeId ?? null],
       );
+      const csr = rows.find((r) => r.area_key === 'csr') as
+        { conclusion?: string | null } | undefined;
+      if (csr)
+        await flagScheduleIiiReevaluationOn(client, workflowInstanceId, {
+          factKey: 'csr_applicable',
+          newValue: csr.conclusion === 'applicable' ? 'Yes' : 'No',
+        });
       if (rows.length === 0) {
         throw new BadRequestException(
           'No system suggestions are waiting — every remaining area needs information or a judgement.',
@@ -368,8 +376,9 @@ export class AuditFrameworkService {
         state: FrameworkState;
         system_suggestion: FrameworkConclusion | null;
         workflow_instance_id: string;
+        area_key: string;
       }>(
-        `SELECT id, state, system_suggestion, workflow_instance_id
+        `SELECT id, state, system_suggestion, workflow_instance_id, area_key
            FROM hsdg.audit_framework_assessments
           WHERE id = $1 AND engagement_id = $2`,
         [assessmentId, engagementId],
@@ -413,6 +422,13 @@ export class AuditFrameworkService {
         throw new ConflictException(
           'This assessment changed since you loaded it; refresh and retry.',
         );
+      }
+      if (current.area_key === 'csr') {
+        // CSR applicability drives the 02.3 CSR disclosure (02.3 spec §12).
+        await flagScheduleIiiReevaluationOn(client, current.workflow_instance_id, {
+          factKey: 'csr_applicable',
+          newValue: input.conclusion === 'applicable' ? 'Yes' : 'No',
+        });
       }
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.framework_decision',

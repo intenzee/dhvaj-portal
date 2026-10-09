@@ -31,6 +31,7 @@ import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { fillConsolidation, consolidationFromMaster } from './framework-facts-prefill';
 import { isEngagementLead, readEngagementMasterFacts } from './master-facts';
 import { assessConsolidation } from './consolidation';
+import { flagScheduleIiiReevaluationOn } from './schedule-iii-reevaluation';
 
 const SUB = SUB_SECTION_KEY.consolidation;
 const AREA = FRAMEWORK_AREA_KEY.cfs;
@@ -405,6 +406,16 @@ export class AuditConsolidationService {
           'This assessment changed since you loaded it; refresh and retry.',
         );
       }
+      // The consolidated-presentation flag and CFS disclosures in 02.3 (spec §12, §19).
+      await flagScheduleIiiReevaluationOn(client, workflowInstanceId, {
+        factKey: 'cfs_required',
+        newValue:
+          input.conclusion === 'cfs_required'
+            ? 'Yes'
+            : input.conclusion === 'cfs_exempt' || input.conclusion === 'not_applicable'
+              ? 'No'
+              : 'Not known',
+      });
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.consolidation_decision',
         objectType: 'audit_framework_subassessment',
