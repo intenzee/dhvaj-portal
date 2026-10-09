@@ -123,7 +123,8 @@ describe('Statutory Audit — Review from the file (e2e)', () => {
     const gen = (await get(pa, `${base}/work-areas`)).body[0] as StatutoryAuditWorkGeneration;
     const caro = gen.areas.find((a) => a.workAreaKey === 'caro')!;
     const procs = (await get(pa, `${base}/procedures`)).body[0].procedures as AuditProcedure[];
-    const clauses = procs.find((p) => p.sourceKey === 'std:caro:clauses')!;
+    // A CARO clause procedure from the 02.4 programme (spec §18).
+    const clauses = procs.find((p) => p.sourceKey === 'caro:CARO_2020_3_I_B')!;
     const review = async (): Promise<StatutoryAuditReview> =>
       (await get(pa, `${base}/review`)).body[0] as StatutoryAuditReview;
     const decide = (body: Record<string, unknown>) =>

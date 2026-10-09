@@ -153,7 +153,12 @@ describe('Statutory Audit — Section 05 suggested work (e2e)', () => {
     expect(bySource.has('fs:fs_cash:substantive')).toBe(true);
     expect(bySource.has('fs:fs_cash:confirm')).toBe(true);
     expect(bySource.has('fs:fs_rev:cutoff')).toBe(true);
-    expect(bySource.has('std:caro:clauses')).toBe(true);
+    // CARO: one procedure per 02.4 clause item (spec §18), no generic CARO template.
+    expect(bySource.get('caro:CARO_2020_3_I_B')?.title).toBe(
+      'CARO 3(i)(b) — Physical verification of property, plant and equipment',
+    );
+    expect(procs.filter((p) => p.sourceKey?.startsWith('caro:'))).toHaveLength(47);
+    expect(procs.some((p) => p.sourceKey === 'std:caro:clauses')).toBe(false);
     expect(bySource.has('std:ifc:walkthroughs')).toBe(false); // IFC not applicable
     expect(procs.every((p) => p.ownerEmployeeId && p.reviewerEmployeeId)).toBe(true);
 

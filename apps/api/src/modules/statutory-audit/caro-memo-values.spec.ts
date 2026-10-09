@@ -8,6 +8,7 @@ const base: CaroMemoInput = {
   basis: null,
   isOverridden: false,
   technicalBasis: null,
+  supportingEvidence: null,
   decidedByName: 'Asha Manager',
   decidedAt: '2025-05-02T10:00:00.000Z',
   professionalAction: null,
@@ -15,6 +16,17 @@ const base: CaroMemoInput = {
   partnerApprovedByName: null,
   partnerApprovedAt: null,
   exemptionReason: null,
+  summary: {
+    result: 'applicable',
+    entityRoute: 'private_company',
+    directExemption: null,
+    privateExemption: 'not_qualified',
+    failedConditions: ['revenue'],
+    failedCondition: 'Total revenue',
+    actualValue: 'INR 14.82 crore',
+    configuredLimit: 'INR 10 crore',
+    orderVersion: 'CARO 2020 (effective 2021-04-01)',
+  },
   programme: {
     orderTitle: "Companies (Auditor's Report) Order, 2020",
     orderVersionLabel: 'CARO 2020 — applicable from FY 2021-22',
@@ -52,6 +64,11 @@ describe('CARO Applicability Memo merge values (02.4 §16)', () => {
     expect(v).toMatchObject({
       'caro.applicability': 'CARO Applicable',
       'caro.exemptionBasis': 'None',
+      'caro.entityRoute': 'Private company',
+      'caro.directExemption': 'None',
+      'caro.privateExemption': 'Not qualified',
+      'caro.failedCondition':
+        'Total revenue — actual INR 14.82 crore — configured limit INR 10 crore',
       'caro.orderVersion':
         "Companies (Auditor's Report) Order, 2020 — CARO 2020 — applicable from FY 2021-22",
       'caro.standaloneScope':

@@ -313,6 +313,14 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'caro.systemConclusion', label: 'CARO system conclusion', source: '02.4 system' },
   { key: 'caro.systemBasis', label: 'CARO system basis', source: '02.4 system' },
   { key: 'caro.exemptionBasis', label: 'CARO exemption basis', source: '02.4 exemption tests' },
+  { key: 'caro.entityRoute', label: 'CARO entity route', source: '02.4 conclusion' },
+  { key: 'caro.directExemption', label: 'CARO direct exemption', source: '02.4 CARO-01..05' },
+  { key: 'caro.privateExemption', label: 'CARO private-company exemption', source: '02.4 §6' },
+  {
+    key: 'caro.failedCondition',
+    label: 'CARO failed condition (actual vs limit)',
+    source: '02.4 §6–§8',
+  },
   { key: 'caro.orderVersion', label: 'CARO Order version', source: '02.4 clause library' },
   { key: 'caro.standaloneScope', label: 'CARO standalone scope', source: '02.4 work programme' },
   {
@@ -326,6 +334,7 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'caro.overridden', label: 'CARO overridden (Yes / No)', source: '02.4 CARO-06' },
   { key: 'caro.overrideReason', label: 'CARO override reason', source: '02.4 CARO-06' },
   { key: 'caro.technicalBasis', label: 'CARO technical basis', source: '02.4 CARO-06' },
+  { key: 'caro.supportingEvidence', label: 'CARO override evidence', source: '02.4 CARO-06' },
   { key: 'caro.partnerApproval', label: 'CARO partner approval', source: '02.4 CARO-06' },
   { key: 'caro.pendingReason', label: 'CARO information pending', source: '02.4 CARO-06' },
   { key: 'caro.decidedBy', label: 'CARO concluded by', source: '02.4 CARO-06' },
