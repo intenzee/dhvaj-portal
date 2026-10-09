@@ -207,40 +207,11 @@ describe('suggestArea — advisory applicability (§19), thresholds resolved fro
     expect(suggestArea(FRAMEWORK_AREA_KEY.indAsAs, f, raised).suggestion).toBe('not_applicable');
   });
 
-  it('CARO: non-company ⇒ not applicable', () => {
-    expect(
-      suggestArea(FRAMEWORK_AREA_KEY.caro, facts({ isCompany: false }), resolve).suggestion,
-    ).toBe('not_applicable');
-  });
-
-  it('CARO: small private company within all exemption limits ⇒ not applicable', () => {
-    const s = suggestArea(
-      FRAMEWORK_AREA_KEY.caro,
-      facts({
-        isCompany: true,
-        isPrivateCompany: true,
-        paidUpCapital: 0.5 * CRORE,
-        totalBorrowings: 0.5 * CRORE,
-        turnover: 5 * CRORE,
-      }),
-      resolve,
-    );
-    expect(s.suggestion).toBe('not_applicable');
-  });
-
-  it('CARO: private company above a limit ⇒ applicable', () => {
-    const s = suggestArea(
-      FRAMEWORK_AREA_KEY.caro,
-      facts({
-        isCompany: true,
-        isPrivateCompany: true,
-        paidUpCapital: 2 * CRORE,
-        totalBorrowings: 0.5 * CRORE,
-        turnover: 5 * CRORE,
-      }),
-      resolve,
-    );
-    expect(s.suggestion).toBe('applicable');
+  it('CARO: never decided here — 02.4 (caro.ts) assesses it and the area mirrors it', () => {
+    const s = suggestArea(FRAMEWORK_AREA_KEY.caro, facts({ isCompany: false }), resolve);
+    expect(s.suggestion).toBeNull();
+    expect(s.state).toBe('professional_judgement_required');
+    expect(s.basis).toMatch(/02\.4/);
   });
 
   it('CFS: subsidiaries present ⇒ applicable; none ⇒ not applicable', () => {

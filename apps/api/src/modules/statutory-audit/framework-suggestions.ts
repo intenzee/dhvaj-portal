@@ -161,41 +161,12 @@ export function suggestArea(
         : notApplies('Not a company — Schedule III does not apply.');
     }
 
-    case FRAMEWORK_AREA_KEY.caro: {
-      // CARO 2020 applies to companies, excluding banking/insurance/sec-8 and
-      // small/OPC and small private companies below the thresholds.
-      if (f.isCompany === false) return notApplies('Not a company — CARO 2020 does not apply.');
-      if (f.isCompany == null)
-        return judgement('Entity type unknown — confirm CARO applicability.');
-      if (f.isPrivateCompany) {
-        const capital = f.paidUpCapital;
-        const borrow = f.totalBorrowings;
-        const rev = f.turnover;
-        if (capital == null || borrow == null || rev == null)
-          return pending(
-            'Private company — capital/borrowings/turnover needed to test the CARO small-company exemption.',
-          );
-        const capRule = resolve(FRAMEWORK_AREA_KEY.caro, RULE_CRITERION.paidUpCapital);
-        const borrowRule = resolve(FRAMEWORK_AREA_KEY.caro, RULE_CRITERION.borrowings);
-        const revRule = resolve(FRAMEWORK_AREA_KEY.caro, RULE_CRITERION.revenue);
-        if (!capRule || !borrowRule || !revRule)
-          return unresolved('CARO private-company exemption thresholds');
-        const exempt =
-          ruleMeets(capital, capRule) && ruleMeets(borrow, borrowRule) && ruleMeets(rev, revRule);
-        return exempt
-          ? notApplies(
-              `Private company within CARO exemption (paid-up ${formatInrCrore(capital)} ${capRule.operator} ${formatInrCrore(capRule.threshold!)}, borrowings ${formatInrCrore(borrow)} ${borrowRule.operator} ${formatInrCrore(borrowRule.threshold!)}, revenue ${formatInrCrore(rev)} ${revRule.operator} ${formatInrCrore(revRule.threshold!)}; ${ruleTag(capRule)}).`,
-              capRule,
-            )
-          : applies(
-              'Private company above the CARO small-company exemption thresholds — CARO 2020 applies.',
-              capRule,
-            );
-      }
-      return applies(
-        'Company (non-private) — CARO 2020 applies, subject to the banking/insurance/sec-8 exclusions.',
-      );
-    }
+    case FRAMEWORK_AREA_KEY.caro:
+      // CARO 2020 is assessed by 02.4 (caro.ts): direct exemptions, the four
+      // cumulative private-company conditions and their measurement bases. The
+      // framework service mirrors that result onto this area — never a second,
+      // simplified CARO test here.
+      return judgement('CARO 2020 applicability is assessed in 02.4.');
 
     case FRAMEWORK_AREA_KEY.ifc: {
       // IFC reporting u/s 143(3)(i): all companies (certain small private cos exempt).

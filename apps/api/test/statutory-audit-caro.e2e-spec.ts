@@ -83,6 +83,31 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
     expect(caro.assessment.systemOutcome).toBe(CARO_OUTCOME.informationInsufficient);
   });
 
+  it('CARO-05 waits for the 02.1 small-company result — never recalculated in 02.4', async () => {
+    const caro = await getCaro(pa);
+    const smallTest = caro.detail!.directTests.find((t) => t.code === 'CARO-05')!;
+    expect(smallTest.answer).toBe('pending');
+    expect(smallTest.provisionCodes).toContain('COS_ACT_2_85');
+
+    // 02.1 records its small-company conclusion; 02.4 consumes it.
+    const profile = await request(app.getHttpServer())
+      .get(`${base()}/profile`)
+      .set(bearer(pa))
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/profile/small-company`)
+      .set(bearer(pa))
+      .send({
+        action: 'override',
+        outcome: 'not_small',
+        reason: 'E2E: above the small-company limits.',
+        version: profile.body[0].version,
+      })
+      .expect(201);
+    const after = await getCaro(pa);
+    expect(after.detail!.directTests.find((t) => t.code === 'CARO-05')!.answer).toBe('no');
+  });
+
   it('captures the CARO facts and applies when a limit is exceeded', async () => {
     const before = await getCaro(pa);
     const res = await request(app.getHttpServer())
@@ -102,6 +127,94 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
     expect(caro.detail!.level1Applies).toBe(true);
     expect(caro.detail!.instantiatesClauseProgramme).toBe(true);
     expect(caro.assessment.authorityProvisionId).toBeTruthy(); // CARO_2020 frozen period-correct
+    // §8: the structured conclusion names the failed condition, value and configured limit.
+    expect(caro.detail!.conclusion).toMatchObject({
+      entityRoute: 'private_company',
+      privateExemption: 'not_qualified',
+      failedCondition: 'Total revenue',
+      actualValue: '₹15.00 cr',
+      configuredLimit: '₹10.00 cr',
+    });
+    expect(caro.detail!.privateTest!.conditions.map((c) => c.ruleCode)).toEqual([
+      'CARO_PVT_PUBLIC_GROUP',
+      'CARO_PVT_CAPITAL_RESERVES',
+      'CARO_PVT_BORROWINGS',
+      'CARO_PVT_REVENUE',
+    ]);
+    // The Phase-02 list mirrors 02.4 — one CARO answer everywhere.
+    const fw = await request(app.getHttpServer())
+      .get(`${base()}/framework`)
+      .set(bearer(pa))
+      .expect(200);
+    const area = (
+      fw.body[0].assessments as Array<{
+        areaKey: string;
+        systemSuggestion: string;
+        systemBasis: string;
+      }>
+    ).find((a) => a.areaKey === 'caro')!;
+    expect(area.systemSuggestion).toBe('applicable');
+    expect(area.systemBasis).toMatch(/^02\.4 CARO:/);
+  });
+
+  it('a borrowing schedule is aggregated across lenders; year-end-only data is Pending', async () => {
+    const before = await getCaro(pa);
+    const res = await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/facts`)
+      .set(bearer(pa))
+      .send({
+        borrowingDataBasis: 'year_end_only',
+        peakBankFiBorrowings: null,
+        borrowingSchedule: [
+          { asOn: '2025-03-31', lender: 'HDFC Bank', lenderType: 'bank', amount: 4000000 },
+          {
+            asOn: '2025-03-31',
+            lender: 'SIDBI',
+            lenderType: 'financial_institution',
+            amount: 3000000,
+          },
+        ],
+        version: before.assessment.version,
+      })
+      .expect(201);
+    const borrowings = (res.body as StatutoryAuditCaro).detail!.privateTest!.conditions.find(
+      (c) => c.key === 'borrowings',
+    )!;
+    expect(borrowings.result).toBe('pending');
+    expect(borrowings.pendingReason).toMatch(/year-end/);
+    // Back to the captured peak for the rest of the suite.
+    await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/facts`)
+      .set(bearer(pa))
+      .send({
+        borrowingDataBasis: 'monthly',
+        borrowingSchedule: null,
+        peakBankFiBorrowings: 5000000,
+        version: (res.body as StatutoryAuditCaro).assessment.version,
+      })
+      .expect(201);
+  });
+
+  it('CARO-06 Information Pending must name the blocking fact', async () => {
+    const caro = await getCaro(pa);
+    await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/decision`)
+      .set(bearer(pa))
+      .send({ action: 'information_pending', version: caro.assessment.version })
+      .expect(400); // nothing is missing, so the reason must say what is pending
+    const res = await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/decision`)
+      .set(bearer(pa))
+      .send({
+        action: 'information_pending',
+        pendingReason: 'Awaiting monthly bank statements.',
+        version: caro.assessment.version,
+      })
+      .expect(201);
+    expect((res.body as StatutoryAuditCaro).assessment.state).toBe('pending_information');
+    expect((res.body as StatutoryAuditCaro).pendingReason).toBe(
+      'Awaiting monthly bank statements.',
+    );
   });
 
   it('records the professional conclusion, and rejects a stale-version write (409)', async () => {
@@ -134,6 +247,83 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
       .set(bearer(pa))
       .send({ conclusion: CARO_OUTCOME.notApplicableExempt, version: caro.assessment.version })
       .expect(400); // differs from the system's "applicable" → basis required
+    // A reason alone is not enough: the technical basis and evidence are mandatory too.
+    await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/decision`)
+      .set(bearer(pa))
+      .send({
+        action: 'override',
+        conclusion: CARO_OUTCOME.notApplicableExempt,
+        basis: 'Revenue restated.',
+        version: caro.assessment.version,
+      })
+      .expect(400);
+  });
+
+  it('an override keeps the system result and needs the Engagement Partner (CARO-06)', async () => {
+    const caro = await getCaro(pa);
+    const res = await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/decision`)
+      .set(bearer(pa))
+      .send({
+        action: 'override',
+        conclusion: CARO_OUTCOME.notApplicableExempt,
+        basis: 'Revenue restated below the limit after the audit adjustment.',
+        technicalBasis: 'ICAI Guidance Note on CARO 2020 — total revenue as per the audited FS.',
+        supportingEvidence: 'Adjusted trial balance and the restated revenue note.',
+        version: caro.assessment.version,
+      })
+      .expect(201);
+    const over = res.body as StatutoryAuditCaro;
+    expect(over.assessment).toMatchObject({
+      conclusion: CARO_OUTCOME.notApplicableExempt,
+      systemOutcome: CARO_OUTCOME.applicable,
+      isOverridden: true,
+      state: 'overridden',
+    });
+    expect(over.partnerApproval).toMatchObject({ required: true, approvedAt: null });
+    expect(over.completion!.items.find((i) => i.key === 'partner_approval')!.met).toBe(false);
+
+    const approve = await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/partner-approve`)
+      .set(bearer(pa))
+      .send({ note: 'Agreed.', version: over.assessment.version });
+    if (over.viewerIsPartner) {
+      expect(approve.status).toBe(201);
+      expect((approve.body as StatutoryAuditCaro).partnerApproval!.approvedAt).toBeTruthy();
+    } else {
+      expect(approve.status).toBe(403);
+    }
+
+    // The Phase-02 area shows the same overridden conclusion.
+    const fw = await request(app.getHttpServer())
+      .get(`${base()}/framework`)
+      .set(bearer(pa))
+      .expect(200);
+    const area = (
+      fw.body[0].assessments as Array<{ areaKey: string; conclusion: string; state: string }>
+    ).find((a) => a.areaKey === 'caro')!;
+    expect(area).toMatchObject({ conclusion: 'not_applicable', state: 'overridden' });
+  });
+
+  it('the §19 checklist and report contexts are returned', async () => {
+    const caro = await getCaro(pa);
+    expect(caro.completion!.items.map((i) => i.key)).toEqual(
+      expect.arrayContaining([
+        'version_resolved',
+        'direct_exemptions',
+        'private_test',
+        'measurement',
+        'report_context',
+        'professional_conclusion',
+        'partner_approval',
+        'no_blocking_matter',
+      ]),
+    );
+    expect(caro.detail!.reportContexts.map((c) => c.context)).toEqual([
+      'standalone',
+      'consolidated',
+    ]);
   });
 
   it('records an immutable audit event for the decision', async () => {

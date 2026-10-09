@@ -299,6 +299,31 @@ export class AuditProfileService {
     });
   }
 
+  /**
+   * 02.1's final §2(85) small-company outcome for one shell — the override when
+   * recorded, else the live system result; the frozen result once confirmed.
+   * 02.4 (CARO-05) consumes it and never recalculates it. Runs in the caller's
+   * RLS transaction; null when the profile does not exist yet.
+   */
+  async smallCompanyResultOn(
+    client: PoolClient,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<{ outcome: string; basis: string; confirmed: boolean } | null> {
+    const a = (await this.assemble(client, engagementId)).find(
+      (x) => x.row.workflow_instance_id === workflowInstanceId,
+    );
+    if (!a) return null;
+    const c = a.view.smallCompanyConclusion;
+    return {
+      outcome: c.finalOutcome,
+      basis: c.override
+        ? `02.1 override: ${c.override.reason ?? c.finalOutcome}`
+        : a.liveSmallCompany.basis,
+      confirmed: a.row.state === PROFILE_STATE.confirmed,
+    };
+  }
+
   /** Read every non-cancelled profile of the engagement, fully assembled. */
   private async assemble(client: PoolClient, engagementId: string): Promise<Assembled[]> {
     const { rows: profiles } = await client.query<ProfileRow>(

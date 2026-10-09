@@ -436,6 +436,7 @@ describe('02.1 workspace — prior year (§14) and change impact (§16, §17)', 
     ]);
     expect(downstreamSectionsFor(['group'])).toEqual([
       SUB_SECTION_KEY.financialReporting,
+      SUB_SECTION_KEY.caro,
       SUB_SECTION_KEY.consolidation,
     ]);
     expect(downstreamSectionsFor(['jointAudit'])).toEqual([]);

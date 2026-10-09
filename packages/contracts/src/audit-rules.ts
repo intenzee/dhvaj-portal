@@ -46,6 +46,8 @@ export const MEASUREMENT_BASIS = {
   atAnyPointInYear: 'at_any_point_in_year',
   section198NetProfit: 'section_198_net_profit',
   caroBasis: 'caro_measurement_basis',
+  /** A relationship status over the relevant period (e.g. CARO public-group test). */
+  relevantPeriod: 'relevant_period',
 } as const;
 export type MeasurementBasis = (typeof MEASUREMENT_BASIS)[keyof typeof MEASUREMENT_BASIS];
 export const MEASUREMENT_BASES: MeasurementBasis[] = Object.values(MEASUREMENT_BASIS);
@@ -61,6 +63,8 @@ export const RULE_CRITERION = {
   capitalAndReserves: 'capital_and_reserves',
   borrowings: 'borrowings',
   revenue: 'revenue',
+  /** A holding/subsidiary relationship with a public company exists (1 = yes, 0 = no) — CARO 2020. */
+  publicGroupRelationship: 'public_group_relationship',
   turnover: 'turnover',
   deposits: 'deposits',
   netProfit: 'net_profit',

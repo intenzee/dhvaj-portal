@@ -732,7 +732,8 @@ const DOWNSTREAM: Record<TrackedFact, SubSectionKey[]> = {
   specialEntityTypes: CLASSIFICATION_SECTIONS,
   regulator: CLASSIFICATION_SECTIONS,
   listing: [SUB_SECTION_KEY.financialReporting],
-  group: [SUB_SECTION_KEY.financialReporting, SUB_SECTION_KEY.consolidation],
+  // The CARO public-group condition reads the group structure (02.4 spec §2).
+  group: [SUB_SECTION_KEY.financialReporting, SUB_SECTION_KEY.caro, SUB_SECTION_KEY.consolidation],
   financials: [
     SUB_SECTION_KEY.financialReporting,
     SUB_SECTION_KEY.scheduleIii,

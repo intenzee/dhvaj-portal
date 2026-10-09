@@ -8,7 +8,7 @@ import {
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditCaroService } from './audit-caro.service';
-import { RecordCaroDecisionDto, SetCaroFactsDto } from './dto/caro.dto';
+import { PartnerApproveCaroDto, RecordCaroDecisionDto, SetCaroFactsDto } from './dto/caro.dto';
 
 /**
  * Statutory Audit — 02.4 CARO 2020 Applicability endpoints (Guide §9.4). Reads
@@ -58,13 +58,7 @@ export class AuditCaroController {
     @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
     @Body() dto: SetCaroFactsDto,
   ): Promise<StatutoryAuditCaro> {
-    return this.caro.setFacts(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
-      isHoldingOrSubsidiaryOfPublic: dto.isHoldingOrSubsidiaryOfPublic,
-      capitalPlusReserves: dto.capitalPlusReserves,
-      peakBankFiBorrowings: dto.peakBankFiBorrowings,
-      totalRevenue: dto.totalRevenue,
-      version: dto.version,
-    });
+    return this.caro.setFacts(rlsContextFromPrincipal(principal), id, workflowInstanceId, dto);
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/caro/run-suggestions')
@@ -80,18 +74,38 @@ export class AuditCaroController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/caro/decision')
   @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'Record the professional CARO conclusion (override needs a basis)' })
+  @ApiOperation({
+    summary:
+      'CARO-06: confirm, override (conclusion + reason + technical basis + evidence) or mark Information Pending',
+  })
   decision(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
     @Body() dto: RecordCaroDecisionDto,
   ): Promise<StatutoryAuditCaro> {
-    return this.caro.recordDecision(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
-      conclusion: dto.conclusion,
-      basis: dto.basis,
-      impact: dto.impact,
-      version: dto.version,
-    });
+    return this.caro.recordDecision(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto,
+    );
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/caro/partner-approve')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'CARO-06: Engagement Partner approval of a significant override' })
+  partnerApprove(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: PartnerApproveCaroDto,
+  ): Promise<StatutoryAuditCaro> {
+    return this.caro.partnerApprove(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+      dto,
+    );
   }
 }
