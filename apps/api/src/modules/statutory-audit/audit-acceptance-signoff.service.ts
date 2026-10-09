@@ -10,6 +10,7 @@ import {
   isApprovingConclusion,
   partnerConclusionError,
   recommendationNeedsComment,
+  section01CompletionChecks,
   type AcceptanceConclusion,
   type AcceptanceDecisionRecord,
   type AcceptanceFileStatus,
@@ -484,7 +485,10 @@ export class AuditAcceptanceSignoffService {
       engagementLetterStatus: (letter?.status as AcceptanceFileStatus | undefined) ?? null,
       recommendation,
       decisions,
-      completionFailures: [],
+      completionFailures: section01CompletionChecks({
+        segments: acc.segments,
+        declarationsPending: acc.context.independence.pending,
+      }),
       preparedByName: recommendation?.submittedByName ?? p?.manager_name ?? null,
       engagementPartnerName: p?.partner_name ?? null,
     });

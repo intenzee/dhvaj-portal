@@ -1,6 +1,7 @@
 import {
   EMPTY_EVAL_CONTEXT,
   evaluateSegment,
+  section01CompletionChecks,
   specialistLabels,
   type AcceptanceEvalContext,
   type AnswersByKey,
@@ -423,6 +424,82 @@ describe('Section 01 question engine', () => {
           noServices,
         ),
       ).toThrow(/Unknown question/);
+    });
+  });
+
+  describe('§14 completion checks', () => {
+    const seg = (
+      segmentKey: string,
+      answers: Array<[string, string | null, Record<string, unknown>?]>,
+      state = 'complete',
+    ) => ({
+      segmentKey,
+      state,
+      answers: answers.map(([questionKey, answer, details]) => ({
+        questionKey,
+        answer,
+        details: details ?? {},
+      })),
+    });
+    const independent = seg('independence_ethics', [['ind_conclusion', 'satisfied']]);
+
+    it('passes a file where independence permits the engagement', () => {
+      expect(
+        section01CompletionChecks({
+          segments: [
+            independent,
+            seg('audit_preconditions', [
+              ['pre_01', 'pending'],
+              ['pre_06', 'no'],
+            ]),
+          ],
+          declarationsPending: 0,
+        }),
+      ).toEqual([]);
+    });
+
+    it('names each rule the file fails', () => {
+      expect(
+        section01CompletionChecks({
+          segments: [
+            seg('appointment_eligibility', [
+              ['el_tenure', 'issue', { conclusion: 'cannot_accept' }],
+            ]),
+            seg('acceptance_continuance', [['acc_conclusion', 'do_not_accept']]),
+            seg('independence_ethics', [
+              ['ind_03:svc1', 'threat', { conclusion: 'not_acceptable' }],
+              ['ind_conclusion', 'not_satisfied'],
+            ]),
+            seg('audit_preconditions', [
+              ['pre_02', 'no'],
+              ['pre_06', 'yes'],
+            ]),
+          ],
+          declarationsPending: 2,
+        }),
+      ).toEqual([
+        'An eligibility issue concludes the appointment cannot be accepted.',
+        'Acceptance / continuance is concluded "Do Not Accept".',
+        'Independence conclusion does not permit the engagement.',
+        'An independence threat that cannot be reduced to an acceptable level is recorded.',
+        '2 team independence declarations are still pending.',
+        'The preconditions for an audit are not present (PRE-02, PRE-06).',
+      ]);
+    });
+
+    it('asks for the independence conclusion and skips not-applicable segments', () => {
+      expect(
+        section01CompletionChecks({
+          segments: [
+            seg('independence_ethics', []),
+            seg('acceptance_continuance', [['acc_conclusion', 'do_not_accept']], 'not_applicable'),
+          ],
+          declarationsPending: 1,
+        }),
+      ).toEqual([
+        'The final independence conclusion has not been recorded.',
+        '1 team independence declaration is still pending.',
+      ]);
     });
   });
 });

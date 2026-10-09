@@ -1549,6 +1549,90 @@ export function fileSlotsFor(
 /** Engagement-letter statuses that complete 01.7. */
 export const ENGAGEMENT_LETTER_DONE: readonly string[] = ['approved', 'issued', 'accepted'];
 
+/** What Section 01 completion reads from a segment (spec §14). */
+export interface CompletionSegment {
+  segmentKey: string;
+  state: string;
+  answers: ReadonlyArray<{
+    questionKey: string;
+    answer: string | null;
+    details?: AcceptanceDetails | null;
+  }>;
+}
+
+/**
+ * Section 01 completion rules beyond "every segment resolved" (spec §14):
+ * independence must permit the engagement, the team's declarations must all
+ * be in, and nothing recorded may rule out acceptance (an eligibility issue
+ * that cannot be accepted, "Do Not Accept", absent preconditions). The
+ * engagement letter's progress is the sign-off's own check (01.7 lifecycle).
+ * Each failure is a sentence the Partner sees as a blocker.
+ */
+export function section01CompletionChecks(input: {
+  segments: readonly CompletionSegment[];
+  declarationsPending: number;
+}): string[] {
+  const failures: string[] = [];
+  const answersOf = (segmentKey: string) => {
+    const seg = input.segments.find((s) => s.segmentKey === segmentKey);
+    if (!seg || seg.state === 'not_applicable') return null;
+    return seg.answers.filter((a) => a.answer !== null);
+  };
+  const base = (key: string) => key.split(':')[0]!;
+
+  const eligibility = answersOf('appointment_eligibility');
+  if (eligibility?.some((a) => a.answer === 'issue' && a.details?.conclusion === 'cannot_accept')) {
+    failures.push('An eligibility issue concludes the appointment cannot be accepted.');
+  }
+
+  const continuance = answersOf('acceptance_continuance');
+  if (
+    continuance?.some((a) => a.questionKey === 'acc_conclusion' && a.answer === 'do_not_accept')
+  ) {
+    failures.push('Acceptance / continuance is concluded "Do Not Accept".');
+  }
+
+  const independence = answersOf('independence_ethics');
+  if (independence) {
+    const conclusion = independence.find((a) => a.questionKey === 'ind_conclusion')?.answer;
+    if (!conclusion) failures.push('The final independence conclusion has not been recorded.');
+    else if (conclusion !== 'satisfied' && conclusion !== 'satisfied_safeguards') {
+      failures.push('Independence conclusion does not permit the engagement.');
+    }
+    if (
+      independence.some(
+        (a) =>
+          ['ind_01', 'ind_02', 'ind_03', 'ind_04'].includes(base(a.questionKey)) &&
+          a.details?.conclusion === 'not_acceptable',
+      )
+    ) {
+      failures.push(
+        'An independence threat that cannot be reduced to an acceptable level is recorded.',
+      );
+    }
+  }
+  if (input.declarationsPending > 0) {
+    failures.push(
+      `${input.declarationsPending} team independence declaration${input.declarationsPending === 1 ? ' is' : 's are'} still pending.`,
+    );
+  }
+
+  const preconditions = answersOf('audit_preconditions');
+  if (preconditions) {
+    const absent = preconditions
+      .filter((a) =>
+        a.questionKey === 'pre_06'
+          ? a.answer === 'yes'
+          : /^pre_0[1-5]$/.test(a.questionKey) && a.answer === 'no',
+      )
+      .map((a) => a.questionKey.toUpperCase().replace('_', '-'));
+    if (absent.length > 0) {
+      failures.push(`The preconditions for an audit are not present (${absent.join(', ')}).`);
+    }
+  }
+  return failures;
+}
+
 /** True when the answer is one of the question's exception answers. */
 export function isExceptionAnswer(
   q: AcceptanceQuestionDefinition,
