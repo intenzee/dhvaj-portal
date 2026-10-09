@@ -1,26 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2 } from 'lucide-react';
 import {
-  ACCEPTANCE_CONCLUSIONS,
+  FINAL_SEGMENT_STATE_LABEL,
   PERMISSION,
+  SECTION01_STATUS_LABEL,
   SEGMENT_STATE_LABEL,
-  type AcceptanceConclusion,
+  type Section01Header,
   type StatutoryAuditAcceptance,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
-import { Card, Badge, Button, Spinner } from '@/components/ui';
-import { Field, Select, Textarea } from '@/components/form';
+import { Card, Badge, Spinner } from '@/components/ui';
 import { useAuditAnchor } from './audit-file-nav';
 import { AcceptanceSegmentEditor, scrollToQuestion, segmentOfQuestion } from './acceptance-segment';
 import { ProfileFacts } from './acceptance-profile';
 import { MattersCard } from './matters-card';
-import { SectionPackChecks } from './section-pack-card';
+import { AcceptanceFinal, useAcceptanceSignoff } from './acceptance-final';
+import { EngagementLetterSection } from './acceptance-engagement-letter';
 
 /**
  * Section 01 — Engagement & Acceptance (spec §3–§13). The engagement profile
@@ -30,14 +30,6 @@ import { SectionPackChecks } from './section-pack-card';
  * state is derived from the answers — never marked by hand. Adverse answers
  * raise Acceptance Matters automatically.
  */
-
-const CONCLUSION_LABEL: Record<AcceptanceConclusion, string> = {
-  accept: 'Accept',
-  continue: 'Continue',
-  accept_with_conditions: 'Accept with conditions',
-  return: 'Return to preparer',
-  decline: 'Do not accept',
-};
 
 const QK = (id: string) => ['engagement', id, 'statutory-audit-acceptance'];
 
@@ -74,6 +66,7 @@ export function AcceptancePanel({
   const onSaved = () => {
     void qc.invalidateQueries({ queryKey: QK(engagementId) });
     void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'statutory-audit'] });
+    void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'statutory-audit-acceptance-signoff'] });
   };
   const onError = (e: unknown) => toast(e instanceof ApiError ? e.message : 'Could not save.');
 
@@ -92,6 +85,8 @@ export function AcceptancePanel({
     onError,
   });
 
+  const signoff = useAcceptanceSignoff(engagementId, query.data?.[0]?.workflowInstanceId);
+
   if (query.isLoading) return <Spinner label="Loading acceptance…" />;
   const acc = query.data?.[0];
   if (!acc) return null;
@@ -106,19 +101,7 @@ export function AcceptancePanel({
 
   return (
     <div className="space-y-3">
-      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div>
-          <h2 className="text-sm font-semibold text-ink">Engagement &amp; Acceptance · Section 01</h2>
-          <p className="text-xs text-ink-muted">
-            {approved
-              ? `Approved — ${CONCLUSION_LABEL[acc.approval!.conclusion]}${acc.approval!.approvedByName ? ` · ${acc.approval!.approvedByName}` : ''}`
-              : `${acc.unresolvedSegmentCount} segment(s) open · ${acc.openBlockingMatterCount} blocking matter(s)${acc.pack.attention > 0 ? ` · ${acc.pack.attention} to note` : ''}${acc.unresolvedSegmentCount === 0 ? ` · suggested: ${CONCLUSION_LABEL[acc.pack.suggestedConclusion]}` : ''}`}
-          </p>
-        </div>
-        <Badge tone={approved ? 'success' : acc.readyForApproval ? 'info' : 'warn'}>
-          {approved ? 'Approved' : acc.readyForApproval ? 'Ready for partner approval' : 'In progress'}
-        </Badge>
-      </Card>
+      <Section01HeaderCard header={signoff.data?.header} approved={approved} />
 
       <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
         <Card className="overflow-hidden p-0">
@@ -135,7 +118,11 @@ export function AcceptancePanel({
                   <span className="w-8 shrink-0 font-mono text-xs text-ink-faint">01.{i + 1}</span>
                   <span className="flex-1">
                     <span className="block text-ink">{s.title}</span>
-                    <span className="text-[11px] text-ink-faint">{SEGMENT_STATE_LABEL[s.state]}</span>
+                    <span className="text-[11px] text-ink-faint">
+                      {s.segmentKey === 'final_acceptance' && signoff.data
+                        ? FINAL_SEGMENT_STATE_LABEL[signoff.data.finalSegmentState]
+                        : SEGMENT_STATE_LABEL[s.state]}
+                    </span>
                   </span>
                 </button>
               </li>
@@ -145,12 +132,10 @@ export function AcceptancePanel({
 
         <div className="space-y-3">
           {selected.segmentKey === 'final_acceptance' ? (
-            <ApprovalCard
-              acc={acc}
-              canManage={canManage}
+            <AcceptanceFinal
               engagementId={engagementId}
-              onSaved={onSaved}
-              onError={onError}
+              workflowInstanceId={acc.workflowInstanceId}
+              canManage={canManage}
             />
           ) : (
             <AcceptanceSegmentEditor
@@ -173,6 +158,12 @@ export function AcceptancePanel({
                       selected.answers.find((a) => a.questionKey === 'ep_01')?.answer === 'correction'
                     }
                   />
+                ) : selected.segmentKey === 'engagement_letter' ? (
+                  <EngagementLetterSection
+                    engagementId={engagementId}
+                    workflowInstanceId={acc.workflowInstanceId}
+                    editable={editable}
+                  />
                 ) : undefined
               }
             />
@@ -189,107 +180,38 @@ export function AcceptancePanel({
   );
 }
 
-function ApprovalCard({
-  acc,
-  canManage,
-  engagementId,
-  onSaved,
-  onError,
+/** The Section 01 header (spec §3): status, progress, people and open matters. */
+function Section01HeaderCard({
+  header,
+  approved,
 }: {
-  acc: StatutoryAuditAcceptance;
-  canManage: boolean;
-  engagementId: string;
-  onSaved: () => void;
-  onError: (e: unknown) => void;
+  header: Section01Header | undefined;
+  approved: boolean;
 }): JSX.Element {
-  const [conclusion, setConclusion] = useState<AcceptanceConclusion>(acc.pack.suggestedConclusion);
-  const [conclusionChosen, setConclusionChosen] = useState(false);
-  useEffect(() => {
-    if (!conclusionChosen) setConclusion(acc.pack.suggestedConclusion);
-  }, [acc.pack.suggestedConclusion, conclusionChosen]);
-  // The memo is drafted from the file; an unedited draft is recorded server-side,
-  // ending on the conclusion chosen here.
-  const draft = acc.pack.draftMemo ?? '';
-  const [memo, setMemo] = useState(draft);
-  const [memoEdited, setMemoEdited] = useState(false);
-  useEffect(() => {
-    if (!memoEdited) setMemo(draft);
-  }, [draft, memoEdited]);
-  const approve = useMutation({
-    mutationFn: () =>
-      apiFetch(`/engagements/${engagementId}/statutory-audit/${acc.workflowInstanceId}/acceptance/approve`, {
-        method: 'POST',
-        body: { conclusion, memo: memoEdited && memo.trim() ? memo : undefined },
-      }),
-    onSuccess: onSaved,
-    onError,
-  });
-
-  if (acc.approval) {
-    return (
-      <Card className="space-y-1 p-4 text-sm">
-        <h3 className="font-semibold text-ink">Partner approval</h3>
-        <p className="text-ink">{CONCLUSION_LABEL[acc.approval.conclusion]}</p>
-        {acc.approval.memo && (
-          <p className="whitespace-pre-line text-ink-muted">{acc.approval.memo}</p>
-        )}
-        <p className="text-xs text-ink-faint">
-          {acc.approval.approvedByName} · {new Date(acc.approval.approvedAt).toLocaleDateString()}
-        </p>
-      </Card>
-    );
-  }
+  const tone =
+    header?.status === 'complete'
+      ? 'success'
+      : header?.status === 'attention_required'
+        ? 'danger'
+        : header?.status === 'ready_for_review'
+          ? 'info'
+          : 'warn';
   return (
-    <Card className="space-y-3 p-4">
-      <h3 className="text-sm font-semibold text-ink">Final acceptance &amp; partner approval</h3>
-      <p className="text-xs text-ink-muted">
-        {acc.readyForApproval
-          ? 'Every segment is resolved and no blocking matter is open.'
-          : 'Not ready yet — see below for what is open and where to put it right (a decline can be recorded at any time).'}
-      </p>
-      <SectionPackChecks pack={acc.pack} />
-      <Field label="Conclusion">
-        <Select
-          value={conclusion}
-          disabled={!canManage}
-          onChange={(e) => {
-            setConclusion(e.target.value as AcceptanceConclusion);
-            setConclusionChosen(true);
-          }}
-        >
-          {ACCEPTANCE_CONCLUSIONS.map((c) => (
-            <option key={c} value={c}>
-              {CONCLUSION_LABEL[c]}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      {acc.unresolvedSegmentCount === 0 && (
-        <p className="-mt-2 text-[11px] text-ink-faint">
-          Suggested from the answers: {CONCLUSION_LABEL[acc.pack.suggestedConclusion]}.
-        </p>
-      )}
-      <Field
-        label="Acceptance memo"
-        hint={memoEdited ? undefined : 'Drafted from the file — recorded as is, ending on the conclusion chosen above, unless you edit it.'}
-      >
-        <Textarea
-          rows={8}
-          value={memo}
-          disabled={!canManage}
-          onChange={(e) => {
-            setMemo(e.target.value);
-            setMemoEdited(true);
-          }}
-        />
-      </Field>
-      <Button
-        disabled={!canManage || approve.isPending || (!acc.readyForApproval && conclusion !== 'decline')}
-        onClick={() => approve.mutate()}
-      >
-        <CheckCircle2 className="h-4 w-4" />
-        Record partner approval
-      </Button>
+    <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+      <div>
+        <h2 className="text-sm font-semibold text-ink">Engagement &amp; Acceptance · Section 01</h2>
+        {header && (
+          <p className="text-xs text-ink-muted">
+            {header.completedSegments} of {header.applicableSegments} segments complete · Prepared by{' '}
+            {header.preparedByName ?? '—'} · Engagement Partner {header.engagementPartnerName ?? '—'} ·{' '}
+            {header.openMatterCount} open matter{header.openMatterCount === 1 ? '' : 's'}
+            {header.openBlockingMatterCount > 0 ? ` (${header.openBlockingMatterCount} blocking)` : ''}
+          </p>
+        )}
+      </div>
+      <Badge tone={header ? tone : approved ? 'success' : 'warn'}>
+        {header ? SECTION01_STATUS_LABEL[header.status] : approved ? 'Complete' : 'In Progress'}
+      </Badge>
     </Card>
   );
 }

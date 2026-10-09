@@ -517,6 +517,8 @@ export interface DocumentRow {
   currentSizeBytes: number | null;
   createdByName: string | null;
   deletedAt: string | null;
+  /** Approved work (e.g. a final Section 01 file): opens read-only until reopened. */
+  editLocked?: boolean;
   version: number;
   updatedAt: string;
 }

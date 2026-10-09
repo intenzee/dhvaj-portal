@@ -8,8 +8,9 @@ import { cn } from '@/lib/cn';
 import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui';
 import { UsersSection } from '@/components/admin/users-section';
 import { OfficesSection } from '@/components/admin/offices-section';
+import { TemplatesSection } from '@/components/admin/templates-section';
 
-type Tab = 'users' | 'offices';
+type Tab = 'users' | 'offices' | 'templates';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -29,13 +30,15 @@ export default function AdministrationPage(): JSX.Element {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'users', label: 'Users & Roles' },
     { id: 'offices', label: 'Offices' },
+    // Firm templates are configured with service.manage (MP / admin).
+    ...(can(principal, PERMISSION.serviceManage) ? [{ id: 'templates' as const, label: 'Templates' }] : []),
   ];
 
   return (
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments and offices. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices and firm templates. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -55,7 +58,9 @@ export default function AdministrationPage(): JSX.Element {
       </div>
 
       <Card>
-        <CardBody>{tab === 'users' ? <UsersSection /> : <OfficesSection />}</CardBody>
+        <CardBody>
+          {tab === 'users' ? <UsersSection /> : tab === 'offices' ? <OfficesSection /> : <TemplatesSection />}
+        </CardBody>
       </Card>
     </div>
   );

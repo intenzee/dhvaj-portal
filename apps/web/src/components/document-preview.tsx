@@ -143,8 +143,8 @@ export function DocumentPreview({
   const requestClose = useCallback(() => {
     if (!liveEditor && mode === 'edit' && dirty && !window.confirm('Discard unsaved changes?')) return;
     // Embedded editors save out-of-band (OnlyOffice force-saves on teardown; the
-    // Microsoft 365 editor autosaves + commits) — nudge the list to pick up any
-    // new version.
+    // Microsoft 365 editor syncs its live copy back on close) — nudge the list to
+    // pick up any new version.
     if (liveEditor && onSaved) {
       onSaved();
       window.setTimeout(onSaved, 2500);
@@ -164,7 +164,7 @@ export function DocumentPreview({
   const ct = state.contentType ?? '';
   const filename = state.filename ?? doc.currentFilename ?? doc.title;
   const kind = detectKind(ct, filename);
-  const editable = canEdit && isEditable(kind);
+  const editable = canEdit && !doc.editLocked && isEditable(kind);
 
   const save = async (): Promise<void> => {
     if (!editorRef.current) return;

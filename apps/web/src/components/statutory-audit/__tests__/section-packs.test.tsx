@@ -124,30 +124,141 @@ const matter = {
   updatedAt: '',
 };
 
+const signoff = {
+  workflowInstanceId: 'wf1',
+  header: {
+    status: 'attention_required',
+    completedSegments: 1,
+    applicableSegments: 2,
+    preparedByName: 'Asha Manager',
+    engagementPartnerName: 'Ravi Partner',
+    openMatterCount: 1,
+    openBlockingMatterCount: 1,
+  },
+  finalSegmentState: 'locked',
+  readiness: [
+    {
+      key: 'appointment_eligibility',
+      label: 'Appointment & Eligibility',
+      statusLabel: 'In Progress',
+      ok: false,
+      anchor: 'segment-appointment_eligibility',
+    },
+    {
+      key: 'independence_ethics',
+      label: 'Independence & Ethics',
+      statusLabel: 'Complete',
+      ok: true,
+      anchor: 'segment-independence_ethics',
+    },
+  ],
+  openMatters: [
+    {
+      id: 'm1',
+      code: 'M-001',
+      title: 'Threats to independence — adverse response requires action/safeguard.',
+      severity: 'high',
+      isBlocking: true,
+      anchor: 'segment-independence_ethics',
+    },
+  ],
+  blockers: [
+    'Appointment & Eligibility is in progress.',
+    '1 blocking acceptance matter must be resolved or accepted with approval.',
+  ],
+  recommendation: null as Record<string, unknown> | null,
+  decisions: [],
+  callerIsEngagementPartner: true,
+  canSubmit: true,
+  canDecide: false,
+  canReopen: false,
+  draftMemo: 'Engagement acceptance — financial year 2024-25.',
+};
+
+let signoffView: typeof signoff = signoff;
+
 beforeEach(() => {
   apiFetch.mockReset();
+  signoffView = signoff;
   apiFetch.mockImplementation((url: string) =>
-    Promise.resolve(url.includes('/matters') ? [matter] : [acceptance]),
+    Promise.resolve(
+      url.includes('/matters')
+        ? [matter]
+        : /\/acceptance\/(signoff|recommend|approve)$/.test(url)
+          ? signoffView
+          : [acceptance],
+    ),
   );
 });
 
-describe('Section 01 approval pack', () => {
-  it('shows what approval needs, suggests the conclusion and drafts the memo', async () => {
+describe('Section 01 final acceptance', () => {
+  it('shows the header, readiness and blockers, and gates a clear recommendation', async () => {
+    render(wrap(<AcceptancePanel engagementId="e1" />));
+    expect(await screen.findByText('Attention Required')).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 segments complete · Prepared by Asha Manager/)).toBeInTheDocument();
+    // The 01.8 row shows its derived state.
+    expect(screen.getByRole('button', { name: /Final Acceptance\s*Locked/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Final Acceptance/ }));
+    expect(
+      await screen.findByText(/Engagement cannot yet be accepted\. 2 matters require attention\./),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('M-001').length).toBeGreaterThan(0);
+
+    const submit = screen.getByRole('button', { name: /Submit to Engagement Partner/ });
+    const rec = screen.getByRole('combobox', { name: /Recommendation/ });
+    await userEvent.selectOptions(rec, 'accept');
+    expect(submit).toBeDisabled();
+    await userEvent.selectOptions(rec, 'accept_with_safeguards');
+    expect(submit).toBeDisabled(); // comments are mandatory
+    await userEvent.type(screen.getByRole('textbox', { name: /Comments/ }), 'Rotate the assistant.');
+    expect(submit).toBeEnabled();
+    await userEvent.click(submit);
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/engagements/e1/statutory-audit/wf1/acceptance/recommend',
+      expect.objectContaining({
+        method: 'POST',
+        body: { recommendation: 'accept_with_safeguards', comments: 'Rotate the assistant.' },
+      }),
+    );
+  });
+
+  it('lets only the Engagement Partner conclude, with safeguards for a conditional acceptance', async () => {
+    signoffView = {
+      ...signoff,
+      blockers: [],
+      finalSegmentState: 'ready_for_approval',
+      canSubmit: false,
+      canDecide: true,
+      recommendation: {
+        id: 'r1',
+        cycle: 1,
+        recommendation: 'accept_with_safeguards',
+        comments: 'Rotate the assistant.',
+        status: 'submitted',
+        submittedByName: 'Asha Manager',
+        submittedAt: '2024-04-10T00:00:00Z',
+      },
+    };
     render(wrap(<AcceptancePanel engagementId="e1" />));
     await userEvent.click(await screen.findByRole('button', { name: /Final Acceptance/ }));
-    expect(screen.getByText('What approval needs')).toBeInTheDocument();
-    expect(screen.getByText('• Appointment & Eligibility — 2 of 3 answered')).toBeInTheDocument();
-    expect(screen.getByText(/Worth knowing \(1 — never blocks\)/)).toBeInTheDocument();
-    expect(screen.getByRole('combobox')).toHaveValue('accept_with_conditions');
-    expect(
-      screen.getByDisplayValue(/Engagement acceptance — financial year 2024-25/),
-    ).toBeInTheDocument();
+    const record = await screen.findByRole('button', { name: /Record conclusion/ });
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /Conclusion/ }), 'accept_with_conditions');
+    expect(record).toBeDisabled();
+    await userEvent.type(screen.getByRole('textbox', { name: /Safeguards/ }), 'Assistant rotated off.');
+    expect(record).toBeEnabled();
+    await userEvent.click(record);
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/engagements/e1/statutory-audit/wf1/acceptance/approve',
+      expect.objectContaining({
+        body: expect.objectContaining({ conclusion: 'accept_with_conditions', safeguards: 'Assistant rotated off.' }),
+      }),
+    );
   });
 
   it('"Go to" selects the segment it names', async () => {
     render(wrap(<AcceptancePanel engagementId="e1" />));
     await userEvent.click(await screen.findByRole('button', { name: /Final Acceptance/ }));
-    await userEvent.click(screen.getByRole('button', { name: /Open Appointment & Eligibility/ }));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Go to' }))[0]!);
     expect(
       await screen.findByRole('heading', { name: 'Appointment & Eligibility' }),
     ).toBeInTheDocument();

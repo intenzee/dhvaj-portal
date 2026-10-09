@@ -164,7 +164,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: 'Administration',
         href: '/admin',
         icon: Settings,
-        hint: 'Users, roles and offices.',
+        hint: 'Users, roles, offices and firm templates.',
         permission: PERMISSION.userManage,
         ready: true,
       },
