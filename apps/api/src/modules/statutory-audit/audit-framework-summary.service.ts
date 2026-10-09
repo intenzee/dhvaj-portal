@@ -29,6 +29,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditCaroService } from './audit-caro.service';
 import { AuditConsolidationService } from './audit-consolidation.service';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
+import { readFinancialReportingResult } from './financial-reporting-result';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditProfileService } from './audit-profile.service';
@@ -203,6 +204,13 @@ export class AuditFrameworkSummaryService {
       [workflowInstanceId],
     );
     const byKey = new Map(rows.map((r) => [`${r.sub_section_key}|${r.area_key}`, r]));
+    // 02.2 counts as decided only once COMPLETE (spec §21: conclusion, Partner
+    // approval where required, SMC / first-time status, no open Framework Review).
+    const frf = byKey.get(`${SUB_SECTION_KEY.financialReporting}|${FRAMEWORK_AREA_KEY.financialReportingFramework}`);
+    const frfComplete =
+      frf && DECIDED.has(frf.state) && frf.state !== 'approved'
+        ? ((await readFinancialReportingResult(client, workflowInstanceId))?.complete ?? false)
+        : true;
     return SECTIONS.map(({ sub, area, title }) => {
       const r = byKey.get(`${sub}|${area}`);
       const state: FrameworkState = (r?.state ?? 'not_assessed') as FrameworkState;
@@ -216,7 +224,10 @@ export class AuditFrameworkSummaryService {
         ruleVersionId: r?.rule_version_id ?? null,
         authorityProvisionId: r?.authority_provision_id ?? null,
         needsReevaluation: r?.needs_reevaluation ?? false,
-        decided: r != null && DECIDED.has(state),
+        decided:
+          r != null &&
+          DECIDED.has(state) &&
+          (sub !== SUB_SECTION_KEY.financialReporting || frfComplete),
       };
     });
   }

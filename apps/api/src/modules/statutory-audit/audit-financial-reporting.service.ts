@@ -638,8 +638,9 @@ export class AuditFinancialReportingService {
           );
       }
 
-      const onlyFirstTime = Object.keys(input).every(
-        (k) => k === 'version' || k === 'firstTimeAdoption' || k === 'firstTimeAdoptionReason',
+      const onlyFirstTime = keys.every(
+        (k) =>
+          k === 'firstTimeAdoption' || k === 'firstTimeAdoptionReason' || input[k] === undefined,
       );
       // A changed fact invalidates a recorded conclusion (it must reflect the facts);
       // FRF-06 sits on top of the conclusion and does not.
