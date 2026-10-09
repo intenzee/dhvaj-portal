@@ -10,7 +10,11 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type AuthorityProvisionRecord } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type AuthorityProvisionRecord,
+  type AuthorityReference,
+} from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -33,6 +37,39 @@ export class AuthorityProvisionsController {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
   ) {}
+
+  @Get('references/:contextKey')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: "A workflow context's View Provision links, resolved for a date",
+    description:
+      'The configured links of the context (e.g. 02.2) in the version in force on `on`, ' +
+      'then each provision version a conclusion cited (`cited`, comma-separated ids).',
+  })
+  async references(
+    @CurrentPrincipal() principal: Principal,
+    @Param('contextKey') contextKey: string,
+    @Query('on') on?: string,
+    @Query('cited') cited?: string,
+  ): Promise<AuthorityReference[]> {
+    if (!/^[0-9]{2}(\.[0-9]{1,2})?$/.test(contextKey)) {
+      throw new BadRequestException('Unknown reference context.');
+    }
+    const date = on ?? new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+      throw new BadRequestException('`on` must be YYYY-MM-DD.');
+    const ids = (cited ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (ids.length > 20 || ids.some((id) => !uuid.test(id))) {
+      throw new BadRequestException('`cited` must be up to 20 provision ids.');
+    }
+    return this.db.withRlsContext(rlsContextFromPrincipal(principal), (client) =>
+      this.rules.resolveReferencesWithCitedOn(client, contextKey, date, ids),
+    );
+  }
 
   @Get(':code')
   @RequirePermissions(PERMISSION.engagementRead)

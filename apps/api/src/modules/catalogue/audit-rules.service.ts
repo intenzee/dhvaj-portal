@@ -203,6 +203,40 @@ export class AuditRulesService {
     return out;
   }
 
+  /**
+   * A context's references (see {@link resolveReferencesOn}) plus the exact
+   * provision versions a conclusion cited by id (e.g. the rule a 02.2 result
+   * triggered) — each cited one once, after the configured links, skipping any
+   * the configured links already show.
+   */
+  async resolveReferencesWithCitedOn(
+    client: PoolClient,
+    contextKey: string,
+    effectiveOn: string,
+    citedProvisionIds: readonly string[],
+  ): Promise<AuthorityReference[]> {
+    const refs = await this.resolveReferencesOn(client, contextKey, effectiveOn);
+    const shown = new Set(refs.map((r) => r.provision?.id).filter(Boolean));
+    const ids = [...new Set(citedProvisionIds)].filter((id) => !shown.has(id));
+    if (ids.length === 0) return refs;
+    const { rows } = await client.query<AuthorityProvisionRow>(
+      `SELECT ${PROVISION_COLUMNS} FROM hsdg.authority_provision
+        WHERE id = ANY($1::uuid[])
+        ORDER BY code`,
+      [ids],
+    );
+    for (const row of rows) {
+      const provision = mapProvision(row);
+      refs.push({
+        anchor: `cited_${provision.code.toLowerCase()}`,
+        label: `${provision.provisionNumber} - ${provision.title}`,
+        code: provision.code,
+        provision,
+      });
+    }
+    return refs;
+  }
+
   /** Public wrapper: one provision by code for a date (the in-portal viewer). */
   async resolveProvision(
     ctx: RlsContext,
