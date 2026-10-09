@@ -12,6 +12,9 @@ jest.mock('@/lib/api', () => ({
 jest.mock('@/lib/auth', () => ({ useAuth: () => ({ principal: {} }) }));
 jest.mock('@/lib/principal', () => ({ can: () => true }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
+jest.mock('../icfr-workspace', () => ({
+  IcfrWorkspace: () => <p>icfr workspace</p>,
+}));
 
 function wrap(ui: ReactNode): ReactNode {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -33,7 +36,7 @@ beforeEach(() => {
         {
           workflowInstanceId: 'wf1',
           assessment: assessment('applicable'),
-          capturedFacts: { peakCoveredBorrowings: null, filingDefault: true },
+          capturedFacts: { peakCoveredBorrowings: null, filingDefault: null },
           masterFacts: [
             {
               label: 'ROC filing record (§92 / §137)',
@@ -105,6 +108,19 @@ describe('ICFR & other reporting card', () => {
           version: 5,
         },
       },
+    );
+  });
+
+  it('opens the 02.5 ICFR workspace in place (+/−, no pop-up)', async () => {
+    const user = userEvent.setup();
+    render(wrap(<ReportingFactsCard engagementId="e1" />));
+    const toggle = await screen.findByRole('button', { name: /Open the 02.5 ICFR workspace/ });
+    expect(screen.queryByText('icfr workspace')).toBeNull();
+    await user.click(toggle);
+    expect(screen.getByText('icfr workspace')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Hide the 02.5 ICFR workspace/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
     );
   });
 });
