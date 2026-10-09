@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type {
   AuditRuleBandRecord,
   AuthorityProvisionRecord,
   AuthorityReference,
   AuthorityReferenceKind,
+  SupersedeAuthorityProvisionInput,
   UpdateAuthorityProvisionInput,
   MeasurementBasis,
   ResolvedRule,
@@ -68,10 +69,23 @@ export class AuditRulesService {
               r.operator, r.unit, r.measurement_basis,
               v.id AS version_id, v.version, v.effective_from::text, v.effective_to::text,
               v.threshold::text, v.threshold_high::text, v.outcome,
-              v.authority_provision_id, v.guidance_reference, v.condition
+              -- The rule cites a provision by its stable code: the version in
+              -- force for the period, else the exact version recorded.
+              COALESCE(
+                (SELECT p2.id
+                   FROM hsdg.authority_provision p1
+                   JOIN hsdg.authority_provision p2 ON p2.code = p1.code
+                  WHERE p1.id = v.authority_provision_id
+                    AND p2.effective_from <= $1::date
+                    AND (p2.effective_to IS NULL OR p2.effective_to >= $1::date)
+                  ORDER BY p2.effective_from DESC
+                  LIMIT 1),
+                v.authority_provision_id) AS authority_provision_id,
+              v.guidance_reference, v.condition
          FROM hsdg.audit_rule r
          JOIN hsdg.audit_rule_version v ON v.audit_rule_id = r.id
         WHERE r.is_active = true`,
+      [auditPeriodStart],
     );
 
     // Group versions per rule, then freeze the one in force for the period.
@@ -165,7 +179,7 @@ export class AuditRulesService {
          FROM hsdg.authority_provision
         WHERE code = $1
           AND effective_from <= $2::date
-          AND (effective_to IS NULL OR effective_to > $2::date)
+          AND (effective_to IS NULL OR effective_to >= $2::date)
         ORDER BY effective_from DESC
         LIMIT 1`,
       [code, effectiveOn],
@@ -275,6 +289,97 @@ export class AuditRulesService {
     return rows[0] ? mapProvision(rows[0]) : null;
   }
 
+  /** Every version of a provision code, newest first (the viewer's version history). */
+  async listProvisionVersionsOn(
+    client: PoolClient,
+    code: string,
+  ): Promise<AuthorityProvisionRecord[]> {
+    const { rows } = await client.query<AuthorityProvisionRow>(
+      `SELECT ${PROVISION_COLUMNS} FROM hsdg.authority_provision
+        WHERE code = $1
+        ORDER BY effective_from DESC`,
+      [code],
+    );
+    return rows.map(mapProvision);
+  }
+
+  /**
+   * Methodology administration (02.2 §20): supersede the CURRENT version of a
+   * provision. The current one closes the day before `effectiveFrom` and gains
+   * `superseded_by_id`; the new version (same code, version_no + 1) carries the
+   * new citation, with blank fields copied over. Nothing already in force for an
+   * earlier period changes. Returns null when the id is unknown.
+   */
+  async supersedeProvisionOn(
+    client: PoolClient,
+    id: string,
+    input: SupersedeAuthorityProvisionInput,
+    employeeId: string | null,
+  ): Promise<{ previous: AuthorityProvisionRecord; current: AuthorityProvisionRecord } | null> {
+    const { rows } = await client.query<AuthorityProvisionRow>(
+      `SELECT ${PROVISION_COLUMNS} FROM hsdg.authority_provision WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const old = rows[0];
+    if (!old) return null;
+    if (old.superseded_by_id) {
+      throw new ConflictException(
+        'This version is already superseded — supersede the current version instead.',
+      );
+    }
+    const from = input.effectiveFrom;
+    if (!isIsoDate(from)) throw new BadRequestException('effectiveFrom must be a real date.');
+    if (from <= old.effective_from) {
+      throw new BadRequestException(
+        `The new version must start after ${old.effective_from}, when the current one took effect.`,
+      );
+    }
+    const note = input.changeNote?.trim();
+    if (!note) throw new BadRequestException('Say what changed in the change note.');
+    const keep = (v: string | null | undefined, cur: string | null) => v?.trim() || cur;
+
+    // Close first, so the one-open-version-per-code index never sees two.
+    await client.query(
+      `UPDATE hsdg.authority_provision
+          SET effective_to = CASE
+                WHEN effective_to IS NULL OR effective_to >= $2::date
+                THEN ($2::date - 1) ELSE effective_to END
+        WHERE id = $1`,
+      [id, from],
+    );
+    const inserted = await client.query<AuthorityProvisionRow>(
+      `INSERT INTO hsdg.authority_provision
+         (code, authority, title, provision_number, effective_from, source_reference,
+          methodology_version_scope, reference_kind, summary, source_url,
+          version_no, change_note, created_by_employee_id)
+       VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10,
+               (SELECT max(version_no) + 1 FROM hsdg.authority_provision WHERE code = $1),
+               $11, $12)
+       RETURNING ${PROVISION_COLUMNS}`,
+      [
+        old.code,
+        old.authority,
+        keep(input.title, old.title),
+        keep(input.provisionNumber, old.provision_number),
+        from,
+        keep(input.sourceReference, old.source_reference),
+        old.methodology_version_scope,
+        old.reference_kind,
+        keep(input.summary, old.summary),
+        keep(input.sourceUrl, old.source_url),
+        note,
+        employeeId,
+      ],
+    );
+    const current = inserted.rows[0]!;
+    const closed = await client.query<AuthorityProvisionRow>(
+      `UPDATE hsdg.authority_provision SET superseded_by_id = $2 WHERE id = $1
+       RETURNING ${PROVISION_COLUMNS}`,
+      [id, current.id],
+    );
+    return { previous: mapProvision(closed.rows[0]!), current: mapProvision(current) };
+  }
+
   private async loadBands(
     client: PoolClient,
     versionIds: string[],
@@ -327,6 +432,8 @@ interface AuthorityProvisionRow {
   reference_kind: AuthorityReferenceKind;
   summary: string | null;
   source_url: string | null;
+  version_no: number;
+  change_note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -334,7 +441,7 @@ interface AuthorityProvisionRow {
 const PROVISION_COLUMNS = `id, code, authority, title, provision_number,
               effective_from::text, effective_to::text, source_reference,
               superseded_by_id, methodology_version_scope,
-              reference_kind, summary, source_url,
+              reference_kind, summary, source_url, version_no, change_note,
               created_at::text, updated_at::text`;
 
 function mapProvision(row: AuthorityProvisionRow): AuthorityProvisionRecord {
@@ -352,6 +459,8 @@ function mapProvision(row: AuthorityProvisionRow): AuthorityProvisionRecord {
     referenceKind: row.reference_kind,
     summary: row.summary,
     sourceUrl: row.source_url,
+    versionNo: row.version_no,
+    changeNote: row.change_note,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -367,4 +476,10 @@ export function buildRuleResolverOn(
   auditPeriodStart: string,
 ): Promise<RuleResolver> {
   return new AuditRulesService(undefined as never).buildResolverOn(client, auditPeriodStart);
+}
+
+function isIsoDate(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
 }

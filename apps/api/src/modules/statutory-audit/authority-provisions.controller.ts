@@ -7,6 +7,7 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -21,6 +22,7 @@ import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { UpdateAuthorityProvisionDto } from './dto/profile.dto';
+import { SupersedeAuthorityProvisionDto } from './dto/authority-provision.dto';
 
 /**
  * The Authority / Provision Library behind every `View Provision / View
@@ -71,6 +73,21 @@ export class AuthorityProvisionsController {
     );
   }
 
+  @Get(':code/versions')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: "A provision's version history, newest first (02.2 §20)" })
+  async versions(
+    @CurrentPrincipal() principal: Principal,
+    @Param('code') code: string,
+  ): Promise<AuthorityProvisionRecord[]> {
+    if (!/^[A-Z0-9_]{2,60}$/.test(code)) throw new BadRequestException('Unknown provision code.');
+    const list = await this.db.withRlsContext(rlsContextFromPrincipal(principal), (client) =>
+      this.rules.listProvisionVersionsOn(client, code),
+    );
+    if (!list.length) throw new NotFoundException('Unknown provision code.');
+    return list;
+  }
+
   @Get(':code')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'The provision / standard in force on a date (default: today)' })
@@ -112,6 +129,44 @@ export class AuthorityProvisionsController {
         after: { summary: dto.summary, sourceUrl: dto.sourceUrl },
       });
       return updated;
+    });
+  }
+
+  @Post(':id/supersede')
+  @RequirePermissions(PERMISSION.serviceManage)
+  @ApiOperation({
+    summary: 'Supersede the current version of a provision with a new dated version',
+    description:
+      'Closes the current version the day before `effectiveFrom` and appends the new one; ' +
+      'engagements whose audit period started earlier keep resolving the old version.',
+  })
+  async supersede(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: SupersedeAuthorityProvisionDto,
+  ): Promise<AuthorityProvisionRecord> {
+    const ctx = rlsContextFromPrincipal(principal);
+    return this.db.withRlsContext(ctx, async (client) => {
+      const out = await this.rules.supersedeProvisionOn(client, id, dto, ctx.employeeId ?? null);
+      if (!out) throw new NotFoundException('Provision not found.');
+      await this.audit.recordWith(client, ctx, {
+        action: 'authority.provision_superseded',
+        objectType: 'authority_provision',
+        objectId: out.current.id,
+        before: {
+          id: out.previous.id,
+          versionNo: out.previous.versionNo,
+          effectiveTo: out.previous.effectiveTo,
+        },
+        after: {
+          code: out.current.code,
+          versionNo: out.current.versionNo,
+          effectiveFrom: out.current.effectiveFrom,
+          provisionNumber: out.current.provisionNumber,
+          changeNote: out.current.changeNote,
+        },
+      });
+      return out.current;
     });
   }
 }

@@ -50,6 +50,10 @@ export interface AuthorityProvisionRecord {
   summary: string | null;
   /** The authoritative source (MCA / ICAI), opened from the viewer — never from a component. */
   sourceUrl: string | null;
+  /** 1 for the first version of a code; each supersession adds one. */
+  versionNo: number;
+  /** Why this version was added (amendment, notification …); null for the first. */
+  changeNote: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -90,4 +94,22 @@ export interface AuthorityReference {
 export interface UpdateAuthorityProvisionInput {
   summary?: string | null;
   sourceUrl?: string | null;
+}
+
+/**
+ * Methodology administration: supersede the current version of a provision
+ * (02.2 §20). Appends a version in force from `effectiveFrom` and closes the
+ * current one the day before; blank fields carry over from the current version.
+ * Engagements whose audit period started earlier keep resolving the old one.
+ */
+export interface SupersedeAuthorityProvisionInput {
+  /** ISO date; after the current version's own effective-from. */
+  effectiveFrom: string;
+  provisionNumber?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  sourceUrl?: string | null;
+  sourceReference?: string | null;
+  /** Required: what changed (e.g. 'Substituted by the Companies (Ind AS) Amendment Rules, 2024'). */
+  changeNote: string;
 }

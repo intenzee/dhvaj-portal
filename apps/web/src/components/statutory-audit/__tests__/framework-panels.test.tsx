@@ -2,9 +2,11 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import type { AuthorityProvisionRecord, AuthorityReference } from '@hsdg/contracts';
 import { FrameworkEvidence } from '../framework-evidence';
 import { FrameworkReferences } from '../framework-references';
 import { FinancialReportingDownstream } from '../framework-downstream';
+import { ProvisionViewer } from '../provision-viewer';
 
 const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
@@ -129,7 +131,7 @@ describe('02.2 evidence and technical memo', () => {
 
 // ── References (§20) ────────────────────────────────────────────────────────
 
-const ref = (anchor: string, label: string, code: string) => ({
+const ref = (anchor: string, label: string, code: string): AuthorityReference => ({
   anchor,
   label,
   code,
@@ -147,6 +149,10 @@ const ref = (anchor: string, label: string, code: string) => ({
     referenceKind: 'provision',
     summary: 'Summary.',
     sourceUrl: 'https://www.mca.gov.in/MinistryV2/Stand.html',
+    versionNo: 1,
+    changeNote: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
   },
 });
 
@@ -179,6 +185,59 @@ describe('02.2 references', () => {
       'href',
       'https://www.mca.gov.in/MinistryV2/Stand.html',
     );
+  });
+});
+
+describe('provision versions (§20)', () => {
+  const r = ref('rule_4', 'View Rule 4', 'INDAS_RULE_4');
+  const v2: AuthorityProvisionRecord = {
+    ...r.provision!,
+    id: 'p-v2',
+    versionNo: 2,
+    effectiveFrom: '2024-04-01',
+    provisionNumber: 'Rule 4 (as amended)',
+    changeNote: 'Substituted in 2024.',
+  };
+  const v1: AuthorityProvisionRecord = {
+    ...r.provision!,
+    effectiveTo: '2024-03-31',
+    supersededById: 'p-v2',
+  };
+
+  it('shows the version history and, for an earlier period, says a later version exists', async () => {
+    apiFetch.mockResolvedValue([v2, v1]);
+    render(wrap(<ProvisionViewer reference={{ ...r, provision: v1 }} canAdmin={false} />));
+    expect(screen.getByText(/A later version applies from/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Version history/ }));
+    expect(await screen.findByText(/Version 2 · Rule 4 \(as amended\)/)).toBeInTheDocument();
+    expect(screen.getByText('Substituted in 2024.')).toBeInTheDocument();
+    expect(apiFetch).toHaveBeenCalledWith('/authority-provisions/INDAS_RULE_4/versions');
+    // An older version cannot be superseded, and non-admins see no admin controls.
+    expect(screen.queryByRole('button', { name: /Supersede/ })).toBeNull();
+  });
+
+  it('lets an administrator supersede the current version with a dated change note', async () => {
+    apiFetch.mockResolvedValue(v2);
+    render(wrap(<ProvisionViewer reference={r} canAdmin />));
+    await userEvent.click(screen.getByRole('button', { name: 'Supersede with a new version' }));
+    const form = screen.getByRole('form', { name: 'Supersede with a new version' });
+    const submit = screen.getByRole('button', { name: 'Supersede' });
+    expect(submit).toBeDisabled();
+    const date = form.querySelector('input[type="date"]') as HTMLInputElement;
+    await userEvent.type(date, '2024-04-01');
+    await userEvent.type(screen.getByLabelText('What changed'), 'Substituted in 2024.');
+    await userEvent.click(submit);
+    expect(apiFetch).toHaveBeenCalledWith('/authority-provisions/p-INDAS_RULE_4/supersede', {
+      method: 'POST',
+      body: {
+        effectiveFrom: '2024-04-01',
+        provisionNumber: null,
+        title: null,
+        sourceUrl: null,
+        summary: null,
+        changeNote: 'Substituted in 2024.',
+      },
+    });
   });
 });
 
