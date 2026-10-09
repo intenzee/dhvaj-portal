@@ -411,6 +411,7 @@ describe('Statutory Audit — 02.1 Profile (e2e §9.1)', () => {
       .expect(200);
     expect(res.body.code).toBe('COS_ACT_2_85');
     expect(res.body.summary).toBeTruthy();
+    expect(res.body.sourceUrl).toBe('https://www.indiacode.nic.in/handle/123456789/2114');
     await request(app.getHttpServer())
       .get('/api/v1/authority-provisions/COS_ACT_2_85?on=01-04-2024')
       .set(bearer(pa))
