@@ -94,6 +94,16 @@ describe('deriveAcceptanceMatters (Section 01 matters, guide §8.4)', () => {
     });
   });
 
+  it('01.6 preconditions raise blocking Preconditions matters', () => {
+    const pre = (questionKey: string, answer: string) =>
+      deriveAcceptanceMatters([ans({ segmentKey: 'audit_preconditions', questionKey, answer })])[0];
+    expect(pre('pre_01', 'pending')).toBeUndefined();
+    expect(pre('pre_01', 'no')).toMatchObject({ category: 'preconditions', severity: 'critical' });
+    expect(pre('pre_03', 'no')).toMatchObject({ category: 'preconditions', isBlocking: true });
+    expect(pre('pre_06', 'yes')).toMatchObject({ category: 'preconditions', isBlocking: true });
+    expect(pre('pre_06', 'no')).toBeUndefined();
+  });
+
   it('ignores unknown questions and yields one matter per distinct adverse answer', () => {
     expect(deriveAcceptanceMatters([ans({ questionKey: 'nonexistent', answer: 'issue' })])).toEqual(
       [],

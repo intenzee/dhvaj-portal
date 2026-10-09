@@ -553,13 +553,18 @@ describe('Statutory Audit (e2e §35/§36)', () => {
     const { engId, shellId } = await newAuditFile();
     await approveFramework(engId, shellId, { caroApplicable: true });
 
-    const audit = await request(app.getHttpServer())
-      .get('/api/v1/audit?limit=100')
-      .set(bearer(mp))
-      .expect(200);
-    const actions = (audit.body.items as Array<{ action: string; objectId: string }>)
-      .filter((e) => e.objectId === shellId)
-      .map((e) => e.action);
+    // The firm-wide log is newest first; read back far enough to reach this
+    // file's provisioning (Section 01 records an event per answer).
+    const actions: string[] = [];
+    for (let offset = 0; offset < 1000; offset += 100) {
+      const audit = await request(app.getHttpServer())
+        .get(`/api/v1/audit?limit=100&offset=${offset}`)
+        .set(bearer(mp))
+        .expect(200);
+      const items = audit.body.items as Array<{ action: string; objectId: string }>;
+      actions.push(...items.filter((e) => e.objectId === shellId).map((e) => e.action));
+      if (actions.includes('statutory_audit.workflow_provisioned') || items.length < 100) break;
+    }
     expect(actions).toContain('statutory_audit.framework_approved');
     expect(actions).toContain('statutory_audit.workflow_provisioned');
   });

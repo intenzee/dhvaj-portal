@@ -348,6 +348,40 @@ describe('Section 01 question engine', () => {
     });
   });
 
+  describe('01.6 Audit Preconditions', () => {
+    const clean: AnswersByKey = {
+      pre_01: ans('yes'),
+      pre_02: ans('yes'),
+      pre_03: ans('yes'),
+      pre_04: ans('yes'),
+      pre_05: ans('yes'),
+      pre_06: ans('no'),
+    };
+
+    it('completes on the six preconditions; a pending framework may proceed (methodology)', () => {
+      expect(evaluateSegment('audit_preconditions', clean, ctx()).state).toBe('complete');
+      expect(
+        evaluateSegment('audit_preconditions', { ...clean, pre_01: ans('pending') }, ctx()).state,
+      ).toBe('complete');
+    });
+
+    it('a "No" on PRE-02 to PRE-05 needs Partner attention, settled with its matter', () => {
+      const answers = { ...clean, pre_04: ans('no', { explanation: 'Board minutes refused.' }) };
+      const ev = evaluateSegment('audit_preconditions', answers, ctx());
+      expect(ev.state).toBe('attention_required');
+      expect(ev.attention).toEqual([
+        'Management has not agreed to provide all relevant information',
+      ]);
+      expect(
+        evaluateSegment(
+          'audit_preconditions',
+          answers,
+          ctx({ settledSources: ['acceptance:audit_preconditions:pre_04'] }),
+        ).state,
+      ).toBe('complete');
+    });
+  });
+
   describe('01.7 Engagement Letter', () => {
     const letter = (status?: string) =>
       evaluateSegment(

@@ -149,7 +149,6 @@ const YES_CLEAR: AcceptanceOption = { ...YES, tone: 'clear' };
 const NO_CLEAR: AcceptanceOption = { ...NO, tone: 'clear' };
 const YES_EXC: AcceptanceOption = { ...YES, tone: 'exception' };
 const NO_EXC: AcceptanceOption = { ...NO, tone: 'exception' };
-const NA: AcceptanceOption = { value: 'na', label: 'N/A', tone: 'clear' };
 
 const EXPLAIN: AcceptanceDetailField = {
   key: 'explanation',
@@ -379,8 +378,6 @@ export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
     ],
   },
 
-  // 01.2 – 01.7: the methodology's earlier Yes / No / N/A checks, until each
-  // segment's full question set lands.
   // 01.2 Appointment & Auditor Eligibility (spec §5).
   {
     segmentKey: 'appointment_eligibility',
@@ -992,35 +989,87 @@ export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
       },
     ],
   },
-  ...legacy('audit_preconditions', [
+  // 01.6 Audit Preconditions (spec §9) — the minimum preconditions only; the
+  // detailed framework analysis is Section 02's.
+  {
+    segmentKey: 'audit_preconditions',
+    questionKey: 'pre_01',
+    code: 'PRE-01',
+    prompt:
+      'Has an acceptable financial reporting framework for preparation of the financial statements been identified?',
+    control: 'choice',
+    options: [
+      YES_CLEAR,
+      ACCEPTANCE_METHODOLOGY.allowPendingFramework
+        ? { value: 'pending', label: 'Pending Framework Assessment', tone: 'clear' }
+        : {
+            value: 'pending',
+            label: 'Pending Framework Assessment',
+            tone: 'pending',
+            pending: 'Financial reporting framework still to be assessed',
+          },
+      {
+        ...NO_EXC,
+        attention: 'No acceptable financial reporting framework identified',
+      },
+    ],
+    details: [{ when: ['no'], fields: [EXPLAIN] }],
+    hint: ACCEPTANCE_METHODOLOGY.allowPendingFramework
+      ? 'Pending is allowed here; the framework is assessed in detail in Section 02.'
+      : undefined,
+  },
+  ...preconditions([
     [
-      'acceptable_framework',
-      'The financial reporting framework to be applied is acceptable (SA 210).',
-      'no',
+      'pre_02',
+      'PRE-02',
+      'Has management acknowledged responsibility for preparation of the financial statements in accordance with the applicable financial reporting framework?',
+      'Management has not acknowledged responsibility for the financial statements',
     ],
     [
-      'management_responsibilities',
-      'Management acknowledges its responsibilities (premise of the audit).',
-      'no',
+      'pre_03',
+      'PRE-03',
+      'Has management acknowledged responsibility for such internal control as management determines necessary for preparation of financial statements free from material misstatement?',
+      'Management has not acknowledged responsibility for internal control',
     ],
-    ['no_scope_limitation', 'Management imposes a scope limitation precluding an opinion.', 'yes'],
+    [
+      'pre_04',
+      'PRE-04',
+      'Has management agreed to provide all relevant information and any additional information requested for purposes of the audit?',
+      'Management has not agreed to provide all relevant information',
+    ],
+    [
+      'pre_05',
+      'PRE-05',
+      'Has management agreed to provide unrestricted access to persons within the entity from whom the auditor considers it necessary to obtain audit evidence?',
+      'Management has not agreed to unrestricted access to persons',
+    ],
   ]),
+  {
+    segmentKey: 'audit_preconditions',
+    questionKey: 'pre_06',
+    code: 'PRE-06',
+    prompt:
+      'Is there any limitation or disagreement that prevents the preconditions for the audit from being satisfied?',
+    control: 'choice',
+    options: [YES_EXC, NO_CLEAR],
+    details: [{ when: ['yes'], fields: [EXPLAIN] }],
+  },
   // 01.7 has no questions: it follows the engagement letter's file lifecycle
   // (see SEGMENT_RULES.engagement_letter).
 ];
 
-function legacy(
-  segmentKey: string,
-  rows: readonly [string, string, 'yes' | 'no'][],
+/** PRE-02 – PRE-05: Yes / No, where No needs the Engagement Partner's attention. */
+function preconditions(
+  rows: readonly [string, string, string, string][],
 ): AcceptanceQuestionDefinition[] {
-  return rows.map(([questionKey, prompt, adverse]) => ({
-    segmentKey,
+  return rows.map(([questionKey, code, prompt, attention]) => ({
+    segmentKey: 'audit_preconditions',
     questionKey,
-    code: '',
+    code,
     prompt,
     control: 'choice' as const,
-    options: [adverse === 'yes' ? YES_EXC : YES_CLEAR, adverse === 'no' ? NO_EXC : NO_CLEAR, NA],
-    details: [{ when: [adverse], fields: [EXPLAIN] }],
+    options: [YES_CLEAR, { ...NO_EXC, attention }],
+    details: [{ when: ['no'], fields: [EXPLAIN] }],
   }));
 }
 

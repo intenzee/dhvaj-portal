@@ -5,7 +5,6 @@ import {
   independenceNeedsPartnerApproval,
   acceptanceSource,
   answerLabel,
-  isExceptionAnswer,
   questionByKey,
   type AcceptanceDetails,
   type AcceptanceMatterCategory,
@@ -41,14 +40,6 @@ interface MatterShape {
 type Rule = (a: AcceptanceAnswerInput) => (MatterShape & { title?: string; sub?: string })[];
 
 const C = ACCEPTANCE_MATTER_CATEGORY;
-
-/** Matter for an exception answer to one of the earlier Yes / No checks. */
-const legacy =
-  (shape: MatterShape): Rule =>
-  (a) => {
-    const q = questionByKey(a.questionKey);
-    return q && isExceptionAnswer(q, a.answer) ? [shape] : [];
-  };
 
 /**
  * APP-05 checklist row marked Issue (spec §5): "any issue creates an
@@ -157,17 +148,12 @@ const RULES: Record<string, Rule> = {
   ind_03: independenceMatter,
   ind_04: independenceMatter,
   ind_conclusion: when({ not_satisfied: [C.independence, 'critical', true] }),
-  acceptable_framework: legacy({
-    category: C.preconditions,
-    severity: 'critical',
-    isBlocking: true,
-  }),
-  management_responsibilities: legacy({
-    category: C.preconditions,
-    severity: 'critical',
-    isBlocking: true,
-  }),
-  no_scope_limitation: legacy({ category: C.scope, severity: 'high', isBlocking: true }),
+  pre_01: when({ no: [C.preconditions, 'critical', true] }),
+  pre_02: when({ no: [C.preconditions, 'high', true] }),
+  pre_03: when({ no: [C.preconditions, 'high', true] }),
+  pre_04: when({ no: [C.preconditions, 'high', true] }),
+  pre_05: when({ no: [C.preconditions, 'high', true] }),
+  pre_06: when({ yes: [C.preconditions, 'high', true] }),
 };
 
 /** First non-empty text detail among `keys`, for the matter description. */
