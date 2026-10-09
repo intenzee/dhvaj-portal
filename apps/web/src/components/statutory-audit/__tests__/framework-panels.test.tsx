@@ -98,6 +98,29 @@ describe('02.2 evidence and technical memo', () => {
     );
   });
 
+  it('creates the 02.3 Schedule III memo through its own route', async () => {
+    apiFetch.mockResolvedValueOnce(evidence({ subSectionKey: '02.3' })).mockResolvedValueOnce({
+      evidence: evidence({
+        subSectionKey: '02.3',
+        memo: { templateAvailable: true, reason: null, memoFileId: 'f3' },
+      }),
+      fileId: 'f3',
+      documentId: 'd3',
+      editorUrl: null,
+      missingFields: [],
+    });
+    apiFetch.mockResolvedValue({ id: 'd3', title: 'Memo' });
+    render(evidencePanel({ memoSuggested: true }));
+    expect(
+      await screen.findByText('Schedule III Presentation Framework technical memo'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Create Technical Memo/ }));
+    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/statutory-audit/wf1/schedule-iii/memo', {
+      method: 'POST',
+      body: {},
+    });
+  });
+
   it('explains why the memo cannot be created without a firm template', async () => {
     apiFetch.mockResolvedValue(
       evidence({

@@ -33,10 +33,23 @@ import { LinkPicker, VersionHistory } from './acceptance-file-card';
  * partner approval) — a Manager may still create one on demand. Everything
  * expands in place; nothing opens a modal except the document itself.
  *
- * With `question` (FRF-02 / FRF-03, §6–§7) it is that question's evidence:
- * only its files, filed under it, and no memo. Without it, every file shows,
- * question-filed ones badged with their question.
+ * With `question` (FRF-02 / FRF-03; SCH-02 / SCH-04) it is that question's
+ * evidence: only its files, filed under it, and no memo. Without it, every file
+ * shows, question-filed ones badged with their question. The memo is the
+ * sub-assessment's own (02.2 Financial Reporting Framework, 02.3 Schedule III).
  */
+
+/** The technical memo of each sub-assessment that has one: its route and title. */
+const MEMO: Record<string, { path: string; title: string }> = {
+  '02.2': {
+    path: 'financial-reporting/memo',
+    title: 'Financial Reporting Framework technical memo',
+  },
+  '02.3': {
+    path: 'schedule-iii/memo',
+    title: 'Schedule III Presentation Framework technical memo',
+  },
+};
 export function FrameworkEvidence({
   engagementId,
   workflowInstanceId,
@@ -96,6 +109,7 @@ export function FrameworkEvidence({
     }
   };
   const memo = question ? null : view.memo;
+  const memoSpec = MEMO[view.subSectionKey] ?? MEMO['02.2']!;
   const files = question ? view.files.filter((f) => f.questionKey === question) : view.files;
   const filedUnder = question ? { questionKey: question } : {};
   const what = question ? `${FRAMEWORK_EVIDENCE_QUESTION_LABEL[question]} evidence` : 'evidence';
@@ -106,7 +120,7 @@ export function FrameworkEvidence({
     setBusy(true);
     try {
       const res = await apiFetch<FrameworkMemoCreated>(
-        `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/financial-reporting/memo`,
+        `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/${memoSpec.path}`,
         { method: 'POST', body: {} },
       );
       qc.setQueryData(key, res.evidence);
@@ -165,7 +179,7 @@ export function FrameworkEvidence({
 
       {memo && memo.memoFileId === null && (memoSuggested || onDemand) && (
         <div className="rounded-md border border-primary-100 bg-primary-50/50 px-3 py-2 text-xs">
-          <p className="font-medium text-ink">Financial Reporting Framework technical memo</p>
+          <p className="font-medium text-ink">{memoSpec.title}</p>
           <p className="text-ink-muted">
             {memoSuggested
               ? 'This conclusion needs a technical memo (override, consultation, pending information or partner approval).'

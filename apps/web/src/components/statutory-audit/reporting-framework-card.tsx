@@ -18,6 +18,7 @@ import { Badge, Button, Card } from '@/components/ui';
 import { ExpandToggle } from '@/components/inline-panel';
 import { Facts } from './group-caro-card';
 import { FinancialReportingWorkspace } from './financial-reporting-workspace';
+import { ScheduleIiiWorkspace } from './schedule-iii-workspace';
 
 /**
  * 02.2 Applicable financial reporting framework (Guide §1, Section 02.2 spec):
@@ -25,7 +26,9 @@ import { FinancialReportingWorkspace } from './financial-reporting-workspace';
  * system suggestion, with the client-master facts and the 02.3 Schedule III
  * Division routed from it (provisional until 02.2 is concluded). The full
  * 02.2 workspace — framework tests, SMC, FRF-01..06, Partner approval and the
- * completion checklist — opens in place under the header (+/−).
+ * completion checklist — opens in place under the header (+/−); the 02.3
+ * Schedule III & Financial Statement Presentation workspace opens the same way
+ * from its own line.
  */
 
 const qk = (id: string) => ['engagement', id, 'statutory-audit-financial-reporting'];
@@ -79,6 +82,7 @@ export function ReportingFrameworkCard({
   });
 
   const [open, setOpen] = useState(false);
+  const [schOpen, setSchOpen] = useState(false);
 
   if (!fr) return null;
   const approved = fr.approved ?? fr.assessment.state === 'approved';
@@ -147,6 +151,28 @@ export function ReportingFrameworkCard({
       </button>
       {open && (
         <FinancialReportingWorkspace engagementId={engagementId} fr={fr} canManage={canManage} />
+      )}
+      {sch && (
+        <>
+          <button
+            type="button"
+            aria-expanded={schOpen}
+            onClick={() => setSchOpen((o) => !o)}
+            className="group flex items-center gap-2.5 text-left text-sm font-medium text-ink"
+          >
+            <ExpandToggle open={schOpen} />
+            {schOpen
+              ? 'Hide the 02.3 Schedule III workspace'
+              : 'Open the 02.3 Schedule III workspace'}
+            {sch.completion?.complete && <Badge tone="success">02.3 COMPLETE</Badge>}
+            {sch.assessment.needsReevaluation && (
+              <Badge tone="warn">02.3 needs re-evaluation</Badge>
+            )}
+          </button>
+          {schOpen && (
+            <ScheduleIiiWorkspace engagementId={engagementId} sch={sch} canManage={canManage} />
+          )}
+        </>
       )}
     </Card>
   );

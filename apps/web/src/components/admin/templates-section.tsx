@@ -6,7 +6,9 @@ import { CheckCircle2, Download, Plus, Upload } from 'lucide-react';
 import {
   DEFAULT_TEMPLATE_VARIANT,
   DOCUMENT_TEMPLATE_DEFINITIONS,
+  TEMPLATE_CONTENT_TYPE,
   TEMPLATE_MERGE_FIELDS,
+  templateDefinition,
   type DocumentTemplateKey,
   type DocumentTemplateRecord,
   type DocumentTemplateVersionRecord,
@@ -51,7 +53,8 @@ export function TemplatesSection(): JSX.Element {
           <h3 className="text-sm font-semibold text-ink">Audit file templates</h3>
           <p className="text-xs text-ink-muted">
             Until a template has an approved version, Create from Template explains that an
-            administrator must upload one. Write merge fields in Word as{' '}
+            administrator must upload one. Write merge fields in Word — or in Excel text cells for
+            the Financial Statements Workbooks — as{' '}
             <code className="font-mono">{'{{client.name}}'}</code>.
           </p>
         </div>
@@ -163,6 +166,16 @@ function conditionsText(c: TemplateConditions): string {
   if (c.listed !== undefined) parts.push(c.listed ? 'listed' : 'unlisted');
   if (c.hasGroup !== undefined) parts.push(c.hasGroup ? 'has a group' : 'no group');
   if (c.entityTypeSlugs?.length) parts.push(`entity type ${c.entityTypeSlugs.join(' / ')}`);
+  if (c.periodFrom || c.periodTo) {
+    parts.push(
+      `audit periods starting ${[
+        c.periodFrom && `from ${c.periodFrom}`,
+        c.periodTo && `to ${c.periodTo}`,
+      ]
+        .filter(Boolean)
+        .join(' ')}`,
+    );
+  }
   return parts.length
     ? `Applies when ${parts.join(', ')}`
     : 'Default — applies when no other variant does';
@@ -200,6 +213,7 @@ function VariantRow({ variant: v }: { variant: DocumentTemplateRecord }): JSX.El
   const [open, setOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState('');
+  const format = templateDefinition(v.templateKey)?.format ?? 'docx';
   const onError = (e: unknown) =>
     toast(e instanceof ApiError ? e.message : 'Could not save.', 'error');
   const done = () => void qc.invalidateQueries({ queryKey: TEMPLATES_KEY });
@@ -295,12 +309,12 @@ function VariantRow({ variant: v }: { variant: DocumentTemplateRecord }): JSX.El
               disabled={upload.isPending}
               onClick={() => fileInput.current?.click()}
             >
-              <Upload className="h-4 w-4" /> {upload.isPending ? 'Uploading…' : 'Upload .docx'}
+              <Upload className="h-4 w-4" /> {upload.isPending ? 'Uploading…' : `Upload .${format}`}
             </Button>
             <input
               ref={fileInput}
               type="file"
-              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept={`.${format},${TEMPLATE_CONTENT_TYPE[format]}`}
               className="hidden"
               aria-label={`Upload a new version of ${v.title}`}
               onChange={(e) => {
@@ -403,6 +417,8 @@ function AddVariant(): JSX.Element {
   const [listed, setListed] = useState('');
   const [hasGroup, setHasGroup] = useState('');
   const [entityTypes, setEntityTypes] = useState('');
+  const [periodFrom, setPeriodFrom] = useState('');
+  const [periodTo, setPeriodTo] = useState('');
   const create = useMutation({
     mutationFn: () => {
       const appliesWhen: TemplateConditions = {};
@@ -413,6 +429,8 @@ function AddVariant(): JSX.Element {
         .map((s) => s.trim())
         .filter(Boolean);
       if (slugs.length) appliesWhen.entityTypeSlugs = slugs;
+      if (periodFrom) appliesWhen.periodFrom = periodFrom;
+      if (periodTo) appliesWhen.periodTo = periodTo;
       return apiFetch('/document-templates', {
         method: 'POST',
         body: {
@@ -431,6 +449,8 @@ function AddVariant(): JSX.Element {
       setListed('');
       setHasGroup('');
       setEntityTypes('');
+      setPeriodFrom('');
+      setPeriodTo('');
       toast('Variant added — upload and approve its file.');
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not save.', 'error'),
@@ -489,6 +509,15 @@ function AddVariant(): JSX.Element {
             hint="Comma-separated entity-type slugs, e.g. public_limited."
           >
             <Input value={entityTypes} onChange={(e) => setEntityTypes(e.target.value)} />
+          </Field>
+          <Field
+            label="Audit periods starting from"
+            hint="Template effective version — e.g. a workbook for FY 2026-27 onwards."
+          >
+            <Input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} />
+          </Field>
+          <Field label="Audit periods starting up to">
+            <Input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
           </Field>
         </div>
         <Button
