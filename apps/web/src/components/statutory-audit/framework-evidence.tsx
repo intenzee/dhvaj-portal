@@ -4,8 +4,10 @@ import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, FilePlus2, History, Link2, Lock, Trash2, Upload } from 'lucide-react';
 import {
+  FRAMEWORK_EVIDENCE_QUESTION_LABEL,
   FRAMEWORK_FILE_KIND_LABEL,
   PERMISSION,
+  type FrameworkEvidenceQuestion,
   type FrameworkEvidenceView,
   type FrameworkFileRecord,
   type FrameworkMemoCreated,
@@ -30,6 +32,10 @@ import { LinkPicker, VersionHistory } from './acceptance-file-card';
  * when the conclusion needs one (override, consultation, pending information,
  * partner approval) — a Manager may still create one on demand. Everything
  * expands in place; nothing opens a modal except the document itself.
+ *
+ * With `question` (FRF-02 / FRF-03, §6–§7) it is that question's evidence:
+ * only its files, filed under it, and no memo. Without it, every file shows,
+ * question-filed ones badged with their question.
  */
 export function FrameworkEvidence({
   engagementId,
@@ -37,12 +43,14 @@ export function FrameworkEvidence({
   subAssessmentId,
   memoSuggested,
   readOnly,
+  question,
 }: {
   engagementId: string;
   workflowInstanceId: string;
   subAssessmentId: string;
   memoSuggested: boolean;
   readOnly: boolean;
+  question?: FrameworkEvidenceQuestion;
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
@@ -87,7 +95,10 @@ export function FrameworkEvidence({
       fail(e);
     }
   };
-  const memo = view.memo;
+  const memo = question ? null : view.memo;
+  const files = question ? view.files.filter((f) => f.questionKey === question) : view.files;
+  const filedUnder = question ? { questionKey: question } : {};
+  const what = question ? `${FRAMEWORK_EVIDENCE_QUESTION_LABEL[question]} evidence` : 'evidence';
   const showMemo =
     memo !== null && memo.memoFileId === null && editable && (memoSuggested || onDemand);
 
@@ -114,19 +125,28 @@ export function FrameworkEvidence({
   };
 
   return (
-    <div className="space-y-2" aria-label="Evidence and technical memo">
-      {view.files.length === 0 ? (
+    <div
+      className="space-y-2"
+      aria-label={
+        question
+          ? `${FRAMEWORK_EVIDENCE_QUESTION_LABEL[question]} evidence`
+          : 'Evidence and technical memo'
+      }
+    >
+      {files.length === 0 ? (
         <p className="text-xs text-ink-faint">
-          No evidence linked yet. The structured assessment is the workpaper; add evidence where a
-          fact needs support.
+          {question
+            ? `No ${what} linked yet.`
+            : 'No evidence linked yet. The structured assessment is the workpaper; add evidence where a fact needs support.'}
         </p>
       ) : (
         <ul className="space-y-1.5">
-          {view.files.map((f) => (
+          {files.map((f) => (
             <FileItem
               key={f.id}
               base={base}
               file={f}
+              showQuestion={!question}
               editable={editable}
               busy={busy}
               onOpen={() => void openFile(f.documentId)}
@@ -192,7 +212,7 @@ export function FrameworkEvidence({
             ref={input}
             type="file"
             className="hidden"
-            aria-label="Add an evidence file"
+            aria-label={question ? `Add a file to ${what}` : 'Add an evidence file'}
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = '';
@@ -204,6 +224,7 @@ export function FrameworkEvidence({
                     filename: file.name,
                     contentType: file.type || undefined,
                     contentBase64: await blobToBase64(file),
+                    ...filedUnder,
                   },
                 }),
               );
@@ -214,12 +235,12 @@ export function FrameworkEvidence({
       {editable && linking && (
         <LinkPicker
           engagementId={engagementId}
-          exclude={view.files.map((f) => f.documentId)}
+          exclude={files.map((f) => f.documentId)}
           onPick={async (documentId) => {
             await act(() =>
               apiFetch<FrameworkEvidenceView>(`${base}/link`, {
                 method: 'POST',
-                body: { documentId },
+                body: { documentId, ...filedUnder },
               }),
             );
             setLinking(false);
@@ -242,6 +263,7 @@ export function FrameworkEvidence({
 function FileItem({
   base,
   file: f,
+  showQuestion,
   editable,
   busy,
   onOpen,
@@ -249,6 +271,7 @@ function FileItem({
 }: {
   base: string;
   file: FrameworkFileRecord;
+  showQuestion: boolean;
   editable: boolean;
   busy: boolean;
   onOpen: () => void;
@@ -263,6 +286,9 @@ function FileItem({
             <span className="truncate text-ink">{f.filename ?? f.title}</span>
             {f.kind === 'technical_memo' && (
               <Badge tone="info">{FRAMEWORK_FILE_KIND_LABEL[f.kind]}</Badge>
+            )}
+            {showQuestion && f.questionKey && (
+              <Badge tone="neutral">{FRAMEWORK_EVIDENCE_QUESTION_LABEL[f.questionKey]}</Badge>
             )}
             {f.editLocked && (
               <span className="inline-flex items-center gap-1 text-[11px] text-ink-faint">

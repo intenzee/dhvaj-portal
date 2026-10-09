@@ -27,11 +27,31 @@ export const FRAMEWORK_FILE_KIND_LABEL: Record<FrameworkFileKind, string> = {
   technical_memo: 'Technical memo',
 };
 
+/**
+ * Checklist questions that carry their own evidence (02.2 §6, §7): FRF-02 the
+ * prior Ind AS financial statements, FRF-03 the voluntary-adoption evidence.
+ */
+export const FRAMEWORK_EVIDENCE_QUESTION = {
+  frf02: 'frf_02',
+  frf03: 'frf_03',
+} as const;
+export type FrameworkEvidenceQuestion =
+  (typeof FRAMEWORK_EVIDENCE_QUESTION)[keyof typeof FRAMEWORK_EVIDENCE_QUESTION];
+export const FRAMEWORK_EVIDENCE_QUESTIONS: FrameworkEvidenceQuestion[] = Object.values(
+  FRAMEWORK_EVIDENCE_QUESTION,
+);
+export const FRAMEWORK_EVIDENCE_QUESTION_LABEL: Record<FrameworkEvidenceQuestion, string> = {
+  frf_02: 'FRF-02',
+  frf_03: 'FRF-03',
+};
+
 /** One file linked to a Section 02 sub-assessment. */
 export interface FrameworkFileRecord {
   id: string;
   documentId: string;
   kind: FrameworkFileKind;
+  /** The checklist question it supports; null when filed on the sub-assessment. */
+  questionKey: FrameworkEvidenceQuestion | null;
   title: string;
   filename: string | null;
   currentVersionNo: number;
@@ -75,10 +95,13 @@ export interface AddFrameworkFileInput {
   filename: string;
   contentType?: string;
   contentBase64: string;
+  /** File it under a checklist question instead of the sub-assessment. */
+  questionKey?: FrameworkEvidenceQuestion;
 }
 
 export interface LinkFrameworkFileInput {
   documentId: string;
+  questionKey?: FrameworkEvidenceQuestion;
 }
 
 export interface CreateFrameworkMemoInput {

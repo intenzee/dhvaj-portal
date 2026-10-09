@@ -471,4 +471,68 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
     expect(keysGenerated).toContain('ind_as_first_time_adoption');
     expect(keysGenerated).not.toContain('schedule_iii_work');
   });
+
+  // ── §6–§7 per-question evidence; §10 net worth "Open Source" ────────────
+
+  it('files evidence under FRF-02 / FRF-03 and opens the net-worth source statements', async () => {
+    const http = app.getHttpServer();
+    const bytes = Buffer.from('Ind AS financial statements FY 2023-24 (e2e)', 'utf8');
+    const v1 = (
+      await request(http)
+        .post(`${evidenceUrl()}/add`)
+        .set(bearer(pa))
+        .send({
+          filename: 'Ind AS FS 2023-24.pdf',
+          contentType: 'application/pdf',
+          contentBase64: bytes.toString('base64'),
+          questionKey: 'frf_02',
+        })
+        .expect(201)
+    ).body as FrameworkEvidenceView;
+    const fs = v1.files.find((f) => f.filename === 'Ind AS FS 2023-24.pdf')!;
+    expect(fs.questionKey).toBe('frf_02');
+
+    // The same statements may also support FRF-03 and the assessment as a whole …
+    const v2 = (
+      await request(http)
+        .post(`${evidenceUrl()}/link`)
+        .set(bearer(pa))
+        .send({ documentId: fs.documentId, questionKey: 'frf_03' })
+        .expect(201)
+    ).body as FrameworkEvidenceView;
+    expect(
+      v2.files
+        .filter((f) => f.documentId === fs.documentId)
+        .map((f) => f.questionKey)
+        .sort(),
+    ).toEqual(['frf_02', 'frf_03']);
+    // … but not twice under one question, and only under known questions.
+    await request(http)
+      .post(`${evidenceUrl()}/link`)
+      .set(bearer(pa))
+      .send({ documentId: fs.documentId, questionKey: 'frf_02' })
+      .expect(409);
+    await request(http)
+      .post(`${evidenceUrl()}/link`)
+      .set(bearer(pa))
+      .send({ documentId: fs.documentId, questionKey: 'frf_09' })
+      .expect(400);
+
+    // §10: the 02.1 net-worth figure's statements become the 02.2E "Open Source".
+    await request(http)
+      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/profile/financials`)
+      .set(bearer(pa))
+      .send({ parameter: 'net_worth', priorValue: 3200000000, documentId: fs.documentId })
+      .expect(201);
+    const fr = (
+      await request(http)
+        .post(
+          `/api/v1/engagements/${engId}/statutory-audit/${shellId}/financial-reporting/run-suggestions`,
+        )
+        .set(bearer(pa))
+        .expect(201)
+    ).body as StatutoryAuditFinancialReporting;
+    expect(fr.detail?.netWorth?.value).toBe(3200000000);
+    expect(fr.detail?.netWorth?.sourceDocumentId).toBe(fs.documentId);
+  });
 });

@@ -188,13 +188,27 @@ export async function assembleFinancialReportingFacts(
     parameter: string;
     current_value: string | null;
     prior_value: string | null;
+    document_id: string | null;
   }>(
-    `SELECT f.parameter, f.current_value::text, f.prior_value::text
+    `SELECT f.parameter, f.current_value::text, f.prior_value::text,
+            -- "Open Source" (§10): the figure's own document, else the latest
+            -- file linked to the 02.1 field.
+            COALESCE(
+              (SELECT d.id FROM hsdg.documents d
+                WHERE d.id = f.document_id AND d.deleted_at IS NULL),
+              (SELECT pf.document_id
+                 FROM hsdg.audit_profile_files pf
+                 JOIN hsdg.documents d ON d.id = pf.document_id AND d.deleted_at IS NULL
+                WHERE pf.profile_id = f.profile_id AND pf.slot = 'financial:' || f.parameter
+                  AND pf.removed_at IS NULL
+                ORDER BY pf.linked_at DESC
+                LIMIT 1)) AS document_id
        FROM hsdg.audit_profile_financials f
       WHERE f.profile_id = $1`,
     [profile.rows[0]?.id ?? null],
   );
   const p02 = new Map(fin02.rows.map((r) => [r.parameter, r]));
+  const nwDocumentId = p02.get('net_worth')?.document_id ?? null;
   const masterFins = await client.query<{
     financial_year: string;
     net_worth: string | null;
@@ -202,11 +216,12 @@ export async function assembleFinancialReportingFacts(
     total_borrowings: string | null;
     public_deposits: string | null;
     source: string | null;
+    supporting_document_ref: string | null;
   }>(
     `SELECT financial_year, net_worth::text, turnover::text, total_borrowings::text,
-            public_deposits::text, source
+            public_deposits::text, source, supporting_document_ref
        FROM hsdg.entity_financial_profiles
-      WHERE entity_id = $1
+      WHERE entity_id = $1 AND is_current
       ORDER BY financial_year`,
     [er?.entity_id ?? null],
   );
@@ -220,6 +235,7 @@ export async function assembleFinancialReportingFacts(
       financialYear: m.financial_year,
       value: v,
       source: `Client master — FY ${m.financial_year} financials${m.source ? ` (${m.source.replace(/_/g, ' ')})` : ''}`,
+      sourceUrl: httpsOnly(m.supporting_document_ref),
     });
   }
   const nwPrior = num(p02.get('net_worth')?.prior_value ?? null);
@@ -229,6 +245,7 @@ export async function assembleFinancialReportingFacts(
       financialYear: precedingFy,
       value: nwPrior,
       source: `02.1 Card D — FY ${precedingFy} (prior-year column)`,
+      sourceDocumentId: nwDocumentId,
     });
   const masterCy = masterFins.rows.find((m) => m.financial_year === auditFinancialYear);
   const masterPy = masterFins.rows.find((m) => m.financial_year === precedingFy);
@@ -243,6 +260,11 @@ export async function assembleFinancialReportingFacts(
       financialYear: precedingFy,
       value: nwCurrent,
       source: '02.1 Card D — current-year figure (no preceding-year figure captured)',
+      sourceDocumentId: p02.get('net_worth')?.current_value != null ? nwDocumentId : null,
+      sourceUrl:
+        p02.get('net_worth')?.current_value != null
+          ? null
+          : httpsOnly(masterCy?.supporting_document_ref ?? null),
     });
   }
   const netWorth = netWorthHistory.length
@@ -1050,4 +1072,10 @@ function prevFy(fy: string): string {
 
 function fyEnd(fy: string): string {
   return `${Number(fy.slice(0, 4)) + 1}-03-31`;
+}
+
+/** A supporting reference opens only when it is an https link (never a bare path). */
+function httpsOnly(ref: string | null): string | null {
+  const v = ref?.trim();
+  return v && /^https:\/\/\S+$/.test(v) ? v : null;
 }

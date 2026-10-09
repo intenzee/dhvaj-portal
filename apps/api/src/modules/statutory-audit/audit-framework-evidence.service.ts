@@ -19,6 +19,9 @@ import {
   type FrameworkMemoAvailability,
   type FrameworkMemoCreated,
   type LinkFrameworkFileInput,
+  FRAMEWORK_EVIDENCE_QUESTION_LABEL,
+  FRAMEWORK_EVIDENCE_QUESTIONS,
+  type FrameworkEvidenceQuestion,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -57,6 +60,7 @@ interface FileRow {
   id: string;
   document_id: string;
   kind: FrameworkFileKind;
+  question_key: FrameworkEvidenceQuestion | null;
   title: string;
   filename: string | null;
   current_version_no: number;
@@ -107,7 +111,7 @@ export class AuditFrameworkEvidenceService {
 
   private async readView(client: PoolClient, sub: SubRow): Promise<FrameworkEvidenceView> {
     const { rows } = await client.query<FileRow>(
-      `SELECT f.id, f.document_id, f.kind, d.title, cv.filename, d.current_version_no,
+      `SELECT f.id, f.document_id, f.kind, f.question_key, d.title, cv.filename, d.current_version_no,
               ue.full_name AS last_edited_by, cv.uploaded_at AS last_saved_at,
               lb.full_name AS linked_by_name, f.linked_at,
               (d.m365_live_item_id IS NOT NULL) AS in_sharepoint, d.edit_locked,
@@ -176,9 +180,11 @@ export class AuditFrameworkEvidenceService {
     subAssessmentId: string,
     input: AddFrameworkFileInput,
   ): Promise<FrameworkEvidenceView> {
+    let question: FrameworkEvidenceQuestion | null = null;
     await this.db.withRlsContext(ctx, async (client) => {
       const sub = await this.loadSub(client, engagementId, workflowInstanceId, subAssessmentId);
       assertEditable(sub);
+      question = questionFor(sub, input.questionKey);
     });
     // Stored in the engagement workspace (SharePoint when Microsoft 365 is on).
     const doc = await this.documents.create(ctx, engagementId, {
@@ -190,7 +196,7 @@ export class AuditFrameworkEvidenceService {
     });
     return this.db.withRlsContext(ctx, async (client) => {
       const sub = await this.loadSub(client, engagementId, workflowInstanceId, subAssessmentId);
-      await this.insertFile(client, ctx, sub, doc.id, 'evidence', null, 'added');
+      await this.insertFile(client, ctx, sub, doc.id, 'evidence', null, 'added', {}, question);
       return this.readView(client, sub);
     });
   }
@@ -205,12 +211,23 @@ export class AuditFrameworkEvidenceService {
     return this.db.withRlsContext(ctx, async (client) => {
       const sub = await this.loadSub(client, engagementId, workflowInstanceId, subAssessmentId);
       assertEditable(sub);
+      const question = questionFor(sub, input.questionKey);
       const { rows } = await client.query(
         `SELECT 1 FROM hsdg.documents WHERE id = $1 AND engagement_id = $2 AND deleted_at IS NULL`,
         [input.documentId, engagementId],
       );
       if (!rows[0]) throw new BadRequestException('That document is not on this engagement.');
-      await this.insertFile(client, ctx, sub, input.documentId, 'evidence', null, 'linked');
+      await this.insertFile(
+        client,
+        ctx,
+        sub,
+        input.documentId,
+        'evidence',
+        null,
+        'linked',
+        {},
+        question,
+      );
       return this.readView(client, sub);
     });
   }
@@ -346,6 +363,7 @@ export class AuditFrameworkEvidenceService {
     template: { versionId: string; variantKey: string; versionNo: number } | null,
     how: 'added' | 'linked' | 'created_from_template',
     extra: Record<string, unknown> = {},
+    question: FrameworkEvidenceQuestion | null = null,
   ): Promise<string> {
     let id: string;
     try {
@@ -353,8 +371,8 @@ export class AuditFrameworkEvidenceService {
         `INSERT INTO hsdg.audit_framework_files
            (subassessment_id, workflow_instance_id, engagement_id, document_id, kind,
             template_version_id, template_key, template_variant_key, template_version_no,
-            linked_by_employee_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            linked_by_employee_id, question_key)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          RETURNING id`,
         [
           sub.id,
@@ -367,6 +385,7 @@ export class AuditFrameworkEvidenceService {
           template?.variantKey ?? null,
           template?.versionNo ?? null,
           ctx.employeeId ?? null,
+          question,
         ],
       );
       id = rows[0]!.id;
@@ -375,7 +394,9 @@ export class AuditFrameworkEvidenceService {
         throw new ConflictException(
           kind === 'technical_memo'
             ? 'The technical memo already exists — open it from the list.'
-            : 'That file is already linked here.',
+            : question
+              ? `That file is already linked under ${FRAMEWORK_EVIDENCE_QUESTION_LABEL[question]}.`
+              : 'That file is already linked here.',
         );
       }
       throw err;
@@ -388,6 +409,7 @@ export class AuditFrameworkEvidenceService {
         subSectionKey: sub.sub_section_key,
         documentId,
         kind,
+        ...(question ? { questionKey: question } : {}),
         ...(template ? { templateKey: MEMO_KEY, ...template } : {}),
         ...extra,
       },
@@ -476,6 +498,7 @@ function mapFile(r: FileRow): FrameworkFileRecord {
     id: r.id,
     documentId: r.document_id,
     kind: r.kind,
+    questionKey: r.question_key,
     title: r.title,
     filename: r.filename,
     currentVersionNo: r.current_version_no,
@@ -488,4 +511,19 @@ function mapFile(r: FileRow): FrameworkFileRecord {
     templateVariantKey: r.template_variant_key,
     templateVersionNo: r.template_version_no,
   };
+}
+
+/** Checklist questions carry evidence only on the 02.2 assessment (§6, §7). */
+function questionFor(
+  sub: SubRow,
+  questionKey: FrameworkEvidenceQuestion | undefined,
+): FrameworkEvidenceQuestion | null {
+  if (!questionKey) return null;
+  if (
+    sub.sub_section_key !== SUB_SECTION_KEY.financialReporting ||
+    !FRAMEWORK_EVIDENCE_QUESTIONS.includes(questionKey)
+  ) {
+    throw new BadRequestException('That question does not take evidence here.');
+  }
+  return questionKey;
 }

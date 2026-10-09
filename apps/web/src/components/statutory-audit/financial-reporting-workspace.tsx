@@ -25,6 +25,7 @@ import { Badge, Button, Card } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 import { FrameworkEvidence } from './framework-evidence';
+import { OpenSourceLink } from './framework-source-link';
 import { FrameworkReferences } from './framework-references';
 import { FinancialReportingDownstream } from './framework-downstream';
 
@@ -353,6 +354,16 @@ export function FinancialReportingWorkspace({
             />
           </div>
         )}
+        <QuestionEvidence label="FRF-02 evidence (prior Ind AS financial statements)">
+          <FrameworkEvidence
+            engagementId={engagementId}
+            workflowInstanceId={fr.workflowInstanceId}
+            subAssessmentId={a.id}
+            memoSuggested={false}
+            readOnly={!editable}
+            question="frf_02"
+          />
+        </QuestionEvidence>
         <FrameworkReferences contextKey="02.2" anchors={['rule_4']} effectiveOn={effectiveOn} />
       </Section>
 
@@ -374,6 +385,16 @@ export function FinancialReportingWorkspace({
             />
           )}
         </div>
+        <QuestionEvidence label="FRF-03 evidence (voluntary adoption)">
+          <FrameworkEvidence
+            engagementId={engagementId}
+            workflowInstanceId={fr.workflowInstanceId}
+            subAssessmentId={a.id}
+            memoSuggested={false}
+            readOnly={!editable}
+            question="frf_03"
+          />
+        </QuestionEvidence>
         <FrameworkReferences contextKey="02.2" anchors={['rule_4_1_i']} effectiveOn={effectiveOn} />
       </Section>
 
@@ -417,7 +438,19 @@ export function FinancialReportingWorkspace({
               label="Measurement date"
               value={d.netWorth.measurementDate ? formatDate(d.netWorth.measurementDate) : '—'}
             />
-            <Fact label="Source" value={d.netWorth.source ?? '—'} />
+            <Fact
+              label="Source"
+              value={
+                <>
+                  {d.netWorth.source ?? '—'}{' '}
+                  <OpenSourceLink
+                    engagementId={engagementId}
+                    documentId={d.netWorth.sourceDocumentId}
+                    url={d.netWorth.sourceUrl}
+                  />
+                </>
+              }
+            />
             <Fact label="Threshold used" value={crore(d.netWorth.threshold)} />
             <Fact label="Result" value={<ResultBadge result={d.netWorth.result} />} />
             <Fact
@@ -674,6 +707,24 @@ function Section({
       </button>
       {open && <div className="mt-3 space-y-3 pl-7">{children}</div>}
     </Card>
+  );
+}
+
+/** A checklist question's own evidence (FRF-02 / FRF-03), expanding in place. */
+function QuestionEvidence({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-md border border-line px-3 py-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="text-xs font-medium text-primary-600 hover:underline"
+      >
+        {open ? '−' : '+'} {label}
+      </button>
+      {open && <div className="mt-2">{children}</div>}
+    </div>
   );
 }
 

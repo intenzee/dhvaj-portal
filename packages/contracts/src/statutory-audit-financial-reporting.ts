@@ -163,6 +163,10 @@ export interface NetWorthPoint {
   financialYear: string;
   value: number;
   source: string;
+  /** The engagement document holding the financial statements (02.1 Card D), when linked. */
+  sourceDocumentId?: string | null;
+  /** An https link to the statements (client master's supporting reference), when given. */
+  sourceUrl?: string | null;
 }
 
 /** A group company confirmed in 02.1 / the client master (no duplicate entry, §11). */
@@ -297,6 +301,10 @@ export interface FrfNetWorthAssessment {
   /** The measurement date the rules engine selected. */
   measurementDate: string | null;
   source: string | null;
+  /** "Open Source" (§10): the linked financial statements in the engagement workspace. */
+  sourceDocumentId?: string | null;
+  /** "Open Source" when the statements live outside the portal (https only). */
+  sourceUrl?: string | null;
   threshold: number | null;
   ruleCode: string | null;
   result: FrfTestResult;

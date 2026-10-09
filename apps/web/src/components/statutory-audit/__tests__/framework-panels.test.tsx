@@ -7,6 +7,7 @@ import { FrameworkEvidence } from '../framework-evidence';
 import { FrameworkReferences } from '../framework-references';
 import { FinancialReportingDownstream } from '../framework-downstream';
 import { ProvisionViewer } from '../provision-viewer';
+import { OpenSourceLink } from '../framework-source-link';
 
 const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
@@ -51,6 +52,7 @@ const evidence = (over: Record<string, unknown> = {}) => ({
       editLocked: false,
       templateVariantKey: null,
       templateVersionNo: null,
+      questionKey: null,
     },
   ],
   memo: { templateAvailable: true, reason: null, memoFileId: null },
@@ -126,6 +128,67 @@ describe('02.2 evidence and technical memo', () => {
     expect(screen.queryByRole('button', { name: /Add File/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Version History/ })).toBeInTheDocument();
+  });
+});
+
+describe('per-question evidence (FRF-02 / FRF-03)', () => {
+  const withQuestion = () =>
+    evidence({
+      files: [
+        { ...evidence().files[0], id: 'f2', filename: 'Ind AS FS.pdf', questionKey: 'frf_02' },
+        evidence().files[0],
+      ],
+    });
+
+  it("shows only the question's files, files new ones under it and offers no memo", async () => {
+    apiFetch.mockResolvedValue(withQuestion());
+    render(
+      wrap(
+        <FrameworkEvidence
+          engagementId="e1"
+          workflowInstanceId="wf1"
+          subAssessmentId="s1"
+          memoSuggested
+          readOnly={false}
+          question="frf_02"
+        />,
+      ),
+    );
+    expect(await screen.findByText('Ind AS FS.pdf')).toBeInTheDocument();
+    expect(screen.queryByText('Listing certificate.pdf')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /Technical memo|Create Technical Memo/ }),
+    ).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: /Link Existing File/ }));
+    expect(screen.getByLabelText('FRF-02 evidence')).toBeInTheDocument();
+  });
+
+  it('the main evidence list shows every file, badged with its question', async () => {
+    apiFetch.mockResolvedValue(withQuestion());
+    render(evidencePanel());
+    expect(await screen.findByText('Ind AS FS.pdf')).toBeInTheDocument();
+    expect(screen.getByText('Listing certificate.pdf')).toBeInTheDocument();
+    expect(screen.getByText('FRF-02')).toBeInTheDocument();
+  });
+});
+
+describe('net worth Open Source (§10)', () => {
+  it('opens the linked statements from the portal, or the master link', async () => {
+    apiFetch.mockResolvedValue({ id: 'd9', title: 'FS' });
+    const { unmount } = render(wrap(<OpenSourceLink engagementId="e1" documentId="d9" />));
+    await userEvent.click(screen.getByRole('button', { name: /Open Source/ }));
+    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/documents/d9');
+    unmount();
+    render(wrap(<OpenSourceLink engagementId="e1" url="https://example.com/fs.pdf" />));
+    expect(screen.getByRole('link', { name: /Open Source/ })).toHaveAttribute(
+      'href',
+      'https://example.com/fs.pdf',
+    );
+  });
+
+  it('shows nothing without a source', () => {
+    const { container } = render(wrap(<OpenSourceLink engagementId="e1" url="file:///c/fs.pdf" />));
+    expect(container).toBeEmptyDOMElement();
   });
 });
 

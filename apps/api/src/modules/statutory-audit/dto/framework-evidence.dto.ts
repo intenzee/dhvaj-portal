@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { FRAMEWORK_EVIDENCE_QUESTIONS, type FrameworkEvidenceQuestion } from '@hsdg/contracts';
 import {
   IsBase64,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -31,12 +33,22 @@ export class AddFrameworkFileDto {
   @ApiProperty({ description: 'File bytes, base64-encoded.' })
   @IsBase64()
   contentBase64!: string;
+
+  @ApiPropertyOptional({ enum: FRAMEWORK_EVIDENCE_QUESTIONS, description: 'Checklist question.' })
+  @IsOptional()
+  @IsIn(FRAMEWORK_EVIDENCE_QUESTIONS)
+  questionKey?: FrameworkEvidenceQuestion;
 }
 
 export class LinkFrameworkFileDto {
   @ApiProperty({ description: 'An engagement document — linked, never copied.' })
   @IsUUID()
   documentId!: string;
+
+  @ApiPropertyOptional({ enum: FRAMEWORK_EVIDENCE_QUESTIONS, description: 'Checklist question.' })
+  @IsOptional()
+  @IsIn(FRAMEWORK_EVIDENCE_QUESTIONS)
+  questionKey?: FrameworkEvidenceQuestion;
 }
 
 export class CreateFrameworkMemoDto {

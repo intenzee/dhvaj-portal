@@ -811,6 +811,8 @@ function nwView(
     value: shown?.value ?? null,
     measurementDate: shown?.asAt ?? null,
     source: shown?.source ?? null,
+    sourceDocumentId: shown?.sourceDocumentId ?? null,
+    sourceUrl: shown?.sourceUrl ?? null,
     threshold: rule?.threshold ?? null,
     ruleCode: rule?.ruleCode ?? null,
     result,
