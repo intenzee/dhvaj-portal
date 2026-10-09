@@ -30,6 +30,17 @@ export class AuditAcceptanceController {
     return this.acceptance.listForEngagement(rlsContextFromPrincipal(principal), id);
   }
 
+  @Post(':id/statutory-audit/acceptance/segments/:segmentId/roll-forward')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: "Start a segment from last year's answers (§13 roll-forward)" })
+  rollForward(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('segmentId', new ParseUUIDPipe()) segmentId: string,
+  ): Promise<StatutoryAuditAcceptance> {
+    return this.acceptance.rollForward(rlsContextFromPrincipal(principal), id, segmentId);
+  }
+
   @Post(':id/statutory-audit/acceptance/segments/:segmentId/answer')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({ summary: 'Record a Yes/No/NA answer; adverse answers raise Matters (§8.4)' })

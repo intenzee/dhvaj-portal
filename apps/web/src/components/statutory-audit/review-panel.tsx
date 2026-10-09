@@ -44,7 +44,7 @@ import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
  * issue has been fixed in the file; "Waiting on you" shows the viewer's share.
  */
 
-const REVIEW_QK = (id: string) => ['engagement', id, 'statutory-audit-review'];
+export const REVIEW_QK = (id: string) => ['engagement', id, 'statutory-audit-review'];
 
 const NOTE_TONE: Record<string, string> = {
   open: 'warn',
@@ -463,7 +463,7 @@ function QueueRow({
   );
 }
 
-function NoteRow({
+export function NoteRow({
   engagementId,
   note,
   canManage,

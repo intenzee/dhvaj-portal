@@ -19,6 +19,7 @@ import { useAuditAnchor } from './audit-file-nav';
 import { AcceptanceSegmentEditor, scrollToQuestion, segmentOfQuestion } from './acceptance-segment';
 import { ProfileFacts } from './acceptance-profile';
 import { MattersCard } from './matters-card';
+import { AcceptanceContextPanel } from './acceptance-context-panel';
 import { AcceptanceFinal, useAcceptanceSignoff } from './acceptance-final';
 import { EngagementLetterSection } from './acceptance-engagement-letter';
 
@@ -103,7 +104,11 @@ export function AcceptancePanel({
     <div className="space-y-3">
       <Section01HeaderCard header={signoff.data?.header} approved={approved} />
 
-      <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
+      <div
+        className={`grid gap-3 md:grid-cols-[14rem_1fr] ${
+          selected.segmentKey === 'final_acceptance' ? '' : 'xl:grid-cols-[14rem_1fr_18rem]'
+        }`}
+      >
         <Card className="overflow-hidden p-0">
           <ol className="divide-y divide-line">
             {segments.map((s, i) => (
@@ -175,6 +180,17 @@ export function AcceptancePanel({
             canManage={editable}
           />
         </div>
+
+        {selected.segmentKey !== 'final_acceptance' && (
+          <aside className="md:col-span-2 xl:col-span-1" aria-label="Segment context">
+            <AcceptanceContextPanel
+              acc={acc}
+              segment={selected}
+              editable={editable}
+              canReview={canManage}
+            />
+          </aside>
+        )}
       </div>
     </div>
   );

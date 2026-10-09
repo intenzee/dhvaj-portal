@@ -41,9 +41,22 @@ const segment = (id: string, segmentKey: string, title: string, state = 'not_sta
 
 beforeEach(() => apiFetch.mockReset());
 
+/** The acceptance read returns the file; the side queries (matters, review) are empty. */
+function mockAcceptance(data: unknown[]): void {
+  apiFetch.mockImplementation((url: string) =>
+    Promise.resolve(
+      url.endsWith('/acceptance')
+        ? data
+        : url.includes('/matters') || url.endsWith('/review')
+          ? []
+          : {},
+    ),
+  );
+}
+
 describe('Section 01 acceptance prefill', () => {
   beforeEach(() => {
-    apiFetch.mockResolvedValue([
+    mockAcceptance([
       {
         workflowInstanceId: 'wf1',
         engagementServiceId: 'es1',
@@ -53,7 +66,11 @@ describe('Section 01 acceptance prefill', () => {
           { label: 'Client name', value: 'Acme Manufacturing Pvt Ltd', source: 'Entity master' },
           { label: 'CIN', value: 'U17110MH2015PTC123456', source: 'Entity master' },
           { label: 'Engagement manager', value: null, source: 'Engagement' },
-          { label: 'First year / continuing audit', value: 'Continuing audit', source: 'System derived' },
+          {
+            label: 'First year / continuing audit',
+            value: 'Continuing audit',
+            source: 'System derived',
+          },
         ],
         segments: [
           segment('s1', 'engagement_profile', 'Engagement Profile'),
@@ -63,12 +80,25 @@ describe('Section 01 acceptance prefill', () => {
         unresolvedSegmentCount: 2,
         openBlockingMatterCount: 0,
         readyForApproval: false,
-        pack: { checks: [], ready: false, attention: 0, draftMemo: null, suggestedConclusion: 'accept' },
+        pack: {
+          checks: [],
+          ready: false,
+          attention: 0,
+          draftMemo: null,
+          suggestedConclusion: 'accept',
+        },
         context: {
           firstYear: false,
           firstYearSource: 'history',
           otherServices: [],
-          independence: { required: 0, completed: 0, pending: 0, threatsDisclosed: 0, rows: [], mine: null },
+          independence: {
+            required: 0,
+            completed: 0,
+            pending: 0,
+            threatsDisclosed: 0,
+            rows: [],
+            mine: null,
+          },
           fileStatuses: {},
           priorYear: null,
           partner: null,

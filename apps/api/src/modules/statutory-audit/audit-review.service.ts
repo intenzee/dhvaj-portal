@@ -172,14 +172,19 @@ export class AuditReviewService {
                 WHEN 'procedure' THEN p.procedure_ref || ' · ' || p.title
                 WHEN 'work_area' THEN wa.title
                 WHEN 'evidence' THEN ev.title
+                WHEN 'acceptance_segment' THEN 'Section 01 · ' || seg.title
               END AS target_label,
+              -- Section 01 is prepared by the Engagement Manager and reviewed
+              -- by the Engagement Partner.
               CASE rn.target_type
                 WHEN 'procedure' THEN p.owner_employee_id
                 WHEN 'work_area' THEN wa.owner_employee_id
+                WHEN 'acceptance_segment' THEN eng.engagement_manager_id
               END AS target_owner_id,
               CASE rn.target_type
                 WHEN 'procedure' THEN p.reviewer_employee_id
                 WHEN 'work_area' THEN wa.reviewer_employee_id
+                WHEN 'acceptance_segment' THEN eng.engagement_partner_id
               END AS target_reviewer_id,
               rn.review_level, rn.body, rn.status, rn.is_blocking, rn.source_key,
               rn.raised_by_employee_id,
@@ -194,6 +199,9 @@ export class AuditReviewService {
          LEFT JOIN hsdg.audit_procedures p ON rn.target_type = 'procedure' AND p.id = rn.target_id
          LEFT JOIN hsdg.audit_work_areas wa ON rn.target_type = 'work_area' AND wa.id = rn.target_id
          LEFT JOIN hsdg.audit_evidence ev ON rn.target_type = 'evidence' AND ev.id = rn.target_id
+         LEFT JOIN hsdg.audit_acceptance_segments seg
+                ON rn.target_type = 'acceptance_segment' AND seg.id = rn.target_id
+         LEFT JOIN hsdg.engagements eng ON eng.id = rn.engagement_id
         WHERE rn.workflow_instance_id = ANY($1::uuid[])
         ORDER BY rn.created_at DESC`,
       [shellIds],
@@ -942,6 +950,16 @@ export class AuditReviewService {
       );
       if (!rows[0]) throw new BadRequestException('Audit area not found on this engagement.');
       return reviewLevelFor(rows[0].reviewer_employee_id, partnerId);
+    }
+    if (targetType === REVIEW_TARGET_TYPE.acceptanceSegment) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM hsdg.audit_acceptance_segments WHERE id = $1 AND engagement_id = $2`,
+        [targetId, engagementId],
+      );
+      if (!rows[0])
+        throw new BadRequestException('Section 01 segment not found on this engagement.');
+      // Section 01 is the Engagement Partner's to review.
+      return reviewLevelFor(partnerId, partnerId);
     }
     // Evidence carries no reviewer of its own; default to manager review.
     const { rows } = await client.query(

@@ -1077,6 +1077,24 @@ export function questionsFor(segmentKey: string): AcceptanceQuestionDefinition[]
   return ACCEPTANCE_QUESTIONS.filter((q) => q.segmentKey === segmentKey);
 }
 
+/** Questions whose answer is this year's to give, never last year's (§13). */
+const NOT_ROLLED_FORWARD = new Set(['ep_01']);
+
+/**
+ * The questions of a segment that roll forward from last year (spec §13):
+ * everything except dates, periods, the per-service IND-03 rows and the
+ * EP-01 confirmation of this year's master facts.
+ */
+export function rollForwardQuestions(segmentKey: string): AcceptanceQuestionDefinition[] {
+  return questionsFor(segmentKey).filter(
+    (q) =>
+      q.control !== 'date' &&
+      q.control !== 'period' &&
+      q.control !== 'services' &&
+      !NOT_ROLLED_FORWARD.has(q.questionKey),
+  );
+}
+
 export function questionByKey(questionKey: string): AcceptanceQuestionDefinition | undefined {
   return ACCEPTANCE_QUESTIONS.find((q) => q.questionKey === questionKey);
 }

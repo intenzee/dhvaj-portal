@@ -48,6 +48,8 @@ export const REVIEW_TARGET_TYPE = {
   procedure: 'procedure',
   workArea: 'work_area',
   evidence: 'evidence',
+  /** A Section 01 segment, reviewed from its context panel. */
+  acceptanceSegment: 'acceptance_segment',
 } as const;
 export type ReviewTargetType = (typeof REVIEW_TARGET_TYPE)[keyof typeof REVIEW_TARGET_TYPE];
 
@@ -178,10 +180,7 @@ export function reviewNoteIsOpen(note: { status: ReviewNoteStatus }): boolean {
  * is an ISO 'YYYY-MM-DD' date so the comparison is timezone-free (DATE columns
  * come back as raw date strings). Pure and DB-free.
  */
-export function isReviewOverdue(
-  item: { dueDate: string | null },
-  today: string,
-): boolean {
+export function isReviewOverdue(item: { dueDate: string | null }, today: string): boolean {
   if (!item.dueDate) return false;
   return item.dueDate < today;
 }

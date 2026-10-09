@@ -12,6 +12,7 @@ import {
   ACCEPTANCE_SEGMENT_KEY,
   SEGMENT_RESOLVED_STATES,
   evaluateSegment,
+  rollForwardQuestions,
   type AcceptanceAnswer,
   type AcceptanceAnswerRecord,
   type AcceptanceConclusion,
@@ -323,6 +324,79 @@ export class AuditAcceptanceService {
         objectType: 'audit_acceptance_segment',
         objectId: segmentId,
         after: { questionKey: input.questionKey, answer: clean.answer, details: clean.details },
+      });
+      const [acc] = await this.readForShell(client, engagementId, seg.workflow_instance_id);
+      return acc!;
+    });
+  }
+
+  // ── Roll-forward (spec §13): last year's answers as this year's start ──────
+
+  /**
+   * Copy last year's answers into this segment's unanswered questions — the
+   * team then reviews and changes what is different this year. Dates, periods,
+   * the per-service IND-03 rows and the EP-01 confirmation are this year's to
+   * give; an answer that no longer validates is skipped.
+   */
+  async rollForward(
+    ctx: RlsContext,
+    engagementId: string,
+    segmentId: string,
+  ): Promise<StatutoryAuditAcceptance> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const seg = await this.loadSegment(client, engagementId, segmentId);
+      await this.assertNotApproved(client, seg.workflow_instance_id);
+      const context = await readAcceptanceContext(client, engagementId, seg.workflow_instance_id);
+      const prior = context.priorYear;
+      if (!prior) {
+        throw new BadRequestException(
+          'There is no prior-year Section 01 in DHVAJ to roll forward.',
+        );
+      }
+      const { rows: have } = await client.query<{ question_key: string }>(
+        `SELECT question_key FROM hsdg.audit_acceptance_answers WHERE segment_id = $1`,
+        [segmentId],
+      );
+      const answered = new Set(have.map((r) => r.question_key));
+      let copied = 0;
+      for (const q of rollForwardQuestions(seg.segment_key)) {
+        const last = prior.answers[q.questionKey];
+        if (answered.has(q.questionKey) || !last || last.answer === null) continue;
+        let clean: { answer: string | null; details: Record<string, unknown> };
+        try {
+          clean = validateAcceptanceAnswer(
+            seg.segment_key,
+            { questionKey: q.questionKey, answer: last.answer, details: last.details },
+            context,
+          );
+        } catch {
+          continue;
+        }
+        await client.query(
+          `INSERT INTO hsdg.audit_acceptance_answers
+             (segment_id, engagement_id, question_key, answer, details, answered_by_employee_id)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+           ON CONFLICT (segment_id, question_key) DO NOTHING`,
+          [
+            segmentId,
+            engagementId,
+            q.questionKey,
+            clean.answer,
+            JSON.stringify(clean.details),
+            ctx.employeeId ?? null,
+          ],
+        );
+        copied += 1;
+      }
+      if (copied === 0) {
+        throw new BadRequestException('Nothing to roll forward — every question here is answered.');
+      }
+      await this.reconcileMatters(client, ctx, engagementId, seg.workflow_instance_id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.acceptance_rolled_forward',
+        objectType: 'audit_acceptance_segment',
+        objectId: segmentId,
+        after: { fromWorkflowInstanceId: prior.workflowInstanceId, copied },
       });
       const [acc] = await this.readForShell(client, engagementId, seg.workflow_instance_id);
       return acc!;
