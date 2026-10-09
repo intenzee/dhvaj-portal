@@ -43,8 +43,7 @@ function cleanField(f: AcceptanceDetailField, v: unknown): unknown {
     }
     case 'select':
     case 'yesno': {
-      const allowed =
-        f.type === 'yesno' ? ['yes', 'no'] : (f.options ?? []).map((o) => o.value);
+      const allowed = f.type === 'yesno' ? ['yes', 'no'] : (f.options ?? []).map((o) => o.value);
       if (typeof v !== 'string' || !allowed.includes(v)) throw bad('choose from the list.');
       return v;
     }
@@ -76,7 +75,7 @@ export function validateAcceptanceAnswer(
   }
   if (q.control === 'services') {
     if (!sub || !context.otherServices.some((o) => o.engagementServiceId === sub)) {
-      throw new BadRequestException('Assess one of the client\'s other active services.');
+      throw new BadRequestException("Assess one of the client's other active services.");
     }
   } else if (sub) {
     throw new BadRequestException('Unknown question for this segment.');

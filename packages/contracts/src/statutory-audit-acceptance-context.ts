@@ -46,7 +46,12 @@ export interface AcceptancePriorYear {
   approvedByName: string | null;
   approvedAt: string | null;
   /** Last year's acceptance matters still open or accepted with conditions. */
-  carriedForwardMatters: { matterCode: string; title: string; status: string; resolution: string | null }[];
+  carriedForwardMatters: {
+    matterCode: string;
+    title: string;
+    status: string;
+    resolution: string | null;
+  }[];
   /** Last year's answers by question key. */
   answers: Record<string, { answer: string | null; details: Record<string, unknown> }>;
 }

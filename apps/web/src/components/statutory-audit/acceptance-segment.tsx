@@ -7,7 +7,7 @@ import {
   answerLabel,
   detailFieldsFor,
   evaluateSegment,
-  optionOf,
+  fileSlotsFor,
   questionByKey,
   type AcceptanceDetailField,
   type AcceptanceQuestionDefinition,
@@ -19,6 +19,7 @@ import {
 import { Badge, Button, Card } from '@/components/ui';
 import { Input, Select, Textarea } from '@/components/form';
 import { cn } from '@/lib/cn';
+import { AcceptanceFileCard } from './acceptance-file-card';
 
 /**
  * One Section 01 segment, rendered from the question engine (spec §4–§9, §13):
@@ -45,7 +46,9 @@ export const SEGMENT_TONE: Record<SegmentState, string> = {
 };
 
 /** Titles for question groups rendered as one compact table. */
-const GROUP_TITLE: Record<string, string> = {};
+const GROUP_TITLE: Record<string, string> = {
+  eligibility_checklist: 'Eligibility check — Clear / Issue / N/A',
+};
 
 export const questionAnchor = (questionKey: string): string =>
   `audit-anchor-question-${questionKey.split(':')[0]}`;
@@ -259,7 +262,10 @@ function QuestionBlock({
   return (
     <div
       id={questionAnchor(q.questionKey)}
-      className={cn('space-y-2 rounded-lg', compact ? 'p-3' : 'border-t border-line pt-3 first:border-0 first:pt-0')}
+      className={cn(
+        'space-y-2 rounded-lg',
+        compact ? 'p-3' : 'border-t border-line pt-3 first:border-0 first:pt-0',
+      )}
     >
       <AnswerRow
         q={q}
@@ -277,6 +283,16 @@ function QuestionBlock({
           Last year (FY {acc.context.priorYear!.financialYear}): {answerLabel(q, prior.answer)}
         </p>
       )}
+      {fileSlotsFor(q, state?.answer ?? null).map((f) => (
+        <AcceptanceFileCard
+          key={f.slot}
+          engagementId={acc.engagementId}
+          workflowInstanceId={acc.workflowInstanceId}
+          slotKey={f.slot}
+          editable={editable}
+          hint={f.hint}
+        />
+      ))}
       {after?.(q, state?.answer ?? null)}
     </div>
   );
@@ -323,7 +339,10 @@ function AnswerRow({
   defaults?: Record<string, unknown>;
 }): JSX.Element {
   const serverDetails = state?.details ?? {};
-  const [draft, setDraft] = useState<Record<string, unknown>>(() => ({ ...defaults, ...serverDetails }));
+  const [draft, setDraft] = useState<Record<string, unknown>>(() => ({
+    ...defaults,
+    ...serverDetails,
+  }));
   const serverKey = JSON.stringify(serverDetails);
   useEffect(() => {
     setDraft({ ...defaults, ...JSON.parse(serverKey) });
@@ -343,7 +362,9 @@ function AnswerRow({
 
   return (
     <div className="space-y-2">
-      <div className={cn('flex flex-wrap items-start gap-2', q.group ? 'justify-between' : 'flex-col')}>
+      <div
+        className={cn('flex flex-wrap items-start gap-2', q.group ? 'justify-between' : 'flex-col')}
+      >
         {label}
         <Control q={q} answer={answer} disabled={disabled} onChange={(a) => save(a, draft)} />
       </div>
@@ -560,4 +581,3 @@ function DetailInput({
 export function segmentOfQuestion(questionKey: string): string | null {
   return questionByKey(questionKey.split(':')[0]!)?.segmentKey ?? null;
 }
-

@@ -184,6 +184,15 @@ beforeEach(() => {
     Promise.resolve(
       url.includes('/matters')
         ? [matter]
+        : url.endsWith('/acceptance/files')
+          ? {
+              workflowInstanceId: 'wf1',
+              sectionLocked: false,
+              callerIsEngagementPartner: true,
+              m365Enabled: false,
+              files: [],
+              templates: [],
+            }
         : /\/acceptance\/(signoff|recommend|approve)$/.test(url)
           ? signoffView
           : [acceptance],

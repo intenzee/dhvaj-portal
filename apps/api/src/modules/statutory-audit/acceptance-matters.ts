@@ -1,5 +1,6 @@
 import {
   ACCEPTANCE_MATTER_CATEGORY,
+  ELIGIBILITY_CHECKS,
   acceptanceSource,
   answerLabel,
   isExceptionAnswer,
@@ -48,36 +49,64 @@ const legacy =
   };
 
 /**
+ * APP-05 checklist row marked Issue (spec §5): "any issue creates an
+ * Acceptance Matter". Its weight follows the conclusion recorded on the row —
+ * a resolved issue stays on the register for the record; one awaiting the
+ * Partner, or barring the appointment, blocks acceptance.
+ */
+const eligibilityIssue: Rule = (a) => {
+  if (a.answer !== 'issue') return [];
+  const label = ELIGIBILITY_CHECKS.find(([k]) => k === a.questionKey)?.[1] ?? a.questionKey;
+  const what = detailText(a.details, 'description') ?? 'issue identified';
+  const title = `Eligibility — ${label}: ${what}`;
+  switch (a.details?.conclusion) {
+    case 'resolved':
+      return [{ category: C.eligibility, severity: 'medium', isBlocking: false, title }];
+    case 'cannot_accept':
+      return [{ category: C.eligibility, severity: 'critical', isBlocking: true, title }];
+    default:
+      return [{ category: C.eligibility, severity: 'high', isBlocking: true, title }];
+  }
+};
+
+/**
  * Per-question rules. A question with no rule raises no matter (e.g. EP-01's
  * correction is put right on the master, it is not an acceptance concern).
  */
 const RULES: Record<string, Rule> = {
-  properly_appointed: legacy({ category: C.appointment, severity: 'critical', isBlocking: true }),
-  eligible_141: legacy({ category: C.eligibility, severity: 'critical', isBlocking: true }),
-  within_ceiling: legacy({ category: C.eligibility, severity: 'high', isBlocking: true }),
+  ...Object.fromEntries(ELIGIBILITY_CHECKS.map(([k]) => [k, eligibilityIssue])),
   communication_sent: legacy({ category: C.previousAuditor, severity: 'high', isBlocking: true }),
   no_professional_objection: legacy({
     category: C.previousAuditor,
     severity: 'high',
     isBlocking: true,
   }),
-  management_integrity_concern: legacy({ category: C.integrity, severity: 'high', isBlocking: true }),
+  management_integrity_concern: legacy({
+    category: C.integrity,
+    severity: 'high',
+    isBlocking: true,
+  }),
   resources_competence: legacy({ category: C.resources, severity: 'high', isBlocking: true }),
   independence_threats: legacy({ category: C.independence, severity: 'high', isBlocking: true }),
   prohibited_services: legacy({ category: C.independence, severity: 'critical', isBlocking: true }),
-  acceptable_framework: legacy({ category: C.preconditions, severity: 'critical', isBlocking: true }),
+  acceptable_framework: legacy({
+    category: C.preconditions,
+    severity: 'critical',
+    isBlocking: true,
+  }),
   management_responsibilities: legacy({
     category: C.preconditions,
     severity: 'critical',
     isBlocking: true,
   }),
   no_scope_limitation: legacy({ category: C.scope, severity: 'high', isBlocking: true }),
-  engagement_letter_issued: legacy({ category: C.other, severity: 'medium', isBlocking: true }),
-  client_acknowledged: legacy({ category: C.other, severity: 'medium', isBlocking: false }),
 };
 
 /** First non-empty text detail among `keys`, for the matter description. */
-export function detailText(details: AcceptanceDetails | undefined, ...keys: string[]): string | null {
+export function detailText(
+  details: AcceptanceDetails | undefined,
+  ...keys: string[]
+): string | null {
   for (const k of keys) {
     const v = details?.[k];
     if (typeof v === 'string' && v.trim()) return v.trim();

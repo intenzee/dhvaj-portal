@@ -97,6 +97,8 @@ export interface AcceptancePackFacts {
   openMatters: readonly PackMatter[];
   /** Engagement-profile facts the client master does not hold yet. */
   missingMasterFacts: readonly string[];
+  /** Section 01 file statuses by slot key (engagement letter, acknowledgement …). */
+  fileStatuses?: Readonly<Record<string, string>>;
 }
 
 const RESOLVED_SEGMENT = ['complete', 'not_applicable'];
@@ -114,7 +116,12 @@ function said(a: { questionKey: string; answer: string | null }): string {
 }
 
 /** The explanation recorded with an answer (any text detail field). */
-function explained(a: { questionKey: string; answer: string | null; details: Record<string, unknown>; narrative: string | null }): string | null {
+function explained(a: {
+  questionKey: string;
+  answer: string | null;
+  details: Record<string, unknown>;
+  narrative: string | null;
+}): string | null {
   const q = questionByKey(a.questionKey.split(':')[0]!);
   const texts = q
     ? detailFieldsFor(q, a)
@@ -220,20 +227,22 @@ export function planAcceptance(f: AcceptancePackFacts): AcceptancePack {
     ),
   );
 
-  const ack = segments
-    .find((s) => s.segmentKey === ACCEPTANCE_SEGMENT_KEY.engagementLetter)
-    ?.answers.find((a) => a.questionKey === 'client_acknowledged');
+  // The client's acceptance: the letter marked Accepted, or a signed
+  // acknowledgement on file (spec §10).
+  const letter = f.fileStatuses?.engagement_letter;
+  const ackFile = f.fileStatuses?.client_acknowledgement;
+  const acknowledged = letter === 'accepted' || ackFile === 'final';
   checks.push(
     check(
       'client_acknowledged',
       'Engagement letter acknowledged by the client',
-      ack?.answer === 'yes',
+      acknowledged,
       false,
-      ack?.answer === 'yes'
-        ? ['The client has acknowledged the engagement letter.']
-        : ack?.answer === 'no'
-          ? ['The client has not acknowledged the engagement letter yet.']
-          : ['Not recorded yet whether the client has acknowledged the engagement letter.'],
+      acknowledged
+        ? ['The client has accepted the engagement letter.']
+        : letter === 'issued'
+          ? ['The letter is issued; the client has not accepted it yet.']
+          : ['The engagement letter has not been issued to the client yet.'],
       go(
         'acceptance',
         'Open engagement letter',

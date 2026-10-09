@@ -30,10 +30,7 @@ import { AuditMattersService } from './audit-matters.service';
 import { deriveAcceptanceMatters } from './acceptance-matters';
 import { readAcceptanceContext } from './acceptance-context';
 import { validateAcceptanceAnswer } from './acceptance-validation';
-import {
-  engagementProfileFacts,
-  readEngagementMasterFacts,
-} from './master-facts';
+import { engagementProfileFacts, readEngagementMasterFacts } from './master-facts';
 
 const FINAL = ACCEPTANCE_SEGMENT_KEY.finalAcceptance;
 
@@ -201,7 +198,13 @@ export class AuditAcceptanceService {
         'acceptance',
       );
       const context = await readAcceptanceContext(client, shell.engagement_id, shell.id);
-      const evaluations = await this.evaluateAndStore(client, shell.id, shellSegments, answers, context);
+      const evaluations = await this.evaluateAndStore(
+        client,
+        shell.id,
+        shellSegments,
+        answers,
+        context,
+      );
       const unresolved = shellSegments.filter(
         (s) => s.segment_key !== FINAL && !SEGMENT_RESOLVED_STATES.includes(s.state),
       ).length;
@@ -215,7 +218,9 @@ export class AuditAcceptanceService {
             appointmentDate: answerOf(answers, shellSegments, 'app_02'),
           })
         : [];
-      const mappedSegments = shellSegments.map((s) => mapSegment(s, answers, evaluations.get(s.id)));
+      const mappedSegments = shellSegments.map((s) =>
+        mapSegment(s, answers, evaluations.get(s.id)),
+      );
       out.push({
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
@@ -243,6 +248,7 @@ export class AuditAcceptanceService {
           segments: mappedSegments,
           openMatters,
           missingMasterFacts: engagementProfile.filter((f) => f.value == null).map((f) => f.label),
+          fileStatuses: context.fileStatuses,
         }),
         context,
       });
@@ -343,7 +349,7 @@ export class AuditAcceptanceService {
         throw new BadRequestException(
           now.pending[0] ??
             now.attention[0] ??
-            'A segment\'s status follows its answers — answer its questions to move it on.',
+            "A segment's status follows its answers — answer its questions to move it on.",
         );
       }
       return acc!;
@@ -389,7 +395,8 @@ export class AuditAcceptanceService {
       if (s.segment_key === FINAL) continue;
       const byKey: Record<string, { answer: string | null; details: Record<string, unknown> }> = {};
       for (const a of answers) {
-        if (a.segment_id === s.id) byKey[a.question_key] = { answer: a.answer, details: a.details ?? {} };
+        if (a.segment_id === s.id)
+          byKey[a.question_key] = { answer: a.answer, details: a.details ?? {} };
       }
       const ev = evaluateSegment(s.segment_key, byKey as AnswersByKey, evalCtx);
       out.set(s.id, ev);
@@ -500,9 +507,15 @@ export class AuditAcceptanceService {
 }
 
 /** The recorded answer to a question in this shell, or null. */
-function answerOf(answers: AnswerRow[], segments: SegmentRow[], questionKey: string): string | null {
+function answerOf(
+  answers: AnswerRow[],
+  segments: SegmentRow[],
+  questionKey: string,
+): string | null {
   const ids = new Set(segments.map((s) => s.id));
-  return answers.find((a) => ids.has(a.segment_id) && a.question_key === questionKey)?.answer ?? null;
+  return (
+    answers.find((a) => ids.has(a.segment_id) && a.question_key === questionKey)?.answer ?? null
+  );
 }
 
 /** A text detail recorded with a question in this shell, or null. */
@@ -513,7 +526,9 @@ function detailString(
   field: string,
 ): string | null {
   const ids = new Set(segments.map((s) => s.id));
-  const v = answers.find((a) => ids.has(a.segment_id) && a.question_key === questionKey)?.details?.[field];
+  const v = answers.find((a) => ids.has(a.segment_id) && a.question_key === questionKey)?.details?.[
+    field
+  ];
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
 

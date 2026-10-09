@@ -22,9 +22,9 @@ describe('planAcceptance', () => {
         required: 3,
         answered: 3,
         answers: [
-          { questionKey: 'properly_appointed', answer: 'yes', details: {}, narrative: null },
-          { questionKey: 'eligible_141', answer: 'yes', details: {}, narrative: null },
-          { questionKey: 'within_ceiling', answer: 'yes', details: {}, narrative: null },
+          { questionKey: 'el_firm', answer: 'clear', details: {}, narrative: null },
+          { questionKey: 'el_disqualification', answer: 'clear', details: {}, narrative: null },
+          { questionKey: 'el_ceiling', answer: 'clear', details: {}, narrative: null },
         ],
       },
       {
@@ -39,12 +39,9 @@ describe('planAcceptance', () => {
         segmentKey: 'engagement_letter',
         title: '01.7 Engagement Letter',
         state: 'complete',
-        required: 2,
-        answered: 2,
-        answers: [
-          { questionKey: 'engagement_letter_issued', answer: 'yes', details: {}, narrative: null },
-          { questionKey: 'client_acknowledged', answer: 'yes', details: {}, narrative: null },
-        ],
+        required: 1,
+        answered: 1,
+        answers: [],
       },
       {
         segmentKey: 'final_acceptance',
@@ -57,6 +54,7 @@ describe('planAcceptance', () => {
     ],
     openMatters: [],
     missingMasterFacts: [],
+    fileStatuses: { engagement_letter: 'accepted' },
   };
 
   it('is ready and suggests accept when every segment is clean', () => {
@@ -81,11 +79,14 @@ describe('planAcceptance', () => {
           state: 'in_progress',
           answered: 2,
           answers: [
-            { questionKey: 'properly_appointed', answer: 'yes', details: {}, narrative: null },
+            { questionKey: 'el_firm', answer: 'clear', details: {}, narrative: null },
             {
-              questionKey: 'eligible_141',
-              answer: 'no',
-              details: { explanation: 'Partner relative holds shares.' },
+              questionKey: 'el_disqualification',
+              answer: 'issue',
+              details: {
+                description: 'Partner relative holds shares.',
+                conclusion: 'cannot_accept',
+              },
               narrative: null,
             },
           ],

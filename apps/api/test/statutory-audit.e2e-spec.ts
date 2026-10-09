@@ -15,6 +15,9 @@ import { answerSection01, answerSection01Clean, recommendSection01 } from './sec
  * individual slices ship pure-unit specs; this is the full-stack pass that binds
  * them together (build sequence §38 item 18).
  */
+// Each test drives Section 01 end to end (answers, engagement letter, FINAL-01/02).
+jest.setTimeout(30_000);
+
 describe('Statutory Audit (e2e §35/§36)', () => {
   let app: INestApplication;
 
@@ -302,8 +305,9 @@ describe('Statutory Audit (e2e §35/§36)', () => {
     const { engId, shellId } = await provisionAuditFile();
     // Answer everything cleanly EXCEPT one adverse (blocking) response.
     await answerSection01Clean(app, pa, engId);
-    await answerSection01(app, pa, engId, 'appointment_eligibility', 'properly_appointed', 'no', {
-      explanation: 'Not yet appointed.',
+    await answerSection01(app, pa, engId, 'appointment_eligibility', 'el_ceiling', 'issue', {
+      description: 'Partner is at the audit ceiling.',
+      conclusion: 'partner_review',
     });
     // Approval is blocked by the open blocking matter.
     await recommendSection01(app, pa, engId, shellId);

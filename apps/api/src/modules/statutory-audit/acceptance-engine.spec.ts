@@ -30,29 +30,101 @@ describe('Section 01 question engine', () => {
     });
   });
 
-  it('an explained exception completes the segment unless its matter is still blocking', () => {
-    const answers: AnswersByKey = {
-      properly_appointed: ans('no', { explanation: 'Board resolution awaited.' }),
-      eligible_141: ans('yes'),
-      within_ceiling: ans('yes'),
+  describe('01.2 Appointment & Eligibility', () => {
+    const clean: AnswersByKey = {
+      app_01: ans('agm'),
+      app_02: ans('2024-09-27'),
+      app_03: ans('recorded', { from: '2024-25', to: '2028-29' }),
+      app_04: ans('yes'),
+      app_05: ans('yes'),
+      el_firm: ans('clear'),
+      el_disqualification: ans('clear'),
+      el_tenure: ans('na'),
+      el_ceiling: ans('clear'),
+      el_relationship: ans('clear'),
+      el_other: ans('clear'),
     };
-    expect(evaluateSegment('appointment_eligibility', answers, ctx()).state).toBe('complete');
-    const blocked = evaluateSegment(
-      'appointment_eligibility',
-      answers,
-      ctx({ openBlockingSources: ['acceptance:appointment_eligibility:properly_appointed'] }),
-    );
-    expect(blocked.state).toBe('attention_required');
+
+    it('completes once appointment, period, communication and the checklist are recorded', () => {
+      const ev = evaluateSegment('appointment_eligibility', clean, ctx());
+      expect(ev).toMatchObject({ state: 'complete', required: 11, answered: 11 });
+    });
+
+    it('"Other" asks for the basis; a missing appointment communication stays in Needs Attention', () => {
+      const ev = evaluateSegment(
+        'appointment_eligibility',
+        { ...clean, app_01: ans('other'), app_04: ans('no') },
+        ctx(),
+      );
+      expect(ev.state).toBe('in_progress');
+      expect(ev.pending).toEqual(
+        expect.arrayContaining([
+          'APP-01: Specify appointment basis still to record',
+          'Appointment Communication Pending',
+        ]),
+      );
+    });
+
+    it('an issue needs its description and conclusion; Partner review or a bar needs attention', () => {
+      const open = evaluateSegment(
+        'appointment_eligibility',
+        { ...clean, el_ceiling: ans('issue') },
+        ctx(),
+      );
+      expect(open.state).toBe('in_progress');
+      expect(open.pending.join(' ')).toMatch(/Describe the matter, Conclusion/);
+      const review = evaluateSegment(
+        'appointment_eligibility',
+        {
+          ...clean,
+          el_ceiling: ans('issue', {
+            description: '21 audits this year.',
+            conclusion: 'partner_review',
+          }),
+        },
+        ctx(),
+      );
+      expect(review.state).toBe('attention_required');
+      expect(review.items).toContainEqual({
+        kind: 'attention',
+        text: 'Audit ceiling / number of audits consideration: Partner review required',
+        questionKey: 'el_ceiling',
+      });
+      const resolved = evaluateSegment(
+        'appointment_eligibility',
+        {
+          ...clean,
+          el_ceiling: ans('issue', {
+            description: 'Within limit after count.',
+            conclusion: 'resolved',
+          }),
+        },
+        ctx(),
+      );
+      expect(resolved.state).toBe('complete');
+      const blocked = evaluateSegment(
+        'appointment_eligibility',
+        clean,
+        ctx({ openBlockingSources: ['acceptance:appointment_eligibility:el_ceiling'] }),
+      );
+      expect(blocked.state).toBe('attention_required');
+    });
   });
 
-  it('an exception with no explanation is still open, naming what to record', () => {
-    const ev = evaluateSegment(
-      'appointment_eligibility',
-      { properly_appointed: ans('no'), eligible_141: ans('yes'), within_ceiling: ans('yes') },
-      ctx(),
-    );
-    expect(ev.state).toBe('in_progress');
-    expect(ev.pending.join(' ')).toMatch(/Explain the exception/);
+  describe('01.7 Engagement Letter', () => {
+    const letter = (status?: string) =>
+      evaluateSegment(
+        'engagement_letter',
+        {},
+        ctx({ fileStatuses: status ? { engagement_letter: status } : {} }),
+      );
+
+    it('follows the letter: none → Not Started, draft / review → In Progress, approved on → Complete', () => {
+      expect(letter().state).toBe('not_started');
+      expect(letter('draft')).toMatchObject({ state: 'in_progress', required: 1, answered: 0 });
+      expect(letter('partner_review').pending[0]).toMatch(/with the Engagement Partner/);
+      for (const s of ['approved', 'issued', 'accepted']) expect(letter(s).state).toBe('complete');
+    });
   });
 
   describe('validateAcceptanceAnswer', () => {
@@ -67,10 +139,18 @@ describe('Section 01 question engine', () => {
 
     it('rejects an answer that is not one of the options, or a question of another segment', () => {
       expect(() =>
-        validateAcceptanceAnswer('engagement_profile', { questionKey: 'ep_01', answer: 'maybe' }, noServices),
+        validateAcceptanceAnswer(
+          'engagement_profile',
+          { questionKey: 'ep_01', answer: 'maybe' },
+          noServices,
+        ),
       ).toThrow(/options/);
       expect(() =>
-        validateAcceptanceAnswer('audit_preconditions', { questionKey: 'ep_01', answer: 'yes' }, noServices),
+        validateAcceptanceAnswer(
+          'audit_preconditions',
+          { questionKey: 'ep_01', answer: 'yes' },
+          noServices,
+        ),
       ).toThrow(/Unknown question/);
     });
   });

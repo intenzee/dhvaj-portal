@@ -90,14 +90,47 @@ export interface AcceptanceSegmentDefinition {
 
 /** The canonical 8 segments, seeded per shell (guide §8.3). */
 export const ACCEPTANCE_SEGMENTS: readonly AcceptanceSegmentDefinition[] = [
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.engagementProfile, title: 'Engagement Profile', sortOrder: 1, readOnly: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.appointmentEligibility, title: 'Appointment & Eligibility', sortOrder: 2 },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.previousAuditor, title: 'Previous Auditor Communication', sortOrder: 3 },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.acceptanceContinuance, title: 'Acceptance / Continuance', sortOrder: 4 },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.independenceEthics, title: 'Independence & Ethics', sortOrder: 5 },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.auditPreconditions, title: 'Audit Preconditions', sortOrder: 6 },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.engagementLetter, title: 'Engagement Letter & Required Documents', sortOrder: 7 },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.finalAcceptance, title: 'Final Acceptance & Partner Approval', sortOrder: 8 },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.engagementProfile,
+    title: 'Engagement Profile',
+    sortOrder: 1,
+    readOnly: true,
+  },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.appointmentEligibility,
+    title: 'Appointment & Eligibility',
+    sortOrder: 2,
+  },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.previousAuditor,
+    title: 'Previous Auditor Communication',
+    sortOrder: 3,
+  },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.acceptanceContinuance,
+    title: 'Acceptance / Continuance',
+    sortOrder: 4,
+  },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.independenceEthics,
+    title: 'Independence & Ethics',
+    sortOrder: 5,
+  },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.auditPreconditions,
+    title: 'Audit Preconditions',
+    sortOrder: 6,
+  },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.engagementLetter,
+    title: 'Engagement Letter & Required Documents',
+    sortOrder: 7,
+  },
+  {
+    segmentKey: ACCEPTANCE_SEGMENT_KEY.finalAcceptance,
+    title: 'Final Acceptance & Partner Approval',
+    sortOrder: 8,
+  },
 ] as const;
 
 export interface AcceptanceAnswerRecord {

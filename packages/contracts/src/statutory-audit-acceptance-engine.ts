@@ -96,14 +96,7 @@ export interface AcceptanceOption extends AcceptanceChoice {
 }
 
 export type AcceptanceFieldType =
-  | 'text'
-  | 'textarea'
-  | 'date'
-  | 'email'
-  | 'fy'
-  | 'select'
-  | 'multiselect'
-  | 'yesno';
+  'text' | 'textarea' | 'date' | 'email' | 'fy' | 'select' | 'multiselect' | 'yesno';
 
 export interface AcceptanceDetailField {
   key: string;
@@ -135,8 +128,10 @@ export interface AcceptanceQuestionDefinition {
   options?: readonly AcceptanceOption[];
   /** Detail fields shown for these answers (any answer when `when` is omitted). */
   details?: readonly { when?: readonly string[]; fields: readonly AcceptanceDetailField[] }[];
-  /** Add File / Link Existing File is offered for these answers. */
+  /** Add File / Link Existing File is offered for these answers (slot `evidence:<questionKey>`). */
   evidenceWhen?: readonly string[];
+  /** Section 01 file cards shown with this question (all answers when `when` is omitted). */
+  files?: readonly { slot: string; when?: readonly string[]; hint?: string }[];
   /** Shown only when this holds. */
   showIf?: AcceptanceCondition;
   /** Does not have to be answered for the segment to complete. */
@@ -163,6 +158,46 @@ const EXPLAIN: AcceptanceDetailField = {
   required: true,
 };
 
+// ── 01.2 vocabulary ─────────────────────────────────────────────────────────
+
+/** APP-01 — how DHVAJ was appointed. */
+export const ACCEPTANCE_APPOINTMENT_BASIS = [
+  { value: 'first_auditor', label: 'First Auditor' },
+  { value: 'agm', label: 'Appointment at AGM' },
+  { value: 'reappointment', label: 'Reappointment' },
+  { value: 'casual_vacancy', label: 'Casual Vacancy' },
+  { value: 'cag', label: 'C&AG Appointment' },
+  { value: 'other', label: 'Other' },
+] as const satisfies readonly AcceptanceChoice[];
+export type AcceptanceAppointmentBasis = (typeof ACCEPTANCE_APPOINTMENT_BASIS)[number]['value'];
+export const ACCEPTANCE_APPOINTMENT_BASIS_LABEL = Object.fromEntries(
+  ACCEPTANCE_APPOINTMENT_BASIS.map((o) => [o.value, o.label]),
+) as Record<AcceptanceAppointmentBasis, string>;
+
+/** The conclusion on an eligibility-checklist issue (spec §5). */
+export const ELIGIBILITY_ISSUE_CONCLUSION = [
+  { value: 'resolved', label: 'Resolved' },
+  { value: 'partner_review', label: 'Partner Review Required' },
+  { value: 'cannot_accept', label: 'Appointment Cannot Be Accepted' },
+] as const satisfies readonly AcceptanceChoice[];
+export type EligibilityIssueConclusion = (typeof ELIGIBILITY_ISSUE_CONCLUSION)[number]['value'];
+
+/** The APP-05 eligibility checklist rows (question key → label). */
+export const ELIGIBILITY_CHECKS = [
+  ['el_firm', 'Firm / auditor eligibility'],
+  ['el_disqualification', 'Relevant disqualifications'],
+  ['el_tenure', 'Tenure / rotation, where applicable'],
+  ['el_ceiling', 'Audit ceiling / number of audits consideration'],
+  ['el_relationship', 'Relationship / interest restrictions'],
+  ['el_other', 'Other appointment restriction identified'],
+] as const;
+
+const CHECK_OPTIONS: readonly AcceptanceOption[] = [
+  { value: 'clear', label: 'Clear', tone: 'clear' },
+  { value: 'issue', label: 'Issue', tone: 'exception' },
+  { value: 'na', label: 'N/A', tone: 'clear' },
+];
+
 // ── The catalogue ───────────────────────────────────────────────────────────
 
 export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
@@ -186,32 +221,152 @@ export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
 
   // 01.2 – 01.7: the methodology's earlier Yes / No / N/A checks, until each
   // segment's full question set lands.
-  ...legacy('appointment_eligibility', [
-    ['properly_appointed', 'The firm is validly appointed as auditor (Sec 139).', 'no'],
-    ['eligible_141', 'No disqualification under Sec 141 applies to the firm or its partners.', 'no'],
-    ['within_ceiling', 'The audit is within the Sec 141(3)(g) ceiling on number of audits.', 'no'],
-  ]),
+  // 01.2 Appointment & Auditor Eligibility (spec §5).
+  {
+    segmentKey: 'appointment_eligibility',
+    questionKey: 'app_01',
+    code: 'APP-01',
+    prompt: 'How has DHVAJ been appointed as statutory auditor?',
+    control: 'select',
+    options: ACCEPTANCE_APPOINTMENT_BASIS.map((o) => ({ ...o, tone: 'clear' as const })),
+    details: [
+      {
+        when: ['other'],
+        fields: [
+          { key: 'specify', label: 'Specify appointment basis', type: 'text', required: true },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'appointment_eligibility',
+    questionKey: 'app_02',
+    code: 'APP-02',
+    prompt: 'Date of appointment',
+    control: 'date',
+  },
+  {
+    segmentKey: 'appointment_eligibility',
+    questionKey: 'app_03',
+    code: 'APP-03',
+    prompt: 'Period for which DHVAJ has been appointed',
+    control: 'period',
+    details: [
+      {
+        fields: [
+          { key: 'from', label: 'From', type: 'fy', required: true },
+          { key: 'to', label: 'To', type: 'fy', required: true },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'appointment_eligibility',
+    questionKey: 'app_04',
+    code: 'APP-04',
+    prompt: "Has the company's formal communication of appointment been received?",
+    control: 'choice',
+    options: [YES_CLEAR, { ...NO, tone: 'pending', pending: 'Appointment Communication Pending' }],
+    files: [
+      {
+        slot: 'appointment_communication',
+        when: ['yes'],
+        hint: 'Board / AGM resolution, appointment letter or the ADT-1 filing.',
+      },
+      // 5.1 Auditor Consent / Eligibility Certificate.
+      { slot: 'consent_certificate' },
+    ],
+  },
+  {
+    segmentKey: 'appointment_eligibility',
+    questionKey: 'app_05',
+    code: 'APP-05',
+    prompt:
+      "Has the firm's eligibility for this appointment been evaluated under the applicable provisions?",
+    control: 'choice',
+    options: [
+      YES_CLEAR,
+      { ...NO, tone: 'pending', pending: 'Eligibility evaluation not yet done' },
+      {
+        value: 'review_required',
+        label: 'Review Required',
+        tone: 'exception',
+        attention: 'Firm eligibility needs Engagement Partner review',
+      },
+    ],
+  },
+  ...ELIGIBILITY_CHECKS.map(([questionKey, prompt]): AcceptanceQuestionDefinition => ({
+    segmentKey: 'appointment_eligibility',
+    questionKey,
+    code: '',
+    prompt,
+    control: 'choice',
+    group: 'eligibility_checklist',
+    options: CHECK_OPTIONS,
+    details: [
+      {
+        when: ['issue'],
+        fields: [
+          { key: 'description', label: 'Describe the matter', type: 'textarea', required: true },
+          {
+            key: 'conclusion',
+            label: 'Conclusion',
+            type: 'select',
+            options: ELIGIBILITY_ISSUE_CONCLUSION,
+            required: true,
+          },
+        ],
+      },
+    ],
+    evidenceWhen: ['issue'],
+  })),
   ...legacy('previous_auditor', [
-    ['communication_sent', 'Communication with the previous auditor has been made (Clause 8, First Schedule).', 'no'],
-    ['no_professional_objection', 'No professional reason from the previous auditor prevents acceptance.', 'no'],
+    [
+      'communication_sent',
+      'Communication with the previous auditor has been made (Clause 8, First Schedule).',
+      'no',
+    ],
+    [
+      'no_professional_objection',
+      'No professional reason from the previous auditor prevents acceptance.',
+      'no',
+    ],
   ]),
   ...legacy('acceptance_continuance', [
     ['management_integrity_concern', 'There are concerns over management integrity.', 'yes'],
-    ['resources_competence', 'The firm has the competence, resources and time to perform the audit.', 'no'],
+    [
+      'resources_competence',
+      'The firm has the competence, resources and time to perform the audit.',
+      'no',
+    ],
   ]),
   ...legacy('independence_ethics', [
-    ['independence_threats', 'Threats to independence have been identified that need safeguards.', 'yes'],
-    ['prohibited_services', 'The firm provides services prohibited under Sec 144 to this client.', 'yes'],
+    [
+      'independence_threats',
+      'Threats to independence have been identified that need safeguards.',
+      'yes',
+    ],
+    [
+      'prohibited_services',
+      'The firm provides services prohibited under Sec 144 to this client.',
+      'yes',
+    ],
   ]),
   ...legacy('audit_preconditions', [
-    ['acceptable_framework', 'The financial reporting framework to be applied is acceptable (SA 210).', 'no'],
-    ['management_responsibilities', 'Management acknowledges its responsibilities (premise of the audit).', 'no'],
+    [
+      'acceptable_framework',
+      'The financial reporting framework to be applied is acceptable (SA 210).',
+      'no',
+    ],
+    [
+      'management_responsibilities',
+      'Management acknowledges its responsibilities (premise of the audit).',
+      'no',
+    ],
     ['no_scope_limitation', 'Management imposes a scope limitation precluding an opinion.', 'yes'],
   ]),
-  ...legacy('engagement_letter', [
-    ['engagement_letter_issued', 'The engagement letter has been issued (SA 210).', 'no'],
-    ['client_acknowledged', 'The client has acknowledged the engagement letter.', 'no'],
-  ]),
+  // 01.7 has no questions: it follows the engagement letter's file lifecycle
+  // (see SEGMENT_RULES.engagement_letter).
 ];
 
 function legacy(
@@ -334,11 +489,7 @@ export function missingDetailFields(
 }
 
 export type DerivedSegmentState =
-  | 'not_started'
-  | 'in_progress'
-  | 'attention_required'
-  | 'complete'
-  | 'not_applicable';
+  'not_started' | 'in_progress' | 'attention_required' | 'complete' | 'not_applicable';
 
 /** One Needs Attention line, linked to the question it comes from (spec §13). */
 export interface AttentionItem {
@@ -411,13 +562,17 @@ export function evaluateSegment(
     const missing = missingDetailFields(q, s);
     if (s?.answer == null) continue;
     if (missing.length > 0) {
-      pend(`${q.code || 'Question'}: ${missing.map((f) => f.label).join(', ')} still to record`, q.questionKey);
+      pend(
+        `${q.code || 'Question'}: ${missing.map((f) => f.label).join(', ')} still to record`,
+        q.questionKey,
+      );
       continue;
     }
     if (!opt?.pending) answered += 1;
   }
   const extra = rule?.extra?.(effective, ctx);
   if (extra) {
+    if (extra.touched) touched = true;
     items.push(...extra.items);
     required += extra.required ?? 0;
     answered += extra.answered ?? 0;
@@ -437,7 +592,16 @@ export function evaluateSegment(
   if (required === 0 && pending.length === 0 && attention.length === 0 && !blockingHere) {
     state = touched || visible.length === 0 ? 'complete' : 'not_started';
   }
-  return { state, items, visible, required, answered, pending, attention, notApplicableReason: null };
+  return {
+    state,
+    items,
+    visible,
+    required,
+    answered,
+    pending,
+    attention,
+    notApplicableReason: null,
+  };
 }
 
 interface SegmentRule {
@@ -449,15 +613,85 @@ interface SegmentRule {
   extra?: (
     answers: AnswersByKey,
     ctx: AcceptanceEvalContext,
-  ) => { items: AttentionItem[]; required?: number; answered?: number };
+  ) => { items: AttentionItem[]; required?: number; answered?: number; touched?: boolean };
 }
 
 const SEGMENT_RULES: Record<string, SegmentRule> = {
+  engagement_letter: {
+    // 01.7 (spec §10): the letter's own lifecycle decides the segment. It is
+    // done once the Engagement Partner has approved the letter; drafting and
+    // partner review keep it in progress; no letter yet is Not Started.
+    extra: (_answers, ctx) => {
+      const status = ctx.fileStatuses.engagement_letter;
+      if (!status) return { items: [], required: 1, answered: 0 };
+      if (ENGAGEMENT_LETTER_DONE.includes(status)) {
+        return { items: [], required: 1, answered: 1, touched: true };
+      }
+      return {
+        items: [
+          {
+            kind: 'pending',
+            text:
+              status === 'partner_review'
+                ? 'Engagement letter is with the Engagement Partner for review'
+                : 'Engagement letter is in draft — submit it for Partner review',
+            questionKey: null,
+          },
+        ],
+        required: 1,
+        answered: 0,
+        touched: true,
+      };
+    },
+  },
+  appointment_eligibility: {
+    // An eligibility issue still awaiting the Partner, or one that bars the
+    // appointment, needs the Engagement Partner's attention (spec §5).
+    extra: (answers) => ({
+      items: ELIGIBILITY_CHECKS.flatMap(([key, label]): AttentionItem[] => {
+        const a = answers[key];
+        if (a?.answer !== 'issue') return [];
+        const c = a.details?.conclusion;
+        if (c === 'partner_review') {
+          return [
+            { kind: 'attention', text: `${label}: Partner review required`, questionKey: key },
+          ];
+        }
+        if (c === 'cannot_accept') {
+          return [
+            {
+              kind: 'attention',
+              text: `${label}: appointment cannot be accepted`,
+              questionKey: key,
+            },
+          ];
+        }
+        return [];
+      }),
+    }),
+  },
   previous_auditor: {
     notApplicable: (_answers, ctx) =>
       ctx.firstYear === false ? 'continuing engagement — DHVAJ was the auditor last year.' : null,
   },
 };
+
+/** The file cards (slot keys) shown with a question for its current answer. */
+export function fileSlotsFor(
+  q: AcceptanceQuestionDefinition,
+  answer: string | null,
+): { slot: string; hint?: string }[] {
+  const out = (q.files ?? [])
+    .filter((f) => !f.when || (answer != null && f.when.includes(answer)))
+    .map((f) => ({ slot: f.slot, hint: f.hint }));
+  if (answer != null && q.evidenceWhen?.includes(answer)) {
+    out.push({ slot: `evidence:${q.questionKey}`, hint: undefined });
+  }
+  return out;
+}
+
+/** Engagement-letter statuses that complete 01.7. */
+export const ENGAGEMENT_LETTER_DONE: readonly string[] = ['approved', 'issued', 'accepted'];
 
 /** True when the answer is one of the question's exception answers. */
 export function isExceptionAnswer(

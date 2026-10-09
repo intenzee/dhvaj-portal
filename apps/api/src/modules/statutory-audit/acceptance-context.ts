@@ -206,7 +206,8 @@ export async function readAcceptanceContext(
   const fy = await readFirstYear(client, workflowInstanceId);
   const otherServices = await readOtherServices(client, workflowInstanceId);
   const fileStatuses = await readFileStatuses(client, workflowInstanceId);
-  const priorYear = fy.firstYear === false ? await readPriorYearAcceptance(client, workflowInstanceId) : null;
+  const priorYear =
+    fy.firstYear === false ? await readPriorYearAcceptance(client, workflowInstanceId) : null;
   const leads = await readLeads(client, engagementId);
   return {
     firstYear: fy.firstYear,

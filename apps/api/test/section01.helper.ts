@@ -13,8 +13,10 @@ import { progressEngagementLetter } from './section01-files.helper';
 /**
  * Section 01 for e2e tests: answer every question the screen would show with a
  * clean answer (no exception, nothing pending), the way a manager clears a
- * routine acceptance. Re-reads the file after each round because earlier
- * answers decide which later questions appear.
+ * routine acceptance, and take the engagement letter to Issued (01.7 follows
+ * the letter). Re-reads the file after each round because earlier answers
+ * decide which later questions appear. `token` must be the Engagement
+ * Partner's (approving the letter is partner-only).
  */
 
 /** A plausible value for a required detail field. */
@@ -98,7 +100,8 @@ export async function answerSection01Clean(
     acc = await read();
     if (posted === 0) break;
   }
-  return acc;
+  await progressEngagementLetter(app, token, engId, acc.workflowInstanceId);
+  return read();
 }
 
 /** Record one Section 01 answer (e.g. the single exception a test needs). */
