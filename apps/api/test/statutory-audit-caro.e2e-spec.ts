@@ -335,6 +335,55 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
     expect(actions).toContain('statutory_audit.caro_decision');
   });
 
+  it('CFS in scope (02.6) → clause 3(xxi) only, configured beside the paragraph 3 programme', async () => {
+    const cfs = await request(app.getHttpServer())
+      .get(`${base()}/consolidation`)
+      .set(bearer(pa))
+      .expect(200);
+    const cfsRow = cfs.body[0] as { assessment: { systemOutcome: string | null; version: number } };
+    await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/consolidation/decision`)
+      .set(bearer(pa))
+      .send({
+        conclusion: 'cfs_required',
+        basis: 'E2E: the company has a subsidiary and prepares CFS.',
+        version: cfsRow.assessment.version,
+      })
+      .expect(201);
+
+    // 02.4 is confirmed applicable for the standalone report.
+    const before = await getCaro(pa);
+    const confirmed = await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/caro/decision`)
+      .set(bearer(pa))
+      .send({ action: 'confirm', version: before.assessment.version })
+      .expect(201);
+    const caro = confirmed.body as StatutoryAuditCaro;
+    expect(caro.assessment.conclusion).toBe(CARO_OUTCOME.applicable);
+    expect(caro.detail!.reportContexts[1]).toMatchObject({
+      context: 'consolidated',
+      status: 'applicable',
+      scope: 'clause_3_xxi',
+    });
+
+    const prog = await request(app.getHttpServer())
+      .get(`${base()}/${shellId}/caro/programme`)
+      .set(bearer(pa))
+      .expect(200);
+    expect((prog.body.standalone as unknown[]).length).toBeGreaterThan(0);
+    expect(prog.body.consolidated).toMatchObject({ reportContext: 'consolidated' });
+    // The CFS item is the single 3(xxi) clause — never a duplicate paragraph 3 programme.
+    expect(
+      (prog.body.standalone as Array<{ reportContext: string }>).every(
+        (i) => i.reportContext === 'standalone',
+      ),
+    ).toBe(true);
+
+    const after = await getCaro(pa);
+    expect(after.completion!.items.find((i) => i.key === 'work_programme')?.met).toBe(true);
+    expect(after.completion!.items.find((i) => i.key === 'clause_3_xxi')?.met).toBe(true);
+  });
+
   it('an outsider (not on the engagement) cannot read or mutate 02.4 (§35)', async () => {
     const res = await request(app.getHttpServer())
       .get(`${base()}/caro`)
