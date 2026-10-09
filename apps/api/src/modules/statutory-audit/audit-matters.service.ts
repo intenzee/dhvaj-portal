@@ -28,11 +28,13 @@ const AUTO_RESOLVED = 'Auto-resolved: source condition cleared.';
 const SUGGESTED_RESOLUTION = `COALESCE(
     (SELECT COALESCE(
               NULLIF(trim(a.narrative), ''),
+              NULLIF(trim(a.details ->> 'actionRequired'), ''),
               NULLIF(trim(a.details ->> 'explanation'), ''),
               NULLIF(trim(a.details ->> 'assessment'), ''),
               NULLIF(trim(a.details ->> 'managerAssessment'), ''),
               NULLIF(trim(a.details ->> 'description'), ''),
-              NULLIF(trim(a.details ->> 'safeguard'), ''))
+              NULLIF(trim(a.details ->> 'safeguard'), ''),
+              NULLIF(trim(a.details ->> 'basis'), ''))
        FROM hsdg.audit_acceptance_answers a
        JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
       WHERE s.workflow_instance_id = m.workflow_instance_id
@@ -192,10 +194,19 @@ export class AuditMattersService {
     );
     let nextSeq = Number(seqRows[0]?.m ?? 0);
     let created = 0;
+    let updated = 0;
+    const { rows: existingRows } = await client.query<{ source: string }>(
+      `SELECT source FROM hsdg.audit_matter WHERE workflow_instance_id = $1 AND source = ANY($2::text[])`,
+      [workflowInstanceId, derivedSources],
+    );
+    const existing = new Set(existingRows.map((r) => r.source));
 
     for (const d of derived) {
-      const upd = await client.query(
-        `UPDATE hsdg.audit_matter
+      // Touch an existing matter only when what derives it has changed, so a
+      // re-sync never bumps the version under someone editing the matter.
+      if (existing.has(d.source)) {
+        const upd = await client.query(
+          `UPDATE hsdg.audit_matter
             SET category = $3,
                 is_blocking = $4,
                 severity = $5,
@@ -205,18 +216,24 @@ export class AuditMattersService {
                 resolution = CASE WHEN is_auto AND status = 'resolved' AND resolution = $7
                                   THEN NULL ELSE resolution END,
                 version = version + 1
-          WHERE workflow_instance_id = $1 AND source = $2`,
-        [
-          workflowInstanceId,
-          d.source,
-          d.category,
-          d.isBlocking,
-          d.severity ?? null,
-          d.title,
-          AUTO_RESOLVED,
-        ],
-      );
-      if ((upd.rowCount ?? 0) === 0) {
+          WHERE workflow_instance_id = $1 AND source = $2
+            AND (category IS DISTINCT FROM $3
+                 OR is_blocking IS DISTINCT FROM $4
+                 OR severity IS DISTINCT FROM $5
+                 OR title IS DISTINCT FROM $6
+                 OR (is_auto AND status = 'resolved' AND resolution = $7))`,
+          [
+            workflowInstanceId,
+            d.source,
+            d.category,
+            d.isBlocking,
+            d.severity ?? null,
+            d.title,
+            AUTO_RESOLVED,
+          ],
+        );
+        updated += upd.rowCount ?? 0;
+      } else {
         nextSeq += 1;
         const ins = await client.query(
           `INSERT INTO hsdg.audit_matter
@@ -251,6 +268,8 @@ export class AuditMattersService {
       [workflowInstanceId, derivedSources.length ? derivedSources : null, AUTO_RESOLVED, section],
     );
 
+    // Only a sync that changed the register is an event worth recording.
+    if (created + updated + (closed.rowCount ?? 0) === 0) return;
     await this.audit.recordWith(client, ctx, {
       action: 'statutory_audit.matters_synced',
       objectType: 'service_workflow_instance',
@@ -258,6 +277,7 @@ export class AuditMattersService {
       after: {
         section,
         created,
+        updated,
         autoClosed: closed.rowCount ?? 0,
         active: derivedSources.length,
       },

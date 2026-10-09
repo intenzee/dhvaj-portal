@@ -18,6 +18,9 @@ import { progressEngagementLetter, tinyDocx } from './section01-files.helper';
  * partner-only steps and the approved-work lock, FINAL-01 → FINAL-02 (EP only,
  * reasons/safeguards enforced, Return / Decline), and the controlled reopen.
  */
+// Each test drives Section 01 end to end (answers, files, FINAL-01/02).
+jest.setTimeout(30_000);
+
 describe('Statutory Audit — Section 01 documents & sign-off (e2e)', () => {
   let app: INestApplication;
   let mp: string; // Managing Partner — firm-wide admin, NOT the EP of these engagements.

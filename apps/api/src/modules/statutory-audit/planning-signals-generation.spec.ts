@@ -41,6 +41,18 @@ describe('deriveEngagementSignals (03.1 Engagement Intelligence)', () => {
     expect(keys(facts({ initialAudit: true, sa510: true }))).toEqual(['initial_audit']);
   });
 
+  it('01.4 specialist required ⇒ an Enhanced Section 01 signal for team and scope', () => {
+    const [s] = deriveEngagementSignals(facts({ specialistsRequired: ['IT', 'Valuation'] }));
+    expect(s).toMatchObject({
+      ruleKey: 'specialist_required',
+      source: 'section_01',
+      suggestedAttention: 'enhanced',
+      destinations: ['03.8', '03.4'],
+    });
+    expect(s!.observation).toContain('IT, Valuation');
+    expect(keys(facts({ specialistsRequired: [] }))).toEqual([]);
+  });
+
   it('outsourced or hybrid accounting environment ⇒ service-organisation signal', () => {
     expect(keys(facts({ accountingEnvironment: 'outsourced_service_organisation' }))).toEqual([
       'service_organisation',

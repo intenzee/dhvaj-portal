@@ -46,6 +46,7 @@ import {
   PRIOR_YEAR_ASSESSMENT_LABEL,
   PRIOR_YEAR_MATTER_TYPE_LABEL,
   ACCEPTANCE_CARRY_FORWARD_ACTION_LABEL,
+  specialistLabels,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -929,8 +930,18 @@ export class AuditPlanningIntelligenceService {
         WHERE workflow_instance_id = $1 AND conclusion IS NOT NULL`,
       [workflowInstanceId],
     );
+    // 01.4 ACC-04 "Specialist Required" (the answer's selected specialist types).
+    const { rows: spec } = await client.query<{ details: Record<string, unknown> }>(
+      `SELECT a.details FROM hsdg.audit_acceptance_answers a
+         JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
+        WHERE s.workflow_instance_id = $1 AND a.question_key = 'acc_04'
+          AND a.answer = 'specialist'`,
+      [workflowInstanceId],
+    );
+    const specialistsRequired = specialistLabels(spec[0]?.details);
     const p = profile[0];
     return {
+      specialistsRequired,
       initialAudit: p?.initial_audit ?? false,
       jointAudit: p?.joint_audit ?? false,
       accountingEnvironment: p?.accounting_environment ?? null,

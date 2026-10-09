@@ -61,6 +61,26 @@ describe('deriveAcceptanceMatters (Section 01 matters, guide §8.4)', () => {
     expect(pa('no_impact').title).toContain('Unpaid fees.');
   });
 
+  it('01.4 answers raise matters in their spec categories', () => {
+    const one = (questionKey: string, answer: string, details: Record<string, unknown> = {}) =>
+      deriveAcceptanceMatters([
+        ans({ segmentKey: 'acceptance_continuance', questionKey, answer, details }),
+      ])[0];
+    expect(one('acc_01', 'yes')).toMatchObject({ category: 'integrity', isBlocking: true });
+    expect(one('acc_02', 'pending')).toMatchObject({ category: 'integrity', isBlocking: false });
+    expect(one('acc_03', 'yes', { effect: 'minor' })).toMatchObject({
+      category: 'scope',
+      severity: 'low',
+      isBlocking: false,
+    });
+    expect(one('acc_04', 'specialist')).toBeUndefined();
+    expect(one('acc_05', 'yes')).toMatchObject({ category: 'fee', isBlocking: true });
+    expect(one('acc_conclusion', 'do_not_accept', { basis: 'Integrity.' })).toMatchObject({
+      severity: 'critical',
+      isBlocking: true,
+    });
+  });
+
   it('ignores unknown questions and yields one matter per distinct adverse answer', () => {
     expect(deriveAcceptanceMatters([ans({ questionKey: 'nonexistent', answer: 'issue' })])).toEqual(
       [],

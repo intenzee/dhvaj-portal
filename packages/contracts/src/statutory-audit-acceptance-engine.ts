@@ -237,6 +237,57 @@ const PA_APPLIES: AcceptanceCondition = {
 /** …and another auditor / firm audited the company immediately before. */
 const PA_HAD_AUDITOR: AcceptanceCondition = { all: [PA_APPLIES, { q: 'pa_02', in: ['yes'] }] };
 
+// ── 01.4 vocabulary ─────────────────────────────────────────────────────────
+
+/** CON-01 — the areas a continuing engagement says have changed (spec §7.1). */
+export const CONTINUANCE_CHANGED_AREA = [
+  { value: 'integrity', label: 'Integrity of management / TCWG' },
+  { value: 'legal', label: 'Legal, regulatory, fraud or reputation' },
+  { value: 'scope', label: 'Scope of the audit' },
+  { value: 'resources', label: 'Competence, time and resources' },
+  { value: 'fee', label: 'Fees / commercial' },
+  { value: 'other', label: 'Other' },
+] as const satisfies readonly AcceptanceChoice[];
+
+/** ACC-04 — specialist skills the engagement needs; carried to Planning. */
+export const SPECIALIST_TYPE = [
+  { value: 'it', label: 'IT' },
+  { value: 'valuation', label: 'Valuation' },
+  { value: 'tax', label: 'Tax' },
+  { value: 'actuarial', label: 'Actuarial' },
+  { value: 'legal', label: 'Legal' },
+  { value: 'industry', label: 'Industry' },
+  { value: 'other', label: 'Other' },
+] as const satisfies readonly AcceptanceChoice[];
+export const SPECIALIST_TYPE_LABEL = Object.fromEntries(
+  SPECIALIST_TYPE.map((o) => [o.value, o.label]),
+) as Record<(typeof SPECIALIST_TYPE)[number]['value'], string>;
+
+export const SCOPE_LIMITATION_EFFECT = [
+  { value: 'minor', label: 'Minor' },
+  { value: 'significant', label: 'Significant' },
+  { value: 'may_prevent', label: 'May Prevent Acceptance' },
+] as const satisfies readonly AcceptanceChoice[];
+
+/**
+ * An ACC question applies to a new engagement, and to a continuing one only
+ * for the areas CON-01 says have changed (spec §7.1–§7.2).
+ */
+const accApplies = (area: string): AcceptanceCondition => ({
+  any: [{ not: { ctx: 'continuing' } }, { q: 'con_01', field: 'changedAreas', includes: area }],
+});
+/** The full questionnaire / conclusion is needed unless continuance is confirmed. */
+const ACC_ASSESSED: AcceptanceCondition = {
+  any: [{ not: { ctx: 'continuing' } }, { q: 'con_01', in: ['yes'] }],
+};
+
+const PENDING_INFO = (text: string): AcceptanceOption => ({
+  value: 'pending',
+  label: 'Information Pending',
+  tone: 'pending',
+  pending: text,
+});
+
 // ── The catalogue ───────────────────────────────────────────────────────────
 
 export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
@@ -556,14 +607,228 @@ export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
       },
     ],
   },
-  ...legacy('acceptance_continuance', [
-    ['management_integrity_concern', 'There are concerns over management integrity.', 'yes'],
-    [
-      'resources_competence',
-      'The firm has the competence, resources and time to perform the audit.',
-      'no',
+  // 01.4 Acceptance / Continuance (spec §7). A continuing engagement confirms
+  // continuance on CON-01, or answers only the areas that changed.
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'con_01',
+    code: 'CON-01',
+    prompt:
+      "Have there been any changes since the previous acceptance assessment that could affect DHVAJ's decision to continue the engagement?",
+    control: 'choice',
+    showIf: { ctx: 'continuing' },
+    options: [
+      { ...YES, tone: 'clear' },
+      { value: 'no', label: 'No — Confirm Continuance', tone: 'clear' },
     ],
-  ]),
+    details: [
+      {
+        when: ['yes'],
+        fields: [
+          {
+            key: 'changedAreas',
+            label: 'Changed areas',
+            type: 'multiselect',
+            options: CONTINUANCE_CHANGED_AREA,
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'acc_01',
+    code: 'ACC-01',
+    prompt:
+      'Are there any known matters that raise concerns regarding the integrity of management or those charged with governance?',
+    control: 'choice',
+    showIf: accApplies('integrity'),
+    options: [
+      { ...YES_EXC, attention: 'Concern over the integrity of management / TCWG' },
+      NO_CLEAR,
+      PENDING_INFO('Integrity of management — information pending'),
+    ],
+    details: [
+      {
+        when: ['yes', 'pending'],
+        fields: [
+          { key: 'matter', label: 'Matter', type: 'textarea', required: true },
+          { key: 'source', label: 'Source of Information', type: 'text', required: true },
+        ],
+      },
+      {
+        when: ['yes'],
+        fields: [
+          { key: 'assessment', label: 'Assessment', type: 'textarea', required: true },
+          { key: 'actionRequired', label: 'Action Required', type: 'textarea', required: true },
+        ],
+      },
+    ],
+    evidenceWhen: ['yes', 'pending'],
+  },
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'acc_02',
+    code: 'ACC-02',
+    prompt:
+      'Are there significant legal, regulatory, investigation, fraud or reputational matters that may affect acceptance or continuance?',
+    control: 'choice',
+    showIf: accApplies('legal'),
+    options: [
+      YES_EXC,
+      NO_CLEAR,
+      PENDING_INFO('Legal / regulatory / reputational matters — information pending'),
+    ],
+    details: [
+      {
+        when: ['yes', 'pending'],
+        fields: [
+          { key: 'description', label: 'Describe the matter', type: 'textarea', required: true },
+          { key: 'assessment', label: 'Assessment', type: 'textarea', required: true },
+        ],
+      },
+    ],
+    evidenceWhen: ['yes', 'pending'],
+  },
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'acc_03',
+    code: 'ACC-03',
+    prompt:
+      'Has management imposed or indicated any limitation on the proposed scope of the audit?',
+    control: 'choice',
+    showIf: accApplies('scope'),
+    options: [YES_EXC, NO_CLEAR],
+    details: [
+      {
+        when: ['yes'],
+        fields: [
+          {
+            key: 'description',
+            label: 'Describe the limitation',
+            type: 'textarea',
+            required: true,
+          },
+          {
+            key: 'effect',
+            label: 'Potential effect',
+            type: 'select',
+            options: SCOPE_LIMITATION_EFFECT,
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'acc_04',
+    code: 'ACC-04',
+    prompt:
+      'Does DHVAJ have sufficient competence, capabilities, time and resources to perform the engagement?',
+    control: 'choice',
+    showIf: accApplies('resources'),
+    options: [
+      YES_CLEAR,
+      { ...NO_EXC, attention: 'Insufficient competence, time or resources for the engagement' },
+      { value: 'specialist', label: 'Specialist Required', tone: 'clear' },
+    ],
+    details: [
+      { when: ['no'], fields: [EXPLAIN] },
+      {
+        when: ['specialist'],
+        fields: [
+          {
+            key: 'specialistTypes',
+            label: 'Specialist',
+            type: 'multiselect',
+            options: SPECIALIST_TYPE,
+            required: true,
+            hint: 'Carried forward to Planning (team and scope).',
+          },
+          {
+            key: 'specialistOther',
+            label: 'Specify the specialist',
+            type: 'text',
+            required: true,
+            showIf: { field: 'specialistTypes', in: ['other'] },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'acc_05',
+    code: 'ACC-05',
+    prompt:
+      'Are there fee, commercial or outstanding-fee matters that require consideration before accepting or continuing the engagement?',
+    control: 'choice',
+    showIf: accApplies('fee'),
+    options: [
+      ACCEPTANCE_METHODOLOGY.feeMattersNeedPartnerReview
+        ? { ...YES_EXC, attention: 'Fee / commercial matter needs Engagement Partner review' }
+        : YES_EXC,
+      NO_CLEAR,
+    ],
+    details: [{ when: ['yes'], fields: [EXPLAIN] }],
+  },
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'acc_06',
+    code: 'ACC-06',
+    prompt:
+      "Is there any other matter that could affect DHVAJ's decision to accept or continue this engagement?",
+    control: 'choice',
+    showIf: accApplies('other'),
+    options: [YES_EXC, NO_CLEAR],
+    details: [
+      {
+        when: ['yes'],
+        fields: [
+          EXPLAIN,
+          { key: 'assessment', label: 'Assessment', type: 'textarea', required: true },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'acceptance_continuance',
+    questionKey: 'acc_conclusion',
+    code: '',
+    prompt: 'Segment conclusion',
+    control: 'select',
+    showIf: ACC_ASSESSED,
+    options: [
+      { value: 'clear', label: 'Clear to Proceed', tone: 'clear' },
+      {
+        value: 'subject_to_resolution',
+        label: 'Proceed Subject to Resolution',
+        tone: 'clear',
+      },
+      {
+        value: 'partner_attention',
+        label: 'Partner Attention Required',
+        tone: 'exception',
+        attention: 'Acceptance / continuance needs Engagement Partner attention',
+      },
+      {
+        value: 'do_not_accept',
+        label: 'Do Not Accept',
+        tone: 'exception',
+        attention: 'Acceptance / continuance concluded: Do Not Accept',
+      },
+    ],
+    details: [
+      {
+        when: ['subject_to_resolution', 'partner_attention', 'do_not_accept'],
+        fields: [
+          { key: 'basis', label: 'Basis for the conclusion', type: 'textarea', required: true },
+        ],
+      },
+    ],
+  },
   ...legacy('independence_ethics', [
     [
       'independence_threats',
@@ -693,6 +958,7 @@ export function detailFieldsFor(
   return fields.filter((f) => {
     if (!f.showIf) return true;
     const v = state?.details?.[f.showIf.field];
+    if (Array.isArray(v)) return v.some((x) => f.showIf!.in.includes(x as string));
     return typeof v === 'string' && f.showIf.in.includes(v);
   });
 }
@@ -906,6 +1172,22 @@ const SEGMENT_RULES: Record<string, SegmentRule> = {
       }),
     }),
   },
+  acceptance_continuance: {
+    // "Proceed Subject to Resolution" holds while this segment's matters are open.
+    extra: (answers, ctx) =>
+      answers.acc_conclusion?.answer === 'subject_to_resolution' &&
+      ctx.openBlockingSources.some((src) => src.startsWith('acceptance:acceptance_continuance:'))
+        ? {
+            items: [
+              {
+                kind: 'pending',
+                text: 'Proceeding subject to resolution — resolve the open matters first',
+                questionKey: 'acc_conclusion',
+              },
+            ],
+          }
+        : { items: [] },
+  },
   previous_auditor: {
     // PA-01 follows the file's first-year call until someone answers it.
     effectiveAnswers: (answers, ctx) =>
@@ -956,6 +1238,19 @@ const SEGMENT_RULES: Record<string, SegmentRule> = {
     },
   },
 };
+
+/** ACC-04 "Specialist Required" details → specialist labels for Planning. */
+export function specialistLabels(details: AcceptanceDetails | undefined): string[] {
+  const types = Array.isArray(details?.specialistTypes)
+    ? (details.specialistTypes as string[])
+    : [];
+  const other = typeof details?.specialistOther === 'string' ? details.specialistOther.trim() : '';
+  return types.map((t) =>
+    t === 'other' && other
+      ? other
+      : (SPECIALIST_TYPE_LABEL[t as keyof typeof SPECIALIST_TYPE_LABEL] ?? t),
+  );
+}
 
 /** The file cards (slot keys) shown with a question for its current answer. */
 export function fileSlotsFor(

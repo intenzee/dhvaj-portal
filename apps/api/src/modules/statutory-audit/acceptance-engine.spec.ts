@@ -1,6 +1,7 @@
 import {
   EMPTY_EVAL_CONTEXT,
   evaluateSegment,
+  specialistLabels,
   type AcceptanceEvalContext,
   type AnswersByKey,
 } from '@hsdg/contracts';
@@ -198,6 +199,67 @@ describe('Section 01 question engine', () => {
         ctx({ firstYear: true }),
       );
       expect(review.state).toBe('attention_required');
+    });
+  });
+
+  describe('01.4 Acceptance / Continuance', () => {
+    const clean: AnswersByKey = {
+      acc_01: ans('no'),
+      acc_02: ans('no'),
+      acc_03: ans('no'),
+      acc_04: ans('yes'),
+      acc_05: ans('no'),
+      acc_06: ans('no'),
+      acc_conclusion: ans('clear'),
+    };
+
+    it('a new engagement answers ACC-01 to ACC-06 and the conclusion', () => {
+      const ev = evaluateSegment('acceptance_continuance', clean, ctx({ firstYear: true }));
+      expect(ev).toMatchObject({ state: 'complete', required: 7, answered: 7 });
+      expect(ev.visible.map((q) => q.questionKey)).not.toContain('con_01');
+    });
+
+    it('a continuing engagement confirms continuance on CON-01 alone', () => {
+      const ev = evaluateSegment(
+        'acceptance_continuance',
+        { con_01: ans('no') },
+        ctx({ firstYear: false }),
+      );
+      expect(ev.visible.map((q) => q.questionKey)).toEqual(['con_01']);
+      expect(ev.state).toBe('complete');
+    });
+
+    it('changes since last year show only the changed areas, plus the conclusion', () => {
+      const ev = evaluateSegment(
+        'acceptance_continuance',
+        { con_01: ans('yes', { changedAreas: ['fee', 'resources'] }) },
+        ctx({ firstYear: false }),
+      );
+      expect(ev.visible.map((q) => q.questionKey)).toEqual([
+        'con_01',
+        'acc_04',
+        'acc_05',
+        'acc_conclusion',
+      ]);
+    });
+
+    it('a specialist names the skills; a fee matter needs Partner review', () => {
+      const spec = evaluateSegment(
+        'acceptance_continuance',
+        { ...clean, acc_04: ans('specialist', { specialistTypes: ['other'] }) },
+        ctx({ firstYear: true }),
+      );
+      expect(spec.pending).toContain('ACC-04: Specify the specialist still to record');
+      expect(
+        specialistLabels({ specialistTypes: ['it', 'other'], specialistOther: 'Forensic' }),
+      ).toEqual(['IT', 'Forensic']);
+      const fee = evaluateSegment(
+        'acceptance_continuance',
+        { ...clean, acc_05: ans('yes', { explanation: 'Last year fees unpaid.' }) },
+        ctx({ firstYear: true }),
+      );
+      expect(fee.state).toBe('attention_required');
+      expect(fee.attention).toContain('Fee / commercial matter needs Engagement Partner review');
     });
   });
 

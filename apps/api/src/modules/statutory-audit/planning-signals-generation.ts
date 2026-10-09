@@ -34,6 +34,8 @@ export interface EngagementIntelligenceFacts {
   sa299: boolean;
   /** Framework applicability conclusions by area key (only decided areas). */
   frameworkConclusions: Readonly<Record<string, 'applicable' | 'not_applicable'>>;
+  /** 01.4 ACC-04 — specialist skills the engagement needs (labels). */
+  specialistsRequired?: readonly string[];
 }
 
 /** A signal proposed by the generator, keyed by a stable rule for idempotency. */
@@ -79,6 +81,23 @@ export function deriveEngagementSignals(facts: EngagementIntelligenceFacts): Der
       suggestedAttention: PLANNING_ATTENTION.enhanced,
       destinations: [PLANNING_DESTINATION.scope0304, PLANNING_DESTINATION.section04],
       sourceLink: 'section-02/entity-profile',
+    });
+  }
+
+  // Specialists required (01.4 ACC-04 — "carry this requirement forward to Planning").
+  if (facts.specialistsRequired && facts.specialistsRequired.length > 0) {
+    const list = facts.specialistsRequired.join(', ');
+    out.push({
+      ruleKey: 'specialist_required',
+      source: PLANNING_SIGNAL_SOURCE.section01,
+      observation: `Acceptance identified that the engagement needs specialist input: ${list}.`,
+      whyMayMatter:
+        "The team must include, or have access to, the specialist skills before fieldwork (SA 220; SA 620 for an auditor's expert).",
+      potentialImplications:
+        'Team composition, use of an expert or internal specialist, scope and timeline.',
+      suggestedAttention: PLANNING_ATTENTION.enhanced,
+      destinations: [PLANNING_DESTINATION.team0308, PLANNING_DESTINATION.scope0304],
+      sourceLink: 'section-01/acceptance_continuance',
     });
   }
 

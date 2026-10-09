@@ -3,7 +3,9 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AlertTriangle, CircleDot, History } from 'lucide-react';
 import {
+  ACCEPTANCE_CONCLUSION_LABEL,
   SEGMENT_STATE_LABEL,
+  type AcceptanceConclusion,
   answerLabel,
   detailFieldsFor,
   evaluateSegment,
@@ -154,6 +156,9 @@ export function AcceptanceSegmentEditor({
       )}
 
       {intro}
+      {segment.segmentKey === 'acceptance_continuance' && acc.context.firstYear === false && (
+        <PriorYearAcceptance acc={acc} />
+      )}
 
       {blocks.map((b, i) =>
         b.group ? (
@@ -199,6 +204,53 @@ export function AcceptanceSegmentEditor({
         ),
       )}
     </Card>
+  );
+}
+
+/** 7.1 Continuing engagement: last year's conclusion and carried-forward matters. */
+function PriorYearAcceptance({ acc }: { acc: StatutoryAuditAcceptance }): JSX.Element {
+  const py = acc.context.priorYear;
+  if (!py) {
+    return (
+      <p className="rounded-lg bg-surface-sunken px-3 py-2 text-xs text-ink-muted">
+        Continuing engagement — last year&apos;s audit file is not in DHVAJ, so there is no
+        prior-year acceptance to show.
+      </p>
+    );
+  }
+  const conclusion = py.conclusion
+    ? (ACCEPTANCE_CONCLUSION_LABEL[py.conclusion as AcceptanceConclusion] ?? py.conclusion)
+    : 'Not concluded';
+  return (
+    <div className="space-y-2 rounded-lg border border-line px-3 py-2">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+        <History className="h-3.5 w-3.5 text-ink-faint" aria-hidden />
+        Prior-year acceptance (FY {py.financialYear})
+      </p>
+      <p className="text-sm text-ink">
+        {conclusion}
+        {py.approvedByName && (
+          <span className="text-xs text-ink-faint">
+            {' '}
+            · {py.approvedByName}
+            {py.approvedAt ? ` · ${new Date(py.approvedAt).toLocaleDateString()}` : ''}
+          </span>
+        )}
+      </p>
+      {py.carriedForwardMatters.length > 0 ? (
+        <ul className="space-y-0.5 text-xs text-ink-muted">
+          {py.carriedForwardMatters.map((m) => (
+            <li key={m.matterCode}>
+              <span className="font-mono text-ink-faint">{m.matterCode}</span> {m.title} —{' '}
+              {m.status}
+              {m.resolution ? ` (${m.resolution})` : ''}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-ink-muted">No matters were carried forward.</p>
+      )}
+    </div>
   );
 }
 

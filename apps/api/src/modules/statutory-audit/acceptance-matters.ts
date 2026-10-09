@@ -1,5 +1,6 @@
 import {
   ACCEPTANCE_MATTER_CATEGORY,
+  ACCEPTANCE_METHODOLOGY,
   ELIGIBILITY_CHECKS,
   acceptanceSource,
   answerLabel,
@@ -92,6 +93,27 @@ const previousAuditorMatter: Rule = (a) => {
   }
 };
 
+/** A matter for each listed answer: [category, severity, blocking]. */
+const when =
+  (byAnswer: Record<string, [AcceptanceMatterCategory, MatterSeverityLevel, boolean]>): Rule =>
+  (a) => {
+    const hit = a.answer != null ? byAnswer[a.answer] : undefined;
+    return hit ? [{ category: hit[0], severity: hit[1], isBlocking: hit[2] }] : [];
+  };
+
+/** ACC-03 scope limitation, weighted by its potential effect (spec §7.2). */
+const scopeLimitation: Rule = (a) => {
+  if (a.answer !== 'yes') return [];
+  switch (a.details?.effect) {
+    case 'minor':
+      return [{ category: C.scope, severity: 'low', isBlocking: false }];
+    case 'may_prevent':
+      return [{ category: C.scope, severity: 'critical', isBlocking: true }];
+    default:
+      return [{ category: C.scope, severity: 'high', isBlocking: true }];
+  }
+};
+
 /**
  * Per-question rules. A question with no rule raises no matter (e.g. EP-01's
  * correction is put right on the master, it is not an acceptance concern).
@@ -99,12 +121,20 @@ const previousAuditorMatter: Rule = (a) => {
 const RULES: Record<string, Rule> = {
   ...Object.fromEntries(ELIGIBILITY_CHECKS.map(([k]) => [k, eligibilityIssue])),
   pa_05: previousAuditorMatter,
-  management_integrity_concern: legacy({
-    category: C.integrity,
-    severity: 'high',
-    isBlocking: true,
+  acc_01: when({ yes: [C.integrity, 'high', true] }),
+  acc_02: when({ yes: [C.integrity, 'high', true], pending: [C.integrity, 'medium', false] }),
+  acc_03: scopeLimitation,
+  acc_04: when({ no: [C.resources, 'high', true] }),
+  acc_05: when({
+    yes: ACCEPTANCE_METHODOLOGY.feeMattersNeedPartnerReview
+      ? [C.fee, 'high', true]
+      : [C.fee, 'medium', false],
   }),
-  resources_competence: legacy({ category: C.resources, severity: 'high', isBlocking: true }),
+  acc_06: when({ yes: [C.other, 'medium', false] }),
+  acc_conclusion: when({
+    partner_attention: [C.other, 'high', true],
+    do_not_accept: [C.other, 'critical', true],
+  }),
   independence_threats: legacy({ category: C.independence, severity: 'high', isBlocking: true }),
   prohibited_services: legacy({ category: C.independence, severity: 'critical', isBlocking: true }),
   acceptable_framework: legacy({
@@ -137,7 +167,7 @@ function titleFor(a: AcceptanceAnswerInput, override?: string): string {
   if (!q) return override ?? a.questionKey;
   const head = `${q.code ? `${q.code} ` : ''}${q.prompt.replace(/[.?]$/, '')}`;
   const said =
-    detailText(a.details, 'explanation', 'description', 'matter', 'matterCommunicated') ??
+    detailText(a.details, 'explanation', 'description', 'matter', 'matterCommunicated', 'basis') ??
     answerLabel(q, a.answer);
   return override ?? `${head} — ${said}`;
 }
