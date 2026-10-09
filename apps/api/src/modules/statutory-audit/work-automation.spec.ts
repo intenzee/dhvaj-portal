@@ -214,4 +214,29 @@ describe('work automation — procedures', () => {
     expect(byKey.has(`std:${OVERALL_WORK_AREA_KEY}:final_analytics`)).toBe(true);
     expect(new Set(out.map((p) => p.sourceKey)).size).toBe(out.length);
   });
+
+  it('takes the IFC programme from the 02.5 ICFR workstream, never a generic one', () => {
+    const icfrProcedures = [
+      {
+        sourceKey: 'icfr:revenue:rev_controls',
+        sourceNote: '02.5 ICFR — Revenue',
+        title: 'Test revenue controls',
+        objective: 'Test.',
+        expectedEvidence: null,
+      },
+    ];
+    const withIfc = suggestProcedures({
+      areaKeys: new Set(['ifc']),
+      fsAreas: [],
+      risks: [],
+      icfrProcedures,
+    });
+    expect(withIfc.map((p) => [p.sourceKey, p.workAreaKey])).toEqual([
+      ['icfr:revenue:rev_controls', 'ifc'],
+    ]);
+    // No IFC work area (reporting exempt) → nothing, even if planned.
+    expect(
+      suggestProcedures({ areaKeys: new Set(), fsAreas: [], risks: [], icfrProcedures }),
+    ).toEqual([]);
+  });
 });

@@ -1,4 +1,5 @@
 import type { PlannedClauseProcedure } from './caro-programme';
+import { ICFR_WORK_AREA_KEY, type PlannedIcfrProcedure } from './icfr-controls';
 import type {
   AreaRiskLevel,
   AssertionId,
@@ -442,34 +443,9 @@ const FS_TEMPLATES: Array<{ match: RegExp; items: Template[] }> = [
 
 /** The standard programme for each framework workstream (§20). */
 const WORKSTREAM_TEMPLATES: Record<string, Template[]> = {
-  // CARO has no standard programme here: the 02.4 clause programme supplies one
-  // procedure per clause (spec §18) through `caroClauses`.
-  ifc: [
-    {
-      key: 'walkthroughs',
-      title: 'Process understanding and walkthroughs',
-      objective:
-        'Document the significant processes and perform walkthroughs to confirm the understanding of key controls.',
-      evidence: 'Process narratives / flowcharts; walkthrough papers.',
-      assertions: [],
-    },
-    {
-      key: 'rcm',
-      title: 'Risk and control matrix — design and operating effectiveness',
-      objective:
-        'Evaluate the design of key controls in the RCM and test operating effectiveness on samples.',
-      evidence: 'RCM; test-of-controls samples and results.',
-      assertions: [],
-    },
-    {
-      key: 'deficiencies',
-      title: 'Evaluate control deficiencies and conclude on IFC',
-      objective:
-        'Aggregate deficiencies, assess severity (deficiency / significant deficiency / material weakness) and conclude on the IFC opinion.',
-      evidence: 'Deficiency evaluation; communication to TCWG (SA 265).',
-      assertions: [],
-    },
-  ],
+  // CARO and IFC have no standard programme here: the 02.4 clause programme
+  // supplies one procedure per clause (spec §18) through `caroClauses`, and the
+  // 02.5 ICFR workstream one per in-scope process area through `icfrProcedures`.
   cfs: [
     {
       key: 'components',
@@ -590,6 +566,12 @@ export function suggestProcedures(input: {
    * item in the CARO work area, replacing a generic CARO programme.
    */
   caroClauses?: readonly PlannedClauseProcedure[];
+  /**
+   * The 02.5 ICFR workstream (spec §13): one procedure per step of each
+   * in-scope process area plus the deficiency evaluation, in the IFC work
+   * area — never the generic IFC programme.
+   */
+  icfrProcedures?: readonly PlannedIcfrProcedure[];
 }): SuggestedProcedure[] {
   const out: SuggestedProcedure[] = [];
   const has = (k: string) => input.areaKeys.has(k);
@@ -693,6 +675,20 @@ export function suggestProcedures(input: {
         assertions: [],
         riskId: null,
         expectedEvidence: c.expectedEvidence,
+      });
+    }
+  }
+  if (has(ICFR_WORK_AREA_KEY)) {
+    for (const p of input.icfrProcedures ?? []) {
+      out.push({
+        sourceKey: p.sourceKey,
+        sourceNote: p.sourceNote,
+        workAreaKey: ICFR_WORK_AREA_KEY,
+        title: p.title,
+        objective: p.objective,
+        assertions: [],
+        riskId: null,
+        expectedEvidence: p.expectedEvidence,
       });
     }
   }
