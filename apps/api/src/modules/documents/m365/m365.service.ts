@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { PERMISSION } from '@hsdg/contracts';
+import { PERMISSION, type FileVersionHistory } from '@hsdg/contracts';
 import { AppConfigService } from '../../../config/config.module';
 import { DatabaseService } from '../../../database/database.service';
 import { rlsContextFromPrincipal, type Principal } from '../../auth/principal';
@@ -20,6 +20,14 @@ export interface M365EditorSession {
   itemId: string;
   driveId: string;
   canEdit: boolean;
+}
+
+/** Outcome of pulling SharePoint edits back into the portal. */
+export interface M365SyncResult {
+  synced: boolean;
+  /** Why nothing was pulled: unchanged, locked, read_only, no_live_copy, disabled. */
+  reason: string | null;
+  versionNo?: number;
 }
 
 /**
@@ -87,7 +95,11 @@ export class M365Service {
     // riskier), so it is gated behind M365_ALLOW_ANON_EDIT and defaults off —
     // everyone else gets the genuine Office-for-the-web VIEWER (the primary goal:
     // familiar, no-login viewing).
+    // Approved work (documents.edit_locked) always opens read-only until it is
+    // reopened through its workflow.
+    const lock = await this.readLiveLink(ctx, engagementId, documentId);
     const canEdit =
+      !lock.editLocked &&
       this.config.get('M365_ALLOW_ANON_EDIT') &&
       principal.permissions.includes(PERMISSION.engagementManage) &&
       M365_EDITABLE_EXT.has(this.extOf(filename));
@@ -124,8 +136,8 @@ export class M365Service {
   }
 
   /**
-   * Snapshot the live SharePoint copy into a new audited portal version. Called
-   * by an explicit "Commit version" action and best-effort on editor close. Runs
+   * Snapshot the live SharePoint copy into a new audited portal version
+   * unconditionally (the automatic path is {@link sync}). Runs
    * the write through documents.addVersion, so RLS (lead-only) + audit +
    * append-only semantics are unchanged.
    */
@@ -144,13 +156,99 @@ export class M365Service {
     }
     const filename = detail.currentFilename ?? detail.title;
     const contentType = detail.currentContentType ?? 'application/octet-stream';
+    const meta = await this.graph.getItemMeta(link.driveId, link.itemId).catch(() => null);
     const buffer = await this.graph.downloadItem(link.driveId, link.itemId);
-    return this.documents.addVersion(ctx, engagementId, documentId, {
+    const updated = await this.documents.addVersion(ctx, engagementId, documentId, {
       filename,
       contentType,
       contentBase64: buffer.toString('base64'),
       note: 'Edited in Microsoft 365',
     });
+    if (meta?.cTag) await this.writeSyncedCTag(ctx, engagementId, documentId, meta.cTag);
+    return updated;
+  }
+
+  /**
+   * "Return to DHVAJ": pull the SharePoint copy's edits back as a new audited
+   * portal version — but only when its content changed (Graph cTag differs from
+   * the last synced tag). Called automatically when the editor closes or the
+   * portal window regains focus; a no-op otherwise. Locked (approved) documents
+   * are never synced.
+   */
+  async sync(
+    principal: Principal,
+    engagementId: string,
+    documentId: string,
+  ): Promise<M365SyncResult> {
+    if (!this.enabled) return { synced: false, reason: 'disabled' };
+    const ctx = rlsContextFromPrincipal(principal);
+    const link = await this.readLiveLink(ctx, engagementId, documentId);
+    if (!link.itemId || !link.driveId) return { synced: false, reason: 'no_live_copy' };
+    const meta = await this.graph.getItemMeta(link.driveId, link.itemId);
+    if (!meta.cTag || meta.cTag === link.syncedCTag) return { synced: false, reason: 'unchanged' };
+    if (link.editLocked) return { synced: false, reason: 'locked' };
+    if (!principal.permissions.includes(PERMISSION.engagementManage)) {
+      return { synced: false, reason: 'read_only' };
+    }
+    const detail = await this.documents.getOne(ctx, engagementId, documentId);
+    const buffer = await this.graph.downloadItem(link.driveId, link.itemId);
+    const updated = await this.documents.addVersion(ctx, engagementId, documentId, {
+      filename: detail.currentFilename ?? detail.title,
+      contentType: detail.currentContentType ?? 'application/octet-stream',
+      contentBase64: buffer.toString('base64'),
+      note: meta.lastModifiedBy
+        ? `Edited in Microsoft 365 by ${meta.lastModifiedBy}`
+        : 'Edited in Microsoft 365',
+    });
+    await this.writeSyncedCTag(ctx, engagementId, documentId, meta.cTag);
+    return { synced: true, reason: null, versionNo: updated.currentVersionNo };
+  }
+
+  /**
+   * The file's version history: SharePoint's own when Microsoft 365 holds a live
+   * copy, otherwise the portal's append-only versions.
+   */
+  async versionHistory(
+    principal: Principal,
+    engagementId: string,
+    documentId: string,
+  ): Promise<FileVersionHistory> {
+    const ctx = rlsContextFromPrincipal(principal);
+    const detail = await this.documents.getOne(ctx, engagementId, documentId);
+    if (this.enabled) {
+      const link = await this.readLiveLink(ctx, engagementId, documentId);
+      if (link.itemId && link.driveId) {
+        try {
+          const versions = await this.graph.listVersions(link.driveId, link.itemId);
+          if (versions.length > 0) {
+            return {
+              source: 'sharepoint',
+              entries: versions.map((v) => ({
+                id: v.id,
+                label: `Version ${v.id}`,
+                editedBy: v.editedBy,
+                savedAt: v.savedAt ?? detail.updatedAt,
+                sizeBytes: v.sizeBytes,
+              })),
+            };
+          }
+        } catch {
+          // SharePoint unreachable — fall back to the portal's own history.
+        }
+      }
+    }
+    return {
+      source: 'portal',
+      entries: [...detail.versions]
+        .sort((a, b) => b.versionNo - a.versionNo)
+        .map((v) => ({
+          id: v.id,
+          label: `Version ${v.versionNo}`,
+          editedBy: v.uploadedByName,
+          savedAt: v.uploadedAt,
+          sizeBytes: v.sizeBytes,
+        })),
+    };
   }
 
   // ── internals ──────────────────────────────────────────────────────────
@@ -164,7 +262,9 @@ export class M365Service {
     detail: DocumentDetail,
   ): Promise<{ itemId: string; driveId: string }> {
     const existing = await this.readLiveLink(ctx, engagementId, documentId);
-    if (existing.itemId && existing.driveId) return existing as { itemId: string; driveId: string };
+    if (existing.itemId && existing.driveId) {
+      return { itemId: existing.itemId, driveId: existing.driveId };
+    }
 
     // Seed the live item from the current version bytes (audited download).
     const driveId = await this.graph.resolveDriveId();
@@ -179,6 +279,8 @@ export class M365Service {
     );
 
     await this.writeLiveLink(ctx, engagementId, documentId, driveId, created.id);
+    const meta = await this.graph.getItemMeta(driveId, created.id).catch(() => null);
+    if (meta?.cTag) await this.writeSyncedCTag(ctx, engagementId, documentId, meta.cTag);
     return { itemId: created.id, driveId };
   }
 
@@ -186,18 +288,44 @@ export class M365Service {
     ctx: ReturnType<typeof rlsContextFromPrincipal>,
     engagementId: string,
     documentId: string,
-  ): Promise<{ itemId: string | null; driveId: string | null }> {
+  ): Promise<{
+    itemId: string | null;
+    driveId: string | null;
+    syncedCTag: string | null;
+    editLocked: boolean;
+  }> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{
         m365_live_item_id: string | null;
         m365_drive_id: string | null;
+        m365_synced_ctag: string | null;
+        edit_locked: boolean;
       }>(
-        `SELECT m365_live_item_id, m365_drive_id
+        `SELECT m365_live_item_id, m365_drive_id, m365_synced_ctag, edit_locked
            FROM hsdg.documents WHERE id = $1 AND engagement_id = $2`,
         [documentId, engagementId],
       );
       const row = rows[0];
-      return { itemId: row?.m365_live_item_id ?? null, driveId: row?.m365_drive_id ?? null };
+      return {
+        itemId: row?.m365_live_item_id ?? null,
+        driveId: row?.m365_drive_id ?? null,
+        syncedCTag: row?.m365_synced_ctag ?? null,
+        editLocked: row?.edit_locked ?? false,
+      };
+    });
+  }
+
+  private async writeSyncedCTag(
+    ctx: ReturnType<typeof rlsContextFromPrincipal>,
+    engagementId: string,
+    documentId: string,
+    cTag: string,
+  ): Promise<void> {
+    await this.db.withRlsContext(ctx, async (client) => {
+      await client.query(
+        `UPDATE hsdg.documents SET m365_synced_ctag = $1 WHERE id = $2 AND engagement_id = $3`,
+        [cTag, documentId, engagementId],
+      );
     });
   }
 

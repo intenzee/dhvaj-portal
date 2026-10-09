@@ -32,6 +32,19 @@ interface CachedToken {
   expiresAt: number;
 }
 
+export interface GraphItemMeta {
+  cTag: string | null;
+  lastModifiedAt: string | null;
+  lastModifiedBy: string | null;
+}
+
+export interface GraphItemVersion {
+  id: string;
+  savedAt: string | null;
+  sizeBytes: number | null;
+  editedBy: string | null;
+}
+
 /** The sharing link returned by the driveItem `createLink` action. */
 interface SharingLinkResponse {
   link?: { webUrl?: string };
@@ -203,6 +216,44 @@ export class GraphClient {
       throw new ServiceUnavailableException('Microsoft 365 did not return an editor link.');
     }
     return url;
+  }
+
+  /**
+   * A drive item's change tag and last edit. The cTag changes whenever the
+   * file's CONTENT changes, so comparing it with the last synced tag tells the
+   * portal whether there are edits to pull back.
+   */
+  async getItemMeta(driveId: string, itemId: string): Promise<GraphItemMeta> {
+    const item = await this.request<{
+      cTag?: string;
+      lastModifiedDateTime?: string;
+      lastModifiedBy?: { user?: { displayName?: string } };
+    }>('GET', `/drives/${driveId}/items/${itemId}`, {
+      query: { $select: 'cTag,lastModifiedDateTime,lastModifiedBy' },
+    });
+    return {
+      cTag: item.cTag ?? null,
+      lastModifiedAt: item.lastModifiedDateTime ?? null,
+      lastModifiedBy: item.lastModifiedBy?.user?.displayName ?? null,
+    };
+  }
+
+  /** SharePoint's own version history of a drive item, newest first. */
+  async listVersions(driveId: string, itemId: string): Promise<GraphItemVersion[]> {
+    const res = await this.request<{
+      value?: Array<{
+        id: string;
+        lastModifiedDateTime?: string;
+        size?: number;
+        lastModifiedBy?: { user?: { displayName?: string } };
+      }>;
+    }>('GET', `/drives/${driveId}/items/${itemId}/versions`);
+    return (res.value ?? []).map((v) => ({
+      id: v.id,
+      savedAt: v.lastModifiedDateTime ?? null,
+      sizeBytes: v.size ?? null,
+      editedBy: v.lastModifiedBy?.user?.displayName ?? null,
+    }));
   }
 
   /** Download a drive item's current bytes. */

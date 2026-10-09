@@ -44,6 +44,8 @@ export interface DocumentRecord {
   archivedById: string | null;
   /** When set, the document is soft-deleted (hidden everywhere; restorable by a managing partner). */
   deletedAt: string | null;
+  /** Approved work — opens read-only and takes no new versions until reopened. */
+  editLocked: boolean;
   createdById: string | null;
   createdByName: string | null;
   version: number;

@@ -21,6 +21,7 @@ import { ComponentsModule } from './modules/components/components.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -91,6 +92,7 @@ import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.
     ComplianceModule,
     TasksModule,
     DocumentsModule,
+    DocumentTemplatesModule,
     NotificationsModule,
     DashboardModule,
     ReportsModule,

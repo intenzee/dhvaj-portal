@@ -12,13 +12,13 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, ROLE, type Paginated } from '@hsdg/contracts';
+import { PERMISSION, ROLE, type FileVersionHistory, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { DocumentsService } from './documents.service';
 import { OnlyOfficeService, type EditorSession } from './onlyoffice/onlyoffice.service';
-import { M365Service, type M365EditorSession } from './m365/m365.service';
+import { M365Service, type M365EditorSession, type M365SyncResult } from './m365/m365.service';
 import type { DocumentDetail, DocumentRecord } from './documents.types';
 import {
   AddVersionDto,
@@ -88,6 +88,33 @@ export class DocumentsController {
     @Param('docId', new ParseUUIDPipe()) docId: string,
   ): Promise<DocumentDetail> {
     return this.m365.commit(principal, id, docId);
+  }
+
+  @Post(':id/documents/:docId/m365/sync')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Pull Microsoft 365 edits back as a new version when the file changed (cTag)',
+    description: 'Called automatically on editor close / window focus; a no-op when unchanged.',
+  })
+  m365Sync(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+  ): Promise<M365SyncResult> {
+    return this.m365.sync(principal, id, docId);
+  }
+
+  @Get(':id/documents/:docId/history')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: "Version history — SharePoint's when it holds the file, else the portal's",
+  })
+  history(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+  ): Promise<FileVersionHistory> {
+    return this.m365.versionHistory(principal, id, docId);
   }
 
   @Get(':id/documents')

@@ -56,6 +56,7 @@ interface DocumentRow {
   archived_at: Date | null;
   archived_by_employee_id: string | null;
   deleted_at: Date | null;
+  edit_locked: boolean;
   created_by_employee_id: string | null;
   created_by_name: string | null;
   version: number;
@@ -85,6 +86,7 @@ const DOC_BASE = `
          cv.filename AS current_filename, cv.content_type AS current_content_type,
          cv.size_bytes AS current_size_bytes,
          d.retention_until::text, d.archived_at, d.archived_by_employee_id, d.deleted_at,
+         d.edit_locked,
          d.created_by_employee_id, ce.full_name AS created_by_name,
          d.version, d.created_at, d.updated_at
   FROM hsdg.documents d
@@ -100,6 +102,7 @@ const GLOBAL_DOC_BASE = `
          cv.filename AS current_filename, cv.content_type AS current_content_type,
          cv.size_bytes AS current_size_bytes,
          d.retention_until::text, d.archived_at, d.archived_by_employee_id, d.deleted_at,
+         d.edit_locked,
          d.created_by_employee_id, ce.full_name AS created_by_name,
          d.version, d.created_at, d.updated_at,
          eng.engagement_code, ent.legal_name AS entity_name
@@ -241,6 +244,19 @@ export class DocumentsService {
       return await this.db.withRlsContext(ctx, async (client) => {
         const existing = await this.selectDocument(client, documentId, engagementId);
         if (!existing) throw new NotFoundException('Document not found.');
+        // Approved work takes no new versions until its workflow reopens it.
+        const { rows: lockRows } = await client.query<{
+          edit_locked: boolean;
+          edit_locked_reason: string | null;
+        }>(`SELECT edit_locked, edit_locked_reason FROM hsdg.documents WHERE id = $1`, [
+          documentId,
+        ]);
+        if (lockRows[0]?.edit_locked) {
+          throw new ConflictException(
+            lockRows[0].edit_locked_reason ??
+              'This document is approved work; reopen it before saving a new version.',
+          );
+        }
         let versionId: string;
         try {
           const next = existing.currentVersionNo + 1;
@@ -892,6 +908,7 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     archivedAt: row.archived_at ? row.archived_at.toISOString() : null,
     archivedById: row.archived_by_employee_id,
     deletedAt: row.deleted_at ? row.deleted_at.toISOString() : null,
+    editLocked: row.edit_locked ?? false,
     createdById: row.created_by_employee_id,
     createdByName: row.created_by_name,
     version: row.version,

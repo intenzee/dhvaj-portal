@@ -1,10 +1,16 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { CatalogueModule } from '../catalogue/catalogue.module';
+import { DocumentsModule } from '../documents/documents.module';
+import { DocumentTemplatesModule } from '../document-templates/document-templates.module';
 import { StatutoryAuditWorkflowService } from './statutory-audit-workflow.service';
 import { StatutoryAuditController } from './statutory-audit.controller';
 import { AuditAcceptanceService } from './audit-acceptance.service';
 import { AuditAcceptanceController } from './audit-acceptance.controller';
+import { AuditAcceptanceFilesService } from './audit-acceptance-files.service';
+import { AuditAcceptanceFilesController } from './audit-acceptance-files.controller';
+import { AuditAcceptanceSignoffService } from './audit-acceptance-signoff.service';
+import { AuditAcceptanceSignoffController } from './audit-acceptance-signoff.controller';
 import { AuditProfileService } from './audit-profile.service';
 import { AuditProfileController } from './audit-profile.controller';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
@@ -74,10 +80,12 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
  * without a circular import. See migration 1762100000000.
  */
 @Module({
-  imports: [AuditModule, CatalogueModule],
+  imports: [AuditModule, CatalogueModule, DocumentsModule, DocumentTemplatesModule],
   controllers: [
     StatutoryAuditController,
     AuditAcceptanceController,
+    AuditAcceptanceFilesController,
+    AuditAcceptanceSignoffController,
     AuditProfileController,
     AuditFinancialReportingController,
     AuditScheduleIiiController,
@@ -112,6 +120,8 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditUndoService,
     StatutoryAuditWorkflowService,
     AuditAcceptanceService,
+    AuditAcceptanceFilesService,
+    AuditAcceptanceSignoffService,
     AuditProfileService,
     AuditFinancialReportingService,
     AuditScheduleIiiService,

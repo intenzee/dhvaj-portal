@@ -42,6 +42,6 @@ import {
     DocExtractionService,
     ClientUploadService,
   ],
-  exports: [DocumentsService],
+  exports: [DocumentsService, M365Service],
 })
 export class DocumentsModule {}

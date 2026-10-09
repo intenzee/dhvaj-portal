@@ -103,7 +103,8 @@ export class OnlyOfficeService {
     if (!documentType)
       throw new BadRequestException('This file type is not supported by the editor.');
 
-    const canEdit = principal.permissions.includes(PERMISSION.engagementManage);
+    const canEdit =
+      !detail.editLocked && principal.permissions.includes(PERMISSION.engagementManage);
     const contentType = detail.currentContentType ?? 'application/octet-stream';
     const tokenCtx: TokenCtx = {
       u: ctx.userId,
