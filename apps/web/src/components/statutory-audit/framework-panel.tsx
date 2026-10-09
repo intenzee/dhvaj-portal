@@ -133,11 +133,23 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
 
   return (
     <div className="space-y-3">
-      <EntityProfileCard engagementId={engagementId} />
-      <ReportingFrameworkCard engagementId={engagementId} />
-      <GroupCaroCard engagementId={engagementId} />
-      <ReportingFactsCard engagementId={engagementId} />
-      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+      {/* Anchors for the 02.1 workspace's Section 02 navigation (SECTION_ANCHOR). */}
+      <div id="framework-02-1" className="scroll-mt-2">
+        <EntityProfileCard engagementId={engagementId} />
+      </div>
+      <div id="framework-02-2" className="scroll-mt-2">
+        <ReportingFrameworkCard engagementId={engagementId} />
+      </div>
+      <div id="framework-02-4" className="scroll-mt-2">
+        <GroupCaroCard engagementId={engagementId} />
+      </div>
+      <div id="framework-02-5" className="scroll-mt-2">
+        <ReportingFactsCard engagementId={engagementId} />
+      </div>
+      <Card
+        id="framework-02-10"
+        className="flex scroll-mt-2 flex-wrap items-center justify-between gap-3 p-4"
+      >
         <div>
           <h2 className="text-sm font-semibold text-ink">Audit Framework · Phase 02</h2>
           <p className="text-xs text-ink-muted">
@@ -226,15 +238,17 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
         canManage={canManage && !approved}
       />
 
-      {framework.assessments.map((a) => (
-        <FrameworkAreaCard
-          key={a.id}
-          engagementId={engagementId}
-          assessment={a}
-          canManage={canManage && !approved}
-          onChanged={invalidate}
-        />
-      ))}
+      <div id="framework-02-8" className="scroll-mt-2 space-y-3">
+        {framework.assessments.map((a) => (
+          <FrameworkAreaCard
+            key={a.id}
+            engagementId={engagementId}
+            assessment={a}
+            canManage={canManage && !approved}
+            onChanged={invalidate}
+          />
+        ))}
+      </div>
     </div>
   );
 }

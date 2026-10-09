@@ -163,6 +163,23 @@ const NAV_STATUS_DOT: Record<SectionNavStatus, string> = {
   needs_attention: 'bg-danger-600',
 };
 
+/**
+ * Where each Section 02 sub-section is worked on the Framework screen — the
+ * navigation scrolls there (the framework panel carries these anchors).
+ */
+export const SECTION_ANCHOR: Record<string, string> = {
+  '02.1': 'framework-02-1',
+  '02.2': 'framework-02-2',
+  '02.3': 'framework-02-2',
+  '02.4': 'framework-02-4',
+  '02.5': 'framework-02-5',
+  '02.6': 'framework-02-4',
+  '02.7': 'framework-02-5',
+  '02.8': 'framework-02-8',
+  '02.9': 'framework-02-8',
+  '02.10': 'framework-02-10',
+};
+
 /** Where each card's facts come from (spec §4–§13, shown in the context panel). */
 const CARD_SOURCE: Record<ProfileCardKey, string> = {
   A: 'Entity Master — entity type and listing lines (ERP-02 / ERP-03).',
@@ -351,12 +368,21 @@ export function EntityProfileWorkspace({
             Section 02 · Framework
           </p>
           {p.sectionNav.map((n) => (
-            <div
+            <button
+              type="button"
               key={n.key}
-              className={`flex items-start gap-2 rounded-md px-2 py-1.5 text-xs ${
-                n.key === '02.1' ? 'bg-primary-50 text-primary-700' : 'text-ink-muted'
+              className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
+                n.key === '02.1'
+                  ? 'bg-primary-50 text-primary-700'
+                  : 'text-ink-muted hover:bg-surface-sunken hover:text-ink'
               }`}
               title={NAV_STATUS_LABEL[n.status]}
+              aria-current={n.key === '02.1' ? 'page' : undefined}
+              onClick={() =>
+                document
+                  .getElementById(SECTION_ANCHOR[n.key] ?? '')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
             >
               <span
                 aria-hidden
@@ -369,7 +395,7 @@ export function EntityProfileWorkspace({
                 )}
                 <span className="sr-only"> — {NAV_STATUS_LABEL[n.status]}</span>
               </span>
-            </div>
+            </button>
           ))}
         </nav>
 
@@ -1964,6 +1990,7 @@ function ProfileFileSlot({
                 <span className="text-ink-faint">
                   {' '}
                   · {f.linkedByName ?? '—'} · {formatDate(f.linkedAt)}
+                  {f.inSharePoint ? ' · in SharePoint' : ''}
                 </span>
               </span>
               <span className="flex items-center gap-1">

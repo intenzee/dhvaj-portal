@@ -254,6 +254,7 @@ describe('Statutory Audit — 02.1 Profile (e2e §9.1)', () => {
     const [file] = files as [(typeof files)[number]];
     expect(file.slot).toBe('service_org');
     expect(file.filename).toBe('service-agreement.txt');
+    expect(file.inSharePoint).toBe(false); // Microsoft 365 is off in e2e.
 
     // Re-linking the same document to another field works; then unlink both.
     const linked = await post(`${base()}/files/link`, {

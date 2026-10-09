@@ -576,6 +576,8 @@ export interface ProfileFileRecord {
   filename: string | null;
   linkedAt: string;
   linkedByName: string | null;
+  /** The document has a live SharePoint copy (opened in Microsoft 365). */
+  inSharePoint: boolean;
 }
 
 /** A tracked fact compared with last year's 02.1 (spec §14). */

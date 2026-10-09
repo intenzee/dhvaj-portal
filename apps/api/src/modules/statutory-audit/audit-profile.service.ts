@@ -733,9 +733,11 @@ export class AuditProfileService {
       filename: string | null;
       linked_at: Date;
       linked_by_name: string | null;
+      in_sharepoint: boolean;
     }>(
       `SELECT f.id, f.slot, f.document_id, d.title, cv.filename, f.linked_at,
-              emp.full_name AS linked_by_name
+              emp.full_name AS linked_by_name,
+              (d.m365_live_item_id IS NOT NULL) AS in_sharepoint
          FROM hsdg.audit_profile_files f
          JOIN hsdg.documents d ON d.id = f.document_id AND d.deleted_at IS NULL
          LEFT JOIN hsdg.document_versions cv ON cv.id = d.current_version_id
@@ -752,6 +754,7 @@ export class AuditProfileService {
       filename: r.filename,
       linkedAt: r.linked_at.toISOString(),
       linkedByName: r.linked_by_name,
+      inSharePoint: r.in_sharepoint,
     }));
   }
 
