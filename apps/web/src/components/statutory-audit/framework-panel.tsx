@@ -370,8 +370,28 @@ function FrameworkAreaCard({
             </p>
           )}
 
+          {/* CARO is concluded in 02.4 (CARO-06) — this area mirrors it. */}
+          {assessment.areaKey === 'caro' && (
+            <p className="rounded-md border border-line px-3 py-2 text-xs text-ink-muted">
+              Concluded in the 02.4 CARO 2020 workspace (exemption tests, CARO-06 and Partner
+              approval); this row mirrors it.{' '}
+              <button
+                type="button"
+                className="font-medium text-primary-600 underline"
+                onClick={() => {
+                  setOpen(false);
+                  document
+                    .getElementById('framework-02-4')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+              >
+                Open the 02.4 CARO workspace
+              </button>
+            </p>
+          )}
+
           {/* Decision controls */}
-          {canManage && (
+          {canManage && assessment.areaKey !== 'caro' && (
             <div className="space-y-2">
               <Textarea
                 placeholder="Basis / rationale (required when overriding the system suggestion)"

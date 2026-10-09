@@ -12,6 +12,8 @@ jest.mock('@/lib/api', () => ({
 jest.mock('@/lib/auth', () => ({ useAuth: () => ({ principal: {} }) }));
 jest.mock('@/lib/principal', () => ({ can: () => true }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
+jest.mock('../framework-evidence', () => ({ FrameworkEvidence: () => null }));
+jest.mock('../framework-references', () => ({ FrameworkReferences: () => null }));
 
 function wrap(ui: ReactNode): ReactNode {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -81,14 +83,12 @@ describe('CARO & group facts card', () => {
     );
   });
 
-  it('asks only for the peak borrowings, and saves it with the version', async () => {
+  it('opens the 02.4 CARO workspace inline (no pop-up)', async () => {
     const user = userEvent.setup();
     render(wrap(<GroupCaroCard engagementId="e1" />));
-    await user.type(await screen.findByLabelText(/Peak bank/), '2500000');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/statutory-audit/wf1/caro/facts', {
-      method: 'POST',
-      body: { peakBankFiBorrowings: 2500000, version: 3 },
-    });
+    await user.click(await screen.findByRole('button', { name: /Open the 02.4 CARO workspace/ }));
+    expect(screen.getByTestId('caro-workspace')).toBeInTheDocument();
+    expect(screen.getByText('CARO 2020 Applicability')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
