@@ -15,7 +15,7 @@ describe('deriveAcceptanceMatters (Section 01 matters, guide §8.4)', () => {
   it('the adverse answer raises a classified, blocking matter with a source back-link', () => {
     const m = deriveAcceptanceMatters([ans({ answer: 'no' })])[0]!;
     expect(m.source).toBe('acceptance:appointment_eligibility:properly_appointed');
-    expect(m.category).toBe('eligibility');
+    expect(m.category).toBe('appointment');
     expect(m.severity).toBe('critical');
     expect(m.isBlocking).toBe(true);
   });

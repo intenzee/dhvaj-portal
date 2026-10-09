@@ -1,4 +1,4 @@
-import { acceptanceMemoFor, planAcceptance } from './section-packs';
+import { planAcceptance } from './section-packs';
 import {
   BadRequestException,
   ConflictException,
@@ -7,17 +7,19 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
-  ACCEPTANCE_QUESTIONS,
   ACCEPTANCE_SEGMENTS,
   ACCEPTANCE_SEGMENT_KEY,
   SEGMENT_RESOLVED_STATES,
-  SEGMENT_STATE,
+  evaluateSegment,
   type AcceptanceAnswer,
   type AcceptanceAnswerRecord,
   type AcceptanceConclusion,
+  type AcceptanceContext,
   type AcceptanceSegment,
   type AcceptanceSegmentKey,
+  type AnswersByKey,
   type RecordAcceptanceAnswerInput,
+  type SegmentEvaluation,
   type SegmentState,
   type StatutoryAuditAcceptance,
 } from '@hsdg/contracts';
@@ -26,19 +28,13 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditMattersService } from './audit-matters.service';
 import { deriveAcceptanceMatters } from './acceptance-matters';
+import { readAcceptanceContext } from './acceptance-context';
+import { validateAcceptanceAnswer } from './acceptance-validation';
 import {
   engagementProfileFacts,
   readEngagementMasterFacts,
-  readInitialAudit,
 } from './master-facts';
 
-/** Question keys per segment, from the methodology catalogue (guide §8.3). */
-const QUESTIONS_BY_SEGMENT = new Map<string, string[]>();
-for (const q of ACCEPTANCE_QUESTIONS) {
-  const list = QUESTIONS_BY_SEGMENT.get(q.segmentKey) ?? [];
-  list.push(q.questionKey);
-  QUESTIONS_BY_SEGMENT.set(q.segmentKey, list);
-}
 const FINAL = ACCEPTANCE_SEGMENT_KEY.finalAcceptance;
 
 interface SegmentRow {
@@ -58,8 +54,10 @@ interface AnswerRow {
   segment_id: string;
   question_key: string;
   answer: AcceptanceAnswer | null;
+  details: Record<string, unknown>;
   narrative: string | null;
   document_id: string | null;
+  answered_by_name: string | null;
   version: number;
   updated_at: Date;
 }
@@ -153,9 +151,11 @@ export class AuditAcceptanceService {
     const segmentIds = segments.map((s) => s.id);
     const { rows: answers } = segmentIds.length
       ? await client.query<AnswerRow>(
-          `SELECT id, segment_id, question_key, answer, narrative, document_id, version, updated_at
-             FROM hsdg.audit_acceptance_answers
-            WHERE segment_id = ANY($1::uuid[])`,
+          `SELECT a.id, a.segment_id, a.question_key, a.answer, a.details, a.narrative,
+                  a.document_id, emp.full_name AS answered_by_name, a.version, a.updated_at
+             FROM hsdg.audit_acceptance_answers a
+             LEFT JOIN hsdg.employees emp ON emp.id = a.answered_by_employee_id
+            WHERE a.segment_id = ANY($1::uuid[])`,
           [segmentIds],
         )
       : { rows: [] as AnswerRow[] };
@@ -166,14 +166,21 @@ export class AuditAcceptanceService {
       version: number;
       conclusion: AcceptanceConclusion;
       memo: string | null;
+      reason: string | null;
+      safeguards: string | null;
       approved_by_name: string | null;
       approved_at: Date;
     }>(
+      // The live approving decision only — returned / declined / reopened ones
+      // are history (see the sign-off read).
       `SELECT ap.id, ap.workflow_instance_id, ap.version, ap.conclusion, ap.memo,
+              ap.reason, ap.safeguards,
               emp.full_name AS approved_by_name, ap.approved_at
          FROM hsdg.audit_acceptance_approvals ap
          LEFT JOIN hsdg.employees emp ON emp.id = ap.approved_by_employee_id
         WHERE ap.workflow_instance_id = ANY($1::uuid[])
+          AND ap.conclusion IN ('accept','continue','accept_with_conditions')
+          AND ap.reopened_at IS NULL
         ORDER BY ap.version DESC`,
       [shellIds],
     );
@@ -193,6 +200,8 @@ export class AuditAcceptanceService {
         shell.id,
         'acceptance',
       );
+      const context = await readAcceptanceContext(client, shell.engagement_id, shell.id);
+      const evaluations = await this.evaluateAndStore(client, shell.id, shellSegments, answers, context);
       const unresolved = shellSegments.filter(
         (s) => s.segment_key !== FINAL && !SEGMENT_RESOLVED_STATES.includes(s.state),
       ).length;
@@ -201,10 +210,12 @@ export class AuditAcceptanceService {
       const openMatters = await this.matters.listOpenMatters(client, shell.id, 'acceptance');
       const engagementProfile = master
         ? engagementProfileFacts(master, {
-            initialAudit: await readInitialAudit(client, shell.id),
+            initialAudit: context.firstYear === null ? null : !context.firstYear,
+            previousAuditor: detailString(answers, shellSegments, 'pa_details', 'firmName'),
+            appointmentDate: answerOf(answers, shellSegments, 'app_02'),
           })
         : [];
-      const mappedSegments = shellSegments.map((s) => mapSegment(s, answers));
+      const mappedSegments = shellSegments.map((s) => mapSegment(s, answers, evaluations.get(s.id)));
       out.push({
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
@@ -218,6 +229,8 @@ export class AuditAcceptanceService {
               version: approval.version,
               conclusion: approval.conclusion,
               memo: approval.memo,
+              reason: approval.reason,
+              safeguards: approval.safeguards,
               approvedByName: approval.approved_by_name,
               approvedAt: approval.approved_at.toISOString(),
             }
@@ -231,12 +244,13 @@ export class AuditAcceptanceService {
           openMatters,
           missingMasterFacts: engagementProfile.filter((f) => f.value == null).map((f) => f.label),
         }),
+        context,
       });
     }
     return out;
   }
 
-  // ── Record an answer (§8.3) ─────────────────────────────────────────────────
+  // ── Record an answer (spec §4–§9) ───────────────────────────────────────────
 
   async recordAnswer(
     ctx: RlsContext,
@@ -247,12 +261,13 @@ export class AuditAcceptanceService {
     return this.db.withRlsContext(ctx, async (client) => {
       const seg = await this.loadSegment(client, engagementId, segmentId);
       await this.assertNotApproved(client, seg.workflow_instance_id);
-
-      const validKeys = QUESTIONS_BY_SEGMENT.get(seg.segment_key) ?? [];
-      if (!validKeys.includes(input.questionKey)) {
-        throw new BadRequestException('Unknown question for this segment.');
+      if (seg.segment_key === FINAL) {
+        throw new BadRequestException('Final acceptance is recorded through the approval steps.');
       }
-      // A linked evidence document must belong to this engagement (§16).
+      const context = await readAcceptanceContext(client, engagementId, seg.workflow_instance_id);
+      const clean = validateAcceptanceAnswer(seg.segment_key, input, context);
+
+      // A linked evidence document must belong to this engagement.
       if (input.documentId) {
         const { rows } = await client.query(
           `SELECT 1 FROM hsdg.documents WHERE id = $1 AND engagement_id = $2`,
@@ -263,55 +278,56 @@ export class AuditAcceptanceService {
         }
       }
 
-      await client.query(
-        `INSERT INTO hsdg.audit_acceptance_answers
-           (segment_id, engagement_id, question_key, answer, narrative, document_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (segment_id, question_key) DO UPDATE
-           SET answer = EXCLUDED.answer,
-               narrative = EXCLUDED.narrative,
-               document_id = EXCLUDED.document_id,
-               version = hsdg.audit_acceptance_answers.version + 1`,
-        [
-          segmentId,
-          engagementId,
-          input.questionKey,
-          input.answer,
-          input.narrative?.trim() || null,
-          input.documentId ?? null,
-        ],
-      );
-
-      // Advance segment state: in_progress, or complete when all questions answered.
-      const answered = await this.answeredKeys(client, segmentId);
-      const allAnswered = validKeys.every((k) => answered.has(k));
-      const nextState: SegmentState = allAnswered
-        ? SEGMENT_STATE.complete
-        : SEGMENT_STATE.inProgress;
-      await client.query(
-        `UPDATE hsdg.audit_acceptance_segments
-            SET state = $2,
-                decided_by_employee_id = CASE WHEN $2 = 'complete' THEN $3 ELSE decided_by_employee_id END,
-                decided_at = CASE WHEN $2 = 'complete' THEN now() ELSE decided_at END,
-                version = version + 1
-          WHERE id = $1 AND state <> 'complete'`,
-        [segmentId, nextState, ctx.employeeId ?? null],
-      );
+      if (clean.answer === null && Object.keys(clean.details).length === 0) {
+        await client.query(
+          `DELETE FROM hsdg.audit_acceptance_answers WHERE segment_id = $1 AND question_key = $2`,
+          [segmentId, input.questionKey],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO hsdg.audit_acceptance_answers
+             (segment_id, engagement_id, question_key, answer, details, narrative, document_id,
+              answered_by_employee_id)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
+           ON CONFLICT (segment_id, question_key) DO UPDATE
+             SET answer = EXCLUDED.answer,
+                 details = EXCLUDED.details,
+                 narrative = EXCLUDED.narrative,
+                 document_id = COALESCE(EXCLUDED.document_id, hsdg.audit_acceptance_answers.document_id),
+                 answered_by_employee_id = EXCLUDED.answered_by_employee_id,
+                 version = hsdg.audit_acceptance_answers.version + 1`,
+          [
+            segmentId,
+            engagementId,
+            input.questionKey,
+            clean.answer,
+            JSON.stringify(clean.details),
+            input.narrative?.trim() || null,
+            input.documentId ?? null,
+            ctx.employeeId ?? null,
+          ],
+        );
+      }
 
       await this.reconcileMatters(client, ctx, engagementId, seg.workflow_instance_id);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.acceptance_answer_recorded',
         objectType: 'audit_acceptance_segment',
         objectId: segmentId,
-        after: { questionKey: input.questionKey, answer: input.answer },
+        after: { questionKey: input.questionKey, answer: clean.answer, details: clean.details },
       });
       const [acc] = await this.readForShell(client, engagementId, seg.workflow_instance_id);
       return acc!;
     });
   }
 
-  // ── Segment state (mark NA / reopen) ────────────────────────────────────────
+  // ── Segment state ───────────────────────────────────────────────────────────
 
+  /**
+   * Segment status follows the answers (spec §3), so there is nothing to set by
+   * hand: this re-evaluates the segment and returns the file. Kept for older
+   * clients that still post "mark complete".
+   */
   async setSegmentState(
     ctx: RlsContext,
     engagementId: string,
@@ -321,153 +337,88 @@ export class AuditAcceptanceService {
     return this.db.withRlsContext(ctx, async (client) => {
       const seg = await this.loadSegment(client, engagementId, segmentId);
       await this.assertNotApproved(client, seg.workflow_instance_id);
-
-      if (input.state === SEGMENT_STATE.complete) {
-        const validKeys = QUESTIONS_BY_SEGMENT.get(seg.segment_key) ?? [];
-        const answered = await this.answeredKeys(client, segmentId);
-        if (!validKeys.every((k) => answered.has(k))) {
-          throw new BadRequestException('Answer every question before completing the segment.');
-        }
-      }
-      const result = await client.query(
-        `UPDATE hsdg.audit_acceptance_segments
-            SET state = $3,
-                decided_by_employee_id = $4,
-                decided_at = CASE WHEN $3 IN ('complete','not_applicable') THEN now() ELSE decided_at END,
-                version = version + 1
-          WHERE id = $1 AND version = $2`,
-        [segmentId, input.version, input.state, ctx.employeeId ?? null],
-      );
-      if ((result.rowCount ?? 0) === 0) {
-        throw new ConflictException('This segment changed since you loaded it; refresh and retry.');
-      }
-      await this.reconcileMatters(client, ctx, engagementId, seg.workflow_instance_id);
       const [acc] = await this.readForShell(client, engagementId, seg.workflow_instance_id);
+      const now = acc!.segments.find((s) => s.id === segmentId);
+      if (now && now.state !== input.state && seg.segment_key !== FINAL) {
+        throw new BadRequestException(
+          now.pending[0] ??
+            now.attention[0] ??
+            'A segment\'s status follows its answers — answer its questions to move it on.',
+        );
+      }
       return acc!;
     });
   }
 
-  // ── Partner approval (FINAL-02) — unlocks Section 02 (§8.5) ──────────────────
-
-  async approve(
-    ctx: RlsContext,
+  /**
+   * Re-evaluate 01.1–01.7 against their answers and store the derived status,
+   * so the approval gate and other sections read the same status the screen
+   * shows. 01.8 is left to the sign-off. Safe for any reader: RLS lets only
+   * leads update, so a member's read changes nothing.
+   */
+  async refreshSegmentStates(
+    client: PoolClient,
     engagementId: string,
     workflowInstanceId: string,
-    input: { conclusion: AcceptanceConclusion; memo?: string | null },
-  ): Promise<StatutoryAuditAcceptance> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      await this.assertShell(client, engagementId, workflowInstanceId);
-      await this.assertNotApproved(client, workflowInstanceId);
+  ): Promise<void> {
+    await this.readForShell(client, engagementId, workflowInstanceId);
+  }
 
-      const { rows: segments } = await client.query<{
-        segment_key: string;
-        state: SegmentState;
-      }>(
-        `SELECT segment_key, state
-           FROM hsdg.audit_acceptance_segments
-          WHERE workflow_instance_id = $1`,
-        [workflowInstanceId],
-      );
-      if (segments.length === 0) throw new NotFoundException('Acceptance not initialised.');
-
-      const unresolved = segments.filter(
-        (s) => s.segment_key !== FINAL && !SEGMENT_RESOLVED_STATES.includes(s.state),
-      );
-      if (unresolved.length > 0 && input.conclusion !== 'decline') {
-        throw new BadRequestException(
-          `${unresolved.length} acceptance segment(s) still need completion before approval.`,
-        );
+  private async evaluateAndStore(
+    client: PoolClient,
+    workflowInstanceId: string,
+    segments: SegmentRow[],
+    answers: AnswerRow[],
+    context: AcceptanceContext,
+  ): Promise<Map<string, SegmentEvaluation>> {
+    const { rows: blocking } = await client.query<{ source: string }>(
+      `SELECT source FROM hsdg.audit_matter
+        WHERE workflow_instance_id = $1 AND section = 'acceptance' AND is_blocking = true
+          AND status IN ('open','under_review','blocking')`,
+      [workflowInstanceId],
+    );
+    const evalCtx = {
+      firstYear: context.firstYear,
+      otherServiceIds: context.otherServices.map((o) => o.engagementServiceId),
+      declarationsPending: context.independence.pending,
+      fileStatuses: context.fileStatuses,
+      openBlockingSources: blocking.map((b) => b.source),
+    };
+    const out = new Map<string, SegmentEvaluation>();
+    for (const s of segments) {
+      if (s.segment_key === FINAL) continue;
+      const byKey: Record<string, { answer: string | null; details: Record<string, unknown> }> = {};
+      for (const a of answers) {
+        if (a.segment_id === s.id) byKey[a.question_key] = { answer: a.answer, details: a.details ?? {} };
       }
-      // Reconcile and block on any open blocking acceptance matter (§8.4).
-      await this.reconcileMatters(client, ctx, engagementId, workflowInstanceId);
-      if (input.conclusion !== 'decline') {
-        await this.matters.assertNoOpenBlockingMatters(client, workflowInstanceId, 'acceptance');
+      const ev = evaluateSegment(s.segment_key, byKey as AnswersByKey, evalCtx);
+      out.set(s.id, ev);
+      if (ev.state !== s.state) {
+        const res = await client.query(
+          `UPDATE hsdg.audit_acceptance_segments
+              SET state = $2,
+                  decided_at = CASE WHEN $2 IN ('complete','not_applicable') THEN now() ELSE NULL END,
+                  decided_by_employee_id = CASE WHEN $2 IN ('complete','not_applicable')
+                                                THEN hsdg.ctx_employee_id() ELSE NULL END,
+                  version = version + 1
+            WHERE id = $1 AND state IS DISTINCT FROM $2
+              AND NOT EXISTS (
+                SELECT 1 FROM hsdg.audit_acceptance_approvals ap
+                 WHERE ap.workflow_instance_id = hsdg.audit_acceptance_segments.workflow_instance_id
+                   AND ap.conclusion IN ('accept','continue','accept_with_conditions')
+                   AND ap.reopened_at IS NULL)`,
+          [s.id, ev.state],
+        );
+        if ((res.rowCount ?? 0) > 0) s.state = ev.state;
       }
-
-      // A blank memo records the one drafted from the file.
-      const drafted = (await this.readForShell(client, engagementId, workflowInstanceId))[0]?.pack
-        .draftMemo;
-      const draftMemo = drafted ? acceptanceMemoFor(drafted, input.conclusion) : null;
-      const { rows: verRows } = await client.query<{ next: number }>(
-        `SELECT COALESCE(MAX(version), 0) + 1 AS next
-           FROM hsdg.audit_acceptance_approvals WHERE workflow_instance_id = $1`,
-        [workflowInstanceId],
-      );
-      const version = verRows[0]!.next;
-
-      const { rows: answerSnap } = await client.query(
-        `SELECT s.segment_key, a.question_key, a.answer
-           FROM hsdg.audit_acceptance_answers a
-           JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
-          WHERE s.workflow_instance_id = $1`,
-        [workflowInstanceId],
-      );
-
-      try {
-        await client.query(
-          `INSERT INTO hsdg.audit_acceptance_approvals
-             (workflow_instance_id, engagement_id, version, conclusion, memo, snapshot, approved_by_employee_id)
-           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
-          [
-            workflowInstanceId,
-            engagementId,
-            version,
-            input.conclusion,
-            input.memo?.trim() || draftMemo,
-            JSON.stringify(answerSnap),
-            ctx.employeeId ?? null,
-          ],
-        );
-      } catch (err) {
-        if ((err as { code?: string }).code === '23505') {
-          throw new ConflictException('Acceptance was approved concurrently; refresh and retry.');
-        }
-        throw err;
-      }
-
-      // Mark 01.8 complete and freeze Section 01.
-      await client.query(
-        `UPDATE hsdg.audit_acceptance_segments
-            SET state = 'complete', decided_at = now(), decided_by_employee_id = $2
-          WHERE workflow_instance_id = $1 AND segment_key = $3`,
-        [workflowInstanceId, ctx.employeeId ?? null, FINAL],
-      );
-
-      // §8.5 gate: a decline leaves Section 02 locked; acceptance/accept-with-
-      // conditions completes Section 01 and UNLOCKS the Framework.
-      if (input.conclusion === 'decline') {
-        await client.query(
-          `UPDATE hsdg.audit_workflow_phases SET state = 'needs_attention'
-            WHERE workflow_instance_id = $1 AND phase_key = 'acceptance'`,
-          [workflowInstanceId],
-        );
-      } else {
-        await client.query(
-          `UPDATE hsdg.audit_workflow_phases SET state = 'complete'
-            WHERE workflow_instance_id = $1 AND phase_key = 'acceptance'`,
-          [workflowInstanceId],
-        );
-        await client.query(
-          `UPDATE hsdg.audit_workflow_phases SET state = 'in_progress'
-            WHERE workflow_instance_id = $1 AND phase_key = 'framework' AND state IN ('locked', 'not_started')`,
-          [workflowInstanceId],
-        );
-      }
-
-      await this.audit.recordWith(client, ctx, {
-        action: 'statutory_audit.acceptance_approved',
-        objectType: 'service_workflow_instance',
-        objectId: workflowInstanceId,
-        after: { version, conclusion: input.conclusion },
-      });
-      const [acc] = await this.readForShell(client, engagementId, workflowInstanceId);
-      return acc!;
-    });
+    }
+    return out;
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────────
 
-  private async readForShell(
+  /** The Section 01 read for one shell, inside the caller's transaction. */
+  async readForShell(
     client: PoolClient,
     engagementId: string,
     workflowInstanceId: string,
@@ -476,7 +427,8 @@ export class AuditAcceptanceService {
     return all.filter((a) => a.workflowInstanceId === workflowInstanceId);
   }
 
-  private async reconcileMatters(
+  /** Re-derive the answer-raised Acceptance Matters (used before a partner decision). */
+  async reconcileMatters(
     client: PoolClient,
     ctx: RlsContext,
     engagementId: string,
@@ -486,8 +438,9 @@ export class AuditAcceptanceService {
       segment_key: string;
       question_key: string;
       answer: string | null;
+      details: Record<string, unknown>;
     }>(
-      `SELECT s.segment_key, a.question_key, a.answer
+      `SELECT s.segment_key, a.question_key, a.answer, a.details
          FROM hsdg.audit_acceptance_answers a
          JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
         WHERE s.workflow_instance_id = $1`,
@@ -498,6 +451,7 @@ export class AuditAcceptanceService {
         segmentKey: r.segment_key,
         questionKey: r.question_key,
         answer: r.answer,
+        details: r.details ?? {},
       })),
     );
     await this.matters.reconcileOn(
@@ -508,15 +462,6 @@ export class AuditAcceptanceService {
       'acceptance',
       derived,
     );
-  }
-
-  private async answeredKeys(client: PoolClient, segmentId: string): Promise<Set<string>> {
-    const { rows } = await client.query<{ question_key: string }>(
-      `SELECT question_key FROM hsdg.audit_acceptance_answers
-        WHERE segment_id = $1 AND answer IS NOT NULL`,
-      [segmentId],
-    );
-    return new Set(rows.map((r) => r.question_key));
   }
 
   private async loadSegment(
@@ -540,31 +485,43 @@ export class AuditAcceptanceService {
   private async assertNotApproved(client: PoolClient, workflowInstanceId: string): Promise<void> {
     const { rows } = await client.query(
       `SELECT 1 FROM hsdg.audit_acceptance_approvals
-        WHERE workflow_instance_id = $1 AND conclusion <> 'decline' LIMIT 1`,
+        WHERE workflow_instance_id = $1
+          AND conclusion IN ('accept','continue','accept_with_conditions')
+          AND reopened_at IS NULL
+        LIMIT 1`,
       [workflowInstanceId],
     );
     if (rows[0]) {
       throw new ConflictException(
-        'Section 01 is approved; reopen it (controlled reopen) before editing.',
+        'Section 01 is approved; the Engagement Partner must reopen it before it changes.',
       );
     }
   }
-
-  private async assertShell(
-    client: PoolClient,
-    engagementId: string,
-    workflowInstanceId: string,
-  ): Promise<void> {
-    const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.service_workflow_instances WHERE id = $1 AND engagement_id = $2 AND status <> 'cancelled'`,
-      [workflowInstanceId, engagementId],
-    );
-    if (!rows[0])
-      throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
-  }
 }
 
-function mapSegment(s: SegmentRow, answers: AnswerRow[]): AcceptanceSegment {
+/** The recorded answer to a question in this shell, or null. */
+function answerOf(answers: AnswerRow[], segments: SegmentRow[], questionKey: string): string | null {
+  const ids = new Set(segments.map((s) => s.id));
+  return answers.find((a) => ids.has(a.segment_id) && a.question_key === questionKey)?.answer ?? null;
+}
+
+/** A text detail recorded with a question in this shell, or null. */
+function detailString(
+  answers: AnswerRow[],
+  segments: SegmentRow[],
+  questionKey: string,
+  field: string,
+): string | null {
+  const ids = new Set(segments.map((s) => s.id));
+  const v = answers.find((a) => ids.has(a.segment_id) && a.question_key === questionKey)?.details?.[field];
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+function mapSegment(
+  s: SegmentRow,
+  answers: AnswerRow[],
+  ev: SegmentEvaluation | undefined,
+): AcceptanceSegment {
   return {
     id: s.id,
     segmentKey: s.segment_key,
@@ -582,10 +539,18 @@ function mapSegment(s: SegmentRow, answers: AnswerRow[]): AcceptanceSegment {
         segmentId: a.segment_id,
         questionKey: a.question_key,
         answer: a.answer,
+        details: a.details ?? {},
         narrative: a.narrative,
         documentId: a.document_id,
+        answeredByName: a.answered_by_name,
         version: a.version,
         updatedAt: a.updated_at.toISOString(),
       })),
+    required: ev?.required ?? 0,
+    answered: ev?.answered ?? 0,
+    pending: ev?.pending ?? [],
+    attention: ev?.attention ?? [],
+    attentionItems: ev?.items ?? [],
+    notApplicableReason: ev?.notApplicableReason ?? null,
   };
 }

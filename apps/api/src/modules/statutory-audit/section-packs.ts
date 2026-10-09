@@ -20,8 +20,11 @@
  * Pure: no database, unit-tested on its own.
  */
 import {
-  ACCEPTANCE_QUESTIONS,
   ACCEPTANCE_SEGMENT_KEY,
+  answerLabel,
+  detailFieldsFor,
+  isExceptionAnswer,
+  questionByKey,
   FRAMEWORK_DECIDED_STATES,
   type AcceptanceConclusion,
   type AcceptancePack,
@@ -81,7 +84,14 @@ export interface AcceptancePackFacts {
     segmentKey: string;
     title: string;
     state: string;
-    answers: readonly { questionKey: string; answer: string | null; narrative: string | null }[];
+    required: number;
+    answered: number;
+    answers: readonly {
+      questionKey: string;
+      answer: string | null;
+      details: Record<string, unknown>;
+      narrative: string | null;
+    }[];
   }[];
   /** Open acceptance matters (open / under review / blocking). */
   openMatters: readonly PackMatter[];
@@ -93,8 +103,26 @@ const RESOLVED_SEGMENT = ['complete', 'not_applicable'];
 
 /** Short form of a question prompt for a fact line. */
 function prompt(questionKey: string): string {
-  const q = ACCEPTANCE_QUESTIONS.find((x) => x.questionKey === questionKey);
-  return (q?.prompt ?? questionKey).replace(/\.$/, '');
+  const q = questionByKey(questionKey.split(':')[0]!);
+  return `${q?.code ? `${q.code} ` : ''}${q?.prompt ?? questionKey}`.replace(/[.?]$/, '');
+}
+
+/** The answer as recorded, for a fact line. */
+function said(a: { questionKey: string; answer: string | null }): string {
+  const q = questionByKey(a.questionKey.split(':')[0]!);
+  return q ? answerLabel(q, a.answer) : (a.answer ?? '');
+}
+
+/** The explanation recorded with an answer (any text detail field). */
+function explained(a: { questionKey: string; answer: string | null; details: Record<string, unknown>; narrative: string | null }): string | null {
+  const q = questionByKey(a.questionKey.split(':')[0]!);
+  const texts = q
+    ? detailFieldsFor(q, a)
+        .filter((f) => f.type === 'textarea' || f.type === 'text')
+        .map((f) => a.details[f.key])
+        .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    : [];
+  return texts[0]?.trim() ?? a.narrative?.trim() ?? null;
 }
 
 function conclusionLine(c: AcceptanceConclusion): string {
@@ -117,9 +145,6 @@ export function planAcceptance(f: AcceptancePackFacts): AcceptancePack {
   const segments = f.segments.filter(
     (s) => s.segmentKey !== ACCEPTANCE_SEGMENT_KEY.finalAcceptance,
   );
-  const questionsIn = (key: string) => ACCEPTANCE_QUESTIONS.filter((q) => q.segmentKey === key);
-  const answered = (s: (typeof segments)[number]) =>
-    s.answers.filter((a) => a.answer != null).length;
 
   const open = segments.filter((s) => !RESOLVED_SEGMENT.includes(s.state));
   checks.push(
@@ -133,10 +158,9 @@ export function planAcceptance(f: AcceptancePackFacts): AcceptancePack {
         : [
             `${segments.length - open.length} of ${segments.length} segments resolved; still open:`,
             ...listed(
-              open.map((s) => {
-                const total = questionsIn(s.segmentKey).length;
-                return total > 0 ? `${s.title} — ${answered(s)} of ${total} answered` : s.title;
-              }),
+              open.map((s) =>
+                s.required > 0 ? `${s.title} — ${s.answered} of ${s.required} answered` : s.title,
+              ),
             ),
           ],
       go(
@@ -165,8 +189,8 @@ export function planAcceptance(f: AcceptancePackFacts): AcceptancePack {
   const adverse = segments.flatMap((s) =>
     s.answers
       .filter((a) => {
-        const q = ACCEPTANCE_QUESTIONS.find((x) => x.questionKey === a.questionKey);
-        return q && a.answer === q.adverseAnswer;
+        const q = questionByKey(a.questionKey.split(':')[0]!);
+        return q != null && isExceptionAnswer(q, a.answer);
       })
       .map((a) => ({ segment: s, answer: a })),
   );
@@ -184,7 +208,7 @@ export function planAcceptance(f: AcceptancePackFacts): AcceptancePack {
             ...listed(
               adverse.map(
                 ({ answer }) =>
-                  `${prompt(answer.questionKey)} — ${answer.answer}${answer.narrative?.trim() ? '' : ', no explanation recorded'}`,
+                  `${prompt(answer.questionKey)} — ${said(answer)}${explained(answer) ? '' : ', no explanation recorded'}`,
               ),
             ),
           ],
@@ -250,12 +274,7 @@ export function planAcceptance(f: AcceptancePackFacts): AcceptancePack {
 
   // Suggested conclusion: a critical concern points to declining; any concern
   // or open matter to accepting with conditions; otherwise accept.
-  const critical =
-    adverse.some(
-      ({ answer }) =>
-        ACCEPTANCE_QUESTIONS.find((q) => q.questionKey === answer.questionKey)?.severity ===
-        'critical',
-    ) || blocking.some((m) => m.severity === 'critical');
+  const critical = f.openMatters.some((m) => m.severity === 'critical');
   const suggestedConclusion: AcceptanceConclusion = critical
     ? 'decline'
     : adverse.length > 0 || f.openMatters.length > 0
@@ -269,20 +288,20 @@ export function planAcceptance(f: AcceptancePackFacts): AcceptancePack {
       continue;
     }
     const concerns = adverse.filter((a) => a.segment.segmentKey === s.segmentKey);
-    const total = questionsIn(s.segmentKey).length;
+    const total = s.required;
     if (concerns.length > 0) {
       lines.push(
         `${s.title}: ${concerns
           .map(
             ({ answer }) =>
-              `${prompt(answer.questionKey)} — ${answer.answer}${answer.narrative?.trim() ? ` (${answer.narrative.trim()})` : ''}`,
+              `${prompt(answer.questionKey)} — ${said(answer)}${explained(answer) ? ` (${explained(answer)})` : ''}`,
           )
           .join('; ')}.`,
       );
-    } else if (total > 0 && answered(s) === total) {
+    } else if (total > 0 && s.answered >= total) {
       lines.push(`${s.title}: no concerns.`);
     } else if (total > 0) {
-      lines.push(`${s.title}: ${answered(s)} of ${total} questions answered.`);
+      lines.push(`${s.title}: ${s.answered} of ${total} questions answered.`);
     }
   }
   if (f.openMatters.length > 0) {

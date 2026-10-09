@@ -1,5 +1,7 @@
 import type { AcceptancePack } from './statutory-audit-section-pack';
 import type { MasterFact } from './statutory-audit';
+import type { AcceptanceContext } from './statutory-audit-acceptance-context';
+import type { AttentionItem } from './statutory-audit-acceptance-engine';
 
 /**
  * Section 01 — Engagement & Acceptance (Implementation Guide §8).
@@ -26,12 +28,18 @@ export const ACCEPTANCE_SEGMENT_KEY = {
 export type AcceptanceSegmentKey =
   (typeof ACCEPTANCE_SEGMENT_KEY)[keyof typeof ACCEPTANCE_SEGMENT_KEY];
 
-/** Professional state of a segment. */
+/**
+ * Status of a segment (spec §3). 01.1–01.7 are derived from their answers by
+ * the question engine; 01.8 moves Locked → Ready for Approval → Complete.
+ */
 export const SEGMENT_STATE = {
   notStarted: 'not_started',
   inProgress: 'in_progress',
+  attentionRequired: 'attention_required',
   complete: 'complete',
   notApplicable: 'not_applicable',
+  locked: 'locked',
+  readyForApproval: 'ready_for_approval',
 } as const;
 export type SegmentState = (typeof SEGMENT_STATE)[keyof typeof SEGMENT_STATE];
 export const SEGMENT_STATES: SegmentState[] = Object.values(SEGMENT_STATE);
@@ -40,16 +48,32 @@ export const SEGMENT_RESOLVED_STATES: SegmentState[] = [
   SEGMENT_STATE.complete,
   SEGMENT_STATE.notApplicable,
 ];
+export const SEGMENT_STATE_LABEL: Record<SegmentState, string> = {
+  not_started: 'Not Started',
+  in_progress: 'In Progress',
+  attention_required: 'Attention Required',
+  complete: 'Complete',
+  not_applicable: 'Not Applicable',
+  locked: 'Locked',
+  ready_for_approval: 'Ready for Approval',
+};
 
-/** A Yes/No/NA answer to a checklist question. */
-export const ACCEPTANCE_ANSWER = { yes: 'yes', no: 'no', na: 'na' } as const;
-export type AcceptanceAnswer = (typeof ACCEPTANCE_ANSWER)[keyof typeof ACCEPTANCE_ANSWER];
-export const ACCEPTANCE_ANSWERS: AcceptanceAnswer[] = Object.values(ACCEPTANCE_ANSWER);
+/**
+ * An answer: the chosen option's value (`yes`, `no`, `pending`, `agm` …) or,
+ * for a date question, an ISO date. Detail fields travel in `details`.
+ */
+export type AcceptanceAnswer = string;
 
-/** The final professional conclusion recorded at partner approval. */
+/**
+ * The Engagement Partner's conclusion (FINAL-02, spec §12.2). Accept / Continue
+ * / Accept-or-Continue-subject-to-safeguards complete Section 01; Return sends
+ * the file back to the preparer; Decline leaves Section 02 locked.
+ */
 export const ACCEPTANCE_CONCLUSION = {
   accept: 'accept',
+  continue: 'continue',
   acceptWithConditions: 'accept_with_conditions',
+  return: 'return',
   decline: 'decline',
 } as const;
 export type AcceptanceConclusion =
@@ -76,55 +100,17 @@ export const ACCEPTANCE_SEGMENTS: readonly AcceptanceSegmentDefinition[] = [
   { segmentKey: ACCEPTANCE_SEGMENT_KEY.finalAcceptance, title: 'Final Acceptance & Partner Approval', sortOrder: 8 },
 ] as const;
 
-/**
- * A checklist question. `adverseAnswer` is the response that raises an
- * Acceptance Matter (§8.4); `severity` / `isBlocking` classify that matter.
- * A blocking matter prevents Section 01 completion until resolved or
- * accepted-with-approval.
- */
-export interface AcceptanceQuestionDefinition {
-  segmentKey: AcceptanceSegmentKey;
-  questionKey: string;
-  prompt: string;
-  adverseAnswer: AcceptanceAnswer;
-  category: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  isBlocking: boolean;
-}
-
-/** The methodology question catalogue for Section 01 (guide §8.1/§8.3). */
-export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
-  // 01.1 Engagement Profile — read-only confirmation of the master facts.
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.engagementProfile, questionKey: 'profile_confirmed', prompt: 'The entity, group and engagement master facts are confirmed correct.', adverseAnswer: 'no', category: 'profile', severity: 'low', isBlocking: true },
-  // 01.2 Appointment & Eligibility.
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.appointmentEligibility, questionKey: 'properly_appointed', prompt: 'The firm is validly appointed as auditor (Sec 139).', adverseAnswer: 'no', category: 'eligibility', severity: 'critical', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.appointmentEligibility, questionKey: 'eligible_141', prompt: 'No disqualification under Sec 141 applies to the firm or its partners.', adverseAnswer: 'no', category: 'eligibility', severity: 'critical', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.appointmentEligibility, questionKey: 'within_ceiling', prompt: 'The audit is within the Sec 141(3)(g) ceiling on number of audits.', adverseAnswer: 'no', category: 'eligibility', severity: 'high', isBlocking: true },
-  // 01.3 Previous Auditor Communication (NA when continuing).
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.previousAuditor, questionKey: 'communication_sent', prompt: 'Communication with the previous auditor has been made (Clause 8, First Schedule).', adverseAnswer: 'no', category: 'previous_auditor', severity: 'high', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.previousAuditor, questionKey: 'no_professional_objection', prompt: 'No professional reason from the previous auditor prevents acceptance.', adverseAnswer: 'no', category: 'previous_auditor', severity: 'high', isBlocking: true },
-  // 01.4 Acceptance / Continuance.
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.acceptanceContinuance, questionKey: 'management_integrity_concern', prompt: 'There are concerns over management integrity.', adverseAnswer: 'yes', category: 'acceptance', severity: 'high', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.acceptanceContinuance, questionKey: 'resources_competence', prompt: 'The firm has the competence, resources and time to perform the audit.', adverseAnswer: 'no', category: 'acceptance', severity: 'high', isBlocking: true },
-  // 01.5 Independence & Ethics.
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.independenceEthics, questionKey: 'independence_threats', prompt: 'Threats to independence have been identified that need safeguards.', adverseAnswer: 'yes', category: 'independence', severity: 'high', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.independenceEthics, questionKey: 'prohibited_services', prompt: 'The firm provides services prohibited under Sec 144 to this client.', adverseAnswer: 'yes', category: 'independence', severity: 'critical', isBlocking: true },
-  // 01.6 Audit Preconditions (SA 210).
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.auditPreconditions, questionKey: 'acceptable_framework', prompt: 'The financial reporting framework to be applied is acceptable (SA 210).', adverseAnswer: 'no', category: 'preconditions', severity: 'critical', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.auditPreconditions, questionKey: 'management_responsibilities', prompt: 'Management acknowledges its responsibilities (premise of the audit).', adverseAnswer: 'no', category: 'preconditions', severity: 'critical', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.auditPreconditions, questionKey: 'no_scope_limitation', prompt: 'Management imposes a scope limitation precluding an opinion.', adverseAnswer: 'yes', category: 'preconditions', severity: 'high', isBlocking: true },
-  // 01.7 Engagement Letter & Required Documents.
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.engagementLetter, questionKey: 'engagement_letter_issued', prompt: 'The engagement letter has been issued (SA 210).', adverseAnswer: 'no', category: 'engagement_letter', severity: 'medium', isBlocking: true },
-  { segmentKey: ACCEPTANCE_SEGMENT_KEY.engagementLetter, questionKey: 'client_acknowledged', prompt: 'The client has acknowledged the engagement letter.', adverseAnswer: 'no', category: 'engagement_letter', severity: 'medium', isBlocking: false },
-] as const;
-
 export interface AcceptanceAnswerRecord {
   id: string;
   segmentId: string;
   questionKey: string;
   answer: AcceptanceAnswer | null;
+  /** Detail fields recorded with the answer (dates, explanations, forms). */
+  details: Record<string, unknown>;
   narrative: string | null;
   documentId: string | null;
+  /** Who recorded it (null for an answer the system derived). */
+  answeredByName: string | null;
   version: number;
   updatedAt: string;
 }
@@ -140,13 +126,27 @@ export interface AcceptanceSegment {
   decidedAt: string | null;
   version: number;
   answers: AcceptanceAnswerRecord[];
+  /** Visible, required questions and how many are done (01.1–01.7). */
+  required: number;
+  answered: number;
+  /** Needs Attention lines: information awaited, details still to record. */
+  pending: string[];
+  /** Items needing the Engagement Partner's attention. */
+  attention: string[];
+  /** Needs Attention lines linked to their question (spec §13 click-through). */
+  attentionItems: AttentionItem[];
+  /** Why the segment is Not Applicable (e.g. continuing engagement). */
+  notApplicableReason: string | null;
 }
 
+/** The Engagement Partner's live approving decision (reopened ones are history). */
 export interface AcceptanceApproval {
   id: string;
   version: number;
   conclusion: AcceptanceConclusion;
   memo: string | null;
+  reason: string | null;
+  safeguards: string | null;
   approvedByName: string | null;
   approvedAt: string;
 }
@@ -170,12 +170,16 @@ export interface StatutoryAuditAcceptance {
   readyForApproval: boolean;
   /** What approval needs, what to know, a suggested conclusion and a draft memo. */
   pack: AcceptancePack;
+  /** Facts the questions are evaluated against (first year, services, team, prior year). */
+  context: AcceptanceContext;
 }
 
-/** Record one Yes/No/NA answer (with narrative on exception). */
+/** Record one answer, with its detail fields. */
 export interface RecordAcceptanceAnswerInput {
   questionKey: string;
-  answer: AcceptanceAnswer;
+  /** Null clears the answer (e.g. withdrawing a system-derived answer's override). */
+  answer: AcceptanceAnswer | null;
+  details?: Record<string, unknown>;
   narrative?: string | null;
   documentId?: string | null;
 }

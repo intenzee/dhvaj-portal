@@ -30,6 +30,12 @@ const segment = (id: string, segmentKey: string, title: string, state = 'complet
   decidedAt: null,
   version: 1,
   answers: [],
+  required: 0,
+  answered: 0,
+  pending: 0,
+  attention: 0,
+  attentionItems: [],
+  notApplicableReason: null,
 });
 
 const acceptance = {
@@ -78,6 +84,16 @@ const acceptance = {
     draftMemo:
       'Engagement acceptance — financial year 2024-25.\nConclusion: accept with conditions.',
     suggestedConclusion: 'accept_with_conditions',
+  },
+  context: {
+    firstYear: true,
+    firstYearSource: 'profile',
+    otherServices: [],
+    independence: { required: 0, completed: 0, pending: 0, threatsDisclosed: 0, rows: [], mine: null },
+    fileStatuses: {},
+    priorYear: null,
+    partner: null,
+    manager: null,
   },
 };
 

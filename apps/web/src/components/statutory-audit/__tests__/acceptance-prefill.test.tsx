@@ -30,6 +30,13 @@ const segment = (id: string, segmentKey: string, title: string, state = 'not_sta
   decidedAt: null,
   version: 1,
   answers: [],
+  required: 1,
+  answered: 0,
+  pending: 0,
+  attention: 0,
+  attentionItems: [],
+  notApplicableReason:
+    state === 'not_applicable' ? 'continuing engagement — DHVAJ was the auditor last year.' : null,
 });
 
 beforeEach(() => apiFetch.mockReset());
@@ -50,13 +57,23 @@ describe('Section 01 acceptance prefill', () => {
         ],
         segments: [
           segment('s1', 'engagement_profile', 'Engagement Profile'),
-          segment('s3', 'previous_auditor', 'Previous Auditor Communication'),
+          segment('s3', 'previous_auditor', 'Previous Auditor Communication', 'not_applicable'),
         ],
         approval: null,
         unresolvedSegmentCount: 2,
         openBlockingMatterCount: 0,
         readyForApproval: false,
         pack: { checks: [], ready: false, attention: 0, draftMemo: null, suggestedConclusion: 'accept' },
+        context: {
+          firstYear: false,
+          firstYearSource: 'history',
+          otherServices: [],
+          independence: { required: 0, completed: 0, pending: 0, threatsDisclosed: 0, rows: [], mine: null },
+          fileStatuses: {},
+          priorYear: null,
+          partner: null,
+          manager: null,
+        },
       },
     ]);
   });
@@ -73,16 +90,23 @@ describe('Section 01 acceptance prefill', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
-  it('offers one-click N/A for previous-auditor communication on a continuing audit', async () => {
+  it('asks EP-01 to confirm the facts, with no manual state buttons', async () => {
+    render(wrap(<AcceptancePanel engagementId="e1" />));
+    expect(await screen.findByText(/EP-01/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mark complete/i })).not.toBeInTheDocument();
+    apiFetch.mockResolvedValueOnce({});
+    await userEvent.click(screen.getAllByRole('button', { name: /^yes/i })[0]!);
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/engagements/e1/statutory-audit/acceptance/segments/s1/answer',
+      expect.objectContaining({ body: { questionKey: 'ep_01', answer: 'yes', details: {} } }),
+    );
+  });
+
+  it('derives Not Applicable for previous-auditor communication on a continuing audit', async () => {
     render(wrap(<AcceptancePanel engagementId="e1" />));
     await userEvent.click(await screen.findByRole('button', { name: /previous auditor/i }));
-    expect(screen.getByText(/continuing audit, so previous-auditor communication/i)).toBeInTheDocument();
-    apiFetch.mockResolvedValueOnce({});
-    await userEvent.click(screen.getByRole('button', { name: 'Mark not applicable' }));
-    expect(apiFetch).toHaveBeenCalledWith(
-      '/engagements/e1/statutory-audit/acceptance/segments/s3/state',
-      expect.objectContaining({ body: { state: 'not_applicable', version: 1 } }),
-    );
+    expect(screen.getByText(/DHVAJ was the auditor last year/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mark not applicable/i })).not.toBeInTheDocument();
   });
 });
 

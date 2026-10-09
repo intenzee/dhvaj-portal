@@ -301,7 +301,13 @@ const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
  */
 export function engagementProfileFacts(
   f: EngagementMasterFacts,
-  audit: { initialAudit: boolean | null },
+  audit: {
+    initialAudit: boolean | null;
+    /** 01.3 previous auditor's firm, when recorded. */
+    previousAuditor?: string | null;
+    /** 01.2 APP-02 date of appointment, when recorded. */
+    appointmentDate?: string | null;
+  },
 ): MasterFact[] {
   const E = 'Entity master';
   const G = 'Engagement';
@@ -334,14 +340,26 @@ export function engagementProfileFacts(
           : 'Continuing audit',
       'System derived',
     ],
-    ['Previous engagement', f.predecessorEngagementCode, G],
-    [
-      'Appointment letter',
-      [f.mandateLetterReference, f.mandateLetterDate && `dated ${f.mandateLetterDate}`]
-        .filter(Boolean)
-        .join(' ') || null,
-      G,
-    ],
+    // Spec §4 "Previous Auditor — display if already available": DHVAJ itself on a
+    // continuing audit, else the firm recorded in 01.3.
+    audit.initialAudit === false
+      ? [
+          'Previous auditor',
+          `DHVAJ — continuing auditor${f.predecessorEngagementCode ? ` (prior file ${f.predecessorEngagementCode})` : ''}`,
+          'System derived',
+        ]
+      : ['Previous auditor', audit.previousAuditor ?? null, '01.3 Previous auditor'],
+    // Spec §4 "Appointment Date — display if already available": 01.2 APP-02,
+    // else the mandate letter's date on the engagement.
+    audit.appointmentDate
+      ? ['Appointment date', audit.appointmentDate, '01.2 APP-02']
+      : [
+          'Appointment date',
+          f.mandateLetterDate
+            ? `${f.mandateLetterDate}${f.mandateLetterReference ? ` (letter ${f.mandateLetterReference})` : ''}`
+            : null,
+          G,
+        ],
     ['Target audit completion', f.plannedEndDate, G],
   ];
   const corpLabel = f.corporateId?.type.toUpperCase() ?? 'CIN';

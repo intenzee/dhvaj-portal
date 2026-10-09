@@ -2,13 +2,13 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Client } from 'pg';
 import {
-  ACCEPTANCE_QUESTIONS,
   type AuditCompletionItem,
   type AuditProcedure,
   type StatutoryAuditCompletion,
 } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { answerSection01Clean, recommendSection01 } from './section01.helper';
 
 /**
  * Section 07 / 08 — the completion and reporting checklist keeps itself in
@@ -98,21 +98,8 @@ describe('Statutory Audit — Section 07 completion from the file (e2e)', () => 
     const shellId = (await get(pa, base)).body[0].workflowInstanceId as string;
 
     // Section 01 accepted, Section 02 approved.
-    const acc = await get(pa, `${base}/acceptance`);
-    const segIdByKey = new Map(
-      (acc.body[0].segments as Array<{ id: string; segmentKey: string }>).map((s) => [
-        s.segmentKey,
-        s.id,
-      ]),
-    );
-    for (const q of ACCEPTANCE_QUESTIONS) {
-      const segmentId = segIdByKey.get(q.segmentKey);
-      if (!segmentId) continue;
-      await post(pa, `${base}/acceptance/segments/${segmentId}/answer`, {
-        questionKey: q.questionKey,
-        answer: q.adverseAnswer === 'no' ? 'yes' : 'no',
-      }).expect(201);
-    }
+    await answerSection01Clean(app, pa, engId);
+    await recommendSection01(app, pa, engId, shellId);
     await post(pa, `${base}/${shellId}/acceptance/approve`, {
       conclusion: 'accept',
       memo: 'Accepted (e2e).',

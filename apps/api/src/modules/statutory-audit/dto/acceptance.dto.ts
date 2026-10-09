@@ -1,24 +1,38 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import {
-  ACCEPTANCE_ANSWERS,
-  ACCEPTANCE_CONCLUSIONS,
-  SEGMENT_STATES,
-  type AcceptanceAnswer,
-  type AcceptanceConclusion,
-  type SegmentState,
-} from '@hsdg/contracts';
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
+import { SEGMENT_STATES, type SegmentState } from '@hsdg/contracts';
 
-/** Record a Yes/No/NA answer for an acceptance question (§8.3). */
+/** Record one Section 01 answer with its detail fields (spec §4–§9). */
 export class RecordAcceptanceAnswerDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Question key, e.g. `app_01`, or `ind_03:<engagement service id>`.' })
   @IsString()
-  @MaxLength(60)
+  @MaxLength(100)
   questionKey!: string;
 
-  @ApiProperty({ enum: ACCEPTANCE_ANSWERS })
-  @IsIn(ACCEPTANCE_ANSWERS)
-  answer!: AcceptanceAnswer;
+  @ApiProperty({
+    nullable: true,
+    description: "The chosen option's value, an ISO date, or `recorded` for a form; null clears it.",
+  })
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Matches(/^[a-z0-9_:-]{1,60}$/)
+  answer!: string | null;
+
+  @ApiPropertyOptional({ description: 'Detail fields recorded with the answer.' })
+  @IsOptional()
+  @IsObject()
+  details?: Record<string, unknown>;
 
   @ApiPropertyOptional({ description: 'Narrative required only on an exception.' })
   @IsOptional()
@@ -42,17 +56,4 @@ export class SetSegmentStateDto {
   @IsInt()
   @Min(1)
   version!: number;
-}
-
-/** Engagement Partner approval (FINAL-02) — unlocks Section 02 (§8.5). */
-export class ApproveAcceptanceDto {
-  @ApiProperty({ enum: ACCEPTANCE_CONCLUSIONS })
-  @IsIn(ACCEPTANCE_CONCLUSIONS)
-  conclusion!: AcceptanceConclusion;
-
-  @ApiPropertyOptional({ description: 'The acceptance memo / rationale recorded with approval.' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(8000)
-  memo?: string;
 }

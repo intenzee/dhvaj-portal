@@ -26,11 +26,18 @@ const AUTO_RESOLVED = 'Auto-resolved: source condition cleared.';
  * accepting it is one step, never re-typed.
  */
 const SUGGESTED_RESOLUTION = `COALESCE(
-    (SELECT NULLIF(trim(a.narrative), '')
+    (SELECT COALESCE(
+              NULLIF(trim(a.narrative), ''),
+              NULLIF(trim(a.details ->> 'explanation'), ''),
+              NULLIF(trim(a.details ->> 'assessment'), ''),
+              NULLIF(trim(a.details ->> 'managerAssessment'), ''),
+              NULLIF(trim(a.details ->> 'description'), ''),
+              NULLIF(trim(a.details ->> 'safeguard'), ''))
        FROM hsdg.audit_acceptance_answers a
        JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
       WHERE s.workflow_instance_id = m.workflow_instance_id
-        AND m.source = 'acceptance:' || s.segment_key || ':' || a.question_key
+        AND (m.source = 'acceptance:' || s.segment_key || ':' || a.question_key
+             OR starts_with(m.source, 'acceptance:' || s.segment_key || ':' || a.question_key || ':'))
       LIMIT 1),
     (SELECT NULLIF(trim(fa.basis), '')
        FROM hsdg.audit_framework_assessments fa

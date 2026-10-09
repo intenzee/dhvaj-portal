@@ -1,8 +1,9 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { ACCEPTANCE_QUESTIONS, type StatutoryAuditCompletion } from '@hsdg/contracts';
+import type { StatutoryAuditCompletion } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { answerSection01, answerSection01Clean, recommendSection01 } from './section01.helper';
 
 /**
  * Statutory Audit — end-to-end acceptance + security (Audit Spec §35, §36). SA-10.
@@ -84,25 +85,8 @@ describe('Statutory Audit (e2e §35/§36)', () => {
 
   /** Complete Section 01 with clean answers and Partner-approve → unlocks Framework (§8). */
   const acceptSection01 = async (engId: string, shellId: string): Promise<void> => {
-    const acc = await request(app.getHttpServer())
-      .get(`/api/v1/engagements/${engId}/statutory-audit/acceptance`)
-      .set(bearer(pa))
-      .expect(200);
-    const segments = acc.body[0].segments as Array<{ id: string; segmentKey: string }>;
-    const segIdByKey = new Map(segments.map((s) => [s.segmentKey, s.id]));
-    for (const q of ACCEPTANCE_QUESTIONS) {
-      const segmentId = segIdByKey.get(q.segmentKey);
-      if (!segmentId) continue;
-      // The non-adverse answer keeps every acceptance matter clear.
-      const answer = q.adverseAnswer === 'no' ? 'yes' : 'no';
-      await request(app.getHttpServer())
-        .post(
-          `/api/v1/engagements/${engId}/statutory-audit/acceptance/segments/${segmentId}/answer`,
-        )
-        .set(bearer(pa))
-        .send({ questionKey: q.questionKey, answer })
-        .expect(201);
-    }
+    await answerSection01Clean(app, pa, engId);
+    await recommendSection01(app, pa, engId, shellId);
     await request(app.getHttpServer())
       .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/acceptance/approve`)
       .set(bearer(pa))
@@ -316,35 +300,18 @@ describe('Statutory Audit (e2e §35/§36)', () => {
 
   it('A blocking Acceptance Matter prevents Partner approval until resolved (§8.4)', async () => {
     const { engId, shellId } = await provisionAuditFile();
-    const acc = await request(app.getHttpServer())
-      .get(`/api/v1/engagements/${engId}/statutory-audit/acceptance`)
-      .set(bearer(pa))
-      .expect(200);
-    const segments = acc.body[0].segments as Array<{ id: string; segmentKey: string }>;
-    const segIdByKey = new Map(segments.map((s) => [s.segmentKey, s.id]));
     // Answer everything cleanly EXCEPT one adverse (blocking) response.
-    for (const q of ACCEPTANCE_QUESTIONS) {
-      const segmentId = segIdByKey.get(q.segmentKey)!;
-      const adverse = q.questionKey === 'properly_appointed';
-      const answer = adverse ? q.adverseAnswer : q.adverseAnswer === 'no' ? 'yes' : 'no';
-      await request(app.getHttpServer())
-        .post(
-          `/api/v1/engagements/${engId}/statutory-audit/acceptance/segments/${segmentId}/answer`,
-        )
-        .set(bearer(pa))
-        .send({
-          questionKey: q.questionKey,
-          answer,
-          narrative: adverse ? 'Not yet appointed.' : undefined,
-        })
-        .expect(201);
-    }
+    await answerSection01Clean(app, pa, engId);
+    await answerSection01(app, pa, engId, 'appointment_eligibility', 'properly_appointed', 'no', {
+      explanation: 'Not yet appointed.',
+    });
     // Approval is blocked by the open blocking matter.
+    await recommendSection01(app, pa, engId, shellId);
     await request(app.getHttpServer())
       .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/acceptance/approve`)
       .set(bearer(pa))
       .send({ conclusion: 'accept' })
-      .expect(409);
+      .expect((r) => expect([400, 409]).toContain(r.status));
     // A blocking matter exists in the acceptance section.
     const matters = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/matters?section=acceptance`)

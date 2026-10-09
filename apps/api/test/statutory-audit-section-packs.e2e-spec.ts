@@ -1,7 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import {
-  ACCEPTANCE_QUESTIONS,
   type AuditMatterRecord,
   type SignOffCheck,
   type StatutoryAuditAcceptance,
@@ -11,6 +10,7 @@ import {
 } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { answerSection01, answerSection01Clean, recommendSection01 } from './section01.helper';
 
 /**
  * Sections 01–04 drafted from the file: each section's pack mirrors its
@@ -83,17 +83,10 @@ describe('Statutory Audit — Sections 01–04 packs (e2e)', () => {
     expect(open.goTo?.anchor).toMatch(/^segment-/);
 
     // Answer everything favourably except one independence threat, explained.
-    const segIdByKey = new Map(acc.segments.map((s) => [s.segmentKey, s.id]));
-    for (const q of ACCEPTANCE_QUESTIONS) {
-      const segmentId = segIdByKey.get(q.segmentKey);
-      if (!segmentId) continue;
-      const threat = q.questionKey === 'independence_threats';
-      await post(pa, `${base}/acceptance/segments/${segmentId}/answer`, {
-        questionKey: q.questionKey,
-        answer: threat ? q.adverseAnswer : q.adverseAnswer === 'no' ? 'yes' : 'no',
-        ...(threat ? { narrative: 'Article assistant rotated off the engagement.' } : {}),
-      }).expect(201);
-    }
+    await answerSection01Clean(app, pa, engId);
+    await answerSection01(app, pa, engId, 'independence_ethics', 'independence_threats', 'yes', {
+      explanation: 'Article assistant rotated off the engagement.',
+    });
     acc = await acceptance();
     expect(check(acc.pack.checks, 'blocking_matters')).toMatchObject({ ok: false });
     expect(check(acc.pack.checks, 'adverse_answers').facts.join(' ')).toMatch(
@@ -118,6 +111,7 @@ describe('Statutory Audit — Sections 01–04 packs (e2e)', () => {
 
     // Approve with a blank memo and a different conclusion: the draft is
     // recorded, ending on the conclusion chosen.
+    await recommendSection01(app, pa, engId, shellId);
     await post(pa, `${base}/${shellId}/acceptance/approve`, { conclusion: 'accept' }).expect(201);
     acc = await acceptance();
     expect(acc.approval?.memo).toMatch(/^Engagement acceptance — financial year 2024-25/);
