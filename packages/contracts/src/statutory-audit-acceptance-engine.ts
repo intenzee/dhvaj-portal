@@ -198,6 +198,45 @@ const CHECK_OPTIONS: readonly AcceptanceOption[] = [
   { value: 'na', label: 'N/A', tone: 'clear' },
 ];
 
+// ── 01.3 vocabulary ─────────────────────────────────────────────────────────
+
+/** PA-05 — what the previous auditor's matter means for acceptance (spec §6). */
+export const ACCEPTANCE_IMPACT = [
+  { value: 'no_impact', label: 'No impact' },
+  { value: 'further_info', label: 'Further information required' },
+  { value: 'safeguard', label: 'Safeguard or action required' },
+  { value: 'partner_review', label: 'Engagement Partner review required' },
+  { value: 'should_not_accept', label: 'Engagement should not be accepted' },
+] as const satisfies readonly AcceptanceChoice[];
+export type AcceptanceImpact = (typeof ACCEPTANCE_IMPACT)[number]['value'];
+
+export const PREVIOUS_AUDITOR_CHANGE_REASON = [
+  { value: 'tenure_completed', label: 'Tenure / rotation completed' },
+  { value: 'not_reappointed', label: 'Not reappointed' },
+  { value: 'resignation', label: 'Resignation' },
+  { value: 'removal', label: 'Removal' },
+  { value: 'casual_vacancy', label: 'Casual vacancy' },
+  { value: 'other', label: 'Other' },
+] as const satisfies readonly AcceptanceChoice[];
+
+export const COMMUNICATION_MODE = [
+  { value: 'email', label: 'Email' },
+  { value: 'registered_post', label: 'Registered Post' },
+  { value: 'speed_post', label: 'Speed Post' },
+  { value: 'hand_delivery', label: 'Hand Delivery' },
+  { value: 'other', label: 'Other' },
+] as const satisfies readonly AcceptanceChoice[];
+
+/** 01.3 applies: a first-year audit, or a special circumstance recorded on PA-01. */
+const PA_APPLIES: AcceptanceCondition = {
+  any: [
+    { q: 'pa_01', in: ['yes'] },
+    { q: 'pa_01', field: 'special', includes: 'yes' },
+  ],
+};
+/** …and another auditor / firm audited the company immediately before. */
+const PA_HAD_AUDITOR: AcceptanceCondition = { all: [PA_APPLIES, { q: 'pa_02', in: ['yes'] }] };
+
 // ── The catalogue ───────────────────────────────────────────────────────────
 
 export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
@@ -320,18 +359,203 @@ export const ACCEPTANCE_QUESTIONS: readonly AcceptanceQuestionDefinition[] = [
     ],
     evidenceWhen: ['issue'],
   })),
-  ...legacy('previous_auditor', [
-    [
-      'communication_sent',
-      'Communication with the previous auditor has been made (Clause 8, First Schedule).',
-      'no',
+  // 01.3 Previous Auditor Communication (spec §6). PA-01 is derived from the
+  // file's first-year call; the rest appears only when there was a previous
+  // auditor to communicate with.
+  {
+    segmentKey: 'previous_auditor',
+    questionKey: 'pa_01',
+    code: 'PA-01',
+    prompt: 'Is this the first year DHVAJ is acting as statutory auditor of the company?',
+    control: 'choice',
+    options: [YES_CLEAR, NO_CLEAR],
+    details: [
+      {
+        when: ['no'],
+        fields: [
+          {
+            key: 'special',
+            label: 'Special circumstance requiring previous-auditor communication?',
+            type: 'yesno',
+          },
+          {
+            key: 'specialReason',
+            label: 'Describe the circumstance',
+            type: 'textarea',
+            required: true,
+            showIf: { field: 'special', in: ['yes'] },
+          },
+        ],
+      },
     ],
-    [
-      'no_professional_objection',
-      'No professional reason from the previous auditor prevents acceptance.',
-      'no',
+  },
+  {
+    segmentKey: 'previous_auditor',
+    questionKey: 'pa_02',
+    code: 'PA-02',
+    prompt: 'Was another auditor / firm the statutory auditor immediately before DHVAJ?',
+    control: 'choice',
+    showIf: PA_APPLIES,
+    options: [
+      YES_CLEAR,
+      NO_CLEAR,
+      {
+        value: 'pending',
+        label: 'Information Pending',
+        tone: 'pending',
+        pending: 'Previous auditor information pending',
+      },
     ],
-  ]),
+    details: [
+      {
+        when: ['no'],
+        fields: [
+          {
+            key: 'reason',
+            label: 'Reason',
+            type: 'select',
+            options: [
+              { value: 'newly_incorporated', label: 'Newly incorporated company' },
+              { value: 'first_statutory_audit', label: 'First statutory audit' },
+              { value: 'other', label: 'Other' },
+            ],
+            required: true,
+          },
+          {
+            key: 'reasonOther',
+            label: 'Specify',
+            type: 'text',
+            required: true,
+            showIf: { field: 'reason', in: ['other'] },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'previous_auditor',
+    questionKey: 'pa_details',
+    code: '6.1',
+    prompt: 'Previous auditor details',
+    control: 'form',
+    showIf: PA_HAD_AUDITOR,
+    details: [
+      {
+        fields: [
+          { key: 'firmName', label: 'Auditor / Firm Name', type: 'text', required: true },
+          { key: 'frn', label: 'FRN', type: 'text' },
+          { key: 'partnerName', label: 'Partner Name', type: 'text' },
+          { key: 'membershipNo', label: 'Membership No.', type: 'text' },
+          { key: 'email', label: 'Email', type: 'email' },
+          { key: 'address', label: 'Address', type: 'text' },
+          { key: 'lastAuditPeriod', label: 'Last Audit Period', type: 'fy', required: true },
+          {
+            key: 'changeReason',
+            label: 'Reason for Change',
+            type: 'select',
+            options: PREVIOUS_AUDITOR_CHANGE_REASON,
+            required: true,
+          },
+          { key: 'changeRemarks', label: 'Remarks', type: 'text' },
+        ],
+      },
+    ],
+  },
+  {
+    segmentKey: 'previous_auditor',
+    questionKey: 'pa_03',
+    code: 'PA-03',
+    prompt: 'Has DHVAJ communicated with the previous auditor before accepting the audit?',
+    control: 'choice',
+    showIf: PA_HAD_AUDITOR,
+    options: [YES_CLEAR, NO_CLEAR],
+    hint: 'If not, create the communication from the DHVAJ template below.',
+    details: [
+      {
+        when: ['yes'],
+        fields: [
+          { key: 'dateCommunicated', label: 'Date communicated', type: 'date', required: true },
+          {
+            key: 'mode',
+            label: 'Mode',
+            type: 'select',
+            options: COMMUNICATION_MODE,
+            required: true,
+          },
+          { key: 'remarks', label: 'Remarks', type: 'text' },
+        ],
+      },
+    ],
+    files: [
+      { slot: 'previous_auditor_communication', when: ['no'] },
+      {
+        slot: 'previous_auditor_sent_evidence',
+        when: ['yes', 'no'],
+        hint: 'Email, postal receipt or acknowledgement of the communication.',
+      },
+    ],
+  },
+  {
+    segmentKey: 'previous_auditor',
+    questionKey: 'pa_04',
+    code: 'PA-04',
+    prompt: 'Has a response been received?',
+    control: 'choice',
+    showIf: PA_HAD_AUDITOR,
+    options: [
+      YES_CLEAR,
+      ACCEPTANCE_METHODOLOGY.previousAuditorResponseRequired
+        ? { ...NO, tone: 'pending', pending: "Awaiting the previous auditor's response" }
+        : NO_CLEAR,
+    ],
+    details: [
+      {
+        when: ['yes'],
+        fields: [{ key: 'responseDate', label: 'Response date', type: 'date', required: true }],
+      },
+      {
+        when: ['no'],
+        fields: [{ key: 'followUp', label: 'Follow-up', type: 'text' }],
+      },
+    ],
+    files: [{ slot: 'previous_auditor_response', when: ['yes'] }],
+  },
+  {
+    segmentKey: 'previous_auditor',
+    questionKey: 'pa_05',
+    code: 'PA-05',
+    prompt:
+      'Has the previous auditor communicated any matter requiring consideration before acceptance?',
+    control: 'choice',
+    showIf: { all: [PA_HAD_AUDITOR, { q: 'pa_04', in: ['yes'] }] },
+    options: [YES_EXC, NO_CLEAR],
+    details: [
+      {
+        when: ['yes'],
+        fields: [
+          {
+            key: 'matterCommunicated',
+            label: 'Matter Communicated',
+            type: 'textarea',
+            required: true,
+          },
+          {
+            key: 'managerAssessment',
+            label: 'Manager Assessment',
+            type: 'textarea',
+            required: true,
+          },
+          {
+            key: 'impact',
+            label: 'Impact on Acceptance',
+            type: 'select',
+            options: ACCEPTANCE_IMPACT,
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
   ...legacy('acceptance_continuance', [
     ['management_integrity_concern', 'There are concerns over management integrity.', 'yes'],
     [
@@ -514,6 +738,10 @@ export interface SegmentEvaluation {
   attention: string[];
   /** Why the segment is Not Applicable, when it is. */
   notApplicableReason: string | null;
+  /** The answers evaluated, including system-derived ones (e.g. PA-01). */
+  answers: AnswersByKey;
+  /** Question keys whose answer is system-derived, not recorded by a user. */
+  derived: string[];
 }
 
 /**
@@ -528,6 +756,7 @@ export function evaluateSegment(
 ): SegmentEvaluation {
   const rule = SEGMENT_RULES[segmentKey];
   const effective = rule?.effectiveAnswers?.(answers, ctx) ?? answers;
+  const derived = Object.keys(effective).filter((k) => effective[k] !== answers[k]);
   const na = rule?.notApplicable?.(effective, ctx) ?? null;
   const visible = questionsFor(segmentKey).filter((q) => conditionHolds(q.showIf, effective, ctx));
   if (na) {
@@ -540,6 +769,8 @@ export function evaluateSegment(
       pending: [],
       attention: [],
       notApplicableReason: na,
+      answers: effective,
+      derived,
     };
   }
 
@@ -553,7 +784,8 @@ export function evaluateSegment(
   let touched = false;
   for (const q of visible) {
     const s = effective[q.questionKey];
-    if (s?.answer != null || (s && Object.keys(s.details ?? {}).length > 0)) touched = true;
+    const recorded = s && !derived.includes(q.questionKey);
+    if (recorded && (s.answer != null || Object.keys(s.details ?? {}).length > 0)) touched = true;
     const opt = optionOf(q, s?.answer);
     if (opt?.pending) pend(opt.pending, q.questionKey);
     if (opt?.attention) attn(opt.attention, q.questionKey);
@@ -584,7 +816,9 @@ export function evaluateSegment(
   );
 
   let state: DerivedSegmentState;
-  if (!touched && answered === 0) state = 'not_started';
+  // Nothing recorded by a user yet (system-derived answers alone do not start
+  // a segment, unless they already complete it).
+  if (!touched && !(answered >= required && pending.length === 0)) state = 'not_started';
   else if (attention.length > 0 || blockingHere) state = 'attention_required';
   else if (answered >= required && pending.length === 0) state = 'complete';
   else state = 'in_progress';
@@ -601,6 +835,8 @@ export function evaluateSegment(
     pending,
     attention,
     notApplicableReason: null,
+    answers: effective,
+    derived,
   };
 }
 
@@ -671,8 +907,53 @@ const SEGMENT_RULES: Record<string, SegmentRule> = {
     }),
   },
   previous_auditor: {
-    notApplicable: (_answers, ctx) =>
-      ctx.firstYear === false ? 'continuing engagement — DHVAJ was the auditor last year.' : null,
+    // PA-01 follows the file's first-year call until someone answers it.
+    effectiveAnswers: (answers, ctx) =>
+      answers.pa_01?.answer != null || ctx.firstYear == null
+        ? answers
+        : { ...answers, pa_01: { answer: ctx.firstYear ? 'yes' : 'no', details: {} } },
+    notApplicable: (answers) =>
+      answers.pa_01?.answer === 'no' && answers.pa_01.details?.special !== 'yes'
+        ? 'Continuing Engagement — DHVAJ was the auditor last year.'
+        : null,
+    extra: (answers, ctx) => {
+      const items: AttentionItem[] = [];
+      if (!conditionHolds(PA_HAD_AUDITOR, answers, ctx)) return { items };
+      // PA-03 "No": the communication is created here and must go out (spec §6.2).
+      if (answers.pa_03?.answer === 'no') {
+        const status = ctx.fileStatuses.previous_auditor_communication;
+        if (status !== 'sent') {
+          items.push({
+            kind: 'pending',
+            text: !status
+              ? 'Create the Communication to Previous Auditor'
+              : status === 'ready_to_send'
+                ? 'Communication to Previous Auditor is ready — mark it Sent once it goes out'
+                : 'Communication to Previous Auditor is in draft',
+            questionKey: 'pa_03',
+          });
+        }
+      }
+      const impact = answers.pa_05?.answer === 'yes' ? answers.pa_05.details?.impact : null;
+      if (impact === 'further_info') {
+        items.push({
+          kind: 'pending',
+          text: "Further information required on the previous auditor's matter",
+          questionKey: 'pa_05',
+        });
+      }
+      if (impact === 'partner_review' || impact === 'should_not_accept') {
+        items.push({
+          kind: 'attention',
+          text:
+            impact === 'partner_review'
+              ? "Previous auditor's matter needs Engagement Partner review"
+              : "Previous auditor's matter: engagement should not be accepted",
+          questionKey: 'pa_05',
+        });
+      }
+      return { items };
+    },
   },
 };
 

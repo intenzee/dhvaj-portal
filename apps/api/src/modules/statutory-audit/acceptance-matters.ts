@@ -70,17 +70,35 @@ const eligibilityIssue: Rule = (a) => {
 };
 
 /**
+ * PA-05 "Yes" (spec §6): the previous auditor communicated a matter. It is
+ * always on the register; its weight follows the Impact on Acceptance.
+ */
+const previousAuditorMatter: Rule = (a) => {
+  if (a.answer !== 'yes') return [];
+  const shape = (severity: MatterSeverityLevel, isBlocking: boolean) => [
+    { category: C.previousAuditor, severity, isBlocking },
+  ];
+  switch (a.details?.impact) {
+    case 'no_impact':
+      return shape('low', false);
+    case 'safeguard':
+      return shape('medium', false);
+    case 'partner_review':
+      return shape('high', true);
+    case 'should_not_accept':
+      return shape('critical', true);
+    default: // further information required, or impact not yet assessed
+      return shape('high', true);
+  }
+};
+
+/**
  * Per-question rules. A question with no rule raises no matter (e.g. EP-01's
  * correction is put right on the master, it is not an acceptance concern).
  */
 const RULES: Record<string, Rule> = {
   ...Object.fromEntries(ELIGIBILITY_CHECKS.map(([k]) => [k, eligibilityIssue])),
-  communication_sent: legacy({ category: C.previousAuditor, severity: 'high', isBlocking: true }),
-  no_professional_objection: legacy({
-    category: C.previousAuditor,
-    severity: 'high',
-    isBlocking: true,
-  }),
+  pa_05: previousAuditorMatter,
   management_integrity_concern: legacy({
     category: C.integrity,
     severity: 'high',

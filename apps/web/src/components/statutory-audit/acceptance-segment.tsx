@@ -170,7 +170,8 @@ export function AcceptanceSegmentEditor({
                   compact
                   q={q}
                   acc={acc}
-                  answers={answers}
+                  answers={ev.answers}
+                  derived={ev.derived}
                   editable={editable}
                   busy={busy}
                   onAnswer={onAnswer}
@@ -186,7 +187,8 @@ export function AcceptanceSegmentEditor({
                 key={q.questionKey}
                 q={q}
                 acc={acc}
-                answers={answers}
+                answers={ev.answers}
+                derived={ev.derived}
                 editable={editable}
                 busy={busy}
                 onAnswer={onAnswer}
@@ -209,10 +211,13 @@ function QuestionBlock({
   onAnswer,
   after,
   compact,
+  derived,
 }: {
   q: AcceptanceQuestionDefinition;
   acc: StatutoryAuditAcceptance;
   answers: AnswersByKey;
+  /** Question keys whose answer is system-derived. */
+  derived: readonly string[];
   editable: boolean;
   busy: boolean;
   onAnswer: SaveAnswer;
@@ -277,6 +282,11 @@ function QuestionBlock({
         onAnswer={onAnswer}
         defaults={periodDefaults(q, acc)}
       />
+      {derived.includes(q.questionKey) && (
+        <p className="text-[11px] text-ink-faint">
+          Set from the engagement history — answer it yourself if that is wrong.
+        </p>
+      )}
       {prior && prior.answer != null && (
         <p className="flex items-center gap-1 text-[11px] text-ink-faint">
           <History className="h-3 w-3" aria-hidden />

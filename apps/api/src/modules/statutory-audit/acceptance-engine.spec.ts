@@ -111,6 +111,96 @@ describe('Section 01 question engine', () => {
     });
   });
 
+  describe('01.3 Previous Auditor Communication', () => {
+    const had = {
+      pa_02: ans('yes'),
+      pa_details: ans('recorded', {
+        firmName: 'Rao & Co',
+        lastAuditPeriod: '2023-24',
+        changeReason: 'tenure_completed',
+      }),
+    };
+
+    it('is Not Applicable on a continuing engagement, with PA-01 derived from the file', () => {
+      const ev = evaluateSegment('previous_auditor', {}, ctx({ firstYear: false }));
+      expect(ev.state).toBe('not_applicable');
+      expect(ev.notApplicableReason).toMatch(/Continuing Engagement/);
+      expect(ev.derived).toEqual(['pa_01']);
+      expect(ev.visible.map((q) => q.questionKey)).toEqual(['pa_01']);
+    });
+
+    it('applies again when a special circumstance is recorded on PA-01', () => {
+      const ev = evaluateSegment(
+        'previous_auditor',
+        { pa_01: ans('no', { special: 'yes', specialReason: 'Group restructuring.' }) },
+        ctx({ firstYear: false }),
+      );
+      expect(ev.state).toBe('in_progress');
+      expect(ev.visible.map((q) => q.questionKey)).toContain('pa_02');
+    });
+
+    it('a first-year audit with no previous auditor completes on the reason', () => {
+      expect(evaluateSegment('previous_auditor', {}, ctx({ firstYear: true })).state).toBe(
+        'not_started',
+      );
+      const ev = evaluateSegment(
+        'previous_auditor',
+        { pa_02: ans('no', { reason: 'newly_incorporated' }) },
+        ctx({ firstYear: true }),
+      );
+      expect(ev.state).toBe('complete');
+      const pending = evaluateSegment(
+        'previous_auditor',
+        { pa_02: ans('pending') },
+        ctx({ firstYear: true }),
+      );
+      expect(pending.state).toBe('in_progress');
+      expect(pending.pending).toContain('Previous auditor information pending');
+    });
+
+    it('PA-03 "No" stays open until the communication is marked Sent', () => {
+      const answers = { ...had, pa_03: ans('no'), pa_04: ans('no') };
+      const draft = evaluateSegment(
+        'previous_auditor',
+        answers,
+        ctx({ firstYear: true, fileStatuses: { previous_auditor_communication: 'draft' } }),
+      );
+      expect(draft.state).toBe('in_progress');
+      expect(draft.items[0]).toMatchObject({ questionKey: 'pa_03', kind: 'pending' });
+      const sent = evaluateSegment(
+        'previous_auditor',
+        answers,
+        ctx({ firstYear: true, fileStatuses: { previous_auditor_communication: 'sent' } }),
+      );
+      expect(sent.state).toBe('complete');
+    });
+
+    it("a previous auditor's matter needs its assessment; Partner review needs attention", () => {
+      const base = {
+        ...had,
+        pa_03: ans('yes', { dateCommunicated: '2024-08-01', mode: 'email' }),
+        pa_04: ans('yes', { responseDate: '2024-08-10' }),
+      };
+      expect(
+        evaluateSegment('previous_auditor', { ...base, pa_05: ans('no') }, ctx({ firstYear: true }))
+          .state,
+      ).toBe('complete');
+      const review = evaluateSegment(
+        'previous_auditor',
+        {
+          ...base,
+          pa_05: ans('yes', {
+            matterCommunicated: 'Unpaid fees.',
+            managerAssessment: 'Fees now settled.',
+            impact: 'partner_review',
+          }),
+        },
+        ctx({ firstYear: true }),
+      );
+      expect(review.state).toBe('attention_required');
+    });
+  });
+
   describe('01.7 Engagement Letter', () => {
     const letter = (status?: string) =>
       evaluateSegment(

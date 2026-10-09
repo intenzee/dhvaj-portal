@@ -79,7 +79,8 @@ export async function answerSection01Clean(
             ? acc.context.otherServices.map((o) => `${q.questionKey}:${o.engagementServiceId}`)
             : [q.questionKey];
         for (const key of keys) {
-          if (byKey[key]?.answer != null) continue;
+          // Answered already, or system-derived (e.g. PA-01 from the first-year call).
+          if (ev.answers[key]?.answer != null) continue;
           const answer = cleanAnswer(q);
           const details: Record<string, unknown> = {};
           // Fill required fields, twice so fields revealed by another field appear.

@@ -111,3 +111,43 @@ describe('01.2 Appointment & Eligibility editor', () => {
     expect(screen.getByText('file card: appointment_communication')).toBeInTheDocument();
   });
 });
+
+describe('01.3 Previous Auditor editor', () => {
+  const pa = (answers: ReturnType<typeof answer>[], firstYear: boolean) => {
+    const seg = {
+      ...segment(answers),
+      id: 's3',
+      segmentKey: 'previous_auditor',
+      title: 'Previous Auditor Communication',
+    } as AcceptanceSegment;
+    const a = { ...acc, context: { ...acc.context, firstYear } } as StatutoryAuditAcceptance;
+    return { seg, a };
+  };
+
+  it('on a continuing engagement shows only PA-01, derived from the file', () => {
+    const { seg, a } = pa([], false);
+    render(
+      <AcceptanceSegmentEditor acc={a} segment={seg} editable busy={false} onAnswer={jest.fn()} />,
+    );
+    expect(screen.getByText(/first year DHVAJ is acting/)).toBeInTheDocument();
+    expect(screen.getByText(/Set from the engagement history/)).toBeInTheDocument();
+    expect(screen.queryByText(/Was another auditor/)).not.toBeInTheDocument();
+  });
+
+  it('PA-03 "No" offers the Communication to Previous Auditor card', () => {
+    const { seg, a } = pa(
+      [
+        answer('pa_02', 'yes'),
+        answer('pa_details', 'recorded', { firmName: 'Rao & Co' }),
+        answer('pa_03', 'no'),
+      ],
+      true,
+    );
+    render(
+      <AcceptanceSegmentEditor acc={a} segment={seg} editable busy={false} onAnswer={jest.fn()} />,
+    );
+    expect(screen.getByText('file card: previous_auditor_communication')).toBeInTheDocument();
+    expect(screen.getByText('Auditor / Firm Name')).toBeInTheDocument();
+    expect(screen.getByText(/Has a response been received/)).toBeInTheDocument();
+  });
+});

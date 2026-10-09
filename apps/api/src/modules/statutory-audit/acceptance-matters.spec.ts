@@ -42,6 +42,25 @@ describe('deriveAcceptanceMatters (Section 01 matters, guide §8.4)', () => {
     expect(raised.isBlocking).toBe(true);
   });
 
+  it("a previous auditor's matter is weighted by its impact on acceptance", () => {
+    const pa = (impact: string) =>
+      deriveAcceptanceMatters([
+        ans({
+          segmentKey: 'previous_auditor',
+          questionKey: 'pa_05',
+          answer: 'yes',
+          details: { matterCommunicated: 'Unpaid fees.', impact },
+        }),
+      ])[0]!;
+    expect(pa('no_impact')).toMatchObject({
+      category: 'previous_auditor',
+      severity: 'low',
+      isBlocking: false,
+    });
+    expect(pa('should_not_accept')).toMatchObject({ severity: 'critical', isBlocking: true });
+    expect(pa('no_impact').title).toContain('Unpaid fees.');
+  });
+
   it('ignores unknown questions and yields one matter per distinct adverse answer', () => {
     expect(deriveAcceptanceMatters([ans({ questionKey: 'nonexistent', answer: 'issue' })])).toEqual(
       [],
