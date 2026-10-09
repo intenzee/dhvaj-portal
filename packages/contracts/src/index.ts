@@ -33,6 +33,7 @@ export * from './statutory-audit-framework-evidence';
 export * from './statutory-audit-schedule-iii';
 export * from './statutory-audit-fs-workbook';
 export * from './statutory-audit-caro';
+export * from './statutory-audit-caro-programme';
 export * from './statutory-audit-icfr';
 export * from './statutory-audit-consolidation';
 export * from './statutory-audit-other-reporting';
