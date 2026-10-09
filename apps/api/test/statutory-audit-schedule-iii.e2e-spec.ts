@@ -92,12 +92,20 @@ describe('Statutory Audit — 02.3 Schedule III (e2e §9.3)', () => {
     await app?.close();
   });
 
-  it('provisions one 02.3 assessment that is information-insufficient until 02.2 is concluded', async () => {
+  it('provisions one 02.3 assessment that is provisional until 02.2 is concluded', async () => {
     const sch = await getScheduleIii(pa);
     expect(sch.assessment.subSectionKey).toBe('02.3');
-    expect(sch.assessment.systemOutcome).toBe(SCHEDULE_III_OUTCOME.informationInsufficient);
+    // Routed from the live 02.2 suggestion (Ind AS at ₹600cr), flagged provisional.
+    expect(sch.assessment.systemOutcome).toBe(SCHEDULE_III_OUTCOME.divisionII);
+    expect(sch.assessment.systemBasis).toMatch(/^Provisional/);
     expect(sch.upstreamReady).toBe(false);
     expect(sch.assessment.state).not.toBe('applicable');
+    // A provisional route cannot be concluded.
+    await request(app.getHttpServer())
+      .post(`${base()}/${shellId}/schedule-iii/decision`)
+      .set(bearer(pa))
+      .send({ action: 'confirm', version: sch.assessment.version })
+      .expect(409);
   });
 
   it('routes Division II once 02.2 concludes Ind AS, citing the Schedule III provision', async () => {

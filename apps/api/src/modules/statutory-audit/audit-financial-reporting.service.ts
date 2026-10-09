@@ -12,6 +12,7 @@ import {
   FRF_PROFESSIONAL_ACTION,
   MATTER_CLOSED_STATUSES,
   REPORTING_FRAMEWORK_CONCLUSIONS,
+  REPORTING_FRAMEWORK_LABEL,
   REPORTING_FRAMEWORK_OUTCOME,
   SUB_SECTION_KEY,
   auditPeriodStartFromFinancialYear,
@@ -50,6 +51,7 @@ import {
   financialReportingCompletion,
   partnerApprovalReason,
 } from './financial-reporting-completion';
+import { flagScheduleIiiReevaluationOn } from './schedule-iii-reevaluation';
 
 const SUB = SUB_SECTION_KEY.financialReporting;
 const AREA = FRAMEWORK_AREA_KEY.financialReportingFramework;
@@ -847,6 +849,13 @@ export class AuditFinancialReportingService {
           ],
         );
         await this.matters.syncFrameworkOn(client, ctx, engagementId, workflowInstanceId);
+        // 02.3 now routes from the 02.2 suggestion (provisional) — re-evaluate it.
+        await flagScheduleIiiReevaluationOn(client, workflowInstanceId, {
+          factKey: 'reporting_framework',
+          newValue: DECISIVE.has(res.outcome)
+            ? REPORTING_FRAMEWORK_LABEL[res.outcome]
+            : 'Not concluded',
+        });
         await this.audit.recordWith(client, ctx, {
           action: 'statutory_audit.financial_reporting_decision',
           objectType: 'audit_framework_subassessment',
@@ -907,6 +916,11 @@ export class AuditFinancialReportingService {
         ],
       );
       await this.matters.syncFrameworkOn(client, ctx, engagementId, workflowInstanceId);
+      // A changed 02.2 conclusion marks a decided 02.3 Needs Re-evaluation (02.3 spec §21 test 5).
+      await flagScheduleIiiReevaluationOn(client, workflowInstanceId, {
+        factKey: 'reporting_framework',
+        newValue: REPORTING_FRAMEWORK_LABEL[conclusion],
+      });
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.financial_reporting_decision',
         objectType: 'audit_framework_subassessment',

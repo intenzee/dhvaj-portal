@@ -733,7 +733,12 @@ const DOWNSTREAM: Record<TrackedFact, SubSectionKey[]> = {
   regulator: CLASSIFICATION_SECTIONS,
   listing: [SUB_SECTION_KEY.financialReporting],
   group: [SUB_SECTION_KEY.financialReporting, SUB_SECTION_KEY.consolidation],
-  financials: [SUB_SECTION_KEY.financialReporting, SUB_SECTION_KEY.caro, SUB_SECTION_KEY.icfr],
+  financials: [
+    SUB_SECTION_KEY.financialReporting,
+    SUB_SECTION_KEY.scheduleIii,
+    SUB_SECTION_KEY.caro,
+    SUB_SECTION_KEY.icfr,
+  ],
   smallCompany: [SUB_SECTION_KEY.scheduleIii, SUB_SECTION_KEY.caro, SUB_SECTION_KEY.icfr],
   period: ALL_SUB_SECTIONS,
   accounting: [],
