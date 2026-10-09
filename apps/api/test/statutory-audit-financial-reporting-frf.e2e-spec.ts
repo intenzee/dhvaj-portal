@@ -26,7 +26,10 @@ describe('Statutory Audit — 02.2 FRF workflow (spec §6–§21)', () => {
   const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
   const stamp = () => `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const post = (t: string, path: string, body: unknown) =>
-    request(app.getHttpServer()).post(path).set(bearer(t)).send(body as object);
+    request(app.getHttpServer())
+      .post(path)
+      .set(bearer(t))
+      .send(body as object);
   const findId = async (path: string): Promise<string> => {
     const res = await request(app.getHttpServer()).get(path).set(bearer(mp)).expect(200);
     return res.body.items[0].id as string;
@@ -112,7 +115,11 @@ describe('Statutory Audit — 02.2 FRF workflow (spec §6–§21)', () => {
       expect(fired?.ruleCode).toBe('FRF_INDAS_CORP_LISTED_P2');
       expect(fired?.authorityProvisionId).toBeTruthy();
       expect(fr.assessment.authorityProvisionId).toBe(fired?.authorityProvisionId);
-      expect(fr.detail?.listing).toMatchObject({ status: 'listed', smeOrItp: false, provisoApplies: false });
+      expect(fr.detail?.listing).toMatchObject({
+        status: 'listed',
+        smeOrItp: false,
+        provisoApplies: false,
+      });
       expect(fr.viewerIsPartner).toBe(true);
     });
 
@@ -190,10 +197,14 @@ describe('Statutory Audit — 02.2 FRF workflow (spec §6–§21)', () => {
       await post(mp, `${f.base}/${f.shellId}/financial-reporting/partner-approve`, {
         version: fr.assessment.version,
       }).expect(403);
-      const approved = await post(pa, `${f.base}/${f.shellId}/financial-reporting/partner-approve`, {
-        note: 'Agreed (e2e).',
-        version: fr.assessment.version,
-      }).expect(201);
+      const approved = await post(
+        pa,
+        `${f.base}/${f.shellId}/financial-reporting/partner-approve`,
+        {
+          note: 'Agreed (e2e).',
+          version: fr.assessment.version,
+        },
+      ).expect(201);
       fr = approved.body as StatutoryAuditFinancialReporting;
       expect(fr.partnerApproval?.approvedByName).toBeTruthy();
       expect(item(fr, 'partner_approval')).toBe(true);
@@ -237,7 +248,9 @@ describe('Statutory Audit — 02.2 FRF workflow (spec §6–§21)', () => {
         .get(`${f.base}/${f.shellId}/matters?section=framework`)
         .set(bearer(pa))
         .expect(200);
-      const m = (matters.body as AuditMatterRecord[]).find((x) => x.source === 'framework:02.2:information');
+      const m = (matters.body as AuditMatterRecord[]).find(
+        (x) => x.source === 'framework:02.2:information',
+      );
       expect(m?.isBlocking).toBe(true);
       expect(m?.title).toContain('Board minute');
     });

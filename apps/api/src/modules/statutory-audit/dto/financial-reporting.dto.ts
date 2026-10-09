@@ -42,18 +42,27 @@ export class SetFinancialReportingFactsDto {
   @IsBoolean()
   voluntaryIndAs?: boolean;
 
-  @ApiPropertyOptional({ description: 'A group company applies Ind AS (legacy; prefer groupAnswer).' })
+  @ApiPropertyOptional({
+    description: 'A group company applies Ind AS (legacy; prefer groupAnswer).',
+  })
   @IsOptional()
   @IsBoolean()
   groupTriggersIndAs?: boolean;
 
-  @ApiPropertyOptional({ enum: Object.values(PRIOR_FRAMEWORK), nullable: true, description: 'FRF-01' })
+  @ApiPropertyOptional({
+    enum: Object.values(PRIOR_FRAMEWORK),
+    nullable: true,
+    description: 'FRF-01',
+  })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)
   @IsIn(Object.values(PRIOR_FRAMEWORK))
   priorFramework?: PriorFramework | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'FRF-01 source (e.g. "FY 2023-24 audited FS").' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'FRF-01 source (e.g. "FY 2023-24 audited FS").',
+  })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)
   @IsString()
@@ -97,13 +106,20 @@ export class SetFinancialReportingFactsDto {
   @IsIn(ANSWERS)
   groupAnswer?: FrfAnswer | null;
 
-  @ApiPropertyOptional({ enum: ANSWERS, nullable: true, description: '§16 holding/subsidiary of a non-SMC' })
+  @ApiPropertyOptional({
+    enum: ANSWERS,
+    nullable: true,
+    description: '§16 holding/subsidiary of a non-SMC',
+  })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)
   @IsIn(ANSWERS)
   groupNonSmc?: FrfAnswer | null;
 
-  @ApiPropertyOptional({ nullable: true, description: '§16 maximum borrowings in the preceding year (₹).' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: '§16 maximum borrowings in the preceding year (₹).',
+  })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)
   @IsNumber()

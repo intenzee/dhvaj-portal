@@ -99,8 +99,7 @@ export class AuditFinancialReportingController {
   @Post(':id/statutory-audit/:workflowInstanceId/financial-reporting/decision')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
-    summary:
-      'FRF-05 — Confirm System Assessment / Override (basis required) / Information Pending',
+    summary: 'FRF-05 — Confirm System Assessment / Override (basis required) / Information Pending',
   })
   decision(
     @CurrentPrincipal() principal: Principal,

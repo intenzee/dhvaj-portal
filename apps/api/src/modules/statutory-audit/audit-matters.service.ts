@@ -16,7 +16,11 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
-import { deriveFinancialReportingMatters, deriveFrameworkMatters, type DerivedMatter } from './matters-generation';
+import {
+  deriveFinancialReportingMatters,
+  deriveFrameworkMatters,
+  type DerivedMatter,
+} from './matters-generation';
 
 /** Marker written by the generator when it auto-closes a cleared matter (§10). */
 export const AUTO_RESOLVED = 'Auto-resolved: source condition cleared.';

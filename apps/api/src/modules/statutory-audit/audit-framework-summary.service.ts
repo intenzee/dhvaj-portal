@@ -208,7 +208,9 @@ export class AuditFrameworkSummaryService {
     const byKey = new Map(rows.map((r) => [`${r.sub_section_key}|${r.area_key}`, r]));
     // 02.2 counts as decided only once COMPLETE (spec §21: conclusion, Partner
     // approval where required, SMC / first-time status, no open Framework Review).
-    const frf = byKey.get(`${SUB_SECTION_KEY.financialReporting}|${FRAMEWORK_AREA_KEY.financialReportingFramework}`);
+    const frf = byKey.get(
+      `${SUB_SECTION_KEY.financialReporting}|${FRAMEWORK_AREA_KEY.financialReportingFramework}`,
+    );
     const frfComplete =
       frf && DECIDED.has(frf.state) && frf.state !== 'approved'
         ? ((await readFinancialReportingResult(client, workflowInstanceId))?.complete ?? false)
