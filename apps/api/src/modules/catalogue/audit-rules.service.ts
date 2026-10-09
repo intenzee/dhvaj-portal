@@ -3,6 +3,9 @@ import type { PoolClient } from 'pg';
 import type {
   AuditRuleBandRecord,
   AuthorityProvisionRecord,
+  AuthorityReference,
+  AuthorityReferenceKind,
+  UpdateAuthorityProvisionInput,
   MeasurementBasis,
   ResolvedRule,
   RuleOperator,
@@ -156,10 +159,7 @@ export class AuditRulesService {
     effectiveOn: string,
   ): Promise<AuthorityProvisionRecord | null> {
     const { rows } = await client.query<AuthorityProvisionRow>(
-      `SELECT id, code, authority, title, provision_number,
-              effective_from::text, effective_to::text, source_reference,
-              superseded_by_id, methodology_version_scope,
-              created_at::text, updated_at::text
+      `SELECT ${PROVISION_COLUMNS}
          FROM hsdg.authority_provision
         WHERE code = $1
           AND effective_from <= $2::date
@@ -170,6 +170,73 @@ export class AuditRulesService {
     );
     const row = rows[0];
     return row ? mapProvision(row) : null;
+  }
+
+  /**
+   * The references a workflow context cites (spec 02.1 §3, §19), each resolved
+   * to the provision version in force on `effectiveOn` through the central
+   * reference map — UI components never name a provision themselves.
+   */
+  async resolveReferencesOn(
+    client: PoolClient,
+    contextKey: string,
+    effectiveOn: string,
+  ): Promise<AuthorityReference[]> {
+    const { rows } = await client.query<{ anchor: string; label: string; provision_code: string }>(
+      `SELECT anchor, label, provision_code
+         FROM hsdg.authority_reference_link
+        WHERE context_key = $1
+        ORDER BY sort_order, anchor`,
+      [contextKey],
+    );
+    const out: AuthorityReference[] = [];
+    for (const r of rows) {
+      out.push({
+        anchor: r.anchor,
+        label: r.label,
+        code: r.provision_code,
+        provision: await this.resolveProvisionOn(client, r.provision_code, effectiveOn),
+      });
+    }
+    return out;
+  }
+
+  /** Public wrapper: one provision by code for a date (the in-portal viewer). */
+  async resolveProvision(
+    ctx: RlsContext,
+    code: string,
+    effectiveOn: string,
+  ): Promise<AuthorityProvisionRecord | null> {
+    return this.db.withRlsContext(ctx, (client) =>
+      this.resolveProvisionOn(client, code, effectiveOn),
+    );
+  }
+
+  /**
+   * Methodology administration: maintain the viewer content (summary, source
+   * URL) of one provision row. Citation identity (code, number, dates) is never
+   * edited in place — supersession appends a row (guide §5).
+   */
+  async updateProvisionContent(
+    client: PoolClient,
+    id: string,
+    input: UpdateAuthorityProvisionInput,
+  ): Promise<AuthorityProvisionRecord | null> {
+    const { rows } = await client.query<AuthorityProvisionRow>(
+      `UPDATE hsdg.authority_provision
+          SET summary = CASE WHEN $2::boolean THEN $3 ELSE summary END,
+              source_url = CASE WHEN $4::boolean THEN $5 ELSE source_url END
+        WHERE id = $1
+        RETURNING ${PROVISION_COLUMNS}`,
+      [
+        id,
+        input.summary !== undefined,
+        input.summary?.trim() || null,
+        input.sourceUrl !== undefined,
+        input.sourceUrl?.trim() || null,
+      ],
+    );
+    return rows[0] ? mapProvision(rows[0]) : null;
   }
 
   private async loadBands(
@@ -221,9 +288,18 @@ interface AuthorityProvisionRow {
   source_reference: string | null;
   superseded_by_id: string | null;
   methodology_version_scope: string | null;
+  reference_kind: AuthorityReferenceKind;
+  summary: string | null;
+  source_url: string | null;
   created_at: string;
   updated_at: string;
 }
+
+const PROVISION_COLUMNS = `id, code, authority, title, provision_number,
+              effective_from::text, effective_to::text, source_reference,
+              superseded_by_id, methodology_version_scope,
+              reference_kind, summary, source_url,
+              created_at::text, updated_at::text`;
 
 function mapProvision(row: AuthorityProvisionRow): AuthorityProvisionRecord {
   return {
@@ -237,6 +313,9 @@ function mapProvision(row: AuthorityProvisionRow): AuthorityProvisionRecord {
     sourceReference: row.source_reference,
     supersededById: row.superseded_by_id,
     methodologyVersionScope: row.methodology_version_scope,
+    referenceKind: row.reference_kind,
+    summary: row.summary,
+    sourceUrl: row.source_url,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

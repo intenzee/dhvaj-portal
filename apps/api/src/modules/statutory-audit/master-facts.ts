@@ -43,6 +43,8 @@ export interface MasterFinancialProfile {
   source: string | null;
   verified: boolean;
   documentRef: string | null;
+  /** When the financial profile was last changed (source date of linked figures). */
+  updatedAt?: string | null;
 }
 
 export interface MasterRelationship {
@@ -60,6 +62,10 @@ export interface MasterRelationship {
    * on a main board (NSE/BSE), or its own audit file concluded Ind AS.
    */
   counterpartyIndAs: 'listed' | 'ind_as_file' | null;
+  /** The counterparty's country of incorporation (ISO code). */
+  counterpartyCountry?: string | null;
+  /** The firm has a live statutory-audit file for the counterparty for the same year. */
+  firmAuditsCounterparty?: boolean;
 }
 
 export interface EngagementMasterFacts {
@@ -95,6 +101,12 @@ export interface EngagementMasterFacts {
   listings: string[];
   /** Raw exchanges of the live listings (`nse`, `bse`, `sme`, `other`). */
   listingExchanges: string[];
+  /** The live listing lines (exchange × security type). */
+  listingLines?: Array<{ exchange: string; securityType: string; symbol: string | null }>;
+  /** A listing is in process (entity status or a listing line). */
+  listingInProcess?: boolean;
+  /** When the entity record was last changed (source date of master facts). */
+  entityUpdatedAt?: string | null;
   paidUpCapital: number | null;
   annualTurnover: number | null;
   businessDescription: string | null;
@@ -398,26 +410,31 @@ export function regulatoryProfileFacts(
   ): MasterFact => {
     const own = captured.get(param);
     if (own != null) return { label, value: inr(own), source: '02.1 (captured)' };
-    if (fromProfile != null) return { label, value: inr(fromProfile), source: cySrc! };
-    if (fromEntity != null) return { label, value: inr(fromEntity), source: E };
+    if (fromProfile != null)
+      return { label, value: inr(fromProfile), source: cySrc!, asOf: cy?.updatedAt ?? null };
+    if (fromEntity != null) return { label, value: inr(fromEntity), source: E, asOf };
     return { label, value: null, source: E };
   };
+  const asOf = f.entityUpdatedAt ?? null;
   const facts: MasterFact[] = [
-    { label: 'Entity type', value: f.entityTypeName, source: E },
+    { label: 'Entity type', value: f.entityTypeName, source: E, asOf },
     {
       label: f.corporateId?.type.toUpperCase() ?? 'CIN',
       value: f.corporateId?.number ?? null,
       source: E,
+      asOf,
     },
     {
       label: 'Listing',
       value: f.listings.join('; ') || f.listingStatus.replace(/_/g, ' '),
       source: E,
+      asOf,
     },
     {
       label: 'Group relationships',
       value: f.relationships.map(describeRelationship).join('; ') || 'None on record',
       source: E,
+      asOf,
     },
     figure('Paid-up capital', 'paid_up_capital', cy?.paidUpCapital, f.paidUpCapital),
     figure('Turnover', 'turnover', cy?.turnover ?? cy?.revenue, f.annualTurnover),
@@ -657,6 +674,7 @@ interface FinancialRow {
   source: string | null;
   verified: boolean;
   supporting_document_ref: string | null;
+  updated_at: string | null;
 }
 
 const n = (v: string | null): number | null => (v === null ? null : Number(v));
@@ -677,6 +695,7 @@ function toProfile(r: FinancialRow | undefined): MasterFinancialProfile | null {
     source: r.source,
     verified: r.verified,
     documentRef: r.supporting_document_ref,
+    updatedAt: r.updated_at,
   };
 }
 
@@ -718,8 +737,10 @@ export async function readEngagementMasterFacts(
     act_ecommerce: boolean;
     act_regulated: boolean;
     group_name: string | null;
+    entity_updated_at: string | null;
   }>(
     `SELECT e.entity_id, e.engagement_code, e.financial_year, e.period_label, e.currency,
+            en.updated_at::text AS entity_updated_at,
             e.planned_start_date::text, e.planned_end_date::text,
             e.mandate_letter_reference, e.mandate_letter_date::text,
             ep.full_name AS partner_name, em.full_name AS manager_name, o.name AS office_name,
@@ -765,15 +786,17 @@ export async function readEngagementMasterFacts(
         WHERE entity_id = $1 ORDER BY is_primary DESC, created_at`,
     [entityId],
   );
-  const listings = await client.query<{
+  const allListings = await client.query<{
     exchange: string;
     security_type: string;
     symbol: string | null;
+    status: string;
   }>(
-    `SELECT exchange, security_type, symbol FROM hsdg.entity_listings
-        WHERE entity_id = $1 AND status = 'listed' ORDER BY created_at`,
+    `SELECT exchange, security_type, symbol, status FROM hsdg.entity_listings
+        WHERE entity_id = $1 AND status IN ('listed', 'in_process') ORDER BY created_at`,
     [entityId],
   );
+  const listings = { rows: allListings.rows.filter((l) => l.status === 'listed') };
   const industry = await client.query<{ name: string }>(
     `SELECT i.name FROM hsdg.entity_business_activities a
          JOIN hsdg.industries i ON i.id = a.industry_id
@@ -809,9 +832,17 @@ export async function readEngagementMasterFacts(
     counterparty_type: string | null;
     counterparty_listed: boolean;
     counterparty_ind_as: 'listed' | 'ind_as_file' | null;
+    counterparty_country: string | null;
+    firm_audits_counterparty: boolean;
   }>(
     `SELECT r.relationship_type, r.shareholding_pct, r.from_entity_id = $1 AS outbound,
               other.legal_name AS counterparty, ot.slug AS counterparty_type,
+              other.country_of_incorporation AS counterparty_country,
+              EXISTS (SELECT 1 FROM hsdg.service_workflow_instances swi
+                        JOIN hsdg.engagements oe ON oe.id = swi.engagement_id
+                       WHERE oe.entity_id = other.id AND swi.workflow_key = 'statutory_audit'
+                         AND swi.status <> 'cancelled'
+                         AND oe.financial_year = $4) AS firm_audits_counterparty,
               EXISTS (SELECT 1 FROM hsdg.entity_listings l
                        WHERE l.entity_id = other.id AND l.status = 'listed') AS counterparty_listed,
               CASE
@@ -831,12 +862,18 @@ export async function readEngagementMasterFacts(
          LEFT JOIN hsdg.entity_types ot ON ot.id = other.entity_type_id
         WHERE $1 IN (r.from_entity_id, r.to_entity_id) AND r.status = 'active'
         ORDER BY r.created_at`,
-    [entityId, SUB_SECTION_KEY.financialReporting, FRAMEWORK_AREA_KEY.financialReportingFramework],
+    [
+      entityId,
+      SUB_SECTION_KEY.financialReporting,
+      FRAMEWORK_AREA_KEY.financialReportingFramework,
+      r.financial_year,
+    ],
   );
   const fins = await client.query<FinancialRow>(
     `SELECT DISTINCT ON (financial_year) financial_year, revenue, turnover, other_income,
               profit_before_tax, net_profit, net_worth, paid_up_capital, total_assets,
-              total_borrowings, source, verified, supporting_document_ref
+              total_borrowings, source, verified, supporting_document_ref,
+              updated_at::text AS updated_at
          FROM hsdg.entity_financial_profiles
         WHERE entity_id = $1 AND financial_year = ANY($2::text[])
         ORDER BY financial_year, is_current DESC, created_at DESC`,
@@ -880,6 +917,14 @@ export async function readEngagementMasterFacts(
     listings: listings.rows.map((l) =>
       [l.exchange.toUpperCase(), l.security_type, l.symbol].filter(Boolean).join(' · '),
     ),
+    listingLines: listings.rows.map((l) => ({
+      exchange: l.exchange,
+      securityType: l.security_type,
+      symbol: l.symbol,
+    })),
+    listingInProcess:
+      r.listing_status === 'in_process' || allListings.rows.some((l) => l.status === 'in_process'),
+    entityUpdatedAt: r.entity_updated_at,
     paidUpCapital: n(r.paid_up_capital),
     annualTurnover: n(r.annual_turnover),
     businessDescription: r.business_description,
@@ -908,6 +953,8 @@ export async function readEngagementMasterFacts(
       counterpartyTypeSlug: x.counterparty_type,
       counterpartyListed: x.counterparty_listed,
       counterpartyIndAs: x.counterparty_ind_as,
+      counterpartyCountry: x.counterparty_country,
+      firmAuditsCounterparty: x.firm_audits_counterparty,
     })),
     cyFinancials: toProfile(fins.rows.find((x) => x.financial_year === r.financial_year)),
     pyFinancials: pyFy ? toProfile(fins.rows.find((x) => x.financial_year === pyFy)) : null,

@@ -149,6 +149,8 @@ export interface MasterFact {
   source: string;
   /** Present when the fact lives on the client master — the form to add or correct it. */
   fix?: MasterFactFix;
+  /** When the source record was last changed (system-derived values keep their source date). */
+  asOf?: string | null;
 }
 
 /** One phase of a live audit-file shell. */

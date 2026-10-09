@@ -13,6 +13,7 @@ import { AuditAcceptanceSignoffService } from './audit-acceptance-signoff.servic
 import { AuditAcceptanceSignoffController } from './audit-acceptance-signoff.controller';
 import { AuditProfileService } from './audit-profile.service';
 import { AuditProfileController } from './audit-profile.controller';
+import { AuthorityProvisionsController } from './authority-provisions.controller';
 import { AuditFinancialReportingService } from './audit-financial-reporting.service';
 import { AuditFinancialReportingController } from './audit-financial-reporting.controller';
 import { AuditScheduleIiiService } from './audit-schedule-iii.service';
@@ -87,6 +88,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditAcceptanceFilesController,
     AuditAcceptanceSignoffController,
     AuditProfileController,
+    AuthorityProvisionsController,
     AuditFinancialReportingController,
     AuditScheduleIiiController,
     AuditCaroController,

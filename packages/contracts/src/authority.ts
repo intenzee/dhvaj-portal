@@ -44,6 +44,50 @@ export interface AuthorityProvisionRecord {
   supersededById: string | null;
   /** Optional methodology-bundle scope (e.g. 'v2026.1'). */
   methodologyVersionScope: string | null;
+  /** Which `View …` action opens it: provision (Act/Rules), standard (SA) or guidance. */
+  referenceKind: AuthorityReferenceKind;
+  /** Plain-language summary shown in the in-portal viewer. */
+  summary: string | null;
+  /** The authoritative source (MCA / ICAI), opened from the viewer — never from a component. */
+  sourceUrl: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** The `View Provision / View Standard / View Guidance` family (spec 02.1 §3). */
+export const AUTHORITY_REFERENCE_KIND = {
+  provision: 'provision',
+  standard: 'standard',
+  guidance: 'guidance',
+} as const;
+export type AuthorityReferenceKind =
+  (typeof AUTHORITY_REFERENCE_KIND)[keyof typeof AUTHORITY_REFERENCE_KIND];
+export const AUTHORITY_REFERENCE_KINDS: AuthorityReferenceKind[] =
+  Object.values(AUTHORITY_REFERENCE_KIND);
+
+export const AUTHORITY_REFERENCE_ACTION: Record<AuthorityReferenceKind, string> = {
+  provision: 'View Provision',
+  standard: 'View Standard',
+  guidance: 'View Guidance',
+};
+
+/**
+ * One field → provision citation, resolved for an engagement period through the
+ * central reference map (`authority_reference_link`). `provision` is null when
+ * the library holds no version in force for the period — the UI says so rather
+ * than guessing a link.
+ */
+export interface AuthorityReference {
+  /** The workflow field the reference belongs to, e.g. `small_company`. */
+  anchor: string;
+  /** Portal label, e.g. 'View Section 2(85) - Small Company'. */
+  label: string;
+  code: string;
+  provision: AuthorityProvisionRecord | null;
+}
+
+/** Methodology administration: maintain a provision's viewer content. */
+export interface UpdateAuthorityProvisionInput {
+  summary?: string | null;
+  sourceUrl?: string | null;
 }

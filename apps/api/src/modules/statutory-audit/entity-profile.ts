@@ -3,7 +3,6 @@ import {
   FRAMEWORK_AREA_KEY,
   RULE_CRITERION,
   SA_TRIGGER_CODE,
-  SERVICE_ORGANISATION_ENVIRONMENTS,
   SMALL_COMPANY_OUTCOME,
   SPECIAL_ENTITY_TYPE,
   formatInrCrore,
@@ -12,9 +11,11 @@ import {
   type ResolvedRule,
   type RuleResolver,
   type SaTrigger,
+  type ServiceOrgAnswer,
   type SmallCompanyAssessment,
   type SpecialEntityType,
 } from '@hsdg/contracts';
+import { usesServiceOrganisation } from './entity-profile-workspace';
 
 /**
  * 02.1 Entity & Regulatory Profile — pure engine (Implementation Guide §9.1, §7).
@@ -146,6 +147,8 @@ export function assessSmallCompany(
 export interface SaTriggerFacts {
   initialAudit: boolean;
   accountingEnvironment: AccountingEnvironment | null;
+  /** ERP-AE-03: an external service organisation is used for financial reporting. */
+  serviceOrg?: ServiceOrgAnswer | null;
   jointAudit: boolean;
 }
 
@@ -154,9 +157,7 @@ export interface SaTriggerFacts {
  * (guide §9.1). Deterministic from the captured facts.
  */
 export function deriveSaTriggers(f: SaTriggerFacts): SaTrigger[] {
-  const usesServiceOrg =
-    f.accountingEnvironment != null &&
-    SERVICE_ORGANISATION_ENVIRONMENTS.includes(f.accountingEnvironment);
+  const usesServiceOrg = usesServiceOrganisation(f.serviceOrg ?? null, f.accountingEnvironment);
   return [
     {
       code: SA_TRIGGER_CODE.sa510,
@@ -169,10 +170,12 @@ export function deriveSaTriggers(f: SaTriggerFacts): SaTrigger[] {
       code: SA_TRIGGER_CODE.sa402,
       triggered: usesServiceOrg,
       basis: usesServiceOrg
-        ? `Accounting is ${f.accountingEnvironment === ACCOUNTING_ENVIRONMENT.hybrid ? 'partly' : ''} handled by a service organisation — SA 402 applies.`.replace(
-            '  ',
-            ' ',
-          )
+        ? f.serviceOrg === 'yes'
+          ? 'An external service organisation is used for processes relevant to financial reporting — SA 402 applies.'
+          : `Accounting is ${f.accountingEnvironment === ACCOUNTING_ENVIRONMENT.hybrid ? 'partly' : ''} handled by a service organisation — SA 402 applies.`.replace(
+              '  ',
+              ' ',
+            )
         : 'Accounting is maintained in-house — SA 402 (service organisation) not triggered.',
     },
     {

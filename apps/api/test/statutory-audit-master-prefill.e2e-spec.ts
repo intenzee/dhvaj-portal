@@ -290,7 +290,8 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     ).toMatch(/NBFC \(Industry: NBFC\)/);
 
     // The team narrows the list; a refill adds back only what the master shows,
-    // and a cleared list is never refilled automatically.
+    // and a cleared list is never refilled automatically. Section 8 / Government
+    // are master-owned (system value + confirm): they stay until the master changes.
     await post(pa, `${base}/${shellId}/profile`, {
       specialEntityTypes: [],
       version: profile.body[0].version,
@@ -299,9 +300,9 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
       .get(`${base}/profile`)
       .set(bearer(pa))
       .expect(200);
-    expect(reopened.body[0].specialEntityTypes).toEqual([]);
+    expect(reopened.body[0].specialEntityTypes).toEqual(['section_8']);
     const refill = await post(pa, `${base}/${shellId}/profile/fill-from-master`, {}).expect(201);
-    expect([...refill.body.filled].sort()).toEqual(['NBFC', 'Section 8 company']);
+    expect([...refill.body.filled].sort()).toEqual(['NBFC']);
 
     const res = await post(pb, `${base}/${shellId}/profile/fill-from-master`, {});
     expect([403, 404]).toContain(res.status);
