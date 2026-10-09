@@ -206,7 +206,9 @@ export function ScheduleIiiWorkspace({
                   : 'Not concluded'}
             </span>
           </span>
-          {a.needsReevaluation && <Badge tone="warn">A source fact changed — re-evaluate</Badge>}
+          {a.needsReevaluation && (
+            <Badge tone="warn">Needs re-evaluation — a source fact changed</Badge>
+          )}
           {d?.blockingReview && <Badge tone="danger">Blocking presentation matter</Badge>}
           {!sch.upstreamReady && <Badge tone="neutral">Provisional — 02.1 / 02.2 open</Badge>}
         </div>
@@ -760,15 +762,29 @@ function SpecialisedCapture({
 }): JSX.Element {
   const sp = sch.detail!.specialised!;
   const c = sch.capturedFacts ?? {};
+  // The library rule suggests the format; the team confirms or corrects it.
+  const rule = sp.matchedRules[0];
+  const [answer, setAnswer] = useState<SchAnswer | ''>(c.specialisedAnswer ?? sp.answer ?? '');
   const [form, setForm] = useState({
-    governingAuthority: c.governingAuthority ?? sp.governingAuthority ?? '',
-    frameworkName: c.frameworkName ?? sp.frameworkName ?? '',
-    specialisedEffect: (c.specialisedEffect ?? sp.effect ?? '') as SpecialisedEffect | '',
+    governingAuthority:
+      c.governingAuthority ?? sp.governingAuthority ?? rule?.governingAuthority ?? '',
+    frameworkName: c.frameworkName ?? sp.frameworkName ?? rule?.frameworkName ?? '',
+    specialisedEffect: (c.specialisedEffect ?? sp.effect ?? rule?.effect ?? '') as
+      SpecialisedEffect | '',
     specialisedVersion: c.specialisedVersion ?? sp.effectiveVersion ?? '',
     specialisedReference: c.specialisedReference ?? sp.reference ?? '',
   });
-  const answer = c.specialisedAnswer ?? sp.answer;
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const isYes = answer === 'yes';
+  // An answer other than the system suggestion needs the authoritative reference.
+  const differs = answer !== '' && answer !== sp.systemSuggested;
+  const needsForm = isYes || differs;
+  const complete =
+    !!form.specialisedReference.trim() &&
+    (!isYes ||
+      (!!form.governingAuthority.trim() &&
+        !!form.frameworkName.trim() &&
+        !!form.specialisedEffect));
   return (
     <div className="space-y-3">
       {sp.matchedRules.length > 0 && (
@@ -791,11 +807,14 @@ function SpecialisedCapture({
         hint={`System suggests: ${SCH_ANSWER_LABEL[sp.systemSuggested]}`}
       >
         <Select
-          value={answer ?? ''}
+          value={answer}
           disabled={disabled}
-          onChange={(e) =>
-            onSave({ specialisedAnswer: (e.target.value || null) as SchAnswer | null })
-          }
+          onChange={(e) => {
+            const v = e.target.value as SchAnswer | '';
+            setAnswer(v);
+            // Agreeing with a No / further-assessment suggestion saves straight away.
+            if (v === sp.systemSuggested && v !== 'yes') onSave({ specialisedAnswer: v });
+          }}
         >
           <option value="">Select…</option>
           {SCH_ANSWERS.map((o) => (
@@ -805,77 +824,82 @@ function SpecialisedCapture({
           ))}
         </Select>
       </Field>
-      {answer === 'yes' && (
+      {needsForm && (
         <div className="space-y-2 rounded-md border border-line p-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Governing authority" required>
-              <Input
-                value={form.governingAuthority}
-                disabled={disabled}
-                onChange={(e) => set('governingAuthority')(e.target.value)}
-              />
-            </Field>
-            <Field label="Framework name" required>
-              <Input
-                value={form.frameworkName}
-                disabled={disabled}
-                onChange={(e) => set('frameworkName')(e.target.value)}
-              />
-            </Field>
-            <Field label="Effect on Schedule III" required>
-              <Select
-                value={form.specialisedEffect}
-                disabled={disabled}
-                onChange={(e) => set('specialisedEffect')(e.target.value)}
-              >
-                <option value="">Select…</option>
-                {SPECIALISED_EFFECTS.map((o) => (
-                  <option key={o} value={o}>
-                    {SPECIALISED_EFFECT_LABEL[o]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Effective version">
-              <Input
-                value={form.specialisedVersion}
-                disabled={disabled}
-                onChange={(e) => set('specialisedVersion')(e.target.value)}
-              />
-            </Field>
-          </div>
-          <Field label="Authoritative reference" required>
+          {isYes && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Governing authority" required>
+                <Input
+                  value={form.governingAuthority}
+                  disabled={disabled}
+                  onChange={(e) => set('governingAuthority')(e.target.value)}
+                />
+              </Field>
+              <Field label="Framework name" required>
+                <Input
+                  value={form.frameworkName}
+                  disabled={disabled}
+                  onChange={(e) => set('frameworkName')(e.target.value)}
+                />
+              </Field>
+              <Field label="Effect on Schedule III" required>
+                <Select
+                  value={form.specialisedEffect}
+                  disabled={disabled}
+                  onChange={(e) => set('specialisedEffect')(e.target.value)}
+                >
+                  <option value="">Select…</option>
+                  {SPECIALISED_EFFECTS.map((o) => (
+                    <option key={o} value={o}>
+                      {SPECIALISED_EFFECT_LABEL[o]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Effective version">
+                <Input
+                  value={form.specialisedVersion}
+                  disabled={disabled}
+                  onChange={(e) => set('specialisedVersion')(e.target.value)}
+                />
+              </Field>
+            </div>
+          )}
+          <Field
+            label="Authoritative reference"
+            required
+            hint={differs ? 'Required — the answer differs from the system suggestion.' : undefined}
+          >
             <Input
               value={form.specialisedReference}
               disabled={disabled}
               onChange={(e) => set('specialisedReference')(e.target.value)}
             />
           </Field>
-          {form.specialisedEffect === 'replaces' && (
+          {isYes && form.specialisedEffect === 'replaces' && (
             <p className="text-xs text-warning-700">
               A format that replaces Schedule III needs Engagement Partner approval at SCH-06.
             </p>
           )}
           <Button
             size="sm"
-            disabled={
-              disabled ||
-              !form.governingAuthority.trim() ||
-              !form.frameworkName.trim() ||
-              !form.specialisedEffect ||
-              !form.specialisedReference.trim()
-            }
+            disabled={disabled || !complete}
             onClick={() =>
               onSave({
-                governingAuthority: form.governingAuthority.trim(),
-                frameworkName: form.frameworkName.trim(),
-                specialisedEffect: form.specialisedEffect as SpecialisedEffect,
-                specialisedVersion: form.specialisedVersion.trim() || null,
+                specialisedAnswer: answer as SchAnswer,
                 specialisedReference: form.specialisedReference.trim(),
+                ...(isYes
+                  ? {
+                      governingAuthority: form.governingAuthority.trim(),
+                      frameworkName: form.frameworkName.trim(),
+                      specialisedEffect: form.specialisedEffect as SpecialisedEffect,
+                      specialisedVersion: form.specialisedVersion.trim() || null,
+                    }
+                  : {}),
               })
             }
           >
-            Save specialised format
+            Save SCH-02
           </Button>
         </div>
       )}

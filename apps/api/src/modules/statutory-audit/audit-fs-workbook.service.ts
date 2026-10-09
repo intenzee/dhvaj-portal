@@ -54,6 +54,7 @@ const OUTCOME_DIVISION: Record<string, 'I' | 'II' | 'III'> = {
 interface Basis {
   subId: string;
   conclusion: string | null;
+  needsReevaluation: boolean;
   frameworkVersion: ScheduleIiiFrameworkVersion | null;
   reportingConcluded: boolean;
   financialYear: string | null;
@@ -314,6 +315,11 @@ export class AuditFsWorkbookService {
         'Conclude 02.3 (SCH-06) first — the workbook follows the established presentation framework.',
       );
     }
+    if (basis.needsReevaluation) {
+      return blocked(
+        'A source fact changed after 02.3 was concluded — re-evaluate and record the conclusion again first.',
+      );
+    }
     const fv = basis.frameworkVersion;
     if (!fv || !fv.templateKey) {
       return blocked(
@@ -371,11 +377,12 @@ export class AuditFsWorkbookService {
     const { rows } = await client.query<{
       id: string;
       conclusion: string | null;
+      needs_reevaluation: boolean;
       system_detail: ScheduleIiiDetail | null;
       reporting_conclusion: string | null;
       financial_year: string | null;
     }>(
-      `SELECT s.id, s.conclusion, s.system_detail,
+      `SELECT s.id, s.conclusion, s.needs_reevaluation, s.system_detail,
               (SELECT f.conclusion FROM hsdg.audit_framework_subassessment f
                 WHERE f.workflow_instance_id = s.workflow_instance_id
                   AND f.sub_section_key = $4 AND f.area_key = $5) AS reporting_conclusion,
@@ -399,6 +406,7 @@ export class AuditFsWorkbookService {
     return {
       subId: r.id,
       conclusion: r.conclusion,
+      needsReevaluation: r.needs_reevaluation,
       frameworkVersion: r.system_detail?.frameworkVersion ?? null,
       reportingConcluded: r.reporting_conclusion !== null,
       financialYear: fy,

@@ -361,6 +361,21 @@ describe('Statutory Audit — 02.3 references, FS workbook, memo, evidence (e2e)
       templateVersionNo: 1,
     });
 
+    // A source fact changed after the conclusion: re-evaluate before creating.
+    const flag = (on: boolean) =>
+      su((c) =>
+        c.query(
+          `UPDATE hsdg.audit_framework_subassessment SET needs_reevaluation = $2 WHERE id = $1`,
+          [schSubId, on],
+        ),
+      );
+    await flag(true);
+    view = (await request(http).get(workbookUrl()).set(bearer(pa)).expect(200)).body;
+    expect(view.available).toBe(false);
+    expect(view.reason).toMatch(/re-evaluate/);
+    await request(http).post(workbookUrl()).set(bearer(pa)).send({}).expect(400);
+    await flag(false);
+
     // Only a lead creates it.
     await request(http).post(workbookUrl()).set(bearer(pb)).send({}).expect(404);
     const created = (await request(http).post(workbookUrl()).set(bearer(pa)).send({}).expect(201))

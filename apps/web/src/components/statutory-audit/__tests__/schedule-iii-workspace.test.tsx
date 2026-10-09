@@ -428,28 +428,34 @@ describe('02.3 Schedule III workspace', () => {
       screen.getByText(/Third Schedule to the Banking Regulation Act, 1949 — RBI/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Unresolved — this blocks 02.3 completion/)).toBeInTheDocument();
-    const save = screen.getByRole('button', { name: 'Save specialised format' });
-    expect(save).toBeDisabled();
-    await userEvent.type(screen.getByLabelText(/Governing authority/), 'RBI');
-    await userEvent.type(screen.getByLabelText(/Framework name/), 'Banking Regulation Act forms');
-    await userEvent.selectOptions(screen.getByLabelText(/Effect on Schedule III/), 'replaces');
-    await userEvent.type(screen.getByLabelText(/Authoritative reference/), 's.29 BR Act');
+    // The library rule pre-fills the format; the reference is the team's.
+    expect(screen.getByLabelText(/Governing authority/)).toHaveValue('RBI');
+    expect(screen.getByLabelText(/Effect on Schedule III/)).toHaveValue('replaces');
     expect(screen.getByText(/needs Engagement Partner approval at SCH-06/)).toBeInTheDocument();
+    const save = screen.getByRole('button', { name: 'Save SCH-02' });
+    expect(save).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(/Authoritative reference/), 's.29 BR Act');
     await userEvent.click(save);
     expect(apiFetch).toHaveBeenCalledWith(
       '/engagements/e1/statutory-audit/wf1/schedule-iii/facts',
       {
         method: 'POST',
         body: {
+          specialisedAnswer: 'yes',
+          specialisedReference: 's.29 BR Act',
           governingAuthority: 'RBI',
-          frameworkName: 'Banking Regulation Act forms',
+          frameworkName: 'Third Schedule to the Banking Regulation Act, 1949',
           specialisedEffect: 'replaces',
           specialisedVersion: null,
-          specialisedReference: 's.29 BR Act',
           version: 4,
         },
       },
     );
+    // Answering against the suggestion needs the reference before it saves.
+    apiFetch.mockClear();
+    await userEvent.selectOptions(screen.getByLabelText(/SCH-02 Does another statute/), 'no');
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(screen.getByText(/Required — the answer differs/)).toBeInTheDocument();
     // The question's own evidence (sch_02).
     await expand(/SCH-02 evidence/);
     expect(screen.getByText('evidence:sch_02')).toBeInTheDocument();
