@@ -21,6 +21,8 @@ export const DOCUMENT_TEMPLATE_KEY = {
   financialReportingFrameworkMemo: 'financial_reporting_framework_memo',
   /** 02.3 §17 — complex or overridden presentation-framework cases. */
   scheduleIiiPresentationMemo: 'schedule_iii_presentation_memo',
+  /** 02.4 §16 — complex, overridden or consulted CARO applicability. */
+  caroApplicabilityMemo: 'caro_applicability_memo',
   /**
    * 02.3 §16 — the Financial Statements Workbook (Excel), one key per Schedule
    * III framework; each framework version names its key (`templateKey`).
@@ -39,7 +41,7 @@ export interface DocumentTemplateDefinition {
   /** File name of a created document; `{client}` is replaced with the client's name. */
   filenamePattern: string;
   /** The audit-file section that creates it (Section 01 lists only its own). */
-  section: '01' | '02.2' | '02.3';
+  section: '01' | '02.2' | '02.3' | '02.4';
   /** The file the firm uploads: a Word document (merged) or an Excel workbook. */
   format: TemplateFormat;
 }
@@ -93,6 +95,13 @@ export const DOCUMENT_TEMPLATE_DEFINITIONS: readonly DocumentTemplateDefinition[
     title: 'Schedule III Presentation Framework Technical Memo',
     filenamePattern: 'Schedule III Presentation Framework Memo - {client}.docx',
     section: '02.3',
+    format: 'docx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.caroApplicabilityMemo,
+    title: 'CARO 2020 Applicability Memo',
+    filenamePattern: 'CARO 2020 Applicability Memo - {client}.docx',
+    section: '02.4',
     format: 'docx',
   },
   {
@@ -300,6 +309,27 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'sch.pendingReason', label: 'Schedule III information pending', source: '02.3 SCH-06' },
   { key: 'sch.decidedBy', label: 'Schedule III concluded by', source: '02.3 SCH-06' },
   { key: 'sch.decidedAt', label: 'Schedule III concluded on', source: '02.3 SCH-06' },
+  { key: 'caro.applicability', label: 'CARO applicability', source: '02.4 conclusion' },
+  { key: 'caro.systemConclusion', label: 'CARO system conclusion', source: '02.4 system' },
+  { key: 'caro.systemBasis', label: 'CARO system basis', source: '02.4 system' },
+  { key: 'caro.exemptionBasis', label: 'CARO exemption basis', source: '02.4 exemption tests' },
+  { key: 'caro.orderVersion', label: 'CARO Order version', source: '02.4 clause library' },
+  { key: 'caro.standaloneScope', label: 'CARO standalone scope', source: '02.4 work programme' },
+  {
+    key: 'caro.consolidatedScope',
+    label: 'CARO consolidated scope (3(xxi))',
+    source: '02.4 work programme',
+  },
+  { key: 'caro.clauseProgress', label: 'CARO clause progress', source: '02.4 work programme' },
+  { key: 'caro.reportableClauses', label: 'CARO reportable clauses', source: '02.4 clause work' },
+  { key: 'caro.professionalConclusion', label: 'CARO conclusion', source: '02.4 CARO-06' },
+  { key: 'caro.overridden', label: 'CARO overridden (Yes / No)', source: '02.4 CARO-06' },
+  { key: 'caro.overrideReason', label: 'CARO override reason', source: '02.4 CARO-06' },
+  { key: 'caro.technicalBasis', label: 'CARO technical basis', source: '02.4 CARO-06' },
+  { key: 'caro.partnerApproval', label: 'CARO partner approval', source: '02.4 CARO-06' },
+  { key: 'caro.pendingReason', label: 'CARO information pending', source: '02.4 CARO-06' },
+  { key: 'caro.decidedBy', label: 'CARO concluded by', source: '02.4 CARO-06' },
+  { key: 'caro.decidedAt', label: 'CARO concluded on', source: '02.4 CARO-06' },
   { key: 'today', label: "Today's date", source: 'System' },
 ] as const;
 

@@ -1,3 +1,4 @@
+import type { PlannedClauseProcedure } from './caro-programme';
 import type {
   AreaRiskLevel,
   AssertionId,
@@ -23,6 +24,8 @@ import type {
  */
 
 export const OVERALL_WORK_AREA_KEY = 'overall_responses';
+/** The framework workstream the 02.4 CARO clause procedures live in. */
+export const CARO_WORK_AREA_KEY = 'caro';
 
 export interface FsAreaInput {
   id: string;
@@ -439,24 +442,8 @@ const FS_TEMPLATES: Array<{ match: RegExp; items: Template[] }> = [
 
 /** The standard programme for each framework workstream (§20). */
 const WORKSTREAM_TEMPLATES: Record<string, Template[]> = {
-  caro: [
-    {
-      key: 'clauses',
-      title: 'CARO 2020 clause-by-clause working',
-      objective:
-        'Work through each applicable CARO 2020 clause (3(i)–3(xxi)), record the facts and conclude on the reporting for each.',
-      evidence: 'Clause-wise working paper with source documents for each clause.',
-      assertions: [],
-    },
-    {
-      key: 'statutory_dues',
-      title: 'Statutory dues and defaults (CARO 3(vii), 3(ix))',
-      objective:
-        'Test regularity of statutory dues and identify disputed dues and any defaults in repayment of borrowings.',
-      evidence: 'Challans; dues ledgers; lender statements; dispute list.',
-      assertions: ['completeness'],
-    },
-  ],
+  // CARO has no standard programme here: the 02.4 clause programme supplies one
+  // procedure per clause (spec §18) through `caroClauses`.
   ifc: [
     {
       key: 'walkthroughs',
@@ -598,6 +585,11 @@ export function suggestProcedures(input: {
    * activated (02.2 §19) — the AS review marks these items. Empty otherwise.
    */
   smcRelaxations?: readonly SmcRelaxation[];
+  /**
+   * The 02.4 CARO clause programme (spec §18): one procedure per live clause
+   * item in the CARO work area, replacing a generic CARO programme.
+   */
+  caroClauses?: readonly PlannedClauseProcedure[];
 }): SuggestedProcedure[] {
   const out: SuggestedProcedure[] = [];
   const has = (k: string) => input.areaKeys.has(k);
@@ -687,6 +679,20 @@ export function suggestProcedures(input: {
         assertions: t.assertions,
         riskId: null,
         expectedEvidence: t.evidence,
+      });
+    }
+  }
+  if (has(CARO_WORK_AREA_KEY)) {
+    for (const c of input.caroClauses ?? []) {
+      out.push({
+        sourceKey: c.sourceKey,
+        sourceNote: c.sourceNote,
+        workAreaKey: CARO_WORK_AREA_KEY,
+        title: c.title,
+        objective: c.objective,
+        assertions: [],
+        riskId: null,
+        expectedEvidence: c.expectedEvidence,
       });
     }
   }

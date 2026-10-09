@@ -26,6 +26,8 @@ import { AuditFsWorkbookService } from './audit-fs-workbook.service';
 import { AuditScheduleIiiController } from './audit-schedule-iii.controller';
 import { AuditCaroService } from './audit-caro.service';
 import { AuditCaroController } from './audit-caro.controller';
+import { AuditCaroProgrammeService } from './audit-caro-programme.service';
+import { AuditCaroProgrammeController } from './audit-caro-programme.controller';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditIcfrController } from './audit-icfr.controller';
 import { AuditConsolidationService } from './audit-consolidation.service';
@@ -101,6 +103,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditScheduleIiiController,
     AuditFsWorkbookController,
     AuditCaroController,
+    AuditCaroProgrammeController,
     AuditIcfrController,
     AuditConsolidationController,
     AuditOtherReportingController,
@@ -140,6 +143,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditScheduleIiiService,
     AuditFsWorkbookService,
     AuditCaroService,
+    AuditCaroProgrammeService,
     AuditIcfrService,
     AuditConsolidationService,
     AuditOtherReportingService,
@@ -170,6 +174,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditFinancialReportingService,
     AuditScheduleIiiService,
     AuditCaroService,
+    AuditCaroProgrammeService,
     AuditIcfrService,
     AuditConsolidationService,
     AuditOtherReportingService,

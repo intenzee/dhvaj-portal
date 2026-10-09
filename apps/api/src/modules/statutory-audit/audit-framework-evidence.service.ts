@@ -45,6 +45,7 @@ import { readFinancialReportingMemoFacts } from './financial-reporting-result';
 import { frameworkMemoMergeValues } from './framework-memo-values';
 import { isEngagementLead } from './master-facts';
 import { readScheduleIiiMemoInput, scheduleIiiMergeValues } from './schedule-iii-memo-values';
+import { caroMergeValues, readCaroMemoInput } from './caro-memo-values';
 
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -83,6 +84,14 @@ const MEMOS: Partial<Record<SubSectionKey, MemoSpec>> = {
     notOpen: 'Open 02.3 Schedule III & Presentation before creating its memo.',
     values: async (client, wf) =>
       scheduleIiiMergeValues(await readScheduleIiiMemoInput(client, wf)),
+  },
+  [SUB_SECTION_KEY.caro]: {
+    subSectionKey: SUB_SECTION_KEY.caro,
+    templateKey: DOCUMENT_TEMPLATE_KEY.caroApplicabilityMemo,
+    areaKey: FRAMEWORK_AREA_KEY.caro,
+    noTemplate: noTemplate('CARO 2020 Applicability'),
+    notOpen: 'Open 02.4 CARO 2020 Applicability before creating its memo.',
+    values: async (client, wf) => caroMergeValues(await readCaroMemoInput(client, wf)),
   },
 };
 

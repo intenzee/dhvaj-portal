@@ -49,6 +49,10 @@ const MEMO: Record<string, { path: string; title: string }> = {
     path: 'schedule-iii/memo',
     title: 'Schedule III Presentation Framework technical memo',
   },
+  '02.4': {
+    path: 'caro/memo',
+    title: 'CARO 2020 Applicability Memo',
+  },
 };
 export function FrameworkEvidence({
   engagementId,

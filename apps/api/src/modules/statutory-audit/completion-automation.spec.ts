@@ -81,6 +81,24 @@ describe('completion automation', () => {
     for (const p of plan.values()) expect(p.evidence.suggestedState).not.toBe('complete');
   });
 
+  it('the CARO item waits for every 02.4 clause conclusion (draft annexure)', () => {
+    const done = proc({ ref: 'P-02', workAreaKey: 'caro', state: 'complete' });
+    const partial = planCompletionItems(
+      facts({ procedures: [done], caroClauses: { total: 21, approved: 20, reportable: 1 } }),
+    ).get('caro')!;
+    expect(partial.evidence.ready).toBe(false);
+    expect(partial.evidence.facts.at(-1)).toBe(
+      '02.4 clause programme: 20 of 21 clause conclusion(s) approved, 1 reportable — draft CARO annexure in progress.',
+    );
+    const full = planCompletionItems(
+      facts({ procedures: [done], caroClauses: { total: 21, approved: 21, reportable: 0 } }),
+    ).get('caro')!;
+    expect(full.evidence.ready).toBe(true);
+    expect(full.draftNote).toMatch(
+      /Draft CARO annexure from 21 approved clause conclusion\(s\)\.$/,
+    );
+  });
+
   it('summarises exceptions for the misstatements item', () => {
     const plan = planCompletionItems(
       facts({

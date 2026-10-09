@@ -124,4 +124,22 @@ export class AuditFrameworkEvidenceController {
   ): Promise<FrameworkMemoCreated> {
     return this.evidence.createMemo(principal, id, wf, dto, SUB_SECTION_KEY.scheduleIii);
   }
+
+  @Post('caro/memo')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Create the CARO 2020 Applicability Memo (02.4 §16)',
+    description:
+      'Merges the 02.4 assessment and clause programme into the approved Word template, ' +
+      'stores it in the engagement workspace and links it to 02.4; returns the Microsoft 365 ' +
+      'link when on.',
+  })
+  createCaroMemo(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wf: string,
+    @Body() dto: CreateFrameworkMemoDto,
+  ): Promise<FrameworkMemoCreated> {
+    return this.evidence.createMemo(principal, id, wf, dto, SUB_SECTION_KEY.caro);
+  }
 }
