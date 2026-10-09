@@ -223,7 +223,7 @@ export class AuditScheduleIiiService {
     return this.db.withRlsContext(ctx, async (client) => {
       const row = await this.loadRow(client, engagementId, workflowInstanceId);
       this.assertNotApproved(row);
-      if (!SCHEDULE_III_CONCLUSIONS.includes(input.conclusion)) {
+      if (!input.conclusion || !SCHEDULE_III_CONCLUSIONS.includes(input.conclusion)) {
         throw new BadRequestException('Not a valid Schedule III conclusion.');
       }
 

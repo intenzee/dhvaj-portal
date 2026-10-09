@@ -34,6 +34,10 @@ export const FRAMEWORK_FILE_KIND_LABEL: Record<FrameworkFileKind, string> = {
 export const FRAMEWORK_EVIDENCE_QUESTION = {
   frf02: 'frf_02',
   frf03: 'frf_03',
+  /** 02.3 SCH-02 — the governing statute / regulator's format reference. */
+  sch02: 'sch_02',
+  /** 02.3 SCH-04 — the linked prior-year financial statements. */
+  sch04: 'sch_04',
 } as const;
 export type FrameworkEvidenceQuestion =
   (typeof FRAMEWORK_EVIDENCE_QUESTION)[keyof typeof FRAMEWORK_EVIDENCE_QUESTION];
@@ -43,6 +47,8 @@ export const FRAMEWORK_EVIDENCE_QUESTIONS: FrameworkEvidenceQuestion[] = Object.
 export const FRAMEWORK_EVIDENCE_QUESTION_LABEL: Record<FrameworkEvidenceQuestion, string> = {
   frf_02: 'FRF-02',
   frf_03: 'FRF-03',
+  sch_02: 'SCH-02',
+  sch_04: 'SCH-04',
 };
 
 /** One file linked to a Section 02 sub-assessment. */
