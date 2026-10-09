@@ -48,6 +48,10 @@ export const MEASUREMENT_BASIS = {
   caroBasis: 'caro_measurement_basis',
   /** A relationship status over the relevant period (e.g. CARO public-group test). */
   relevantPeriod: 'relevant_period',
+  /** Per the latest audited financial statements (e.g. the ICFR turnover test). */
+  latestAuditedFs: 'latest_audited_fs',
+  /** An entity-status / eligibility route (e.g. the ICFR OPC / small-company routes). */
+  entityStatus: 'entity_status',
 } as const;
 export type MeasurementBasis = (typeof MEASUREMENT_BASIS)[keyof typeof MEASUREMENT_BASIS];
 export const MEASUREMENT_BASES: MeasurementBasis[] = Object.values(MEASUREMENT_BASIS);
@@ -82,6 +86,14 @@ export const RULE_CRITERION = {
   cgForwardDays: 'cg_forward_days',
   /** Books/audit-trail preservation period in years (Sec 128(5)). */
   retentionYears: 'retention_years',
+  /** ICFR exemption route open to a One Person Company (1 = route available). */
+  opcRoute: 'opc_route',
+  /** ICFR exemption route open to an approved small company (1 = route available). */
+  smallCompanyRoute: 'small_company_route',
+  /** §92 / §137 filing-default eligibility condition (defaults allowed; 0 = none). */
+  filingCondition: 'filing_condition',
+  /** How the ICFR monetary conditions combine (condition.join = 'and' | 'or'). */
+  monetaryJoin: 'monetary_join',
 } as const;
 export type RuleCriterion = (typeof RULE_CRITERION)[keyof typeof RULE_CRITERION];
 export const RULE_CRITERIA: RuleCriterion[] = Object.values(RULE_CRITERION);
