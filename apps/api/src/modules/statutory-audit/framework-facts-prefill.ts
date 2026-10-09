@@ -3,6 +3,7 @@ import type {
   ConsolidationCapturedFacts,
   FinancialReportingCapturedFacts,
   IcfrCapturedFacts,
+  IcfrFilingRecord,
   InvesteeInput,
   MasterFact,
   OtherReportingCapturedFacts,
@@ -249,8 +250,10 @@ export function lateRocFilings(filings: readonly RocFiling[], today: string): Ro
 }
 
 /**
- * ICFR facts from the portal: the §92/§137 filing default is read off the
- * AOC-4 / MGT-7 obligations on the compliance calendar. Peak covered
+ * ICFR facts from the portal (display): the §92/§137 filing record off the
+ * AOC-4 / MGT-7 obligations on the compliance calendar. The 02.5 engine reads
+ * those records live as traceable IFC-03 filings, so nothing is copied into
+ * the team's documented answer (unknown is never "no default"). Peak covered
  * borrowings (banks, FIs and bodies corporate, at any point in the year) is
  * not held anywhere and stays with the team.
  */
@@ -267,7 +270,6 @@ export function icfrFromSources(
   if (due.length === 0) {
     facts.push({ label: 'ROC filing record (§92 / §137)', value: null, source: C });
   } else {
-    values.filingDefault = late.length > 0;
     facts.push({
       label: 'ROC filing record (§92 / §137)',
       value: late.length
@@ -298,11 +300,49 @@ export function fillIcfr(
 ): { next: IcfrCapturedFacts; filled: string[] } {
   const next = { ...current };
   const filled: string[] = [];
-  if (fill.values.filingDefault && !next.filingDefault) {
-    next.filingDefault = true;
-    filled.push('ROC filing default');
+  if (fill.values.peakCoveredBorrowings != null && next.peakCoveredBorrowings == null) {
+    next.peakCoveredBorrowings = fill.values.peakCoveredBorrowings;
+    filled.push('Peak covered borrowings');
   }
   return { next, filled };
+}
+
+/** '2024-25' → '2023-24'. */
+export function precedingFinancialYear(fy: string): string | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!m) return null;
+  const start = Number(m[1]) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+/** The financial year a filing due on `deadline` relates to (AOC-4 / MGT-7 fall due after year end). */
+function filingPeriod(deadline: string): string {
+  const y = Number(deadline.slice(0, 4));
+  const m = Number(deadline.slice(5, 7));
+  const end = m >= 4 ? y : y - 1; // year-end (31 March) before the deadline
+  return `${end - 1}-${String(end % 100).padStart(2, '0')}`;
+}
+
+/**
+ * IFC-03 records from the compliance calendar: AOC-4 (§137) / MGT-7 (§92)
+ * obligations falling due from the audit period start (the filings the
+ * exemption looks at for this audit), waived ones dropped.
+ */
+export function calendarFilings(
+  roc: readonly RocFiling[],
+  periodStart: string | null,
+): IcfrFilingRecord[] {
+  return roc
+    .filter((f) => f.status !== 'waived' && (!periodStart || f.deadline >= periodStart))
+    .map((f) => ({
+      form: f.form,
+      section: f.form === 'AOC-4' ? '137' : '92',
+      period: filingPeriod(f.deadline),
+      dueDate: f.deadline,
+      filedOn: f.status === 'completed' ? (f.completedOn ?? f.deadline) : null,
+      srn: null,
+      source: 'compliance_calendar' as const,
+    }));
 }
 
 // ── 02.7 Other reporting ─────────────────────────────────────────────────────
