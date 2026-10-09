@@ -550,7 +550,7 @@ function VersionHistory({ base, fileId }: { base: string; fileId: string }): JSX
 }
 
 /** Inline picker over the engagement's documents — linked, never copied. */
-function LinkPicker({
+export function LinkPicker({
   engagementId,
   exclude,
   onPick,
