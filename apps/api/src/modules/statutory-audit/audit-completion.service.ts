@@ -30,6 +30,7 @@ import {
   type CompletionProcedure,
   type PlannedCompletionItem,
 } from './completion-automation';
+import { readCaroClauseStatus } from './audit-caro-programme.service';
 import { isEngagementLead } from './master-facts';
 import { planSignOff, type SignOffFacts } from './sign-off-automation';
 import { addDays, addYears, day, planArchive, type ArchiveFacts } from './archive-automation';
@@ -311,6 +312,7 @@ export class AuditCompletionService {
       materiality: mat.rows[0]
         ? { om: num(mat.rows[0].om), pm: num(mat.rows[0].pm), ctt: num(mat.rows[0].ctt) }
         : null,
+      caroClauses: await readCaroClauseStatus(client, wi),
     };
   }
 

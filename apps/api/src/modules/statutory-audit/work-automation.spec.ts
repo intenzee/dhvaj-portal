@@ -180,6 +180,15 @@ describe('work automation — procedures', () => {
         risk({ id: 'r2', ref: 'R2', fsArea: 'Journal entries', isSignificant: true }),
         risk({ id: 'r3', ref: 'R3', status: 'concluded' }),
       ],
+      caroClauses: [
+        {
+          sourceKey: 'caro:CARO_2020_3_I_B',
+          sourceNote: '02.4 CARO clause 3(i)(b)',
+          title: 'CARO 3(i)(b) — Physical verification of property, plant and equipment',
+          objective: 'Verify.',
+          expectedEvidence: null,
+        },
+      ],
     });
     const byKey = new Map(out.map((p) => [p.sourceKey, p]));
     expect(byKey.get('risk:r1')).toMatchObject({
@@ -198,7 +207,9 @@ describe('work automation — procedures', () => {
     ]);
     expect(byKey.has('fs:fs_cash:confirm')).toBe(true);
     expect(byKey.has('fs:fs_rev_ops:cutoff')).toBe(true);
-    expect(byKey.has('std:caro:clauses')).toBe(true);
+    // CARO: the 02.4 clause programme, never a generic CARO template.
+    expect(byKey.get('caro:CARO_2020_3_I_B')?.workAreaKey).toBe('caro');
+    expect([...byKey.keys()].some((k) => k.startsWith('std:caro:'))).toBe(false);
     expect(byKey.has('std:ifc:walkthroughs')).toBe(false);
     expect(byKey.has(`std:${OVERALL_WORK_AREA_KEY}:final_analytics`)).toBe(true);
     expect(new Set(out.map((p) => p.sourceKey)).size).toBe(out.length);

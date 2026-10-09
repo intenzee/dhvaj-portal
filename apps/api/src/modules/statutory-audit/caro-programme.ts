@@ -175,7 +175,11 @@ export interface BlockerInput {
   draftReporting: string | null;
   requiresPartnerReview: boolean;
   partnerReviewed: boolean;
-  findings: ReadonlyArray<{ status: 'open' | 'resolved'; includeInReport: boolean; withdrawn: boolean }>;
+  findings: ReadonlyArray<{
+    status: 'open' | 'resolved';
+    includeInReport: boolean;
+    withdrawn: boolean;
+  }>;
   components: ReadonlyArray<{
     caroApplicable: CaroComponentApplicable;
     qualificationIdentified: boolean | null;
@@ -268,8 +272,7 @@ export function summarise(items: readonly SummaryItem[]): CaroProgrammeSummary {
     assessmentRequired: live.filter((i) => i.relevance === CARO_RELEVANCE.assessmentRequired)
       .length,
     approved: live.filter((i) => i.reviewState === 'approved').length,
-    reportable: live.filter((i) => i.conclusion === CARO_CLAUSE_CONCLUSION.reportableMatter)
-      .length,
+    reportable: live.filter((i) => i.conclusion === CARO_CLAUSE_CONCLUSION.reportableMatter).length,
     openFindings: live.reduce((n, i) => n + i.openFindings, 0),
   };
 }

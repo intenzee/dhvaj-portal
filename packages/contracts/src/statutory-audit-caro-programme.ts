@@ -55,9 +55,8 @@ export const CARO_CLAUSE_CONCLUSION = {
 } as const;
 export type CaroClauseConclusion =
   (typeof CARO_CLAUSE_CONCLUSION)[keyof typeof CARO_CLAUSE_CONCLUSION];
-export const CARO_CLAUSE_CONCLUSIONS: CaroClauseConclusion[] = Object.values(
-  CARO_CLAUSE_CONCLUSION,
-);
+export const CARO_CLAUSE_CONCLUSIONS: CaroClauseConclusion[] =
+  Object.values(CARO_CLAUSE_CONCLUSION);
 
 export const CARO_CLAUSE_CONCLUSION_LABEL: Record<CaroClauseConclusion, string> = {
   no_reportable_exception: 'No reportable exception',
@@ -390,7 +389,13 @@ export interface UpdateCaroClauseInput {
   version: number;
 }
 
-export const CARO_REVIEW_ACTIONS = ['submit', 'approve', 'return', 'reopen', 'partner_review'] as const;
+export const CARO_REVIEW_ACTIONS = [
+  'submit',
+  'approve',
+  'return',
+  'reopen',
+  'partner_review',
+] as const;
 export type CaroReviewAction = (typeof CARO_REVIEW_ACTIONS)[number];
 
 export interface CaroClauseReviewInput {

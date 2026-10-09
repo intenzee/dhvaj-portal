@@ -130,7 +130,11 @@ describe('planProgramme (Level 1 → Level 2)', () => {
       null,
       true,
     );
-    expect(p).toMatchObject({ standalone: 'ensure', consolidated: 'ensure', consolidatedState: 'pending' });
+    expect(p).toMatchObject({
+      standalone: 'ensure',
+      consolidated: 'ensure',
+      consolidatedState: 'pending',
+    });
     const q = planProgramme(
       level1({ cfsInScope: true, consolidatedStatus: 'applicable', consolidatedApplies: true }),
       null,
@@ -145,13 +149,18 @@ describe('planProgramme (Level 1 → Level 2)', () => {
       { status: 'active' },
       true,
     );
-    expect(p).toMatchObject({ state: 'withdrawn', standalone: 'withdraw', consolidated: 'withdraw' });
+    expect(p).toMatchObject({
+      state: 'withdrawn',
+      standalone: 'withdraw',
+      consolidated: 'withdraw',
+    });
   });
 
   it('has no programme for an exempt entity that never had one', () => {
-    expect(
-      planProgramme(level1({ standaloneApplies: false }), null, true),
-    ).toMatchObject({ state: 'not_applicable', standalone: 'keep' });
+    expect(planProgramme(level1({ standaloneApplies: false }), null, true)).toMatchObject({
+      state: 'not_applicable',
+      standalone: 'keep',
+    });
   });
 
   it('leaves existing items alone while 02.4 is re-evaluated', () => {
@@ -230,9 +239,24 @@ describe('approvalBlockers', () => {
       ...base,
       requiresPartnerReview: true,
       components: [
-        { caroApplicable: 'pending', qualificationIdentified: null, paragraphRefs: null, withdrawn: false },
-        { caroApplicable: 'yes', qualificationIdentified: true, paragraphRefs: null, withdrawn: false },
-        { caroApplicable: 'pending', qualificationIdentified: null, paragraphRefs: null, withdrawn: true },
+        {
+          caroApplicable: 'pending',
+          qualificationIdentified: null,
+          paragraphRefs: null,
+          withdrawn: false,
+        },
+        {
+          caroApplicable: 'yes',
+          qualificationIdentified: true,
+          paragraphRefs: null,
+          withdrawn: false,
+        },
+        {
+          caroApplicable: 'pending',
+          qualificationIdentified: null,
+          paragraphRefs: null,
+          withdrawn: true,
+        },
       ],
     });
     expect(b).toHaveLength(3);
@@ -319,7 +343,12 @@ describe('summary and annexure', () => {
     expect(a.paragraphs[0]!.text).toMatch(/clause 3\(xii\) of the Order are not applicable/);
     expect(a.paragraphs[1]!.text).toBe('Verification was not carried out.');
     expect(a.paragraphs[2]!.text).toBeNull(); // not approved — no text in the report
-    expect(a).toMatchObject({ complete: false, approvedCount: 2, totalCount: 3, reportableCount: 1 });
+    expect(a).toMatchObject({
+      complete: false,
+      approvedCount: 2,
+      totalCount: 3,
+      reportableCount: 1,
+    });
     expect(buildAnnexure('wf', items, 'consolidated', null).totalCount).toBe(0);
   });
 

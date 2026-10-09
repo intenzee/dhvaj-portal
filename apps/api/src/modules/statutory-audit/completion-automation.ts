@@ -66,6 +66,11 @@ export interface CompletionFacts {
   risks: readonly CompletionRisk[];
   exceptions: readonly CompletionException[];
   materiality: { om: number | null; pm: number | null; ctt: number | null } | null;
+  /**
+   * The live 02.4 CARO clause items (spec §18) — approved conclusions build the
+   * draft CARO annexure. Null when no clause programme is instantiated.
+   */
+  caroClauses?: { total: number; approved: number; reportable: number } | null;
 }
 
 export interface PlannedCompletionItem {
@@ -164,6 +169,45 @@ function reportItem(
   return {
     evidence: evidence([`Section 02: ${name} applicable.`, ...p.facts], p.state, p.ready, WORK),
     draftNote: procs.length ? `${applicableNote} Work performed: ${refs(procs)}.` : applicableNote,
+  };
+}
+
+/**
+ * The CARO report item: the Section 02 conclusion and the CARO procedures,
+ * plus the 02.4 clause programme — the draft annexure is ready only when every
+ * live clause conclusion is approved (spec §18).
+ */
+function caroItem(
+  f: CompletionFacts,
+  procs: readonly CompletionProcedure[],
+): PlannedCompletionItem {
+  const item = reportItem(
+    f,
+    'caro',
+    'CARO 2020',
+    procs,
+    'CARO 2020 report prepared clause by clause (3(i)–3(xxi)) from the working papers.',
+  );
+  const c = f.caroClauses;
+  if (!c || c.total === 0 || f.framework.get('caro')?.conclusion !== 'applicable') return item;
+  const complete = c.approved === c.total;
+  const e = item.evidence;
+  return {
+    evidence: evidence(
+      [
+        ...e.facts,
+        `02.4 clause programme: ${c.approved} of ${c.total} clause conclusion(s) approved` +
+          (c.reportable ? `, ${c.reportable} reportable` : '') +
+          ` — draft CARO annexure ${complete ? 'complete' : 'in progress'}.`,
+      ],
+      e.suggestedState === 'not_started' && c.approved > 0 ? 'in_progress' : e.suggestedState,
+      e.ready && complete,
+      e.goTo,
+    ),
+    draftNote:
+      (item.draftNote ? `${item.draftNote} ` : '') +
+      `Draft CARO annexure from ${c.approved} approved clause conclusion(s)` +
+      (c.reportable ? `, including ${c.reportable} reportable matter(s).` : '.'),
   };
 }
 
@@ -369,12 +413,9 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
 
   out.set(
     'caro',
-    reportItem(
+    caroItem(
       f,
-      'caro',
-      'CARO 2020',
       by((p) => p.workAreaKey === 'caro'),
-      'CARO 2020 report prepared clause by clause (3(i)–3(xxi)) from the working papers.',
     ),
   );
   out.set(
