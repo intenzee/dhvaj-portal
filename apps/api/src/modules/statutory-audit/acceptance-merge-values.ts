@@ -159,20 +159,13 @@ export async function readMergeInput(
       WHERE swi.id = $1`,
     [workflowInstanceId],
   );
-  // `details` arrives with the expanded question catalogue; read it when present.
-  const { rows: hasDetails } = await client.query(
-    `SELECT 1 FROM information_schema.columns
-      WHERE table_schema = 'hsdg' AND table_name = 'audit_acceptance_answers'
-        AND column_name = 'details'`,
-  );
   const { rows } = await client.query<{
     segment_key: string;
     question_key: string;
     answer: string | null;
     details: Record<string, unknown> | null;
   }>(
-    `SELECT s.segment_key, a.question_key, a.answer,
-            ${hasDetails.length > 0 ? 'a.details' : 'NULL::jsonb AS details'}
+    `SELECT s.segment_key, a.question_key, a.answer, a.details
        FROM hsdg.audit_acceptance_answers a
        JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
       WHERE s.workflow_instance_id = $1`,
