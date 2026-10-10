@@ -1,5 +1,6 @@
 import type { PlannedClauseProcedure } from './caro-programme';
 import { CONSOLIDATION_WORK_AREA_KEY, type PlannedConsolidationProcedure } from './group-audit';
+import { REPORTING_WORK_AREA_KEY, type PlannedReportingProcedure } from './reporting-records';
 import { ICFR_WORK_AREA_KEY, type PlannedIcfrProcedure } from './icfr-controls';
 import type {
   AreaRiskLevel,
@@ -562,6 +563,12 @@ export function suggestProcedures(input: {
    * applicable item in the CFS work area — never the generic CFS programme.
    */
   consolidationProcedures?: readonly PlannedConsolidationProcedure[];
+  /**
+   * The 02.7 reporting cards (spec §17): one procedure per card with a
+   * reporting obligation in the auditor's-reporting work area — replacing the
+   * single generic report procedure once 02.7 has run.
+   */
+  reportingProcedures?: readonly PlannedReportingProcedure[];
 }): SuggestedProcedure[] {
   const out: SuggestedProcedure[] = [];
   const has = (k: string) => input.areaKeys.has(k);
@@ -626,6 +633,9 @@ export function suggestProcedures(input: {
   const fsNames = input.fsAreas.map((a) => a.name.toLowerCase()).join(' | ');
   for (const [areaKey, items] of Object.entries(WORKSTREAM_TEMPLATES)) {
     if (!has(areaKey)) continue;
+    // 02.7 supplies the auditor's-reporting programme card by card.
+    if (areaKey === REPORTING_WORK_AREA_KEY && (input.reportingProcedures ?? []).length > 0)
+      continue;
     for (const t of items) {
       if (
         areaKey === OVERALL_WORK_AREA_KEY &&
@@ -674,6 +684,20 @@ export function suggestProcedures(input: {
         sourceKey: p.sourceKey,
         sourceNote: p.sourceNote,
         workAreaKey: ICFR_WORK_AREA_KEY,
+        title: p.title,
+        objective: p.objective,
+        assertions: [],
+        riskId: null,
+        expectedEvidence: p.expectedEvidence,
+      });
+    }
+  }
+  if (has(REPORTING_WORK_AREA_KEY)) {
+    for (const p of input.reportingProcedures ?? []) {
+      out.push({
+        sourceKey: p.sourceKey,
+        sourceNote: p.sourceNote,
+        workAreaKey: REPORTING_WORK_AREA_KEY,
         title: p.title,
         objective: p.objective,
         assertions: [],

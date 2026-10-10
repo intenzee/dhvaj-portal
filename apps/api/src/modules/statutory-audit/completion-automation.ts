@@ -20,6 +20,7 @@ import type {
   CompletionGoTo,
   IcfrReportingSummary,
   CompletionItemEvidence,
+  OtherReportingCompletionSummary,
   CompletionItemState,
   FrameworkConclusion,
 } from '@hsdg/contracts';
@@ -78,6 +79,13 @@ export interface CompletionFacts {
    * Null when no workstream was ever set up.
    */
   icfr?: IcfrReportingSummary | null;
+  /**
+   * 02.7 other Companies Act reporting (spec §17, §20): the cards with a
+   * reporting obligation and their work state, the Section 143(12) Fraud
+   * Matters, the §164(2) director workpaper and the Rule 11(e) representations
+   * the Management Representation Letter carries. Null when 02.7 is not seeded.
+   */
+  otherReporting?: OtherReportingCompletionSummary | null;
 }
 
 export interface PlannedCompletionItem {
@@ -519,12 +527,20 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
       });
     } else {
       const p = progress(reporting, 'No Section 143 / Rule 11 procedure in the audit work yet.');
+      const o = f.otherReporting ?? null;
+      const ro = o ? otherReportingReadiness(o) : null;
       out.set('rule_11_143', {
-        evidence: evidence(p.facts, p.state, p.ready, WORK),
+        evidence: evidence(
+          ro ? [...ro.facts, ...p.facts] : p.facts,
+          ro && !ro.ready && p.state === 'not_started' && ro.started ? 'in_progress' : p.state,
+          p.ready && (ro?.ready ?? true),
+          ro && !ro.ready && p.ready ? FRAMEWORK : WORK,
+        ),
         draftNote:
           `Section 143(3) matters and Rule 11 clauses (audit trail, pending litigations, foreseeable losses, IEPF, funding and dividend representations) reported` +
           (reporting.length ? ` from ${refs(reporting)}` : '') +
-          '.',
+          '.' +
+          (ro?.draft.length ? ` ${ro.draft.join(' ')}` : ''),
       });
     }
   }
@@ -596,6 +612,7 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
       `Work: ${concluded} of ${f.areas.length} audit areas concluded; ${procsDone} of ${procs.length} procedures complete.`,
       `Misstatements: ${carried} carried forward from the procedures.`,
       `Reporting: ${reportingLine}.`,
+      ...otherReportingMemoLines(f.otherReporting ?? null),
       'Overall conclusion: sufficient appropriate audit evidence has been obtained to support the opinion.',
     ].join('\n');
     const anyStarted = others.some((o) => o.evidence.suggestedState === 'in_progress');
@@ -611,4 +628,90 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
   }
 
   return out;
+}
+
+// ── 02.7 other Companies Act reporting ─────────────────────────────────────
+
+const TRI_TEXT: Record<string, string> = { yes: 'obtained', no: 'not obtained', pending: 'pending' };
+const RULE_11E_CARDS: Record<string, string> = {
+  rule_11_e_i: 'rule_11_e_funds_advanced',
+  rule_11_e_ii: 'rule_11_e_funds_received',
+};
+
+/** What 02.7 still needs before the Rule 11 / Section 143 reporting is ready. */
+export function otherReportingReadiness(o: OtherReportingCompletionSummary): {
+  facts: string[];
+  draft: string[];
+  ready: boolean;
+  started: boolean;
+} {
+  const facts: string[] = [];
+  const draft: string[] = [];
+  let ready = true;
+  if (!o.decided) {
+    facts.push('02.7: other Companies Act reporting not yet concluded.');
+    ready = false;
+  }
+  const done = o.cards.filter((c) => c.workStatus === 'complete' || c.workStatus === 'not_required');
+  facts.push(`02.7: ${done.length} of ${o.cards.length} reporting card(s) complete.`);
+  if (done.length < o.cards.length) ready = false;
+  const modified = o.cards.filter((c) => c.reportingStatus === 'modified_wording_expected');
+  if (modified.length) {
+    const list = modified.slice(0, MAX_LISTED).map((c) => c.clause).join(', ');
+    facts.push(
+      `Modified wording expected: ${list}${modified.length > MAX_LISTED ? ` +${modified.length - MAX_LISTED} more` : ''}.`,
+    );
+    draft.push(`Modified wording for ${modified.map((c) => c.clause).join(', ')}.`);
+  }
+
+  if (o.fraud.matters > 0) {
+    facts.push(
+      `Section 143(12): ${o.fraud.matters} Fraud Matter(s) — ${o.fraud.centralGovernmentRoute} Central Government route, ${o.fraud.belowThreshold} below the threshold; ${o.fraud.open} open, ${o.fraud.overdue} overdue.`,
+    );
+    if (o.fraud.open > 0) ready = false;
+    draft.push(`${o.fraud.matters} Fraud Matter(s) considered under Section 143(12) and Rule 13.`);
+  } else {
+    facts.push('Section 143(12): no Fraud Matter recorded.');
+  }
+
+  const dirCard = o.cards.some((c) => c.key === 's143_3_g_director_disqualification');
+  if (dirCard) {
+    const d = o.directors;
+    facts.push(
+      d.conclusion === 'not_started'
+        ? 'Section 164(2): director workpaper not started.'
+        : `Section 164(2): ${d.total} director(s) — ${d.cleared} not disqualified, ${d.disqualified} disqualified, ${d.pending} pending.`,
+    );
+    if (d.conclusion === 'not_started' || d.conclusion === 'pending') ready = false;
+    if (d.conclusion === 'identified')
+      draft.push(`${d.disqualified} director(s) disqualified under Section 164(2) — reported under Section 143(3)(g).`);
+  }
+
+  for (const r of o.mrlRepresentations) {
+    if (!o.cards.some((c) => c.key === RULE_11E_CARDS[r.key])) continue;
+    facts.push(`MRL ${r.label.split(' — ')[0]}: representation ${TRI_TEXT[r.obtained] ?? r.obtained}.`);
+    if (r.obtained !== 'yes') ready = false;
+  }
+
+  const started =
+    o.decided || o.cards.some((c) => c.workStatus !== 'not_started') || o.fraud.matters > 0;
+  return { facts, draft, ready, started };
+}
+
+/** The completion memo's 02.7 lines — the Rule 11(e) representations go to the MRL. */
+export function otherReportingMemoLines(o: OtherReportingCompletionSummary | null): string[] {
+  if (!o) return [];
+  const lines: string[] = [];
+  const reps = o.mrlRepresentations.filter((r) =>
+    o.cards.some((c) => c.key === RULE_11E_CARDS[r.key]),
+  );
+  if (reps.length) {
+    lines.push('Management representation letter (Section 07) — Rule 11(e):');
+    for (const r of reps) lines.push(`  • ${r.label} [${TRI_TEXT[r.obtained] ?? r.obtained}]`);
+  }
+  if (o.fraud.matters > 0)
+    lines.push(
+      `Fraud (Section 143(12)): ${o.fraud.matters} matter(s), ${o.fraud.open} open, ${o.fraud.overdue} overdue.`,
+    );
+  return lines;
 }
