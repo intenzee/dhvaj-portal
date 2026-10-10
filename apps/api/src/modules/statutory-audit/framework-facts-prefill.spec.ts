@@ -1,3 +1,4 @@
+import { EMPTY_OTHER_REPORTING_CAPTURED } from '@hsdg/contracts';
 import type {
   CaroCapturedFacts,
   ConsolidationCapturedFacts,
@@ -300,22 +301,7 @@ describe('02.5 ICFR filing records from the compliance calendar', () => {
 });
 
 describe('02.7 other reporting from contacts and last year', () => {
-  const BLANK: OtherReportingCapturedFacts = {
-    softwareSystems: [],
-    managerialRemunerationPaid: null,
-    section198NetProfit: null,
-    hasManagingOrWholeTimeDirector: false,
-    fraudIdentified: false,
-    fraudAmount: null,
-    fraudEventDate: null,
-    intermediaryFundsAdvanced: false,
-    ultimateBeneficiaryFundsReceived: false,
-    fundingRepresentationsObtained: false,
-    dividendCompliesSec123: null,
-    pendingLitigationDisclosed: null,
-    foreseeableLossesProvided: null,
-    iepfTransferDelay: null,
-  };
+  const BLANK: OtherReportingCapturedFacts = EMPTY_OTHER_REPORTING_CAPTURED;
 
   it('finds a managing or whole-time director among the contacts', () => {
     const fill = otherReportingFromSources(
@@ -345,13 +331,60 @@ describe('02.7 other reporting from contacts and last year', () => {
     });
     const { next, filled } = fillOtherReporting(BLANK, fill);
     expect(next.softwareSystems).toEqual([
-      { name: 'Tally Prime', hasAuditTrailFeature: true, auditTrailOperatedAllYear: false },
+      {
+        name: 'Tally Prime',
+        hasAuditTrailFeature: true,
+        auditTrailOperatedAllYear: false,
+        module: 'gl',
+        moduleOther: null,
+        booksAffected: null,
+        featureStatus: 'available',
+        enabledThroughout: 'pending',
+        transactionsCovered: 'pending',
+        privilegedUsers: null,
+        canAlterOrDisable: 'pending',
+        tampering: 'pending',
+        preservation: 'pending',
+        conclusion: 'pending',
+      },
     ]);
     expect(next.hasManagingOrWholeTimeDirector).toBe(true);
     // Audit findings are never filled.
     expect(next.fraudIdentified).toBe(false);
     expect(next.managerialRemunerationPaid).toBeNull();
     expect(filled).toEqual(['managing / whole-time director', '1 accounting system(s)']);
+  });
+
+  it('seeds the Section 197 managerial persons from the directors, remuneration blank', () => {
+    const fill = otherReportingFromSources(
+      [
+        { fullName: 'Asha Rao', designation: 'Managing Director' },
+        { fullName: 'Vikram Shah', designation: 'Whole-time Director' },
+        { fullName: 'Meera Iyer', designation: 'Independent Director' },
+      ],
+      null,
+    );
+    const { next, filled } = fillOtherReporting(BLANK, fill);
+    expect(next.managerialPersons.map((p) => [p.name, p.category, p.remuneration])).toEqual([
+      ['Asha Rao', 'managing_director', null],
+      ['Vikram Shah', 'whole_time_director', null],
+      ['Meera Iyer', 'non_executive_director', null],
+    ]);
+    expect(filled).toContain('3 managerial person(s)');
+  });
+
+  it('prefers last year\'s managerial persons (this year\'s remuneration blank)', () => {
+    const fill = otherReportingFromSources([{ fullName: 'New Person', designation: 'Director' }], {
+      financialYear: '2023-24',
+      facts: {
+        managerialPersons: [
+          { id: 'mp-1', name: 'Asha Rao', din: '0001', category: 'manager', remuneration: 900000 },
+        ],
+      },
+    });
+    expect(fill.values.managerialPersons).toEqual([
+      { id: 'mp-1', name: 'Asha Rao', din: '0001', category: 'manager', remuneration: null },
+    ]);
   });
 
   it('never replaces software the team already listed', () => {

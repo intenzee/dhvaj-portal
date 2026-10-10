@@ -5,6 +5,7 @@ import type {
   IcfrCapturedFacts,
   IcfrFilingRecord,
   InvesteeInput,
+  ManagerialPersonInput,
   MasterFact,
   OtherReportingCapturedFacts,
   SoftwareSystemInput,
@@ -391,13 +392,29 @@ export function otherReportingFromSources(
   const systems = Array.isArray(prior?.facts.softwareSystems)
     ? (prior!.facts.softwareSystems as SoftwareSystemInput[])
         .filter((x) => typeof x?.name === 'string' && x.name.trim())
-        // The system and its edit-log feature carry over; whether the trail
-        // ran all THIS year is unconfirmed until the team says so.
-        .map((x) => ({
-          name: x.name.trim(),
-          hasAuditTrailFeature: x.hasAuditTrailFeature === true,
-          auditTrailOperatedAllYear: false,
-        }))
+        // The system, its module and its edit-log feature carry over; whether
+        // the trail ran all THIS year (and everything after it on the spec §11
+        // register) is this year's fact — pending until the team confirms it.
+        .map(
+          (x): SoftwareSystemInput => ({
+            ...(x.id ? { id: x.id } : {}),
+            name: x.name.trim(),
+            hasAuditTrailFeature: x.hasAuditTrailFeature === true || x.featureStatus === 'available',
+            auditTrailOperatedAllYear: false,
+            module: x.module ?? 'gl',
+            moduleOther: x.moduleOther ?? null,
+            booksAffected: x.booksAffected ?? null,
+            featureStatus:
+              x.featureStatus ?? (x.hasAuditTrailFeature === true ? 'available' : 'pending'),
+            enabledThroughout: 'pending',
+            transactionsCovered: 'pending',
+            privilegedUsers: x.privilegedUsers ?? null,
+            canAlterOrDisable: 'pending',
+            tampering: 'pending',
+            preservation: 'pending',
+            conclusion: 'pending',
+          }),
+        )
     : [];
   if (systems.length) values.softwareSystems = systems;
   facts.push({
@@ -406,6 +423,41 @@ export function otherReportingFromSources(
       ? `${systems.map((x) => x.name).join(', ')} — carried from FY ${prior!.financialYear}; confirm the audit trail ran all this year (unconfirmed until then)`
       : null,
     source: systems.length ? 'Last year’s audit file' : 'Team to confirm',
+  });
+
+  // Section 197(16): the managerial persons — last year's list (names and
+  // categories; this year's remuneration is blank) or the directors on the
+  // contacts master, an MD / WTD by designation and the rest non-executive.
+  const priorPersons = Array.isArray(prior?.facts.managerialPersons)
+    ? (prior!.facts.managerialPersons as ManagerialPersonInput[]).filter(
+        (p) => typeof p?.name === 'string' && p.name.trim(),
+      )
+    : [];
+  const persons: ManagerialPersonInput[] = priorPersons.length
+    ? priorPersons.map((p) => ({
+        ...(p.id ? { id: p.id } : {}),
+        name: p.name.trim(),
+        din: p.din ?? null,
+        category: p.category,
+        remuneration: null,
+      }))
+    : directors.map((d) => ({
+        name: d.fullName,
+        din: null,
+        category: MD_WTD.test(d.designation ?? '')
+          ? /whole[- ]?time|\bwtd\b/i.test(d.designation ?? '')
+            ? 'whole_time_director'
+            : 'managing_director'
+          : 'non_executive_director',
+        remuneration: null,
+      }));
+  if (persons.length) values.managerialPersons = persons;
+  facts.push({
+    label: 'Managerial persons (Section 197)',
+    value: persons.length
+      ? `${persons.length} person(s) — ${priorPersons.length ? `carried from FY ${prior!.financialYear}` : 'from the directors on record'}; enter this year's remuneration`
+      : null,
+    source: priorPersons.length ? 'Last year’s audit file' : 'Client master — contacts',
   });
   return {
     values,
@@ -427,6 +479,10 @@ export function fillOtherReporting(
   if (next.softwareSystems.length === 0 && v.softwareSystems?.length) {
     next.softwareSystems = v.softwareSystems;
     filled.push(`${v.softwareSystems.length} accounting system(s)`);
+  }
+  if (next.managerialPersons.length === 0 && v.managerialPersons?.length) {
+    next.managerialPersons = v.managerialPersons;
+    filled.push(`${v.managerialPersons.length} managerial person(s)`);
   }
   return { next, filled };
 }

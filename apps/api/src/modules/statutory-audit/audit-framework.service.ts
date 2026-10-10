@@ -24,6 +24,7 @@ import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditCaroService } from './audit-caro.service';
 import { AuditConsolidationService } from './audit-consolidation.service';
 import { AuditIcfrService } from './audit-icfr.service';
+import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditMattersService } from './audit-matters.service';
 import { SUGGESTED_AREA_KEYS, suggestArea, type FrameworkFacts } from './framework-suggestions';
 import { fixFor, isEngagementLead } from './master-facts';
@@ -85,6 +86,7 @@ export class AuditFrameworkService {
     private readonly caro: AuditCaroService,
     private readonly icfr: AuditIcfrService,
     private readonly consolidation: AuditConsolidationService,
+    private readonly otherReporting: AuditOtherReportingService,
   ) {}
 
   // ── Read ──────────────────────────────────────────────────────────────────
@@ -303,6 +305,15 @@ export class AuditFrameworkService {
           WHERE workflow_instance_id = $1`,
       [workflowInstanceId],
     );
+    // Rule 11 and Section 143 both mirror the one 02.7 assessment — run it once.
+    let otherReporting: ReturnType<AuditOtherReportingService['legacySuggestionOn']> | null = null;
+    const otherReportingSuggestion = () =>
+      (otherReporting ??= this.otherReporting.legacySuggestionOn(
+        client,
+        ctx,
+        engagementId,
+        workflowInstanceId,
+      ));
     let updated = 0;
     for (const row of rows) {
       // Never overwrite a professional conclusion (§19).
@@ -321,7 +332,10 @@ export class AuditFrameworkService {
                   engagementId,
                   workflowInstanceId,
                 )
-              : suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
+              : row.area_key === FRAMEWORK_AREA_KEY.rule11 ||
+                  row.area_key === FRAMEWORK_AREA_KEY.section143
+                ? await otherReportingSuggestion()
+                : suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
       if (!s.suggestion && s.state === 'not_assessed') continue; // descriptive — leave alone
       await client.query(
         `UPDATE hsdg.audit_framework_assessments
