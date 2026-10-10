@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { ExternalLink, Link2, Plus } from 'lucide-react';
 import {
   ICFR_COMPONENT_AUDITOR_LABEL,
   ICFR_COMPONENT_AUDITORS,
@@ -26,6 +26,9 @@ import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
+import { DocumentPreview } from '@/components/document-preview';
+import type { DocumentRow } from '@/lib/types';
+import { LinkPicker } from './acceptance-file-card';
 
 /**
  * Consolidated ICFR reporting consideration (DHVAJ 02.5 spec §17). Exists only
@@ -124,6 +127,7 @@ export function IcfrConsolidated({
           {view.components.map((m) => (
             <ComponentRow
               key={m.id}
+              engagementId={engagementId}
               m={m}
               editable={editable && !m.withdrawn}
               busy={busy}
@@ -185,12 +189,14 @@ export function IcfrConsolidated({
 }
 
 function ComponentRow({
+  engagementId,
   m,
   editable,
   busy,
   act,
   send,
 }: {
+  engagementId: string;
   m: IcfrComponent;
   editable: boolean;
   busy: boolean;
@@ -222,6 +228,15 @@ function ComponentRow({
       )}
       {m.materialWeaknessDetails && !editable && (
         <p className="text-ink-muted">{m.materialWeaknessDetails}</p>
+      )}
+      {indian && m.componentIcfr !== 'exempt' && (m.auditor === 'other' || m.reportDocumentId) && (
+        <ComponentReport
+          engagementId={engagementId}
+          m={m}
+          editable={editable}
+          busy={busy}
+          patch={patch}
+        />
       )}
       {editable && (
         <div className="grid gap-2 sm:grid-cols-3">
@@ -349,6 +364,83 @@ function ComponentRow({
         </div>
       )}
     </li>
+  );
+}
+
+/** The component auditor's section 143(3)(i) report — linked once, never re-uploaded (§17). */
+function ComponentReport({
+  engagementId,
+  m,
+  editable,
+  busy,
+  patch,
+}: {
+  engagementId: string;
+  m: IcfrComponent;
+  editable: boolean;
+  busy: boolean;
+  patch: (body: object, ok?: string) => Promise<boolean>;
+}): JSX.Element {
+  const toast = useToast();
+  const [linking, setLinking] = useState(false);
+  const [doc, setDoc] = useState<DocumentRow | null>(null);
+  const openDoc = async (documentId: string) => {
+    try {
+      setDoc(await apiFetch<DocumentRow>(`/engagements/${engagementId}/documents/${documentId}`));
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not open the document.', 'error');
+    }
+  };
+  return (
+    <div aria-label={`${m.componentName} section 143(3)(i) report`}>
+      <p className="font-medium text-ink">Component auditor’s section 143(3)(i) report</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {m.reportDocumentId ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-primary-600 hover:underline"
+            onClick={() => void openDoc(m.reportDocumentId!)}
+          >
+            {m.reportDocumentTitle ?? 'Linked report'} <ExternalLink className="h-3 w-3" />
+          </button>
+        ) : (
+          <span className="text-ink-faint">Not linked yet.</span>
+        )}
+        {editable && m.reportDocumentId && (
+          <button
+            type="button"
+            className="text-ink-faint hover:text-danger-700"
+            disabled={busy}
+            onClick={() => void patch({ reportDocumentId: null }, 'Report unlinked.')}
+          >
+            Unlink
+          </button>
+        )}
+        {editable && (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setLinking((o) => !o)}>
+            <Link2 className="h-3.5 w-3.5" />{' '}
+            {m.reportDocumentId ? 'Replace' : 'Link Existing File'}
+          </Button>
+        )}
+      </div>
+      {editable && linking && (
+        <LinkPicker
+          engagementId={engagementId}
+          exclude={m.reportDocumentId ? [m.reportDocumentId] : []}
+          onPick={async (documentId) => {
+            if (await patch({ reportDocumentId: documentId }, 'Report linked.')) setLinking(false);
+          }}
+        />
+      )}
+      {doc && (
+        <DocumentPreview
+          engagementId={engagementId}
+          doc={doc}
+          canEdit={false}
+          onClose={() => setDoc(null)}
+        />
+      )}
+    </div>
   );
 }
 

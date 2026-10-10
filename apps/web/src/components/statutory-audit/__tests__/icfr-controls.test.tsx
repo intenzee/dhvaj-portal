@@ -486,6 +486,52 @@ describe('IcfrConsolidated (02.5 §17)', () => {
     });
   });
 
+  it("links the other auditor's section 143(3)(i) report from the engagement's documents", async () => {
+    const user = userEvent.setup();
+    const other = component({
+      componentIcfr: 'applicable',
+      auditor: 'other',
+      auditorName: 'Mehta & Co',
+      missing: ["Link the component auditor's section 143(3)(i) report"],
+    });
+    const linked = component({
+      ...other,
+      reportDocumentId: 'doc-9',
+      reportDocumentTitle: 'Acme ICFR report FY25',
+      missing: [],
+      version: 2,
+    });
+    let current = consolidated({ components: [other] });
+    apiFetch.mockImplementation((url: string, init?: { method?: string }) => {
+      if (url.startsWith('/engagements/e1/documents?'))
+        return Promise.resolve({
+          items: [
+            {
+              id: 'doc-9',
+              title: 'Acme ICFR report FY25',
+              currentFilename: 'r.pdf',
+              currentVersionNo: 1,
+            },
+          ],
+        });
+      if (init?.method === 'PATCH') current = consolidated({ components: [linked] });
+      return Promise.resolve(current);
+    });
+    render(wrap(<IcfrConsolidated engagementId="e1" workflowInstanceId="wf1" />));
+    const report = await screen.findByLabelText('Acme Retail Pvt Ltd section 143(3)(i) report');
+    expect(within(report).getByText('Not linked yet.')).toBeInTheDocument();
+    await user.click(within(report).getByRole('button', { name: /Link Existing File/ }));
+    await user.click(await within(report).findByRole('button', { name: 'Link' }));
+    expect(apiFetch).toHaveBeenCalledWith(`${BASE}/consolidated/components/m1`, {
+      method: 'PATCH',
+      body: { reportDocumentId: 'doc-9', version: 1 },
+    });
+    expect(
+      await within(report).findByRole('button', { name: /Acme ICFR report FY25/ }),
+    ).toBeInTheDocument();
+    expect(within(report).getByRole('button', { name: 'Unlink' })).toBeInTheDocument();
+  });
+
   it('pre-selects the suggested parent conclusion for the partner', async () => {
     const user = userEvent.setup();
     apiFetch.mockResolvedValueOnce(
