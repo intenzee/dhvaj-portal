@@ -406,23 +406,37 @@ describe('IcfrWorkspace (02.5 spec §4)', () => {
     expect(screen.getByRole('note')).toHaveTextContent(ICFR_CONTROL_REMINDER);
   });
 
-  it('mounts the Section 05 workstream only once Applicable is confirmed', () => {
+  it('mounts the Section 05 workstream for Applicable — provisional until IFC-04 confirms', () => {
     const { unmount } = render(
       wrap(
         <IcfrWorkspace engagementId="e1" icfr={icfr()} canManage workstream={<p>processes</p>} />,
       ),
     );
-    expect(screen.queryByText('processes')).toBeNull();
+    expect(screen.getByText('processes')).toBeInTheDocument();
+    expect(screen.getByText(/Provisional — follows the system suggestion/)).toBeInTheDocument();
     unmount();
+
     const decided = icfr({
       assessment: { ...baseAssessment, state: 'applicable', conclusion: 'applicable' },
     });
-    render(
+    const { unmount: u2 } = render(
       wrap(
         <IcfrWorkspace engagementId="e1" icfr={decided} canManage workstream={<p>processes</p>} />,
       ),
     );
     expect(screen.getByText('processes')).toBeInTheDocument();
+    expect(screen.queryByText(/Provisional — follows the system suggestion/)).toBeNull();
+    u2();
+
+    const exempt = icfr({
+      assessment: { ...baseAssessment, state: 'not_applicable', conclusion: 'exempt' },
+    });
+    render(
+      wrap(
+        <IcfrWorkspace engagementId="e1" icfr={exempt} canManage workstream={<p>processes</p>} />,
+      ),
+    );
+    expect(screen.queryByText('processes')).toBeNull();
   });
 
   it('keeps the system result after an override and waits for the Partner', () => {

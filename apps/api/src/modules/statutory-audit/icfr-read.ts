@@ -18,6 +18,7 @@ import {
   isIcfrDecided,
   type IcfrDownstreamStatus,
 } from './icfr-completion';
+import { icfrConsolidatedStatusOn, icfrWorkstreamStatusOn } from './icfr-controls-read';
 
 /**
  * DI-free 02.5 readers (spec §22): downstream modules (Section 05 ICFR work,
@@ -31,15 +32,22 @@ const SUB = SUB_SECTION_KEY.icfr;
 const AREA = FRAMEWORK_AREA_KEY.ifc;
 
 /**
- * Track B's Section 05 workstream / consolidated-consideration status, read for
- * the §23 checklist. Null halves mean "not available on this build" — the
- * checklist then treats the item as not yet relevant rather than failed.
+ * The Section 05 ICFR workstream / consolidated-consideration status (Track B,
+ * icfr-controls-read — DI-free, never imports this module), read for the §23
+ * checklist items `workstream` and `consolidated`.
  */
 export async function icfrDownstreamStatusOn(
-  _client: PoolClient,
-  _workflowInstanceId: string,
+  client: PoolClient,
+  workflowInstanceId: string,
 ): Promise<IcfrDownstreamStatus> {
-  return { workstream: null, consolidated: null };
+  const [workstream, consolidated] = [
+    await icfrWorkstreamStatusOn(client, workflowInstanceId),
+    await icfrConsolidatedStatusOn(client, workflowInstanceId),
+  ];
+  return {
+    workstream: { instantiated: workstream.instantiated },
+    consolidated: { configured: consolidated.configured },
+  };
 }
 
 /** An open blocking Framework Matter raised on the IFC area (spec §23). */
@@ -127,8 +135,6 @@ export async function readIcfrResultOn(
         : status.standalone === ICFR_CONTEXT_STATUS.applicable,
     consolidated: { cfsInScope, status: status.consolidated },
     financialYear: fy,
-    periodStart: fy
-      ? auditPeriodStartFromFinancialYear(fy)
-      : new Date().toISOString().slice(0, 10),
+    periodStart: fy ? auditPeriodStartFromFinancialYear(fy) : new Date().toISOString().slice(0, 10),
   };
 }

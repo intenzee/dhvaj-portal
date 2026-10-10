@@ -205,7 +205,9 @@ export function IcfrWorkspace({
         : 'In progress';
   const finalOutcome = decided ? a.conclusion : null;
   const exempt = (finalOutcome ?? a.systemOutcome) === 'exempt';
-  const workstreamReady = decided && finalOutcome === 'applicable';
+  // The workstream follows the current result (the Applicable suggestion configures
+  // it; confirming freezes it; an Exempt result withdraws it).
+  const workstreamReady = (finalOutcome ?? a.systemOutcome) === 'applicable';
   const cfsInScope = d?.reportContexts?.find((c) => c.context === 'consolidated');
   const cited = [a.authorityProvisionId].filter((x): x is string => !!x);
   const conditions = d?.conditions ?? [];
@@ -560,14 +562,21 @@ export function IcfrWorkspace({
       {/* Section 05 ICFR workstream (§13) */}
       <Section id="icfr-workstream" title="ICFR workstream configuration (Section 05)" open>
         {workstreamReady ? (
-          (workstream ?? (
-            <p className="text-sm text-ink-muted">
-              ICFR reporting applies — the ICFR workstream is configured in Section 05 controls.
-            </p>
-          ))
+          <>
+            {!decided && (
+              <p className="text-xs text-warning-700">
+                Provisional — follows the system suggestion until IFC-04 confirms Applicable.
+              </p>
+            )}
+            {workstream ?? (
+              <p className="text-sm text-ink-muted">
+                ICFR reporting applies — the ICFR workstream is configured in Section 05 controls.
+              </p>
+            )}
+          </>
         ) : (
           <p className="text-sm text-ink-muted">
-            Configured only after Applicable is confirmed
+            Configured only when ICFR reporting is Applicable
             {decided ? ' — the current conclusion does not require ICFR reporting work.' : '.'}{' '}
             Normal control understanding and evaluation in Section 05 continue either way.
           </p>

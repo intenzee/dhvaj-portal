@@ -21,7 +21,10 @@ import { humanize } from '@/lib/format';
 import { Badge, Button, Card } from '@/components/ui';
 import { ExpandToggle } from '@/components/inline-panel';
 import { Facts } from './group-caro-card';
+import { IcfrConsolidated } from './icfr-consolidated';
+import { IcfrEvidence } from './icfr-evidence';
 import { IcfrWorkspace } from './icfr-workspace';
+import { IcfrWorkstream } from './icfr-workstream';
 
 /**
  * 02.5 ICFR and 02.7 other-reporting facts the portal already holds (Guide
@@ -116,6 +119,9 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
 
   if (!icfr && !or) return null;
   const editable = canManage && !!wf;
+  // An approved 02.5 shows its workstream, consideration and evidence read-only.
+  const icfrEditable =
+    canManage && !!icfr && !(icfr.approved ?? icfr.assessment.state === 'approved');
   const systems = or?.capturedFacts.softwareSystems ?? [];
 
   return (
@@ -168,7 +174,28 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
             {icfrOpen ? 'Hide the 02.5 ICFR workspace' : 'Open the 02.5 ICFR workspace'}
           </button>
           {icfrOpen && (
-            <IcfrWorkspace engagementId={engagementId} icfr={icfr} canManage={canManage} />
+            <IcfrWorkspace
+              engagementId={engagementId}
+              icfr={icfr}
+              canManage={canManage}
+              workstream={
+                <IcfrWorkstream
+                  engagementId={engagementId}
+                  workflowInstanceId={icfr.workflowInstanceId}
+                  canManage={icfrEditable}
+                />
+              }
+              consolidated={
+                <IcfrConsolidated
+                  engagementId={engagementId}
+                  workflowInstanceId={icfr.workflowInstanceId}
+                  canManage={icfrEditable}
+                />
+              }
+              evidence={
+                <IcfrEvidence engagementId={engagementId} icfr={icfr} readOnly={!icfrEditable} />
+              }
+            />
           )}
         </section>
       )}
