@@ -142,4 +142,22 @@ export class AuditFrameworkEvidenceController {
   ): Promise<FrameworkMemoCreated> {
     return this.evidence.createMemo(principal, id, wf, dto, SUB_SECTION_KEY.caro);
   }
+
+  @Post('icfr/memo')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Create the ICFR Reporting Applicability Memo (02.5 §20)',
+    description:
+      'Merges the 02.5 assessment, the Section 05 ICFR workstream and the consolidated ' +
+      'consideration into the approved Word template, stores it in the engagement workspace ' +
+      'and links it to 02.5; returns the Microsoft 365 link when on.',
+  })
+  createIcfrMemo(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wf: string,
+    @Body() dto: CreateFrameworkMemoDto,
+  ): Promise<FrameworkMemoCreated> {
+    return this.evidence.createMemo(principal, id, wf, dto, SUB_SECTION_KEY.icfr);
+  }
 }

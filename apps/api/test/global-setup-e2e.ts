@@ -21,6 +21,24 @@ export default async function globalSetup(): Promise<void> {
     process.env.DATABASE_MIGRATE_URL ??
     'postgres://hsdg_migrator:hsdg_migrator_dev_pw@localhost:5433/hsdg';
 
+  // The reset DROPs schema hsdg. Never point it at the persisted local dev DB
+  // (docker volume on :5433, database `hsdg`) by accident — use a scratch DB for
+  // all three URLs, or opt in explicitly. CI runs a throwaway Postgres on :5432.
+  const isLocalDevDb = (url: string): boolean => {
+    const u = new URL(url);
+    return u.port === '5433' && u.pathname.replace(/^\//, '') === 'hsdg';
+  };
+  if (
+    (isLocalDevDb(superuserUrl) || isLocalDevDb(migrateUrl)) &&
+    process.env.E2E_ALLOW_DEV_DB_RESET !== '1'
+  ) {
+    throw new Error(
+      'e2e would DROP the local dev database (localhost:5433/hsdg). Point DATABASE_URL, ' +
+        'DATABASE_SUPERUSER_URL and DATABASE_MIGRATE_URL at a scratch database, or set ' +
+        'E2E_ALLOW_DEV_DB_RESET=1 to reset the dev database on purpose.',
+    );
+  }
+
   const client = new Client({ connectionString: superuserUrl });
   await client.connect();
   try {

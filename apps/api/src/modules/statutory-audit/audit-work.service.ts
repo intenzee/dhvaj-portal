@@ -28,6 +28,7 @@ import { AuditAreaReviewService } from './audit-area-review.service';
 import { AuditRiskService } from './audit-risk.service';
 import { AuditFrameworkDownstreamService } from './audit-framework-downstream.service';
 import { AuditCaroProgrammeService } from './audit-caro-programme.service';
+import { AuditIcfrControlsService } from './audit-icfr-controls.service';
 import { isEngagementLead } from './master-facts';
 import {
   areaForRisk,
@@ -98,6 +99,7 @@ export class AuditWorkService {
     private readonly risk: AuditRiskService,
     private readonly downstream: AuditFrameworkDownstreamService,
     private readonly caroProgramme: AuditCaroProgrammeService,
+    private readonly icfrControls: AuditIcfrControlsService,
   ) {}
 
   // ── Read ──────────────────────────────────────────────────────────────────
@@ -848,6 +850,7 @@ export class AuditWorkService {
       risks: await this.readRisks(client, wi),
       smcRelaxations: await this.downstream.smcRelaxationsOn(client, wi),
       caroClauses: await this.caroProgramme.clauseProceduresOn(client, ctx, engagementId, wi),
+      icfrProcedures: await this.icfrControls.icfrProceduresOn(client, ctx, engagementId, wi),
     });
     const { rows: logged } = await client.query<{ source_key: string }>(
       `SELECT source_key FROM hsdg.audit_work_suggestion_log WHERE workflow_instance_id = $1`,
@@ -899,6 +902,7 @@ export class AuditWorkService {
       );
     }
     await this.caroProgramme.linkProceduresOn(client, wi);
+    await this.icfrControls.linkProceduresOn(client, wi);
     await this.audit.recordWith(client, ctx, {
       action: 'statutory_audit.work_suggested',
       objectType: 'service_workflow_instance',

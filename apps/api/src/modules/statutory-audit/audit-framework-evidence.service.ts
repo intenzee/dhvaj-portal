@@ -46,6 +46,7 @@ import { frameworkMemoMergeValues } from './framework-memo-values';
 import { isEngagementLead } from './master-facts';
 import { readScheduleIiiMemoInput, scheduleIiiMergeValues } from './schedule-iii-memo-values';
 import { caroMergeValues, readCaroMemoInput } from './caro-memo-values';
+import { icfrMergeValues, readIcfrMemoInput } from './icfr-memo-values';
 
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -92,6 +93,14 @@ const MEMOS: Partial<Record<SubSectionKey, MemoSpec>> = {
     noTemplate: noTemplate('CARO 2020 Applicability'),
     notOpen: 'Open 02.4 CARO 2020 Applicability before creating its memo.',
     values: async (client, wf) => caroMergeValues(await readCaroMemoInput(client, wf)),
+  },
+  [SUB_SECTION_KEY.icfr]: {
+    subSectionKey: SUB_SECTION_KEY.icfr,
+    templateKey: DOCUMENT_TEMPLATE_KEY.icfrApplicabilityMemo,
+    areaKey: FRAMEWORK_AREA_KEY.ifc,
+    noTemplate: noTemplate('ICFR Reporting Applicability'),
+    notOpen: 'Open 02.5 ICFR Reporting Applicability before creating its memo.',
+    values: async (client, wf) => icfrMergeValues(await readIcfrMemoInput(client, wf)),
   },
 };
 

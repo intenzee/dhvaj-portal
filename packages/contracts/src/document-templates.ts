@@ -23,6 +23,8 @@ export const DOCUMENT_TEMPLATE_KEY = {
   scheduleIiiPresentationMemo: 'schedule_iii_presentation_memo',
   /** 02.4 §16 — complex, overridden or consulted CARO applicability. */
   caroApplicabilityMemo: 'caro_applicability_memo',
+  /** 02.5 §20 — complex, overridden or consulted ICFR reporting applicability. */
+  icfrApplicabilityMemo: 'icfr_applicability_memo',
   /**
    * 02.3 §16 — the Financial Statements Workbook (Excel), one key per Schedule
    * III framework; each framework version names its key (`templateKey`).
@@ -41,7 +43,7 @@ export interface DocumentTemplateDefinition {
   /** File name of a created document; `{client}` is replaced with the client's name. */
   filenamePattern: string;
   /** The audit-file section that creates it (Section 01 lists only its own). */
-  section: '01' | '02.2' | '02.3' | '02.4';
+  section: '01' | '02.2' | '02.3' | '02.4' | '02.5';
   /** The file the firm uploads: a Word document (merged) or an Excel workbook. */
   format: TemplateFormat;
 }
@@ -102,6 +104,13 @@ export const DOCUMENT_TEMPLATE_DEFINITIONS: readonly DocumentTemplateDefinition[
     title: 'CARO 2020 Applicability Memo',
     filenamePattern: 'CARO 2020 Applicability Memo - {client}.docx',
     section: '02.4',
+    format: 'docx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.icfrApplicabilityMemo,
+    title: 'ICFR Reporting Applicability Memo',
+    filenamePattern: 'ICFR Reporting Applicability Memo - {client}.docx',
+    section: '02.5',
     format: 'docx',
   },
   {
@@ -339,6 +348,37 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'caro.pendingReason', label: 'CARO information pending', source: '02.4 CARO-06' },
   { key: 'caro.decidedBy', label: 'CARO concluded by', source: '02.4 CARO-06' },
   { key: 'caro.decidedAt', label: 'CARO concluded on', source: '02.4 CARO-06' },
+  { key: 'icfr.applicability', label: 'ICFR reporting applicability', source: '02.5 conclusion' },
+  { key: 'icfr.systemConclusion', label: 'ICFR system conclusion', source: '02.5 system' },
+  { key: 'icfr.systemReason', label: 'ICFR system reason', source: '02.5 §10' },
+  { key: 'icfr.entityRoute', label: 'ICFR entity route', source: '02.5 §5' },
+  { key: 'icfr.opcRoute', label: 'ICFR OPC route', source: '02.5 §6 (02.1)' },
+  { key: 'icfr.smallCompanyRoute', label: 'ICFR small company route', source: '02.5 §6 (02.1)' },
+  { key: 'icfr.turnover', label: 'ICFR turnover (actual vs limit)', source: '02.5 IFC-01' },
+  {
+    key: 'icfr.borrowings',
+    label: 'ICFR peak covered borrowings (actual vs limit)',
+    source: '02.5 IFC-02',
+  },
+  { key: 'icfr.filingCondition', label: 'ICFR filing-default condition', source: '02.5 IFC-03' },
+  {
+    key: 'icfr.notificationVersion',
+    label: 'ICFR exemption notification version',
+    source: '02.5 rule basis',
+  },
+  { key: 'icfr.workstream', label: 'ICFR workstream configuration', source: '02.5 §13' },
+  { key: 'icfr.deficiencies', label: 'ICFR deficiencies identified', source: '02.5 §16' },
+  { key: 'icfr.consolidated', label: 'ICFR consolidated consideration', source: '02.5 §17' },
+  { key: 'icfr.controlReminder', label: 'ICFR control audit reminder', source: '02.5 §12' },
+  { key: 'icfr.professionalConclusion', label: 'ICFR conclusion', source: '02.5 IFC-04' },
+  { key: 'icfr.overridden', label: 'ICFR overridden (Yes / No)', source: '02.5 IFC-04' },
+  { key: 'icfr.overrideReason', label: 'ICFR override reason', source: '02.5 IFC-04' },
+  { key: 'icfr.technicalBasis', label: 'ICFR technical basis', source: '02.5 IFC-04' },
+  { key: 'icfr.supportingEvidence', label: 'ICFR override evidence', source: '02.5 IFC-04' },
+  { key: 'icfr.partnerApproval', label: 'ICFR partner approval', source: '02.5 IFC-04' },
+  { key: 'icfr.pendingReason', label: 'ICFR information pending', source: '02.5 IFC-04' },
+  { key: 'icfr.decidedBy', label: 'ICFR concluded by', source: '02.5 IFC-04' },
+  { key: 'icfr.decidedAt', label: 'ICFR concluded on', source: '02.5 IFC-04' },
   { key: 'today', label: "Today's date", source: 'System' },
 ] as const;
 

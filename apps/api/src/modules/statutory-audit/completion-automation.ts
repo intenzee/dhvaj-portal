@@ -18,6 +18,7 @@
  */
 import type {
   CompletionGoTo,
+  IcfrReportingSummary,
   CompletionItemEvidence,
   CompletionItemState,
   FrameworkConclusion,
@@ -71,6 +72,12 @@ export interface CompletionFacts {
    * draft CARO annexure. Null when no clause programme is instantiated.
    */
   caroClauses?: { total: number; approved: number; reportable: number } | null;
+  /**
+   * The 02.5 ICFR workstream (spec §22): its conclusion and the deficiency
+   * register — MW / SD drive the IFC annexure and the SA 265 communication.
+   * Null when no workstream was ever set up.
+   */
+  icfr?: IcfrReportingSummary | null;
 }
 
 export interface PlannedCompletionItem {
@@ -208,6 +215,70 @@ function caroItem(
       (item.draftNote ? `${item.draftNote} ` : '') +
       `Draft CARO annexure from ${c.approved} approved clause conclusion(s)` +
       (c.reportable ? `, including ${c.reportable} reportable matter(s).` : '.'),
+  };
+}
+
+const DEF_LIST = 4;
+const named = (ds: ReadonlyArray<{ ref: string; description: string }>) =>
+  ds
+    .slice(0, DEF_LIST)
+    .map((d) => `${d.ref} ${clipText(d.description, 80)}`)
+    .join('; ') + (ds.length > DEF_LIST ? ` (+${ds.length - DEF_LIST} more)` : '');
+const clipText = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * The IFC report item: the Section 02 conclusion and the IFC procedures, plus
+ * the 02.5 ICFR workstream — ready only once the Engagement Partner has
+ * concluded on ICFR with every SD / MW concluded (spec §22).
+ */
+function icfrItem(
+  f: CompletionFacts,
+  procs: readonly CompletionProcedure[],
+): PlannedCompletionItem {
+  const item = reportItem(
+    f,
+    'ifc',
+    'IFC reporting',
+    procs,
+    'IFC report under Section 143(3)(i) prepared from the controls testing and the deficiency evaluation.',
+  );
+  const w = f.icfr;
+  if (!w?.workstreamActive || f.framework.get('ifc')?.conclusion !== 'applicable') return item;
+  const d = w.deficiencies;
+  const facts = [
+    `02.5 deficiency register: ${d.total} deficienc${d.total === 1 ? 'y' : 'ies'} — ` +
+      `${d.materialWeaknesses} material weakness(es), ${d.significantDeficiencies} significant, ` +
+      `${d.controlDeficiencies} control deficienc${d.controlDeficiencies === 1 ? 'y' : 'ies'}` +
+      (d.awaitingReview || d.awaitingPartner
+        ? ` (${d.awaitingReview} awaiting Manager review, ${d.awaitingPartner} awaiting the Partner).`
+        : '.'),
+    w.concluded
+      ? `ICFR concluded: ${w.conclusion?.replace(/_/g, ' ')}.`
+      : 'The Engagement Partner has not yet concluded on ICFR.',
+  ];
+  if (w.materialWeaknesses.length)
+    facts.push(`Material weakness(es): ${named(w.materialWeaknesses)}.`);
+  const settled = d.awaitingReview === 0 && d.awaitingPartner === 0;
+  const e = item.evidence;
+  const opinion =
+    w.conclusion === 'modified_material_weakness'
+      ? `Modified ICFR opinion — material weakness(es): ${named(w.materialWeaknesses)}.`
+      : w.conclusion === 'disclaimer'
+        ? 'Disclaimer of the ICFR opinion — sufficient appropriate evidence could not be obtained.'
+        : w.conclusion === 'unmodified'
+          ? 'Unmodified ICFR opinion — adequate and operating effectively.'
+          : null;
+  const sd = w.significantDeficiencies.length
+    ? ` Significant deficiencies communicated in writing to those charged with governance (SA 265): ${named(w.significantDeficiencies)}.`
+    : '';
+  return {
+    evidence: evidence(
+      [...e.facts, ...facts],
+      e.suggestedState === 'not_started' && d.total > 0 ? 'in_progress' : e.suggestedState,
+      e.ready && w.concluded && settled,
+      e.goTo,
+    ),
+    draftNote: [item.draftNote, opinion, sd.trim() || null].filter(Boolean).join(' '),
   };
 }
 
@@ -389,7 +460,14 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
   const annexures: string[] = [];
   if (f.framework.get('caro')?.conclusion === 'applicable')
     annexures.push('CARO 2020 (Annexure A)');
-  if (f.framework.get('ifc')?.conclusion === 'applicable') annexures.push('IFC (Annexure B)');
+  if (f.framework.get('ifc')?.conclusion === 'applicable')
+    annexures.push(
+      f.icfr?.conclusion === 'modified_material_weakness'
+        ? 'IFC (Annexure B, modified — material weakness)'
+        : f.icfr?.conclusion === 'disclaimer'
+          ? 'IFC (Annexure B, disclaimer)'
+          : 'IFC (Annexure B)',
+    );
   {
     const p = progress(reporting, "No auditor's report procedure in the audit work yet.");
     out.set('auditors_report', {
@@ -420,12 +498,9 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
   );
   out.set(
     'ifc',
-    reportItem(
+    icfrItem(
       f,
-      'ifc',
-      'IFC reporting',
       by((p) => p.workAreaKey === 'ifc'),
-      'IFC report under Section 143(3)(i) prepared from the controls testing and the deficiency evaluation.',
     ),
   );
 

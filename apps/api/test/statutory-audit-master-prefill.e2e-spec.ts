@@ -216,7 +216,9 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     expect(or.body[0].capturedFacts.fraudIdentified).toBe(false);
 
     const icfr = await request(app.getHttpServer()).get(`${base}/icfr`).set(bearer(pa)).expect(200);
-    expect(icfr.body[0].capturedFacts.filingDefault).toBe(false);
+    // The team's documented filing answer stays unknown — the engine reads the
+    // calendar live; unknown is never "no default".
+    expect(icfr.body[0].capturedFacts.filingDefault).toBeNull();
     expect((icfr.body[0].masterFacts as Array<{ label: string }>).map((f) => f.label)).toContain(
       'ROC filing record (§92 / §137)',
     );
@@ -229,7 +231,7 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
     expect([403, 404]).toContain(res.status);
   });
 
-  it('02.5: an overdue AOC-4 on the compliance calendar marks the ROC filing default', async () => {
+  it('02.5: an overdue AOC-4 on the compliance calendar is a traceable filing default', async () => {
     const entityId = await newEntity('private_limited', 'Prefill Late Filer');
     const roc = await findId('/api/v1/services?search=ROC_ANNUAL&limit=100');
     const rocEng = await post(pa, '/api/v1/engagements', {
@@ -249,7 +251,22 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
       .get(`/api/v1/engagements/${engId}/statutory-audit/icfr`)
       .set(bearer(pa))
       .expect(200);
-    expect(icfr.body[0].capturedFacts.filingDefault).toBe(true);
+    // Read live as an IFC-03 record (never copied into the team's answer).
+    expect(icfr.body[0].capturedFacts.filingDefault).toBeNull();
+    expect(icfr.body[0].detail.filing).toMatchObject({ status: 'default_identified' });
+    expect(icfr.body[0].detail.filing.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          form: 'AOC-4',
+          section: '137',
+          source: 'compliance_calendar',
+          filedOn: null,
+          defaulted: true,
+        }),
+      ]),
+    );
+    expect(icfr.body[0].detail.filingDefaultBlocks).toBe(true);
+    expect(icfr.body[0].assessment.systemOutcome).toBe('applicable');
     const record = (icfr.body[0].masterFacts as Array<{ label: string; value: string }>).find(
       (f) => f.label === 'ROC filing record (§92 / §137)',
     );

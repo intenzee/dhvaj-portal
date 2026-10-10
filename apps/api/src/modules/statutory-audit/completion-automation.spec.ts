@@ -1,3 +1,4 @@
+import type { IcfrReportingSummary } from '@hsdg/contracts';
 import {
   periodEndLabel,
   planCompletionItems,
@@ -96,6 +97,53 @@ describe('completion automation', () => {
     expect(full.evidence.ready).toBe(true);
     expect(full.draftNote).toMatch(
       /Draft CARO annexure from 21 approved clause conclusion\(s\)\.$/,
+    );
+  });
+
+  it('the IFC item waits for the 02.5 ICFR conclusion and names material weaknesses', () => {
+    const fw = new Map(facts().framework);
+    fw.set('ifc', { conclusion: 'applicable', basis: null });
+    const done = proc({ ref: 'P-09', workAreaKey: 'ifc', state: 'complete' });
+    const icfr = {
+      workstreamActive: true,
+      conclusion: null as IcfrReportingSummary['conclusion'],
+      concluded: false,
+      deficiencies: {
+        total: 2,
+        open: 2,
+        controlDeficiencies: 0,
+        significantDeficiencies: 1,
+        materialWeaknesses: 1,
+        awaitingReview: 0,
+        awaitingPartner: 1,
+      },
+      materialWeaknesses: [{ ref: 'ICD-001', description: 'No review of journals' }],
+      significantDeficiencies: [{ ref: 'ICD-002', description: 'Late reconciliations' }],
+      consolidated: { active: false, parentConclusion: null, componentMaterialWeaknesses: 0 },
+    } satisfies IcfrReportingSummary;
+    const open = planCompletionItems(
+      facts({ framework: fw, procedures: [done], icfr: { ...icfr } }),
+    ).get('ifc')!;
+    expect(open.evidence.ready).toBe(false);
+    expect(open.evidence.facts).toContain('The Engagement Partner has not yet concluded on ICFR.');
+    const concluded = planCompletionItems(
+      facts({
+        framework: fw,
+        procedures: [done],
+        icfr: {
+          ...icfr,
+          conclusion: 'modified_material_weakness',
+          concluded: true,
+          deficiencies: { ...icfr.deficiencies, awaitingPartner: 0 },
+        },
+      }),
+    );
+    expect(concluded.get('ifc')!.evidence.ready).toBe(true);
+    expect(concluded.get('ifc')!.draftNote).toMatch(
+      /Modified ICFR opinion — material weakness\(es\): ICD-001 No review of journals\..*SA 265\): ICD-002/,
+    );
+    expect(concluded.get('auditors_report')!.evidence.facts.at(-1)).toMatch(
+      /IFC \(Annexure B, modified — material weakness\)/,
     );
   });
 

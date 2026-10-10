@@ -6,6 +6,7 @@ import type {
   OtherReportingCapturedFacts,
 } from '@hsdg/contracts';
 import {
+  calendarFilings,
   caroFromMaster,
   consolidationFromMaster,
   fillCaro,
@@ -18,6 +19,7 @@ import {
   icfrFromSources,
   lateRocFilings,
   otherReportingFromSources,
+  precedingFinancialYear,
   specialEntityTypesFromMaster,
 } from './framework-facts-prefill';
 import type {
@@ -211,7 +213,7 @@ describe('02.6 consolidation from the client master', () => {
 
 describe('02.5 ICFR from the compliance calendar', () => {
   const TODAY = '2026-10-03';
-  const BLANK: IcfrCapturedFacts = { peakCoveredBorrowings: null, filingDefault: false };
+  const BLANK: IcfrCapturedFacts = { peakCoveredBorrowings: null, filingDefault: null };
   const filing = (p: Partial<RocFiling>): RocFiling => ({
     form: 'AOC-4',
     deadline: '2025-10-30',
@@ -237,23 +239,56 @@ describe('02.5 ICFR from the compliance calendar', () => {
     ]);
   });
 
-  it('switches the filing default on when the record shows one', () => {
+  it('shows a late filing on the master facts but never writes it into the team answer', () => {
     const fill = icfrFromSources(
       master(),
       [filing({ status: 'open', completedOn: null, deadline: '2026-09-30' })],
       TODAY,
     );
+    expect(fill.facts[0]!.value).toMatch(/^Default — AOC-4 due 2026-09-30 not filed/);
     const { next, filled } = fillIcfr(BLANK, fill);
-    expect(next.filingDefault).toBe(true);
+    // The 02.5 engine reads the calendar live as traceable IFC-03 records.
+    expect(next.filingDefault).toBeNull();
     expect(next.peakCoveredBorrowings).toBeNull();
-    expect(filled).toEqual(['ROC filing default']);
+    expect(filled).toEqual([]);
   });
 
-  it('records on-time filings as no default and leaves an unknown record alone', () => {
-    expect(icfrFromSources(master(), [filing({})], TODAY).values.filingDefault).toBe(false);
+  it('summarises on-time filings and leaves an unknown record alone', () => {
+    expect(icfrFromSources(master(), [filing({})], TODAY).facts[0]!.value).toMatch(/^On time/);
     const none = icfrFromSources(master(), [], TODAY);
     expect(none.values.filingDefault).toBeUndefined();
     expect(none.facts[0]!.value).toBeNull();
+  });
+});
+
+describe('02.5 ICFR filing records from the compliance calendar', () => {
+  it('maps AOC-4 / MGT-7 obligations from the audit period start, dropping waived ones', () => {
+    const recs = calendarFilings(
+      [
+        { form: 'AOC-4', deadline: '2023-10-30', status: 'completed', completedOn: '2023-10-01' },
+        { form: 'AOC-4', deadline: '2024-10-30', status: 'completed', completedOn: '2024-11-05' },
+        { form: 'MGT-7', deadline: '2024-11-29', status: 'open', completedOn: null },
+        { form: 'MGT-7', deadline: '2024-12-29', status: 'waived', completedOn: null },
+      ],
+      '2024-04-01',
+    );
+    expect(recs).toEqual([
+      expect.objectContaining({
+        form: 'AOC-4',
+        section: '137',
+        period: '2023-24',
+        dueDate: '2024-10-30',
+        filedOn: '2024-11-05',
+        source: 'compliance_calendar',
+      }),
+      expect.objectContaining({ form: 'MGT-7', section: '92', period: '2023-24', filedOn: null }),
+    ]);
+  });
+
+  it('derives the preceding financial year', () => {
+    expect(precedingFinancialYear('2024-25')).toBe('2023-24');
+    expect(precedingFinancialYear('2000-01')).toBe('1999-00');
+    expect(precedingFinancialYear('bad')).toBeNull();
   });
 });
 

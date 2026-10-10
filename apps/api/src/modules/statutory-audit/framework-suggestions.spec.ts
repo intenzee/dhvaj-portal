@@ -214,6 +214,13 @@ describe('suggestArea — advisory applicability (§19), thresholds resolved fro
     expect(s.basis).toMatch(/02\.4/);
   });
 
+  it('IFC: never decided here — 02.5 (icfr.ts) assesses it and the area mirrors it', () => {
+    const s = suggestArea(FRAMEWORK_AREA_KEY.ifc, facts({ isCompany: true }), resolve);
+    expect(s.suggestion).toBeNull();
+    expect(s.state).toBe('professional_judgement_required');
+    expect(s.basis).toMatch(/02\.5/);
+  });
+
   it('CFS: subsidiaries present ⇒ applicable; none ⇒ not applicable', () => {
     expect(
       suggestArea(FRAMEWORK_AREA_KEY.cfs, facts({ hasSubsidiariesOrAssociates: true }), resolve)

@@ -31,6 +31,7 @@ import {
   type PlannedCompletionItem,
 } from './completion-automation';
 import { readCaroClauseStatus } from './caro-programme-read';
+import { readIcfrReportingOn } from './icfr-controls-read';
 import { isEngagementLead } from './master-facts';
 import { planSignOff, type SignOffFacts } from './sign-off-automation';
 import { addDays, addYears, day, planArchive, type ArchiveFacts } from './archive-automation';
@@ -313,6 +314,7 @@ export class AuditCompletionService {
         ? { om: num(mat.rows[0].om), pm: num(mat.rows[0].pm), ctt: num(mat.rows[0].ctt) }
         : null,
       caroClauses: await readCaroClauseStatus(client, wi),
+      icfr: await readIcfrReportingOn(client, wi),
     };
   }
 
