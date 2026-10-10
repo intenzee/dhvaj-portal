@@ -58,6 +58,7 @@ import {
   type ProgrammePlan,
 } from './caro-programme';
 import { componentAuditorFeedOn } from './consolidation-group-read';
+import { componentsFromDetail } from './consolidation-read';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
 
 /** The Section 06 work area every CARO clause procedure lives in. */
@@ -960,23 +961,19 @@ export class AuditCaroProgrammeService {
     if (!items[0]) return;
     const itemId = items[0].id;
     const { rows } = await client.query<{
-      perimeter: Array<{
-        name: string;
-        relationship: string;
-        included?: string;
-        method: string;
-      }> | null;
+      detail: unknown;
     }>(
-      `SELECT system_detail -> 'perimeter' AS perimeter
+      `SELECT system_detail AS detail
          FROM hsdg.audit_framework_subassessment
         WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3`,
       [workflowInstanceId, SUB_SECTION_KEY.consolidation, FRAMEWORK_AREA_KEY.cfs],
     );
-    // Only the companies the CFS includes — an excluded / out-of-period entity is not one (02.6 §8).
-    const perimeter = (rows[0]?.perimeter ?? []).filter(
-      (p) =>
-        p?.name?.trim() && CFS_COMPONENT_RELATIONSHIPS.has(p.relationship) && p.included !== 'no',
+    // Excluded / outside-the-period entries (included = 'no') are not components.
+    const perimeter = componentsFromDetail(rows[0]?.detail).filter(
+      (p) => p.included !== 'no' && CFS_COMPONENT_RELATIONSHIPS.has(p.relationship),
     );
+    // The matrix feed is keyed on the stable component id; rows here keep their name key.
+    const keyById = new Map(perimeter.map((p) => [p.id, componentKey(p.name)]));
     const keys: string[] = [];
     let order = 0;
     for (const p of perimeter) {
@@ -1005,6 +1002,8 @@ export class AuditCaroProgrammeService {
     // 02.6 §20 — one group structure: the component auditor matrix supplies the
     // auditor and the linked report; a team entry is never overwritten.
     for (const f of await componentAuditorFeedOn(client, workflowInstanceId)) {
+      const key = keyById.get(f.componentId);
+      if (!key) continue;
       if (
         f.auditorType !== COMPONENT_AUDITOR_TYPE.dhvaj &&
         f.auditorType !== COMPONENT_AUDITOR_TYPE.otherAuditor
@@ -1017,7 +1016,7 @@ export class AuditCaroProgrammeService {
           WHERE item_id = $1 AND source_key = $2 AND withdrawn_at IS NULL
             AND ((auditor_name IS NULL AND $3::text IS NOT NULL)
               OR (auditor_report_document_id IS NULL AND $4::uuid IS NOT NULL))`,
-        [itemId, componentKey(f.componentName), f.auditorName, f.reportDocumentId],
+        [itemId, key, f.auditorName, f.reportDocumentId],
       );
     }
   }
