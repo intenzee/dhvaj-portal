@@ -53,6 +53,10 @@ const MEMO: Record<string, { path: string; title: string }> = {
     path: 'caro/memo',
     title: 'CARO 2020 Applicability Memo',
   },
+  '02.5': {
+    path: 'icfr/memo',
+    title: 'ICFR Reporting Applicability Memo',
+  },
 };
 export function FrameworkEvidence({
   engagementId,

@@ -129,6 +129,15 @@ export const ICFR_CONTROL_FREQUENCIES = [
   'ad_hoc',
 ] as const;
 export type IcfrControlFrequency = (typeof ICFR_CONTROL_FREQUENCIES)[number];
+export const ICFR_CONTROL_FREQUENCY_LABEL: Record<IcfrControlFrequency, string> = {
+  transactional: 'Each transaction',
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  quarterly: 'Quarterly',
+  annual: 'Annual',
+  ad_hoc: 'Ad hoc',
+};
 
 export const ICFR_CONTROL_REVIEW_STATE = {
   open: 'open',
@@ -242,6 +251,12 @@ export const ICFR_WORKSTREAM_STATE = {
 } as const;
 export type IcfrWorkstreamState =
   (typeof ICFR_WORKSTREAM_STATE)[keyof typeof ICFR_WORKSTREAM_STATE];
+export const ICFR_WORKSTREAM_STATE_LABEL: Record<IcfrWorkstreamState, string> = {
+  awaiting_conclusion: 'Awaiting the 02.5 conclusion',
+  not_required: 'Not required — reporting exempt',
+  active: 'Active',
+  withdrawn: 'Withdrawn',
+};
 
 // ── §17 consolidated consideration ───────────────────────────────────────────
 
@@ -255,9 +270,17 @@ export const ICFR_COMPONENT_ICFR_LABEL: Record<IcfrComponentIcfr, string> = {
 
 export const ICFR_COMPONENT_AUDITORS = ['dhvaj', 'other'] as const;
 export type IcfrComponentAuditor = (typeof ICFR_COMPONENT_AUDITORS)[number];
+export const ICFR_COMPONENT_AUDITOR_LABEL: Record<IcfrComponentAuditor, string> = {
+  dhvaj: 'DHVAJ',
+  other: 'Other auditor',
+};
 
 export const ICFR_COMPONENT_MATERIALITY = ['significant', 'not_significant'] as const;
 export type IcfrComponentMateriality = (typeof ICFR_COMPONENT_MATERIALITY)[number];
+export const ICFR_COMPONENT_MATERIALITY_LABEL: Record<IcfrComponentMateriality, string> = {
+  significant: 'Significant to the group',
+  not_significant: 'Not significant',
+};
 
 export const ICFR_PARENT_CONCLUSIONS = [
   'unmodified',
@@ -283,6 +306,12 @@ export const ICFR_CONSOLIDATED_STATE = {
 } as const;
 export type IcfrConsolidatedState =
   (typeof ICFR_CONSOLIDATED_STATE)[keyof typeof ICFR_CONSOLIDATED_STATE];
+export const ICFR_CONSOLIDATED_STATE_LABEL: Record<IcfrConsolidatedState, string> = {
+  not_required: 'Not required',
+  pending: 'Pending — awaiting 02.6',
+  active: 'Active',
+  withdrawn: 'Withdrawn',
+};
 
 // ── Records ──────────────────────────────────────────────────────────────────
 
