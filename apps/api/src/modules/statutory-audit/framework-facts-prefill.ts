@@ -395,26 +395,24 @@ export function otherReportingFromSources(
         // The system, its module and its edit-log feature carry over; whether
         // the trail ran all THIS year (and everything after it on the spec §11
         // register) is this year's fact — pending until the team confirms it.
-        .map(
-          (x): SoftwareSystemInput => ({
-            ...(x.id ? { id: x.id } : {}),
-            name: x.name.trim(),
-            hasAuditTrailFeature: x.hasAuditTrailFeature === true || x.featureStatus === 'available',
-            auditTrailOperatedAllYear: false,
-            module: x.module ?? 'gl',
-            moduleOther: x.moduleOther ?? null,
-            booksAffected: x.booksAffected ?? null,
-            featureStatus:
-              x.featureStatus ?? (x.hasAuditTrailFeature === true ? 'available' : 'pending'),
-            enabledThroughout: 'pending',
-            transactionsCovered: 'pending',
-            privilegedUsers: x.privilegedUsers ?? null,
-            canAlterOrDisable: 'pending',
-            tampering: 'pending',
-            preservation: 'pending',
-            conclusion: 'pending',
-          }),
-        )
+        .map((x): SoftwareSystemInput => ({
+          ...(x.id ? { id: x.id } : {}),
+          name: x.name.trim(),
+          hasAuditTrailFeature: x.hasAuditTrailFeature === true || x.featureStatus === 'available',
+          auditTrailOperatedAllYear: false,
+          module: x.module ?? 'gl',
+          moduleOther: x.moduleOther ?? null,
+          booksAffected: x.booksAffected ?? null,
+          featureStatus:
+            x.featureStatus ?? (x.hasAuditTrailFeature === true ? 'available' : 'pending'),
+          enabledThroughout: 'pending',
+          transactionsCovered: 'pending',
+          privilegedUsers: x.privilegedUsers ?? null,
+          canAlterOrDisable: 'pending',
+          tampering: 'pending',
+          preservation: 'pending',
+          conclusion: 'pending',
+        }))
     : [];
   if (systems.length) values.softwareSystems = systems;
   facts.push({

@@ -107,7 +107,8 @@ function rule11eOf(
 /** Normalise a software row to the full spec §11 register shape. */
 export function normaliseSystem(s: SoftwareSystemInput, i: number): Required<SoftwareSystemInput> {
   const featureStatus = s.featureStatus ?? (s.hasAuditTrailFeature ? 'available' : 'not_available');
-  const enabledThroughout = s.enabledThroughout ?? (s.auditTrailOperatedAllYear ? 'yes' : 'pending');
+  const enabledThroughout =
+    s.enabledThroughout ?? (s.auditTrailOperatedAllYear ? 'yes' : 'pending');
   return {
     id: s.id ?? `sys-${i + 1}`,
     name: s.name,
@@ -162,7 +163,10 @@ export function normaliseCaptured(
   return {
     ...base,
     ...f,
-    softwareSystems: (f.softwareSystems ?? []).map((s, i) => ({ ...s, id: s.id ?? `sys-${i + 1}` })),
+    softwareSystems: (f.softwareSystems ?? []).map((s, i) => ({
+      ...s,
+      id: s.id ?? `sys-${i + 1}`,
+    })),
     managerialPersons: (f.managerialPersons ?? []).map((p, i) => ({
       ...p,
       id: p.id ?? `mp-${i + 1}`,
@@ -190,7 +194,9 @@ function systemResult(raw: SoftwareSystemInput, i: number): AuditTrailSystemResu
   if (s.featureStatus === 'not_available') exceptions.push('No audit-trail (edit-log) feature');
   if (s.enabledThroughout === 'no') exceptions.push('Audit trail not enabled throughout the year');
   if (s.enabledThroughout === 'exceptions')
-    exceptions.push(`Audit trail disabled for part of the year${s.enabledNote ? ` — ${s.enabledNote}` : ''}`);
+    exceptions.push(
+      `Audit trail disabled for part of the year${s.enabledNote ? ` — ${s.enabledNote}` : ''}`,
+    );
   if (s.transactionsCovered === 'gaps') exceptions.push('Not all transactions are covered');
   if (s.canAlterOrDisable === 'yes')
     exceptions.push('Privileged users can alter or disable the audit trail');
@@ -271,7 +277,10 @@ function sum(xs: Array<number | null | undefined>): number | null {
 
 function scheduleVBandsOf(rule: ResolvedRule | null): ScheduleVBand[] {
   if (!rule) return [];
-  const cond = (rule.condition ?? {}) as { excess_percent?: number; doubled_by_special_resolution?: boolean };
+  const cond = (rule.condition ?? {}) as {
+    excess_percent?: number;
+    doubled_by_special_resolution?: boolean;
+  };
   return [...rule.bands]
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((b) => ({
@@ -335,7 +344,8 @@ function scheduleV(
     };
   const band =
     bands.find(
-      (b) => (b.capitalFrom == null || ec >= b.capitalFrom) && (b.capitalTo == null || ec < b.capitalTo),
+      (b) =>
+        (b.capitalFrom == null || ec >= b.capitalFrom) && (b.capitalTo == null || ec < b.capitalTo),
     ) ?? null;
   let ceiling: number | null = null;
   let doubled = false;
@@ -372,7 +382,8 @@ function remuneration(f: OtherReportingBaseFacts, resolve: RuleResolver): Remune
   const executives = persons.filter((p) => EXECUTIVE.has(p.category));
   const nonExec = persons.filter((p) => p.category === MANAGERIAL_CATEGORY.nonExecutiveDirector);
   const hasMgmt = executives.length > 0 || f.hasManagingOrWholeTimeDirector;
-  const paidTotal = persons.length > 0 ? sum(persons.map((p) => p.remuneration)) : f.managerialRemunerationPaid;
+  const paidTotal =
+    persons.length > 0 ? sum(persons.map((p) => p.remuneration)) : f.managerialRemunerationPaid;
   const np = f.section198NetProfit;
 
   const overallRule = resolve(AREA_143, C.managerialRemunerationPercent);
@@ -423,7 +434,7 @@ function remuneration(f: OtherReportingBaseFacts, resolve: RuleResolver): Remune
         paidPercent: null,
         within: null,
         approvalRoute: false,
-        basis: 'Not relevant to this company\'s managerial structure.',
+        basis: "Not relevant to this company's managerial structure.",
       };
     if (limit == null || np == null || np <= 0 || paid == null)
       return {
@@ -465,7 +476,15 @@ function remuneration(f: OtherReportingBaseFacts, resolve: RuleResolver): Remune
 
   const R = OTHER_REPORTING_RULE_CODE;
   const categories: RemunerationCategoryTest[] = [
-    test('overall', 'Overall managerial remuneration', R.overallLimit, overallRule, true, paidTotal, ap.overallSpecialResolution),
+    test(
+      'overall',
+      'Overall managerial remuneration',
+      R.overallLimit,
+      overallRule,
+      true,
+      paidTotal,
+      ap.overallSpecialResolution,
+    ),
     test(
       'one_executive',
       'One MD / WTD / Manager',
@@ -534,7 +553,9 @@ function remuneration(f: OtherReportingBaseFacts, resolve: RuleResolver): Remune
     return {
       ...base,
       outcome:
-        sv.ceiling == null ? REMUNERATION_OUTCOME.informationInsufficient : REMUNERATION_OUTCOME.scheduleVRoute,
+        sv.ceiling == null
+          ? REMUNERATION_OUTCOME.informationInsufficient
+          : REMUNERATION_OUTCOME.scheduleVRoute,
       permittedAmount,
       scheduleVRoute: true,
       scheduleV: sv,
@@ -563,13 +584,23 @@ function remuneration(f: OtherReportingBaseFacts, resolve: RuleResolver): Remune
 
 // ── Section 143(12) summary (records are Track B's) ─────────────────────────
 
+function addDaysUtc(iso: string, days: number): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function fraud(f: OtherReportingBaseFacts, resolve: RuleResolver): FraudResult {
   const s = f.fraud;
-  const thresholdAmount = s.thresholdAmount ?? resolve(AREA_143, C.fraudReportingThreshold)?.threshold ?? null;
+  const thresholdAmount =
+    s.thresholdAmount ?? resolve(AREA_143, C.fraudReportingThreshold)?.threshold ?? null;
   if (s.matters > 0)
     return {
       identified: true,
-      route: s.centralGovernmentRoute > 0 ? FRAUD_ROUTE.centralGovernment : FRAUD_ROUTE.auditCommitteeBoard,
+      route:
+        s.centralGovernmentRoute > 0
+          ? FRAUD_ROUTE.centralGovernment
+          : FRAUD_ROUTE.auditCommitteeBoard,
       thresholdAmount,
       amount: null,
       boardReplyByDate: null,
@@ -588,15 +619,21 @@ function fraud(f: OtherReportingBaseFacts, resolve: RuleResolver): FraudResult {
       formReference: null,
       basis: `No fraud matter recorded — the Section 143(12) framework is available (threshold ${thresholdAmount != null ? formatInrCrore(thresholdAmount) : '—'}).`,
     };
-  // Legacy single-fraud facts (before the Fraud Matter register): route only.
+  // Legacy single-fraud facts (before the Fraud Matter register): the route and
+  // indicative Rule 13 dates from the event date (day counts are rule data).
   const cg = f.fraudAmount != null && thresholdAmount != null && f.fraudAmount >= thresholdAmount;
+  const replyDays = resolve(AREA_143, C.boardReplyDays)?.threshold ?? null;
+  const cgDays = resolve(AREA_143, C.cgForwardDays)?.threshold ?? null;
+  const boardReplyByDate =
+    f.fraudEventDate && replyDays != null ? addDaysUtc(f.fraudEventDate, replyDays) : null;
   return {
     identified: true,
     route: cg ? FRAUD_ROUTE.centralGovernment : FRAUD_ROUTE.auditCommitteeBoard,
     thresholdAmount,
     amount: f.fraudAmount,
-    boardReplyByDate: null,
-    cgForwardByDate: null,
+    boardReplyByDate,
+    cgForwardByDate:
+      cg && boardReplyByDate && cgDays != null ? addDaysUtc(boardReplyByDate, cgDays) : null,
     formReference: cg ? 'ADT-4' : null,
     basis: `Fraud ${f.fraudAmount != null ? formatInrCrore(f.fraudAmount) : 'amount not captured'} vs the ${thresholdAmount != null ? formatInrCrore(thresholdAmount) : '—'} threshold — ${cg ? 'Central Government route (ADT-4)' : 'Audit Committee / Board route'}. Record it on the Fraud Matter register to run the Rule 13 deadlines.`,
   };
@@ -681,14 +718,19 @@ function buildCards(
 
   const branchesKnown = x.group.branchesExist;
   const branchAuditors = x.group.branchAuditors;
-  const trailBooks = g.systems.filter((s) => s.conclusion === AUDIT_TRAIL_CONCLUSION.modifiedExpected);
+  const trailBooks = g.systems.filter(
+    (s) => s.conclusion === AUDIT_TRAIL_CONCLUSION.modifiedExpected,
+  );
 
   const cards: CardDraft[] = [
     s143(CARD.s143Information, 'Section 143(3)(a)', 'Information and explanations', {
       workSource: 'Audit-wide / completion',
       systemExceptions:
         f.informationObtained === 'no' ? ['Information / explanations not obtained'] : [],
-      systemReportingStatus: triStatus(f.informationObtained === 'no', f.informationObtained === 'pending'),
+      systemReportingStatus: triStatus(
+        f.informationObtained === 'no',
+        f.informationObtained === 'pending',
+      ),
     }),
     s143(CARD.s143Books, 'Section 143(3)(b)', 'Proper books of account', {
       workSource: 'Books / accounting records assessment',
@@ -700,7 +742,11 @@ function buildCards(
     }),
     s143(CARD.s143BranchReturns, 'Section 143(3)(b)', 'Proper returns from branches not visited', {
       applicability:
-        branchesKnown == null ? APPL.pending : branchesKnown ? APPL.applicable : APPL.notApplicableToFacts,
+        branchesKnown == null
+          ? APPL.pending
+          : branchesKnown
+            ? APPL.applicable
+            : APPL.notApplicableToFacts,
       applicabilityBasis:
         branchesKnown == null
           ? 'Conditional — 02.6 BR-01 has not answered whether the company has branches.'
@@ -711,7 +757,9 @@ function buildCards(
       workSource: '02.6 / branch work',
       workConfigured: WC.conditional,
       systemExceptions:
-        x.group.branchReturnsReceived === false ? ['Proper returns not received from branches not visited'] : [],
+        x.group.branchReturnsReceived === false
+          ? ['Proper returns not received from branches not visited']
+          : [],
       systemReportingStatus: triStatus(
         x.group.branchReturnsReceived === false,
         x.group.branchReturnsReceived == null,
@@ -735,24 +783,40 @@ function buildCards(
       workSource: '02.6',
       workConfigured: WC.conditional,
       systemReportingStatus:
-        branchAuditors > 0 && x.group.branchReportsPending === 0 ? RS.unmodifiedExpected : RS.notDetermined,
+        branchAuditors > 0 && x.group.branchReportsPending === 0
+          ? RS.unmodifiedExpected
+          : RS.notDetermined,
       anchors: [ANCHOR.section143_3, ANCHOR.section143_8],
     }),
-    s143(CARD.s143Agreement, 'Section 143(3)(d)', 'Financial statements agree with books / returns', {
-      workSource: 'Completion / FS tie-out',
-    }),
+    s143(
+      CARD.s143Agreement,
+      'Section 143(3)(d)',
+      'Financial statements agree with books / returns',
+      {
+        workSource: 'Completion / FS tie-out',
+      },
+    ),
     s143(CARD.s143Standards, 'Section 143(3)(e)', 'Compliance with Accounting Standards', {
       workSource: '02.2 + FS review',
     }),
-    s143(CARD.s143Adverse, 'Section 143(3)(f)', 'Observations / comments adversely affecting functioning', {
-      workSource: 'Completion / significant matters',
-      systemExceptions: f.adverseObservations === 'yes' ? ['Adverse observations to report'] : [],
-      systemReportingStatus: triStatus(f.adverseObservations === 'yes', f.adverseObservations === 'pending'),
-    }),
+    s143(
+      CARD.s143Adverse,
+      'Section 143(3)(f)',
+      'Observations / comments adversely affecting functioning',
+      {
+        workSource: 'Completion / significant matters',
+        systemExceptions: f.adverseObservations === 'yes' ? ['Adverse observations to report'] : [],
+        systemReportingStatus: triStatus(
+          f.adverseObservations === 'yes',
+          f.adverseObservations === 'pending',
+        ),
+      },
+    ),
     s143(CARD.s143Directors, 'Section 143(3)(g)', 'Director disqualification u/s 164(2)', {
       applicabilityBasis: `Applies where relevant — ${d.total} director(s) on the 02.7 director workpaper.`,
       workSource: 'Director workpaper (Section 164(2))',
-      systemExceptions: d.disqualified > 0 ? [`${d.disqualified} director(s) disqualified u/s 164(2)`] : [],
+      systemExceptions:
+        d.disqualified > 0 ? [`${d.disqualified} director(s) disqualified u/s 164(2)`] : [],
       systemReportingStatus:
         d.conclusion === 'identified'
           ? RS.modifiedExpected
@@ -761,15 +825,24 @@ function buildCards(
             : RS.notDetermined,
       anchors: [ANCHOR.section143_3, ANCHOR.section164_2],
     }),
-    s143(CARD.s143AccountsQualification, 'Section 143(3)(h)', 'Qualification / reservation on maintenance of accounts', {
-      workSource: 'Books / accounting records assessment',
-      systemExceptions:
-        f.accountsQualification === 'yes' ? ['Qualification relating to maintenance of accounts'] : [],
-      systemReportingStatus: triStatus(f.accountsQualification === 'yes', f.accountsQualification === 'pending'),
-    }),
+    s143(
+      CARD.s143AccountsQualification,
+      'Section 143(3)(h)',
+      'Qualification / reservation on maintenance of accounts',
+      {
+        workSource: 'Books / accounting records assessment',
+        systemExceptions:
+          f.accountsQualification === 'yes'
+            ? ['Qualification relating to maintenance of accounts']
+            : [],
+        systemReportingStatus: triStatus(
+          f.accountsQualification === 'yes',
+          f.accountsQualification === 'pending',
+        ),
+      },
+    ),
     s143(CARD.s143Icfr, 'Section 143(3)(i)', 'Internal financial controls (ICFR)', {
-      applicability:
-        x.icfr.reportingRequired === false ? APPL.notApplicable : APPL.crossReference,
+      applicability: x.icfr.reportingRequired === false ? APPL.notApplicable : APPL.crossReference,
       applicabilityBasis:
         x.icfr.reportingRequired === false
           ? `02.5 concluded ICFR reporting is not required${x.icfr.conclusion ? ` (${x.icfr.conclusion})` : ''}.`
@@ -778,7 +851,8 @@ function buildCards(
       workSource: 'Cross-reference only',
       workConfigured: WC.crossReference,
       finalStage: '02.5 / Section 08',
-      systemReportingStatus: x.icfr.reportingRequired === false ? RS.notApplicable : RS.crossReference,
+      systemReportingStatus:
+        x.icfr.reportingRequired === false ? RS.notApplicable : RS.crossReference,
     }),
     s143(CARD.s143Other, 'Section 143(3)(j)', 'Other prescribed matters (Rule 11)', {
       applicabilityBasis: 'Reported through the Rule 11 matters below.',
@@ -814,7 +888,8 @@ function buildCards(
   const lit = f.litigation;
   const litEx: string[] = [];
   if (lit.disclosure === 'not_disclosed') litEx.push('Impact of pending litigations not disclosed');
-  if (lit.disclosure === 'partially_disclosed') litEx.push('Impact of pending litigations partially disclosed');
+  if (lit.disclosure === 'partially_disclosed')
+    litEx.push('Impact of pending litigations partially disclosed');
   if ((lit.exceptions ?? 0) > 0) litEx.push(`${lit.exceptions} litigation exception(s)`);
   const fl = f.foreseeableLosses;
   const flYes = fl.hasLongTermContracts === 'yes' || fl.hasDerivativeContracts === 'yes';
@@ -823,7 +898,8 @@ function buildCards(
   const dv = f.dividend;
   const e11 = (a: Rule11eAssessment, label: string) => {
     const ex: string[] = [];
-    if (a.representationObtained === 'no') ex.push(`${label}: management representation not obtained`);
+    if (a.representationObtained === 'no')
+      ex.push(`${label}: management representation not obtained`);
     if (a.contraryMatter === 'yes' || a.conclusion === 'exception')
       ex.push(`${label}: contrary matter noticed${a.contraryNote ? ` — ${a.contraryNote}` : ''}`);
     return ex;
@@ -851,22 +927,32 @@ function buildCards(
               ? RS.unmodifiedExpected
               : RS.notDetermined,
     }),
-    rule11(CARD.r11Losses, 'Rule 11(b)', 'Material foreseeable losses on long-term / derivative contracts', {
-      applicability: flYes ? APPL.applicable : flNo ? APPL.notApplicableToFacts : APPL.pending,
-      applicabilityBasis: flYes
-        ? 'R11-02: long-term (incl. derivative) contracts exist — assess provision for material foreseeable losses.'
-        : flNo
-          ? 'R11-02: no long-term or derivative contracts — Not Applicable to Facts.'
-          : 'R11-02: confirm whether long-term contracts, including derivative contracts, exist.',
-      workSource: fl.linkedWorkpapers.length ? fl.linkedWorkpapers.join('; ') : 'Provisions / estimates work',
-      workConfigured: WC.conditional,
-      systemExceptions: flYes && fl.provisionAdequate === 'no' ? ['Provision for material foreseeable losses not made'] : [],
-      systemReportingStatus: flNo
-        ? RS.notApplicable
-        : flYes
-          ? triStatus(fl.provisionAdequate === 'no', fl.provisionAdequate === 'pending')
-          : RS.notDetermined,
-    }),
+    rule11(
+      CARD.r11Losses,
+      'Rule 11(b)',
+      'Material foreseeable losses on long-term / derivative contracts',
+      {
+        applicability: flYes ? APPL.applicable : flNo ? APPL.notApplicableToFacts : APPL.pending,
+        applicabilityBasis: flYes
+          ? 'R11-02: long-term (incl. derivative) contracts exist — assess provision for material foreseeable losses.'
+          : flNo
+            ? 'R11-02: no long-term or derivative contracts — Not Applicable to Facts.'
+            : 'R11-02: confirm whether long-term contracts, including derivative contracts, exist.',
+        workSource: fl.linkedWorkpapers.length
+          ? fl.linkedWorkpapers.join('; ')
+          : 'Provisions / estimates work',
+        workConfigured: WC.conditional,
+        systemExceptions:
+          flYes && fl.provisionAdequate === 'no'
+            ? ['Provision for material foreseeable losses not made']
+            : [],
+        systemReportingStatus: flNo
+          ? RS.notApplicable
+          : flYes
+            ? triStatus(fl.provisionAdequate === 'no', fl.provisionAdequate === 'pending')
+            : RS.notDetermined,
+      },
+    ),
     rule11(CARD.r11Iepf, 'Rule 11(c)', 'Transfers to the Investor Education and Protection Fund', {
       applicability:
         iepf.status === 'pending'
@@ -895,20 +981,25 @@ function buildCards(
               : RS.notDetermined,
       anchors: [ANCHOR.rule11, ANCHOR.iepf],
     }),
-    rule11(CARD.r11eAdvanced, 'Rule 11(e)(i)', 'Funds advanced / loaned / invested through intermediaries', {
-      applicabilityBasis:
-        'Mirrored assessment linked to the Section 07 Management Representation Letter. No monetary exemption threshold applies.',
-      workSource: 'Management representation + audit procedures',
-      workConfigured: WC.yes,
-      finalStage: 'Completion / MRL / Reporting',
-      systemExceptions: eA,
-      systemReportingStatus: eA.length
-        ? RS.modifiedExpected
-        : f.rule11eAdvanced.conclusion === 'no_exception'
-          ? RS.unmodifiedExpected
-          : RS.notDetermined,
-      anchors: [ANCHOR.rule11, ANCHOR.rule11efGuidance],
-    }),
+    rule11(
+      CARD.r11eAdvanced,
+      'Rule 11(e)(i)',
+      'Funds advanced / loaned / invested through intermediaries',
+      {
+        applicabilityBasis:
+          'Mirrored assessment linked to the Section 07 Management Representation Letter. No monetary exemption threshold applies.',
+        workSource: 'Management representation + audit procedures',
+        workConfigured: WC.yes,
+        finalStage: 'Completion / MRL / Reporting',
+        systemExceptions: eA,
+        systemReportingStatus: eA.length
+          ? RS.modifiedExpected
+          : f.rule11eAdvanced.conclusion === 'no_exception'
+            ? RS.unmodifiedExpected
+            : RS.notDetermined,
+        anchors: [ANCHOR.rule11, ANCHOR.rule11efGuidance],
+      },
+    ),
     rule11(CARD.r11eReceived, 'Rule 11(e)(ii)', 'Funds received from funding parties', {
       applicabilityBasis:
         'Mirrored assessment linked to the Section 07 Management Representation Letter. No monetary exemption threshold applies.',
@@ -925,7 +1016,11 @@ function buildCards(
     }),
     rule11(CARD.r11fDividend, 'Rule 11(f)', 'Dividend declared / paid — Section 123 compliance', {
       applicability:
-        dv.declaredOrPaid == null ? APPL.pending : dv.declaredOrPaid ? APPL.applicable : APPL.notApplicableToFacts,
+        dv.declaredOrPaid == null
+          ? APPL.pending
+          : dv.declaredOrPaid
+            ? APPL.applicable
+            : APPL.notApplicableToFacts,
       applicabilityBasis:
         dv.declaredOrPaid == null
           ? 'R11-04: was dividend declared or paid during the year?'
@@ -934,7 +1029,10 @@ function buildCards(
             : 'R11-04: no dividend declared or paid — Not Applicable to Facts.',
       workSource: dv.sourceWorkpaper ?? 'Dividend work',
       workConfigured: WC.conditional,
-      systemExceptions: dv.declaredOrPaid && dv.section123Compliant === 'no' ? ['Dividend not compliant with Section 123'] : [],
+      systemExceptions:
+        dv.declaredOrPaid && dv.section123Compliant === 'no'
+          ? ['Dividend not compliant with Section 123']
+          : [],
       systemReportingStatus:
         dv.declaredOrPaid === false
           ? RS.notApplicable
@@ -994,10 +1092,18 @@ function buildCards(
           : remEx.length
             ? RS.modifiedExpected
             : rem.outcome === REMUNERATION_OUTCOME.withinLimit ||
-                (rem.outcome === REMUNERATION_OUTCOME.scheduleVRoute && rem.scheduleV.ceiling != null)
+                (rem.outcome === REMUNERATION_OUTCOME.scheduleVRoute &&
+                  rem.scheduleV.ceiling != null)
               ? RS.unmodifiedExpected
               : RS.notDetermined,
-      anchors: [ANCHOR.section197_16, ANCHOR.section197, ANCHOR.section198, ANCHOR.scheduleV, ANCHOR.icai197Advisory, ANCHOR.section196],
+      anchors: [
+        ANCHOR.section197_16,
+        ANCHOR.section197,
+        ANCHOR.section198,
+        ANCHOR.scheduleV,
+        ANCHOR.icai197Advisory,
+        ANCHOR.section196,
+      ],
     },
     {
       key: CARD.s143_12Fraud,
@@ -1010,7 +1116,8 @@ function buildCards(
       workSource: 'Fraud Matter register',
       workConfigured: WC.alwaysAvailable,
       finalStage: 'Immediate / event-driven',
-      systemExceptions: f.fraud.overdue > 0 ? [`${f.fraud.overdue} Rule 13 deadline(s) overdue`] : [],
+      systemExceptions:
+        f.fraud.overdue > 0 ? [`${f.fraud.overdue} Rule 13 deadline(s) overdue`] : [],
       systemReportingStatus: fr.identified ? RS.modifiedExpected : RS.unmodifiedExpected,
       anchors: [ANCHOR.section143_12, ANCHOR.rule13, ANCHOR.formAdt4],
     },
@@ -1044,7 +1151,7 @@ function buildCards(
     {
       key: CARD.caro,
       group: GROUP.crossReference,
-      requirement: 'Companies (Auditor\'s Report) Order, 2020',
+      requirement: "Companies (Auditor's Report) Order, 2020",
       clause: 'Section 143(11) — CARO 2020',
       applicability: x.caro.applicable === false ? APPL.notApplicable : APPL.crossReference,
       applicabilityBasis:
@@ -1098,7 +1205,12 @@ export function significantOverrides(
 
 // ── Aggregate ───────────────────────────────────────────────────────────────
 
-function ruleUsed(code: string, label: string, unit: string, r: ResolvedRule | null): OtherReportingRuleUsed {
+function ruleUsed(
+  code: string,
+  label: string,
+  unit: string,
+  r: ResolvedRule | null,
+): OtherReportingRuleUsed {
   return {
     code,
     label,
@@ -1114,15 +1226,60 @@ export function otherReportingRulesUsed(resolve: RuleResolver): OtherReportingRu
   const R = OTHER_REPORTING_RULE_CODE;
   const eff = resolve(AREA_11, C.auditTrailEffective);
   return [
-    ruleUsed(R.overallLimit, 'Overall managerial remuneration', '% of Section 198 net profit', resolve(AREA_143, C.managerialRemunerationPercent)),
-    ruleUsed(R.oneExecutive, 'One MD / WTD / Manager', '%', resolve(AREA_143, C.remunerationOneExecutivePercent)),
-    ruleUsed(R.multipleExecutives, 'More than one MD / WTD / Manager', '% aggregate', resolve(AREA_143, C.remunerationMultiExecutivePercent)),
-    ruleUsed(R.nonExecWithMgmt, 'Non-executive directors (company has MD / WTD / Manager)', '% aggregate', resolve(AREA_143, C.remunerationNonExecWithMgmtPercent)),
-    ruleUsed(R.nonExecWithoutMgmt, 'Non-executive directors (any other case)', '% aggregate', resolve(AREA_143, C.remunerationNonExecWithoutMgmtPercent)),
-    ruleUsed(R.fraudThreshold, 'Fraud — Central Government route', '₹ (>= routes to CG)', resolve(AREA_143, C.fraudReportingThreshold)),
-    ruleUsed(R.fraudInitialNoticeDays, 'Fraud — initial report to Board / AC', 'days maximum', resolve(AREA_143, C.fraudInitialNoticeDays)),
-    ruleUsed(R.fraudResponseDays, 'Fraud — Board / AC reply window', 'days', resolve(AREA_143, C.boardReplyDays)),
-    ruleUsed(R.fraudForwardDays, 'Fraud — forward to the CG after reply', 'days', resolve(AREA_143, C.cgForwardDays)),
+    ruleUsed(
+      R.overallLimit,
+      'Overall managerial remuneration',
+      '% of Section 198 net profit',
+      resolve(AREA_143, C.managerialRemunerationPercent),
+    ),
+    ruleUsed(
+      R.oneExecutive,
+      'One MD / WTD / Manager',
+      '%',
+      resolve(AREA_143, C.remunerationOneExecutivePercent),
+    ),
+    ruleUsed(
+      R.multipleExecutives,
+      'More than one MD / WTD / Manager',
+      '% aggregate',
+      resolve(AREA_143, C.remunerationMultiExecutivePercent),
+    ),
+    ruleUsed(
+      R.nonExecWithMgmt,
+      'Non-executive directors (company has MD / WTD / Manager)',
+      '% aggregate',
+      resolve(AREA_143, C.remunerationNonExecWithMgmtPercent),
+    ),
+    ruleUsed(
+      R.nonExecWithoutMgmt,
+      'Non-executive directors (any other case)',
+      '% aggregate',
+      resolve(AREA_143, C.remunerationNonExecWithoutMgmtPercent),
+    ),
+    ruleUsed(
+      R.fraudThreshold,
+      'Fraud — Central Government route',
+      '₹ (>= routes to CG)',
+      resolve(AREA_143, C.fraudReportingThreshold),
+    ),
+    ruleUsed(
+      R.fraudInitialNoticeDays,
+      'Fraud — initial report to Board / AC',
+      'days maximum',
+      resolve(AREA_143, C.fraudInitialNoticeDays),
+    ),
+    ruleUsed(
+      R.fraudResponseDays,
+      'Fraud — Board / AC reply window',
+      'days',
+      resolve(AREA_143, C.boardReplyDays),
+    ),
+    ruleUsed(
+      R.fraudForwardDays,
+      'Fraud — forward to the CG after reply',
+      'days',
+      resolve(AREA_143, C.cgForwardDays),
+    ),
     {
       code: R.auditTrailEffective,
       label: 'Rule 11(g) audit-trail reporting from',
@@ -1131,7 +1288,12 @@ export function otherReportingRulesUsed(resolve: RuleResolver): OtherReportingRu
       effectiveFrom: eff?.effectiveFrom ?? null,
       ruleVersionId: eff?.ruleVersionId ?? null,
     },
-    ruleUsed(R.booksRetention, 'Books / audit-trail preservation', 'financial years baseline', resolve(AREA_11, C.retentionYears)),
+    ruleUsed(
+      R.booksRetention,
+      'Books / audit-trail preservation',
+      'financial years baseline',
+      resolve(AREA_11, C.retentionYears),
+    ),
   ];
 }
 
@@ -1175,11 +1337,19 @@ export function assessOtherReporting(
   for (const c of cards) {
     if (c.applicability !== APPL.pending) continue;
     // Branch facts belong to 02.6 — shown, but they do not block 02.7.
-    const blocking = c.key !== CARD.s143BranchReturns && c.key !== CARD.s143BranchReport && c.key !== CARD.branchReporting;
+    const blocking =
+      c.key !== CARD.s143BranchReturns &&
+      c.key !== CARD.s143BranchReport &&
+      c.key !== CARD.branchReporting;
     miss(c.key, `${c.clause} — ${c.requirement}`, blocking, c.key);
   }
   if (rem.applicable && rem.outcome === REMUNERATION_OUTCOME.informationInsufficient)
-    miss('remuneration_facts', 'Section 197(16) — Section 198 net profit / remuneration / effective capital', false, CARD.s197Remuneration);
+    miss(
+      'remuneration_facts',
+      'Section 197(16) — Section 198 net profit / remuneration / effective capital',
+      false,
+      CARD.s197Remuneration,
+    );
   const rules = otherReportingRulesUsed(resolve);
   for (const r of notCompany ? [] : rules)
     if (r.code !== OTHER_REPORTING_RULE_CODE.auditTrailEffective && r.value == null)
@@ -1192,7 +1362,9 @@ export function assessOtherReporting(
         code: c.key,
         cardKey: c.key,
         severity:
-          c.key === CARD.s143_12Fraud || c.key === CARD.s197Remuneration || c.key === CARD.s143Directors
+          c.key === CARD.s143_12Fraud ||
+          c.key === CARD.s197Remuneration ||
+          c.key === CARD.s143Directors
             ? 'high'
             : 'medium',
         message: `${c.clause}: ${e}`,
@@ -1214,7 +1386,9 @@ export function assessOtherReporting(
     : matters.length
       ? OTHER_REPORTING_OUTCOME.attentionRequired
       : OTHER_REPORTING_OUTCOME.configured;
-  const state: FrameworkState = blocking.length ? 'pending_information' : 'system_suggested_applicable';
+  const state: FrameworkState = blocking.length
+    ? 'pending_information'
+    : 'system_suggested_applicable';
   const applicable = cards.filter((c) => !NA.has(c.applicability)).length;
   const basis = notCompany
     ? 'Not a company — Companies Act auditor reporting (Section 143(3), Rule 11, Section 197(16), Section 143(12)) does not apply.'
@@ -1231,13 +1405,19 @@ export function assessOtherReporting(
     fraud: fr,
     rule11ef: ef,
     dividendCompliesSec123:
-      f.dividend.section123Compliant === 'pending' ? null : f.dividend.section123Compliant === 'yes',
+      f.dividend.section123Compliant === 'pending'
+        ? null
+        : f.dividend.section123Compliant === 'yes',
     pendingLitigationDisclosed:
       f.litigation.disclosure === 'pending' ? null : f.litigation.disclosure === 'disclosed',
     foreseeableLossesProvided:
-      f.foreseeableLosses.provisionAdequate === 'pending' ? null : f.foreseeableLosses.provisionAdequate === 'yes',
+      f.foreseeableLosses.provisionAdequate === 'pending'
+        ? null
+        : f.foreseeableLosses.provisionAdequate === 'yes',
     iepfTransferDelay:
-      f.iepf.status === 'pending' || f.iepf.status === 'not_applicable' ? null : f.iepf.status === 'delay',
+      f.iepf.status === 'pending' || f.iepf.status === 'not_applicable'
+        ? null
+        : f.iepf.status === 'delay',
     matters,
     missingFacts,
     rulesUsed: rules,

@@ -82,20 +82,25 @@ export class SoftwareSystemDto {
   @ApiPropertyOptional({ enum: SOFTWARE_MODULES }) @OneOf(SOFTWARE_MODULES) module?: SoftwareModule;
   @ApiPropertyOptional({ nullable: true }) @Text(200) moduleOther?: string | null;
   @ApiPropertyOptional({ nullable: true }) @Text(1000) booksAffected?: string | null;
-  @ApiPropertyOptional() @OneOf(['available', 'not_available', 'pending'])
+  @ApiPropertyOptional()
+  @OneOf(['available', 'not_available', 'pending'])
   featureStatus?: 'available' | 'not_available' | 'pending';
-  @ApiPropertyOptional() @OneOf(['yes', 'no', 'exceptions', 'pending'])
+  @ApiPropertyOptional()
+  @OneOf(['yes', 'no', 'exceptions', 'pending'])
   enabledThroughout?: 'yes' | 'no' | 'exceptions' | 'pending';
   @ApiPropertyOptional({ nullable: true }) @Text() enabledNote?: string | null;
-  @ApiPropertyOptional() @OneOf(['complete', 'gaps', 'pending'])
+  @ApiPropertyOptional()
+  @OneOf(['complete', 'gaps', 'pending'])
   transactionsCovered?: 'complete' | 'gaps' | 'pending';
   @ApiPropertyOptional({ nullable: true }) @Text(1000) privilegedUsers?: string | null;
   @ApiPropertyOptional({ enum: TRIS }) @OneOf(TRIS) canAlterOrDisable?: Tri;
   @ApiPropertyOptional({ enum: TRIS }) @OneOf(TRIS) tampering?: Tri;
-  @ApiPropertyOptional() @OneOf(['compliant', 'exception', 'pending'])
+  @ApiPropertyOptional()
+  @OneOf(['compliant', 'exception', 'pending'])
   preservation?: 'compliant' | 'exception' | 'pending';
   @ApiPropertyOptional({ nullable: true }) @Text() evidence?: string | null;
-  @ApiPropertyOptional() @OneOf(Object.values(AUDIT_TRAIL_CONCLUSION))
+  @ApiPropertyOptional()
+  @OneOf(Object.values(AUDIT_TRAIL_CONCLUSION))
   conclusion?: AuditTrailConclusion;
   @ApiPropertyOptional({ nullable: true }) @Text(500) icfrCrossRef?: string | null;
   @ApiPropertyOptional() @Bool() booksCrossRef?: boolean;
@@ -106,7 +111,9 @@ export class ManagerialPersonDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(80) id?: string;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(200) name!: string;
   @ApiPropertyOptional({ nullable: true }) @Text(20) din?: string | null;
-  @ApiProperty({ enum: MANAGERIAL_CATEGORIES }) @IsIn(MANAGERIAL_CATEGORIES) category!: ManagerialCategory;
+  @ApiProperty({ enum: MANAGERIAL_CATEGORIES })
+  @IsIn(MANAGERIAL_CATEGORIES)
+  category!: ManagerialCategory;
   @ApiPropertyOptional({ nullable: true, description: 'Remuneration for the year (₹).' })
   @Amount()
   remuneration!: number | null;
@@ -135,7 +142,8 @@ export class LitigationFactsDto {
   @ApiPropertyOptional({ enum: TRIS }) @OneOf(TRIS) identified?: Tri;
   @ApiPropertyOptional({ nullable: true }) @Amount() totalMatters?: number | null;
   @ApiPropertyOptional({ nullable: true }) @Amount() materialMatters?: number | null;
-  @ApiPropertyOptional() @OneOf(['disclosed', 'partially_disclosed', 'not_disclosed', 'pending'])
+  @ApiPropertyOptional()
+  @OneOf(['disclosed', 'partially_disclosed', 'not_disclosed', 'pending'])
   disclosure?: 'disclosed' | 'partially_disclosed' | 'not_disclosed' | 'pending';
   @ApiPropertyOptional({ nullable: true }) @Amount() exceptions?: number | null;
   @ApiPropertyOptional({ nullable: true }) @Text(500) sourceWorkpaper?: string | null;
@@ -189,7 +197,10 @@ export class SetOtherReportingFactsDto {
   @Amount()
   managerialRemunerationPaid?: number | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Section 198 net profit (₹; may be negative).' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Section 198 net profit (₹; may be negative).',
+  })
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsNumber()
@@ -339,7 +350,9 @@ export class RecordOtherReportingDecisionDto {
   @MaxLength(4000)
   technicalBasis?: string;
 
-  @ApiPropertyOptional({ description: 'Supporting evidence (or link a file) — mandatory on override.' })
+  @ApiPropertyOptional({
+    description: 'Supporting evidence (or link a file) — mandatory on override.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(4000)

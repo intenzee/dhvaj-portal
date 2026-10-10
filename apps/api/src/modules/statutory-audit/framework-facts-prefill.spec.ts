@@ -373,7 +373,7 @@ describe('02.7 other reporting from contacts and last year', () => {
     expect(filled).toContain('3 managerial person(s)');
   });
 
-  it('prefers last year\'s managerial persons (this year\'s remuneration blank)', () => {
+  it("prefers last year's managerial persons (this year's remuneration blank)", () => {
     const fill = otherReportingFromSources([{ fullName: 'New Person', designation: 'Director' }], {
       financialYear: '2023-24',
       facts: {
