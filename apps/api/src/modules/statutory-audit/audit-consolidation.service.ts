@@ -355,7 +355,7 @@ export class AuditConsolidationService {
     return this.db.withRlsContext(ctx, async (client) => {
       const row = await this.loadRow(client, engagementId, workflowInstanceId);
       this.assertNotApproved(row);
-      if (!CONSOLIDATION_CONCLUSIONS.includes(input.conclusion)) {
+      if (!input.conclusion || !CONSOLIDATION_CONCLUSIONS.includes(input.conclusion)) {
         throw new BadRequestException('Not a valid consolidation conclusion.');
       }
 
@@ -375,7 +375,7 @@ export class AuditConsolidationService {
           'A basis is required when the conclusion overrides the system suggestion.',
         );
       }
-      const state: FrameworkState = isOverridden ? 'overridden' : decisiveState(input.conclusion);
+      const state: FrameworkState = isOverridden ? 'overridden' : decisiveState(input.conclusion!);
 
       const result = await client.query(
         `UPDATE hsdg.audit_framework_subassessment

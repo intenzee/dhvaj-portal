@@ -63,7 +63,10 @@ export function componentsFromDetail(detail: unknown): ConsolidationComponentRef
 
 function cfsRequiredOf(outcome: ConsolidationOutcome | null): boolean | null {
   if (outcome === CONSOLIDATION_OUTCOME.cfsRequired) return true;
-  if (outcome === CONSOLIDATION_OUTCOME.cfsExempt || outcome === CONSOLIDATION_OUTCOME.notApplicable)
+  if (
+    outcome === CONSOLIDATION_OUTCOME.cfsExempt ||
+    outcome === CONSOLIDATION_OUTCOME.notApplicable
+  )
     return false;
   return null;
 }

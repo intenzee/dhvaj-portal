@@ -76,6 +76,11 @@ export const RULE_CRITERION = {
   controlOwnership: 'control_ownership',
   /** Ownership % significant-influence presumption (e.g. AS 23 / Ind AS 28). */
   significantInfluenceOwnership: 'significant_influence_ownership',
+  /**
+   * Maximum months between a component's and the group's reporting date
+   * (02.6 CFS-03), keyed by the standard as entity_class (e.g. as_21, ind_as_110).
+   */
+  reportingDateGapMonths: 'reporting_date_gap_months',
   /** Overall managerial-remuneration ceiling as a % of Section 198 net profit (§197). */
   managerialRemunerationPercent: 'managerial_remuneration_percent',
   /** Fraud amount at/above which the Central Government route applies (§143(12)). */
