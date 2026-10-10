@@ -672,7 +672,11 @@ export class AuditOtherReportingService {
       if (exceptions > 0 && !note)
         throw new BadRequestException('Describe the exception(s) recorded on this card.');
       const reviewedBy =
-        input.reviewed === true ? (ctx.employeeId ?? null) : input.reviewed === false ? null : undefined;
+        input.reviewed === true
+          ? (ctx.employeeId ?? null)
+          : input.reviewed === false
+            ? null
+            : undefined;
       if (input.reviewed === true && !reviewedBy)
         throw new ForbiddenException('Only an employee can mark a card reviewed.');
 
@@ -746,7 +750,11 @@ export class AuditOtherReportingService {
     );
     const res = await this.runEngine(client, facts);
     const m = otherReportingLegacyMirror(facts.isCompany, false, false);
-    return { suggestion: m.suggestion, basis: legacyBasis(facts.isCompany, res.basis), state: m.state };
+    return {
+      suggestion: m.suggestion,
+      basis: legacyBasis(facts.isCompany, res.basis),
+      state: m.state,
+    };
   }
 
   /** Write the 02.7 state onto the Section 02 rule_11 / section_143 areas. */
@@ -1079,6 +1087,19 @@ function validOverrides(
 }
 
 /** Merge a facts input over the current captured facts (omitted = unchanged). */
+/**
+ * Merge a partial fact group onto the stored one. Only keys the caller actually
+ * sent count — the validation pipe materialises declared-but-absent DTO fields
+ * as `undefined`, which must not wipe the stored value.
+ */
+function patch<T extends object>(base: T, input: Partial<T> | undefined): T {
+  if (!input) return base;
+  const out = { ...base };
+  for (const [k, v] of Object.entries(input))
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  return out;
+}
+
 export function mergeInput(
   c: OtherReportingCapturedFacts,
   input: SetOtherReportingFactsInput,
@@ -1111,24 +1132,18 @@ export function mergeInput(
     managerialPersons: input.managerialPersons
       ? input.managerialPersons.map((p) => ({ ...p, name: p.name.trim() }))
       : c.managerialPersons,
-    approvals: input.approvals ? { ...c.approvals, ...input.approvals } : c.approvals,
+    approvals: patch(c.approvals, input.approvals),
     effectiveCapital: opt(input.effectiveCapital, c.effectiveCapital),
     inadequateProfits: opt(input.inadequateProfits, c.inadequateProfits),
     fraudIdentified: opt(input.fraudIdentified, c.fraudIdentified),
     fraudAmount: opt(input.fraudAmount, c.fraudAmount),
     fraudEventDate: opt(input.fraudEventDate, c.fraudEventDate),
-    rule11eAdvanced: input.rule11eAdvanced
-      ? { ...c.rule11eAdvanced, ...input.rule11eAdvanced }
-      : c.rule11eAdvanced,
-    rule11eReceived: input.rule11eReceived
-      ? { ...c.rule11eReceived, ...input.rule11eReceived }
-      : c.rule11eReceived,
-    litigation: input.litigation ? { ...c.litigation, ...input.litigation } : c.litigation,
-    foreseeableLosses: input.foreseeableLosses
-      ? { ...c.foreseeableLosses, ...input.foreseeableLosses }
-      : c.foreseeableLosses,
-    iepf: input.iepf ? { ...c.iepf, ...input.iepf } : c.iepf,
-    dividend: input.dividend ? { ...c.dividend, ...input.dividend } : c.dividend,
+    rule11eAdvanced: patch(c.rule11eAdvanced, input.rule11eAdvanced),
+    rule11eReceived: patch(c.rule11eReceived, input.rule11eReceived),
+    litigation: patch(c.litigation, input.litigation),
+    foreseeableLosses: patch(c.foreseeableLosses, input.foreseeableLosses),
+    iepf: patch(c.iepf, input.iepf),
+    dividend: patch(c.dividend, input.dividend),
     booksProper: opt(input.booksProper, c.booksProper),
     informationObtained: opt(input.informationObtained, c.informationObtained),
     adverseObservations: opt(input.adverseObservations, c.adverseObservations),
@@ -1158,7 +1173,9 @@ export function mergeInput(
   );
   merged.pendingLitigationDisclosed = opt(
     input.pendingLitigationDisclosed,
-    merged.litigation.disclosure === 'pending' ? null : merged.litigation.disclosure === 'disclosed',
+    merged.litigation.disclosure === 'pending'
+      ? null
+      : merged.litigation.disclosure === 'disclosed',
   );
   merged.foreseeableLossesProvided = opt(
     input.foreseeableLossesProvided,

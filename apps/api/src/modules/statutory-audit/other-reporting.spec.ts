@@ -21,6 +21,7 @@ import {
   type SoftwareSystemInput,
 } from '@hsdg/contracts';
 import { assessOtherReporting, normaliseCaptured } from './other-reporting';
+import { mergeInput } from './audit-other-reporting.service';
 import {
   otherReportingCompletion,
   otherReportingFingerprint,
@@ -187,7 +188,10 @@ describe('02.7 matrix — Section 143(3) core and the clean case', () => {
   });
 
   it('a team "No" on proper books / information raises a modified-reporting exception', () => {
-    const r = assessOtherReporting(facts({ booksProper: 'no', informationObtained: 'no' }), resolve);
+    const r = assessOtherReporting(
+      facts({ booksProper: 'no', informationObtained: 'no' }),
+      resolve,
+    );
     expect(card(r, CARD.s143Books).systemReportingStatus).toBe(RS.modifiedExpected);
     expect(card(r, CARD.s143Information).systemExceptions).toHaveLength(1);
     expect(r.outcome).toBe(OTHER_REPORTING_OUTCOME.attentionRequired);
@@ -195,7 +199,9 @@ describe('02.7 matrix — Section 143(3) core and the clean case', () => {
 
   it('director disqualification (Section 164(2)) comes from the Track B director workpaper', () => {
     const r = assessOtherReporting(
-      facts({ directors: { total: 3, pending: 0, disqualified: 1, cleared: 2, conclusion: 'identified' } }),
+      facts({
+        directors: { total: 3, pending: 0, disqualified: 1, cleared: 2, conclusion: 'identified' },
+      }),
       resolve,
     );
     const g = card(r, CARD.s143Directors);
@@ -401,7 +407,10 @@ describe('02.7 §21 — Section 143(12) fraud', () => {
   });
 
   it('every fraud number is shown from the Rules Library', () => {
-    const codes = assessOtherReporting(facts(), resolve).detail.rulesUsed.map((u) => [u.code, u.value]);
+    const codes = assessOtherReporting(facts(), resolve).detail.rulesUsed.map((u) => [
+      u.code,
+      u.value,
+    ]);
     expect(codes).toEqual(
       expect.arrayContaining([
         ['FRAUD_CG_THRESHOLD', CRORE],
@@ -430,7 +439,13 @@ describe('02.7 §21 — Rule 11(g) audit trail', () => {
       facts({
         softwareSystems: [
           COMPLIANT_SYSTEM,
-          { ...COMPLIANT_SYSTEM, id: 'sys-b', name: 'Payroll', module: 'payroll', tampering: 'yes' },
+          {
+            ...COMPLIANT_SYSTEM,
+            id: 'sys-b',
+            name: 'Payroll',
+            module: 'payroll',
+            tampering: 'yes',
+          },
           { ...COMPLIANT_SYSTEM, id: 'sys-c', name: 'Billing', preservation: 'pending' },
         ],
       }),
@@ -466,12 +481,15 @@ describe('02.7 §21 — Rule 11(g) audit trail', () => {
   });
 
   it('a register with no systems is pending; legacy two-boolean rows still read', () => {
-    expect(card(assessOtherReporting(facts({ softwareSystems: [] }), resolve), CARD.r11gAuditTrail).applicability).toBe(
-      APPL.pending,
-    );
+    expect(
+      card(assessOtherReporting(facts({ softwareSystems: [] }), resolve), CARD.r11gAuditTrail)
+        .applicability,
+    ).toBe(APPL.pending);
     const legacy = assessOtherReporting(
       facts({
-        softwareSystems: [{ name: 'Old', hasAuditTrailFeature: true, auditTrailOperatedAllYear: true }],
+        softwareSystems: [
+          { name: 'Old', hasAuditTrailFeature: true, auditTrailOperatedAllYear: true },
+        ],
       }),
       resolve,
     );
@@ -505,7 +523,10 @@ describe('02.7 §21 — Rule 11(a)–(f)', () => {
   });
 
   it('unanswered Rule 11 routes are blocking pending facts', () => {
-    const r = assessOtherReporting(facts({ dividend: { ...EMPTY_OTHER_REPORTING_CAPTURED.dividend } }), resolve);
+    const r = assessOtherReporting(
+      facts({ dividend: { ...EMPTY_OTHER_REPORTING_CAPTURED.dividend } }),
+      resolve,
+    );
     expect(card(r, CARD.r11fDividend).applicability).toBe(APPL.pending);
     expect(r.outcome).toBe(OTHER_REPORTING_OUTCOME.informationInsufficient);
   });
@@ -513,7 +534,12 @@ describe('02.7 §21 — Rule 11(a)–(f)', () => {
   it('an IEPF delay and a non-compliant dividend are exceptions', () => {
     const r = assessOtherReporting(
       facts({
-        iepf: { status: 'delay', delayAmount: 2 * LAKH, delayPeriod: '40 days', sourceWorkpaper: null },
+        iepf: {
+          status: 'delay',
+          delayAmount: 2 * LAKH,
+          delayPeriod: '40 days',
+          sourceWorkpaper: null,
+        },
         dividend: {
           declaredOrPaid: true,
           kind: 'final',
@@ -549,8 +575,18 @@ describe('02.7 §21 — cross-references consume 02.4 / 02.5 / 02.6 (no second r
     const r = assessOtherReporting(
       facts({
         crossRefs: {
-          caro: { applicable: false, conclusion: 'not_applicable', complete: true, reportableClauses: 0 },
-          icfr: { reportingRequired: true, conclusion: 'applicable', complete: false, deficiencies: 1 },
+          caro: {
+            applicable: false,
+            conclusion: 'not_applicable',
+            complete: true,
+            reportableClauses: 0,
+          },
+          icfr: {
+            reportingRequired: true,
+            conclusion: 'applicable',
+            complete: false,
+            deficiencies: 1,
+          },
           group: {
             cfsConclusion: null,
             branchesExist: true,
@@ -567,13 +603,17 @@ describe('02.7 §21 — cross-references consume 02.4 / 02.5 / 02.6 (no second r
     expect(card(r, CARD.s143Icfr).applicability).toBe(APPL.crossReference);
     expect(card(r, CARD.s143Icfr).workConfigured).toBe('cross_reference');
     expect(card(r, CARD.s143BranchReport).applicability).toBe(APPL.applicable);
-    expect(card(r, CARD.branchReporting).applicabilityBasis).toMatch(/1 report\(s\) dealt with, 1 pending/);
+    expect(card(r, CARD.branchReporting).applicabilityBasis).toMatch(
+      /1 report\(s\) dealt with, 1 pending/,
+    );
   });
 
   it('unanswered 02.6 branch facts show as pending but do not block 02.7', () => {
     const r = assessOtherReporting(facts(), resolve);
     expect(card(r, CARD.s143BranchReturns).applicability).toBe(APPL.pending);
-    expect(r.detail.missingFacts.find((m) => m.key === CARD.s143BranchReturns)?.blocking).toBe(false);
+    expect(r.detail.missingFacts.find((m) => m.key === CARD.s143BranchReturns)?.blocking).toBe(
+      false,
+    );
     expect(r.outcome).toBe(OTHER_REPORTING_OUTCOME.configured);
   });
 });
@@ -631,8 +671,18 @@ describe('02.7 §20 completion, fingerprint and the Section 02 mirror', () => {
       facts({
         crossRefs: {
           ...EMPTY_CROSS_REFS,
-          caro: { applicable: true, conclusion: 'applicable', complete: true, reportableClauses: 2 },
-          icfr: { reportingRequired: true, conclusion: 'applicable', complete: true, deficiencies: 0 },
+          caro: {
+            applicable: true,
+            conclusion: 'applicable',
+            complete: true,
+            reportableClauses: 2,
+          },
+          icfr: {
+            reportingRequired: true,
+            conclusion: 'applicable',
+            complete: true,
+            deficiencies: 0,
+          },
         },
       }),
       resolve,
@@ -647,11 +697,21 @@ describe('02.7 §20 completion, fingerprint and the Section 02 mirror', () => {
       isCompany: true,
       started: true,
       fraud: EMPTY_FRAUD_STATUS,
-      directors: { ...EMPTY_DIRECTOR_STATUS, total: 3, cleared: 3, conclusion: 'none_found' as const },
+      directors: {
+        ...EMPTY_DIRECTOR_STATUS,
+        total: 3,
+        cleared: 3,
+        conclusion: 'none_found' as const,
+      },
       crossRefs: {
         ...EMPTY_CROSS_REFS,
         caro: { applicable: true, conclusion: 'applicable', complete: true, reportableClauses: 2 },
-        icfr: { reportingRequired: true, conclusion: 'applicable', complete: true, deficiencies: 0 },
+        icfr: {
+          reportingRequired: true,
+          conclusion: 'applicable',
+          complete: true,
+          deficiencies: 0,
+        },
       },
     };
   };
@@ -700,5 +760,17 @@ describe('02.7 §20 completion, fingerprint and the Section 02 mirror', () => {
     expect(otherReportingLegacyMirror(null, false, false).state).toBe(
       'professional_judgement_required',
     );
+  });
+});
+
+describe('02.7 fact merge (validation-pipe DTOs)', () => {
+  it('a nested group with declared-but-absent fields keeps the stored values', () => {
+    const merged = mergeInput(EMPTY_OTHER_REPORTING_CAPTURED, {
+      foreseeableLosses: { hasLongTermContracts: 'no', linkedWorkpapers: undefined },
+      version: 1,
+    });
+    expect(merged.foreseeableLosses.hasLongTermContracts).toBe('no');
+    expect(merged.foreseeableLosses.linkedWorkpapers).toEqual([]);
+    expect(merged.foreseeableLosses.provisionAdequate).toBe('pending');
   });
 });

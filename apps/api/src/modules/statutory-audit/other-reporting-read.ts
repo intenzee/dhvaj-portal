@@ -113,7 +113,9 @@ export async function readOtherReportingResultOn(
     conclusion: decided ? (r.conclusion as OtherReportingOutcome) : null,
     systemOutcome: (r.system_outcome as OtherReportingOutcome | null) ?? null,
     decided,
-    cards: cards.length ? withCardStates(cards, await readCardStatesOn(client, workflowInstanceId)) : [],
+    cards: cards.length
+      ? withCardStates(cards, await readCardStatesOn(client, workflowInstanceId))
+      : [],
     needsReevaluation: r.needs_reevaluation,
   };
 }

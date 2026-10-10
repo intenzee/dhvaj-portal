@@ -219,8 +219,20 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
       .set(bearer(pa))
       .expect(200);
     expect(or.body[0].capturedFacts.hasManagingOrWholeTimeDirector).toBe(true);
+    // The full Rule 11(g) register rolls forward: the feature carries, this
+    // year's answers are pending, and the system keeps a stable id.
     expect(or.body[0].capturedFacts.softwareSystems).toEqual([
-      { name: 'Tally Prime', hasAuditTrailFeature: true, auditTrailOperatedAllYear: false },
+      expect.objectContaining({
+        id: expect.any(String),
+        name: 'Tally Prime',
+        hasAuditTrailFeature: true,
+        auditTrailOperatedAllYear: false,
+        featureStatus: 'available',
+        enabledThroughout: 'pending',
+        tampering: 'pending',
+        preservation: 'pending',
+        conclusion: 'pending',
+      }),
     ]);
     expect(or.body[0].capturedFacts.fraudIdentified).toBe(false);
 
