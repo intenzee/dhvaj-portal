@@ -39,6 +39,7 @@ export * from './statutory-audit-icfr-controls';
 export * from './statutory-audit-consolidation';
 export * from './statutory-audit-group-audit';
 export * from './statutory-audit-other-reporting';
+export * from './statutory-audit-reporting-records';
 export * from './statutory-audit-framework-summary';
 export * from './statutory-audit-rollforward';
 export * from './statutory-audit-matters';

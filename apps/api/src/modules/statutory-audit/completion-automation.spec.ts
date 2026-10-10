@@ -1,5 +1,7 @@
-import type { IcfrReportingSummary } from '@hsdg/contracts';
+import type { IcfrReportingSummary, OtherReportingCompletionSummary } from '@hsdg/contracts';
 import {
+  otherReportingMemoLines,
+  otherReportingReadiness,
   periodEndLabel,
   planCompletionItems,
   type CompletionFacts,
@@ -199,5 +201,134 @@ describe('completion automation', () => {
     expect(memo).toContain('Work: 1 of 2 audit areas concluded');
     expect(memo).toContain('Reporting: CARO applicable · IFC not applicable.');
     expect(plan.get('fs_final_review')?.evidence.facts).toContain('Not yet concluded: CARO.');
+  });
+
+  describe('02.7 other Companies Act reporting', () => {
+    const fraud = {
+      active: true,
+      matters: 0,
+      open: 0,
+      centralGovernmentRoute: 0,
+      belowThreshold: 0,
+      overdue: 0,
+      nextDeadline: null,
+      thresholdAmount: 10000000,
+      initialNoticeDays: 2,
+      responseDays: 45,
+      forwardDays: 15,
+    };
+    const card = (key: string, workStatus = 'complete', reportingStatus = 'clean') => ({
+      key: key as OtherReportingCompletionSummary['cards'][number]['key'],
+      requirement: key,
+      clause: key,
+      workStatus,
+      reportingStatus,
+    });
+    const o = (
+      x: Partial<OtherReportingCompletionSummary> = {},
+    ): OtherReportingCompletionSummary => ({
+      decided: true,
+      cards: [
+        card('s143_3_g_director_disqualification'),
+        card('rule_11_e_funds_advanced'),
+        card('rule_11_e_funds_received'),
+      ],
+      fraud: { ...fraud },
+      directors: { total: 3, pending: 0, disqualified: 0, cleared: 3, conclusion: 'none_found' },
+      mrlRepresentations: [
+        { key: 'rule_11_e_i', label: 'Rule 11(e)(i) — no funds advanced', obtained: 'yes' },
+        { key: 'rule_11_e_ii', label: 'Rule 11(e)(ii) — no funds received', obtained: 'yes' },
+      ],
+      ...x,
+    });
+    const done = proc({ ref: 'P-09', workAreaKey: 'auditor_reporting', state: 'complete' });
+
+    it('is ready when 02.7 is concluded, every card is done and the representations are obtained', () => {
+      const r = otherReportingReadiness(o());
+      expect(r.ready).toBe(true);
+      expect(r.facts).toContain('02.7: 3 of 3 reporting card(s) complete.');
+      expect(r.facts).toContain('MRL Rule 11(e)(i): representation obtained.');
+      const plan = planCompletionItems(facts({ procedures: [done], otherReporting: o() }));
+      expect(plan.get('rule_11_143')?.evidence.ready).toBe(true);
+    });
+
+    it('blocks on an open Fraud Matter, a pending director or a missing representation', () => {
+      expect(
+        otherReportingReadiness(o({ fraud: { ...fraud, matters: 1, open: 1, overdue: 1 } })).ready,
+      ).toBe(false);
+      expect(
+        otherReportingReadiness(
+          o({
+            directors: { total: 2, pending: 1, disqualified: 0, cleared: 1, conclusion: 'pending' },
+          }),
+        ).ready,
+      ).toBe(false);
+      const reps = o({
+        mrlRepresentations: [
+          { key: 'rule_11_e_i', label: 'Rule 11(e)(i) — no funds advanced', obtained: 'pending' },
+          { key: 'rule_11_e_ii', label: 'Rule 11(e)(ii) — no funds received', obtained: 'yes' },
+        ],
+      });
+      const r = otherReportingReadiness(reps);
+      expect(r.ready).toBe(false);
+      expect(r.facts).toContain('MRL Rule 11(e)(i): representation pending.');
+      // Procedures done but 02.7 not — the Go-to points at the framework, not the work.
+      const plan = planCompletionItems(facts({ procedures: [done], otherReporting: reps }));
+      expect(plan.get('rule_11_143')?.evidence).toMatchObject({ ready: false });
+      expect(plan.get('rule_11_143')?.evidence.goTo?.phaseKey).not.toBe('audit_areas');
+    });
+
+    it('ignores the director and Rule 11(e) checks when those cards do not apply', () => {
+      const r = otherReportingReadiness(
+        o({
+          cards: [card('rule_11_a_litigation')],
+          directors: {
+            total: 0,
+            pending: 0,
+            disqualified: 0,
+            cleared: 0,
+            conclusion: 'not_started',
+          },
+          mrlRepresentations: [
+            { key: 'rule_11_e_i', label: 'Rule 11(e)(i) — no funds advanced', obtained: 'pending' },
+          ],
+        }),
+      );
+      expect(r.ready).toBe(true);
+      expect(r.facts.some((x) => x.startsWith('Section 164(2)'))).toBe(false);
+    });
+
+    it('drafts modified wording, the fraud count and the director finding into the note', () => {
+      const r = otherReportingReadiness(
+        o({
+          cards: [
+            card('s143_3_g_director_disqualification'),
+            card('s143_3_b_books', 'complete', 'modified_wording_expected'),
+          ],
+          fraud: { ...fraud, matters: 2, centralGovernmentRoute: 1, belowThreshold: 1 },
+          directors: {
+            total: 2,
+            pending: 0,
+            disqualified: 1,
+            cleared: 1,
+            conclusion: 'identified',
+          },
+        }),
+      );
+      expect(r.ready).toBe(true);
+      expect(r.draft.join(' ')).toMatch(/Modified wording for s143_3_b_books/);
+      expect(r.draft.join(' ')).toMatch(/2 Fraud Matter\(s\)/);
+      expect(r.draft.join(' ')).toMatch(/1 director\(s\) disqualified/);
+    });
+
+    it('carries the Rule 11(e) representations into the memo for the MRL', () => {
+      expect(otherReportingMemoLines(null)).toEqual([]);
+      const lines = otherReportingMemoLines(o({ fraud: { ...fraud, matters: 1, open: 1 } }));
+      expect(lines[0]).toMatch(/Management representation letter/);
+      expect(lines).toContain('  • Rule 11(e)(i) — no funds advanced [obtained]');
+      expect(lines.at(-1)).toBe('Fraud (Section 143(12)): 1 matter(s), 1 open, 0 overdue.');
+      const memo = planCompletionItems(facts({ otherReporting: o() })).get('completion_memo')!;
+      expect(memo.draftNote).toMatch(/Rule 11\(e\)\(ii\) — no funds received \[obtained\]/);
+    });
   });
 });

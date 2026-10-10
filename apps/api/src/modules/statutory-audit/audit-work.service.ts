@@ -31,6 +31,7 @@ import { AuditCaroProgrammeService } from './audit-caro-programme.service';
 import { AuditIcfrControlsService } from './audit-icfr-controls.service';
 import { AuditGroupAuditService } from './audit-group-audit.service';
 import { isEngagementLead } from './master-facts';
+import { reportingProceduresOn } from './other-reporting-records-read';
 import {
   areaForRisk,
   fsWorkAreaKey,
@@ -858,6 +859,7 @@ export class AuditWorkService {
         engagementId,
         wi,
       ),
+      reportingProcedures: await reportingProceduresOn(client, wi),
     });
     const { rows: logged } = await client.query<{ source_key: string }>(
       `SELECT source_key FROM hsdg.audit_work_suggestion_log WHERE workflow_instance_id = $1`,
