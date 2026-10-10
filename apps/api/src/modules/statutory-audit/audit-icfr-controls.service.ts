@@ -93,6 +93,7 @@ import {
 import { icfrDeficiencyRef, readIcfrReportingOn } from './icfr-controls-read';
 import { readIcfrResultOn } from './icfr-read';
 import { componentAuditorFeedOn } from './consolidation-group-read';
+import { componentsFromDetail } from './consolidation-read';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
 
 /** 02.6 perimeter relationships whose entities are components of the CFS. */
@@ -1508,16 +1509,19 @@ export class AuditIcfrControlsService {
     consolidatedId: string,
   ): Promise<void> {
     const { rows } = await client.query<{
-      perimeter: Array<{ name: string; relationship: string }> | null;
+      detail: unknown;
     }>(
-      `SELECT system_detail -> 'perimeter' AS perimeter
+      `SELECT system_detail AS detail
          FROM hsdg.audit_framework_subassessment
         WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3`,
       [workflowInstanceId, SUB_SECTION_KEY.consolidation, FRAMEWORK_AREA_KEY.cfs],
     );
-    const perimeter = (rows[0]?.perimeter ?? []).filter(
-      (p) => p?.name?.trim() && CFS_COMPONENT_RELATIONSHIPS.has(p.relationship),
+    // Excluded / outside-the-period entries (included = 'no') are not components.
+    const perimeter = componentsFromDetail(rows[0]?.detail).filter(
+      (p) => p.included !== 'no' && CFS_COMPONENT_RELATIONSHIPS.has(p.relationship),
     );
+    // The matrix feed is keyed on the stable component id; rows here keep their name key.
+    const keyById = new Map(perimeter.map((p) => [p.id, componentKey(p.name)]));
     const keys: string[] = [];
     let order = 0;
     for (const p of perimeter) {
@@ -1553,6 +1557,8 @@ export class AuditIcfrControlsService {
     // 02.6 §20 — one group structure: the component auditor matrix supplies the
     // auditor, its name and the linked report; a team entry is never overwritten.
     for (const f of await componentAuditorFeedOn(client, workflowInstanceId)) {
+      const key = keyById.get(f.componentId);
+      if (!key) continue;
       const auditor =
         f.auditorType === COMPONENT_AUDITOR_TYPE.dhvaj
           ? 'dhvaj'
@@ -1570,7 +1576,7 @@ export class AuditIcfrControlsService {
             AND (auditor IS NULL
               OR (auditor = $3 AND auditor_name IS NULL AND $4::text IS NOT NULL)
               OR (report_document_id IS NULL AND $5::uuid IS NOT NULL))`,
-        [consolidatedId, componentKey(f.componentName), auditor, f.auditorName, f.reportDocumentId],
+        [consolidatedId, key, auditor, f.auditorName, f.reportDocumentId],
       );
     }
   }
