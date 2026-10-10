@@ -21,6 +21,7 @@ import { ExpandToggle } from '@/components/inline-panel';
 import { CaroEvidence } from './caro-evidence';
 import { CaroProgramme } from './caro-programme';
 import { CaroWorkspace, CARO_OUTCOME_LABEL } from './caro-workspace';
+import { ConsolidationWorkspace } from './consolidation-workspace';
 import { MasterFactList } from './master-fact-list';
 
 /**
@@ -94,6 +95,7 @@ export function GroupCaroCard({ engagementId }: { engagementId: string }): JSX.E
   });
 
   const [caroOpen, setCaroOpen] = useState(false);
+  const [cfsOpen, setCfsOpen] = useState(false);
 
   const saveParentCfs = useMutation({
     mutationFn: (value: boolean | null) =>
@@ -206,6 +208,16 @@ export function GroupCaroCard({ engagementId }: { engagementId: string }): JSX.E
             {cfs.assessment.systemOutcome && (
               <Badge tone="info">Suggested: {humanize(cfs.assessment.systemOutcome)}</Badge>
             )}
+            {decided(cfs.assessment.state) && cfs.assessment.conclusion && (
+              <Badge tone="success">Concluded: {humanize(cfs.assessment.conclusion)}</Badge>
+            )}
+            {cfs.completion?.complete && <Badge tone="success">02.6 COMPLETE</Badge>}
+            {cfs.assessment.needsReevaluation && (
+              <Badge tone="warn">02.6 needs re-evaluation</Badge>
+            )}
+            {cfs.partnerApproval?.required && !cfs.partnerApproval.approvedAt && (
+              <Badge tone="warn">Partner approval pending</Badge>
+            )}
           </div>
           <Facts facts={cfs.masterFacts} />
           {cfs.assessment.systemBasis && (
@@ -232,6 +244,24 @@ export function GroupCaroCard({ engagementId }: { engagementId: string }): JSX.E
                 <option value="false">No</option>
               </Select>
             </Field>
+          )}
+          <button
+            type="button"
+            aria-expanded={cfsOpen}
+            onClick={() => setCfsOpen((o) => !o)}
+            className="group flex items-center gap-2.5 text-left text-sm font-medium text-ink"
+          >
+            <ExpandToggle open={cfsOpen} />
+            {cfsOpen
+              ? 'Hide the 02.6 Consolidation workspace'
+              : 'Open the 02.6 Consolidation workspace'}
+          </button>
+          {cfsOpen && (
+            <ConsolidationWorkspace
+              engagementId={engagementId}
+              consolidation={cfs}
+              canManage={canManage}
+            />
           )}
         </section>
       )}

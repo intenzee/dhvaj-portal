@@ -1,4 +1,9 @@
-import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes, ReactNode } from 'react';
+import type {
+  InputHTMLAttributes,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+  ReactNode,
+} from 'react';
 import { cn } from '@/lib/cn';
 
 const base =
@@ -8,15 +13,18 @@ export function Field({
   label,
   hint,
   required,
+  className,
   children,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
+  /** Layout classes for the wrapper (e.g. a grid column span). */
+  className?: string;
   children: ReactNode;
 }): JSX.Element {
   return (
-    <label className="block">
+    <label className={cn('block', className)}>
       <span className="mb-1 block text-sm font-medium text-ink">
         {label}
         {required && <span className="ml-0.5 text-danger-600">*</span>}
