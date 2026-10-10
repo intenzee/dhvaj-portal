@@ -347,6 +347,9 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
       .send({
         conclusion: 'cfs_required',
         basis: 'E2E: the company has a subsidiary and prepares CFS.',
+        // An override of the 02.6 system result needs its technical basis and evidence (CFS-05).
+        technicalBasis: 'Section 129(3) — the company has a subsidiary.',
+        supportingEvidence: 'E2E: group structure confirmed with management.',
         version: cfsRow.assessment.version,
       })
       .expect(201);

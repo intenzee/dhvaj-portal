@@ -323,6 +323,18 @@ export function classifyInvestee(
     };
   })();
 
+  // A conclusion against a rule presumption is a control / influence dispute (EP approval, spec §22).
+  const controlPresumed =
+    (indicator != null && controlRule != null && ruleMeets(indicator, controlRule)) ||
+    inv.boardCompositionControl === true;
+  const siPresumed = indicator != null && siRule != null && ruleMeets(indicator, siRule);
+  const presumptionRebutted =
+    control === ASSESSMENT_ANSWER.no && controlPresumed
+      ? `No control concluded despite ${inv.boardCompositionControl === true ? 'board-composition control' : `${indicatorLabel} ${fmt(indicator)}% above the ${fmt(controlRule?.threshold)}% control presumption`}.`
+      : si === ASSESSMENT_ANSWER.no && siPresumed && c.relationship === INVESTEE_RELATIONSHIP.none
+        ? `Significant-influence presumption rebutted (${indicatorLabel} ${fmt(indicator)}% ≥ ${fmt(siRule?.threshold)}%).`
+        : null;
+
   const periodImpact = periodImpactOf(inv, ctx.periodStart, ctx.periodEnd);
   const accounted = ACCOUNTED.has(c.relationship);
   let systemIncluded: PerimeterInclusion;
@@ -363,6 +375,7 @@ export function classifyInvestee(
     basis: c.basis,
     factors,
     judgementRequired: c.judgementRequired,
+    presumptionRebutted,
     systemIncluded,
     included: inv.included ?? systemIncluded,
     inclusionReason:

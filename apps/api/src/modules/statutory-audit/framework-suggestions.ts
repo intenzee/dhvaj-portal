@@ -175,18 +175,12 @@ export function suggestArea(
       // area — never a second "any company applies" test here.
       return judgement('ICFR reporting applicability is assessed in 02.5.');
 
-    case FRAMEWORK_AREA_KEY.cfs: {
-      // Consolidation: a company with subsidiaries/associates/JVs prepares CFS.
-      if (f.hasSubsidiariesOrAssociates == null)
-        return pending(
-          'Group structure not captured — needed to test consolidation applicability.',
-        );
-      return f.hasSubsidiariesOrAssociates
-        ? applies(
-            'Entity has subsidiaries/associates/JVs — consolidated financial statements are required (Sec 129(3)).',
-          )
-        : notApplies('No subsidiaries/associates/JVs on record — CFS not indicated.');
-    }
+    case FRAMEWORK_AREA_KEY.cfs:
+      // §129(3) CFS is assessed by 02.6 (consolidation.ts): the relationship
+      // assessment (control / significant influence / joint control — never a
+      // percentage alone), the cumulative Rule 6 exemption and the perimeter.
+      // The framework service mirrors that result onto this area.
+      return judgement('Consolidation (CFS) applicability is assessed in 02.6.');
 
     case FRAMEWORK_AREA_KEY.internalAudit: {
       // Sec 138 / Rule 13 thresholds (paid-up / turnover / borrowings / deposits).

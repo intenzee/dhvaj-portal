@@ -221,15 +221,18 @@ describe('suggestArea — advisory applicability (§19), thresholds resolved fro
     expect(s.basis).toMatch(/02\.5/);
   });
 
-  it('CFS: subsidiaries present ⇒ applicable; none ⇒ not applicable', () => {
-    expect(
-      suggestArea(FRAMEWORK_AREA_KEY.cfs, facts({ hasSubsidiariesOrAssociates: true }), resolve)
-        .suggestion,
-    ).toBe('applicable');
-    expect(
-      suggestArea(FRAMEWORK_AREA_KEY.cfs, facts({ hasSubsidiariesOrAssociates: false }), resolve)
-        .suggestion,
-    ).toBe('not_applicable');
+  it('CFS: never decided here — 02.6 (consolidation.ts) assesses it and the area mirrors it', () => {
+    // A "has subsidiaries" flag alone ignores Rule 6 and the control judgment.
+    for (const has of [true, false, null]) {
+      const s = suggestArea(
+        FRAMEWORK_AREA_KEY.cfs,
+        facts({ hasSubsidiariesOrAssociates: has }),
+        resolve,
+      );
+      expect(s.suggestion).toBeNull();
+      expect(s.state).toBe('professional_judgement_required');
+      expect(s.basis).toMatch(/02\.6/);
+    }
   });
 
   it('CSR: meets a Sec 135 threshold ⇒ applicable; below all ⇒ not applicable', () => {
