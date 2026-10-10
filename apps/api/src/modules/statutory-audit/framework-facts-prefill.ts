@@ -141,14 +141,18 @@ export function consolidationFromMaster(m: EngagementMasterFacts): Consolidation
 
   values.investees = g.investees.map((i): InvesteeInput => ({
     name: i.counterparty,
+    // The master label is a SUGGESTION (spec §5): control / influence / joint
+    // control stays a professional conclusion the engine prompts for — the
+    // percentage is a rule input, never a substitute for that judgment.
+    suggestedRelationship: i.kind,
     ownershipPercent: i.shareholdingPct,
-    // Recorded as a subsidiary on the master = control; associates and JVs
-    // fall back to the ownership presumptions.
-    hasControl: i.kind === 'subsidiary' ? true : null,
+    hasControl: null,
     isJointArrangement: i.kind === 'joint_venture',
     jointArrangementIsOperation: false,
     significantInfluenceRebutted: null,
     auditedByOtherAuditor: false,
+    country: i.counterpartyCountry ?? null,
+    isIndianCompany: i.counterpartyCountry ? i.counterpartyCountry === 'IN' : null,
   }));
   facts.push({
     label: 'Subsidiaries, associates and JVs',

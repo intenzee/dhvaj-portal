@@ -9,6 +9,7 @@ import {
   auditPeriodStartFromFinancialYear,
   type ConsolidationApprovedResult,
   type ConsolidationComponentRef,
+  type ConsolidationCrossLinks,
   type ConsolidationOutcome,
   type FrameworkState,
   type ReportingFrameworkOutcome,
@@ -74,6 +75,8 @@ function cfsRequiredOf(outcome: ConsolidationOutcome | null): boolean | null {
 /**
  * The 02.6 result for one workflow instance: the conclusion when decided, else
  * the stored system suggestion. Null when the 02.6 row has not been seeded yet.
+ * `complete` is null here — Track B's group-audit reader calls this, so the §24
+ * checklist (which reads Track B's status) lives in `consolidation-status-read.ts`.
  */
 export async function readConsolidationResultOn(
   client: PoolClient,
@@ -114,7 +117,7 @@ export async function readConsolidationResultOn(
     workflowInstanceId,
     outcome,
     decided,
-    complete: false,
+    complete: null,
     cfsRequired: cfsRequiredOf(outcome),
     groupFramework:
       r.fr_state && DECIDED.has(r.fr_state) && r.fr_conclusion
@@ -125,4 +128,34 @@ export async function readConsolidationResultOn(
     financialYear: fy,
     periodStart: fy ? auditPeriodStartFromFinancialYear(fy) : new Date().toISOString().slice(0, 10),
   };
+}
+
+/**
+ * The CARO 3(xxi) / consolidated-ICFR component rows 02.4 / 02.5 fed from this
+ * perimeter (spec §20 — one group structure, no duplicate entry). Null when
+ * that module is not in scope (no consolidated CARO clause / no consolidated
+ * ICFR consideration).
+ */
+export async function consolidationCrossLinksOn(
+  client: PoolClient,
+  workflowInstanceId: string,
+): Promise<ConsolidationCrossLinks> {
+  const { rows } = await client.query<{ caro: string | null; icfr: string | null }>(
+    `SELECT
+       (SELECT count(c.id) FILTER (WHERE c.source = '02.6' AND c.withdrawn_at IS NULL)
+          FROM hsdg.audit_caro_programme p
+          JOIN hsdg.audit_caro_clause_item i
+            ON i.programme_id = p.id AND i.report_context = 'consolidated' AND i.status = 'active'
+          LEFT JOIN hsdg.audit_caro_component c ON c.item_id = i.id
+         WHERE p.workflow_instance_id = $1 AND p.status = 'active'
+         HAVING count(i.id) > 0) AS caro,
+       (SELECT count(c.id) FILTER (WHERE c.source = '02.6' AND c.withdrawn_at IS NULL)
+          FROM hsdg.audit_icfr_consolidated k
+          LEFT JOIN hsdg.audit_icfr_component c ON c.consolidated_id = k.id
+         WHERE k.workflow_instance_id = $1 AND k.status = 'active'
+         HAVING count(k.id) > 0) AS icfr`,
+    [workflowInstanceId],
+  );
+  const n = (v: string | null | undefined) => (v == null ? null : Number(v));
+  return { caroComponents: n(rows[0]?.caro), icfrComponents: n(rows[0]?.icfr) };
 }

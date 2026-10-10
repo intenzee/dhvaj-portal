@@ -138,9 +138,18 @@ describe('Statutory Audit — 02.4 / 02.6 facts from the client master (e2e)', (
       .set(bearer(pa))
       .expect(200);
     const c = res.body[0] as StatutoryAuditConsolidation;
+    // The master suggests the relationship; control stays a professional conclusion (02.6 §5).
     expect(c.capturedFacts.investees).toEqual([
-      expect.objectContaining({ name: subName, ownershipPercent: 100, hasControl: true }),
+      expect.objectContaining({
+        name: subName,
+        ownershipPercent: 100,
+        suggestedRelationship: 'subsidiary',
+        hasControl: null,
+        country: 'IN',
+        isIndianCompany: true,
+      }),
     ]);
+    expect(c.capturedFacts.investees[0]!.id).toBeTruthy();
     expect(c.capturedFacts.isPartiallyOwnedSubsidiary).toBe(true);
     expect(c.capturedFacts.isWhollyOwnedSubsidiary).toBe(false);
     expect(c.capturedFacts.hasBranches).toBe(true);

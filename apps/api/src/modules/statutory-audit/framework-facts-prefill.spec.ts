@@ -151,12 +151,19 @@ describe('02.6 consolidation from the client master', () => {
       }),
     );
     const { next } = fillConsolidation(CFS_BLANK, fill);
+    // The master label is a suggestion — control stays a professional conclusion (spec §5).
     expect(
-      next.investees.map((i) => [i.name, i.ownershipPercent, i.hasControl, i.isJointArrangement]),
+      next.investees.map((i) => [
+        i.name,
+        i.suggestedRelationship,
+        i.ownershipPercent,
+        i.hasControl,
+        i.isJointArrangement,
+      ]),
     ).toEqual([
-      ['Sub A', 100, true, false],
-      ['Assoc B', 30, null, false],
-      ['JV C', 50, null, true],
+      ['Sub A', 'subsidiary', 100, null, false],
+      ['Assoc B', 'associate', 30, null, false],
+      ['JV C', 'joint_venture', 50, null, true],
     ]);
   });
 

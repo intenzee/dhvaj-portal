@@ -283,6 +283,12 @@ export interface InvesteeClassification {
   factors: string[];
   /** A professional control / influence / joint-control judgment is still required. */
   judgementRequired: boolean;
+  /**
+   * The professional conclusion rebuts a rule presumption (e.g. no control
+   * despite voting power above the control presumption) — a control dispute
+   * that needs Engagement Partner approval (spec §22). Null = none.
+   */
+  presumptionRebutted?: string | null;
   systemIncluded: PerimeterInclusion;
   included: PerimeterInclusion;
   inclusionReason: string;
@@ -627,6 +633,18 @@ export interface StatutoryAuditConsolidation {
   priorYear?: ConsolidationPriorYear | null;
   /** The audit period start — the date references / rules resolve on. */
   periodStart?: string;
+  /** CARO 3(xxi) / consolidated-ICFR component rows fed from this perimeter (spec §20). */
+  crossLinks?: ConsolidationCrossLinks;
+  /** The framework is approved (frozen) — 02.6 is read-only until a reassessment reopens it. */
+  approved?: boolean;
+  /** The viewer is the engagement's Engagement Partner (CFS-05 approval). */
+  viewerIsPartner?: boolean;
+}
+
+/** CARO 3(xxi) / consolidated-ICFR component rows fed from 02.6 (null = that module is not in scope). */
+export interface ConsolidationCrossLinks {
+  caroComponents: number | null;
+  icfrComponents: number | null;
 }
 
 /** Capture the 02.6-specific facts. */
@@ -767,8 +785,11 @@ export interface ConsolidationApprovedResult {
   /** Conclusion when decided, else the stored system suggestion. */
   outcome: ConsolidationOutcome | null;
   decided: boolean;
-  /** 02.6 COMPLETE (spec §24). */
-  complete: boolean;
+  /**
+   * 02.6 COMPLETE (spec §24). Null from `readConsolidationResultOn` (Track B's
+   * group reader calls it); `readConsolidationStatusOn` fills it.
+   */
+  complete: boolean | null;
   /** true = CFS required; false = not required / exempt; null = not yet known. */
   cfsRequired: boolean | null;
   /** The group reporting framework from 02.2 (null until 02.2 concludes). */

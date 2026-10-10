@@ -22,6 +22,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditCaroService } from './audit-caro.service';
+import { AuditConsolidationService } from './audit-consolidation.service';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditMattersService } from './audit-matters.service';
 import { SUGGESTED_AREA_KEYS, suggestArea, type FrameworkFacts } from './framework-suggestions';
@@ -83,6 +84,7 @@ export class AuditFrameworkService {
     private readonly matters: AuditMattersService,
     private readonly caro: AuditCaroService,
     private readonly icfr: AuditIcfrService,
+    private readonly consolidation: AuditConsolidationService,
   ) {}
 
   // ── Read ──────────────────────────────────────────────────────────────────
@@ -305,14 +307,21 @@ export class AuditFrameworkService {
     for (const row of rows) {
       // Never overwrite a professional conclusion (§19).
       if (FRAMEWORK_DECIDED_STATES.includes(row.state)) continue;
-      // CARO is assessed by 02.4 and ICFR by 02.5 — those areas mirror their
-      // sub-assessment's result (one answer each).
+      // CARO is assessed by 02.4, ICFR by 02.5 and consolidation by 02.6 —
+      // those areas mirror their sub-assessment's result (one answer each).
       const s =
         row.area_key === FRAMEWORK_AREA_KEY.caro
           ? await this.caro.legacySuggestionOn(client, ctx, engagementId, workflowInstanceId)
           : row.area_key === FRAMEWORK_AREA_KEY.ifc
             ? await this.icfr.legacySuggestionOn(client, ctx, engagementId, workflowInstanceId)
-            : suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
+            : row.area_key === FRAMEWORK_AREA_KEY.cfs
+              ? await this.consolidation.legacySuggestionOn(
+                  client,
+                  ctx,
+                  engagementId,
+                  workflowInstanceId,
+                )
+              : suggestArea(row.area_key as FrameworkAreaKey, facts, resolve);
       if (!s.suggestion && s.state === 'not_assessed') continue; // descriptive — leave alone
       await client.query(
         `UPDATE hsdg.audit_framework_assessments
@@ -347,7 +356,7 @@ export class AuditFrameworkService {
                 decided_at = now(), version = version + 1
           WHERE workflow_instance_id = $1 AND system_suggestion IS NOT NULL
             AND state IN ('system_suggested_applicable', 'system_suggested_not_applicable')
-            AND area_key NOT IN ('caro', 'ifc')
+            AND area_key NOT IN ('caro', 'ifc', 'cfs')
           RETURNING id, area_key, conclusion`,
         [workflowInstanceId, ctx.employeeId ?? null],
       );
@@ -357,6 +366,11 @@ export class AuditFrameworkService {
       // ICFR: accepting is the 02.5 IFC-04 Confirm (which mirrors this area).
       if (await this.icfr.acceptSuggestionOn(client, ctx, engagementId, workflowInstanceId))
         rows.push({ id: '', area_key: 'ifc' });
+      // CFS: accepting is the 02.6 CFS-05 Confirm (which mirrors this area).
+      if (
+        await this.consolidation.acceptSuggestionOn(client, ctx, engagementId, workflowInstanceId)
+      )
+        rows.push({ id: '', area_key: 'cfs' });
       const csr = rows.find((r) => r.area_key === 'csr') as
         { conclusion?: string | null } | undefined;
       if (csr)
@@ -428,6 +442,24 @@ export class AuditFrameworkService {
           objectType: 'audit_framework_assessment',
           objectId: assessmentId,
           after: { conclusion: input.conclusion, via: '02.4' },
+        });
+        const [framework] = await this.readFrameworks(client, engagementId);
+        return framework!;
+      }
+      if (current.area_key === FRAMEWORK_AREA_KEY.cfs) {
+        // Consolidation is concluded in 02.6 (CFS-05); this records it there and mirrors back.
+        await this.consolidation.decideFromFrameworkOn(
+          client,
+          ctx,
+          engagementId,
+          current.workflow_instance_id,
+          input,
+        );
+        await this.audit.recordWith(client, ctx, {
+          action: 'statutory_audit.framework_decision',
+          objectType: 'audit_framework_assessment',
+          objectId: assessmentId,
+          after: { conclusion: input.conclusion, via: '02.6' },
         });
         const [framework] = await this.readFrameworks(client, engagementId);
         return framework!;
