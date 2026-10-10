@@ -1,4 +1,5 @@
 import type { PlannedClauseProcedure } from './caro-programme';
+import { CONSOLIDATION_WORK_AREA_KEY, type PlannedConsolidationProcedure } from './group-audit';
 import { ICFR_WORK_AREA_KEY, type PlannedIcfrProcedure } from './icfr-controls';
 import type {
   AreaRiskLevel,
@@ -443,27 +444,11 @@ const FS_TEMPLATES: Array<{ match: RegExp; items: Template[] }> = [
 
 /** The standard programme for each framework workstream (§20). */
 const WORKSTREAM_TEMPLATES: Record<string, Template[]> = {
-  // CARO and IFC have no standard programme here: the 02.4 clause programme
-  // supplies one procedure per clause (spec §18) through `caroClauses`, and the
-  // 02.5 ICFR workstream one per in-scope process area through `icfrProcedures`.
-  cfs: [
-    {
-      key: 'components',
-      title: 'Component scoping and instructions',
-      objective:
-        'Confirm the group structure and components in scope, issue instructions and evaluate component auditors’ work (SA 600).',
-      evidence: 'Group structure; scoping memo; instructions; component reporting.',
-      assertions: [],
-    },
-    {
-      key: 'consolidation',
-      title: 'Consolidation adjustments and eliminations',
-      objective:
-        'Test the consolidation workings — eliminations, non-controlling interests, goodwill and uniform accounting policies.',
-      evidence: 'Consolidation workings; intra-group reconciliations.',
-      assertions: ['accuracy', 'presentation_and_disclosure'],
-    },
-  ],
+  // CARO, IFC and CFS have no standard programme here: the 02.4 clause
+  // programme supplies one procedure per clause (spec §18) through
+  // `caroClauses`, the 02.5 ICFR workstream one per in-scope process area
+  // through `icfrProcedures`, and the 02.6 consolidation work programme one
+  // per applicable item (02.6 spec §19) through `consolidationProcedures`.
   ind_as_review: [
     {
       key: 'disclosure',
@@ -572,6 +557,11 @@ export function suggestProcedures(input: {
    * area — never the generic IFC programme.
    */
   icfrProcedures?: readonly PlannedIcfrProcedure[];
+  /**
+   * The 02.6 consolidation work programme (spec §19): one procedure per
+   * applicable item in the CFS work area — never the generic CFS programme.
+   */
+  consolidationProcedures?: readonly PlannedConsolidationProcedure[];
 }): SuggestedProcedure[] {
   const out: SuggestedProcedure[] = [];
   const has = (k: string) => input.areaKeys.has(k);
@@ -684,6 +674,20 @@ export function suggestProcedures(input: {
         sourceKey: p.sourceKey,
         sourceNote: p.sourceNote,
         workAreaKey: ICFR_WORK_AREA_KEY,
+        title: p.title,
+        objective: p.objective,
+        assertions: [],
+        riskId: null,
+        expectedEvidence: p.expectedEvidence,
+      });
+    }
+  }
+  if (has(CONSOLIDATION_WORK_AREA_KEY)) {
+    for (const p of input.consolidationProcedures ?? []) {
+      out.push({
+        sourceKey: p.sourceKey,
+        sourceNote: p.sourceNote,
+        workAreaKey: CONSOLIDATION_WORK_AREA_KEY,
         title: p.title,
         objective: p.objective,
         assertions: [],

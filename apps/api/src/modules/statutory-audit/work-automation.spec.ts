@@ -239,4 +239,28 @@ describe('work automation — procedures', () => {
       suggestProcedures({ areaKeys: new Set(), fsAreas: [], risks: [], icfrProcedures }),
     ).toEqual([]);
   });
+
+  it('takes the CFS programme from the 02.6 consolidation work programme, never a generic one', () => {
+    const consolidationProcedures = [
+      {
+        sourceKey: 'cfs:eliminations',
+        sourceNote: '02.6 — DHVAJ consolidation programme',
+        title: 'Intra-group eliminations',
+        objective: 'Test.',
+        expectedEvidence: 'Elimination workings.',
+      },
+    ];
+    const withCfs = suggestProcedures({
+      areaKeys: new Set(['cfs']),
+      fsAreas: [],
+      risks: [],
+      consolidationProcedures,
+    });
+    expect(withCfs.map((p) => [p.sourceKey, p.workAreaKey])).toEqual([['cfs:eliminations', 'cfs']]);
+    expect(withCfs.some((p) => p.sourceKey.startsWith('std:cfs:'))).toBe(false);
+    // No CFS work area (CFS not required) → nothing, even if planned.
+    expect(
+      suggestProcedures({ areaKeys: new Set(), fsAreas: [], risks: [], consolidationProcedures }),
+    ).toEqual([]);
+  });
 });
