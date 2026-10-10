@@ -1508,15 +1508,17 @@ export class AuditIcfrControlsService {
     consolidatedId: string,
   ): Promise<void> {
     const { rows } = await client.query<{
-      perimeter: Array<{ name: string; relationship: string }> | null;
+      perimeter: Array<{ name: string; relationship: string; included?: string }> | null;
     }>(
       `SELECT system_detail -> 'perimeter' AS perimeter
          FROM hsdg.audit_framework_subassessment
         WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3`,
       [workflowInstanceId, SUB_SECTION_KEY.consolidation, FRAMEWORK_AREA_KEY.cfs],
     );
+    // Only the companies the CFS includes — an excluded / out-of-period entity is not one (02.6 §8).
     const perimeter = (rows[0]?.perimeter ?? []).filter(
-      (p) => p?.name?.trim() && CFS_COMPONENT_RELATIONSHIPS.has(p.relationship),
+      (p) =>
+        p?.name?.trim() && CFS_COMPONENT_RELATIONSHIPS.has(p.relationship) && p.included !== 'no',
     );
     const keys: string[] = [];
     let order = 0;

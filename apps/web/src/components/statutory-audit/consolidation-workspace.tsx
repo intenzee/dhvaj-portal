@@ -544,7 +544,17 @@ export function ConsolidationWorkspace({
               are complete.
             </p>
           )}
-          {(d?.hasBranches || ga?.branchAuditPresent === 'yes') && branchAuditors}
+        </Section>
+      )}
+
+      {/* Branch auditors — §143(8) applies with or without CFS (§17, Track B) */}
+      {branchAuditors && (
+        <Section
+          id="cfs-branches"
+          title="Branch auditors (§143(8))"
+          open={!!d?.hasBranches || ga?.branchAuditPresent === 'yes'}
+        >
+          {branchAuditors}
         </Section>
       )}
 

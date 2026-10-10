@@ -21,6 +21,10 @@ import { ExpandToggle } from '@/components/inline-panel';
 import { CaroEvidence } from './caro-evidence';
 import { CaroProgramme } from './caro-programme';
 import { CaroWorkspace, CARO_OUTCOME_LABEL } from './caro-workspace';
+import { ConsolidationBranchAuditors } from './consolidation-branch-auditors';
+import { ConsolidationEvidence } from './consolidation-evidence';
+import { ConsolidationOtherAuditors } from './consolidation-other-auditors';
+import { ConsolidationWorkProgramme } from './consolidation-work-programme';
 import { ConsolidationWorkspace } from './consolidation-workspace';
 import { MasterFactList } from './master-fact-list';
 
@@ -261,6 +265,33 @@ export function GroupCaroCard({ engagementId }: { engagementId: string }): JSX.E
               engagementId={engagementId}
               consolidation={cfs}
               canManage={canManage}
+              otherAuditors={
+                <ConsolidationOtherAuditors
+                  engagementId={engagementId}
+                  workflowInstanceId={cfs.workflowInstanceId}
+                  canManage={canManage}
+                />
+              }
+              branchAuditors={
+                <ConsolidationBranchAuditors
+                  engagementId={engagementId}
+                  workflowInstanceId={cfs.workflowInstanceId}
+                  canManage={canManage}
+                />
+              }
+              workProgramme={
+                <ConsolidationWorkProgramme
+                  engagementId={engagementId}
+                  workflowInstanceId={cfs.workflowInstanceId}
+                />
+              }
+              evidence={
+                <ConsolidationEvidence
+                  engagementId={engagementId}
+                  consolidation={cfs}
+                  readOnly={!canManage || !!cfs.approved}
+                />
+              }
             />
           )}
         </section>

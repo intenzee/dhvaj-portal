@@ -343,7 +343,7 @@ describe('IcfrWorkspace (02.5 spec §4)', () => {
         version: 7,
       },
     });
-  });
+  }, 20_000); // types a full IFC-01..03 schedule — slow under a loaded full-suite run
 
   it('Confirm posts IFC-04 confirm; it is unavailable when information is pending', async () => {
     const user = userEvent.setup();
