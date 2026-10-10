@@ -103,7 +103,12 @@ describe('ICFR & other reporting card', () => {
         method: 'POST',
         body: {
           softwareSystems: [
-            { name: 'Tally Prime', hasAuditTrailFeature: true, auditTrailOperatedAllYear: true },
+            {
+              name: 'Tally Prime',
+              hasAuditTrailFeature: true,
+              auditTrailOperatedAllYear: true,
+              enabledThroughout: 'yes',
+            },
           ],
           version: 5,
         },

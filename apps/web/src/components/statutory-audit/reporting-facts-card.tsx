@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileCheck2, RefreshCw } from 'lucide-react';
 import {
   ICFR_OUTCOME_LABEL,
+  OTHER_REPORTING_OUTCOME_LABEL,
+  type OtherReportingOutcome,
   PERMISSION,
   type IcfrOutcome,
   type SoftwareSystemInput,
@@ -25,6 +27,7 @@ import { IcfrConsolidated } from './icfr-consolidated';
 import { IcfrEvidence } from './icfr-evidence';
 import { IcfrWorkspace } from './icfr-workspace';
 import { IcfrWorkstream } from './icfr-workstream';
+import { OtherReportingWorkspace } from './other-reporting-workspace';
 
 /**
  * 02.5 ICFR and 02.7 other-reporting facts the portal already holds (Guide
@@ -40,6 +43,8 @@ const icfrQk = (id: string) => ['engagement', id, 'statutory-audit-icfr'];
 const orQk = (id: string) => ['engagement', id, 'statutory-audit-other-reporting'];
 
 const icfrLabel = (o: string) => ICFR_OUTCOME_LABEL[o as IcfrOutcome] ?? humanize(o);
+const orLabel = (o: string) =>
+  OTHER_REPORTING_OUTCOME_LABEL[o as OtherReportingOutcome] ?? humanize(o);
 
 const decided = (s?: string) =>
   s === 'applicable' || s === 'not_applicable' || s === 'overridden' || s === 'approved';
@@ -103,6 +108,7 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
   });
 
   const [icfrOpen, setIcfrOpen] = useState(false);
+  const [orOpen, setOrOpen] = useState(false);
 
   const saveSystems = useMutation({
     mutationFn: (softwareSystems: SoftwareSystemInput[]) =>
@@ -205,8 +211,13 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-ink">Other reporting</span>
             {or.assessment.systemOutcome && (
-              <Badge tone="info">Suggested: {humanize(or.assessment.systemOutcome)}</Badge>
+              <Badge tone="info">Suggested: {orLabel(or.assessment.systemOutcome)}</Badge>
             )}
+            {decided(or.assessment.state) && or.assessment.conclusion && (
+              <Badge tone="success">Concluded: {orLabel(or.assessment.conclusion)}</Badge>
+            )}
+            {or.completion?.complete && <Badge tone="success">02.7 COMPLETE</Badge>}
+            {or.assessment.needsReevaluation && <Badge tone="warn">02.7 needs re-evaluation</Badge>}
           </div>
           <Facts facts={or.masterFacts} />
           {editable && !decided(or.assessment.state) && systems.length > 0 && (
@@ -221,8 +232,15 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
                       disabled={saveSystems.isPending || !sys.hasAuditTrailFeature}
                       onChange={(e) =>
                         saveSystems.mutate(
+                          // The register field drives the legacy flag server-side.
                           systems.map((x, j) =>
-                            j === i ? { ...x, auditTrailOperatedAllYear: e.target.checked } : x,
+                            j === i
+                              ? {
+                                  ...x,
+                                  auditTrailOperatedAllYear: e.target.checked,
+                                  enabledThroughout: e.target.checked ? 'yes' : 'pending',
+                                }
+                              : x,
                           ),
                         )
                       }
@@ -234,6 +252,18 @@ export function ReportingFactsCard({ engagementId }: { engagementId: string }): 
                 </li>
               ))}
             </ul>
+          )}
+          <button
+            type="button"
+            aria-expanded={orOpen}
+            onClick={() => setOrOpen((o) => !o)}
+            className="group flex items-center gap-2.5 text-left text-sm font-medium text-ink"
+          >
+            <ExpandToggle open={orOpen} />
+            {orOpen ? 'Hide the 02.7 reporting workspace' : 'Open the 02.7 reporting workspace'}
+          </button>
+          {orOpen && (
+            <OtherReportingWorkspace engagementId={engagementId} or={or} canManage={canManage} />
           )}
         </section>
       )}
