@@ -193,6 +193,8 @@ export interface StatutoryAuditConsolidation {
   masterFacts: MasterFact[];
   /** True once 02.1 is confirmed AND 02.2 concluded — 02.6 reads their frozen outputs. */
   upstreamReady: boolean;
+  /** A technical memo is suggested (override / further assessment / EP approval required). */
+  memoSuggested?: boolean;
 }
 
 /** Capture the 02.6-specific facts (guide §9.6). */
@@ -220,4 +222,146 @@ export interface StatutoryAuditConsolidationMasterFillResult {
   consolidation: StatutoryAuditConsolidation;
   /** What was filled (empty when the master had nothing new to add). */
   filled: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Spec v1.0 build (two tracks, docs/02-6-consolidation-build-split.md).
+// Track A owns this file; Track B's own types live in statutory-audit-group-audit.ts
+// and import these (never re-export the same names).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Provision codes (spec §23) — resolved through the central Provision Library,
+ * never a URL in a component. Track B seeds the ones not yet in the library
+ * (COS_ACT_2_6) and the `authority_reference_link` rows under context '02.6'.
+ */
+export const CONSOLIDATION_PROVISION_CODE = {
+  section129_3: 'COS_ACT_129_3',
+  section2_6: 'COS_ACT_2_6',
+  rule6: 'ACCT_RULE_6',
+  as21: 'AS_21',
+  as23: 'AS_23',
+  as27: 'AS_27',
+  indAs110: 'INDAS_110',
+  indAs111: 'INDAS_111',
+  indAs28: 'INDAS_28',
+  sa600: 'SA_600',
+  section143_8: 'COS_ACT_143_8',
+} as const;
+
+/** `authority_reference_link` anchors under context '02.6' (spec §23). */
+export const CONSOLIDATION_REFERENCE_CONTEXT = '02.6';
+export const CONSOLIDATION_REFERENCE_ANCHOR = {
+  section129_3: 'section_129_3',
+  section2_6: 'section_2_6',
+  rule6: 'rule_6',
+  as21: 'as_21',
+  as23: 'as_23',
+  as27: 'as_27',
+  indAs110: 'ind_as_110',
+  indAs111: 'ind_as_111',
+  indAs28: 'ind_as_28',
+  sa600: 'sa_600',
+  section143_8: 'section_143_8',
+} as const;
+
+/** Whether a perimeter entity is included in the CFS (spec §8). */
+export const PERIMETER_INCLUSION = { yes: 'yes', no: 'no', pending: 'pending' } as const;
+export type PerimeterInclusion = (typeof PERIMETER_INCLUSION)[keyof typeof PERIMETER_INCLUSION];
+
+/** Who audits a component (spec §8, §12) — Track B's auditor matrix owns the value. */
+export const COMPONENT_AUDITOR_TYPE = {
+  dhvaj: 'dhvaj',
+  otherAuditor: 'other_auditor',
+  unaudited: 'unaudited_special_purpose',
+  none: 'none',
+  tbd: 'tbd',
+} as const;
+export type ComponentAuditorType =
+  (typeof COMPONENT_AUDITOR_TYPE)[keyof typeof COMPONENT_AUDITOR_TYPE];
+export const COMPONENT_AUDITOR_TYPE_LABEL: Record<ComponentAuditorType, string> = {
+  dhvaj: 'DHVAJ',
+  other_auditor: 'Another auditor',
+  unaudited_special_purpose: 'Unaudited / special purpose',
+  none: 'None',
+  tbd: 'TBD',
+};
+
+/**
+ * One component of the 02.6 consolidation perimeter as other modules see it
+ * (Track B's auditor matrix, instructions, packages; 02.4 3(xxi); 02.5
+ * consolidated; 03.3). `id` is stable across edits and years (roll-forward keeps it).
+ */
+export interface ConsolidationComponentRef {
+  id: string;
+  name: string;
+  /** Classified relationship (subsidiary / associate / joint_venture / joint_operation / none). */
+  relationship: InvesteeRelationship;
+  method: ConsolidationMethod;
+  included: PerimeterInclusion;
+  country: string | null;
+  /** Incorporated in India (a company under the Companies Act) — null = unknown. */
+  isIndianCompany: boolean | null;
+  /** Component reporting date (CFS-03) — null = not captured. */
+  reportingDate: string | null;
+  /** Component local framework (CFS-04): 'ind_as' | 'as' | 'ifrs' | 'local_gaap' | 'other'. */
+  localFramework: string | null;
+}
+
+/**
+ * The 02.6 result for one workflow instance as downstream modules read it
+ * (DI-free `consolidation-read.ts` → `readConsolidationResultOn`, Track A).
+ */
+export interface ConsolidationApprovedResult {
+  workflowInstanceId: string;
+  /** Conclusion when decided, else the stored system suggestion. */
+  outcome: ConsolidationOutcome | null;
+  decided: boolean;
+  /** 02.6 COMPLETE (spec §24). */
+  complete: boolean;
+  /** true = CFS required; false = not required / exempt; null = not yet known. */
+  cfsRequired: boolean | null;
+  /** The group reporting framework from 02.2 (null until 02.2 concludes). */
+  groupFramework: ReportingFrameworkOutcome | null;
+  components: ConsolidationComponentRef[];
+  /** The master shows branch addresses — Track B's BR-01 suggestion. */
+  branchesOnMaster: boolean;
+  financialYear: string | null;
+  /** Audit period start (rule / provision resolution date). */
+  periodStart: string;
+}
+
+/**
+ * Track B's group-audit status (DI-free `consolidation-group-read.ts` →
+ * `groupAuditStatusOn`), read by Track A for the landing screen (Other Auditors,
+ * Outstanding Information, Workstream), the CFS-05 summary and the §24 checklist.
+ */
+export interface GroupAuditStatus {
+  /** The auditor matrix has a row for every included component. */
+  matrixComplete: boolean;
+  dhvajComponents: number;
+  otherAuditorComponents: number;
+  tbdComponents: number;
+  /** Per component id: the matrix auditor type + firm (A shows it on the perimeter). */
+  byComponent: Record<
+    string,
+    { auditorType: ComponentAuditorType | null; auditorName: string | null }
+  >;
+  /** SA 600 applies (any other component auditor / branch auditor). */
+  sa600Required: boolean;
+  /** GA-01..GA-04 answers still Pending / Further Assessment. */
+  sa600Pending: number;
+  /** Other-auditor components with no component instructions issued. */
+  instructionsPending: number;
+  /** Required reporting-package documents not yet received (spec §15). */
+  pendingReports: number;
+  /** BR-01 answer. */
+  branchAuditPresent: 'yes' | 'no' | 'pending';
+  branchAuditors: number;
+  /** Branch auditor records missing a report / principal-auditor response. */
+  branchPending: number;
+  /** Consolidation work programme generated (§19). */
+  workProgrammeGenerated: boolean;
+  /** Blocking matters (material GA-04 Pending, unresolved significant findings), as sentences. */
+  blockingMatters: string[];
 }
