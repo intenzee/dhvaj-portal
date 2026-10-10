@@ -44,7 +44,8 @@ const CARD_WORK: Partial<Record<ReportingCardKey, { objective: string; evidence:
   s143_3_b_books: {
     objective:
       'Assess whether proper books of account as required by law have been kept, so far as appears from the examination of those books, including backup and the audit-trail bearing on the books.',
-    evidence: 'Books of account review; Section 128 compliance notes; backup / server location evidence.',
+    evidence:
+      'Books of account review; Section 128 compliance notes; backup / server location evidence.',
   },
   s143_3_b_branch_returns: {
     objective:
@@ -74,7 +75,8 @@ const CARD_WORK: Partial<Record<ReportingCardKey, { objective: string; evidence:
   s143_3_g_director_disqualification: {
     objective:
       'Complete the Section 164(2) workpaper for every director: written representations taken on record by the Board, MCA / DIR-8 evidence and the legal analysis — never a DIN-status shortcut.',
-    evidence: 'Directors’ written representations (DIR-8); Board minutes; MCA records; 164(2) workpaper.',
+    evidence:
+      'Directors’ written representations (DIR-8); Board minutes; MCA records; 164(2) workpaper.',
   },
   s143_3_h_accounts_qualification: {
     objective:
@@ -99,7 +101,8 @@ const CARD_WORK: Partial<Record<ReportingCardKey, { objective: string; evidence:
   rule_11_b_foreseeable_losses: {
     objective:
       'Check provision is made, as required under law or accounting standards, for material foreseeable losses on long-term contracts including derivative contracts.',
-    evidence: 'Schedule of long-term and derivative contracts; loss assessment; provision workings.',
+    evidence:
+      'Schedule of long-term and derivative contracts; loss assessment; provision workings.',
   },
   rule_11_c_iepf: {
     objective:
@@ -109,7 +112,8 @@ const CARD_WORK: Partial<Record<ReportingCardKey, { objective: string; evidence:
   rule_11_e_funds_advanced: {
     objective:
       'Obtain management’s Rule 11(e)(i) representation on funds advanced, loaned or invested through intermediaries for ultimate beneficiaries, and perform procedures supporting the Rule 11(e)(iii) statement.',
-    evidence: 'Management representation (MRL); loans / advances / investments testing; related-party review.',
+    evidence:
+      'Management representation (MRL); loans / advances / investments testing; related-party review.',
   },
   rule_11_e_funds_received: {
     objective:
@@ -129,12 +133,14 @@ const CARD_WORK: Partial<Record<ReportingCardKey, { objective: string; evidence:
   s197_16_remuneration: {
     objective:
       'Recompute managerial remuneration against Section 197 and Schedule V limits on Section 198 net profits, and check the approvals; quantify any excess.',
-    evidence: 'Section 198 computation; remuneration schedule; shareholder / Central Government approvals.',
+    evidence:
+      'Section 198 computation; remuneration schedule; shareholder / Central Government approvals.',
   },
   s143_12_fraud: {
     objective:
       'Consider whether any fraud by officers or employees is being or has been committed against the company; for each Fraud Matter apply the Rule 13 route and deadlines and record the conclusion.',
-    evidence: 'Fraud Matter records; Board / Audit Committee communications; Form ADT-4 where filed.',
+    evidence:
+      'Fraud Matter records; Board / Audit Committee communications; Form ADT-4 where filed.',
   },
 };
 
@@ -183,7 +189,12 @@ const human = (s: string | null) => (s ? s.replace(/_/g, ' ') : null);
 
 export function crossRefLinksOf(x: ReportingCrossRefs): ReportingCrossRefLink[] {
   const caroLines = [
-    yesNo(x.caro.applicable, 'CARO 2020 applies', 'CARO 2020 does not apply', 'CARO applicability not yet decided'),
+    yesNo(
+      x.caro.applicable,
+      'CARO 2020 applies',
+      'CARO 2020 does not apply',
+      'CARO applicability not yet decided',
+    ),
   ];
   if (x.caro.conclusion) caroLines.push(`02.4 conclusion: ${human(x.caro.conclusion)}`);
   if (x.caro.applicable) {
@@ -298,7 +309,10 @@ export function mrlRepresentationsOf(
 export function completionSummaryOf(input: {
   decided: boolean;
   cards: ReadonlyArray<
-    Pick<ReportingCard, 'key' | 'requirement' | 'clause' | 'applicability' | 'systemReportingStatus' | 'state'>
+    Pick<
+      ReportingCard,
+      'key' | 'requirement' | 'clause' | 'applicability' | 'systemReportingStatus' | 'state'
+    >
   >;
   fraud: FraudFrameworkStatus;
   directors: DirectorDisqualificationStatus;

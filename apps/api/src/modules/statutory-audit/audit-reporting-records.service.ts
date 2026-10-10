@@ -134,7 +134,8 @@ export class AuditReportingRecordsService {
     input: CreateFraudMatterInput,
   ): Promise<StatutoryAuditReportingRecords> {
     return this.mutate(ctx, engagementId, workflowInstanceId, async (client) => {
-      if (input.procedureId) await this.assertProcedure(client, workflowInstanceId, input.procedureId);
+      if (input.procedureId)
+        await this.assertProcedure(client, workflowInstanceId, input.procedureId);
       const seq = await this.nextSeq(client, workflowInstanceId);
       let id: string;
       try {
@@ -186,10 +187,11 @@ export class AuditReportingRecordsService {
       const before = await this.loadMatter(client, workflowInstanceId, matterId);
       if (before.version !== input.version)
         throw new ConflictException('This Fraud Matter changed — reload and try again.');
-      if (input.procedureId) await this.assertProcedure(client, workflowInstanceId, input.procedureId);
+      if (input.procedureId)
+        await this.assertProcedure(client, workflowInstanceId, input.procedureId);
 
       const pick = <K extends keyof UpdateFraudMatterInput>(k: K, cur: unknown) =>
-        k in input ? (input[k] as unknown) : cur;
+        input[k] !== undefined ? (input[k] as unknown) : cur;
       const knowledge = pick('knowledgeDate', before.knowledge_date) as string | null;
       const board = pick('boardReportedOn', before.board_reported_on) as string | null;
       const reply = pick('replyReceivedOn', before.reply_received_on) as string | null;
@@ -253,15 +255,21 @@ export class AuditReportingRecordsService {
       const sets: string[] = [];
       const values: unknown[] = [];
       for (const [key, col] of Object.entries(MATTER_COLUMNS)) {
-        if (!(key in input)) continue;
         let v = (input as unknown as Record<string, unknown>)[key];
-        if (typeof v === 'string' && key !== 'nature' && key !== 'conclusion' && key !== 'source' && key !== 'perpetrator')
+        if (v === undefined) continue;
+        if (
+          typeof v === 'string' &&
+          key !== 'nature' &&
+          key !== 'conclusion' &&
+          key !== 'source' &&
+          key !== 'perpetrator'
+        )
           v = trimOrNull(v);
         if (key === 'nature' && typeof v === 'string') v = v.trim();
         values.push(v ?? null);
         sets.push(`${col} = $${values.length}`);
       }
-      if ('withdrawn' in input) {
+      if (input.withdrawn !== undefined) {
         if (input.withdrawn) {
           values.push(ctx.employeeId ?? null);
           sets.push(`withdrawn_at = COALESCE(withdrawn_at, now())`);
@@ -397,13 +405,13 @@ export class AuditReportingRecordsService {
       if (!before) throw new NotFoundException('That director is not on this workpaper.');
       if (before.version !== input.version)
         throw new ConflictException('This director changed — reload and try again.');
-      const appointed = 'appointedOn' in input ? input.appointedOn ?? null : before.appointed_on;
-      const ceased = 'ceasedOn' in input ? input.ceasedOn ?? null : before.ceased_on;
+      const appointed = input.appointedOn !== undefined ? input.appointedOn : before.appointed_on;
+      const ceased = input.ceasedOn !== undefined ? input.ceasedOn : before.ceased_on;
       if (appointed && ceased && ceased < appointed)
         throw new BadRequestException('The director ceased before being appointed.');
       const disqualified = input.disqualified ?? before.disqualified;
       const analysis =
-        'legalAnalysis' in input ? trimOrNull(input.legalAnalysis) : before.legal_analysis;
+        input.legalAnalysis !== undefined ? trimOrNull(input.legalAnalysis) : before.legal_analysis;
       if (disqualified !== 'pending' && !analysis)
         throw new BadRequestException(
           'A Yes / No conclusion needs the Section 164(2) legal analysis — a DIN status alone is not the conclusion.',
@@ -412,13 +420,14 @@ export class AuditReportingRecordsService {
       const sets: string[] = [];
       const values: unknown[] = [];
       for (const [key, col] of Object.entries(DIRECTOR_COLUMNS)) {
-        if (!(key in input)) continue;
         let v = (input as unknown as Record<string, unknown>)[key];
-        if (typeof v === 'string' && key !== 'disqualified') v = key === 'name' ? v.trim() : trimOrNull(v);
+        if (v === undefined) continue;
+        if (typeof v === 'string' && key !== 'disqualified')
+          v = key === 'name' ? v.trim() : trimOrNull(v);
         values.push(v ?? null);
         sets.push(`${col} = $${values.length}`);
       }
-      if ('withdrawn' in input) {
+      if (input.withdrawn !== undefined) {
         if (input.withdrawn) {
           values.push(ctx.employeeId ?? null);
           sets.push(`withdrawn_at = COALESCE(withdrawn_at, now())`);
@@ -465,7 +474,9 @@ export class AuditReportingRecordsService {
         throw new BadRequestException('Link to a Fraud Matter or a director, not both.');
       if (input.fraudMatterId) {
         if (input.cardKey !== REPORTING_CARD.s143_12Fraud)
-          throw new BadRequestException('Fraud Matter evidence belongs on the Section 143(12) card.');
+          throw new BadRequestException(
+            'Fraud Matter evidence belongs on the Section 143(12) card.',
+          );
         await this.loadMatter(client, workflowInstanceId, input.fraudMatterId);
       }
       if (input.directorId) {
@@ -577,7 +588,11 @@ export class AuditReportingRecordsService {
 
     if (!rec.legacy_fraud_migrated_at) {
       const { rows: facts } = await client.query<{
-        facts: { fraudIdentified?: boolean; fraudAmount?: number | null; fraudEventDate?: string | null } | null;
+        facts: {
+          fraudIdentified?: boolean;
+          fraudAmount?: number | null;
+          fraudEventDate?: string | null;
+        } | null;
       }>(
         `SELECT facts FROM hsdg.audit_framework_subassessment
           WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3`,
@@ -646,7 +661,14 @@ export class AuditReportingRecordsService {
                              WHERE workflow_instance_id = $1 AND contact_id = $3
                                AND withdrawn_at IS NULL)
          ON CONFLICT DO NOTHING`,
-        [workflowInstanceId, engagementId, c.contactId, c.name, c.designation, ctx.employeeId ?? null],
+        [
+          workflowInstanceId,
+          engagementId,
+          c.contactId,
+          c.name,
+          c.designation,
+          ctx.employeeId ?? null,
+        ],
       );
       added += res.rowCount ?? 0;
     }

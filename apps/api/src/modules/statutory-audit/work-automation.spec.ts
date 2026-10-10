@@ -263,4 +263,35 @@ describe('work automation — procedures', () => {
       suggestProcedures({ areaKeys: new Set(), fsAreas: [], risks: [], consolidationProcedures }),
     ).toEqual([]);
   });
+
+  it('takes the auditor-reporting programme from 02.7 card by card, replacing the generic report', () => {
+    const generic = suggestProcedures({
+      areaKeys: new Set(['auditor_reporting']),
+      fsAreas: [],
+      risks: [],
+    });
+    expect(generic.some((p) => p.sourceKey === 'std:auditor_reporting:report')).toBe(true);
+    const reportingProcedures = [
+      {
+        sourceKey: 'r027:rule_11_a_litigation',
+        sourceNote: '02.7 — Other Companies Act reporting',
+        title: 'Rule 11(a) — Pending litigations',
+        objective: 'Test.',
+        expectedEvidence: 'Legal confirmations.',
+      },
+    ];
+    const with027 = suggestProcedures({
+      areaKeys: new Set(['auditor_reporting']),
+      fsAreas: [],
+      risks: [],
+      reportingProcedures,
+    });
+    expect(with027.map((p) => [p.sourceKey, p.workAreaKey])).toEqual([
+      ['r027:rule_11_a_litigation', 'auditor_reporting'],
+    ]);
+    // No reporting work area → nothing, even if planned.
+    expect(
+      suggestProcedures({ areaKeys: new Set(), fsAreas: [], risks: [], reportingProcedures }),
+    ).toEqual([]);
+  });
 });

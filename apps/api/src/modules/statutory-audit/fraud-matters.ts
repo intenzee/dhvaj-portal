@@ -103,7 +103,9 @@ export function fraudRulesOn(versions: FraudRuleVersion[], onDate: string): Frau
 
 /** The Rule 13 framework can run (threshold and the 45 / 15-day periods resolve). */
 export function fraudRulesActive(rules: FraudRules): boolean {
-  return rules.thresholdAmount !== null && rules.responseDays !== null && rules.forwardDays !== null;
+  return (
+    rules.thresholdAmount !== null && rules.responseDays !== null && rules.forwardDays !== null
+  );
 }
 
 // ── dates (ISO yyyy-mm-dd, UTC calendar days) ──────────────────────────────
@@ -114,8 +116,7 @@ export function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const inr = (n: number) =>
-  `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const inr = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 // ── route ─────────────────────────────────────────────────────────────────
 
@@ -292,7 +293,10 @@ export function evaluateFraudMatter(
   const auditorSteps = deadlines.filter((d) => d.key !== FRAUD_DEADLINE_KEY.replyDue);
   const overdue = open && auditorSteps.some((d) => d.status === 'overdue');
   const pendingDue = open
-    ? deadlines.filter((d) => d.metOn === null).map((d) => d.dueDate).sort()
+    ? deadlines
+        .filter((d) => d.metOn === null)
+        .map((d) => d.dueDate)
+        .sort()
     : [];
 
   return {

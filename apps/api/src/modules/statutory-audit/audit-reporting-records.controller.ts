@@ -62,7 +62,13 @@ export class AuditReportingRecordsController {
     @Param('matterId', new ParseUUIDPipe()) matterId: string,
     @Body() dto: UpdateFraudMatterDto,
   ): Promise<StatutoryAuditReportingRecords> {
-    return this.records.updateFraudMatter(rlsContextFromPrincipal(principal), id, wf, matterId, dto);
+    return this.records.updateFraudMatter(
+      rlsContextFromPrincipal(principal),
+      id,
+      wf,
+      matterId,
+      dto,
+    );
   }
 
   @Post('fraud-matters/:matterId/partner-consultation')

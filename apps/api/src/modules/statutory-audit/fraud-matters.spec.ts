@@ -16,11 +16,41 @@ const CRORE_1 = 10_000_000;
 // The Rules Library as seeded: threshold v1 (all frauds, 0) → v2 ₹1 crore from
 // the 2015 amendment; 2 / 45 / 15 days since 2014.
 const VERSIONS: FraudRuleVersion[] = [
-  { code: RC.fraudThreshold, value: 0, effectiveFrom: '2014-04-01', effectiveTo: '2015-12-13', ruleVersionId: 't1' },
-  { code: RC.fraudThreshold, value: CRORE_1, effectiveFrom: '2015-12-14', effectiveTo: null, ruleVersionId: 't2' },
-  { code: RC.fraudInitialNoticeDays, value: 2, effectiveFrom: '2014-04-01', effectiveTo: null, ruleVersionId: 'n1' },
-  { code: RC.fraudResponseDays, value: 45, effectiveFrom: '2014-04-01', effectiveTo: null, ruleVersionId: 'r1' },
-  { code: RC.fraudForwardDays, value: 15, effectiveFrom: '2014-04-01', effectiveTo: null, ruleVersionId: 'f1' },
+  {
+    code: RC.fraudThreshold,
+    value: 0,
+    effectiveFrom: '2014-04-01',
+    effectiveTo: '2015-12-13',
+    ruleVersionId: 't1',
+  },
+  {
+    code: RC.fraudThreshold,
+    value: CRORE_1,
+    effectiveFrom: '2015-12-14',
+    effectiveTo: null,
+    ruleVersionId: 't2',
+  },
+  {
+    code: RC.fraudInitialNoticeDays,
+    value: 2,
+    effectiveFrom: '2014-04-01',
+    effectiveTo: null,
+    ruleVersionId: 'n1',
+  },
+  {
+    code: RC.fraudResponseDays,
+    value: 45,
+    effectiveFrom: '2014-04-01',
+    effectiveTo: null,
+    ruleVersionId: 'r1',
+  },
+  {
+    code: RC.fraudForwardDays,
+    value: 15,
+    effectiveFrom: '2014-04-01',
+    effectiveTo: null,
+    ruleVersionId: 'f1',
+  },
 ];
 const RULES = fraudRulesOn(VERSIONS, '2024-04-01');
 

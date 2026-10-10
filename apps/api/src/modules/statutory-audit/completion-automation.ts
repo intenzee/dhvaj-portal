@@ -632,7 +632,11 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
 
 // ── 02.7 other Companies Act reporting ─────────────────────────────────────
 
-const TRI_TEXT: Record<string, string> = { yes: 'obtained', no: 'not obtained', pending: 'pending' };
+const TRI_TEXT: Record<string, string> = {
+  yes: 'obtained',
+  no: 'not obtained',
+  pending: 'pending',
+};
 const RULE_11E_CARDS: Record<string, string> = {
   rule_11_e_i: 'rule_11_e_funds_advanced',
   rule_11_e_ii: 'rule_11_e_funds_received',
@@ -652,12 +656,17 @@ export function otherReportingReadiness(o: OtherReportingCompletionSummary): {
     facts.push('02.7: other Companies Act reporting not yet concluded.');
     ready = false;
   }
-  const done = o.cards.filter((c) => c.workStatus === 'complete' || c.workStatus === 'not_required');
+  const done = o.cards.filter(
+    (c) => c.workStatus === 'complete' || c.workStatus === 'not_required',
+  );
   facts.push(`02.7: ${done.length} of ${o.cards.length} reporting card(s) complete.`);
   if (done.length < o.cards.length) ready = false;
   const modified = o.cards.filter((c) => c.reportingStatus === 'modified_wording_expected');
   if (modified.length) {
-    const list = modified.slice(0, MAX_LISTED).map((c) => c.clause).join(', ');
+    const list = modified
+      .slice(0, MAX_LISTED)
+      .map((c) => c.clause)
+      .join(', ');
     facts.push(
       `Modified wording expected: ${list}${modified.length > MAX_LISTED ? ` +${modified.length - MAX_LISTED} more` : ''}.`,
     );
@@ -684,12 +693,16 @@ export function otherReportingReadiness(o: OtherReportingCompletionSummary): {
     );
     if (d.conclusion === 'not_started' || d.conclusion === 'pending') ready = false;
     if (d.conclusion === 'identified')
-      draft.push(`${d.disqualified} director(s) disqualified under Section 164(2) — reported under Section 143(3)(g).`);
+      draft.push(
+        `${d.disqualified} director(s) disqualified under Section 164(2) — reported under Section 143(3)(g).`,
+      );
   }
 
   for (const r of o.mrlRepresentations) {
     if (!o.cards.some((c) => c.key === RULE_11E_CARDS[r.key])) continue;
-    facts.push(`MRL ${r.label.split(' — ')[0]}: representation ${TRI_TEXT[r.obtained] ?? r.obtained}.`);
+    facts.push(
+      `MRL ${r.label.split(' — ')[0]}: representation ${TRI_TEXT[r.obtained] ?? r.obtained}.`,
+    );
     if (r.obtained !== 'yes') ready = false;
   }
 
