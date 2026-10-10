@@ -5,6 +5,7 @@ import type {
   ConsolidationWorkProgramme,
   GroupAuditComponent,
   StatutoryAuditGroupAudit,
+  StatutoryAuditIcfrConsolidated,
 } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
@@ -85,7 +86,7 @@ describe('Statutory Audit — 02.6 group audit framework (e2e)', () => {
   const set026 = async (
     f: File,
     outcome: 'cfs_required' | 'cfs_exempt' | null,
-    opts: { hasBranches?: boolean; withBeta?: boolean } = {},
+    opts: { hasBranches?: boolean; withBeta?: boolean; withExcluded?: boolean } = {},
   ) => {
     const perimeter = [
       {
@@ -111,6 +112,20 @@ describe('Statutory Audit — 02.6 group audit framework (e2e)', () => {
               isIndianCompany: true,
             },
           ]),
+      // Outside the period / excluded — kept on the perimeter, never a component.
+      ...(opts.withExcluded
+        ? [
+            {
+              id: 'cmp-gamma',
+              name: 'Gamma Trading Ltd',
+              relationship: 'subsidiary',
+              method: 'full_consolidation',
+              included: 'no',
+              country: 'India',
+              isIndianCompany: true,
+            },
+          ]
+        : []),
     ];
     await su.query(
       `UPDATE hsdg.audit_framework_subassessment
@@ -258,6 +273,43 @@ describe('Statutory Audit — 02.6 group audit framework (e2e)', () => {
     expect(g.status.matrixComplete).toBe(true);
     // A significant other-auditor component with GA-04 pending blocks completion.
     expect(g.status.blockingMatters.join(' ')).toMatch(/Alpha Overseas Ltd/);
+  });
+
+  it('feeds the matrix auditor into the consolidated ICFR components — one record per component (§20)', async () => {
+    await set026(prior, 'cfs_required', { withExcluded: true });
+    expect((await getGa(prior)).components.map((c) => c.componentId)).not.toContain('cmp-gamma');
+    // 02.5 Level 1: applicable, with a CFS in scope.
+    await request(http())
+      .get(`${base(prior)}/icfr`)
+      .set(bearer(pa))
+      .expect(200);
+    await su.query(
+      `UPDATE hsdg.audit_framework_subassessment
+          SET state = 'applicable', conclusion = 'applicable', system_outcome = 'applicable',
+              decided_at = now(),
+              system_detail = jsonb_set(COALESCE(system_detail, '{}'::jsonb), '{factsUsed}',
+                '[{"key":"cfs_in_scope","value":"Yes"}]'::jsonb)
+        WHERE workflow_instance_id = $1 AND sub_section_key = '02.5' AND area_key = 'ifc'`,
+      [prior.wf],
+    );
+    const c = (
+      await request(http())
+        .get(`${base(prior)}/${prior.wf}/icfr/consolidated`)
+        .set(bearer(pa))
+        .expect(200)
+    ).body as StatutoryAuditIcfrConsolidated;
+    const live = c.components.filter((x) => !x.withdrawn);
+    expect(live.map((x) => x.componentName).sort()).toEqual([ALPHA.name, BETA.name]);
+    expect(live.find((x) => x.componentName === ALPHA.name)).toMatchObject({
+      source: '02.6',
+      auditor: 'other',
+      auditorName: 'Tan & Lee LLP',
+    });
+    expect(live.find((x) => x.componentName === BETA.name)).toMatchObject({
+      auditor: 'dhvaj',
+      auditorName: 'DHVAJ',
+    });
+    await set026(prior, 'cfs_required'); // restore the perimeter for the rest of the suite
   });
 
   it('a foreign component takes no CARO / ICFR package documents (§15)', async () => {
