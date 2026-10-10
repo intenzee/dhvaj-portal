@@ -2106,10 +2106,20 @@ export class AuditIcfrControlsService {
       design: IcfrDesign | null;
       implementation: IcfrImplementation | null;
       operating_effectiveness: IcfrOperating | null;
+      evidence: Array<{ documentId: string | null; title: string | null }> | null;
     }>(
-      `SELECT control_ref, design, implementation, operating_effectiveness
-         FROM hsdg.audit_icfr_control
-        WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL`,
+      // Prior evidence is a cross-reference only (§19) — titles, never re-linked here.
+      `SELECT c.control_ref, c.design, c.implementation, c.operating_effectiveness,
+              (SELECT json_agg(json_build_object(
+                        'documentId', COALESCE(l.document_id, ev.document_id),
+                        'title', COALESCE(d.title, ev.title)) ORDER BY l.linked_at)
+                 FROM hsdg.audit_icfr_control_evidence l
+                 LEFT JOIN hsdg.audit_evidence ev ON ev.id = l.audit_evidence_id
+                 LEFT JOIN hsdg.documents d ON d.id = COALESCE(l.document_id, ev.document_id)
+                                           AND d.deleted_at IS NULL
+                WHERE l.control_id = c.id AND l.removed_at IS NULL) AS evidence
+         FROM hsdg.audit_icfr_control c
+        WHERE c.workflow_instance_id = $1 AND c.withdrawn_at IS NULL`,
       [prior.workflowInstanceId],
     );
     return new Map(
@@ -2117,6 +2127,11 @@ export class AuditIcfrControlsService {
         r.control_ref.toLowerCase(),
         {
           financialYear: prior.financialYear,
+          engagementId: prior.engagementId,
+          evidence: (r.evidence ?? []).map((e) => ({
+            documentId: e.documentId,
+            title: e.title ?? 'Removed document',
+          })),
           design: r.design,
           implementation: r.implementation,
           operatingEffectiveness: r.operating_effectiveness,

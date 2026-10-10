@@ -347,6 +347,36 @@ describe('IcfrWorkstream (02.5 §13–§16, §19)', () => {
     });
   });
 
+  it("shows last year's result and evidence as a cross-reference only", async () => {
+    const user = userEvent.setup();
+    apiFetch.mockResolvedValueOnce(
+      workstream({
+        controls: [
+          control({
+            priorYear: {
+              financialYear: '2023-24',
+              engagementId: 'e0',
+              evidence: [{ documentId: 'pd1', title: 'Dispatch sample FY24' }],
+              design: 'adequate',
+              implementation: 'implemented',
+              operatingEffectiveness: 'exception_identified',
+              overall: 'operating_exception',
+            },
+          }),
+        ],
+      }),
+    );
+    render(wrap(<IcfrWorkstream engagementId="e1" workflowInstanceId="wf1" />));
+    const row = await screen.findByLabelText('Control IC-001');
+    await user.click(within(row).getByLabelText('Expand IC-001'));
+    const prior = within(row).getByLabelText('IC-001 prior year');
+    expect(within(prior).getByText(/context only; this year is tested afresh/)).toBeInTheDocument();
+    expect(within(prior).getByText(/cross-reference only/)).toBeInTheDocument();
+    apiFetch.mockRejectedValueOnce(new Error('no access'));
+    await user.click(within(prior).getByRole('button', { name: /Dispatch sample FY24/ }));
+    expect(apiFetch).toHaveBeenLastCalledWith('/engagements/e0/documents/pd1');
+  });
+
   it('shows the methodology suggestion and gates the Manager review on its blockers', async () => {
     const user = userEvent.setup();
     apiFetch.mockResolvedValueOnce(workstream());

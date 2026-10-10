@@ -378,6 +378,10 @@ export interface IcfrControlEvidence {
 /** Prior-year control effectiveness — context only, never rolled forward (§19). */
 export interface IcfrPriorControl {
   financialYear: string;
+  /** The prior engagement (its documents open there, under its own access). */
+  engagementId: string;
+  /** Prior-year evidence — a cross-reference only, never current-year evidence (§19). */
+  evidence: Array<{ documentId: string | null; title: string }>;
   design: IcfrDesign | null;
   implementation: IcfrImplementation | null;
   operatingEffectiveness: IcfrOperating | null;

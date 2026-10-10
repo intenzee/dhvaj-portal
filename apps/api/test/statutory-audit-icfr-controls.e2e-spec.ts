@@ -303,6 +303,25 @@ describe('Statutory Audit — 02.5 ICFR workstream & consolidated (e2e)', () => 
       partnerRequired: true,
       processTitle: 'Financial Close & Reporting',
     });
+    // A prior-year control with evidence — next year shows it as a cross-reference only.
+    const priorIcfr = await openIcfr(prior);
+    const pev = (
+      await request(http())
+        .post(`${base(prior)}/${prior.wf}/framework/${priorIcfr.assessment.id}/evidence/add`)
+        .set(bearer(pa))
+        .send({
+          filename: 'Prior-year board review sample.pdf',
+          contentType: 'application/pdf',
+          contentBase64: Buffer.from('prior ICFR evidence (e2e)', 'utf8').toString('base64'),
+        })
+        .expect(201)
+    ).body as FrameworkEvidenceView;
+    await reviewedControl(
+      prior,
+      area(w, 'entity_level').id,
+      'Board reviews the quarterly results (prior year).',
+      pev.files[0]!.documentId,
+    );
   });
 
   let docId: string;
@@ -397,6 +416,14 @@ describe('Statutory Audit — 02.5 ICFR workstream & consolidated (e2e)', () => 
     ).body;
     let c = control(w, 'IC-001');
     expect(c).toMatchObject({ process: 'Entity-Level Controls', overall: 'not_assessed' });
+    // Last year's IC-001: context and a cross-reference to its evidence, never this year's result.
+    expect(c.priorYear).toMatchObject({
+      financialYear: '2031-32',
+      engagementId: prior.engId,
+      operatingEffectiveness: 'effective',
+      evidence: [{ title: expect.stringMatching(/Prior-year board review sample/) }],
+    });
+    expect(c.evidence).toHaveLength(0);
     // Submit is blocked until D, I and OE and the evidence are concluded.
     const blocked = await post(
       cur,

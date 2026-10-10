@@ -34,6 +34,7 @@ import {
   PERMISSION,
   RISK_ASSERTION,
   type IcfrControl,
+  type IcfrPriorControl,
   type IcfrControlOverall,
   type IcfrDeficiency,
   type IcfrDeficiencyClass,
@@ -813,20 +814,7 @@ function ControlDetail({ c, ctx }: { c: IcfrControl; ctx: Ctx }): JSX.Element {
         </p>
       )}
       {c.procedureRef && <p className="text-ink-muted">Section 06 procedure: {c.procedureRef}</p>}
-      {c.priorYear && (
-        <p className="text-ink-faint">
-          FY {c.priorYear.financialYear}:{' '}
-          {[
-            c.priorYear.design && ICFR_DESIGN_LABEL[c.priorYear.design],
-            c.priorYear.implementation && ICFR_IMPLEMENTATION_LABEL[c.priorYear.implementation],
-            c.priorYear.operatingEffectiveness &&
-              ICFR_OPERATING_LABEL[c.priorYear.operatingEffectiveness],
-          ]
-            .filter(Boolean)
-            .join(' · ') || 'not concluded'}{' '}
-          — context only; this year is tested afresh.
-        </p>
-      )}
+      {c.priorYear && <PriorControl p={c.priorYear} controlRef={c.controlRef} />}
 
       {editable && !locked && (
         <div className="space-y-2">
@@ -1007,6 +995,61 @@ function ControlDetail({ c, ctx }: { c: IcfrControl; ctx: Ctx }): JSX.Element {
             </Button>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Last year's result and evidence for the same control — context only (§19). */
+function PriorControl({ p, controlRef }: { p: IcfrPriorControl; controlRef: string }): JSX.Element {
+  const toast = useToast();
+  const [doc, setDoc] = useState<DocumentRow | null>(null);
+  const openDoc = async (documentId: string) => {
+    try {
+      setDoc(await apiFetch<DocumentRow>(`/engagements/${p.engagementId}/documents/${documentId}`));
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not open the prior-year document.', 'error');
+    }
+  };
+  return (
+    <div className="text-ink-faint" aria-label={`${controlRef} prior year`}>
+      <p>
+        FY {p.financialYear}:{' '}
+        {[
+          p.design && ICFR_DESIGN_LABEL[p.design],
+          p.implementation && ICFR_IMPLEMENTATION_LABEL[p.implementation],
+          p.operatingEffectiveness && ICFR_OPERATING_LABEL[p.operatingEffectiveness],
+        ]
+          .filter(Boolean)
+          .join(' · ') || 'not concluded'}{' '}
+        — context only; this year is tested afresh.
+      </p>
+      {p.evidence.length > 0 && (
+        <p className="flex flex-wrap items-center gap-x-2">
+          <span>Prior-year evidence (cross-reference only, not this year’s evidence):</span>
+          {p.evidence.map((e, i) =>
+            e.documentId ? (
+              <button
+                key={`${e.documentId}-${i}`}
+                type="button"
+                className="inline-flex items-center gap-1 text-primary-600 hover:underline"
+                onClick={() => void openDoc(e.documentId!)}
+              >
+                {e.title} <ExternalLink className="h-3 w-3" />
+              </button>
+            ) : (
+              <span key={i}>{e.title}</span>
+            ),
+          )}
+        </p>
+      )}
+      {doc && (
+        <DocumentPreview
+          engagementId={p.engagementId}
+          doc={doc}
+          canEdit={false}
+          onClose={() => setDoc(null)}
+        />
       )}
     </div>
   );
