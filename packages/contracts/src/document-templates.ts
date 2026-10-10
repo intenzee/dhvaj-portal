@@ -25,6 +25,10 @@ export const DOCUMENT_TEMPLATE_KEY = {
   caroApplicabilityMemo: 'caro_applicability_memo',
   /** 02.5 §20 — complex, overridden or consulted ICFR reporting applicability. */
   icfrApplicabilityMemo: 'icfr_applicability_memo',
+  /** 02.6 — complex, overridden or EP-approved consolidation / group-audit framework. */
+  consolidationGroupAuditMemo: 'consolidation_group_audit_memo',
+  /** 02.6 §14 — group instructions to another component auditor (SA 600). */
+  componentAuditorInstructions: 'component_auditor_instructions',
   /**
    * 02.3 §16 — the Financial Statements Workbook (Excel), one key per Schedule
    * III framework; each framework version names its key (`templateKey`).
@@ -43,7 +47,7 @@ export interface DocumentTemplateDefinition {
   /** File name of a created document; `{client}` is replaced with the client's name. */
   filenamePattern: string;
   /** The audit-file section that creates it (Section 01 lists only its own). */
-  section: '01' | '02.2' | '02.3' | '02.4' | '02.5';
+  section: '01' | '02.2' | '02.3' | '02.4' | '02.5' | '02.6';
   /** The file the firm uploads: a Word document (merged) or an Excel workbook. */
   format: TemplateFormat;
 }
@@ -111,6 +115,20 @@ export const DOCUMENT_TEMPLATE_DEFINITIONS: readonly DocumentTemplateDefinition[
     title: 'ICFR Reporting Applicability Memo',
     filenamePattern: 'ICFR Reporting Applicability Memo - {client}.docx',
     section: '02.5',
+    format: 'docx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.consolidationGroupAuditMemo,
+    title: 'Consolidation & Group Audit Memo',
+    filenamePattern: 'Consolidation and Group Audit Memo - {client}.docx',
+    section: '02.6',
+    format: 'docx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.componentAuditorInstructions,
+    title: 'Component Auditor Instructions',
+    filenamePattern: 'Component Auditor Instructions - {component} - {client}.docx',
+    section: '02.6',
     format: 'docx',
   },
   {
@@ -379,6 +397,44 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
   { key: 'icfr.pendingReason', label: 'ICFR information pending', source: '02.5 IFC-04' },
   { key: 'icfr.decidedBy', label: 'ICFR concluded by', source: '02.5 IFC-04' },
   { key: 'icfr.decidedAt', label: 'ICFR concluded on', source: '02.5 IFC-04' },
+  { key: 'cfs.requirement', label: 'CFS requirement (conclusion)', source: '02.6 CFS-05' },
+  { key: 'cfs.systemConclusion', label: 'CFS system conclusion', source: '02.6 CFS-01' },
+  { key: 'cfs.systemBasis', label: 'CFS system basis', source: '02.6 CFS-01' },
+  { key: 'cfs.rule6', label: 'Rule 6 exemption — condition by condition', source: '02.6 CFS-02' },
+  { key: 'cfs.perimeter', label: 'Consolidation perimeter', source: '02.6 §8' },
+  { key: 'cfs.groupFramework', label: 'Group financial reporting framework', source: '02.2' },
+  { key: 'cfs.componentAuditors', label: 'Component / other auditor matrix', source: '02.6 §12' },
+  { key: 'cfs.sa600', label: 'SA 600 assessment (GA-01 to GA-04)', source: '02.6 §13' },
+  { key: 'cfs.reportingPackages', label: 'Component reporting packages', source: '02.6 §15' },
+  { key: 'cfs.otherAuditorFindings', label: 'Other-auditor findings', source: '02.6 §16' },
+  { key: 'cfs.branchAuditors', label: 'Branch auditors (BR-01)', source: '02.6 §17' },
+  { key: 'cfs.workProgramme', label: 'Consolidation work programme', source: '02.6 §19' },
+  { key: 'cfs.materialityNote', label: 'Group materiality note', source: '02.6 §18' },
+  { key: 'cfs.professionalConclusion', label: 'CFS-05 conclusion', source: '02.6 CFS-05' },
+  { key: 'cfs.overridden', label: 'CFS-05 overridden (Yes / No)', source: '02.6 CFS-05' },
+  { key: 'cfs.overrideReason', label: 'CFS-05 override reason', source: '02.6 CFS-05' },
+  { key: 'cfs.technicalBasis', label: 'CFS-05 technical basis', source: '02.6 CFS-05' },
+  { key: 'cfs.supportingEvidence', label: 'CFS-05 override evidence', source: '02.6 CFS-05' },
+  { key: 'cfs.partnerApproval', label: 'CFS-05 EP approval', source: '02.6 CFS-05' },
+  { key: 'cfs.pendingReason', label: 'CFS-05 information pending', source: '02.6 CFS-05' },
+  { key: 'cfs.decidedBy', label: 'CFS-05 concluded by', source: '02.6 CFS-05' },
+  { key: 'cfs.decidedAt', label: 'CFS-05 concluded on', source: '02.6 CFS-05' },
+  { key: 'ga.componentName', label: 'Component name', source: '02.6 §12' },
+  { key: 'ga.relationship', label: 'Component relationship', source: '02.6 §5' },
+  { key: 'ga.componentCountry', label: 'Component country', source: '02.6 §12' },
+  { key: 'ga.auditorFirm', label: 'Component auditor firm', source: '02.6 §12' },
+  { key: 'ga.auditorFrn', label: 'Component auditor FRN / professional body', source: '02.6 §12' },
+  { key: 'ga.auditorPartner', label: 'Component auditor partner / contact', source: '02.6 §12' },
+  { key: 'ga.auditPeriod', label: 'Component audit / reporting period', source: '02.6 §12' },
+  { key: 'ga.reportingFramework', label: 'Group reporting framework / package', source: '02.2 / 02.6 §14' },
+  { key: 'ga.materiality', label: 'Materiality for the component', source: '03.3 (after approval)' },
+  { key: 'ga.clearlyTrivial', label: 'Clearly trivial threshold', source: '03.3 (after approval)' },
+  { key: 'ga.significantRisks', label: 'Group-identified significant risks', source: 'Section 04' },
+  { key: 'ga.groupComponents', label: 'Other group components (inter-company)', source: '02.6 perimeter' },
+  { key: 'ga.reportingPackage', label: 'Reporting package required', source: '02.6 §15' },
+  { key: 'ga.icfrReporting', label: 'ICFR reporting required of the component', source: '02.5 / 02.6' },
+  { key: 'ga.caroReporting', label: 'CARO reporting required of the component', source: '02.4 / 02.6' },
+  { key: 'ga.deadline', label: 'Group reporting deadline', source: '02.6 §14' },
   { key: 'today', label: "Today's date", source: 'System' },
 ] as const;
 
