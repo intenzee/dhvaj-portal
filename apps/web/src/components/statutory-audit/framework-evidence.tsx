@@ -57,6 +57,10 @@ const MEMO: Record<string, { path: string; title: string }> = {
     path: 'icfr/memo',
     title: 'ICFR Reporting Applicability Memo',
   },
+  '02.6': {
+    path: 'consolidation/memo',
+    title: 'Consolidation & Group Audit Framework Memo',
+  },
 };
 export function FrameworkEvidence({
   engagementId,
