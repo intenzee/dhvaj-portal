@@ -160,4 +160,23 @@ export class AuditFrameworkEvidenceController {
   ): Promise<FrameworkMemoCreated> {
     return this.evidence.createMemo(principal, id, wf, dto, SUB_SECTION_KEY.icfr);
   }
+
+  @Post('consolidation/memo')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Create the Consolidation & Group Audit Framework Memo (02.6)',
+    description:
+      'Merges the 02.6 conclusion, the perimeter, the component / branch auditor matrix, the ' +
+      'findings and the consolidation work programme into the approved Word template, stores ' +
+      'it in the engagement workspace and links it to 02.6; returns the Microsoft 365 link ' +
+      'when on.',
+  })
+  createConsolidationMemo(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wf: string,
+    @Body() dto: CreateFrameworkMemoDto,
+  ): Promise<FrameworkMemoCreated> {
+    return this.evidence.createMemo(principal, id, wf, dto, SUB_SECTION_KEY.consolidation);
+  }
 }

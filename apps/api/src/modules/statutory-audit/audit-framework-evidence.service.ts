@@ -47,6 +47,7 @@ import { isEngagementLead } from './master-facts';
 import { readScheduleIiiMemoInput, scheduleIiiMergeValues } from './schedule-iii-memo-values';
 import { caroMergeValues, readCaroMemoInput } from './caro-memo-values';
 import { icfrMergeValues, readIcfrMemoInput } from './icfr-memo-values';
+import { consolidationMergeValues, readConsolidationMemoInput } from './consolidation-memo-values';
 
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -101,6 +102,15 @@ const MEMOS: Partial<Record<SubSectionKey, MemoSpec>> = {
     noTemplate: noTemplate('ICFR Reporting Applicability'),
     notOpen: 'Open 02.5 ICFR Reporting Applicability before creating its memo.',
     values: async (client, wf) => icfrMergeValues(await readIcfrMemoInput(client, wf)),
+  },
+  [SUB_SECTION_KEY.consolidation]: {
+    subSectionKey: SUB_SECTION_KEY.consolidation,
+    templateKey: DOCUMENT_TEMPLATE_KEY.consolidationGroupAuditMemo,
+    areaKey: FRAMEWORK_AREA_KEY.cfs,
+    noTemplate: noTemplate('Consolidation & Group Audit Framework'),
+    notOpen: 'Open 02.6 Consolidation & Group Audit Framework before creating its memo.',
+    values: async (client, wf) =>
+      consolidationMergeValues(await readConsolidationMemoInput(client, wf)),
   },
 };
 

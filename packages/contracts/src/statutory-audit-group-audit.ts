@@ -406,7 +406,12 @@ export const BRANCH_APPOINTMENT_BASIS_LABEL: Record<BranchAppointmentBasis, stri
   other: 'Other (record in the note)',
 };
 
-export const BRANCH_CONCLUSIONS = ['pending', 'relied', 'relied_with_procedures', 'not_relied'] as const;
+export const BRANCH_CONCLUSIONS = [
+  'pending',
+  'relied',
+  'relied_with_procedures',
+  'not_relied',
+] as const;
 export type BranchConclusion = (typeof BRANCH_CONCLUSIONS)[number];
 export const BRANCH_CONCLUSION_LABEL: Record<BranchConclusion, string> = {
   pending: 'Pending',

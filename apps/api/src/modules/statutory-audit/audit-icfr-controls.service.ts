@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  COMPONENT_AUDITOR_TYPE,
   FRAMEWORK_AREA_KEY,
   SUB_SECTION_KEY,
   type AddIcfrComponentInput,
@@ -91,6 +92,7 @@ import {
 } from './icfr-controls';
 import { icfrDeficiencyRef, readIcfrReportingOn } from './icfr-controls-read';
 import { readIcfrResultOn } from './icfr-read';
+import { componentAuditorFeedOn } from './consolidation-group-read';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
 
 /** 02.6 perimeter relationships whose entities are components of the CFS. */
@@ -1548,6 +1550,29 @@ export class AuditIcfrControlsService {
           AND NOT (source_key = ANY($2::text[]))`,
       [consolidatedId, keys],
     );
+    // 02.6 §20 — one group structure: the component auditor matrix supplies the
+    // auditor, its name and the linked report; a team entry is never overwritten.
+    for (const f of await componentAuditorFeedOn(client, workflowInstanceId)) {
+      const auditor =
+        f.auditorType === COMPONENT_AUDITOR_TYPE.dhvaj
+          ? 'dhvaj'
+          : f.auditorType === COMPONENT_AUDITOR_TYPE.otherAuditor
+            ? 'other'
+            : null;
+      if (!auditor) continue;
+      await client.query(
+        `UPDATE hsdg.audit_icfr_component
+            SET auditor = COALESCE(auditor, $3),
+                auditor_name = CASE WHEN auditor IS NULL OR auditor = $3
+                                    THEN COALESCE(auditor_name, $4) ELSE auditor_name END,
+                report_document_id = COALESCE(report_document_id, $5)
+          WHERE consolidated_id = $1 AND source_key = $2 AND withdrawn_at IS NULL
+            AND (auditor IS NULL
+              OR (auditor = $3 AND auditor_name IS NULL AND $4::text IS NOT NULL)
+              OR (report_document_id IS NULL AND $5::uuid IS NOT NULL))`,
+        [consolidatedId, componentKey(f.componentName), auditor, f.auditorName, f.reportDocumentId],
+      );
+    }
   }
 
   // ── View assembly ──────────────────────────────────────────────────────

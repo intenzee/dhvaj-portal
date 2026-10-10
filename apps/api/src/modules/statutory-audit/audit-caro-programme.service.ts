@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  COMPONENT_AUDITOR_TYPE,
   CARO_REPORT_CONTEXT,
   FRAMEWORK_AREA_KEY,
   SUB_SECTION_KEY,
@@ -56,6 +57,7 @@ import {
   workClauses,
   type ProgrammePlan,
 } from './caro-programme';
+import { componentAuditorFeedOn } from './consolidation-group-read';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
 
 /** The Section 06 work area every CARO clause procedure lives in. */
@@ -993,6 +995,24 @@ export class AuditCaroProgrammeService {
           AND NOT (source_key = ANY($2::text[]))`,
       [itemId, keys],
     );
+    // 02.6 §20 — one group structure: the component auditor matrix supplies the
+    // auditor and the linked report; a team entry is never overwritten.
+    for (const f of await componentAuditorFeedOn(client, workflowInstanceId)) {
+      if (
+        f.auditorType !== COMPONENT_AUDITOR_TYPE.dhvaj &&
+        f.auditorType !== COMPONENT_AUDITOR_TYPE.otherAuditor
+      )
+        continue;
+      await client.query(
+        `UPDATE hsdg.audit_caro_component
+            SET auditor_name = COALESCE(auditor_name, $3),
+                auditor_report_document_id = COALESCE(auditor_report_document_id, $4)
+          WHERE item_id = $1 AND source_key = $2 AND withdrawn_at IS NULL
+            AND ((auditor_name IS NULL AND $3::text IS NOT NULL)
+              OR (auditor_report_document_id IS NULL AND $4::uuid IS NOT NULL))`,
+        [itemId, componentKey(f.componentName), f.auditorName, f.reportDocumentId],
+      );
+    }
   }
 
   // ── View assembly ──────────────────────────────────────────────────────
