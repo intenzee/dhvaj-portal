@@ -746,6 +746,8 @@ export interface OtherReportingDetail {
   missingFacts: OtherReportingMissingFact[];
   rulesUsed: OtherReportingRuleUsed[];
   rule11Version: { code: string; effectiveFrom: string } | null;
+  /** Requirements a team applicability override removed although the system found them (spec §20 significant override). */
+  removedObligations?: string[];
 }
 
 /** The result of the pure 02.7 engine. */
@@ -907,6 +909,7 @@ export const OTHER_REPORTING_REFERENCE_ANCHOR = {
   section128_5: 'section_128_5',
   section164_2: 'section_164_2',
   section197: 'section_197',
+  section197_16: 'section_197_16',
   section198: 'section_198',
   scheduleV: 'schedule_v',
   icai197Advisory: 'icai_197_16_advisory',

@@ -99,6 +99,20 @@ export const RULE_CRITERION = {
   filingCondition: 'filing_condition',
   /** How the ICFR monetary conditions combine (condition.join = 'and' | 'or'). */
   monetaryJoin: 'monetary_join',
+  /** §197 one MD/WTD/Manager ordinary sub-limit, % of Section 198 net profit. */
+  remunerationOneExecutivePercent: 'remuneration_one_executive_percent',
+  /** §197 more-than-one MD/WTD/Manager aggregate sub-limit. */
+  remunerationMultiExecutivePercent: 'remuneration_multi_executive_percent',
+  /** §197 non-executive directors' aggregate limit where the company has an MD/WTD/Manager. */
+  remunerationNonExecWithMgmtPercent: 'remuneration_nonexec_with_mgmt_percent',
+  /** §197 non-executive directors' aggregate limit in any other case. */
+  remunerationNonExecWithoutMgmtPercent: 'remuneration_nonexec_without_mgmt_percent',
+  /** Rule 13 — days from knowledge to report a fraud to the Board / Audit Committee. */
+  fraudInitialNoticeDays: 'fraud_initial_notice_days',
+  /** Rule 11(g) audit-trail reporting in force (a version exists for the period). */
+  auditTrailEffective: 'audit_trail_effective',
+  /** Schedule V effective-capital bands (child band table, versioned). */
+  scheduleVCeiling: 'schedule_v_ceiling',
 } as const;
 export type RuleCriterion = (typeof RULE_CRITERION)[keyof typeof RULE_CRITERION];
 export const RULE_CRITERIA: RuleCriterion[] = Object.values(RULE_CRITERION);
