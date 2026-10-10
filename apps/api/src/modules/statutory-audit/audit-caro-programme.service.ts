@@ -999,8 +999,20 @@ export class AuditCaroProgrammeService {
           AND NOT (source_key = ANY($2::text[]))`,
       [itemId, keys],
     );
+    // CARO 2020 applies only to a company incorporated in India (para 1(2)): a
+    // foreign component is suggested Not Applicable while it is still pending.
+    const foreign = perimeter.filter((p) => p.isIndianCompany === false);
+    if (foreign.length)
+      await client.query(
+        `UPDATE hsdg.audit_caro_component
+            SET caro_applicable = 'no'
+          WHERE item_id = $1 AND source = '02.6' AND withdrawn_at IS NULL
+            AND caro_applicable = 'pending' AND source_key = ANY($2::text[])`,
+        [itemId, foreign.map((p) => componentKey(p.name))],
+      );
     // 02.6 §20 — one group structure: the component auditor matrix supplies the
-    // auditor and the linked report; a team entry is never overwritten.
+    // auditor and the component's CARO report (the package CARO report, else the
+    // audit report it is annexed to); a team entry is never overwritten.
     for (const f of await componentAuditorFeedOn(client, workflowInstanceId)) {
       const key = keyById.get(f.componentId);
       if (!key) continue;
@@ -1016,7 +1028,7 @@ export class AuditCaroProgrammeService {
           WHERE item_id = $1 AND source_key = $2 AND withdrawn_at IS NULL
             AND ((auditor_name IS NULL AND $3::text IS NOT NULL)
               OR (auditor_report_document_id IS NULL AND $4::uuid IS NOT NULL))`,
-        [itemId, key, f.auditorName, f.reportDocumentId],
+        [itemId, key, f.auditorName, f.caroReportDocumentId ?? f.reportDocumentId],
       );
     }
   }

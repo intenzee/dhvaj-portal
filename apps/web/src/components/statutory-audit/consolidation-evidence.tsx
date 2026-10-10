@@ -1,7 +1,14 @@
 'use client';
 
-import { type StatutoryAuditConsolidation } from '@hsdg/contracts';
+import { relationshipEvidenceKey, type StatutoryAuditConsolidation } from '@hsdg/contracts';
 import { FrameworkEvidence } from './framework-evidence';
+
+/** Investee evidence key → investee name, so relationship files are badged by name (§5). */
+export function relationshipEvidenceLabels(c: StatutoryAuditConsolidation): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const i of c.capturedFacts.investees) if (i.id) out[relationshipEvidenceKey(i.id)] = i.name;
+  return out;
+}
 
 /**
  * 02.6 Evidence / Consolidation & Group Audit Framework Memo. Routine
@@ -30,6 +37,7 @@ export function ConsolidationEvidence({
         subAssessmentId={consolidation.assessment.id}
         memoSuggested={!!consolidation.memoSuggested}
         readOnly={readOnly}
+        keyLabels={relationshipEvidenceLabels(consolidation)}
       />
     </section>
   );

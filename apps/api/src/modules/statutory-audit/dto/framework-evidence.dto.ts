@@ -1,8 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { FRAMEWORK_EVIDENCE_QUESTIONS, type FrameworkEvidenceQuestion } from '@hsdg/contracts';
+import { FRAMEWORK_EVIDENCE_KEY_PATTERN, type FrameworkEvidenceKey } from '@hsdg/contracts';
 import {
   IsBase64,
-  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -34,10 +33,13 @@ export class AddFrameworkFileDto {
   @IsBase64()
   contentBase64!: string;
 
-  @ApiPropertyOptional({ enum: FRAMEWORK_EVIDENCE_QUESTIONS, description: 'Checklist question.' })
+  @ApiPropertyOptional({
+    pattern: FRAMEWORK_EVIDENCE_KEY_PATTERN.source,
+    description: 'Checklist question (frf_02 …) or 02.6 relationship (rel_<hex>).',
+  })
   @IsOptional()
-  @IsIn(FRAMEWORK_EVIDENCE_QUESTIONS)
-  questionKey?: FrameworkEvidenceQuestion;
+  @Matches(FRAMEWORK_EVIDENCE_KEY_PATTERN)
+  questionKey?: FrameworkEvidenceKey;
 }
 
 export class LinkFrameworkFileDto {
@@ -45,10 +47,13 @@ export class LinkFrameworkFileDto {
   @IsUUID()
   documentId!: string;
 
-  @ApiPropertyOptional({ enum: FRAMEWORK_EVIDENCE_QUESTIONS, description: 'Checklist question.' })
+  @ApiPropertyOptional({
+    pattern: FRAMEWORK_EVIDENCE_KEY_PATTERN.source,
+    description: 'Checklist question (frf_02 …) or 02.6 relationship (rel_<hex>).',
+  })
   @IsOptional()
-  @IsIn(FRAMEWORK_EVIDENCE_QUESTIONS)
-  questionKey?: FrameworkEvidenceQuestion;
+  @Matches(FRAMEWORK_EVIDENCE_KEY_PATTERN)
+  questionKey?: FrameworkEvidenceKey;
 }
 
 export class CreateFrameworkMemoDto {

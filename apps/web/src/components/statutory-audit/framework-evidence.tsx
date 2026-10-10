@@ -4,10 +4,10 @@ import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, FilePlus2, History, Link2, Lock, Trash2, Upload } from 'lucide-react';
 import {
-  FRAMEWORK_EVIDENCE_QUESTION_LABEL,
   FRAMEWORK_FILE_KIND_LABEL,
   PERMISSION,
-  type FrameworkEvidenceQuestion,
+  frameworkEvidenceKeyLabel,
+  type FrameworkEvidenceKey,
   type FrameworkEvidenceView,
   type FrameworkFileRecord,
   type FrameworkMemoCreated,
@@ -69,13 +69,20 @@ export function FrameworkEvidence({
   memoSuggested,
   readOnly,
   question,
+  questionLabel,
+  keyLabels,
 }: {
   engagementId: string;
   workflowInstanceId: string;
   subAssessmentId: string;
   memoSuggested: boolean;
   readOnly: boolean;
-  question?: FrameworkEvidenceQuestion;
+  /** File under a checklist question / 02.6 relationship instead of the sub-assessment. */
+  question?: FrameworkEvidenceKey;
+  /** The question's name when it is not a checklist question (an 02.6 investee). */
+  questionLabel?: string;
+  /** Names for the keys the full list shows (02.6: investee id key → investee name). */
+  keyLabels?: Record<string, string>;
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
@@ -124,7 +131,10 @@ export function FrameworkEvidence({
   const memoSpec = MEMO[view.subSectionKey] ?? MEMO['02.2']!;
   const files = question ? view.files.filter((f) => f.questionKey === question) : view.files;
   const filedUnder = question ? { questionKey: question } : {};
-  const what = question ? `${FRAMEWORK_EVIDENCE_QUESTION_LABEL[question]} evidence` : 'evidence';
+  const labelOf = (k: FrameworkEvidenceKey): string =>
+    keyLabels?.[k] ?? frameworkEvidenceKeyLabel(k);
+  const heading = question ? (questionLabel ?? labelOf(question)) : null;
+  const what = heading ? `${heading} evidence` : 'evidence';
   const showMemo =
     memo !== null && memo.memoFileId === null && editable && (memoSuggested || onDemand);
 
@@ -153,11 +163,7 @@ export function FrameworkEvidence({
   return (
     <div
       className="space-y-2"
-      aria-label={
-        question
-          ? `${FRAMEWORK_EVIDENCE_QUESTION_LABEL[question]} evidence`
-          : 'Evidence and technical memo'
-      }
+      aria-label={heading ? `${heading} evidence` : 'Evidence and technical memo'}
     >
       {files.length === 0 ? (
         <p className="text-xs text-ink-faint">
@@ -172,7 +178,7 @@ export function FrameworkEvidence({
               key={f.id}
               base={base}
               file={f}
-              showQuestion={!question}
+              questionLabel={!question && f.questionKey ? labelOf(f.questionKey) : null}
               editable={editable}
               busy={busy}
               onOpen={() => void openFile(f.documentId)}
@@ -289,7 +295,7 @@ export function FrameworkEvidence({
 function FileItem({
   base,
   file: f,
-  showQuestion,
+  questionLabel,
   editable,
   busy,
   onOpen,
@@ -297,7 +303,7 @@ function FileItem({
 }: {
   base: string;
   file: FrameworkFileRecord;
-  showQuestion: boolean;
+  questionLabel: string | null;
   editable: boolean;
   busy: boolean;
   onOpen: () => void;
@@ -313,9 +319,7 @@ function FileItem({
             {f.kind === 'technical_memo' && (
               <Badge tone="info">{FRAMEWORK_FILE_KIND_LABEL[f.kind]}</Badge>
             )}
-            {showQuestion && f.questionKey && (
-              <Badge tone="neutral">{FRAMEWORK_EVIDENCE_QUESTION_LABEL[f.questionKey]}</Badge>
-            )}
+            {questionLabel && <Badge tone="neutral">{questionLabel}</Badge>}
             {f.editLocked && (
               <span className="inline-flex items-center gap-1 text-[11px] text-ink-faint">
                 <Lock className="h-3 w-3" /> Read-only

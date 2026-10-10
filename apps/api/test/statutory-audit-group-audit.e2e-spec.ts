@@ -300,14 +300,17 @@ describe('Statutory Audit — 02.6 group audit framework (e2e)', () => {
     ).body as StatutoryAuditIcfrConsolidated;
     const live = c.components.filter((x) => !x.withdrawn);
     expect(live.map((x) => x.componentName).sort()).toEqual([ALPHA.name, BETA.name]);
+    // The Indian-company status comes from the 02.6 perimeter, never re-entered.
     expect(live.find((x) => x.componentName === ALPHA.name)).toMatchObject({
       source: '02.6',
       auditor: 'other',
       auditorName: 'Tan & Lee LLP',
+      indianCompany: 'no',
     });
     expect(live.find((x) => x.componentName === BETA.name)).toMatchObject({
       auditor: 'dhvaj',
       auditorName: 'DHVAJ',
+      indianCompany: 'yes',
     });
     await set026(prior, 'cfs_required'); // restore the perimeter for the rest of the suite
   });

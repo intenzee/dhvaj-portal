@@ -1524,6 +1524,9 @@ export class AuditGroupAuditService {
               hasInstructions: !!instructions,
               pendingPackage,
               priorReportType: r.prior_report_type,
+              findingCategories: findings
+                .filter((f) => f.component_row_id === r.id && !f.withdrawn_at)
+                .map((f) => f.category),
             }),
         priorYear: prior
           ? {

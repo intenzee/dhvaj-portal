@@ -170,6 +170,7 @@ describe('row completeness', () => {
     hasInstructions: true,
     pendingPackage: 0,
     priorReportType: null,
+    findingCategories: [],
   };
 
   it('is complete when everything is recorded', () => {
@@ -205,6 +206,22 @@ describe('row completeness', () => {
     expect(componentMissing({ ...base, reportType: null, priorReportType: 'qualified' })).toContain(
       "Follow up last year's qualified opinion",
     );
+  });
+
+  it('asks for a group finding for a modified or emphasis report until one is recorded (§16)', () => {
+    expect(componentMissing({ ...base, reportType: 'qualified' })).toEqual([
+      'Record a group finding for the qualified opinion (modified opinion)',
+    ]);
+    expect(
+      componentMissing({
+        ...base,
+        reportType: 'qualified',
+        findingCategories: ['modified_opinion'],
+      }),
+    ).toEqual([]);
+    expect(componentMissing({ ...base, reportType: 'unmodified_emphasis' })).toEqual([
+      expect.stringContaining('(emphasis / other matter)'),
+    ]);
   });
 
   it('needs nothing extra for a DHVAJ component', () => {
@@ -524,5 +541,37 @@ describe('group-audit status (Track A reads it)', () => {
     });
     expect(yes.blockingMatters[0]).toContain('branch Pune');
     expect(computeGroupAuditStatus({ ...base, br01: 'no' }).branchAuditors).toBe(0);
+  });
+
+  it('blocks GA-04 No on a significant branch until the response is recorded', () => {
+    const branch = {
+      branchName: 'Pune',
+      significance: 'significant' as const,
+      ga02: 'yes' as const,
+      ga03: 'yes' as const,
+      ga04: 'no' as const,
+      hasReport: true,
+      principalResponse: 'Extended procedures',
+      conclusion: 'reliance_with_further_work',
+    };
+    const base = {
+      cfsRequired: false,
+      expectedComponentIds: [],
+      components: [],
+      ga01: 'yes' as const,
+      br01: 'yes' as const,
+      findings: [],
+      workProgrammeActive: false,
+    };
+    const open = { ...branch, principalResponse: null, conclusion: 'pending' };
+    const s = computeGroupAuditStatus({ ...base, branches: [open] });
+    expect(s.blockingMatters).toEqual([expect.stringContaining('GA-04 is No for branch Pune')]);
+    expect(computeGroupAuditStatus({ ...base, branches: [branch] }).blockingMatters).toEqual([]);
+    expect(
+      computeGroupAuditStatus({
+        ...base,
+        branches: [{ ...open, significance: 'not_significant' }],
+      }).blockingMatters,
+    ).toEqual([]);
   });
 });

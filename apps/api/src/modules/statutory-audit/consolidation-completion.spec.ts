@@ -323,6 +323,53 @@ describe('02.6 completion checklist (spec §24)', () => {
     expect(met(c, 'rule6_tested')).toBe(true);
   });
 
+  it('branch auditors (section 143(8)) count toward completion with or without a CFS (spec §17)', () => {
+    const detail = detailOf([SUB_OK]).detail;
+    const exempt = (g: Partial<GroupAuditStatus>) =>
+      consolidationCompletion(
+        completionInput(detail, {
+          conclusion: CONSOLIDATION_OUTCOME.cfsExempt,
+          isSubsidiary: true,
+          groupAudit: { ...GROUP_DONE, matrixComplete: false, ...g },
+          crossLinks: { caroComponents: null, icfrComponents: null },
+        }),
+      );
+    // No branches, no CFS: nothing to do.
+    expect(met(exempt({ branchAuditPresent: 'no' }), 'auditor_matrix')).toBeNull();
+    // BR-01 unanswered blocks even a standalone file.
+    const pending = exempt({ branchAuditPresent: 'pending' });
+    expect(met(pending, 'auditor_matrix')).toBe(false);
+    expect(pending.items.find((x) => x.key === 'auditor_matrix')?.detail).toMatch(/BR-01/);
+    // BR-01 Yes needs a branch record, each with its report and response.
+    expect(met(exempt({ branchAuditPresent: 'yes', branchAuditors: 0 }), 'auditor_matrix')).toBe(
+      false,
+    );
+    expect(
+      met(
+        exempt({ branchAuditPresent: 'yes', branchAuditors: 2, branchPending: 1 }),
+        'auditor_matrix',
+      ),
+    ).toBe(false);
+    expect(
+      met(
+        exempt({ branchAuditPresent: 'yes', branchAuditors: 2, branchPending: 0 }),
+        'auditor_matrix',
+      ),
+    ).toBe(true);
+    // CFS required: the component matrix and the branch records both count.
+    const cfs = consolidationCompletion(
+      completionInput(detail, {
+        groupAudit: {
+          ...GROUP_DONE,
+          branchAuditPresent: 'yes',
+          branchAuditors: 1,
+          branchPending: 1,
+        },
+      }),
+    );
+    expect(met(cfs, 'auditor_matrix')).toBe(false);
+  });
+
   it('Information Pending and undecided files are in progress, never complete', () => {
     const detail = detailOf([SUB_OK]).detail;
     const c = consolidationCompletion(

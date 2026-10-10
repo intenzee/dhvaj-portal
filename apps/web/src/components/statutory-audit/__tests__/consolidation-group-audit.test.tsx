@@ -32,6 +32,14 @@ jest.mock('../framework-evidence', () => ({
   },
 }));
 
+const frameworkReferences = jest.fn();
+jest.mock('../framework-references', () => ({
+  FrameworkReferences: (props: { anchors?: string[] }) => {
+    frameworkReferences(props);
+    return <p>references: {props.anchors?.join(', ')}</p>;
+  },
+}));
+
 function wrap(ui: ReactNode): ReactNode {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={qc}>{ui}</QueryClientProvider>;
@@ -40,6 +48,7 @@ function wrap(ui: ReactNode): ReactNode {
 beforeEach(() => {
   apiFetch.mockReset();
   frameworkEvidence.mockReset();
+  frameworkReferences.mockReset();
 });
 
 const BASE = '/engagements/e1/statutory-audit/wf1/group-audit';
@@ -216,6 +225,7 @@ describe('02.6 component auditors (§12–§16)', () => {
     render(wrap(<ConsolidationOtherAuditors engagementId="e1" workflowInstanceId="wf1" />));
     expect(await screen.findByText('Matrix incomplete')).toBeInTheDocument();
     expect(screen.getByLabelText('Blocking matters')).toHaveTextContent(/GA-04 is pending/);
+    expect(screen.getByLabelText('GA-01')).toHaveTextContent('references: sa_600');
     expect(screen.queryByLabelText('SA 600 questions')).toBeNull();
     await userEvent.click(
       screen.getByRole('button', { name: 'Expand component Alpha Holdings Ltd (UK)' }),
@@ -301,6 +311,8 @@ describe('02.6 branch auditors (§17)', () => {
     render(wrap(<ConsolidationBranchAuditors engagementId="e1" workflowInstanceId="wf1" />));
     const br = await screen.findByLabelText('BR-01');
     expect(br).toHaveTextContent('(system suggestion)');
+    // View Section 143(8) / Rule 12 (spec §17, §23).
+    expect(br).toHaveTextContent('references: section_143_8, audit_rule_12');
     apiFetch.mockResolvedValueOnce(view());
     await userEvent.click(within(br).getByRole('button', { name: 'Record BR-01' }));
     expect(apiFetch).toHaveBeenCalledWith(BASE, {
@@ -429,6 +441,12 @@ describe('02.6 evidence and memo', () => {
       workflowInstanceId: 'wf1',
       assessment: { id: 'sa-026' },
       memoSuggested: true,
+      capturedFacts: {
+        investees: [
+          { id: '0b6f2c1e-3d4a-4b5c-8d9e-0f1a2b3c4d5e', name: 'Alpha Ltd' },
+          { name: 'Unsaved' },
+        ],
+      },
     } as unknown as StatutoryAuditConsolidation;
     render(
       wrap(<ConsolidationEvidence engagementId="e1" consolidation={consolidation} readOnly />),
@@ -440,6 +458,8 @@ describe('02.6 evidence and memo', () => {
       subAssessmentId: 'sa-026',
       memoSuggested: true,
       readOnly: true,
+      // Relationship files (§5) are badged with the investee's name.
+      keyLabels: { rel_0b6f2c1e3d4a4b5c8d9e0f1a2b3c4d5e: 'Alpha Ltd' },
     });
   });
 });

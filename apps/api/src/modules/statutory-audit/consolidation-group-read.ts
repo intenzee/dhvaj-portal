@@ -59,6 +59,8 @@ interface ComponentRow {
   ga04: GaYesNoPending;
   report_type: ComponentReportType | null;
   report_document_id: string | null;
+  caro_report_document_id: string | null;
+  icfr_report_document_id: string | null;
   has_instructions: boolean;
   packages: Array<{ key: PackageDocumentKey; status: PackageDocumentStatus }> | null;
 }
@@ -83,6 +85,14 @@ async function readComponentRowsOn(
             (SELECT f.document_id FROM hsdg.audit_group_file f
               WHERE f.component_row_id = c.id AND f.slot = 'report' AND f.superseded_at IS NULL
               LIMIT 1) AS report_document_id,
+            (SELECT f.document_id FROM hsdg.audit_group_file f
+              WHERE f.component_row_id = c.id AND f.slot = 'package'
+                AND f.package_key = 'caro_report' AND f.superseded_at IS NULL
+              LIMIT 1) AS caro_report_document_id,
+            (SELECT f.document_id FROM hsdg.audit_group_file f
+              WHERE f.component_row_id = c.id AND f.slot = 'package'
+                AND f.package_key = 'icfr_report' AND f.superseded_at IS NULL
+              LIMIT 1) AS icfr_report_document_id,
             EXISTS (SELECT 1 FROM hsdg.audit_group_file f
                      WHERE f.component_row_id = c.id AND f.slot = 'instructions'
                        AND f.superseded_at IS NULL) AS has_instructions,
@@ -234,6 +244,8 @@ export async function componentAuditorFeedOn(
       auditorName:
         r.auditor_type === COMPONENT_AUDITOR_TYPE.dhvaj ? 'DHVAJ' : r.firm_name?.trim() || null,
       reportDocumentId: r.report_document_id,
+      caroReportDocumentId: r.caro_report_document_id,
+      icfrReportDocumentId: r.icfr_report_document_id,
       reportType: r.report_type,
     }));
 }

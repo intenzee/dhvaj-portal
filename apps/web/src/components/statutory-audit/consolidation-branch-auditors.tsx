@@ -12,6 +12,9 @@ import {
   BRANCH_CONCLUSIONS,
   COMPONENT_SIGNIFICANCE,
   COMPONENT_SIGNIFICANCE_LABEL,
+  CONSOLIDATION_REFERENCE_ANCHOR,
+  CONSOLIDATION_REFERENCE_CONTEXT,
+  GROUP_AUDIT_REFERENCE_ANCHOR,
   type Br01Answer,
   type BranchConclusion,
   type GroupAuditBranch,
@@ -29,6 +32,7 @@ import {
   type GroupView,
 } from './consolidation-group-shared';
 import { Sa600Questions } from './consolidation-other-auditors';
+import { FrameworkReferences } from './framework-references';
 
 /**
  * 02.6 Part B — Branch Auditors (DHVAJ 02.6 spec §17; section 143(8), Rule 12).
@@ -204,6 +208,14 @@ function Br01({
       <p className="text-ink">
         <span className="font-mono text-ink-muted">BR-01</span> {BR01_QUESTION}
       </p>
+      <FrameworkReferences
+        contextKey={CONSOLIDATION_REFERENCE_CONTEXT}
+        anchors={[
+          CONSOLIDATION_REFERENCE_ANCHOR.section143_8,
+          GROUP_AUDIT_REFERENCE_ANCHOR.branchAuditRule,
+        ]}
+        effectiveOn={view.periodStart}
+      />
       <p className="text-ink-muted">
         {BR01_ANSWER_LABEL[view.br01]}
         {view.br01Source === 'system' ? ' (system suggestion)' : ''} — {view.br01Basis || '—'}

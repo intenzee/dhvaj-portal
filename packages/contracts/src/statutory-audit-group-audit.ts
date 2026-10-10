@@ -698,6 +698,11 @@ export interface ComponentAuditorFeed {
   auditorType: ComponentAuditorType;
   /** "DHVAJ" or the other firm's name. */
   auditorName: string | null;
+  /** The component audit report (the matrix report slot). */
   reportDocumentId: string | null;
+  /** The component's CARO report from the reporting package (02.4 3(xxi)). */
+  caroReportDocumentId: string | null;
+  /** The component's section 143(3)(i) / ICFR report from the reporting package (02.5). */
+  icfrReportDocumentId: string | null;
   reportType: ComponentReportType | null;
 }

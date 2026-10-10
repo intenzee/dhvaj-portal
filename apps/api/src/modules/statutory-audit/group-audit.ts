@@ -248,6 +248,8 @@ export interface ComponentRowFacts extends Sa600AnswerFacts {
   hasInstructions: boolean;
   pendingPackage: number;
   priorReportType: ComponentReportType | null;
+  /** Categories of the live (not withdrawn) findings on this component. */
+  findingCategories: readonly GroupFindingCategory[];
 }
 
 const blank = (s: string | null | undefined) => !s || !s.trim();
@@ -282,6 +284,12 @@ export function componentMissing(r: ComponentRowFacts): string[] {
   if (r.pendingPackage)
     out.push(
       `${r.pendingPackage} reporting-package document${r.pendingPackage === 1 ? '' : 's'} pending`,
+    );
+  // §16: a modified / emphasis report is carried into the group as a finding.
+  const category = findingCategoryForReport(r.reportType);
+  if (r.reportType && category && !r.findingCategories.includes(category))
+    out.push(
+      `Record a group finding for the ${COMPONENT_REPORT_TYPE_LABEL[r.reportType].toLowerCase()} (${FINDING_CATEGORY_LABEL[category].toLowerCase()})`,
     );
   if (
     r.priorReportType &&
@@ -622,9 +630,14 @@ export function computeGroupAuditStatus(input: {
       );
   }
   for (const b of branches) {
-    if (b.significance === 'significant' && b.ga04 === 'pending')
+    if (b.significance !== 'significant') continue;
+    if (b.ga04 === 'pending')
       blockingMatters.push(
         `GA-04 is Pending for branch ${b.branchName}, a significant branch — the branch auditor's work must be evaluated before completion.`,
+      );
+    else if (b.ga04 === 'no' && (blank(b.principalResponse) || b.conclusion === 'pending'))
+      blockingMatters.push(
+        `GA-04 is No for branch ${b.branchName}, a significant branch — record the audit response (further work or a reporting impact).`,
       );
   }
   for (const f of input.findings) {

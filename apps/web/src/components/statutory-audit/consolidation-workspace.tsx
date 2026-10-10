@@ -11,6 +11,8 @@ import {
   CONSOLIDATION_REFERENCE_CONTEXT,
   CONVERSION_STATUS_LABEL,
   EMPTY_RULE6_EVIDENCE,
+  GROUP_AUDIT_REFERENCE_ANCHOR,
+  INVESTEE_RELATIONSHIP,
   INVESTEE_RELATIONSHIP_LABEL,
   LOCAL_FRAMEWORK_LABEL,
   RULE6_RESULT_LABEL,
@@ -19,6 +21,8 @@ import {
   type ConsolidationOutcome,
   type ConversionDifference,
   type ConversionStatus,
+  relationshipEvidenceKey,
+  type InvesteeClassification,
   type InvesteeInput,
   type InvesteeRelationship,
   type MemberObjectionStatus,
@@ -36,6 +40,7 @@ import { Badge, Button, Card } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 import { LinkPicker } from './acceptance-file-card';
+import { relationshipEvidenceLabels } from './consolidation-evidence';
 import { ConsolidationPerimeter } from './consolidation-perimeter';
 import { FrameworkEvidence } from './framework-evidence';
 import { FrameworkReferences } from './framework-references';
@@ -90,7 +95,32 @@ function anchorsFor(c: StatutoryAuditConsolidation): string[] {
   if (d?.groupFramework === 'ind_as') out.push(A.indAs110, A.indAs111, A.indAs28);
   else if (d?.groupFramework === 'as') out.push(A.as21, A.as23, A.as27);
   if (c.groupAudit?.sa600Required || d?.saFramework) out.push(A.sa600);
-  if (d?.hasBranches) out.push(A.section143_8);
+  if (d?.hasBranches || c.groupAudit?.branchAuditPresent === 'yes')
+    out.push(A.section143_8, GROUP_AUDIT_REFERENCE_ANCHOR.branchAuditRule);
+  return out;
+}
+
+const STANDARD_ANCHOR: Record<string, string> = {
+  'AS 21': CONSOLIDATION_REFERENCE_ANCHOR.as21,
+  'AS 23': CONSOLIDATION_REFERENCE_ANCHOR.as23,
+  'AS 27': CONSOLIDATION_REFERENCE_ANCHOR.as27,
+  'Ind AS 110': CONSOLIDATION_REFERENCE_ANCHOR.indAs110,
+  'Ind AS 111': CONSOLIDATION_REFERENCE_ANCHOR.indAs111,
+  'Ind AS 28': CONSOLIDATION_REFERENCE_ANCHOR.indAs28,
+};
+
+/** The authority behind one relationship (§5): its standard, and §2(6) for an associate / JV. */
+function relationshipAnchors(p: InvesteeClassification | undefined): string[] {
+  if (!p) return [];
+  const out = (p.standard ?? '')
+    .split('/')
+    .map((s) => STANDARD_ANCHOR[s.trim()])
+    .filter((a): a is string => !!a);
+  if (
+    p.relationship === INVESTEE_RELATIONSHIP.associate ||
+    p.relationship === INVESTEE_RELATIONSHIP.jointVenture
+  )
+    out.push(CONSOLIDATION_REFERENCE_ANCHOR.section2_6);
   return out;
 }
 
@@ -417,6 +447,29 @@ export function ConsolidationWorkspace({
           editable={editable}
           busy={busy}
           onSave={(investees: InvesteeInput[]) => facts.mutate({ investees })}
+          rowExtras={(id, inv, p) => (
+            <div className="space-y-2 rounded-md border border-line p-2">
+              <p className="text-xs font-medium text-ink">
+                Relationship evidence (control / influence / joint control)
+              </p>
+              <FrameworkEvidence
+                engagementId={engagementId}
+                workflowInstanceId={c.workflowInstanceId}
+                subAssessmentId={a.id}
+                memoSuggested={false}
+                readOnly={!editable}
+                question={relationshipEvidenceKey(id)}
+                questionLabel={inv.name}
+              />
+              {relationshipAnchors(p).length > 0 && (
+                <FrameworkReferences
+                  contextKey={CONSOLIDATION_REFERENCE_CONTEXT}
+                  anchors={relationshipAnchors(p)}
+                  effectiveOn={c.periodStart}
+                />
+              )}
+            </div>
+          )}
         />
         {d?.materialityNote && <p className="text-xs text-ink-faint">{d.materialityNote}</p>}
       </Section>
@@ -590,6 +643,7 @@ export function ConsolidationWorkspace({
             subAssessmentId={a.id}
             memoSuggested={!!c.memoSuggested}
             readOnly={!editable}
+            keyLabels={relationshipEvidenceLabels(c)}
           />
         )}
       </Section>

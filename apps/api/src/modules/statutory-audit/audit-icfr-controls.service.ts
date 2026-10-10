@@ -1554,8 +1554,22 @@ export class AuditIcfrControlsService {
           AND NOT (source_key = ANY($2::text[]))`,
       [consolidatedId, keys],
     );
+    // 02.6 §20 — the Indian-company status comes from the perimeter (never re-entered);
+    // a team answer is never overwritten.
+    for (const p of perimeter) {
+      if (p.isIndianCompany == null) continue;
+      await client.query(
+        `UPDATE hsdg.audit_icfr_component
+            SET indian_company = $3
+          WHERE consolidated_id = $1 AND source = '02.6' AND source_key = $2
+            AND withdrawn_at IS NULL AND indian_company IS NULL`,
+        [consolidatedId, componentKey(p.name), p.isIndianCompany ? 'yes' : 'no'],
+      );
+    }
     // 02.6 §20 — one group structure: the component auditor matrix supplies the
-    // auditor, its name and the linked report; a team entry is never overwritten.
+    // auditor, its name and the component's section 143(3)(i) report (the package
+    // ICFR report, else the audit report it is annexed to); a team entry is never
+    // overwritten.
     for (const f of await componentAuditorFeedOn(client, workflowInstanceId)) {
       const key = keyById.get(f.componentId);
       if (!key) continue;
@@ -1576,7 +1590,7 @@ export class AuditIcfrControlsService {
             AND (auditor IS NULL
               OR (auditor = $3 AND auditor_name IS NULL AND $4::text IS NOT NULL)
               OR (report_document_id IS NULL AND $5::uuid IS NOT NULL))`,
-        [consolidatedId, key, auditor, f.auditorName, f.reportDocumentId],
+        [consolidatedId, key, auditor, f.auditorName, f.icfrReportDocumentId ?? f.reportDocumentId],
       );
     }
   }

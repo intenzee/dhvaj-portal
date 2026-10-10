@@ -81,6 +81,7 @@ export function ConsolidationPerimeter({
   editable,
   busy,
   onSave,
+  rowExtras,
 }: {
   /** The captured facts (what the team edits). */
   investees: InvesteeInput[];
@@ -91,6 +92,12 @@ export function ConsolidationPerimeter({
   busy: boolean;
   /** Save the whole list (the server keeps component ids by name / id). */
   onSave: (next: InvesteeInput[]) => void;
+  /** Shown under a saved investee's editor (§5: its evidence and authority links). */
+  rowExtras?: (
+    id: string,
+    investee: InvesteeInput,
+    c: InvesteeClassification | undefined,
+  ) => ReactNode;
 }): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -177,6 +184,7 @@ export function ConsolidationPerimeter({
                         setOpen(null);
                       }}
                     />
+                    {inv.id && rowExtras?.(inv.id, inv, c)}
                   </div>
                 )}
               </li>

@@ -8,6 +8,8 @@ import {
   COMPONENT_REPORT_TYPES,
   COMPONENT_SIGNIFICANCE,
   COMPONENT_SIGNIFICANCE_LABEL,
+  CONSOLIDATION_REFERENCE_ANCHOR,
+  CONSOLIDATION_REFERENCE_CONTEXT,
   FINDING_CATEGORIES,
   FINDING_CATEGORY_LABEL,
   FINDING_IMPACT_CHOICES,
@@ -47,6 +49,7 @@ import {
   type GroupSend,
   type GroupView,
 } from './consolidation-group-shared';
+import { FrameworkReferences } from './framework-references';
 
 /**
  * 02.6 Part B — Other Auditors (DHVAJ 02.6 spec §12–§16). One matrix row per
@@ -230,6 +233,11 @@ function Ga01({
       <p className="text-ink">
         <span className="font-mono text-ink-muted">GA-01</span> {SA600_QUESTION_TEXT.ga_01}
       </p>
+      <FrameworkReferences
+        contextKey={CONSOLIDATION_REFERENCE_CONTEXT}
+        anchors={[CONSOLIDATION_REFERENCE_ANCHOR.sa600]}
+        effectiveOn={view.periodStart}
+      />
       <p className="text-ink-muted">
         {view.ga01 ? GA01_ANSWER_LABEL[view.ga01] : 'Not answered'}
         {view.ga01Source === 'system' ? ' (system suggestion)' : ''}

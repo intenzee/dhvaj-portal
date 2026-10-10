@@ -2,6 +2,8 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import {
   CONSOLIDATION_OUTCOME,
+  relationshipEvidenceKey,
+  type FrameworkEvidenceView,
   type StatutoryAuditConsolidation,
   type StatutoryAuditFinancialReporting,
 } from '@hsdg/contracts';
@@ -129,6 +131,50 @@ describe('Statutory Audit — 02.6 Consolidation (e2e §9.6)', () => {
     expect(c.detail!.cfsTriggered).toBe(true);
     expect(c.detail!.perimeter[0]?.relationship).toBe('subsidiary');
     expect(c.assessment.authorityProvisionId).toBeTruthy(); // §129(3) frozen period-correct
+  });
+
+  it('files evidence against one investee relationship on 02.6 (spec §5)', async () => {
+    const c = await getConsolidation(pa);
+    const investee = c.capturedFacts.investees[0]!;
+    const key = relationshipEvidenceKey(investee.id!);
+    const url = `${base()}/${shellId}/framework/${c.assessment.id}/evidence`;
+    const v = (
+      await request(app.getHttpServer())
+        .post(`${url}/add`)
+        .set(bearer(pa))
+        .send({
+          filename: 'Bharat board minutes.pdf',
+          contentType: 'application/pdf',
+          contentBase64: Buffer.from('Board composition (e2e)', 'utf8').toString('base64'),
+          questionKey: key,
+        })
+        .expect(201)
+    ).body as FrameworkEvidenceView;
+    const file = v.files.find((f) => f.filename === 'Bharat board minutes.pdf')!;
+    expect(file.questionKey).toBe(key);
+    // Once per relationship; a malformed key is rejected.
+    await request(app.getHttpServer())
+      .post(`${url}/link`)
+      .set(bearer(pa))
+      .send({ documentId: file.documentId, questionKey: key })
+      .expect(409);
+    await request(app.getHttpServer())
+      .post(`${url}/link`)
+      .set(bearer(pa))
+      .send({ documentId: file.documentId, questionKey: 'rel_XYZ' })
+      .expect(400);
+    // A checklist question of another sub-assessment does not file here.
+    await request(app.getHttpServer())
+      .post(`${url}/link`)
+      .set(bearer(pa))
+      .send({ documentId: file.documentId, questionKey: 'frf_02' })
+      .expect(400);
+    // Unlinked again: a later test needs 02.6 without evidence on file.
+    await request(app.getHttpServer())
+      .post(`${url}/${file.id}/unlink`)
+      .set(bearer(pa))
+      .send({})
+      .expect(201);
   });
 
   it('records the professional conclusion, and rejects a stale-version write (409)', async () => {

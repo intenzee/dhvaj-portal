@@ -19,9 +19,11 @@ import {
   type FrameworkMemoAvailability,
   type FrameworkMemoCreated,
   type LinkFrameworkFileInput,
-  FRAMEWORK_EVIDENCE_QUESTION_LABEL,
   FRAMEWORK_EVIDENCE_QUESTIONS,
+  frameworkEvidenceKeyLabel,
+  isRelationshipEvidenceKey,
   type DocumentTemplateKey,
+  type FrameworkEvidenceKey,
   type FrameworkEvidenceQuestion,
   type SubSectionKey,
 } from '@hsdg/contracts';
@@ -134,7 +136,7 @@ interface FileRow {
   id: string;
   document_id: string;
   kind: FrameworkFileKind;
-  question_key: FrameworkEvidenceQuestion | null;
+  question_key: FrameworkEvidenceKey | null;
   title: string;
   filename: string | null;
   current_version_no: number;
@@ -260,7 +262,7 @@ export class AuditFrameworkEvidenceService {
     subAssessmentId: string,
     input: AddFrameworkFileInput,
   ): Promise<FrameworkEvidenceView> {
-    let question: FrameworkEvidenceQuestion | null = null;
+    let question: FrameworkEvidenceKey | null = null;
     await this.db.withRlsContext(ctx, async (client) => {
       const sub = await this.loadSub(client, engagementId, workflowInstanceId, subAssessmentId);
       assertEditable(sub);
@@ -453,7 +455,7 @@ export class AuditFrameworkEvidenceService {
     } | null,
     how: 'added' | 'linked' | 'created_from_template',
     extra: Record<string, unknown> = {},
-    question: FrameworkEvidenceQuestion | null = null,
+    question: FrameworkEvidenceKey | null = null,
   ): Promise<string> {
     let id: string;
     try {
@@ -485,7 +487,7 @@ export class AuditFrameworkEvidenceService {
           kind === 'technical_memo'
             ? 'The technical memo already exists — open it from the list.'
             : question
-              ? `That file is already linked under ${FRAMEWORK_EVIDENCE_QUESTION_LABEL[question]}.`
+              ? `That file is already linked under ${frameworkEvidenceKeyLabel(question)}.`
               : 'That file is already linked here.',
         );
       }
@@ -599,17 +601,19 @@ function mapFile(r: FileRow): FrameworkFileRecord {
   };
 }
 
-/** A checklist question carries evidence only on its own sub-assessment (02.2 FRF, 02.3 SCH). */
+/**
+ * A checklist question carries evidence only on its own sub-assessment (02.2
+ * FRF, 02.3 SCH); an investee relationship only on 02.6 (spec §5).
+ */
 function questionFor(
   sub: SubRow,
-  questionKey: FrameworkEvidenceQuestion | undefined,
-): FrameworkEvidenceQuestion | null {
+  questionKey: FrameworkEvidenceKey | undefined,
+): FrameworkEvidenceKey | null {
   if (!questionKey) return null;
-  if (
-    !FRAMEWORK_EVIDENCE_QUESTIONS.includes(questionKey) ||
-    QUESTION_SUB_SECTION[questionKey] !== sub.sub_section_key
-  ) {
-    throw new BadRequestException('That question does not take evidence here.');
-  }
+  const ok = isRelationshipEvidenceKey(questionKey)
+    ? sub.sub_section_key === SUB_SECTION_KEY.consolidation
+    : FRAMEWORK_EVIDENCE_QUESTIONS.includes(questionKey) &&
+      QUESTION_SUB_SECTION[questionKey] === sub.sub_section_key;
+  if (!ok) throw new BadRequestException('That question does not take evidence here.');
   return questionKey;
 }

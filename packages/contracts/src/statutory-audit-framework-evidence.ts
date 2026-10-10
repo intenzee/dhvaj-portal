@@ -51,13 +51,50 @@ export const FRAMEWORK_EVIDENCE_QUESTION_LABEL: Record<FrameworkEvidenceQuestion
   sch_04: 'SCH-04',
 };
 
+/**
+ * 02.6 §5: evidence filed against one investee relationship (control /
+ * significant-influence / joint-control support). `rel_` + the investee's
+ * stable id as hex, so it fits the `question_key` column.
+ */
+export type RelationshipEvidenceKey = `rel_${string}`;
+/** Where a file sits within its sub-assessment: a checklist question or an 02.6 relationship. */
+export type FrameworkEvidenceKey = FrameworkEvidenceQuestion | RelationshipEvidenceKey;
+
+const RELATIONSHIP_KEY = 'rel_[0-9a-f]{16,32}';
+export const FRAMEWORK_EVIDENCE_KEY_PATTERN = new RegExp(
+  `^(${FRAMEWORK_EVIDENCE_QUESTIONS.join('|')}|${RELATIONSHIP_KEY})$`,
+);
+
+export function isRelationshipEvidenceKey(key: string): key is RelationshipEvidenceKey {
+  return new RegExp(`^${RELATIONSHIP_KEY}$`).test(key);
+}
+
+/** The evidence key of an 02.6 investee: its uuid as hex, else a hash of a legacy `name:` id. */
+export function relationshipEvidenceKey(investeeId: string): RelationshipEvidenceKey {
+  const hex = investeeId.toLowerCase().replace(/-/g, '');
+  if (/^[0-9a-f]{32}$/.test(hex)) return `rel_${hex}`;
+  const fnv = (seed: number): string => {
+    let h = seed;
+    for (let i = 0; i < investeeId.length; i++) {
+      h ^= investeeId.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, '0');
+  };
+  return `rel_${fnv(0x811c9dc5)}${fnv(0x050c5d1f)}`;
+}
+
+export function frameworkEvidenceKeyLabel(key: FrameworkEvidenceKey): string {
+  return isRelationshipEvidenceKey(key) ? 'Relationship' : FRAMEWORK_EVIDENCE_QUESTION_LABEL[key];
+}
+
 /** One file linked to a Section 02 sub-assessment. */
 export interface FrameworkFileRecord {
   id: string;
   documentId: string;
   kind: FrameworkFileKind;
-  /** The checklist question it supports; null when filed on the sub-assessment. */
-  questionKey: FrameworkEvidenceQuestion | null;
+  /** The checklist question / 02.6 relationship it supports; null when filed on the sub-assessment. */
+  questionKey: FrameworkEvidenceKey | null;
   title: string;
   filename: string | null;
   currentVersionNo: number;
@@ -101,13 +138,13 @@ export interface AddFrameworkFileInput {
   filename: string;
   contentType?: string;
   contentBase64: string;
-  /** File it under a checklist question instead of the sub-assessment. */
-  questionKey?: FrameworkEvidenceQuestion;
+  /** File it under a checklist question / 02.6 relationship instead of the sub-assessment. */
+  questionKey?: FrameworkEvidenceKey;
 }
 
 export interface LinkFrameworkFileInput {
   documentId: string;
-  questionKey?: FrameworkEvidenceQuestion;
+  questionKey?: FrameworkEvidenceKey;
 }
 
 export interface CreateFrameworkMemoInput {

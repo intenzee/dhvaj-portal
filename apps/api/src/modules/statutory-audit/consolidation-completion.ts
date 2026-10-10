@@ -280,17 +280,27 @@ export function consolidationCompletion(i: ConsolidationCompletionInput): Consol
           ? `${i.conversionsOpen} conversion work item(s) open.`
           : null,
     ),
+    // Branch auditors (section 143(8)) apply with or without a CFS (spec §17).
     item(
       'auditor_matrix',
       'Component / branch auditor matrix complete',
-      cfsRequired && g
-        ? g.matrixComplete && g.tbdComponents === 0 && g.branchAuditPresent !== 'pending'
+      g && (cfsRequired || g.branchAuditPresent !== 'no')
+        ? (!cfsRequired || (g.matrixComplete && g.tbdComponents === 0)) &&
+            g.branchAuditPresent !== 'pending' &&
+            !(g.branchAuditPresent === 'yes' && g.branchAuditors === 0) &&
+            g.branchPending === 0
         : null,
-      g && cfsRequired && !g.matrixComplete
-        ? 'Record the auditor of every included component.'
-        : g && g.branchAuditPresent === 'pending'
-          ? 'Answer BR-01 (branch auditors).'
-          : null,
+      !g
+        ? null
+        : cfsRequired && (!g.matrixComplete || g.tbdComponents > 0)
+          ? 'Record the auditor of every included component.'
+          : g.branchAuditPresent === 'pending'
+            ? 'Answer BR-01 (branch auditors).'
+            : g.branchAuditPresent === 'yes' && g.branchAuditors === 0
+              ? 'BR-01 is Yes — add the branch auditor record.'
+              : g.branchPending > 0
+                ? `${g.branchPending} branch auditor record(s) still need the branch report or the principal auditor's response.`
+                : null,
     ),
     item(
       'sa600_configured',

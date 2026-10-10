@@ -2,7 +2,11 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { StatutoryAuditConsolidation } from '@hsdg/contracts';
+import {
+  relationshipEvidenceKey,
+  type GroupAuditStatus,
+  type StatutoryAuditConsolidation,
+} from '@hsdg/contracts';
 import { ConsolidationWorkspace } from '../consolidation-workspace';
 
 const apiFetch = jest.fn();
@@ -11,8 +15,20 @@ jest.mock('@/lib/api', () => ({
   ApiError: class ApiError extends Error {},
 }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
-jest.mock('../framework-evidence', () => ({ FrameworkEvidence: () => null }));
-jest.mock('../framework-references', () => ({ FrameworkReferences: () => null }));
+const evidenceProps = jest.fn();
+const referenceProps = jest.fn();
+jest.mock('../framework-evidence', () => ({
+  FrameworkEvidence: (p: unknown) => {
+    evidenceProps(p);
+    return null;
+  },
+}));
+jest.mock('../framework-references', () => ({
+  FrameworkReferences: (p: unknown) => {
+    referenceProps(p);
+    return null;
+  },
+}));
 jest.mock('../acceptance-file-card', () => ({
   LinkPicker: ({ onPick }: { onPick: (id: string) => void }) => (
     <button type="button" onClick={() => onPick('doc-tb')}>
@@ -152,6 +168,8 @@ function fixture(over: Partial<StatutoryAuditConsolidation> = {}): StatutoryAudi
 }
 
 beforeEach(() => {
+  evidenceProps.mockReset();
+  referenceProps.mockReset();
   apiFetch.mockReset();
   apiFetch.mockImplementation((url: string) =>
     url.endsWith('/statutory-audit/team')
@@ -278,6 +296,47 @@ describe('02.6 Consolidation workspace (spec §4)', () => {
     expect(call?.[1].body.investees).toEqual([
       expect.objectContaining({ id: 'c1', name: 'Sub One Pvt Ltd', controlConclusion: 'yes' }),
     ]);
+  });
+
+  it('files evidence and shows the authority per relationship (§5)', async () => {
+    const user = userEvent.setup();
+    render(wrap(<ConsolidationWorkspace engagementId="e1" consolidation={fixture()} canManage />));
+    const perimeter = screen.getByTestId('consolidation-perimeter');
+    await user.click(within(perimeter).getByRole('button', { name: /Sub One Pvt Ltd/ }));
+    expect(within(perimeter).getByText(/Relationship evidence/)).toBeInTheDocument();
+    expect(evidenceProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subAssessmentId: 'sa1',
+        question: relationshipEvidenceKey('c1'),
+        questionLabel: 'Sub One Pvt Ltd',
+        readOnly: false,
+      }),
+    );
+    expect(relationshipEvidenceKey('c1')).toMatch(/^rel_[0-9a-f]{16}$/);
+    expect(referenceProps).toHaveBeenCalledWith(
+      expect.objectContaining({ anchors: ['ind_as_110'], effectiveOn: fixture().periodStart }),
+    );
+  });
+
+  it('shows Section 143(8) and Rule 12 once branch auditors exist (BR-01 Yes)', () => {
+    const groupAudit = {
+      branchAuditPresent: 'yes',
+      byComponent: {},
+    } as unknown as GroupAuditStatus;
+    render(
+      wrap(
+        <ConsolidationWorkspace
+          engagementId="e1"
+          consolidation={fixture({ groupAudit })}
+          canManage
+        />,
+      ),
+    );
+    expect(referenceProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        anchors: expect.arrayContaining(['section_143_8', 'audit_rule_12']),
+      }),
+    );
   });
 
   it('a conversion completes only with a reviewer and the adjusted group TB (CFS-04)', async () => {

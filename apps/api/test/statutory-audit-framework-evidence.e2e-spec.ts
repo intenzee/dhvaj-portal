@@ -517,6 +517,12 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
       .set(bearer(pa))
       .send({ documentId: fs.documentId, questionKey: 'frf_09' })
       .expect(400);
+    // An 02.6 relationship key (spec §5) files only on 02.6.
+    await request(http)
+      .post(`${evidenceUrl()}/link`)
+      .set(bearer(pa))
+      .send({ documentId: fs.documentId, questionKey: 'rel_0123456789abcdef' })
+      .expect(400);
 
     // §10: the 02.1 net-worth figure's statements become the 02.2E "Open Source".
     await request(http)
