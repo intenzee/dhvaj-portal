@@ -26,6 +26,8 @@
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- Up Migration
+-- authority_provision is FORCE RLS: lift it so the provision joins below resolve.
+ALTER TABLE hsdg.authority_provision NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_version NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_band NO FORCE ROW LEVEL SECURITY;
@@ -107,6 +109,7 @@ ON CONFLICT (audit_rule_id, version) DO NOTHING;
 ALTER TABLE hsdg.audit_rule FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_version FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_band FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.authority_provision FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE hsdg.audit_reporting_card (
   id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
