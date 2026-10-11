@@ -86,6 +86,10 @@ describe('Notification delivery outbox (e2e)', () => {
       .send({ complianceRuleCode: code, referenceDate: '2026-07-01' }) // critically overdue
       .expect(201);
 
+    // Earlier suites in a full run leave deliveries pending; drain them first
+    // (a drain sends at most 100), so this test sees only its own batch.
+    while ((await outbox.drain(operator)).sent > 0);
+
     // The sweep emits notifications → each enqueues an email delivery.
     await request(app.getHttpServer())
       .post('/api/v1/notifications/scan')
@@ -93,7 +97,7 @@ describe('Notification delivery outbox (e2e)', () => {
       .expect(201);
 
     // Drain the outbox as the operator — pending rows are delivered and sent.
-    const result = await outbox.drain(operator);
+    const result = await outbox.drain(operator, { limit: 10_000 });
     expect(result.sent).toBeGreaterThanOrEqual(1);
 
     // A second drain finds nothing left from this batch to send (idempotent).
