@@ -425,17 +425,32 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
       ['ind_as_101_transition', 'pending'],
     ]);
 
-    // AF-01 (the Manager confirmation over all six sub-sections) is exercised in
-    // its own suite; here the baseline is placed Manager-confirmed and AF-02 runs
-    // for real. The legacy memo approval is what gates work generation.
+    // AF-01 and the memorandum are exercised in their own suites; here the
+    // baseline is placed Manager-confirmed with a submitted memo and AF-02 runs
+    // for real.
     const su = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
     await su.connect();
     try {
-      await su.query(
+      const { rows: bl } = await su.query<{ id: string }>(
         `INSERT INTO hsdg.audit_framework_baseline
-           (workflow_instance_id, engagement_id, version, status, manager_confirmed_at, record_version)
-         VALUES ($1, $2, '1.0', 'manager_confirmed', now(), 1)`,
+           (workflow_instance_id, engagement_id, version, status, manager_confirmed_at,
+            preview_reviewed_at, record_version)
+         VALUES ($1, $2, '1.0', 'manager_confirmed', now(), now(), 1)
+         RETURNING id`,
         [wf, eng],
+      );
+      // The submitted Audit Framework Memorandum AF-02 controls (its own suite drafts it).
+      const { rows: doc } = await su.query<{ id: string }>(
+        `INSERT INTO hsdg.documents (engagement_id, title)
+         VALUES ($1, 'Audit Framework Memorandum v1.0') RETURNING id`,
+        [eng],
+      );
+      await su.query(
+        `INSERT INTO hsdg.audit_framework_memo
+           (baseline_id, workflow_instance_id, engagement_id, baseline_version, document_id,
+            status, submitted_at)
+         VALUES ($1, $2, $3, '1.0', $4, 'submitted', now())`,
+        [bl[0]!.id, wf, eng, doc[0]!.id],
       );
       await su.query(
         `INSERT INTO hsdg.audit_framework_approvals (workflow_instance_id, engagement_id, version, snapshot)
@@ -448,7 +463,7 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
     await request(http)
       .post(`/api/v1/engagements/${eng}/statutory-audit/${wf}/framework-summary/approve`)
       .set(bearer(pa))
-      .send({ recordVersion: 1 })
+      .send({ decision: 'approve', recordVersion: 1 })
       .expect(201);
 
     const after = (await request(http).get(downstream).set(bearer(pa)).expect(200))
