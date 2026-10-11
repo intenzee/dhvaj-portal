@@ -80,6 +80,7 @@ import {
   assertPlanningCapability,
   closePlanningRevision,
   markRaisedByPartner,
+  readPlanningLock,
   resolvePlanningActor,
   signalAuthorship,
   syncPlanningAttention,
@@ -242,10 +243,12 @@ export class AuditPlanningIntelligenceService {
       // A lead's open keeps the intelligence current without a "Generate"
       // button: the first open derives it (and brings last year's matters
       // forward); a later open re-derives it when the Section 01/02 facts
-      // moved. Nothing generates while Section 03 is still locked (02.8 AF-02).
+      // moved. Nothing generates while Section 03 is still locked (02.8 AF-02),
+      // nor once 03.1 is frozen by the 03.12 approval — the approved signals are
+      // the baseline; the stale banner stays and a controlled revision refreshes.
       if (await isEngagementLead(client, engagementId)) {
         const gate = (await readFrameworkApprovalOn(client, workflowInstanceId)).planning;
-        if (gate.unlocked) {
+        if (gate.unlocked && !(await readPlanningLock(client, workflowInstanceId)).locked) {
           const first = !record.intelligenceGeneratedAt;
           const facts = await readPlanningIntelligenceFactsOn(client, workflowInstanceId);
           if (first || (await this.factsMoved(client, workflowInstanceId, facts))) {

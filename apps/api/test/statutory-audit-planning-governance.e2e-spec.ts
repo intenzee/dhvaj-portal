@@ -515,6 +515,29 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
       description: 'After approval',
     }).expect(409);
 
+    // Section 01/02 facts move after approval: opening the frozen 03.1 must not
+    // re-derive signals into the approved baseline (only the stale marker stays).
+    const fingerprint = async () =>
+      (
+        await su.query<{ facts_fingerprint: string | null; intelligence_generated_at: Date }>(
+          `SELECT facts_fingerprint, intelligence_generated_at
+             FROM hsdg.audit_planning_intelligence WHERE workflow_instance_id = $1`,
+          [shellId],
+        )
+      ).rows[0]!;
+    await su.query(
+      `UPDATE hsdg.audit_planning_intelligence SET facts_fingerprint = 'moved-after-approval'
+        WHERE workflow_instance_id = $1`,
+      [shellId],
+    );
+    const frozenBefore = await fingerprint();
+    const signalsBefore = (await signals()).map((x) => `${x.id}:${x.version}`);
+    await get(mx, `${base}/planning-intelligence`).expect(200);
+    await get(pa, `${base}/planning-intelligence`).expect(200);
+    expect(await fingerprint()).toEqual(frozenBefore);
+    expect((await signals()).map((x) => `${x.id}:${x.version}`)).toEqual(signalsBefore);
+    await post(mx, `${base}/planning-intelligence/generate`, {}).expect(409);
+
     await post(mx, `${base}/planning-governance/reopen`, { reason: '' }).expect(400);
     await post(sy, `${base}/planning-governance/reopen`, { reason: 'x' }).expect(403);
     const reopened = (
@@ -556,6 +579,9 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
         [access.openRevision!.id],
       ),
     ).rejects.toThrow(/immutable/);
+    // Under the open revision the next open re-derives from the moved facts.
+    await get(mx, `${base}/planning-intelligence`).expect(200);
+    expect((await fingerprint()).facts_fingerprint).not.toBe('moved-after-approval');
 
     // Completing 03.1 again closes the revision (ready for 03.12 re-approval).
     await completeIntelligence();
