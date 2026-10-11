@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import type {
   EngagementIntelligenceView,
   PlanningCapabilities,
+  PlanningConsiderationRuleRecord,
   PlanningGovernanceView,
   PlanningIntelligenceSummary,
   PlanningSignalRecord,
@@ -13,6 +14,7 @@ import type {
 import { PlanningIntelligencePanel } from '../planning-intelligence-panel';
 import { goToSourceLink, parseSourceLink, sourceLinkLabel } from '../planning-source-link';
 import { PlanningSignalLibrarySection } from '../../admin/planning-signal-library-section';
+import { PlanningConsiderationLibrarySection } from '../../admin/planning-consideration-library-section';
 import { openAuditPhase } from '../audit-file-nav';
 import { ApiError } from '@/lib/api';
 
@@ -61,6 +63,26 @@ describe('03.1 source links', () => {
     expect(openAuditPhase).toHaveBeenCalledWith('acceptance', 'question-acc_03');
     goToSourceLink('framework:02.1');
     expect(openAuditPhase).toHaveBeenLastCalledWith('framework');
+  });
+
+  it('falls back to the 02.8 summary when the source card rendered empty', () => {
+    jest.useFakeTimers();
+    try {
+      document.body.innerHTML = '<div id="framework-02-4"></div><div id="framework-02-8"></div>';
+      const card = document.getElementById('framework-02-4')!;
+      const summary = document.getElementById('framework-02-8')!;
+      card.scrollIntoView = jest.fn();
+      summary.scrollIntoView = jest.fn();
+      summary.getBoundingClientRect = () => ({ height: 120 }) as DOMRect;
+      goToSourceLink('framework:02.4');
+      jest.advanceTimersByTime(2500);
+      expect(card.scrollIntoView).not.toHaveBeenCalled();
+      expect(summary.scrollIntoView).toHaveBeenCalled();
+      expect(summary).toHaveClass('ring-2');
+    } finally {
+      document.body.innerHTML = '';
+      jest.useRealTimers();
+    }
   });
 });
 
@@ -133,6 +155,78 @@ describe('Planning Signal Library (admin, §21)', () => {
     );
     const body = apiFetch.mock.calls.find(([, i]) => i?.method === 'POST')![1].body;
     expect(body).not.toHaveProperty('ruleKey');
+  });
+});
+
+const considerationRule = (
+  over: Partial<PlanningConsiderationRuleRecord> = {},
+): PlanningConsiderationRuleRecord => ({
+  id: 'c1',
+  ruleCode: 'PCR-015',
+  version: 1,
+  considerationKey: 'tax_expertise',
+  kind: 'resource',
+  label: 'Tax expertise',
+  basis: 'A restructuring was reported for the current year.',
+  matchRuleKeys: [],
+  matchChangeCategories: ['restructuring'],
+  matchAttention: [],
+  effectiveFrom: '2000-01-01',
+  effectiveTo: null,
+  active: true,
+  methodologyVersion: 'DHVAJ-M1',
+  changeNote: 'Seed',
+  createdByName: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  ...over,
+});
+
+describe('Strategic Consideration Library (admin, §13.2–13.3, §21)', () => {
+  beforeEach(() => {
+    apiFetch.mockReset();
+    apiFetch.mockImplementation((url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') return Promise.resolve(considerationRule({ version: 2 }));
+      if (url === '/planning-signal-rules') return Promise.resolve([rule()]);
+      return Promise.resolve([considerationRule()]);
+    });
+  });
+
+  it('shows what a rule fires on and appends a version with a known signal rule key', async () => {
+    const user = userEvent.setup();
+    render(wrap(<PlanningConsiderationLibrarySection />));
+    const row = await screen.findByRole('button', { name: /PCR-015 Tax expertise/ });
+    await user.click(row);
+    expect(screen.getByText(/change: Restructuring/i)).toBeInTheDocument();
+
+    const keys = screen.getByLabelText(/Fires on signal rule keys/);
+    await user.type(keys, 'no_such_key');
+    await user.type(screen.getByLabelText(/Reason for this version/), 'Widened to CARO');
+    const add = screen.getByRole('button', { name: 'Add version' });
+    expect(add).toBeDisabled();
+    expect(await screen.findByText(/Unknown: no_such_key/)).toBeInTheDocument();
+
+    await user.clear(keys);
+    await user.type(keys, 'caro_applicable');
+    expect(await screen.findByText(/PSR-005 CARO 2020 applies/)).toBeInTheDocument();
+    expect(add).toBeEnabled();
+    await user.click(add);
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/planning-consideration-rules',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.objectContaining({
+            ruleCode: 'PCR-015',
+            kind: 'resource',
+            matchRuleKeys: ['caro_applicable'],
+            matchChangeCategories: ['restructuring'],
+            changeNote: 'Widened to CARO',
+          }),
+        }),
+      ),
+    );
+    const body = apiFetch.mock.calls.find(([, i]) => i?.method === 'POST')![1].body;
+    expect(body).not.toHaveProperty('considerationKey');
   });
 });
 
@@ -260,6 +354,8 @@ const governanceView = (caps: Partial<PlanningCapabilities> = {}): PlanningGover
 });
 
 describe('03.1 Planning Intelligence panel', () => {
+  const onChanged = jest.fn();
+  beforeEach(() => onChanged.mockReset());
   const mount = (v: EngagementIntelligenceView, caps: Partial<PlanningCapabilities> = {}) => {
     apiFetch.mockReset();
     apiFetch.mockImplementation((url: string, init?: { method?: string }) => {
@@ -277,11 +373,16 @@ describe('03.1 Planning Intelligence panel', () => {
           workflowInstanceId="w"
           team={[]}
           editable
-          onChanged={jest.fn()}
+          onChanged={onChanged}
         />,
       ),
     );
   };
+
+  it('refreshes the Phase 03 list once opening 03.1 has generated it', async () => {
+    mount(view());
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  });
 
   it('shows the facts with source links and records the review', async () => {
     const user = userEvent.setup();

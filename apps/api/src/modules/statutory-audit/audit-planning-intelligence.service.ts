@@ -29,6 +29,7 @@ import {
   type PlanningChangeRecord,
   type PlanningDestination,
   type PlanningIntelligenceRecord,
+  type DraftStrategySummaryInput,
   type PlanningIntelligenceStatus,
   type PlanningIntelligenceSummary,
   type PlanningSignalAssessment,
@@ -676,10 +677,25 @@ export class AuditPlanningIntelligenceService {
     ctx: RlsContext,
     engagementId: string,
     workflowInstanceId: string,
+    onScreen: DraftStrategySummaryInput = {},
   ): Promise<{ draft: string }> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      const saved = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      // Draft from what the Manager sees, saved or not; nothing is persisted here.
+      const record: PlanningIntelligenceRecord = {
+        ...saved,
+        ...(onScreen.orientation !== undefined && { orientation: onScreen.orientation }),
+        ...(onScreen.orientationNote !== undefined && {
+          orientationNote: onScreen.orientationNote.trim() || null,
+        }),
+        ...(onScreen.additionalScopeRequired !== undefined && {
+          additionalScopeRequired: onScreen.additionalScopeRequired,
+        }),
+        ...(onScreen.additionalScope !== undefined && {
+          additionalScope: onScreen.additionalScope.trim() || null,
+        }),
+      };
       const signals = await this.readSignals(client, workflowInstanceId);
       const focus = await this.readFocusAreas(client, workflowInstanceId);
       const extras = await this.readStrategyExtras(client, workflowInstanceId);

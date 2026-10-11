@@ -57,6 +57,8 @@ import { AuditPlanningController } from './audit-planning.controller';
 import { AuditPlanningIntelligenceService } from './audit-planning-intelligence.service';
 import { AuditPlanningIntelligenceController } from './audit-planning-intelligence.controller';
 import { PlanningSignalLibraryController } from './planning-signal-library.controller';
+import { PlanningConsiderationLibraryController } from './planning-consideration-library.controller';
+import { PlanningConsiderationLibraryService } from './planning-consideration-rules';
 import { PlanningSignalLibraryService } from './planning-signal-rules';
 import { AuditPlanningStrategyService } from './audit-planning-strategy.service';
 import { AuditPlanningStrategyController } from './audit-planning-strategy.controller';
@@ -131,6 +133,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditPlanningController,
     AuditPlanningIntelligenceController,
     PlanningSignalLibraryController,
+    PlanningConsiderationLibraryController,
     AuditPlanningStrategyController,
     AuditPlanningGovernanceController,
     AuditBusinessUnderstandingController,
@@ -177,6 +180,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditPlanningService,
     AuditPlanningIntelligenceService,
     PlanningSignalLibraryService,
+    PlanningConsiderationLibraryService,
     AuditPlanningStrategyService,
     AuditPlanningGovernanceService,
     AuditBusinessUnderstandingService,

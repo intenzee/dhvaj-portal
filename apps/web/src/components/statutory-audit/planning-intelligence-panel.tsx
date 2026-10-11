@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import {
+  AREA_CATEGORIES,
   AREA_CATEGORY_LABEL,
   ASSERTION_GROUP_LABEL,
   AUDIT_ORIENTATION_LABEL,
@@ -28,6 +29,7 @@ import {
   type AreaOfFocusRecord,
   type AssertionGroup,
   type AuditOrientation,
+  type DraftStrategySummaryInput,
   type EngagementIntelligenceView,
   type FocusPickLists,
   type PlanningAttention,
@@ -168,10 +170,12 @@ export function PlanningIntelligencePanel({
   const summaryRead = summary.isSuccess;
   const generationStamp = summary.data?.record.intelligenceGeneratedAt;
   const seenGeneratedAt = useRef(generationStamp);
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
   useEffect(() => {
     if (generationStamp === undefined) return;
-    const moved =
-      seenGeneratedAt.current !== undefined && seenGeneratedAt.current !== generationStamp;
+    const firstSeen = seenGeneratedAt.current === undefined;
+    const moved = !firstSeen && seenGeneratedAt.current !== generationStamp;
     seenGeneratedAt.current = generationStamp;
     if (moved) {
       void qc.invalidateQueries({
@@ -179,6 +183,9 @@ export function PlanningIntelligencePanel({
         predicate: (q) => q.queryKey[4] !== 'summary',
       });
     }
+    // Opening 03.1 may have just generated it (and moved the Phase 03 row to In
+    // progress) — the Planning list was read before that, so refresh it.
+    if (firstSeen || moved) onChangedRef.current();
   }, [generationStamp, qc, engagementId, workflowInstanceId]);
   const signals = useQuery({
     queryKey: [...qk, 'signals'],
@@ -1415,11 +1422,14 @@ function FocusForm({
         <PickList
           label="Potential FS areas"
           hint="From the audit-area library. Not a final audit-area decision (03.5)."
-          options={lists.fsAreas.map((a) => ({
-            value: a.name,
-            label: a.name,
-            group: (a.category && AREA_CATEGORY_LABEL[a.category as AreaCategory]) || 'Other',
-          }))}
+          options={[...lists.fsAreas]
+            // Statement order (Assets, Liabilities & Equity, …), uncategorised last.
+            .sort((a, b) => categoryRank(a.category) - categoryRank(b.category))
+            .map((a) => ({
+              value: a.name,
+              label: a.name,
+              group: (a.category && AREA_CATEGORY_LABEL[a.category as AreaCategory]) || 'Other',
+            }))}
           value={fsAreas}
           onChange={setFsAreas}
         />
@@ -1547,6 +1557,11 @@ function PickList({
   );
 }
 
+const categoryRank = (c: string | null): number => {
+  const i = AREA_CATEGORIES.indexOf(c as AreaCategory);
+  return i < 0 ? AREA_CATEGORIES.length : i;
+};
+
 // ── 03.1.5 Overall direction + 03.1.9 Strategy Summary ──────────────────────
 
 function StrategySection({
@@ -1601,7 +1616,13 @@ function StrategySection({
     mutationFn: () =>
       apiFetch<{ draft: string }>(`${base}/planning-intelligence/strategy-draft`, {
         method: 'POST',
-        body: {},
+        // Draft from the answers on screen, saved or not (nothing is saved).
+        body: {
+          orientation: orientation || undefined,
+          orientationNote,
+          additionalScopeRequired: scopeRequired ?? undefined,
+          additionalScope: scopeRequired === false ? '' : additionalScope,
+        } satisfies DraftStrategySummaryInput,
       }),
     onSuccess: (d) => {
       setStrategySummary(d.draft);

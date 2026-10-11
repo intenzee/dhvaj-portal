@@ -47,6 +47,8 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { deriveStrategicConsiderations } from './planning-considerations-generation';
+import { readConsiderationRulesOn } from './planning-consideration-rules';
+import { readFrameworkEngagementOn } from './framework-summary-inputs';
 import {
   assertShell,
   assertSignalsInShell,
@@ -71,6 +73,8 @@ interface ConsiderationRow {
   signal_seq: number | null;
   signal_attention: PlanningAttention | null;
   is_auto: boolean;
+  rule_code: string | null;
+  rule_version: number | null;
   assessment: PlanningConsiderationAssessment | null;
   rationale: string | null;
   version: number;
@@ -150,7 +154,8 @@ interface MatterRow {
 const CONSIDERATION_SELECT = `
   SELECT c.id, c.workflow_instance_id, c.engagement_id, c.kind, c.consideration_key,
          c.label, c.basis, c.signal_id, s.seq AS signal_seq, s.attention AS signal_attention,
-         c.is_auto, c.assessment, c.rationale, c.version, c.created_at, c.updated_at
+         c.is_auto, c.rule_code, c.rule_version, c.assessment, c.rationale, c.version,
+         c.created_at, c.updated_at
     FROM hsdg.audit_planning_consideration c
     LEFT JOIN hsdg.audit_planning_signal s ON s.id = c.signal_id`;
 
@@ -236,7 +241,11 @@ export class AuditPlanningStrategyService {
         ORDER BY s.seq ASC`,
       [workflowInstanceId],
     );
+    const on =
+      (await readFrameworkEngagementOn(client, workflowInstanceId))?.periodEnd ??
+      new Date().toISOString().slice(0, 10);
     const derived = deriveStrategicConsiderations(
+      await readConsiderationRulesOn(client),
       signals.map((s) => ({
         id: s.id,
         ruleKey: s.rule_key,
@@ -244,24 +253,47 @@ export class AuditPlanningStrategyService {
         attention: s.attention,
         status: s.status,
       })),
+      on,
     );
     for (const d of derived) {
       await client.query(
         `INSERT INTO hsdg.audit_planning_consideration
            (workflow_instance_id, engagement_id, kind, consideration_key, label, basis,
-            signal_id, is_auto)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+            signal_id, is_auto, rule_code, rule_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9)
          ON CONFLICT (workflow_instance_id, consideration_key)
            WHERE consideration_key IS NOT NULL
          DO UPDATE SET label = EXCLUDED.label,
                        basis = EXCLUDED.basis,
                        signal_id = EXCLUDED.signal_id,
-                       version = hsdg.audit_planning_consideration.version + 1
+                       rule_code = EXCLUDED.rule_code,
+                       rule_version = EXCLUDED.rule_version,
+                       -- A new library version with the same wording is not a new revision.
+                       version = hsdg.audit_planning_consideration.version +
+                         CASE WHEN (hsdg.audit_planning_consideration.label,
+                                    hsdg.audit_planning_consideration.basis,
+                                    hsdg.audit_planning_consideration.signal_id)
+                                   IS DISTINCT FROM (EXCLUDED.label, EXCLUDED.basis,
+                                                     EXCLUDED.signal_id)
+                              THEN 1 ELSE 0 END
          WHERE (hsdg.audit_planning_consideration.label,
                 hsdg.audit_planning_consideration.basis,
-                hsdg.audit_planning_consideration.signal_id)
-               IS DISTINCT FROM (EXCLUDED.label, EXCLUDED.basis, EXCLUDED.signal_id)`,
-        [workflowInstanceId, engagementId, d.kind, d.key, d.label, d.basis, d.signalId],
+                hsdg.audit_planning_consideration.signal_id,
+                hsdg.audit_planning_consideration.rule_code,
+                hsdg.audit_planning_consideration.rule_version)
+               IS DISTINCT FROM (EXCLUDED.label, EXCLUDED.basis, EXCLUDED.signal_id,
+                                 EXCLUDED.rule_code, EXCLUDED.rule_version)`,
+        [
+          workflowInstanceId,
+          engagementId,
+          d.kind,
+          d.key,
+          d.label,
+          d.basis,
+          d.signalId,
+          d.ruleCode,
+          d.ruleVersion,
+        ],
       );
     }
   }
@@ -1150,6 +1182,8 @@ function mapConsideration(c: ConsiderationRow): PlanningConsiderationRecord {
     signalCode: displayCode('PS', c.signal_seq),
     signalAttention: c.signal_attention,
     isAuto: c.is_auto,
+    ruleCode: c.rule_code,
+    ruleVersion: c.rule_version,
     assessment: c.assessment,
     rationale: c.rationale,
     version: c.version,

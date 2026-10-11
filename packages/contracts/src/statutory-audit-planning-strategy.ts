@@ -23,6 +23,54 @@ export const PLANNING_CONSIDERATION_KINDS: PlanningConsiderationKind[] = Object.
   PLANNING_CONSIDERATION_KIND,
 );
 
+export const PLANNING_CONSIDERATION_KIND_LABEL: Record<PlanningConsiderationKind, string> = {
+  timing: 'Strategic timing',
+  resource: 'Strategic resources',
+};
+
+/**
+ * One insert-only version of a Strategic Consideration Library rule (§13.2–13.3,
+ * §21). A rule fires on any active signal whose rule key, PI-01 change category
+ * or attention is listed; the version in force on the audit period end is used.
+ */
+export interface PlanningConsiderationRuleRecord {
+  id: string;
+  ruleCode: string;
+  version: number;
+  considerationKey: string;
+  kind: PlanningConsiderationKind;
+  label: string;
+  basis: string;
+  matchRuleKeys: string[];
+  matchChangeCategories: string[];
+  matchAttention: Array<'standard' | 'enhanced' | 'immediate_partner'>;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  active: boolean;
+  methodologyVersion: string;
+  changeNote: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+/** Add a new version of an existing consideration rule, or the first version of a new one. */
+export interface CreatePlanningConsiderationRuleVersionInput {
+  ruleCode: string;
+  /** Required for a new code; fixed thereafter. */
+  considerationKey?: string;
+  kind: PlanningConsiderationKind;
+  label: string;
+  basis: string;
+  matchRuleKeys?: string[];
+  matchChangeCategories?: string[];
+  matchAttention?: Array<'standard' | 'enhanced' | 'immediate_partner'>;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+  active?: boolean;
+  methodologyVersion?: string;
+  changeNote: string;
+}
+
 /** Manager assessment of a timing (§13.2) or resource (§13.3) consideration. */
 export const PLANNING_CONSIDERATION_ASSESSMENT = {
   relevant: 'relevant',
@@ -75,6 +123,9 @@ export interface PlanningConsiderationRecord {
   /** Effective attention of the prompting signal (drives the rationale gate). */
   signalAttention: 'standard' | 'enhanced' | 'immediate_partner' | null;
   isAuto: boolean;
+  /** Strategic Consideration Library rule a generated consideration came from (§22). */
+  ruleCode: string | null;
+  ruleVersion: number | null;
   assessment: PlanningConsiderationAssessment | null;
   rationale: string | null;
   version: number;
@@ -270,7 +321,8 @@ export const PLANNING_MATTER_ORIGIN = {
 } as const;
 export type PlanningMatterOrigin =
   (typeof PLANNING_MATTER_ORIGIN)[keyof typeof PLANNING_MATTER_ORIGIN];
-export const PLANNING_MATTER_ORIGINS: PlanningMatterOrigin[] = Object.values(PLANNING_MATTER_ORIGIN);
+export const PLANNING_MATTER_ORIGINS: PlanningMatterOrigin[] =
+  Object.values(PLANNING_MATTER_ORIGIN);
 
 export const PLANNING_MATTER_CATEGORY = {
   scope: 'scope',

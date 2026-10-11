@@ -11,6 +11,7 @@ import { OfficesSection } from '@/components/admin/offices-section';
 import { TemplatesSection } from '@/components/admin/templates-section';
 import { RulesLibrarySection } from '@/components/admin/rules-library-section';
 import { PlanningSignalLibrarySection } from '@/components/admin/planning-signal-library-section';
+import { PlanningConsiderationLibrarySection } from '@/components/admin/planning-consideration-library-section';
 
 type Tab = 'users' | 'offices' | 'templates' | 'rules' | 'signals';
 
@@ -33,9 +34,13 @@ export default function AdministrationPage(): JSX.Element {
     { id: 'users', label: 'Users & Roles' },
     { id: 'offices', label: 'Offices' },
     // Firm templates are configured with service.manage (MP / admin).
-    ...(can(principal, PERMISSION.serviceManage) ? [{ id: 'templates' as const, label: 'Templates' }] : []),
+    ...(can(principal, PERMISSION.serviceManage)
+      ? [{ id: 'templates' as const, label: 'Templates' }]
+      : []),
     // The Rules Library is methodology configuration (service.manage — MP / admin).
-    ...(can(principal, PERMISSION.serviceManage) ? [{ id: 'rules' as const, label: 'Rules Library' }] : []),
+    ...(can(principal, PERMISSION.serviceManage)
+      ? [{ id: 'rules' as const, label: 'Rules Library' }]
+      : []),
     // The 03.1 Planning Signal Library is methodology configuration too.
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'signals' as const, label: 'Planning Signal Library' }]
@@ -74,7 +79,12 @@ export default function AdministrationPage(): JSX.Element {
           ) : tab === 'rules' ? (
             <RulesLibrarySection />
           ) : tab === 'signals' ? (
-            <PlanningSignalLibrarySection />
+            <div className="space-y-8">
+              <PlanningSignalLibrarySection />
+              <div className="border-t border-line pt-6">
+                <PlanningConsiderationLibrarySection />
+              </div>
+            </div>
           ) : (
             <TemplatesSection />
           )}

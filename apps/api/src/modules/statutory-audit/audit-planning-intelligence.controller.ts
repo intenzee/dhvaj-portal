@@ -17,6 +17,7 @@ import {
   CreateAreaOfFocusDto,
   CreatePlanningChangeDto,
   CreatePlanningSignalDto,
+  DraftStrategySummaryDto,
   UpdateAreaOfFocusDto,
   UpdatePlanningChangeDto,
   UpdatePlanningIntelligenceDto,
@@ -140,11 +141,13 @@ export class AuditPlanningIntelligenceController {
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+    @Body() dto: DraftStrategySummaryDto,
   ): Promise<{ draft: string }> {
     return this.intelligence.draftStrategySummary(
       rlsContextFromPrincipal(principal),
       id,
       workflowInstanceId,
+      dto,
     );
   }
 

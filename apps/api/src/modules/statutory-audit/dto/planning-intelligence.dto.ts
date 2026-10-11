@@ -25,6 +25,7 @@ import {
   PLANNING_SIGNAL_STATUSES,
   type AreaOfFocusStatus,
   type AuditOrientation,
+  type DraftStrategySummaryInput,
   type PlanningAttention,
   type PlanningChangeCategory,
   type PlanningChangeFrImpact,
@@ -326,6 +327,31 @@ export class UpdatePlanningChangeDto {
   @IsInt()
   @Min(1)
   version!: number;
+}
+
+/** The on-screen (unsaved) AS-01 / AS-02 answers to draft the Strategy Summary from. */
+export class DraftStrategySummaryDto implements DraftStrategySummaryInput {
+  @ApiPropertyOptional({ enum: AUDIT_ORIENTATIONS })
+  @IsOptional()
+  @IsIn(AUDIT_ORIENTATIONS)
+  orientation?: AuditOrientation;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  orientationNote?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  additionalScopeRequired?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  additionalScope?: string;
 }
 
 /** Update the 03.1 record — AS-01 orientation, AS-02 scope, strategy summary, status. */
