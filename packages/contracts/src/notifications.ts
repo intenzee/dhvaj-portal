@@ -34,6 +34,12 @@ export const NOTIFICATION_TYPE = {
   frameworkReopened: 'framework_reopened',
   /** 02.8 §17 — downstream work was created, invalidated or needs reassessment (owners). */
   frameworkWorkImpacted: 'framework_work_impacted',
+  /** 03.1 §19 — a new Enhanced / Immediate signal entered the register (Engagement Manager). */
+  planningSignalAlert: 'planning_signal_alert',
+  /** 03.1 §10/§20 — an Immediate Partner Attention item was surfaced / challenged / answered. */
+  planningPartnerAttention: 'planning_partner_attention',
+  /** 03.1 §19 — approved planning strategy reopened for a controlled revision. */
+  planningStrategyReopened: 'planning_strategy_reopened',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
