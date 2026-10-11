@@ -67,6 +67,9 @@ describe('pbc automation — suggestions', () => {
   it('links requests to the 03.5 area they support, else the workstream', () => {
     const areas = facts().areas;
     expect(linkArea('Bank statements and reconciliations', areas)).toBe('fs_cash');
+    // Whatever order the 03.5 areas come in, bank evidence never lands on the cash-flow statement.
+    const withCfs = [{ key: 'fs_cfs', title: 'Cash Flow Statement' }, ...areas];
+    expect(linkArea('Bank statements and reconciliations', withCfs)).toBe('fs_cash');
     expect(linkArea('Fixed asset register with additions', areas, 'caro')).toBe('fs_ppe');
     expect(linkArea('Loan sanction letters', areas, 'caro')).toBe('caro');
     expect(linkArea('Loan sanction letters', areas, 'cfs')).toBeNull();
