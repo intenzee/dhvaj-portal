@@ -370,11 +370,11 @@ export async function reportingCrossRefsOn(
         : null;
   const clauses = await readCaroClauseStatus(client, workflowInstanceId);
 
-  const [icfr, icfrReporting, cfs, group] = await Promise.all([
+  const cfs = await readConsolidationResultOn(client, workflowInstanceId);
+  const [icfr, icfrReporting, group] = await Promise.all([
     readIcfrResultOn(client, workflowInstanceId),
     readIcfrReportingOn(client, workflowInstanceId),
-    readConsolidationResultOn(client, workflowInstanceId),
-    groupAuditStatusOn(client, workflowInstanceId),
+    groupAuditStatusOn(client, workflowInstanceId, cfs),
   ]);
 
   const branchesExist =
