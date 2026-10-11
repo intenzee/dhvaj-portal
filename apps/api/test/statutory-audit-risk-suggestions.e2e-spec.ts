@@ -3,6 +3,7 @@ import request from 'supertest';
 import type { AuditRisk } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Section 04 — the risk register seeds itself from what the file knows: the
@@ -75,6 +76,8 @@ describe('Statutory Audit — Section 04 suggested risks (e2e)', () => {
     const shells = await get(`/api/v1/engagements/${engId}/statutory-audit`);
     const shellId = shells.body[0].workflowInstanceId as string;
     const base = `/api/v1/engagements/${engId}/statutory-audit`;
+    // Section 03 opens once the framework is approved (02.8 AF-02).
+    await approveFrameworkForTest(shellId);
 
     // A planning signal the Manager raised to Enhanced attention.
     const sig = await post(pa, `${base}/${shellId}/planning-signals`, {

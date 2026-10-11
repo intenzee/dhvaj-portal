@@ -136,7 +136,8 @@ describe('Statutory Audit — Sections 01–04 packs (e2e)', () => {
     fw = (await get(pa, `${base}/framework`)).body[0] as StatutoryAuditFramework;
     expect(check(fw.pack.checks, 'areas_decided').ok).toBe(true);
     expect(fw.pack.draftMemo).toMatch(/^Audit framework — financial year 2024-25/);
-    await approveFrameworkForTest(shellId);
+    // The drafted memo is what AF-02 records with the legacy approval.
+    await approveFrameworkForTest(shellId, { memo: fw.pack.draftMemo ?? undefined });
     fw = (await get(pa, `${base}/framework`)).body[0] as StatutoryAuditFramework;
     expect(fw.approval?.memo).toMatch(/^Audit framework — financial year 2024-25/);
 

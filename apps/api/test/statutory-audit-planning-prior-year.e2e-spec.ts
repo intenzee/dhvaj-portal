@@ -3,6 +3,7 @@ import { Client } from 'pg';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Section 03 planning carried forward from last year's audit file (Guide §1):
@@ -50,6 +51,8 @@ describe('Statutory Audit — Section 03 from last year’s file (e2e)', () => {
     await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: stat }).expect(201);
     const shells = await get(`/api/v1/engagements/${engId}/statutory-audit`);
     const shellId = shells.body[0].workflowInstanceId as string;
+    // Section 03 opens once the framework is approved (02.8 AF-02).
+    await approveFrameworkForTest(shellId);
     return { engId, shellId, base: `/api/v1/engagements/${engId}/statutory-audit/${shellId}` };
   };
 
