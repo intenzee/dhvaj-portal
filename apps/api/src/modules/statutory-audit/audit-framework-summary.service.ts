@@ -48,12 +48,10 @@ import { isEngagementLead } from './master-facts';
 import { AuditScheduleIiiService } from './audit-schedule-iii.service';
 import { readFrameworkApprovalOn } from './framework-approval-read';
 import {
-  LEGACY_AREA_KEYS_BY_SECTION,
   OTHER_AREA_KEYS,
   SECTION_02_RULE_AREAS,
   auditPeriodLabel,
   buildDashboard,
-  bumpMinor,
   evaluateCompletion,
   sectionForRuleArea,
   summaryStatus,
@@ -65,11 +63,8 @@ import {
   type OtherAreaFacts,
   type ProfileSummaryFacts,
 } from './framework-summary-engine';
-import {
-  onFrameworkApprovedOn,
-  onFrameworkReopenedOn,
-  readImpactOn,
-} from './framework-summary-impact';
+import { lockFrameworkBaselineOn, reopenFrameworkBaselineOn } from './framework-reopen';
+import { onFrameworkApprovedOn, readImpactOn } from './framework-summary-impact';
 import { readFrameworkMattersOn } from './framework-summary-matters';
 import {
   controlFrameworkMemoOn,
@@ -1020,85 +1015,23 @@ export class AuditFrameworkSummaryService {
       }
       if (existing.record_version !== input.recordVersion) throw staleConflict();
 
-      await client.query(
-        `UPDATE hsdg.audit_framework_baseline
-            SET status = 'superseded', superseded_at = now(), record_version = record_version + 1
-          WHERE id = $1`,
-        [existing.id],
-      );
-      const nextVersion = bumpMinor(existing.version);
-      const affected = [...new Set(input.affectedSections)];
-      const { rows: inserted } = await client.query<{ id: string }>(
-        `INSERT INTO hsdg.audit_framework_baseline
-           (workflow_instance_id, engagement_id, version, status, reopen_reason,
-            reopen_affected_sections, reopen_identified_at, reopen_identified_by_employee_id,
-            reopen_evidence_note, reopen_evidence_document_id, reopen_reapproval_required,
-            reopened_by_employee_id, reopened_at, reopened_from_version)
-         VALUES ($1, $2, $3, 'draft', $4, $5::text[], $6::timestamptz, $7, $8, $9, $10, $11, now(), $12)
-         RETURNING id`,
-        [
-          workflowInstanceId,
-          engagementId,
-          nextVersion,
-          input.reason.trim(),
-          affected,
-          input.identifiedAt,
-          input.identifiedByEmployeeId ?? ctx.employeeId ?? null,
-          input.evidenceNote?.trim() || null,
-          input.evidenceDocumentId ?? null,
-          input.reapprovalRequired,
-          ctx.employeeId ?? null,
-          existing.version,
-        ],
-      );
-      // Reopen only the affected sections: the user edits the originating section,
-      // never a duplicate value here. Unaffected conclusions stay approved.
-      const subs = affected.filter((s): s is SubSectionKey => s !== '02.1' && s !== 'other_areas');
-      if (subs.length)
-        await client.query(
-          `UPDATE hsdg.audit_framework_subassessment
-              SET needs_reevaluation = true,
-                  state = CASE WHEN state = 'approved' THEN 'reassessment_required' ELSE state END
-            WHERE workflow_instance_id = $1 AND sub_section_key = ANY($2::text[])`,
-          [workflowInstanceId, subs],
-        );
-      if (affected.includes('02.1'))
-        await client.query(
-          `UPDATE hsdg.audit_entity_profile SET needs_reevaluation = true
-            WHERE workflow_instance_id = $1`,
-          [workflowInstanceId],
-        );
-      const legacyKeys = affected.flatMap((s) => [...LEGACY_AREA_KEYS_BY_SECTION[s]]);
-      await client.query(
-        `UPDATE hsdg.audit_framework_assessments SET state = 'reassessment_required'
-          WHERE workflow_instance_id = $1 AND state = 'approved' AND area_key = ANY($2::text[])`,
-        [workflowInstanceId, legacyKeys],
-      );
-      await client.query(
-        `UPDATE hsdg.audit_workflow_phases SET state = 'needs_attention'
-          WHERE workflow_instance_id = $1 AND phase_key = 'framework'`,
-        [workflowInstanceId],
-      );
-      // Track B: impact first pass, notifications, Section 07/08 surfacing.
-      await onFrameworkReopenedOn(client, ctx, {
-        workflowInstanceId,
+      const r = await reopenFrameworkBaselineOn(
+        client,
+        ctx,
         engagementId,
-        fromBaselineId: existing.id,
-        toBaselineId: inserted[0]!.id,
-        fromVersion: existing.version,
-        toVersion: nextVersion,
-        reason: input.reason.trim(),
-        affectedSections: affected,
-      });
+        workflowInstanceId,
+        existing,
+        input,
+      );
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.framework_reopened',
         objectType: 'audit_framework_baseline',
         objectId: workflowInstanceId,
         after: {
-          from: existing.version,
-          to: nextVersion,
+          from: r.fromVersion,
+          to: r.toVersion,
           reason: input.reason.trim(),
-          affectedSections: affected,
+          affectedSections: r.affectedSections,
           reapprovalRequired: input.reapprovalRequired,
         },
       });
@@ -1200,10 +1133,7 @@ export class AuditFrameworkSummaryService {
    * create two v1.0 / v1.1 rows or approve twice). Advisory, so RLS-agnostic.
    */
   private async lockBaseline(client: PoolClient, workflowInstanceId: string): Promise<void> {
-    await client.query(
-      `SELECT pg_advisory_xact_lock(hashtext('audit_framework_baseline:' || $1))`,
-      [workflowInstanceId],
-    );
+    await lockFrameworkBaselineOn(client, workflowInstanceId);
   }
 
   private async insertDraft(
