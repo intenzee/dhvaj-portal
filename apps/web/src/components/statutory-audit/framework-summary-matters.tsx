@@ -133,7 +133,7 @@ function MatterRow({
 
   return (
     <li
-      className={`rounded-md border p-2.5 text-sm ${m.blocking ? 'border-danger-200 bg-danger-50/40' : 'border-line bg-surface'}`}
+      className={`rounded-md border p-2.5 text-sm ${m.blocking ? 'border-danger-500/30 bg-danger-50/40' : 'border-line bg-surface'}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">

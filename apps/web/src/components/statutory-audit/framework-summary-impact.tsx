@@ -121,7 +121,7 @@ export function FrameworkSummaryImpact({
           {a.confirmationNote ? ` — ${a.confirmationNote}` : ''}
         </p>
       ) : (
-        <div className="mt-2 rounded-md border border-warning-200 bg-warning-50/50 p-2 text-xs">
+        <div className="mt-2 rounded-md border border-warning-500/30 bg-warning-50/50 p-2 text-xs">
           <p className="flex items-center gap-1.5 text-warning-700">
             <AlertTriangle className="h-3.5 w-3.5" /> Confirm the impact analysis before the Manager
             review (AF-01). A later change in the source sections re-opens it.
