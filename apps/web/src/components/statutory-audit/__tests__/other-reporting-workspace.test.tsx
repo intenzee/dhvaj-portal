@@ -381,7 +381,11 @@ describe('02.7 Other reporting workspace', () => {
     });
     const o = or(
       {
-        baseFacts: { isPublicCompany: true, publicCompanySource: 'Entity type: public limited' },
+        baseFacts: {
+          ...or().baseFacts,
+          isPublicCompany: true,
+          publicCompanySource: 'Entity type: public limited',
+        },
         capturedFacts: {
           ...EMPTY_OTHER_REPORTING_CAPTURED,
           managerialPersons: [
