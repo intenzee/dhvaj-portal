@@ -40,6 +40,10 @@ export const NOTIFICATION_TYPE = {
   planningPartnerAttention: 'planning_partner_attention',
   /** 03.1 §19 — approved planning strategy reopened for a controlled revision. */
   planningStrategyReopened: 'planning_strategy_reopened',
+  /** 03.2 §21 — a completed 03.2 needs reassessment after its analytics moved (Engagement Manager). */
+  planningUnderstandingReassessment: 'planning_understanding_reassessment',
+  /** 03.2 §23 — the Engagement Partner commented on / challenged 03.2, or the Manager answered. */
+  planningUnderstandingChallenge: 'planning_understanding_challenge',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);

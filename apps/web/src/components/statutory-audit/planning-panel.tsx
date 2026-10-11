@@ -353,7 +353,7 @@ function PlanningItemWork({
             engagementId={engagementId}
             workflowInstanceId={workflowInstanceId}
             team={team}
-            editable={editable}
+            editable={sectionOpen}
             onChanged={onChanged}
           />
         </div>

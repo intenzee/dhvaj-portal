@@ -10,7 +10,31 @@ import {
   FINANCIAL_UNIT_FACTOR,
   FINANCIAL_METRIC_DEFS,
   INDUSTRY_PROFILE_LABEL,
+  NOTIFICATION_TYPE,
+  PLANNING_ACTOR_ROLE_LABEL,
+  REGULATOR_LABEL,
+  SPECIAL_ENTITY_LABEL,
+  UNDERSTANDING_CHALLENGE_KINDS,
+  UNDERSTANDING_CHALLENGE_TARGETS,
+  planningVersionLabel,
+  type CreateUnderstandingChallengeInput,
+  type DecideIndustryConsiderationInput,
+  type IndustryConsiderationDecision,
+  type Regulator,
+  type ReopenUnderstandingInput,
+  type RespondUnderstandingChallengeInput,
+  type CloseUnderstandingChallengeInput,
+  type SpecialEntityType,
+  type UnderstandingAccess,
+  type UnderstandingChallengeRecord,
+  type UnderstandingChallengeTarget,
+  type UnderstandingFocusLink,
+  type UnderstandingRevisionChange,
+  type UnderstandingRevisionDetail,
+  type UnderstandingRevisionRecord,
+  type UnderstandingVersionInfo,
   INVESTIGATION_ASSESSMENT,
+  EXPECTATION_CONCLUSION_LABEL,
   INVESTIGATION_ASSESSMENT_LABEL,
   INVESTIGATION_SIGNAL_DECISION,
   PLANNING_ATTENTION,
@@ -60,7 +84,12 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditPlanningStrategyService } from './audit-planning-strategy.service';
 import {
-  isEngagementLead,
+  assertPlanningCapability,
+  notifyPlanning,
+  readPlanningLock,
+  resolvePlanningActor,
+} from './planning-governance';
+import {
   planUnderstandingPrefill,
   readEngagementMasterFacts,
   readPriorAuditFile,
@@ -100,12 +129,86 @@ const SECTION_CHANGE_CONTEXT: Partial<
 
 interface RecordRow {
   id: string;
+  engagement_id: string;
   status: UnderstandingStatus;
   industry_profile: IndustryProfile;
   ba01: Ba01Answer | null;
   conclusion_summary: string | null;
   master_prefilled_at: Date | null;
   version: number;
+  version_no: number;
+  completed_at: Date | null;
+  completed_by_employee_id: string | null;
+  reassessment_reason: string | null;
+  reassessment_flagged_at: Date | null;
+  industry_consideration_decisions: Record<string, IndustryConsiderationDecision> | null;
+}
+
+/** 03.2 as it stood when completed — frozen into a revision (§20). */
+export interface UnderstandingSnapshot {
+  record: { ba01: Ba01Answer | null; conclusionSummary: string | null; industryProfile: string };
+  sections: Array<{
+    key: UnderstandingSectionKey;
+    anythingChanged: 'yes' | 'no' | null;
+    answers: Record<string, UnderstandingAnswer>;
+    reviewed: boolean;
+  }>;
+  values: Array<{ metricKey: string; label: string; period: FinancialPeriod; amount: number }>;
+  cards: Array<{
+    id: string;
+    code: string;
+    observation: string;
+    assessment: InvestigationAssessment | null;
+    signalCode: string | null;
+    status: InvestigationStatus;
+  }>;
+  expectations: Array<{ id: string; label: string; conclusion: ExpectationConclusion | null }>;
+}
+
+interface RevisionRow {
+  id: string;
+  from_version_no: number;
+  to_version_no: number;
+  reason: string;
+  status: 'open' | 'completed';
+  opened_by_name: string | null;
+  opened_at: Date;
+  completed_by_name: string | null;
+  completed_at: Date | null;
+}
+
+interface ChallengeRow {
+  id: string;
+  seq: number;
+  target_type: UnderstandingChallengeTarget;
+  target_ref: string | null;
+  kind: 'comment' | 'challenge';
+  body: string;
+  raised_by_name: string | null;
+  raised_at: Date;
+  response: string | null;
+  responded_by_name: string | null;
+  responded_at: Date | null;
+  status: 'open' | 'responded' | 'closed';
+  version: number;
+}
+
+const SCOPE = '03.2';
+
+/** The §25 references every 03.2 shows, plus industry guidance by profile. */
+const GENERIC_AUTHORITY_ANCHORS = ['view_sa_315', 'view_sa_520', 'view_sa_300', 'view_ig_rba'];
+const INDUSTRY_AUTHORITY_ANCHORS: Partial<Record<string, string[]>> = {
+  construction: ['industry_construction', 'industry_construction_as'],
+  nbfc: ['industry_nbfc'],
+};
+
+/** §20 — a completed 03.2 is frozen until it is reopened for a controlled revision. */
+function assertWritable(r: Pick<RecordRow, 'status' | 'version_no'>): void {
+  if (r.status === 'complete') {
+    throw new ConflictException(
+      `03.2 ${planningVersionLabel(r.version_no)} is complete — reopen it for a controlled revision to change it.`,
+    );
+  }
 }
 
 interface SectionRow {
@@ -141,6 +244,10 @@ interface ValueRow {
   entered_by_name: string | null;
   entered_at: Date;
   version: number;
+  rolled_forward_amount: string | null;
+  rolled_forward_approved: boolean;
+  override_reason: string | null;
+  rolled_forward_fy: string | null;
 }
 
 interface ExceptionRow {
@@ -210,6 +317,19 @@ const EXPECTATION_SELECT = `
 
 const num = (v: string | null): number | null => (v === null ? null : Number(v));
 
+const metricLabel = (key: string): string =>
+  FINANCIAL_METRIC_DEFS.find((d) => d.key === key)?.label ?? key;
+
+/** Investigation Card fields only the Engagement Manager sets (§23). */
+const MANAGER_CARD_FIELDS = [
+  'assessment',
+  'signalDecision',
+  'linkSignalId',
+  'noSignalRationale',
+  'ownerEmployeeId',
+  'dueDate',
+] as const;
+
 /**
  * 03.2 Business Understanding & Preliminary Analytics (DHVAJ 03.2).
  *
@@ -236,12 +356,18 @@ export class AuditBusinessUnderstandingService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
-      // Capture-once: the first open seeds 03.2 from the masters (one-shot, so a
-      // figure the team later removes is never silently put back).
-      // Writes are lead-only under RLS, so a read-only member simply sees the
-      // file as it is until a lead opens it.
-      if (!record.master_prefilled_at && (await isEngagementLead(client, engagementId))) {
-        await this.applyMasterPrefill(client, ctx, engagementId, workflowInstanceId);
+      // Capture-once: the first open by anyone who records facts (§23 — Article
+      // and up) seeds 03.2 from the masters (one-shot, so a figure the team
+      // later removes is never silently put back). A completed or frozen 03.2
+      // is never touched; a viewer without the capability sees it as it is.
+      if (!record.master_prefilled_at && record.status !== 'complete') {
+        const actor = await resolvePlanningActor(client, engagementId);
+        if (
+          actor.capabilities.addFacts &&
+          !(await readPlanningLock(client, workflowInstanceId)).locked
+        ) {
+          await this.applyMasterPrefill(client, ctx, engagementId, workflowInstanceId);
+        }
       }
       return this.buildSummary(client, workflowInstanceId);
     });
@@ -259,7 +385,7 @@ export class AuditBusinessUnderstandingService {
   ): Promise<BusinessUnderstandingSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      assertWritable(await this.ensureRecord(client, engagementId, workflowInstanceId));
       await this.applyMasterPrefill(client, ctx, engagementId, workflowInstanceId);
       return this.buildSummary(client, workflowInstanceId);
     });
@@ -275,6 +401,7 @@ export class AuditBusinessUnderstandingService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       const current = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      assertWritable(current);
       const nextProfile = input.industryProfile ?? current.industry_profile;
       const nextBa01 = input.ba01 !== undefined ? input.ba01 : current.ba01;
       const nextSummary =
@@ -289,7 +416,7 @@ export class AuditBusinessUnderstandingService {
             WHERE workflow_instance_id = $1`,
           [workflowInstanceId, nextProfile],
         );
-        await this.syncExceptions(client, engagementId, workflowInstanceId);
+        await this.syncExceptions(client, ctx, engagementId, workflowInstanceId);
       }
       if (nextBa01 === 'yes_complete') {
         const checks = await this.computeCompletion(client, workflowInstanceId, {
@@ -301,17 +428,45 @@ export class AuditBusinessUnderstandingService {
           throw new ConflictException(`03.2 cannot be completed yet: ${problems.join(' ')}`);
         }
       }
-      const status: UnderstandingStatus = nextBa01 === 'yes_complete' ? 'complete' : 'in_progress';
+      const completing = nextBa01 === 'yes_complete';
+      // A system-flagged reassessment stays flagged until 03.2 is completed again.
+      const status: UnderstandingStatus = completing
+        ? 'complete'
+        : current.status === 'reassessment_required'
+          ? 'reassessment_required'
+          : 'in_progress';
       const { rows } = await client.query<RecordRow>(
         `UPDATE hsdg.audit_business_understanding
             SET industry_profile = $3, ba01 = $4, conclusion_summary = $5, status = $6,
+                completed_at = CASE WHEN $7 THEN now() END,
+                completed_by_employee_id = CASE WHEN $7 THEN $8::uuid END,
+                reassessment_reason = CASE WHEN $7 THEN NULL ELSE reassessment_reason END,
+                reassessment_flagged_at = CASE WHEN $7 THEN NULL ELSE reassessment_flagged_at END,
                 version = version + 1
           WHERE workflow_instance_id = $1 AND version = $2
         RETURNING *`,
-        [workflowInstanceId, input.version, nextProfile, nextBa01, nextSummary, status],
+        [
+          workflowInstanceId,
+          input.version,
+          nextProfile,
+          nextBa01,
+          nextSummary,
+          status,
+          completing,
+          ctx.employeeId ?? null,
+        ],
       );
       if (!rows[0]) {
         throw new ConflictException('03.2 changed since you loaded it; refresh and retry.');
+      }
+      if (completing) {
+        // Completing a revision closes it: v1.n is now the concluded version.
+        await client.query(
+          `UPDATE hsdg.audit_understanding_revision
+              SET status = 'completed', completed_by_employee_id = $2, completed_at = now()
+            WHERE workflow_instance_id = $1 AND status = 'open'`,
+          [workflowInstanceId, ctx.employeeId ?? null],
+        );
       }
       await this.rollUp(client, ctx, workflowInstanceId, status);
       await this.audit.recordWith(client, ctx, {
@@ -355,7 +510,27 @@ export class AuditBusinessUnderstandingService {
 
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      assertWritable(await this.ensureRecord(client, engagementId, workflowInstanceId));
+      // A content change by anyone clears "reviewed" — the Manager reviews what
+      // is there now. Marking (or un-marking) reviewed is the Manager's (§23).
+      const { rows: cur } = await client.query<{ changed: boolean; reviewed: boolean }>(
+        `SELECT ($3::jsonb IS NOT NULL AND $3::jsonb IS DISTINCT FROM answers)
+                OR ($4::boolean AND $5::text IS DISTINCT FROM anything_changed) AS changed,
+                reviewed
+           FROM hsdg.audit_understanding_section
+          WHERE workflow_instance_id = $1 AND section_key = $2`,
+        [
+          workflowInstanceId,
+          sectionKey,
+          answers ? JSON.stringify(answers) : null,
+          input.anythingChanged !== undefined,
+          input.anythingChanged ?? null,
+        ],
+      );
+      if (input.reviewed !== undefined && input.reviewed !== (cur[0]?.reviewed ?? false)) {
+        assertPlanningCapability(await resolvePlanningActor(client, engagementId), 'assess', SCOPE);
+      }
+      const reviewed = input.reviewed ?? (cur[0]?.changed ? false : undefined);
       const result =
         input.version === 0
           ? await client.query(
@@ -371,7 +546,7 @@ export class AuditBusinessUnderstandingService {
                 sectionKey,
                 input.anythingChanged ?? null,
                 JSON.stringify(answers ?? {}),
-                input.reviewed ?? false,
+                reviewed ?? false,
                 ctx.employeeId ?? null,
               ],
             )
@@ -394,7 +569,7 @@ export class AuditBusinessUnderstandingService {
                 input.anythingChanged !== undefined,
                 input.anythingChanged ?? null,
                 answers ? JSON.stringify(answers) : null,
-                input.reviewed ?? null,
+                reviewed ?? null,
                 ctx.employeeId ?? null,
               ],
             );
@@ -406,7 +581,7 @@ export class AuditBusinessUnderstandingService {
         action: 'statutory_audit.understanding_section_saved',
         objectType: 'service_workflow_instance',
         objectId: workflowInstanceId,
-        after: { section: sectionKey, reviewed: input.reviewed ?? null },
+        after: { section: sectionKey, reviewed: reviewed ?? null },
       });
       const sections = await this.readSections(client, workflowInstanceId);
       return sections.find((s) => s.key === sectionKey)!;
@@ -423,7 +598,7 @@ export class AuditBusinessUnderstandingService {
   ): Promise<BusinessUnderstandingSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      assertWritable(await this.ensureRecord(client, engagementId, workflowInstanceId));
       // [column, provided?, value] — omitted fields stay unchanged.
       const fields: Array<[string, boolean, unknown]> = [
         ['period_end', input.periodEnd !== undefined, input.periodEnd ?? null],
@@ -477,7 +652,7 @@ export class AuditBusinessUnderstandingService {
           'The dataset header changed since you loaded it; refresh and retry.',
         );
       }
-      await this.syncExceptions(client, engagementId, workflowInstanceId);
+      await this.syncExceptions(client, ctx, engagementId, workflowInstanceId);
       await this.markInProgress(client, ctx, workflowInstanceId);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.financial_dataset_saved',
@@ -506,6 +681,7 @@ export class AuditBusinessUnderstandingService {
     const key = `${CUSTOM_METRIC_PREFIX}${slug}`;
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
+      assertWritable(await this.ensureRecord(client, engagementId, workflowInstanceId));
       const ins = await client.query(
         `INSERT INTO hsdg.audit_financial_custom_metric (workflow_instance_id, engagement_id, metric_key, label)
          VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
@@ -535,7 +711,7 @@ export class AuditBusinessUnderstandingService {
   ): Promise<BusinessUnderstandingSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      assertWritable(await this.ensureRecord(client, engagementId, workflowInstanceId));
       const header = await this.readDataset(client, workflowInstanceId);
       if (!header.periodEnd || !header.currency || !header.units) {
         throw new BadRequestException(
@@ -545,9 +721,50 @@ export class AuditBusinessUnderstandingService {
       const custom = new Set(
         (await this.readCustomMetrics(client, workflowInstanceId)).map((c) => c.key),
       );
+      // §21 — a prior-year figure rolled forward from last year's APPROVED file
+      // is never silently overwritten: changing or clearing it needs a reason.
+      const { rows: rolled } = await client.query<{
+        metric_key: string;
+        period: FinancialPeriod;
+        rolled_forward_amount: string;
+      }>(
+        `SELECT metric_key, period, rolled_forward_amount FROM hsdg.audit_financial_value
+          WHERE workflow_instance_id = $1 AND rolled_forward_approved
+            AND rolled_forward_amount IS NOT NULL`,
+        [workflowInstanceId],
+      );
+      const rolledAmount = new Map(
+        rolled.map((r) => [`${r.metric_key}:${r.period}`, Number(r.rolled_forward_amount)]),
+      );
+      const overrides: Array<{
+        metric: string;
+        period: FinancialPeriod;
+        rolledForward: number;
+        amount: number | null;
+        reason: string;
+      }> = [];
       for (const v of input.values) {
         if (!CANONICAL_KEYS.has(v.metricKey) && !custom.has(v.metricKey)) {
           throw new BadRequestException(`Unknown metric "${v.metricKey}".`);
+        }
+        const rolledForward = rolledAmount.get(`${v.metricKey}:${v.period}`);
+        const overrideReason = clean(v.overrideReason);
+        const departs =
+          rolledForward !== undefined &&
+          (v.amount === null || Math.abs(Number(v.amount) - rolledForward) >= 0.005);
+        if (departs && !overrideReason) {
+          throw new BadRequestException(
+            `${metricLabel(v.metricKey)} (${v.period.toUpperCase()}) was rolled forward from last year's approved audit file — give a reason to ${v.amount === null ? 'remove' : 'change'} it.`,
+          );
+        }
+        if (departs) {
+          overrides.push({
+            metric: v.metricKey,
+            period: v.period,
+            rolledForward: rolledForward!,
+            amount: v.amount,
+            reason: overrideReason!,
+          });
         }
         let result;
         if (v.amount === null) {
@@ -585,7 +802,8 @@ export class AuditBusinessUnderstandingService {
               : await client.query(
                   `UPDATE hsdg.audit_financial_value
                       SET amount = $5, source_type = $6, source_ref = $7, note = $8,
-                          entered_by_employee_id = $9, entered_at = now(), version = version + 1
+                          entered_by_employee_id = $9, entered_at = now(),
+                          override_reason = $10, version = version + 1
                     WHERE workflow_instance_id = $1 AND metric_key = $2 AND period = $3
                       AND version = $4`,
                   [
@@ -598,6 +816,7 @@ export class AuditBusinessUnderstandingService {
                     clean(v.sourceRef),
                     clean(v.note),
                     ctx.employeeId ?? null,
+                    departs ? overrideReason : null,
                   ],
                 );
         }
@@ -607,13 +826,13 @@ export class AuditBusinessUnderstandingService {
           );
         }
       }
-      await this.syncExceptions(client, engagementId, workflowInstanceId);
+      await this.syncExceptions(client, ctx, engagementId, workflowInstanceId);
       await this.markInProgress(client, ctx, workflowInstanceId);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.financial_values_saved',
         objectType: 'service_workflow_instance',
         objectId: workflowInstanceId,
-        after: { count: input.values.length },
+        after: { count: input.values.length, ...(overrides.length ? { overrides } : {}) },
       });
       return this.buildSummary(client, workflowInstanceId);
     });
@@ -651,6 +870,24 @@ export class AuditBusinessUnderstandingService {
       const card = rows[0];
       if (!card) throw new NotFoundException('Investigation card not found.');
       const wi = card.workflow_instance_id;
+      assertWritable(await this.ensureRecord(client, engagementId, wi));
+      // §23 — the team records the explanation, evidence and affected areas;
+      // the auditor's assessment, the signal decision and owner/due are the Manager's.
+      const current: Record<(typeof MANAGER_CARD_FIELDS)[number], unknown> = {
+        assessment: card.assessment,
+        signalDecision: card.signal_decision,
+        linkSignalId: card.signal_id,
+        noSignalRationale: card.no_signal_rationale,
+        ownerEmployeeId: card.owner_employee_id,
+        dueDate: card.due_date,
+      };
+      const touched = MANAGER_CARD_FIELDS.filter((f) => {
+        const next = f === 'noSignalRationale' ? clean(input[f]) : input[f];
+        return input[f] !== undefined && (next ?? null) !== (current[f] ?? null);
+      });
+      if (touched.length) {
+        assertPlanningCapability(await resolvePlanningActor(client, engagementId), 'assess', SCOPE);
+      }
 
       const pick = <T>(v: T | undefined, cur: T): T => (v !== undefined ? v : cur);
       const assessment = pick(input.assessment, card.assessment);
@@ -754,11 +991,7 @@ export class AuditBusinessUnderstandingService {
         before: { assessment: card.assessment, decision: card.signal_decision },
         after: { assessment, decision, signalId, status },
       });
-      const { rows: out } = await client.query<ExceptionRow>(
-        `${EXCEPTION_SELECT} WHERE x.id = $1`,
-        [cardId],
-      );
-      return mapException(out[0]!);
+      return (await this.readExceptions(client, wi)).find((c) => c.id === cardId)!;
     });
   }
 
@@ -797,6 +1030,7 @@ export class AuditBusinessUnderstandingService {
     }
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
+      assertWritable(await this.ensureRecord(client, engagementId, workflowInstanceId));
       const custom = new Set(
         (await this.readCustomMetrics(client, workflowInstanceId)).map((c) => c.key),
       );
@@ -854,6 +1088,7 @@ export class AuditBusinessUnderstandingService {
       const current = rows[0];
       if (!current) throw new NotFoundException('Expectation not found.');
       const wi = current.workflow_instance_id;
+      assertWritable(await this.ensureRecord(client, engagementId, wi));
       let signalId = current.signal_id;
       if (input.conclusion === 'planning_signal' && !signalId) {
         const exp = (await this.readExpectations(client, wi)).find((e) => e.id === expectationId)!;
@@ -898,6 +1133,278 @@ export class AuditBusinessUnderstandingService {
     });
   }
 
+  // ── §20 controlled revision ────────────────────────────────────────────────
+
+  /**
+   * Reopen a completed 03.2 for a controlled revision (v1.0 → v1.1). What was
+   * concluded is frozen into the revision baseline first; BA-01 is cleared so
+   * the Manager re-confirms the revised understanding.
+   */
+  async reopen(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    input: ReopenUnderstandingInput,
+  ): Promise<BusinessUnderstandingSummary> {
+    const reason = clean(input.reason);
+    if (!reason) throw new BadRequestException('Give the reason for reopening 03.2.');
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const rec = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      if (rec.status !== 'complete') {
+        throw new ConflictException('03.2 is not complete — there is nothing to reopen.');
+      }
+      if (rec.version !== input.version) {
+        throw new ConflictException('03.2 changed since you loaded it; refresh and retry.');
+      }
+      await this.openRevision(
+        client,
+        engagementId,
+        workflowInstanceId,
+        rec,
+        reason,
+        ctx.employeeId ?? null,
+      );
+      await client.query(
+        `UPDATE hsdg.audit_business_understanding
+            SET status = 'in_progress', ba01 = NULL, version_no = version_no + 1,
+                completed_at = NULL, completed_by_employee_id = NULL, version = version + 1
+          WHERE workflow_instance_id = $1`,
+        [workflowInstanceId],
+      );
+      await this.rollUp(client, ctx, workflowInstanceId, 'in_progress');
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.business_understanding_reopened',
+        objectType: 'audit_business_understanding',
+        objectId: rec.id,
+        before: { version: planningVersionLabel(rec.version_no) },
+        after: { version: planningVersionLabel(rec.version_no + 1), reason },
+      });
+      return this.buildSummary(client, workflowInstanceId);
+    });
+  }
+
+  /** One revision with what changed between its frozen baseline and what followed. */
+  async revisionDetail(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    revisionId: string,
+  ): Promise<UnderstandingRevisionDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const revisions = await this.readRevisions(client, workflowInstanceId);
+      const rev = revisions.find((r) => r.id === revisionId);
+      if (!rev) throw new NotFoundException('Revision not found.');
+      const { rows } = await client.query<{
+        to_version_no: number;
+        baseline: UnderstandingSnapshot;
+      }>(
+        `SELECT to_version_no, baseline FROM hsdg.audit_understanding_revision
+          WHERE workflow_instance_id = $1 AND to_version_no IN ($2, $2 + 1)`,
+        [workflowInstanceId, rev.toVersionNo],
+      );
+      const before = rows.find((r) => r.to_version_no === rev.toVersionNo)!.baseline;
+      // A completed revision ends where the next one's baseline begins; the
+      // latest runs to 03.2 as it is now.
+      const after =
+        rows.find((r) => r.to_version_no === rev.toVersionNo + 1)?.baseline ??
+        (await this.snapshot(client, workflowInstanceId));
+      return { ...rev, changes: diffUnderstandingSnapshots(before, after) };
+    });
+  }
+
+  // ── §23 Engagement Partner comments / challenges ───────────────────────────
+
+  async createChallenge(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    input: CreateUnderstandingChallengeInput,
+  ): Promise<BusinessUnderstandingSummary> {
+    const body = clean(input.body);
+    if (!body) throw new BadRequestException('Write the comment or challenge.');
+    if (!UNDERSTANDING_CHALLENGE_TARGETS.includes(input.targetType)) {
+      throw new BadRequestException('Unknown 03.2 area.');
+    }
+    if (!UNDERSTANDING_CHALLENGE_KINDS.includes(input.kind)) {
+      throw new BadRequestException('Choose comment or challenge.');
+    }
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      const target = await this.resolveChallengeTarget(
+        client,
+        workflowInstanceId,
+        input.targetType,
+        clean(input.targetRef),
+      );
+      const { rows } = await client.query<{ id: string; seq: number }>(
+        `INSERT INTO hsdg.audit_understanding_challenge
+           (workflow_instance_id, engagement_id, seq, target_type, target_ref, kind, body,
+            raised_by_employee_id)
+         SELECT $1, $2, COALESCE(MAX(seq), 0) + 1, $3, $4, $5, $6, hsdg.ctx_employee_id()
+           FROM hsdg.audit_understanding_challenge WHERE workflow_instance_id = $1
+         RETURNING id, seq`,
+        [workflowInstanceId, engagementId, input.targetType, target.ref, input.kind, body],
+      );
+      const created = rows[0]!;
+      const actor = await resolvePlanningActor(client, engagementId);
+      await notifyPlanning(client, [actor.managerId], {
+        type: NOTIFICATION_TYPE.planningUnderstandingChallenge,
+        title: `Engagement Partner ${input.kind} on 03.2 — ${target.label}`,
+        body,
+        engagementId,
+        objectType: 'audit_understanding_challenge',
+        objectId: created.id,
+        dedup: `u032-challenge:${created.id}`,
+        except: ctx.employeeId ?? null,
+      });
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.understanding_challenge_raised',
+        objectType: 'audit_understanding_challenge',
+        objectId: created.id,
+        after: { code: displayCode('PC', created.seq), target: target.label, kind: input.kind },
+      });
+      return this.buildSummary(client, workflowInstanceId);
+    });
+  }
+
+  /** The Engagement Manager answers (a completed 03.2 stays frozen — reopen to act on it). */
+  async respondChallenge(
+    ctx: RlsContext,
+    engagementId: string,
+    challengeId: string,
+    input: RespondUnderstandingChallengeInput,
+  ): Promise<BusinessUnderstandingSummary> {
+    const response = clean(input.response);
+    if (!response) throw new BadRequestException('Write the response.');
+    return this.db.withRlsContext(ctx, async (client) => {
+      const c = await this.loadChallenge(client, engagementId, challengeId);
+      if (c.status === 'closed') throw new ConflictException('This challenge is already closed.');
+      const res = await client.query(
+        `UPDATE hsdg.audit_understanding_challenge
+            SET response = $3, responded_by_employee_id = hsdg.ctx_employee_id(),
+                responded_at = now(), status = 'responded', version = version + 1
+          WHERE id = $1 AND version = $2`,
+        [challengeId, input.version, response],
+      );
+      if ((res.rowCount ?? 0) === 0) {
+        throw new ConflictException(
+          'This challenge changed since you loaded it; refresh and retry.',
+        );
+      }
+      const actor = await resolvePlanningActor(client, engagementId);
+      await notifyPlanning(client, [actor.partnerId], {
+        type: NOTIFICATION_TYPE.planningUnderstandingChallenge,
+        title: `Manager responded to ${displayCode('PC', c.seq)} on 03.2`,
+        body: response,
+        engagementId,
+        objectType: 'audit_understanding_challenge',
+        objectId: challengeId,
+        dedup: `u032-challenge-response:${challengeId}:${c.version}`,
+        except: ctx.employeeId ?? null,
+      });
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.understanding_challenge_responded',
+        objectType: 'audit_understanding_challenge',
+        objectId: challengeId,
+        after: { response },
+      });
+      return this.buildSummary(client, c.workflow_instance_id);
+    });
+  }
+
+  /** The Engagement Partner closes a comment, or a challenge once answered. */
+  async closeChallenge(
+    ctx: RlsContext,
+    engagementId: string,
+    challengeId: string,
+    input: CloseUnderstandingChallengeInput,
+  ): Promise<BusinessUnderstandingSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const c = await this.loadChallenge(client, engagementId, challengeId);
+      if (c.status === 'closed') throw new ConflictException('This challenge is already closed.');
+      if (c.kind === 'challenge' && !c.response) {
+        throw new ConflictException(
+          'The Engagement Manager has not responded to this challenge yet.',
+        );
+      }
+      const res = await client.query(
+        `UPDATE hsdg.audit_understanding_challenge
+            SET status = 'closed', closed_by_employee_id = hsdg.ctx_employee_id(),
+                closed_at = now(), version = version + 1
+          WHERE id = $1 AND version = $2`,
+        [challengeId, input.version],
+      );
+      if ((res.rowCount ?? 0) === 0) {
+        throw new ConflictException(
+          'This challenge changed since you loaded it; refresh and retry.',
+        );
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.understanding_challenge_closed',
+        objectType: 'audit_understanding_challenge',
+        objectId: challengeId,
+      });
+      return this.buildSummary(client, c.workflow_instance_id);
+    });
+  }
+
+  // ── §7 suggested industry considerations ──────────────────────────────────
+
+  /** The Manager confirms whether each suggested consideration is relevant here. */
+  async decideConsideration(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    input: DecideIndustryConsiderationInput,
+  ): Promise<BusinessUnderstandingSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const rec = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      assertWritable(rec);
+      const suggested = await this.considerationsFor(client, rec.industry_profile);
+      if (!suggested.includes(input.consideration)) {
+        throw new BadRequestException(
+          'That is not a suggested consideration for this industry profile.',
+        );
+      }
+      if (input.relevant === null) {
+        await client.query(
+          `UPDATE hsdg.audit_business_understanding
+              SET industry_consideration_decisions = industry_consideration_decisions - $2::text
+            WHERE workflow_instance_id = $1`,
+          [workflowInstanceId, input.consideration],
+        );
+      } else {
+        const decision: IndustryConsiderationDecision = {
+          relevant: input.relevant,
+          note: clean(input.note),
+          byName: null,
+          at: new Date().toISOString(),
+        };
+        await client.query(
+          `UPDATE hsdg.audit_business_understanding
+              SET industry_consideration_decisions = industry_consideration_decisions
+                    || jsonb_build_object($2::text, $3::jsonb || jsonb_build_object(
+                         'byName', (SELECT full_name FROM hsdg.employees
+                                     WHERE id = hsdg.ctx_employee_id())))
+            WHERE workflow_instance_id = $1`,
+          [workflowInstanceId, input.consideration, JSON.stringify(decision)],
+        );
+      }
+      await this.markInProgress(client, ctx, workflowInstanceId);
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.industry_consideration_decided',
+        objectType: 'audit_business_understanding',
+        objectId: rec.id,
+        after: { consideration: input.consideration, relevant: input.relevant },
+      });
+      return this.buildSummary(client, workflowInstanceId);
+    });
+  }
+
   /**
    * The 03.2.7 header and calculated analytics, read by 03.3 Materiality so it
    * consumes the canonical metric ids instead of keeping a second financial
@@ -922,20 +1429,27 @@ export class AuditBusinessUnderstandingService {
    */
   private async syncExceptions(
     client: PoolClient,
+    ctx: RlsContext,
     engagementId: string,
     workflowInstanceId: string,
   ): Promise<void> {
     const analytics = await this.computeAnalytics(client, workflowInstanceId);
     const { rows: existing } = await client.query<{
+      seq: number;
       rule_key: string;
       values: Record<string, number | null>;
       status: InvestigationStatus;
       no_longer_flagged: boolean;
+      signal_id: string | null;
     }>(
-      `SELECT rule_key, values, status, no_longer_flagged FROM hsdg.audit_analytics_exception
+      `SELECT seq, rule_key, values, status, no_longer_flagged, signal_id
+         FROM hsdg.audit_analytics_exception
         WHERE workflow_instance_id = $1`,
       [workflowInstanceId],
     );
+    // §21 — cards newly flagged, or whose figures moved under worked conclusions.
+    const impacted: string[] = [];
+    const impactedSignals: string[] = [];
     const byKey = new Map(existing.map((e) => [e.rule_key, e]));
     const { rows: seqRows } = await client.query<{ m: number }>(
       `SELECT COALESCE(MAX(seq), 0) AS m FROM hsdg.audit_analytics_exception WHERE workflow_instance_id = $1`,
@@ -965,10 +1479,15 @@ export class AuditBusinessUnderstandingService {
             e.affectedAreas,
           ],
         );
+        impacted.push(displayCode('AX', seq)!);
         continue;
       }
       const changed = JSON.stringify(sortKeys(prior.values)) !== JSON.stringify(sortKeys(e.values));
       if (!changed && !prior.no_longer_flagged) continue;
+      if (prior.no_longer_flagged || (changed && prior.status !== 'open')) {
+        impacted.push(displayCode('AX', prior.seq)!);
+        if (changed && prior.signal_id) impactedSignals.push(prior.signal_id);
+      }
       await client.query(
         `UPDATE hsdg.audit_analytics_exception
             SET observation = $3, why_flagged = $4, suggested_attention = $5, values = $6::jsonb,
@@ -1000,6 +1519,80 @@ export class AuditBusinessUnderstandingService {
         [workflowInstanceId, gone],
       );
     }
+    if (impacted.length) {
+      await this.afterAnalyticsChange(
+        client,
+        ctx,
+        engagementId,
+        workflowInstanceId,
+        impacted,
+        impactedSignals,
+      );
+    }
+  }
+
+  /**
+   * §21 "reopen impacted investigations / signals". A Planning Signal linked to
+   * a card whose figures moved goes back to the Manager (unless Planning is
+   * frozen in 03.12). A COMPLETED 03.2 is flagged for reassessment: what was
+   * concluded is frozen into a revision baseline, BA-01 is cleared, the
+   * checklist row needs attention and the Manager is told.
+   */
+  private async afterAnalyticsChange(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    impacted: string[],
+    signalIds: string[],
+  ): Promise<void> {
+    let reopenedSignals = 0;
+    if (signalIds.length && !(await readPlanningLock(client, workflowInstanceId)).locked) {
+      const res = await client.query(
+        `UPDATE hsdg.audit_planning_signal SET status = 'open', version = version + 1
+          WHERE workflow_instance_id = $1 AND id = ANY($2::uuid[]) AND status = 'assessed'`,
+        [workflowInstanceId, [...new Set(signalIds)]],
+      );
+      reopenedSignals = res.rowCount ?? 0;
+    }
+    const { rows } = await client.query<RecordRow>(
+      `SELECT * FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    const rec = rows[0];
+    const flag = rec?.status === 'complete';
+    if (flag) {
+      const reason = `Figures changed after 03.2 ${planningVersionLabel(rec.version_no)} was completed: ${impacted.join(', ')} ${impacted.length === 1 ? 'needs' : 'need'} reassessment.`;
+      await this.openRevision(client, engagementId, workflowInstanceId, rec, reason, null);
+      await client.query(
+        `UPDATE hsdg.audit_business_understanding
+            SET status = 'reassessment_required', ba01 = NULL, version_no = version_no + 1,
+                completed_at = NULL, completed_by_employee_id = NULL,
+                reassessment_reason = $2, reassessment_flagged_at = now(), version = version + 1
+          WHERE workflow_instance_id = $1`,
+        [workflowInstanceId, reason],
+      );
+      await this.rollUp(client, ctx, workflowInstanceId, 'reassessment_required');
+      const actor = await resolvePlanningActor(client, engagementId);
+      await notifyPlanning(client, [actor.managerId ?? actor.partnerId], {
+        type: NOTIFICATION_TYPE.planningUnderstandingReassessment,
+        title: '03.2 Business Understanding needs reassessment',
+        body: reason,
+        engagementId,
+        objectType: 'audit_business_understanding',
+        objectId: rec.id,
+        dedup: `u032-reassess:${rec.id}:${rec.version_no}`,
+        except: ctx.employeeId ?? null,
+      });
+    }
+    if (flag || reopenedSignals) {
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.business_understanding_reassessment',
+        objectType: 'service_workflow_instance',
+        objectId: workflowInstanceId,
+        after: { cards: impacted, reopenedSignals, flagged: flag },
+      });
+    }
   }
 
   private async computeAnalytics(
@@ -1028,6 +1621,14 @@ export class AuditBusinessUnderstandingService {
     client: PoolClient,
     workflowInstanceId: string,
     override: { ba01?: Ba01Answer | null; conclusionSummary?: string | null } = {},
+    // What buildSummary has already read — not recomputed.
+    known: {
+      sections?: UnderstandingSectionRecord[];
+      header?: FinancialDatasetHeader;
+      values?: FinancialValueRecord[];
+      analytics?: AnalyticsResult;
+      considerations?: string[];
+    } = {},
   ): Promise<PlanningCompletionCheck[]> {
     const { rows: rec } = await client.query<RecordRow>(
       `SELECT * FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
@@ -1037,16 +1638,21 @@ export class AuditBusinessUnderstandingService {
     const ba01 = override.ba01 !== undefined ? override.ba01 : r.ba01;
     const summaryText =
       override.conclusionSummary !== undefined ? override.conclusionSummary : r.conclusion_summary;
-    const sections = await this.readSections(client, workflowInstanceId);
+    const sections = known.sections ?? (await this.readSections(client, workflowInstanceId));
     const unreviewed = sections.filter((s) => !s.reviewed);
-    const header = await this.readDataset(client, workflowInstanceId);
-    const values = await this.readValues(client, workflowInstanceId);
-    const analytics = await this.computeAnalytics(client, workflowInstanceId);
+    const header = known.header ?? (await this.readDataset(client, workflowInstanceId));
+    const values = known.values ?? (await this.readValues(client, workflowInstanceId));
+    const analytics = known.analytics ?? (await this.computeAnalytics(client, workflowInstanceId));
+    const considerations =
+      known.considerations ?? (await this.considerationsFor(client, r.industry_profile));
+    const decisions = r.industry_consideration_decisions ?? {};
+    const undecidedConsiderations = considerations.filter((c) => !decisions[c]);
     const { rows: c } = await client.query<{
       unassessed: string;
       stale: string;
       undecided: string;
       exp_open: string;
+      challenges: string;
     }>(
       `SELECT
          (SELECT count(*) FROM hsdg.audit_analytics_exception
@@ -1059,7 +1665,10 @@ export class AuditBusinessUnderstandingService {
              AND signal_decision IS NULL) AS undecided,
          (SELECT count(*) FROM hsdg.audit_planning_expectation
            WHERE workflow_instance_id = $1 AND requires_investigation IS TRUE
-             AND conclusion IS NULL) AS exp_open`,
+             AND conclusion IS NULL) AS exp_open,
+         (SELECT count(*) FROM hsdg.audit_understanding_challenge
+           WHERE workflow_instance_id = $1 AND kind = 'challenge'
+             AND status = 'open') AS challenges`,
       [workflowInstanceId],
     );
     const n = (k: keyof (typeof c)[number]) => Number(c[0]?.[k] ?? 0);
@@ -1088,6 +1697,12 @@ export class AuditBusinessUnderstandingService {
         'Business, governance, industry, systems, objectives and KPIs reviewed (03.2.1–03.2.6)',
         unreviewed.length === 0,
         `Mark reviewed: ${unreviewed.map((s) => titleOf(s.key)).join(', ')}.`,
+      ),
+      check(
+        'considerations',
+        'Suggested industry considerations confirmed relevant or not (03.2.3)',
+        undecidedConsiderations.length === 0,
+        `${undecidedConsiderations.length} suggested industry consideration(s) not yet confirmed.`,
       ),
       check(
         'dataset',
@@ -1136,6 +1751,12 @@ export class AuditBusinessUnderstandingService {
         'Draft and save the conclusion.',
       ),
       check(
+        'challenges',
+        'Engagement Partner challenges answered',
+        n('challenges') === 0,
+        `${n('challenges')} Engagement Partner challenge(s) await the Manager's response.`,
+      ),
+      check(
         'ba01',
         'BA-01 answered "Yes — Complete" by the Engagement Manager',
         ba01 === 'yes_complete',
@@ -1148,8 +1769,11 @@ export class AuditBusinessUnderstandingService {
     client: PoolClient,
     workflowInstanceId: string,
   ): Promise<BusinessUnderstandingSummary> {
-    const { rows } = await client.query<RecordRow>(
-      `SELECT * FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
+    const { rows } = await client.query<RecordRow & { completed_by_name: string | null }>(
+      `SELECT u.*, cb.full_name AS completed_by_name
+         FROM hsdg.audit_business_understanding u
+         LEFT JOIN hsdg.employees cb ON cb.id = u.completed_by_employee_id
+        WHERE u.workflow_instance_id = $1`,
       [workflowInstanceId],
     );
     const r = rows[0]!;
@@ -1166,16 +1790,311 @@ export class AuditBusinessUnderstandingService {
           AND (status <> 'assessed' OR needs_reassessment)`,
       [workflowInstanceId],
     );
+    // Read once, shared with the completion checklist.
+    const sections = await this.readSections(client, workflowInstanceId);
+    const dataset = await this.readDataset(client, workflowInstanceId);
+    const values = await this.readValues(client, workflowInstanceId);
+    const analytics = await this.computeAnalytics(client, workflowInstanceId);
+    const considerations = await this.considerationsFor(client, r.industry_profile);
+
+    const actor = await resolvePlanningActor(client, r.engagement_id);
+    const lock = await readPlanningLock(client, workflowInstanceId);
+    const complete = r.status === 'complete';
+    const label = planningVersionLabel(r.version_no);
+    const access: UnderstandingAccess = {
+      role: actor.role,
+      roleLabel: PLANNING_ACTOR_ROLE_LABEL[actor.role],
+      actingAsManager: actor.actingAsManager,
+      capabilities: actor.capabilities,
+      locked: complete || lock.locked,
+      lockReason: lock.locked
+        ? 'Planning was approved in 03.12 — 03.2 is frozen with it until Planning is reopened for a controlled revision.'
+        : complete
+          ? `03.2 ${label} is complete — reopen it for a controlled revision to change it.`
+          : null,
+      planningLocked: lock.locked,
+    };
+    const versionInfo: UnderstandingVersionInfo = {
+      versionNo: r.version_no,
+      versionLabel: label,
+      completedAt: r.completed_at?.toISOString() ?? null,
+      completedByName: r.completed_by_name,
+      reassessmentReason: r.reassessment_reason,
+      reassessmentFlaggedAt: r.reassessment_flagged_at?.toISOString() ?? null,
+    };
+    const { rows: ids } = await client.query<{ kind: string; id: string; key: string | null }>(
+      `SELECT 'section' AS kind, id, section_key AS key FROM hsdg.audit_understanding_section
+        WHERE workflow_instance_id = $1
+       UNION ALL
+       SELECT 'dataset', id, NULL FROM hsdg.audit_financial_dataset WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    const { rows: counts } = await client.query<{ target_id: string; n: string }>(
+      `SELECT target_id, count(*) AS n FROM hsdg.audit_planning_evidence
+        WHERE workflow_instance_id = $1 AND removed_at IS NULL
+          AND target_type IN ('understanding_section','financial_dataset',
+                              'analytics_exception','planning_expectation')
+        GROUP BY target_id`,
+      [workflowInstanceId],
+    );
     return {
       record,
-      sections: await this.readSections(client, workflowInstanceId),
-      industryConsiderations: [...INDUSTRY_PROFILE_CONFIG[r.industry_profile].considerations],
-      dataset: await this.readDataset(client, workflowInstanceId),
+      access,
+      versionInfo,
+      revisions: await this.readRevisions(client, workflowInstanceId),
+      challenges: await this.readChallenges(client, workflowInstanceId),
+      evidenceCounts: Object.fromEntries(counts.map((c) => [c.target_id, Number(c.n)])),
+      authorityAnchors: [
+        ...GENERIC_AUTHORITY_ANCHORS,
+        ...(INDUSTRY_AUTHORITY_ANCHORS[r.industry_profile] ?? []),
+      ],
+      industryConsiderationDecisions: r.industry_consideration_decisions ?? {},
+      recordIds: {
+        sections: Object.fromEntries(
+          ids.filter((i) => i.kind === 'section').map((i) => [i.key!, i.id]),
+        ),
+        dataset: ids.find((i) => i.kind === 'dataset')?.id ?? null,
+      },
+      sections,
+      industryConsiderations: considerations,
+      dataset,
       customMetrics: await this.readCustomMetrics(client, workflowInstanceId),
-      values: await this.readValues(client, workflowInstanceId),
-      analytics: await this.computeAnalytics(client, workflowInstanceId),
+      values,
+      analytics,
       openInvestigations: Number(open[0]?.n ?? 0),
-      completion: await this.computeCompletion(client, workflowInstanceId),
+      completion: await this.computeCompletion(
+        client,
+        workflowInstanceId,
+        {},
+        { sections, header: dataset, values, analytics, considerations },
+      ),
+    };
+  }
+
+  /** The suggested industry considerations for a profile (§7, methodology-configured). */
+  private async considerationsFor(
+    _client: PoolClient,
+    profile: IndustryProfile,
+  ): Promise<string[]> {
+    return [...(INDUSTRY_PROFILE_CONFIG[profile]?.considerations ?? [])];
+  }
+
+  private async readRevisions(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<UnderstandingRevisionRecord[]> {
+    const { rows } = await client.query<RevisionRow>(
+      `SELECT r.id, r.from_version_no, r.to_version_no, r.reason, r.status,
+              ob.full_name AS opened_by_name, r.opened_at,
+              cb.full_name AS completed_by_name, r.completed_at
+         FROM hsdg.audit_understanding_revision r
+         LEFT JOIN hsdg.employees ob ON ob.id = r.opened_by_employee_id
+         LEFT JOIN hsdg.employees cb ON cb.id = r.completed_by_employee_id
+        WHERE r.workflow_instance_id = $1
+        ORDER BY r.to_version_no DESC`,
+      [workflowInstanceId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      fromVersionNo: r.from_version_no,
+      toVersionNo: r.to_version_no,
+      fromLabel: planningVersionLabel(r.from_version_no),
+      toLabel: planningVersionLabel(r.to_version_no),
+      reason: r.reason,
+      status: r.status,
+      openedByName: r.opened_by_name,
+      openedAt: r.opened_at.toISOString(),
+      completedByName: r.completed_by_name,
+      completedAt: r.completed_at?.toISOString() ?? null,
+    }));
+  }
+
+  private async readChallenges(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<UnderstandingChallengeRecord[]> {
+    const { rows } = await client.query<
+      ChallengeRow & { card_seq: number | null; metric_key: string | null }
+    >(
+      `SELECT c.id, c.seq, c.target_type, c.target_ref, c.kind, c.body,
+              rb.full_name AS raised_by_name, c.raised_at, c.response,
+              sb.full_name AS responded_by_name, c.responded_at, c.status, c.version,
+              x.seq AS card_seq, e.metric_key
+         FROM hsdg.audit_understanding_challenge c
+         LEFT JOIN hsdg.employees rb ON rb.id = c.raised_by_employee_id
+         LEFT JOIN hsdg.employees sb ON sb.id = c.responded_by_employee_id
+         LEFT JOIN hsdg.audit_analytics_exception x
+                ON c.target_type = 'exception' AND x.id::text = c.target_ref
+         LEFT JOIN hsdg.audit_planning_expectation e
+                ON c.target_type = 'expectation' AND e.id::text = c.target_ref
+        WHERE c.workflow_instance_id = $1
+        ORDER BY (c.status = 'closed'), c.seq DESC`,
+      [workflowInstanceId],
+    );
+    return rows.map((c) => ({
+      id: c.id,
+      code: displayCode('PC', c.seq)!,
+      targetType: c.target_type,
+      targetRef: c.target_ref,
+      targetLabel: challengeTargetLabel(c.target_type, c.target_ref, c.card_seq, c.metric_key),
+      kind: c.kind,
+      body: c.body,
+      raisedByName: c.raised_by_name,
+      raisedAt: c.raised_at.toISOString(),
+      response: c.response,
+      respondedByName: c.responded_by_name,
+      respondedAt: c.responded_at?.toISOString() ?? null,
+      status: c.status,
+      version: c.version,
+    }));
+  }
+
+  private async loadChallenge(
+    client: PoolClient,
+    engagementId: string,
+    challengeId: string,
+  ): Promise<{
+    workflow_instance_id: string;
+    seq: number;
+    kind: 'comment' | 'challenge';
+    response: string | null;
+    status: 'open' | 'responded' | 'closed';
+    version: number;
+  }> {
+    const { rows } = await client.query(
+      `SELECT workflow_instance_id, seq, kind, response, status, version
+         FROM hsdg.audit_understanding_challenge WHERE id = $1 AND engagement_id = $2`,
+      [challengeId, engagementId],
+    );
+    if (!rows[0]) throw new NotFoundException('Challenge not found.');
+    return rows[0];
+  }
+
+  /** Validate what a challenge points at and name it. */
+  private async resolveChallengeTarget(
+    client: PoolClient,
+    workflowInstanceId: string,
+    targetType: UnderstandingChallengeTarget,
+    ref: string | null,
+  ): Promise<{ ref: string | null; label: string }> {
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (targetType === 'section') {
+      if (!ref || !UNDERSTANDING_SECTIONS.includes(ref as UnderstandingSectionKey)) {
+        throw new BadRequestException('Choose the 03.2 section.');
+      }
+      return { ref, label: challengeTargetLabel('section', ref, null, null) };
+    }
+    if (targetType === 'exception' || targetType === 'expectation') {
+      if (!ref || !UUID.test(ref)) throw new BadRequestException('Choose the item.');
+      const { rows } = await client.query<{ seq: number | null; metric_key: string | null }>(
+        targetType === 'exception'
+          ? `SELECT seq, NULL AS metric_key FROM hsdg.audit_analytics_exception
+              WHERE id = $1 AND workflow_instance_id = $2`
+          : `SELECT NULL::int AS seq, metric_key FROM hsdg.audit_planning_expectation
+              WHERE id = $1 AND workflow_instance_id = $2`,
+        [ref, workflowInstanceId],
+      );
+      if (!rows[0]) throw new NotFoundException('That item is not on this audit file.');
+      return {
+        ref,
+        label: challengeTargetLabel(targetType, ref, rows[0].seq, rows[0].metric_key),
+      };
+    }
+    return { ref: null, label: challengeTargetLabel(targetType, null, null, null) };
+  }
+
+  /** Freeze a completed 03.2 into a new revision's baseline (§20). */
+  private async openRevision(
+    client: PoolClient,
+    engagementId: string,
+    workflowInstanceId: string,
+    rec: RecordRow,
+    reason: string,
+    openedBy: string | null,
+  ): Promise<void> {
+    const baseline = await this.snapshot(client, workflowInstanceId);
+    await client.query(
+      `INSERT INTO hsdg.audit_understanding_revision
+         (workflow_instance_id, engagement_id, from_version_no, to_version_no, reason, baseline,
+          opened_by_employee_id)
+       VALUES ($1, $2, $3, $3 + 1, $4, $5::jsonb, $6)`,
+      [
+        workflowInstanceId,
+        engagementId,
+        rec.version_no,
+        reason,
+        JSON.stringify(baseline),
+        openedBy,
+      ],
+    );
+  }
+
+  /** 03.2 as it stands, in the shape a revision freezes. */
+  private async snapshot(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<UnderstandingSnapshot> {
+    const { rows: rec } = await client.query<RecordRow>(
+      `SELECT * FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    const { rows: sections } = await client.query<SectionRow>(
+      `SELECT section_key, anything_changed, answers, reviewed FROM hsdg.audit_understanding_section
+        WHERE workflow_instance_id = $1 ORDER BY section_key`,
+      [workflowInstanceId],
+    );
+    const custom = await this.readCustomMetrics(client, workflowInstanceId);
+    const label = (k: string) => custom.find((c) => c.key === k)?.label ?? metricLabel(k);
+    const { rows: values } = await client.query<{
+      metric_key: string;
+      period: FinancialPeriod;
+      amount: string;
+    }>(
+      `SELECT metric_key, period, amount FROM hsdg.audit_financial_value
+        WHERE workflow_instance_id = $1 ORDER BY metric_key, period`,
+      [workflowInstanceId],
+    );
+    const cards = await this.readExceptions(client, workflowInstanceId);
+    const { rows: exps } = await client.query<{
+      id: string;
+      metric_key: string;
+      conclusion: ExpectationConclusion | null;
+    }>(
+      `SELECT id, metric_key, conclusion FROM hsdg.audit_planning_expectation
+        WHERE workflow_instance_id = $1 ORDER BY created_at`,
+      [workflowInstanceId],
+    );
+    return {
+      record: {
+        ba01: rec[0]?.ba01 ?? null,
+        conclusionSummary: rec[0]?.conclusion_summary ?? null,
+        industryProfile: rec[0]?.industry_profile ?? 'generic',
+      },
+      sections: sections.map((x) => ({
+        key: x.section_key,
+        anythingChanged: x.anything_changed,
+        answers: x.answers ?? {},
+        reviewed: x.reviewed,
+      })),
+      values: values.map((v) => ({
+        metricKey: v.metric_key,
+        label: label(v.metric_key),
+        period: v.period,
+        amount: Number(v.amount),
+      })),
+      cards: cards.map((c) => ({
+        id: c.id,
+        code: c.cardCode,
+        observation: c.observation,
+        assessment: c.assessment,
+        signalCode: c.signalCode,
+        status: c.status,
+      })),
+      expectations: exps.map((e) => ({
+        id: e.id,
+        label: label(e.metric_key),
+        conclusion: e.conclusion,
+      })),
     };
   }
 
@@ -1221,9 +2140,31 @@ export class AuditBusinessUnderstandingService {
     const { rows: profile } = await client.query<{
       accounting_environment: string | null;
       initial_audit: boolean;
+      regulator: Regulator | null;
+      regulator_name: string | null;
+      special_entity_types: SpecialEntityType[] | null;
     }>(
-      `SELECT accounting_environment, initial_audit FROM hsdg.audit_entity_profile
-        WHERE workflow_instance_id = $1`,
+      `SELECT accounting_environment, initial_audit, regulator, regulator_name,
+              special_entity_types
+         FROM hsdg.audit_entity_profile WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    const { rows: branches } = await client.query<{
+      branch_name: string;
+      location: string | null;
+      country: string | null;
+    }>(
+      `SELECT branch_name, location, country FROM hsdg.audit_group_branch
+        WHERE workflow_instance_id = $1 ORDER BY branch_name`,
+      [workflowInstanceId],
+    );
+    const { rows: components } = await client.query<{
+      component_name: string;
+      relationship: string;
+      country: string | null;
+    }>(
+      `SELECT component_name, relationship, country FROM hsdg.audit_group_component
+        WHERE workflow_instance_id = $1 AND included <> 'no' ORDER BY component_name`,
       [workflowInstanceId],
     );
     const out: Partial<Record<UnderstandingSectionKey, UnderstandingContextItem[]>> = {};
@@ -1258,6 +2199,49 @@ export class AuditBusinessUnderstandingService {
               ? 'Hybrid (partly outsourced)'
               : 'In-house',
         source: 'Section 02',
+      });
+    }
+    if (branches.length) {
+      out.business_model!.push({
+        label: 'Branches',
+        value: listOf(
+          branches.map((b) =>
+            [b.branch_name, [b.location, b.country].filter(Boolean).join(', ')]
+              .filter(Boolean)
+              .join(' — '),
+          ),
+        ),
+        source: '02.6',
+      });
+    }
+    if (components.length) {
+      out.governance!.push({
+        label: 'Group components',
+        value: listOf(
+          components.map(
+            (c) =>
+              `${c.component_name} (${c.relationship.replace(/_/g, ' ')}${c.country ? `, ${c.country}` : ''})`,
+          ),
+        ),
+        source: '02.6',
+      });
+    }
+    const p = profile[0];
+    if (p?.regulator) {
+      out.industry!.push({
+        label: 'Regulator',
+        value:
+          p.regulator === 'other'
+            ? (p.regulator_name ?? REGULATOR_LABEL.other)
+            : REGULATOR_LABEL[p.regulator],
+        source: '02.1',
+      });
+    }
+    if (p?.special_entity_types?.length) {
+      out.industry!.push({
+        label: 'Special entity type',
+        value: p.special_entity_types.map((t) => SPECIAL_ENTITY_LABEL[t] ?? t).join(', '),
+        source: '02.1',
       });
     }
     if (profile[0]) {
@@ -1319,13 +2303,26 @@ export class AuditBusinessUnderstandingService {
   ): Promise<FinancialValueRecord[]> {
     const { rows } = await client.query<ValueRow>(
       `SELECT v.metric_key, v.period, v.amount, v.source_type, v.source_ref, v.note,
-              emp.full_name AS entered_by_name, v.entered_at, v.version
+              emp.full_name AS entered_by_name, v.entered_at, v.version,
+              v.rolled_forward_amount, v.rolled_forward_approved, v.override_reason,
+              pe.financial_year AS rolled_forward_fy
          FROM hsdg.audit_financial_value v
          LEFT JOIN hsdg.employees emp ON emp.id = v.entered_by_employee_id
+         LEFT JOIN hsdg.service_workflow_instances pw ON pw.id = v.rolled_forward_from_instance_id
+         LEFT JOIN hsdg.engagements pe ON pe.id = pw.engagement_id
         WHERE v.workflow_instance_id = $1`,
       [workflowInstanceId],
     );
     return rows.map((v) => ({
+      rolledForward:
+        v.rolled_forward_amount === null
+          ? null
+          : {
+              fromFinancialYear: v.rolled_forward_fy,
+              amount: Number(v.rolled_forward_amount),
+              approved: v.rolled_forward_approved,
+            },
+      overrideReason: v.override_reason,
       metricKey: v.metric_key,
       period: v.period,
       amount: Number(v.amount),
@@ -1346,7 +2343,26 @@ export class AuditBusinessUnderstandingService {
       `${EXCEPTION_SELECT} WHERE x.workflow_instance_id = $1 ORDER BY x.no_longer_flagged, x.seq`,
       [workflowInstanceId],
     );
-    return rows.map(mapException);
+    const { rows: focus } = await client.query<{
+      signal_id: string;
+      id: string;
+      seq: number;
+      name: string;
+    }>(
+      `SELECT fs.signal_id, f.id, f.seq, f.name
+         FROM hsdg.audit_focus_signal fs
+         JOIN hsdg.audit_area_of_focus f ON f.id = fs.focus_id
+        WHERE f.workflow_instance_id = $1 AND f.status <> 'superseded'
+        ORDER BY f.seq`,
+      [workflowInstanceId],
+    );
+    const bySignal = new Map<string, UnderstandingFocusLink[]>();
+    for (const f of focus) {
+      const list = bySignal.get(f.signal_id) ?? [];
+      list.push({ id: f.id, code: displayCode('FA', f.seq)!, name: f.name });
+      bySignal.set(f.signal_id, list);
+    }
+    return rows.map((x) => mapException(x, bySignal));
   }
 
   private async readExpectations(
@@ -1447,7 +2463,14 @@ export class AuditBusinessUnderstandingService {
     );
     let priorValues: Array<{ metricKey: string; amount: number }> = [];
     let priorValueSource: { type: MetricSourceType; ref: string } | null = null;
+    // Last year's 03.2 completed = its figures are approved: protected here (§21).
+    let priorApproved = false;
     if (prior) {
+      const ps = await client.query<{ status: string }>(
+        `SELECT status FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
+        [prior.workflowInstanceId],
+      );
+      priorApproved = ps.rows[0]?.status === 'complete';
       const pd = await client.query<{ units: FinancialUnit | null; data_status: string | null }>(
         `SELECT units, data_status FROM hsdg.audit_financial_dataset WHERE workflow_instance_id = $1`,
         [prior.workflowInstanceId],
@@ -1500,8 +2523,9 @@ export class AuditBusinessUnderstandingService {
     for (const v of priorValues) {
       const ins = await client.query(
         `INSERT INTO hsdg.audit_financial_value
-           (workflow_instance_id, engagement_id, metric_key, period, amount, source_type, source_ref)
-         VALUES ($1, $2, $3, 'py', $4, $5, $6)
+           (workflow_instance_id, engagement_id, metric_key, period, amount, source_type, source_ref,
+            rolled_forward_from_instance_id, rolled_forward_amount, rolled_forward_approved)
+         VALUES ($1, $2, $3, 'py', $4, $5, $6, $7, $4, $8)
          ON CONFLICT (workflow_instance_id, metric_key, period) DO NOTHING`,
         [
           workflowInstanceId,
@@ -1510,6 +2534,8 @@ export class AuditBusinessUnderstandingService {
           v.amount,
           priorValueSource!.type,
           priorValueSource!.ref,
+          prior!.workflowInstanceId,
+          priorApproved,
         ],
       );
       valuesAdded += ins.rowCount ?? 0;
@@ -1549,7 +2575,7 @@ export class AuditBusinessUnderstandingService {
       );
     }
     if (valuesAdded || plan.industryProfile) {
-      await this.syncExceptions(client, engagementId, workflowInstanceId);
+      await this.syncExceptions(client, ctx, engagementId, workflowInstanceId);
     }
     await markDone();
     if (headerCols.length || valuesAdded || mergedSections.length || plan.industryProfile) {
@@ -1605,17 +2631,149 @@ export class AuditBusinessUnderstandingService {
     workflowInstanceId: string,
     status: UnderstandingStatus,
   ): Promise<void> {
+    const state = status === 'reassessment_required' ? 'needs_attention' : status;
     await client.query(
       `UPDATE hsdg.audit_planning_items
           SET state = $3, updated_by_employee_id = $4, content_updated_at = now(),
               version = version + 1
         WHERE workflow_instance_id = $1 AND item_key = $2 AND state <> $3`,
-      [workflowInstanceId, UNDERSTANDING_ITEM_KEY, status, ctx.employeeId ?? null],
+      [workflowInstanceId, UNDERSTANDING_ITEM_KEY, state, ctx.employeeId ?? null],
     );
   }
 }
 
 // ── pure helpers ─────────────────────────────────────────────────────────────
+
+/** At most eight items, then "+n more". */
+function listOf(items: string[]): string {
+  return items.length > 8
+    ? `${items.slice(0, 8).join('; ')}; +${items.length - 8} more`
+    : items.join('; ');
+}
+
+const CHALLENGE_AREA_LABEL: Record<UnderstandingChallengeTarget, string> = {
+  section: '03.2 section',
+  dataset: '03.2.7 Focused financial dataset',
+  analytics: '03.2.8 Preliminary analytics',
+  exception: 'Investigation Card',
+  expectation: 'Expectation vs actual',
+  conclusion: '03.2.10 Understanding & analytics conclusion',
+};
+
+export function challengeTargetLabel(
+  type: UnderstandingChallengeTarget,
+  ref: string | null,
+  cardSeq: number | null,
+  metricKey: string | null,
+): string {
+  if (type === 'section') {
+    const def = UNDERSTANDING_SECTION_DEFS.find((d) => d.key === ref);
+    return def ? `${def.code} ${def.title}` : CHALLENGE_AREA_LABEL.section;
+  }
+  if (type === 'exception' && cardSeq !== null) return displayCode('AX', cardSeq)!;
+  if (type === 'expectation' && metricKey) return `Expectation — ${metricLabel(metricKey)}`;
+  return CHALLENGE_AREA_LABEL[type];
+}
+
+/** An answer in full for the revision view — table rows by content, not by count. */
+const diffText = (v: UnderstandingAnswer | undefined): string | null => {
+  if (v == null) return null;
+  if (typeof v === 'string') return v;
+  if (v.length && Array.isArray(v[0])) {
+    return (v as string[][]).map((row) => row.filter(Boolean).join(' | ')).join('; ');
+  }
+  return (v as string[]).join(', ') || null;
+};
+
+const fmtAmount = (n: number): string => n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+/**
+ * What changed between two 03.2 snapshots (§20 revision view): figures,
+ * section answers, Investigation Cards and the conclusion. Exported for tests.
+ */
+export function diffUnderstandingSnapshots(
+  before: UnderstandingSnapshot,
+  after: UnderstandingSnapshot,
+): UnderstandingRevisionChange[] {
+  const out: UnderstandingRevisionChange[] = [];
+  const push = (
+    area: UnderstandingRevisionChange['area'],
+    label: string,
+    b: string | null,
+    a: string | null,
+  ) => {
+    if (b !== a) out.push({ area, label, before: b, after: a });
+  };
+
+  const fig = (s: UnderstandingSnapshot) =>
+    new Map(s.values.map((v) => [`${v.metricKey}:${v.period}`, v]));
+  const fb = fig(before);
+  const fa = fig(after);
+  for (const key of new Set([...fb.keys(), ...fa.keys()])) {
+    const v = fa.get(key) ?? fb.get(key)!;
+    push(
+      'figure',
+      `${v.label} (${v.period.toUpperCase()})`,
+      fb.has(key) ? fmtAmount(fb.get(key)!.amount) : null,
+      fa.has(key) ? fmtAmount(fa.get(key)!.amount) : null,
+    );
+  }
+
+  for (const def of UNDERSTANDING_SECTION_DEFS) {
+    const sb = before.sections.find((x) => x.key === def.key);
+    const sa = after.sections.find((x) => x.key === def.key);
+    push(
+      'section',
+      `${def.code} Anything changed?`,
+      sb?.anythingChanged ?? null,
+      sa?.anythingChanged ?? null,
+    );
+    for (const f of def.fields) {
+      push(
+        'section',
+        `${def.code} ${f.label}`,
+        diffText(sb?.answers[f.key]),
+        diffText(sa?.answers[f.key]),
+      );
+    }
+  }
+
+  const cardText = (c: UnderstandingSnapshot['cards'][number] | undefined) =>
+    c
+      ? [c.assessment ? INVESTIGATION_ASSESSMENT_LABEL[c.assessment] : 'Not assessed', c.signalCode]
+          .filter(Boolean)
+          .join(' · ')
+      : null;
+  const cb = new Map(before.cards.map((c) => [c.id, c]));
+  const ca = new Map(after.cards.map((c) => [c.id, c]));
+  for (const id of new Set([...cb.keys(), ...ca.keys()])) {
+    const c = ca.get(id) ?? cb.get(id)!;
+    push('exception', `${c.code} ${c.observation}`, cardText(cb.get(id)), cardText(ca.get(id)));
+  }
+
+  const eb = new Map(before.expectations.map((e) => [e.id, e]));
+  const ea = new Map(after.expectations.map((e) => [e.id, e]));
+  for (const id of new Set([...eb.keys(), ...ea.keys()])) {
+    const e = ea.get(id) ?? eb.get(id)!;
+    const text = (x: typeof e | undefined) =>
+      x ? (x.conclusion ? EXPECTATION_CONCLUSION_LABEL[x.conclusion] : 'Not concluded') : null;
+    push('conclusion', `Expectation — ${e.label}`, text(eb.get(id)), text(ea.get(id)));
+  }
+
+  push(
+    'conclusion',
+    'Understanding & analytics conclusion',
+    before.record.conclusionSummary,
+    after.record.conclusionSummary,
+  );
+  push(
+    'conclusion',
+    'Industry profile',
+    before.record.industryProfile,
+    after.record.industryProfile,
+  );
+  return out;
+}
 
 function sortKeys(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o ?? {}).sort(([a], [b]) => a.localeCompare(b)));
@@ -1843,7 +3001,10 @@ export function composeUnderstandingConclusion(
   return lines.join('\n');
 }
 
-function mapException(x: ExceptionRow): InvestigationCardRecord {
+function mapException(
+  x: ExceptionRow,
+  focusBySignal: ReadonlyMap<string, UnderstandingFocusLink[]> = new Map(),
+): InvestigationCardRecord {
   return {
     id: x.id,
     cardCode: displayCode('AX', x.seq)!,
@@ -1862,6 +3023,7 @@ function mapException(x: ExceptionRow): InvestigationCardRecord {
     noSignalRationale: x.no_signal_rationale,
     signalId: x.signal_id,
     signalCode: displayCode('PS', x.signal_seq),
+    focusAreas: x.signal_id ? (focusBySignal.get(x.signal_id) ?? []) : [],
     ownerEmployeeId: x.owner_employee_id,
     ownerName: x.owner_name,
     dueDate: x.due_date,

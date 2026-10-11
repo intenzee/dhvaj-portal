@@ -14,6 +14,15 @@
 
 import type { PlanningAttention } from './statutory-audit-planning-signal';
 import type { PlanningCompletionCheck } from './statutory-audit-planning-strategy';
+import type {
+  IndustryConsiderationDecision,
+  RolledForwardInfo,
+  UnderstandingAccess,
+  UnderstandingChallengeRecord,
+  UnderstandingFocusLink,
+  UnderstandingRevisionRecord,
+  UnderstandingVersionInfo,
+} from './statutory-audit-understanding-governance';
 
 // ── 03.2.1–03.2.6 Understanding sections ─────────────────────────────────────
 
@@ -386,6 +395,10 @@ export interface CustomMetricRecord {
 }
 
 export interface FinancialValueRecord {
+  /** Brought forward from last year's file (§21); null when entered here. */
+  rolledForward: RolledForwardInfo | null;
+  /** Why an approved roll-forward was changed. */
+  overrideReason: string | null;
   metricKey: string;
   period: FinancialPeriod;
   amount: number;
@@ -399,6 +412,8 @@ export interface FinancialValueRecord {
 
 /** One cell of the dataset grid. `amount: null` clears the value. */
 export interface FinancialValueInput {
+  /** Required to change (or clear) a figure rolled forward from an approved prior file (§21). */
+  overrideReason?: string | null;
   metricKey: string;
   period: FinancialPeriod;
   amount: number | null;
@@ -556,6 +571,8 @@ export interface InvestigationCardRecord {
   noSignalRationale: string | null;
   signalId: string | null;
   signalCode: string | null;
+  /** Areas of Focus the card's signal is grouped under (§18). */
+  focusAreas: UnderstandingFocusLink[];
   ownerEmployeeId: string | null;
   ownerName: string | null;
   dueDate: string | null;
@@ -662,6 +679,8 @@ export const UNDERSTANDING_STATUS = {
   notStarted: 'not_started',
   inProgress: 'in_progress',
   complete: 'complete',
+  /** A completed 03.2 whose analytics moved (source figure / methodology) — reassess (§21). */
+  reassessmentRequired: 'reassessment_required',
 } as const;
 export type UnderstandingStatus = (typeof UNDERSTANDING_STATUS)[keyof typeof UNDERSTANDING_STATUS];
 
@@ -688,6 +707,21 @@ export interface UpdateBusinessUnderstandingInput {
 /** Everything the 03.2 screen needs in one read. */
 export interface BusinessUnderstandingSummary {
   record: BusinessUnderstandingRecord;
+  /** §23 the caller's role / capabilities and the edit lock. */
+  access: UnderstandingAccess;
+  /** §20 version (v1.0, v1.1…) and completion / reassessment state. */
+  versionInfo: UnderstandingVersionInfo;
+  revisions: UnderstandingRevisionRecord[];
+  /** §23 Engagement Partner comments / challenges. */
+  challenges: UnderstandingChallengeRecord[];
+  /** Live evidence files per 03.2 record id (§20). */
+  evidenceCounts: Record<string, number>;
+  /** §25 View Provision anchors for context `03.2` (generic + industry profile). */
+  authorityAnchors: string[];
+  /** §7 the Manager's decision per suggested industry consideration (keyed by its text). */
+  industryConsiderationDecisions: Record<string, IndustryConsiderationDecision>;
+  /** Record ids of the six sections / the dataset header (evidence targets; null until saved). */
+  recordIds: { sections: Partial<Record<UnderstandingSectionKey, string>>; dataset: string | null };
   sections: UnderstandingSectionRecord[];
   /** System-suggested industry considerations for 03.2.3 (Manager confirms). */
   industryConsiderations: string[];
