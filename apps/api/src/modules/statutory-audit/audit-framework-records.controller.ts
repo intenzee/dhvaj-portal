@@ -8,6 +8,7 @@ import {
   type FrameworkMemoHistoryItem,
   type FrameworkMemorandumCreated,
   type FrameworkSummaryMatter,
+  type FrameworkSystemOverride,
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
@@ -127,6 +128,17 @@ export class AuditFrameworkRecordsController {
         ownerEmployeeId: dto.ownerEmployeeId,
       },
     );
+  }
+
+  @Get(':id/statutory-audit/:workflowInstanceId/framework-summary/overrides')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Every system result a professional overrode (§12 System Overrides)' })
+  overrides(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<FrameworkSystemOverride[]> {
+    return this.records.overrides(rlsContextFromPrincipal(principal), id, workflowInstanceId);
   }
 
   @Get(':id/statutory-audit/:workflowInstanceId/framework-summary/impact')

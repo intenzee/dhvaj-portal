@@ -18,6 +18,7 @@ import {
   type FrameworkMemoHistoryItem,
   type FrameworkMemorandumCreated,
   type FrameworkSummaryMatter,
+  type FrameworkSystemOverride,
   type ReturnFrameworkMatterInput,
   type UpdateFrameworkMatterInput,
 } from '@hsdg/contracts';
@@ -45,6 +46,7 @@ import {
   frameworkMemorandumValues,
   readFrameworkMemoDetailsOn,
 } from './framework-summary-memo-values';
+import { readFrameworkOverridesOn } from './framework-summary-overrides';
 import { readSnapshotFactsOn } from './framework-summary-prior-year';
 import { isEngagementLead } from './master-facts';
 
@@ -368,6 +370,19 @@ export class AuditFrameworkRecordsService {
         after: { ownerEmployeeId: owner, note },
       });
       return this.matter(client, workflowInstanceId, matterId);
+    });
+  }
+
+  // ── System overrides (§12) ────────────────────────────────────────────────
+
+  async overrides(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<FrameworkSystemOverride[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await this.assertShell(client, engagementId, workflowInstanceId);
+      return readFrameworkOverridesOn(client, workflowInstanceId);
     });
   }
 
