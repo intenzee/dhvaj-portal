@@ -550,6 +550,18 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
         .body[0] as StatutoryAuditFrameworkSummary;
     const planning3 = async (): Promise<StatutoryAuditPlanning> =>
       (await get(pa, `${base3()}/planning`).expect(200)).body[0] as StatutoryAuditPlanning;
+    /** 03.1's state, read past RLS: when it was generated and how many signals it holds. */
+    const intelligence3 = () =>
+      su(async (c) => {
+        const { rows } = await c.query<{ generated: Date | null; signals: number }>(
+          `SELECT (SELECT intelligence_generated_at FROM hsdg.audit_planning_intelligence
+                    WHERE workflow_instance_id = $1) AS generated,
+                  (SELECT count(*)::int FROM hsdg.audit_planning_signal
+                    WHERE workflow_instance_id = $1) AS signals`,
+          [wf3],
+        );
+        return rows[0]!;
+      });
 
     beforeAll(async () => {
       ({ engId: eng3, shellId: wf3 } = await newFile());
@@ -611,6 +623,8 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
         expect.objectContaining({ status: 'open', planningMayCommence: false }),
       ]);
       expect(s.planning).toMatchObject({ unlocked: false, route: 'locked' });
+      // 03.1 §22: nothing is derived while Section 03 is locked.
+      expect(await intelligence3()).toEqual({ generated: null, signals: 0 });
 
       // Section 03 stays locked: a write is refused with the condition's reason.
       let planning = await planning3();
@@ -637,12 +651,21 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
         resolution: 'Sanction letter on file',
       });
       expect(after.planning).toMatchObject({ unlocked: true, route: 'conditional' });
+      // 03.1 §22: the decision that opened Section 03 derived the Engagement
+      // Intelligence, so whoever opens 03.1 first finds it ready.
+      const ready = await intelligence3();
+      expect(ready.generated).not.toBeNull();
+      // … and it is complete: the Manager's open finds nothing to re-derive.
+      await get(pa, `${base3()}/${wf3}/planning-intelligence`).expect(200);
+      expect(await intelligence3()).toEqual(ready);
 
       planning = await planning3();
       expect(planning.frameworkApproved).toBe(true);
+      // Re-read: deriving 03.1 above moved its planning row on.
+      const fresh = planning.items.find((i) => i.id === item.id)!;
       await post(pa, `${base3()}/planning/${item.id}`, {
         state: 'in_progress',
-        version: item.version,
+        version: fresh.version,
       }).expect(201);
     });
   });

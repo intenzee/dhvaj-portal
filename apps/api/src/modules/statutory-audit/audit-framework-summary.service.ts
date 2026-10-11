@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
@@ -42,6 +43,7 @@ import { AuditFrameworkDownstreamService } from './audit-framework-downstream.se
 import { readFinancialReportingResult } from './financial-reporting-result';
 import { AuditIcfrService } from './audit-icfr.service';
 import { AuditMattersService } from './audit-matters.service';
+import { AuditPlanningIntelligenceService } from './audit-planning-intelligence.service';
 import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditProfileService } from './audit-profile.service';
 import { isEngagementLead } from './master-facts';
@@ -168,6 +170,8 @@ interface EngagementRow {
  */
 @Injectable()
 export class AuditFrameworkSummaryService {
+  private readonly logger = new Logger(AuditFrameworkSummaryService.name);
+
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
@@ -180,6 +184,7 @@ export class AuditFrameworkSummaryService {
     private readonly scheduleIii: AuditScheduleIiiService,
     private readonly frameworkDownstream: AuditFrameworkDownstreamService,
     private readonly matters: AuditMattersService,
+    private readonly planningIntelligence: AuditPlanningIntelligenceService,
   ) {}
 
   // ── Read / aggregate ─────────────────────────────────────────────────────────
@@ -963,6 +968,7 @@ export class AuditFrameworkSummaryService {
             ? before.approvedBaselineId
             : null,
       });
+      await this.preparePlanningOn(client, ctx, engagementId, workflowInstanceId);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.framework_ep_approved',
         objectType: 'audit_framework_baseline',
@@ -1170,11 +1176,40 @@ export class AuditFrameworkSummaryService {
         objectType: 'audit_framework_condition',
         objectId: conditionId,
       });
+      // The last blocking condition resolved opens Section 03 (02.8 §12).
+      await this.preparePlanningOn(client, ctx, engagementId, c.workflow_instance_id);
       return this.build(client, ctx, engagementId, c.workflow_instance_id);
     });
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────────
+
+  /**
+   * DHVAJ 03.1 §22 — the decision that opens Section 03 also derives the 03.1
+   * Engagement Intelligence, as the approving lead, so whoever opens 03.1 first
+   * finds it ready (team members cannot write 03.1 themselves). A no-op while
+   * Section 03 stays locked or 03.1 is frozen. Under a savepoint: a planning
+   * failure never undoes the framework decision — the next lead's open of
+   * 03.1 retries it.
+   */
+  private async preparePlanningOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<void> {
+    await client.query('SAVEPOINT planning_autogen');
+    try {
+      await this.planningIntelligence.autoGenerateOn(client, ctx, engagementId, workflowInstanceId);
+      await client.query('RELEASE SAVEPOINT planning_autogen');
+    } catch (err) {
+      await client.query('ROLLBACK TO SAVEPOINT planning_autogen');
+      this.logger.warn(
+        `03.1 intelligence was not derived on the framework decision for ${workflowInstanceId}; ` +
+          `the next lead's open retries: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   /**
    * AF-01 / AF-02 / reopen read the current baseline, check it, then write: a

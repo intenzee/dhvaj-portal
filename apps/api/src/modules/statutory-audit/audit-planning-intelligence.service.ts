@@ -240,28 +240,42 @@ export class AuditPlanningIntelligenceService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       let record = await this.ensureRecord(client, engagementId, workflowInstanceId);
-      // A lead's open keeps the intelligence current without a "Generate"
-      // button: the first open derives it (and brings last year's matters
-      // forward); a later open re-derives it when the Section 01/02 facts
-      // moved. Nothing generates while Section 03 is still locked (02.8 AF-02),
-      // nor once 03.1 is frozen by the 03.12 approval — the approved signals are
-      // the baseline; the stale banner stays and a controlled revision refreshes.
-      if (await isEngagementLead(client, engagementId)) {
-        const gate = (await readFrameworkApprovalOn(client, workflowInstanceId)).planning;
-        if (gate.unlocked && !(await readPlanningLock(client, workflowInstanceId)).locked) {
-          const first = !record.intelligenceGeneratedAt;
-          const facts = await readPlanningIntelligenceFactsOn(client, workflowInstanceId);
-          if (first || (await this.factsMoved(client, workflowInstanceId, facts))) {
-            await this.generateOn(client, ctx, engagementId, workflowInstanceId, true, facts);
-            if (first) {
-              await this.strategy.importPriorYearOn(client, ctx, engagementId, workflowInstanceId);
-            }
-            record = await this.readRecord(client, workflowInstanceId);
-          }
-        }
+      if (await this.autoGenerateOn(client, ctx, engagementId, workflowInstanceId)) {
+        record = await this.readRecord(client, workflowInstanceId);
       }
       return this.buildSummary(client, workflowInstanceId, record);
     });
+  }
+
+  /**
+   * Keep the intelligence current without a "Generate" button (§5, §22): the
+   * first run derives it and brings last year's matters forward; a later run
+   * re-derives it when the Section 01/02 facts moved. Runs in the caller's
+   * transaction, only for an engagement lead (the 03.1 writes are lead-only),
+   * never while Section 03 is locked (02.8 AF-02) and never once 03.1 is
+   * frozen by the 03.12 approval — the approved signals are the baseline and a
+   * controlled revision refreshes them. Called on a lead's open and by the
+   * 02.8 approval itself, so whoever opens 03.1 first finds it ready.
+   * Returns whether it generated.
+   */
+  async autoGenerateOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<boolean> {
+    if (!(await isEngagementLead(client, engagementId))) return false;
+    const gate = (await readFrameworkApprovalOn(client, workflowInstanceId)).planning;
+    if (!gate.unlocked || (await readPlanningLock(client, workflowInstanceId)).locked) return false;
+    const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+    const first = !record.intelligenceGeneratedAt;
+    const facts = await readPlanningIntelligenceFactsOn(client, workflowInstanceId);
+    if (!first && !(await this.factsMoved(client, workflowInstanceId, facts))) return false;
+    await this.generateOn(client, ctx, engagementId, workflowInstanceId, true, facts);
+    if (first) {
+      await this.strategy.importPriorYearOn(client, ctx, engagementId, workflowInstanceId);
+    }
+    return true;
   }
 
   /**
