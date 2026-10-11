@@ -40,6 +40,7 @@ export class AuditFrameworkSummaryController {
     @Body() dto: ConfirmFrameworkDto,
   ): Promise<StatutoryAuditFrameworkSummary> {
     return this.summary.confirmManager(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
+      decision: dto.decision,
       note: dto.note,
       recordVersion: dto.recordVersion,
     });
@@ -57,6 +58,7 @@ export class AuditFrameworkSummaryController {
     @Body() dto: ApproveFrameworkDto,
   ): Promise<StatutoryAuditFrameworkSummary> {
     return this.summary.approve(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
+      decision: dto.decision,
       methodologyVersion: dto.methodologyVersion,
       recordVersion: dto.recordVersion,
     });
@@ -75,6 +77,9 @@ export class AuditFrameworkSummaryController {
   ): Promise<StatutoryAuditFrameworkSummary> {
     return this.summary.reopen(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
       reason: dto.reason,
+      affectedSections: [],
+      identifiedAt: new Date().toISOString(),
+      reapprovalRequired: true,
       recordVersion: dto.recordVersion,
     });
   }

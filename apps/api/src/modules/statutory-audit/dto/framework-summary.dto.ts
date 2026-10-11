@@ -1,8 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  AF01_DECISION,
+  AF02_DECISION,
+  type Af01Decision,
+  type Af02Decision,
+} from '@hsdg/contracts';
+import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 /** AF-01 — Manager confirmation of the framework. */
 export class ConfirmFrameworkDto {
+  @ApiProperty({ enum: Object.values(AF01_DECISION) })
+  @IsIn(Object.values(AF01_DECISION))
+  decision!: Af01Decision;
+
   @ApiPropertyOptional({ description: 'Optional confirmation note.' })
   @IsOptional()
   @IsString()
@@ -17,6 +27,10 @@ export class ConfirmFrameworkDto {
 
 /** AF-02 — Engagement Partner approval; freezes the baseline. */
 export class ApproveFrameworkDto {
+  @ApiProperty({ enum: Object.values(AF02_DECISION) })
+  @IsIn(Object.values(AF02_DECISION))
+  decision!: Af02Decision;
+
   @ApiPropertyOptional({
     description: 'Methodology version label to freeze (defaults per baseline).',
   })

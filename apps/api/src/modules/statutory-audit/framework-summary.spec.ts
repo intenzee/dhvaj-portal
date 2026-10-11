@@ -48,14 +48,27 @@ describe('computeFrameworkGates — 02.8 two-gate approval (§9.8)', () => {
     expect(g.canApprove).toBe(false);
   });
 
-  it('5. AF-02 can approve only from a Manager-confirmed baseline', () => {
+  it('5. AF-02 can approve only from a Manager-confirmed baseline with a submitted memo', () => {
     const g = computeFrameworkGates({
       sections: sixDecided,
       profileConfirmed: true,
       hasBlockingMatter: false,
       baselineStatus: FRAMEWORK_BASELINE_STATUS.managerConfirmed,
+      memoSubmitted: true,
     });
     expect(g.canApprove).toBe(true);
+    expect(g.canConfirm).toBe(false);
+    expect(g.canCreateMemo).toBe(true);
+    // §18: the memorandum must be generated and submitted before AF-02.
+    expect(
+      computeFrameworkGates({
+        sections: sixDecided,
+        profileConfirmed: true,
+        hasBlockingMatter: false,
+        baselineStatus: FRAMEWORK_BASELINE_STATUS.managerConfirmed,
+        memoSubmitted: false,
+      }).canApprove,
+    ).toBe(false);
     // Already approved → cannot re-confirm.
     expect(
       computeFrameworkGates({
