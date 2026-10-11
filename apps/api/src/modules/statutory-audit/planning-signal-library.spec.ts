@@ -383,6 +383,16 @@ describe('deriveChangeSignal (PI-01 → category-specific signal)', () => {
       }),
     );
   });
+  it('a description that ends its own sentence ⇒ one full stop', () => {
+    const at = (description: string) =>
+      deriveChangeSignal(LIBRARY, { category: 'other', label: 'Other', description }, ON)!
+        .observation;
+    expect(at('Opening balances converted.')).toBe(
+      'Current-year change — Other: Opening balances converted.',
+    );
+    expect(at('Was the ERP changed?')).toBe('Current-year change — Other: Was the ERP changed?');
+    expect(at('Migration pending...')).toBe('Current-year change — Other: Migration pending...');
+  });
   it('no description ⇒ just the category', () => {
     expect(
       deriveChangeSignal(LIBRARY, { category: 'other', label: 'Other', description: null }, ON)!

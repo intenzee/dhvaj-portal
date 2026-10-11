@@ -74,10 +74,13 @@ export function usePlanningGovernance(
   /** Section 03 is open (the Audit Framework is approved). */
   unlocked: boolean,
   refresh: () => void,
+  /** False until the 03.1 summary read (which may generate the register) has landed. */
+  enabled = true,
 ): PlanningGovernance & { isLoading: boolean } {
   const q = useQuery({
     queryKey: [...qk, 'governance'],
     queryFn: () => apiFetch<PlanningGovernanceView>(`${base}/planning-governance`),
+    enabled,
   });
   const view = q.data ?? null;
   const has = (c: PlanningCapability) => unlocked && !!view?.access.capabilities[c];

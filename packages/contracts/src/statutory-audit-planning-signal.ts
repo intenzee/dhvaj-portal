@@ -69,8 +69,9 @@ export const PLANNING_SIGNAL_ASSESSMENT = {
 } as const;
 export type PlanningSignalAssessment =
   (typeof PLANNING_SIGNAL_ASSESSMENT)[keyof typeof PLANNING_SIGNAL_ASSESSMENT];
-export const PLANNING_SIGNAL_ASSESSMENTS: PlanningSignalAssessment[] =
-  Object.values(PLANNING_SIGNAL_ASSESSMENT);
+export const PLANNING_SIGNAL_ASSESSMENTS: PlanningSignalAssessment[] = Object.values(
+  PLANNING_SIGNAL_ASSESSMENT,
+);
 
 // ── Signal lifecycle (§9) ────────────────────────────────────────────────────
 
@@ -98,10 +99,18 @@ export const PLANNING_DESTINATION = {
   timeline0311: '03.11',
   section04: 'section_04',
 } as const;
-export type PlanningDestination =
-  (typeof PLANNING_DESTINATION)[keyof typeof PLANNING_DESTINATION];
-export const PLANNING_DESTINATIONS: PlanningDestination[] =
-  Object.values(PLANNING_DESTINATION);
+export type PlanningDestination = (typeof PLANNING_DESTINATION)[keyof typeof PLANNING_DESTINATION];
+export const PLANNING_DESTINATIONS: PlanningDestination[] = Object.values(PLANNING_DESTINATION);
+/** Where a signal carries forward — one label for the 03.1 panel and the admin library. */
+export const PLANNING_DESTINATION_LABEL: Record<PlanningDestination, string> = {
+  '03.4': '03.4 Scope',
+  '03.5': '03.5 Areas',
+  '03.6': '03.6 Risks',
+  '03.8': '03.8 Team',
+  '03.9': '03.9 Components',
+  '03.11': '03.11 Timeline',
+  section_04: 'Section 04',
+};
 
 // ── Planning Signal record ───────────────────────────────────────────────────
 
@@ -191,8 +200,7 @@ export const AREA_OF_FOCUS_STATUS = {
   established: 'established',
   superseded: 'superseded',
 } as const;
-export type AreaOfFocusStatus =
-  (typeof AREA_OF_FOCUS_STATUS)[keyof typeof AREA_OF_FOCUS_STATUS];
+export type AreaOfFocusStatus = (typeof AREA_OF_FOCUS_STATUS)[keyof typeof AREA_OF_FOCUS_STATUS];
 export const AREA_OF_FOCUS_STATUSES: AreaOfFocusStatus[] = Object.values(AREA_OF_FOCUS_STATUS);
 
 export interface AreaOfFocusRecord {
@@ -374,8 +382,9 @@ export const PLANNING_INTELLIGENCE_STATUS = {
 } as const;
 export type PlanningIntelligenceStatus =
   (typeof PLANNING_INTELLIGENCE_STATUS)[keyof typeof PLANNING_INTELLIGENCE_STATUS];
-export const PLANNING_INTELLIGENCE_STATUSES: PlanningIntelligenceStatus[] =
-  Object.values(PLANNING_INTELLIGENCE_STATUS);
+export const PLANNING_INTELLIGENCE_STATUSES: PlanningIntelligenceStatus[] = Object.values(
+  PLANNING_INTELLIGENCE_STATUS,
+);
 
 /** The one-per-shell 03.1 record: orientation, additional scope, strategy summary. */
 export interface PlanningIntelligenceRecord {
