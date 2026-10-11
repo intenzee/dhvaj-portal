@@ -303,7 +303,11 @@ describe('Statutory Audit — 02.7 Other Reporting (e2e §9.7)', () => {
   it('Section 196 appointment checks read the Rules Library and raise non-blocking matters', async () => {
     const o = await getOther(pa);
     const values = Object.fromEntries(o.detail!.rulesUsed.map((r) => [r.code, r.value]));
-    expect(values).toMatchObject({ MGR_TERM_MAX_YEARS: 5, MGR_MIN_AGE: 21, MGR_AGE_SR_TRIGGER: 70 });
+    expect(values).toMatchObject({
+      MGR_TERM_MAX_YEARS: 5,
+      MGR_MIN_AGE: 21,
+      MGR_AGE_SR_TRIGGER: 70,
+    });
     await post(pa, 'facts', {
       managerialPersons: [
         { name: 'A. Rao', category: 'managing_director', remuneration: 4_000_000, age: 150 },
@@ -312,7 +316,13 @@ describe('Statutory Audit — 02.7 Other Reporting (e2e §9.7)', () => {
     }).expect(400);
     const res = await post(pa, 'facts', {
       managerialPersons: [
-        { name: 'A. Rao', category: 'managing_director', remuneration: 4_000_000, age: 72, termYears: 6 },
+        {
+          name: 'A. Rao',
+          category: 'managing_director',
+          remuneration: 4_000_000,
+          age: 72,
+          termYears: 6,
+        },
       ],
       version: o.assessment.version,
     }).expect(201);

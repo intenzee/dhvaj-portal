@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
@@ -21,6 +21,7 @@ import {
   UpdatePlanningDiscussionDto,
   UpdatePlanningMatterDto,
 } from './dto/planning-strategy.dto';
+import { Section03LockGuard } from './section-03-lock.guard';
 
 /**
  * Statutory Audit — 03.1 remaining sub-sections: strategic timing/resource
@@ -30,6 +31,7 @@ import {
  */
 @ApiTags('engagements')
 @Controller('engagements')
+@UseGuards(Section03LockGuard)
 export class AuditPlanningStrategyController {
   constructor(private readonly strategy: AuditPlanningStrategyService) {}
 

@@ -9,6 +9,7 @@ import {
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { answerSection01Clean, recommendSection01 } from './section01.helper';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Section 07 / 08 — the completion and reporting checklist keeps itself in
@@ -116,7 +117,7 @@ describe('Statutory Audit — Section 07 completion from the file (e2e)', () => 
         version: a.version,
       }).expect(201);
     }
-    await post(pa, `${base}/${shellId}/framework/approve`, { memo: 'Approved (e2e).' }).expect(201);
+    await approveFrameworkForTest(shellId);
 
     // 03.5 populated from the library.
     await post(pa, `${base}/${shellId}/audit-areas/populate`, {}).expect(201);

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
@@ -19,6 +19,7 @@ import {
   UpdatePlanningChangeDto,
   UpdatePlanningIntelligenceDto,
 } from './dto/planning-intelligence.dto';
+import { Section03LockGuard } from './section-03-lock.guard';
 
 /**
  * Statutory Audit — 03.1 Planning Intelligence & the Planning Signal Register.
@@ -27,6 +28,7 @@ import {
  */
 @ApiTags('engagements')
 @Controller('engagements')
+@UseGuards(Section03LockGuard)
 export class AuditPlanningIntelligenceController {
   constructor(private readonly intelligence: AuditPlanningIntelligenceService) {}
 

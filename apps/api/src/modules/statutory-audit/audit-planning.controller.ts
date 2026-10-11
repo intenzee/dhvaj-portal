@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type StatutoryAuditPlanning } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditPlanningService } from './audit-planning.service';
 import { ApprovePlanningDto, SetMaterialityDto, UpdatePlanningItemDto } from './dto/planning.dto';
+import { Section03LockGuard } from './section-03-lock.guard';
 
 /**
  * Statutory Audit — Planning (Phase 03) endpoints (Audit Spec §21). Reads are
@@ -13,6 +14,7 @@ import { ApprovePlanningDto, SetMaterialityDto, UpdatePlanningItemDto } from './
  */
 @ApiTags('engagements')
 @Controller('engagements')
+@UseGuards(Section03LockGuard)
 export class AuditPlanningController {
   constructor(private readonly planning: AuditPlanningService) {}
 

@@ -11,6 +11,7 @@ import {
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { answerSection01, answerSection01Clean, recommendSection01 } from './section01.helper';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Sections 01–04 drafted from the file: each section's pack mirrors its
@@ -135,7 +136,7 @@ describe('Statutory Audit — Sections 01–04 packs (e2e)', () => {
     fw = (await get(pa, `${base}/framework`)).body[0] as StatutoryAuditFramework;
     expect(check(fw.pack.checks, 'areas_decided').ok).toBe(true);
     expect(fw.pack.draftMemo).toMatch(/^Audit framework — financial year 2024-25/);
-    await post(pa, `${base}/${shellId}/framework/approve`, {}).expect(201);
+    await approveFrameworkForTest(shellId);
     fw = (await get(pa, `${base}/framework`)).body[0] as StatutoryAuditFramework;
     expect(fw.approval?.memo).toMatch(/^Audit framework — financial year 2024-25/);
 

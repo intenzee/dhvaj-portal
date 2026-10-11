@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type MaterialitySummary, type RevisionImpactItem } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -13,6 +22,7 @@ import {
   UpdateMaterialityDto,
   UpdateRevisionItemDto,
 } from './dto/materiality.dto';
+import { Section03LockGuard } from './section-03-lock.guard';
 
 /**
  * Statutory Audit — 03.3 Materiality. Reads gated by `engagement.read`,
@@ -21,6 +31,7 @@ import {
  */
 @ApiTags('engagements')
 @Controller('engagements')
+@UseGuards(Section03LockGuard)
 export class AuditMaterialityController {
   constructor(private readonly materiality: AuditMaterialityService) {}
 

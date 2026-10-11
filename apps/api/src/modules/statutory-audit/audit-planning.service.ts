@@ -16,6 +16,11 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import {
+  FRAMEWORK_GATE_LOCKED,
+  readFrameworkApprovalOn,
+  readFrameworkApprovalStateOn,
+} from './framework-approval-read';
 import { incompletePlanningCount } from './plan-risk';
 
 interface PlanningItemRow {
@@ -126,14 +131,12 @@ export class AuditPlanningService {
       [shellIds],
     );
 
-    // Whether each shell's framework is approved (the planning-approval gate).
-    const { rows: fwApproved } = await client.query<{ workflow_instance_id: string }>(
-      `SELECT DISTINCT workflow_instance_id
-         FROM hsdg.audit_framework_approvals
-        WHERE workflow_instance_id = ANY($1::uuid[])`,
-      [shellIds],
-    );
-    const frameworkApprovedSet = new Set(fwApproved.map((r) => r.workflow_instance_id));
+    // Each shell's 02.8 approval state (the planning gate, §14).
+    const fwState = await readFrameworkApprovalStateOn(client, shellIds);
+    const fwApproved = (id: string): boolean => {
+      const st = fwState.get(id);
+      return !!st && st.approved && st.planning.unlocked;
+    };
 
     return shells.map((shell) => {
       const shellItems = items.filter((i) => i.workflow_instance_id === shell.id);
@@ -143,14 +146,16 @@ export class AuditPlanningService {
         workflowInstanceId: shell.id,
         engagementServiceId: shell.engagement_service_id,
         engagementId: shell.engagement_id,
-        frameworkApproved: frameworkApprovedSet.has(shell.id),
+        frameworkApproved: fwApproved(shell.id),
+        frameworkGate: fwState.get(shell.id)?.planning ?? FRAMEWORK_GATE_LOCKED,
+        frameworkReopened: fwState.get(shell.id)?.reopened ?? false,
         items: shellItems.map(mapItem),
         materiality: mat ? mapMateriality(mat) : null,
         approval: latestApproval ? mapApproval(latestApproval) : null,
         incompleteCount: incompletePlanningCount(shellItems.map((i) => i.state)),
         pack: planPlanning({
           financialYear: shell.financial_year,
-          frameworkApproved: frameworkApprovedSet.has(shell.id),
+          frameworkApproved: fwApproved(shell.id),
           items: shellItems.map((i) => ({
             itemKey: i.item_key,
             title: i.title,
@@ -321,13 +326,18 @@ export class AuditPlanningService {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
 
-      const { rows: fw } = await client.query(
-        `SELECT 1 FROM hsdg.audit_framework_approvals WHERE workflow_instance_id = $1 LIMIT 1`,
-        [workflowInstanceId],
-      );
-      if (!fw[0]) {
-        throw new ConflictException('Approve the Framework Memo before approving Planning (§21).');
+      const fw = await readFrameworkApprovalOn(client, workflowInstanceId);
+      if (fw.reopened) {
+        throw new ConflictException(
+          `The Audit Framework was reopened (v${fw.currentVersion}); Planning approval waits for its re-approval in 02.8.`,
+        );
       }
+      if (!fw.approved) {
+        throw new ConflictException(
+          'The Engagement Partner must approve the Audit Framework (02.8 AF-02) before Planning is approved.',
+        );
+      }
+      if (!fw.planning.unlocked) throw new ConflictException(fw.planning.reason);
 
       const { rows: items } = await client.query<{ item_key: string; state: PlanningItemState }>(
         `SELECT item_key, state FROM hsdg.audit_planning_items

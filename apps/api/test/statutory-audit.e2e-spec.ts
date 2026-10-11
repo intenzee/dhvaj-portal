@@ -4,6 +4,7 @@ import type { StatutoryAuditCompletion } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { answerSection01, answerSection01Clean, recommendSection01 } from './section01.helper';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Statutory Audit — end-to-end acceptance + security (Audit Spec §35, §36). SA-10.
@@ -128,11 +129,7 @@ describe('Statutory Audit (e2e §35/§36)', () => {
         .send({ conclusion, basis: 'E2E professional basis.', version: a.version })
         .expect(201);
     }
-    await request(app.getHttpServer())
-      .post(`/api/v1/engagements/${engId}/statutory-audit/${shellId}/framework/approve`)
-      .set(bearer(pa))
-      .send({ memo: 'Framework approved (e2e).' })
-      .expect(201);
+    await approveFrameworkForTest(shellId);
   };
 
   const generate = async (

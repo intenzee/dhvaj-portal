@@ -23,7 +23,7 @@ export interface FrameworkApprovalState {
   planning: FrameworkPlanningGate;
 }
 
-const LOCKED: FrameworkPlanningGate = {
+export const FRAMEWORK_GATE_LOCKED: FrameworkPlanningGate = {
   unlocked: false,
   route: 'locked',
   reason: 'Section 03 opens once the Engagement Partner approves the Audit Framework (02.8).',
@@ -71,10 +71,11 @@ export async function readFrameworkApprovalStateOn(
   );
   for (const r of rows) {
     const everApproved = r.approved_id != null || r.legacy_approved;
+    // A file approved before 02.8 existed stays approved until 02.8 approves it.
     const approved =
-      r.current_status === 'approved' || (r.current_status == null && r.legacy_approved);
+      r.current_status === 'approved' || (r.approved_id == null && r.legacy_approved);
     const reopened = r.approved_id != null && r.current_status !== 'approved';
-    let planning: FrameworkPlanningGate = LOCKED;
+    let planning: FrameworkPlanningGate = FRAMEWORK_GATE_LOCKED;
     if (everApproved) {
       planning =
         r.blocking_conditions > 0

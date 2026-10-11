@@ -9,6 +9,7 @@ import {
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { answerSection01Clean, recommendSection01 } from './section01.helper';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Team plans itself from the file: planned hours estimated from the work each
@@ -126,7 +127,7 @@ describe('Statutory Audit — Team from the file (e2e)', () => {
         version: a.version,
       }).expect(201);
     }
-    await post(pa, `${base}/${shellId}/framework/approve`, { memo: 'Approved (e2e).' }).expect(201);
+    await approveFrameworkForTest(shellId);
 
     // The team: a senior and an article join the engagement.
     for (const [name, role] of [
