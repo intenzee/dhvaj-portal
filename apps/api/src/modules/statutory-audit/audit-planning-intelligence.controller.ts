@@ -22,15 +22,22 @@ import {
   UpdatePlanningIntelligenceDto,
 } from './dto/planning-intelligence.dto';
 import { Section03LockGuard } from './section-03-lock.guard';
+import {
+  PlanningCapabilityRequired,
+  PlanningGovernanceGuard,
+  PlanningLockExempt,
+} from './planning-governance.guard';
 
 /**
  * Statutory Audit — 03.1 Planning Intelligence & the Planning Signal Register.
- * Reads gated by `engagement.read`, mutations by `engagement.manage`; RLS does
- * the real gating (members read; EP/manager leads mutate).
+ * Reads need `engagement.read`. Each write also passes the §23 capability
+ * matrix and the 03.12 lock (`PlanningGovernanceGuard`): the team proposes
+ * signals and records facts, the Manager assesses and completes, the EP
+ * reviews. RLS remains the backstop.
  */
 @ApiTags('engagements')
 @Controller('engagements')
-@UseGuards(Section03LockGuard)
+@UseGuards(Section03LockGuard, PlanningGovernanceGuard)
 export class AuditPlanningIntelligenceController {
   constructor(private readonly intelligence: AuditPlanningIntelligenceService) {}
 
@@ -49,6 +56,7 @@ export class AuditPlanningIntelligenceController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-intelligence/generate')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({
     summary: 'Generate Engagement Intelligence signals from Section 01/02 facts',
     description: 'Idempotent: upserts by rule; never overwrites Manager assessments.',
@@ -107,6 +115,7 @@ export class AuditPlanningIntelligenceController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-intelligence')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Update 03.1 — AS-01 orientation, AS-02 scope, summary, status' })
   update(
     @CurrentPrincipal() principal: Principal,
@@ -124,6 +133,8 @@ export class AuditPlanningIntelligenceController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-intelligence/strategy-draft')
   @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired()
+  @PlanningLockExempt()
   @ApiOperation({ summary: 'Draft the Strategy Summary from structured data (not persisted)' })
   strategyDraft(
     @CurrentPrincipal() principal: Principal,
@@ -155,7 +166,8 @@ export class AuditPlanningIntelligenceController {
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-signals')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('proposeSignals', 'partnerSignals')
   @ApiOperation({ summary: 'Raise a Manager / Partner / prior-year Planning Signal' })
   createSignal(
     @CurrentPrincipal() principal: Principal,
@@ -173,6 +185,7 @@ export class AuditPlanningIntelligenceController {
 
   @Post(':id/statutory-audit/planning-signals/:signalId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Assess a Planning Signal in place' })
   assessSignal(
     @CurrentPrincipal() principal: Principal,
@@ -202,6 +215,7 @@ export class AuditPlanningIntelligenceController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/areas-of-focus')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('focusAreas')
   @ApiOperation({ summary: 'Create an Area of Focus grouping signals' })
   createFocus(
     @CurrentPrincipal() principal: Principal,
@@ -219,6 +233,7 @@ export class AuditPlanningIntelligenceController {
 
   @Post(':id/statutory-audit/areas-of-focus/:focusId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('focusAreas')
   @ApiOperation({ summary: 'Update an Area of Focus (and its linked signals)' })
   updateFocus(
     @CurrentPrincipal() principal: Principal,
@@ -247,7 +262,8 @@ export class AuditPlanningIntelligenceController {
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-changes')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('addFacts')
   @ApiOperation({ summary: 'Record a significant current-year change (PI-01)' })
   createChange(
     @CurrentPrincipal() principal: Principal,
@@ -264,7 +280,8 @@ export class AuditPlanningIntelligenceController {
   }
 
   @Post(':id/statutory-audit/planning-changes/:changeId')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('addFacts')
   @ApiOperation({ summary: 'Update a significant change (optionally generate its signal)' })
   updateChange(
     @CurrentPrincipal() principal: Principal,

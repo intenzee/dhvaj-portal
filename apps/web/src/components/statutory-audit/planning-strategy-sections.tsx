@@ -36,6 +36,9 @@ import { useToast } from '@/lib/toast';
 import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { DiscussionActions } from './planning-discussion-actions';
+import { PlanningEvidence } from './planning-evidence';
+import { usePlanningGov } from './planning-governance';
 
 /**
  * 03.1 remaining sub-sections (DHVAJ 03.1 §13.2–13.3, §14–§16, §18, §20):
@@ -46,7 +49,7 @@ import { Field, Input, Select, Textarea } from '@/components/form';
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
-const MATTER_CATEGORY_LABEL: Record<PlanningMatterCategory, string> = {
+export const MATTER_CATEGORY_LABEL: Record<PlanningMatterCategory, string> = {
   scope: 'Scope',
   information: 'Information',
   timing: 'Timing',
@@ -401,6 +404,7 @@ export function CarriedMattersSection({
   });
   const [adding, setAdding] = useState(false);
   const toast = useToast();
+  const mayAddFacts = usePlanningGov().can('addFacts');
   const bringForward = useMutation({
     mutationFn: () =>
       apiFetch<{ matters: PriorYearMatterRecord[]; added: number }>(
@@ -446,17 +450,19 @@ export function CarriedMattersSection({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium text-ink">03.1.6 · Prior-year intelligence</div>
-          {editable && !adding && !initialAudit && (
+          {(editable || mayAddFacts) && !adding && !initialAudit && (
             <div className="flex flex-wrap gap-1">
-              <Button
-                variant="ghost"
-                onClick={() => bringForward.mutate()}
-                disabled={bringForward.isPending}
-                title="Significant risks, Areas of Focus, blocking review notes and high-severity exceptions from last year's file"
-              >
-                <History className="mr-1.5 h-4 w-4" />
-                Bring forward from last year’s file
-              </Button>
+              {editable && (
+                <Button
+                  variant="ghost"
+                  onClick={() => bringForward.mutate()}
+                  disabled={bringForward.isPending}
+                  title="Significant risks, Areas of Focus, blocking review notes and high-severity exceptions from last year's file"
+                >
+                  <History className="mr-1.5 h-4 w-4" />
+                  Bring forward from last year’s file
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => setAdding(true)}>
                 <Plus className="mr-1.5 h-4 w-4" />
                 Add prior-year matter
@@ -613,6 +619,7 @@ function AcceptanceCard({
           </div>
         </div>
       )}
+      <PlanningEvidence targetType="acceptance" targetId={a.matterId} />
     </Card>
   );
 }
@@ -734,6 +741,7 @@ function PriorYearCard({
         </div>
       )}
       {!editable && m.assessmentNote && <p className="text-xs text-ink-muted">{m.assessmentNote}</p>}
+      <PlanningEvidence targetType="prior_year" targetId={m.id} />
     </Card>
   );
 }
@@ -824,16 +832,22 @@ export function DiscussionSection({
   });
   if (discussion.isLoading || !discussion.data) return <Spinner label="Loading discussion…" />;
   return (
-    <DiscussionForm
-      key={discussion.data.version}
-      base={base}
-      record={discussion.data}
-      team={team}
-      signals={signals}
-      focus={focus}
-      editable={editable}
-      onChanged={onChanged}
-    />
+    <div className="space-y-4">
+      <DiscussionForm
+        key={discussion.data.version}
+        base={base}
+        record={discussion.data}
+        team={team}
+        signals={signals}
+        focus={focus}
+        editable={editable}
+        onChanged={onChanged}
+      />
+      {discussion.data.id && (
+        <PlanningEvidence targetType="discussion" targetId={discussion.data.id} />
+      )}
+      <DiscussionActions qk={qk} team={team} onChanged={onChanged} />
+    </div>
   );
 }
 
@@ -948,8 +962,8 @@ function DiscussionForm({
   return (
     <div className="space-y-3">
       <p className="text-xs text-ink-muted">
-        Capture the initial engagement-team discussion in structured form — no long minutes. Raise
-        actions in the Planning matters tab and new matters as signals in the register.
+        Capture the initial engagement-team discussion in structured form — no long minutes. Record
+        the actions agreed and any new matter as a Planning Signal below.
       </p>
       <Card className="space-y-3 p-3">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1109,6 +1123,13 @@ function MatterCard({
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
+  const gov = usePlanningGov();
+  // §23: without the discussion right, the owner still progresses their own action.
+  const ownerOnly =
+    !editable &&
+    !!m.ownerEmployeeId &&
+    m.ownerEmployeeId === gov.view?.access.employeeId &&
+    gov.can('addFacts');
   const [status, setStatus] = useState<PlanningMatterStatus>(m.status);
   const [owner, setOwner] = useState(m.ownerEmployeeId ?? '');
   const [resolution, setResolution] = useState(m.resolution ?? '');
@@ -1123,7 +1144,7 @@ function MatterCard({
           method: 'POST',
           body: {
             status,
-            ownerEmployeeId: owner || undefined,
+            ownerEmployeeId: ownerOnly ? undefined : owner || undefined,
             resolution: resolution || undefined,
             version: m.version,
           },
@@ -1164,7 +1185,7 @@ function MatterCard({
       {m.resolution && m.status === 'resolved' && (
         <p className="text-xs text-ink-muted">Resolution: {m.resolution}</p>
       )}
-      {editable && m.status !== 'resolved' && (
+      {(editable || ownerOnly) && m.status !== 'resolved' && (
         <div className="flex flex-wrap items-end gap-2 rounded-lg bg-surface-raised p-2">
           <div className="w-40">
             <Select value={status} onChange={(e) => setStatus(e.target.value as PlanningMatterStatus)}>
@@ -1176,7 +1197,7 @@ function MatterCard({
             </Select>
           </div>
           <div className="w-48">
-            <Select value={owner} onChange={(e) => setOwner(e.target.value)}>
+            <Select value={owner} onChange={(e) => setOwner(e.target.value)} disabled={ownerOnly}>
               <option value="">— Owner —</option>
               {team.map((t) => (
                 <option key={t.employeeId} value={t.employeeId}>
