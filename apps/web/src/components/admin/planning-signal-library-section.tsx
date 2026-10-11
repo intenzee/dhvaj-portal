@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   PLANNING_ATTENTION_LABEL,
   PLANNING_ATTENTIONS,
+  PLANNING_DESTINATION_LABEL,
   PLANNING_DESTINATIONS,
   PLANNING_RULE_TRIGGER_SOURCE_LABEL,
   PLANNING_RULE_TRIGGER_SOURCES,
@@ -22,16 +23,6 @@ import { Field, Input, Select, Textarea } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 
 const LIBRARY_KEY = ['planning-signal-rules'];
-
-const DESTINATION_LABEL: Record<PlanningDestination, string> = {
-  '03.4': '03.4 Materiality',
-  '03.5': '03.5 Area review',
-  '03.6': '03.6 Risks',
-  '03.8': '03.8 Team',
-  '03.9': '03.9 Components',
-  '03.11': '03.11 Timeline',
-  section_04: 'Section 04',
-};
 
 const ATTENTION_TONE: Record<PlanningAttention, 'neutral' | 'warn' | 'danger'> = {
   standard: 'neutral',
@@ -177,7 +168,7 @@ function RuleDetail({ rule }: { rule: PlanningSignalRuleRecord }): JSX.Element {
       <dt className="text-ink-muted">Potential implications</dt>
       <dd>{rule.potentialImplications}</dd>
       <dt className="text-ink-muted">Flows to</dt>
-      <dd>{rule.destinations.map((d) => DESTINATION_LABEL[d]).join(', ') || '—'}</dd>
+      <dd>{rule.destinations.map((d) => PLANNING_DESTINATION_LABEL[d]).join(', ') || '—'}</dd>
       <dt className="text-ink-muted">Guidance</dt>
       <dd className="font-mono text-xs">{rule.guidanceAnchors.join(', ') || '—'}</dd>
       <dt className="text-ink-muted">Source link</dt>
@@ -420,7 +411,7 @@ function RuleVersionForm({
                 checked={destinations.includes(d)}
                 onChange={() => toggleDestination(d)}
               />
-              {DESTINATION_LABEL[d]}
+              {PLANNING_DESTINATION_LABEL[d]}
             </label>
           ))}
         </div>

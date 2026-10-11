@@ -183,11 +183,16 @@ export function renderTemplate(template: string, facts: PlanningFacts): string {
     });
     return empty ? '' : out;
   });
-  return withOptional
-    .replace(PLACEHOLDER, (_, key: string) => formatFact(facts[key]))
-    .replace(/\s+([.,;:])/g, '$1')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  return (
+    withOptional
+      .replace(PLACEHOLDER, (_, key: string) => formatFact(facts[key]))
+      .replace(/\s+([.,;:])/g, '$1')
+      // A user-typed fact that already ends its sentence ("…converted.") before the
+      // template's own full stop, which it absorbs (an ellipsis stays three dots).
+      .replace(/([^.][!?.]|\.\.\.)\.(?=\s|$)/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+  );
 }
 
 // ── versions ────────────────────────────────────────────────────────────────
