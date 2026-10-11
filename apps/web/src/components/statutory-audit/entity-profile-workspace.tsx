@@ -174,9 +174,10 @@ export const SECTION_ANCHOR: Record<string, string> = {
   '02.5': 'framework-02-5',
   '02.6': 'framework-02-4',
   '02.7': 'framework-02-5',
-  '02.8': 'framework-02-8',
-  '02.9': 'framework-02-8',
-  '02.10': 'framework-02-10',
+  // 02.8 / 02.9 are Phase-02 area cards; 02.10 is the 02.8 summary & approval.
+  '02.8': 'framework-02-areas',
+  '02.9': 'framework-02-areas',
+  '02.10': 'framework-02-8',
 };
 
 /** Where each card's facts come from (spec §4–§13, shown in the context panel). */

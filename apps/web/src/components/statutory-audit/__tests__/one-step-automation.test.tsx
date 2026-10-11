@@ -51,7 +51,8 @@ describe('one-step automation for the team', () => {
         url.endsWith('/icfr') ||
         url.endsWith('/other-reporting') ||
         url.endsWith('/financial-reporting') ||
-        url.endsWith('/schedule-iii')
+        url.endsWith('/schedule-iii') ||
+        url.endsWith('/framework-summary')
       )
         return Promise.resolve([]);
       if (url.endsWith('/accept-suggestions')) return Promise.resolve({});

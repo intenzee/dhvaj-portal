@@ -66,7 +66,7 @@ export function PlanningPanel({
   const qc = useQueryClient();
   const toast = useToast();
   const { principal } = useAuth();
-  const canManage = can(principal, PERMISSION.engagementManage);
+  const mayManage = can(principal, PERMISSION.engagementManage);
 
   const query = useQuery({
     queryKey: PLANNING_QK(engagementId),
@@ -116,12 +116,30 @@ export function PlanningPanel({
     planning.items.find((i) => i.state !== 'complete') ??
     planning.items[0];
 
+  // 02.8 §14: Section 03 is read-only until the Audit Framework is approved.
+  const canManage = mayManage && planning.frameworkGate.unlocked;
   const approved = planning.approval != null;
   const ready = planning.pack.ready;
   const editable = canManage && !approved;
 
   return (
     <div className="space-y-3">
+      {!planning.frameworkGate.unlocked && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700"
+        >
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            <span className="font-medium">Section 03 is locked.</span> {planning.frameworkGate.reason}
+          </span>
+        </div>
+      )}
+      {planning.frameworkGate.route === 'conditional' && (
+        <p className="rounded-lg bg-primary-50 px-4 py-2 text-xs text-primary-700">
+          {planning.frameworkGate.reason}
+        </p>
+      )}
       <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div>
           <h2 className="text-sm font-semibold text-ink">Planning · Phase 03</h2>
@@ -135,7 +153,11 @@ export function PlanningPanel({
             ) : !planning.frameworkApproved ? (
               <span className="inline-flex items-center gap-1.5">
                 <Lock className="h-3.5 w-3.5" />
-                Approve the Framework (Phase 02) before approving Planning.
+                {planning.frameworkReopened
+                  ? 'The Audit Framework was reopened — Planning approval waits for its re-approval (02.8).'
+                  : !planning.frameworkGate.unlocked
+                    ? planning.frameworkGate.reason
+                    : 'The Engagement Partner must approve the Audit Framework (02.8) before Planning is approved.'}
               </span>
             ) : planning.incompleteCount === 0 ? (
               'All sub-areas complete — ready to approve.'
