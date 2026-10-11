@@ -35,6 +35,8 @@ import {
   type PlanningSignalRecord,
   type PlanningSignalSource,
   type PlanningSignalStatus,
+  type EngagementIntelligenceView,
+  type FocusPickLists,
   type UpdateAreaOfFocusInput,
   type UpdatePlanningChangeInput,
   type UpdatePlanningIntelligenceInput,
@@ -46,18 +48,26 @@ import {
   PRIOR_YEAR_ASSESSMENT_LABEL,
   PRIOR_YEAR_MATTER_TYPE_LABEL,
   ACCEPTANCE_CARRY_FORWARD_ACTION_LABEL,
-  specialistLabels,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditPlanningStrategyService } from './audit-planning-strategy.service';
 import { AuditAreaReviewService } from './audit-area-review.service';
+import { readFrameworkApprovalOn } from './framework-approval-read';
+import { readFrameworkEngagementOn } from './framework-summary-inputs';
 import { isEngagementLead } from './master-facts';
 import {
+  readPlanningIntelligenceFactsOn,
+  type PlanningIntelligenceFacts,
+} from './planning-intelligence-facts';
+import {
+  deriveChangeSignal,
   deriveEngagementSignals,
-  type EngagementIntelligenceFacts,
-} from './planning-signals-generation';
+  type DerivedSignal,
+  type PlanningFacts,
+} from './planning-signal-library';
+import { readSignalRulesOn } from './planning-signal-rules';
 import {
   assertShell,
   assertSignalsInShell,
@@ -91,6 +101,12 @@ interface SignalRow {
   destinations: PlanningDestination[];
   status: PlanningSignalStatus;
   is_auto: boolean;
+  rule_code: string | null;
+  rule_version: number | null;
+  guidance_anchors: string[] | null;
+  source_section: string | null;
+  source_changed_at: Date | null;
+  source_change_acknowledged_at: Date | null;
   document_id: string | null;
   version: number;
   created_at: Date;
@@ -105,6 +121,7 @@ interface FocusRow {
   name: string;
   why_requires_attention: string | null;
   potential_fs_areas: string[];
+  potential_assertions: string[] | null;
   expected_strategic_implication: string | null;
   partner_attention: boolean;
   destinations: PlanningDestination[];
@@ -143,10 +160,19 @@ interface IntelligenceRow {
   prior_year_reviewed: boolean;
   strategy_summary: string | null;
   intelligence_generated_at: Date | null;
+  intelligence_reviewed_at: Date | null;
+  intelligence_reviewed_by_employee_id: string | null;
+  reviewed_by_name?: string | null;
+  facts_fingerprint: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
 }
+
+const INTELLIGENCE_SELECT = `
+  SELECT i.*, rv.full_name AS reviewed_by_name
+    FROM hsdg.audit_planning_intelligence i
+    LEFT JOIN hsdg.employees rv ON rv.id = i.intelligence_reviewed_by_employee_id`;
 
 const SIGNAL_SELECT = `
   SELECT s.id, s.workflow_instance_id, s.engagement_id, s.seq, s.source, s.rule_key,
@@ -154,13 +180,15 @@ const SIGNAL_SELECT = `
          s.potential_implications, s.suggested_attention, s.attention,
          s.attention_rationale, s.manager_assessment, s.assessment_rationale,
          owner.full_name AS owner_name, s.destinations, s.status, s.is_auto,
+         s.rule_code, s.rule_version, s.guidance_anchors, s.source_section,
+         s.source_changed_at, s.source_change_acknowledged_at,
          s.document_id, s.version, s.created_at, s.updated_at
     FROM hsdg.audit_planning_signal s
     LEFT JOIN hsdg.employees owner ON owner.id = s.owner_employee_id`;
 
 const FOCUS_SELECT = `
   SELECT f.id, f.workflow_instance_id, f.engagement_id, f.seq, f.name,
-         f.why_requires_attention, f.potential_fs_areas,
+         f.why_requires_attention, f.potential_fs_areas, f.potential_assertions,
          f.expected_strategic_implication, f.partner_attention, f.destinations,
          f.status, f.version, f.created_at, f.updated_at,
          (SELECT array_agg(fs.signal_id ORDER BY fs.created_at)
@@ -202,13 +230,23 @@ export class AuditPlanningIntelligenceService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       let record = await this.ensureRecord(client, engagementId, workflowInstanceId);
-      // First open by a lead derives the engagement intelligence on its own, and
-      // brings last year's matters forward — no "Generate" button to find.
-      if (!record.intelligenceGeneratedAt && (await isEngagementLead(client, engagementId))) {
-        record = mapIntelligence(
-          await this.generateOn(client, ctx, engagementId, workflowInstanceId, true),
-        );
-        await this.strategy.importPriorYearOn(client, ctx, engagementId, workflowInstanceId);
+      // A lead's open keeps the intelligence current without a "Generate"
+      // button: the first open derives it (and brings last year's matters
+      // forward); a later open re-derives it when the Section 01/02 facts
+      // moved. Nothing generates while Section 03 is still locked (02.8 AF-02).
+      if (await isEngagementLead(client, engagementId)) {
+        const gate = (await readFrameworkApprovalOn(client, workflowInstanceId)).planning;
+        if (gate.unlocked) {
+          const first = !record.intelligenceGeneratedAt;
+          const facts = await readPlanningIntelligenceFactsOn(client, workflowInstanceId);
+          if (first || (await this.factsMoved(client, workflowInstanceId, facts))) {
+            await this.generateOn(client, ctx, engagementId, workflowInstanceId, true, facts);
+            if (first) {
+              await this.strategy.importPriorYearOn(client, ctx, engagementId, workflowInstanceId);
+            }
+            record = await this.readRecord(client, workflowInstanceId);
+          }
+        }
       }
       return this.buildSummary(client, workflowInstanceId, record);
     });
@@ -216,9 +254,10 @@ export class AuditPlanningIntelligenceService {
 
   /**
    * 03.1.1 Engagement Intelligence — derive baseline signals from Section 01/02
-   * facts. Idempotent: upserts by rule_key and refreshes the factual text, but
-   * never overwrites the Manager's attention, assessment, owner or status, and
-   * never silently deletes a signal whose source fact has since changed.
+   * facts through the Planning Signal Library. Idempotent: upserts by rule_key
+   * and refreshes the factual text, but never overwrites the Manager's
+   * attention, assessment, owner or status, and never deletes a signal whose
+   * source fact has since changed — it is flagged for reassessment instead.
    */
   async generateIntelligence(
     ctx: RlsContext,
@@ -227,106 +266,293 @@ export class AuditPlanningIntelligenceService {
   ): Promise<PlanningIntelligenceSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      const row = await this.generateOn(client, ctx, engagementId, workflowInstanceId);
-      return this.buildSummary(client, workflowInstanceId, mapIntelligence(row));
+      const gate = (await readFrameworkApprovalOn(client, workflowInstanceId)).planning;
+      if (!gate.unlocked) throw new ConflictException(gate.reason);
+      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      await this.generateOn(client, ctx, engagementId, workflowInstanceId);
+      return this.buildSummary(
+        client,
+        workflowInstanceId,
+        await this.readRecord(client, workflowInstanceId),
+      );
     });
   }
 
-  /** Derive and upsert the 03.1.1 signals; returns the updated 03.1 record row. */
+  /**
+   * §5 "Review Engagement Intelligence" — the Manager confirms the generated
+   * facts and signals. A later regeneration that changes a signal clears it.
+   */
+  async reviewIntelligence(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<PlanningIntelligenceSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+      if (!record.intelligenceGeneratedAt) {
+        throw new ConflictException('Engagement Intelligence has not been generated yet.');
+      }
+      await client.query(
+        `UPDATE hsdg.audit_planning_intelligence
+            SET intelligence_reviewed_at = now(),
+                intelligence_reviewed_by_employee_id = $2,
+                version = version + 1
+          WHERE workflow_instance_id = $1`,
+        [workflowInstanceId, ctx.employeeId ?? null],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.planning_intelligence_reviewed',
+        objectType: 'audit_planning_intelligence',
+        objectId: record.id,
+      });
+      return this.buildSummary(
+        client,
+        workflowInstanceId,
+        await this.readRecord(client, workflowInstanceId),
+      );
+    });
+  }
+
+  /** §5 read-only facts panel: the confirmed Section 01/02 facts, grouped, with links. */
+  async getIntelligenceFacts(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<EngagementIntelligenceView> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const gate = (await readFrameworkApprovalOn(client, workflowInstanceId)).planning;
+      const facts = await readPlanningIntelligenceFactsOn(client, workflowInstanceId);
+      const { rows } = await client.query<IntelligenceRow>(
+        `${INTELLIGENCE_SELECT} WHERE i.workflow_instance_id = $1`,
+        [workflowInstanceId],
+      );
+      const { rows: changed } = await client.query<{ n: string }>(
+        `SELECT count(*) AS n FROM hsdg.audit_planning_signal
+          WHERE workflow_instance_id = $1 AND source_changed_at IS NOT NULL
+            AND source_change_acknowledged_at IS NULL AND status <> 'closed'`,
+        [workflowInstanceId],
+      );
+      const r = rows[0];
+      return {
+        gate: { unlocked: gate.unlocked, route: gate.route, reason: gate.reason },
+        groups: facts.groups,
+        generatedAt: r?.intelligence_generated_at?.toISOString() ?? null,
+        reviewedAt: r?.intelligence_reviewed_at?.toISOString() ?? null,
+        reviewedByName: r?.reviewed_by_name ?? null,
+        stale:
+          !!r?.intelligence_generated_at &&
+          r.facts_fingerprint !== null &&
+          r.facts_fingerprint !== facts.fingerprint,
+        sourceChangedSignals: Number(changed[0]?.n ?? 0),
+      };
+    });
+  }
+
+  /** §11 pick-lists: FS areas from the 03.5 audit-area library, assertions from the master. */
+  async getFocusPickLists(ctx: RlsContext): Promise<FocusPickLists> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows: areas } = await client.query<{
+        area_code: string;
+        area_name: string;
+        category: string | null;
+      }>(
+        `SELECT DISTINCT ON (area_code) area_code, area_name, category
+           FROM hsdg.audit_area_library
+          WHERE active AND (effective_to IS NULL OR effective_to >= current_date)
+          ORDER BY area_code, library_version DESC`,
+      );
+      const { rows: assertions } = await client.query<{
+        id: string;
+        assertion_group: string;
+        label: string;
+      }>(
+        `SELECT id, assertion_group, label FROM hsdg.audit_assertion
+          WHERE active ORDER BY sort_order, label`,
+      );
+      return {
+        fsAreas: areas
+          .map((a) => ({ code: a.area_code, name: a.area_name, category: a.category }))
+          .sort(
+            (a, b) =>
+              (a.category ?? '').localeCompare(b.category ?? '') || a.name.localeCompare(b.name),
+          ),
+        assertions: assertions.map((a) => ({
+          id: a.id,
+          group: a.assertion_group,
+          label: a.label,
+        })),
+      };
+    });
+  }
+
+  /** True when the Section 01/02 facts differ from those the last generation read. */
+  private async factsMoved(
+    client: PoolClient,
+    workflowInstanceId: string,
+    facts: PlanningIntelligenceFacts,
+  ): Promise<boolean> {
+    const { rows } = await client.query<{ facts_fingerprint: string | null }>(
+      `SELECT facts_fingerprint FROM hsdg.audit_planning_intelligence
+        WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    return (rows[0]?.facts_fingerprint ?? null) !== facts.fingerprint;
+  }
+
+  /**
+   * Derive and upsert the 03.1.1 signals from the library. Text refreshes only
+   * when it changed (a re-run never bumps `version` under a Manager's open
+   * form); an auto signal whose rule no longer fires gets `source_changed_at`.
+   * The generation stamp moves only when something changed, so a regeneration
+   * that finds nothing new keeps the Manager's review.
+   */
   private async generateOn(
     client: PoolClient,
     ctx: RlsContext,
     engagementId: string,
     workflowInstanceId: string,
     automatic = false,
-  ): Promise<IntelligenceRow> {
-    {
-      await this.ensureRecord(client, engagementId, workflowInstanceId);
+    preRead?: PlanningIntelligenceFacts,
+  ): Promise<void> {
+    const facts = preRead ?? (await readPlanningIntelligenceFactsOn(client, workflowInstanceId));
+    const rules = await readSignalRulesOn(client);
+    const derived = deriveEngagementSignals(rules, facts.facts, facts.periodEnd);
 
-      const facts = await this.readFacts(client, workflowInstanceId);
-      const derived = deriveEngagementSignals(facts);
+    const { rows: existingRows } = await client.query<{ rule_key: string }>(
+      `SELECT rule_key FROM hsdg.audit_planning_signal
+        WHERE workflow_instance_id = $1 AND rule_key IS NOT NULL`,
+      [workflowInstanceId],
+    );
+    const existing = new Set(existingRows.map((r) => r.rule_key));
 
-      let nextSeq = await maxSeq(client, 'audit_planning_signal', workflowInstanceId);
-      let created = 0;
-      for (const d of derived) {
-        const { rows: existing } = await client.query(
-          `SELECT 1 FROM hsdg.audit_planning_signal
-            WHERE workflow_instance_id = $1 AND rule_key = $2`,
-          [workflowInstanceId, d.ruleKey],
+    let nextSeq = await maxSeq(client, 'audit_planning_signal', workflowInstanceId);
+    let created = 0;
+    let refreshed = 0;
+    for (const d of derived) {
+      if (existing.has(d.ruleKey)) {
+        refreshed += await this.refreshAutoSignal(client, workflowInstanceId, d);
+      } else {
+        nextSeq += 1;
+        const ins = await client.query(
+          `INSERT INTO hsdg.audit_planning_signal
+             (workflow_instance_id, engagement_id, seq, source, rule_key, source_link,
+              observation, why_may_matter, potential_implications,
+              suggested_attention, attention, destinations, is_auto,
+              rule_code, rule_version, guidance_anchors, source_section)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, true, $12, $13, $14, $15)
+           ON CONFLICT DO NOTHING`,
+          [
+            workflowInstanceId,
+            engagementId,
+            nextSeq,
+            d.source,
+            d.ruleKey,
+            d.sourceLink,
+            d.observation,
+            d.whyMayMatter,
+            d.potentialImplications,
+            d.suggestedAttention,
+            d.destinations,
+            d.ruleCode,
+            d.ruleVersion,
+            d.guidanceAnchors,
+            d.sourceSection,
+          ],
         );
-        if (existing[0]) {
-          // Refresh the factual text only when it actually changed, so a
-          // re-run never bumps `version` under a Manager's open form.
-          await client.query(
-            `UPDATE hsdg.audit_planning_signal
-                SET observation = $3,
-                    why_may_matter = $4,
-                    potential_implications = $5,
-                    suggested_attention = $6,
-                    source_link = $7,
-                    version = version + 1
-              WHERE workflow_instance_id = $1 AND rule_key = $2
-                AND (observation, why_may_matter, potential_implications,
-                     suggested_attention, source_link)
-                    IS DISTINCT FROM ($3, $4, $5, $6, $7)`,
-            [
-              workflowInstanceId,
-              d.ruleKey,
-              d.observation,
-              d.whyMayMatter,
-              d.potentialImplications,
-              d.suggestedAttention,
-              d.sourceLink,
-            ],
-          );
-        } else {
-          nextSeq += 1;
-          const ins = await client.query(
-            `INSERT INTO hsdg.audit_planning_signal
-               (workflow_instance_id, engagement_id, seq, source, rule_key, source_link,
-                observation, why_may_matter, potential_implications,
-                suggested_attention, attention, destinations, is_auto)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, true)
-             ON CONFLICT DO NOTHING`,
-            [
-              workflowInstanceId,
-              engagementId,
-              nextSeq,
-              d.source,
-              d.ruleKey,
-              d.sourceLink,
-              d.observation,
-              d.whyMayMatter,
-              d.potentialImplications,
-              d.suggestedAttention,
-              d.destinations,
-            ],
-          );
-          created += ins.rowCount ?? 0;
-        }
+        created += ins.rowCount ?? 0;
       }
-
-      await this.strategy.syncConsiderations(client, engagementId, workflowInstanceId);
-
-      const { rows } = await client.query<IntelligenceRow>(
-        `UPDATE hsdg.audit_planning_intelligence
-            SET intelligence_generated_at = now(),
-                status = CASE WHEN status = 'not_started' THEN 'intelligence_generated'
-                              ELSE status END,
-                version = version + 1
-          WHERE workflow_instance_id = $1
-        RETURNING *`,
-        [workflowInstanceId],
-      );
-      await this.rollUpStrategyItem(client, ctx, workflowInstanceId, rows[0]!.status);
-      await this.audit.recordWith(client, ctx, {
-        action: 'statutory_audit.planning_intelligence_generated',
-        objectType: 'service_workflow_instance',
-        objectId: workflowInstanceId,
-        after: { derived: derived.length, created, ...(automatic && { automatic }) },
-      });
-      return rows[0]!;
     }
+
+    // A Section 01/02 fact that no longer holds: flag (never delete) its signal.
+    const gone = await client.query(
+      `UPDATE hsdg.audit_planning_signal
+          SET source_changed_at = now(), source_change_acknowledged_at = NULL,
+              version = version + 1
+        WHERE workflow_instance_id = $1 AND is_auto AND rule_key IS NOT NULL
+          AND source IN ('section_01','section_02') AND source_changed_at IS NULL
+          AND NOT (rule_key = ANY($2::text[]))`,
+      [workflowInstanceId, derived.map((d) => d.ruleKey)],
+    );
+    const sourceChanged = gone.rowCount ?? 0;
+    const changed = created + refreshed + sourceChanged;
+
+    await this.strategy.syncConsiderations(client, engagementId, workflowInstanceId);
+    if (created + sourceChanged > 0) {
+      // §25 (03.5): new or changed intelligence can make a completed 03.5 Update Required.
+      await this.areaReview.markImpacted(client, workflowInstanceId);
+    }
+
+    const { rows } = await client.query<{ status: PlanningIntelligenceStatus }>(
+      `UPDATE hsdg.audit_planning_intelligence
+          SET intelligence_generated_at =
+                CASE WHEN $2::boolean OR intelligence_generated_at IS NULL THEN now()
+                     ELSE intelligence_generated_at END,
+              facts_fingerprint = $3,
+              status = CASE WHEN status = 'not_started' THEN 'intelligence_generated'
+                            ELSE status END,
+              version = version + 1
+        WHERE workflow_instance_id = $1
+      RETURNING status`,
+      [workflowInstanceId, changed > 0, facts.fingerprint],
+    );
+    await this.rollUpStrategyItem(client, ctx, workflowInstanceId, rows[0]!.status);
+    await this.audit.recordWith(client, ctx, {
+      action: 'statutory_audit.planning_intelligence_generated',
+      objectType: 'service_workflow_instance',
+      objectId: workflowInstanceId,
+      after: {
+        derived: derived.length,
+        created,
+        refreshed,
+        sourceChanged,
+        ...(automatic && { automatic }),
+      },
+    });
+  }
+
+  /** Refresh one auto signal's library-owned fields; returns 1 when it changed. */
+  private async refreshAutoSignal(
+    client: PoolClient,
+    workflowInstanceId: string,
+    d: DerivedSignal,
+  ): Promise<number> {
+    const res = await client.query(
+      `UPDATE hsdg.audit_planning_signal
+          SET observation = $3,
+              why_may_matter = $4,
+              potential_implications = $5,
+              suggested_attention = $6,
+              source_link = $7,
+              rule_code = $8,
+              rule_version = $9,
+              guidance_anchors = $10,
+              source_section = $11,
+              source_changed_at = NULL,
+              source_change_acknowledged_at = NULL,
+              version = version + 1
+        WHERE workflow_instance_id = $1 AND rule_key = $2
+          AND (observation, why_may_matter, potential_implications, suggested_attention,
+               source_link, rule_code, rule_version, guidance_anchors, source_section,
+               source_changed_at)
+              IS DISTINCT FROM ($3, $4, $5, $6, $7, $8, $9::integer, $10::text[], $11,
+                                NULL::timestamptz)`,
+      [
+        workflowInstanceId,
+        d.ruleKey,
+        d.observation,
+        d.whyMayMatter,
+        d.potentialImplications,
+        d.suggestedAttention,
+        d.sourceLink,
+        d.ruleCode,
+        d.ruleVersion,
+        d.guidanceAnchors,
+        d.sourceSection,
+      ],
+    );
+    return res.rowCount ?? 0;
   }
 
   /** Update the 03.1 record: AS-01 orientation, AS-02 scope, strategy summary, status. */
@@ -387,7 +613,11 @@ export class AuditPlanningIntelligenceService {
         objectId: row.id,
         after: { status: row.status, orientation: row.orientation },
       });
-      return this.buildSummary(client, workflowInstanceId, mapIntelligence(row));
+      return this.buildSummary(
+        client,
+        workflowInstanceId,
+        await this.readRecord(client, workflowInstanceId),
+      );
     });
   }
 
@@ -486,9 +716,10 @@ export class AuditPlanningIntelligenceService {
         manager_assessment: PlanningSignalAssessment | null;
         assessment_rationale: string | null;
         owner_employee_id: string | null;
+        source_changed_at: Date | null;
       }>(
         `SELECT workflow_instance_id, suggested_attention, attention, attention_rationale,
-                manager_assessment, assessment_rationale, owner_employee_id
+                manager_assessment, assessment_rationale, owner_employee_id, source_changed_at
            FROM hsdg.audit_planning_signal
           WHERE id = $1 AND engagement_id = $2`,
         [signalId, engagementId],
@@ -550,6 +781,11 @@ export class AuditPlanningIntelligenceService {
                 destinations = COALESCE($8::text[], destinations),
                 status = COALESCE($9, status),
                 document_id = CASE WHEN $10::boolean THEN $11 ELSE document_id END,
+                -- Saving an assessment after the source fact changed is the
+                -- Manager's reassessment of that change (§5).
+                source_change_acknowledged_at =
+                  CASE WHEN source_changed_at IS NOT NULL THEN now()
+                       ELSE source_change_acknowledged_at END,
                 version = version + 1
           WHERE id = $1 AND version = $2`,
         [
@@ -592,7 +828,12 @@ export class AuditPlanningIntelligenceService {
         objectType: 'audit_planning_signal',
         objectId: signalId,
         before: { attention: current.attention, managerAssessment: current.manager_assessment },
-        after: { attention: nextAttention, managerAssessment: nextAssessment, status: nextStatus },
+        after: {
+          attention: nextAttention,
+          managerAssessment: nextAssessment,
+          status: nextStatus,
+          ...(current.source_changed_at && { sourceChangeAcknowledged: true }),
+        },
       });
       return this.readSignalById(client, signalId);
     });
@@ -628,8 +869,8 @@ export class AuditPlanningIntelligenceService {
         `INSERT INTO hsdg.audit_area_of_focus
            (workflow_instance_id, engagement_id, seq, name, why_requires_attention,
             potential_fs_areas, expected_strategic_implication, partner_attention,
-            destinations)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            destinations, potential_assertions)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
         [
           workflowInstanceId,
@@ -641,6 +882,7 @@ export class AuditPlanningIntelligenceService {
           clean(input.expectedStrategicImplication),
           input.partnerAttention ?? false,
           input.destinations ?? [],
+          cleanList(input.potentialAssertions),
         ],
       );
       const id = rows[0]!.id;
@@ -693,6 +935,7 @@ export class AuditPlanningIntelligenceService {
                 partner_attention = COALESCE($9, partner_attention),
                 destinations = COALESCE($10::text[], destinations),
                 status = COALESCE($11, status),
+                potential_assertions = COALESCE($12::text[], potential_assertions),
                 version = version + 1
           WHERE id = $1 AND version = $2`,
         [
@@ -707,6 +950,7 @@ export class AuditPlanningIntelligenceService {
           input.partnerAttention ?? null,
           input.destinations ?? null,
           input.status ?? null,
+          input.potentialAssertions ? cleanList(input.potentialAssertions) : null,
         ],
       );
       if ((result.rowCount ?? 0) === 0) {
@@ -863,7 +1107,12 @@ export class AuditPlanningIntelligenceService {
 
   // ── internals ──────────────────────────────────────────────────────────────
 
-  /** Generate the one Planning Signal a change may produce, and link it. */
+  /**
+   * Generate the one Planning Signal a change may produce, and link it. The
+   * category's library rule supplies why it may matter, the implications, the
+   * destinations, the attention and the guidance (§6); a category with no rule
+   * in force falls back to a neutral Standard signal.
+   */
   private async signalFromChange(
     client: PoolClient,
     engagementId: string,
@@ -881,11 +1130,16 @@ export class AuditPlanningIntelligenceService {
     if (change.signal_id) return;
 
     const label = PLANNING_CHANGE_CATEGORY_LABEL[change.category];
-    const observation = change.description
-      ? `Current-year change — ${label}: ${change.description}`
-      : `Current-year change reported: ${label}.`;
+    const on =
+      (await readFrameworkEngagementOn(client, workflowInstanceId))?.periodEnd ??
+      new Date().toISOString().slice(0, 10);
+    const derived = deriveChangeSignal(
+      await readSignalRulesOn(client),
+      { category: change.category, label, description: change.description },
+      on,
+    );
     // Fraud and going-concern changes surface to the Partner promptly (§10).
-    const attention =
+    const fallbackAttention =
       change.category === PLANNING_CHANGE_CATEGORY.fraud ||
       change.category === PLANNING_CHANGE_CATEGORY.goingConcern
         ? PLANNING_ATTENTION.immediatePartner
@@ -894,62 +1148,38 @@ export class AuditPlanningIntelligenceService {
     const signalId = await insertSignal(client, engagementId, workflowInstanceId, {
       source: PLANNING_SIGNAL_SOURCE.currentYearChange,
       sourceRef: changeId,
-      observation,
-      attention,
+      sourceLink: derived?.sourceLink ?? null,
+      observation:
+        derived?.observation ??
+        (change.description
+          ? `Current-year change — ${label}: ${change.description}`
+          : `Current-year change reported: ${label}.`),
+      whyMayMatter: derived?.whyMayMatter ?? null,
+      potentialImplications: derived?.potentialImplications ?? null,
+      attention: derived?.suggestedAttention ?? fallbackAttention,
     });
+    if (derived) {
+      await client.query(
+        `UPDATE hsdg.audit_planning_signal
+            SET rule_code = $2, rule_version = $3, guidance_anchors = $4,
+                source_section = $5, destinations = $6
+          WHERE id = $1`,
+        [
+          signalId,
+          derived.ruleCode,
+          derived.ruleVersion,
+          derived.guidanceAnchors,
+          derived.sourceSection,
+          derived.destinations,
+        ],
+      );
+    }
     await client.query(`UPDATE hsdg.audit_planning_change SET signal_id = $2 WHERE id = $1`, [
       changeId,
       signalId,
     ]);
-  }
-
-  /** Read the Section 01/02 facts the intelligence generator consumes. */
-  private async readFacts(
-    client: PoolClient,
-    workflowInstanceId: string,
-  ): Promise<EngagementIntelligenceFacts> {
-    const { rows: profile } = await client.query<{
-      initial_audit: boolean;
-      joint_audit: boolean;
-      accounting_environment: EngagementIntelligenceFacts['accountingEnvironment'];
-      sa510_flag: boolean;
-      sa402_flag: boolean;
-      sa299_flag: boolean;
-    }>(
-      `SELECT initial_audit, joint_audit, accounting_environment,
-              sa510_flag, sa402_flag, sa299_flag
-         FROM hsdg.audit_entity_profile
-        WHERE workflow_instance_id = $1`,
-      [workflowInstanceId],
-    );
-    const { rows: areas } = await client.query<{
-      area_key: string;
-      conclusion: 'applicable' | 'not_applicable';
-    }>(
-      `SELECT area_key, conclusion FROM hsdg.audit_framework_assessments
-        WHERE workflow_instance_id = $1 AND conclusion IS NOT NULL`,
-      [workflowInstanceId],
-    );
-    // 01.4 ACC-04 "Specialist Required" (the answer's selected specialist types).
-    const { rows: spec } = await client.query<{ details: Record<string, unknown> }>(
-      `SELECT a.details FROM hsdg.audit_acceptance_answers a
-         JOIN hsdg.audit_acceptance_segments s ON s.id = a.segment_id
-        WHERE s.workflow_instance_id = $1 AND a.question_key = 'acc_04'
-          AND a.answer = 'specialist'`,
-      [workflowInstanceId],
-    );
-    const specialistsRequired = specialistLabels(spec[0]?.details);
-    const p = profile[0];
-    return {
-      specialistsRequired,
-      initialAudit: p?.initial_audit ?? false,
-      jointAudit: p?.joint_audit ?? false,
-      accountingEnvironment: p?.accounting_environment ?? null,
-      sa510: p?.sa510_flag ?? false,
-      sa402: p?.sa402_flag ?? false,
-      sa299: p?.sa299_flag ?? false,
-      frameworkConclusions: Object.fromEntries(areas.map((a) => [a.area_key, a.conclusion])),
-    };
+    // §25 (03.5): a new Enhanced / Immediate signal can make a completed 03.5 Update Required.
+    await this.areaReview.markImpacted(client, workflowInstanceId);
   }
 
   /**
@@ -993,6 +1223,7 @@ export class AuditPlanningIntelligenceService {
       acceptance_open: string;
       discussion_ok: boolean;
       matters_unowned: string;
+      source_changed: string;
     }>(
       `SELECT
          (SELECT initial_audit FROM hsdg.audit_entity_profile
@@ -1021,7 +1252,10 @@ export class AuditPlanningIntelligenceService {
                     AND cardinality(d.participant_employee_ids) > 0) AS discussion_ok,
          (SELECT count(*) FROM hsdg.audit_planning_matter
            WHERE workflow_instance_id = $1 AND status IN ('open','in_progress')
-             AND owner_employee_id IS NULL) AS matters_unowned`,
+             AND owner_employee_id IS NULL) AS matters_unowned,
+         (SELECT count(*) FROM hsdg.audit_planning_signal
+           WHERE workflow_instance_id = $1 AND source_changed_at IS NOT NULL
+             AND source_change_acknowledged_at IS NULL AND status <> 'closed') AS source_changed`,
       [workflowInstanceId],
     );
     const r = rows[0]!;
@@ -1037,9 +1271,19 @@ export class AuditPlanningIntelligenceService {
     const checks: PlanningCompletionCheck[] = [
       check(
         'intelligence',
-        'Engagement Intelligence generated',
-        rec.intelligence_generated_at !== null,
-        'Generate Engagement Intelligence from Sections 01/02.',
+        'Engagement Intelligence generated and reviewed',
+        rec.intelligence_generated_at !== null &&
+          rec.intelligence_reviewed_at !== null &&
+          rec.intelligence_reviewed_at >= rec.intelligence_generated_at,
+        rec.intelligence_generated_at === null
+          ? 'Generate Engagement Intelligence from Sections 01/02.'
+          : 'Review the Engagement Intelligence (it changed since it was last reviewed).',
+      ),
+      check(
+        'source_changes',
+        'Signals whose source fact changed are reassessed',
+        n(r.source_changed) === 0,
+        `${n(r.source_changed)} signal(s) changed at source — reassess or close them.`,
       ),
       check(
         'pi01',
@@ -1135,6 +1379,7 @@ export class AuditPlanningIntelligenceService {
       considerations: await this.strategy.readConsiderations(client, workflowInstanceId),
       priorYear: await this.strategy.readPriorYear(client, workflowInstanceId),
       acceptance: await this.strategy.readAcceptance(client, workflowInstanceId),
+      facts: (await readPlanningIntelligenceFactsOn(client, workflowInstanceId)).facts,
     };
   }
 
@@ -1195,8 +1440,15 @@ export class AuditPlanningIntelligenceService {
        VALUES ($1, $2) ON CONFLICT (workflow_instance_id) DO NOTHING`,
       [workflowInstanceId, engagementId],
     );
+    return this.readRecord(client, workflowInstanceId);
+  }
+
+  private async readRecord(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<PlanningIntelligenceRecord> {
     const { rows } = await client.query<IntelligenceRow>(
-      `SELECT * FROM hsdg.audit_planning_intelligence WHERE workflow_instance_id = $1`,
+      `${INTELLIGENCE_SELECT} WHERE i.workflow_instance_id = $1`,
       [workflowInstanceId],
     );
     return mapIntelligence(rows[0]!);
@@ -1302,12 +1554,59 @@ export interface StrategySummaryExtras {
   considerations: readonly PlanningConsiderationRecord[];
   priorYear: readonly PriorYearMatterRecord[];
   acceptance: readonly AcceptanceCarryForwardRecord[];
+  /** The Section 01/02 Planning Facts (characteristics, scope and component lines). */
+  facts?: PlanningFacts;
 }
 
 const NO_EXTRAS: StrategySummaryExtras = { considerations: [], priorYear: [], acceptance: [] };
 
-/** Rule keys whose signals describe components / other auditors (02.6). */
-const COMPONENT_RULE_KEYS = new Set(['cfs_required', 'joint_audit']);
+/** Rule keys whose signals describe components / other auditors (02.1, 02.6). */
+const COMPONENT_RULE_KEYS = new Set([
+  'cfs_required',
+  'joint_audit',
+  'other_auditor_components',
+  'branch_auditors',
+  'service_organisation',
+]);
+
+const list = (v: PlanningFacts[string] | undefined) =>
+  Array.isArray(v) ? v.filter((x) => String(x).trim()) : [];
+
+/** One sentence describing the engagement from the Section 01/02 facts (§17). */
+export function characteristicsLine(f: PlanningFacts): string | null {
+  const parts: string[] = [];
+  if (typeof f.entity_class === 'string' && f.entity_class) parts.push(f.entity_class);
+  if (f.listed === true) parts.push('listed');
+  if (list(f.special_entity_types).length) parts.push(list(f.special_entity_types).join(', '));
+  if (typeof f.reporting_framework_label === 'string' && f.reporting_framework_label) {
+    parts.push(
+      f.first_time_ind_as === true
+        ? `${f.reporting_framework_label} (first-time adoption)`
+        : f.reporting_framework_label,
+    );
+  }
+  if (typeof f.schedule_iii_label === 'string' && f.schedule_iii_label) {
+    parts.push(f.schedule_iii_label);
+  }
+  if (f.initial_audit === true) parts.push('initial audit');
+  else if (f.initial_audit === false) parts.push('continuing audit');
+  if (f.joint_audit === true) parts.push('joint audit');
+  return parts.length ? `${parts[0]![0]!.toUpperCase()}${parts.join('; ').slice(1)}.` : null;
+}
+
+/** The Section 02 reporting obligations that shape the audit scope (§17). */
+export function reportingScopeLine(f: PlanningFacts): string | null {
+  const parts: string[] = [];
+  if (f.caro === 'applicable') parts.push('CARO 2020');
+  if (f.icfr === 'applicable') parts.push('ICFR (Section 143(3)(i))');
+  if (f.cfs === 'cfs_required') parts.push('consolidated financial statements');
+  if (typeof f.rule_11_items === 'number' && f.rule_11_items > 0) {
+    parts.push(`Rule 11 (${f.rule_11_items} matter${f.rule_11_items === 1 ? '' : 's'})`);
+  }
+  if (f.audit_trail === true) parts.push('audit trail (Rule 11(g))');
+  if (f.s197 === true) parts.push('Section 197(16)');
+  return parts.length ? `Section 02 reporting scope: ${parts.join('; ')}.` : null;
+}
 
 /**
  * Compose the §17 Strategy Summary draft from structured data only. Exported for
@@ -1334,9 +1633,14 @@ export function composeStrategySummary(
       s.source === PLANNING_SIGNAL_SOURCE.section01 ||
       s.source === PLANNING_SIGNAL_SOURCE.section02,
   );
+  const facts = extras.facts;
+  const profileLine = facts ? characteristicsLine(facts) : null;
   section(
     'Engagement characteristics',
-    characteristics.map((s) => `- ${s.signalCode} ${s.observation}`),
+    [
+      ...(profileLine ? [`- ${profileLine}`] : []),
+      ...characteristics.map((s) => `- ${s.signalCode} ${s.observation}`),
+    ],
     'No Section 01/02 signals generated yet.',
   );
 
@@ -1358,15 +1662,17 @@ export function composeStrategySummary(
   if (record.orientationNote) direction.push(`- ${record.orientationNote}`);
   section('Overall audit direction', direction);
 
+  const scope: string[] = [];
+  const scopeLine = facts ? reportingScopeLine(facts) : null;
+  if (scopeLine) scope.push(`- ${scopeLine}`);
   if (record.additionalScopeRequired === true && record.additionalScope) {
-    section('Scope considerations', [`- ${record.additionalScope}`]);
+    scope.push(`- ${record.additionalScope}`);
   } else if (record.additionalScopeRequired === false) {
-    section('Scope considerations', [
-      '- No additional scope considerations beyond Section 02 (AS-02).',
-    ]);
+    scope.push('- No additional scope considerations beyond Section 02 (AS-02).');
   } else if (record.additionalScope) {
-    section('Scope considerations', [`- ${record.additionalScope}`]);
+    scope.push(`- ${record.additionalScope}`);
   }
+  section('Scope considerations', scope);
 
   const kept = (kind: 'timing' | 'resource') =>
     extras.considerations
@@ -1452,6 +1758,12 @@ function mapSignal(s: SignalRow): PlanningSignalRecord {
     destinations: s.destinations ?? [],
     status: s.status,
     isAuto: s.is_auto,
+    ruleCode: s.rule_code,
+    ruleVersion: s.rule_version,
+    guidanceAnchors: s.guidance_anchors ?? [],
+    sourceSection: s.source_section,
+    sourceChangedAt: s.source_changed_at?.toISOString() ?? null,
+    sourceChangeAcknowledgedAt: s.source_change_acknowledged_at?.toISOString() ?? null,
     documentId: s.document_id,
     version: s.version,
     createdAt: s.created_at.toISOString(),
@@ -1468,6 +1780,7 @@ function mapFocus(f: FocusRow): AreaOfFocusRecord {
     name: f.name,
     whyRequiresAttention: f.why_requires_attention,
     potentialFsAreas: f.potential_fs_areas ?? [],
+    potentialAssertions: f.potential_assertions ?? [],
     expectedStrategicImplication: f.expected_strategic_implication,
     partnerAttention: f.partner_attention,
     destinations: f.destinations ?? [],
@@ -1512,6 +1825,8 @@ function mapIntelligence(r: IntelligenceRow): PlanningIntelligenceRecord {
     intelligenceGeneratedAt: r.intelligence_generated_at
       ? r.intelligence_generated_at.toISOString()
       : null,
+    intelligenceReviewedAt: r.intelligence_reviewed_at?.toISOString() ?? null,
+    intelligenceReviewedByName: r.reviewed_by_name ?? null,
     version: r.version,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),

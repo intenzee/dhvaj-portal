@@ -85,6 +85,13 @@ describe('Statutory Audit — Section 03 from last year’s file (e2e)', () => {
       isFraudRisk: true,
       fsArea: 'Revenue',
     }).expect(201);
+    // A high-rated estimate risk comes forward as a significant estimate.
+    await post(pa, `${py.base}/risks`, {
+      description: 'Expected credit loss on trade receivables',
+      source: 'estimate',
+      rating: 'high',
+      fsArea: 'Trade receivables',
+    }).expect(201);
     await post(pa, `${py.base}/areas-of-focus`, {
       name: 'Inventory valuation',
       whyRequiresAttention: 'Slow-moving stock',
@@ -124,6 +131,14 @@ describe('Statutory Audit — Section 03 from last year’s file (e2e)', () => {
          VALUES ($1, $2, 1, 'complete', '{lenders}', 'revenue', 1000000, 750000, 50000)`,
         [py.shellId, py.engId],
       );
+      // Last year's ICFR: a material weakness comes forward; a plain deficiency does not.
+      await db.query(
+        `INSERT INTO hsdg.audit_icfr_deficiency
+           (workflow_instance_id, engagement_id, seq, classification, description)
+         VALUES ($1, $2, 1, 'material_weakness', 'No review of manual journals'),
+                ($1, $2, 2, 'control_deficiency', 'Late bank reconciliation')`,
+        [py.shellId, py.engId],
+      );
     } finally {
       await db.end();
     }
@@ -143,12 +158,17 @@ describe('Statutory Audit — Section 03 from last year’s file (e2e)', () => {
         'significant_risk',
         'Significant (fraud) risk — Revenue: Revenue recognised before delivery',
       ],
+      [
+        'significant_estimate',
+        'Significant estimate — Trade receivables: Expected credit loss on trade receivables',
+      ],
       ['partner_focus_area', 'Inventory valuation — Slow-moving stock'],
+      ['control_deficiency', 'Material weakness: No review of manual journals'],
     ]);
     // Re-importing never duplicates.
     const again = await post(pa, `${cy.base}/prior-year-matters/import`, {}).expect(201);
     expect(again.body.added).toBe(0);
-    expect(again.body.matters).toHaveLength(2);
+    expect(again.body.matters).toHaveLength(4);
 
     const cbu = await get(`${cy.base}/business-understanding`);
     const cySystems = (

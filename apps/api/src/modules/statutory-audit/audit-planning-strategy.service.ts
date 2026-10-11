@@ -423,8 +423,10 @@ export class AuditPlanningStrategyService {
 
   /**
    * Bring last year's matters forward from the prior-year audit file (03.1.6):
-   * significant risks, Areas of Focus, blocking review notes and high-severity
-   * exceptions. Idempotent by source record; never touches a matter already
+   * significant risks and estimates, Areas of Focus, blocking review notes,
+   * high-severity exceptions, CARO reportable matters, ICFR significant
+   * deficiencies / material weaknesses, opinion modifications and uncorrected
+   * misstatements. Idempotent by source record; never touches a matter already
    * here. Returns how many were added. Runs in the caller's transaction.
    */
   async importPriorYearOn(
@@ -442,10 +444,13 @@ export class AuditPlanningStrategyService {
       description: string;
       fs_area: string | null;
       is_fraud_risk: boolean;
+      source: string;
       response: string | null;
     }>(
-      `SELECT id, risk_ref, description, fs_area, is_fraud_risk, response
-         FROM hsdg.audit_risks WHERE workflow_instance_id = $1 AND is_significant
+      `SELECT id, risk_ref, description, fs_area, is_fraud_risk, source, response
+         FROM hsdg.audit_risks
+        WHERE workflow_instance_id = $1
+          AND (is_significant OR (source = 'estimate' AND rating IN ('high','significant')))
         ORDER BY risk_ref`,
       [pw],
     );
@@ -474,6 +479,38 @@ export class AuditPlanningStrategyService {
         WHERE workflow_instance_id = $1 AND severity = 'high' ORDER BY created_at`,
       [pw],
     );
+    const caro = await client.query<{
+      id: string;
+      clause_ref: string;
+      title: string;
+      draft_reporting: string | null;
+    }>(
+      `SELECT id, clause_ref, title, draft_reporting FROM hsdg.audit_caro_clause_item
+        WHERE workflow_instance_id = $1 AND conclusion = 'reportable_matter'
+          AND status = 'active' AND withdrawn_at IS NULL
+        ORDER BY sort_order, clause_code`,
+      [pw],
+    );
+    const icfr = await client.query<{
+      id: string;
+      seq: number;
+      classification: string;
+      description: string;
+      remediation_status: string;
+    }>(
+      `SELECT id, seq, classification, description, remediation_status
+         FROM hsdg.audit_icfr_deficiency
+        WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL
+          AND classification IN ('significant_deficiency','material_weakness')
+        ORDER BY seq`,
+      [pw],
+    );
+    const completion = await client.query<{ id: string; item_key: string; note: string | null }>(
+      `SELECT id, item_key, note FROM hsdg.audit_completion_items
+        WHERE workflow_instance_id = $1 AND item_key IN ('auditors_report','misstatements')
+          AND state <> 'not_applicable'`,
+      [pw],
+    );
     const planned = priorYearMattersFromFile({
       financialYear: prior.financialYear,
       risks: risks.rows.map((r) => ({
@@ -482,6 +519,7 @@ export class AuditPlanningStrategyService {
         description: r.description,
         fsArea: r.fs_area,
         isFraudRisk: r.is_fraud_risk,
+        source: r.source,
         response: r.response,
       })),
       focusAreas: focus.rows.map((f) => ({
@@ -492,6 +530,24 @@ export class AuditPlanningStrategyService {
       })),
       blockingNotes: notes.rows,
       exceptions: exceptions.rows,
+      caroMatters: caro.rows.map((c) => ({
+        id: c.id,
+        clauseRef: c.clause_ref,
+        title: c.title,
+        draft: c.draft_reporting,
+      })),
+      icfrDeficiencies: icfr.rows.map((d) => ({
+        id: d.id,
+        seq: d.seq,
+        classification: d.classification,
+        description: d.description,
+        remediationStatus: d.remediation_status,
+      })),
+      completionNotes: completion.rows.map((n) => ({
+        id: n.id,
+        itemKey: n.item_key,
+        note: n.note,
+      })),
     });
     if (planned.length === 0) return 0;
     const { rows: have } = await client.query<{ source_ref: string }>(

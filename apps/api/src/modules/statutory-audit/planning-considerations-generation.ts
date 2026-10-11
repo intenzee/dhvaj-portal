@@ -84,8 +84,31 @@ const RULES: Rule[] = [
     key: 'component_reporting_dependency',
     kind: TIMING,
     label: 'Component / joint-auditor reporting dependency',
-    basis: 'Group or joint-audit reporting depends on other auditors delivering on time.',
-    match: byRule('cfs_required', 'joint_audit'),
+    basis: 'Group, joint-audit or branch reporting depends on other auditors delivering on time.',
+    match: byRule('cfs_required', 'joint_audit', 'other_auditor_components', 'branch_auditors'),
+  },
+  {
+    key: 'transition_date_balances',
+    kind: TIMING,
+    label: 'Ind AS transition-date balances and comparatives — early',
+    basis: 'First-time Ind AS adoption — the transition balance sheet is audited before year end.',
+    match: byRule('first_time_ind_as'),
+  },
+  {
+    key: 'regulatory_reporting_deadlines',
+    kind: TIMING,
+    label: 'Regulatory / listing reporting deadlines',
+    basis:
+      'A listed or regulated entity has external filing deadlines that drive the audit timetable.',
+    match: byRule('listed_entity', 'regulated_entity'),
+  },
+  {
+    key: 'audit_trail_log_access',
+    kind: TIMING,
+    label: 'Audit-trail (edit log) access through the year',
+    basis:
+      'Rule 11(g) reporting applies — log configuration and retention are checked across the year.',
+    match: byRule('audit_trail_reporting'),
   },
   {
     key: 'service_org_report_timing',
@@ -106,11 +129,33 @@ const RULES: Rule[] = [
     key: 'it_expertise',
     kind: RESOURCE,
     label: 'IT audit expertise',
-    basis: 'ICFR reporting, an ERP change or a service organisation points to IT involvement.',
+    basis:
+      'ICFR or audit-trail reporting, an ERP environment or change, or a service organisation points to IT involvement.',
     match: either(
-      byRule('icfr_applicable', 'service_organisation'),
+      byRule('icfr_applicable', 'service_organisation', 'audit_trail_reporting', 'erp_environment'),
       byChange(PLANNING_CHANGE_CATEGORY.erpAccountingSystem),
     ),
+  },
+  {
+    key: 'specialist_involvement',
+    kind: RESOURCE,
+    label: 'Auditor’s expert / specialist involvement',
+    basis: 'Section 01 identified specialist areas — scope and the individuals are set in 03.8.',
+    match: byRule('specialist_required'),
+  },
+  {
+    key: 'ind_as_transition_expertise',
+    kind: RESOURCE,
+    label: 'Ind AS transition expertise',
+    basis: 'First-time Ind AS adoption (Ind AS 101).',
+    match: byRule('first_time_ind_as'),
+  },
+  {
+    key: 'industry_regulatory_expertise',
+    kind: RESOURCE,
+    label: 'Industry / regulatory expertise',
+    basis: 'The entity is regulated or specialised (e.g. NBFC, insurer, bank).',
+    match: byRule('regulated_entity', 'schedule_iii_specialised'),
   },
   {
     key: 'group_audit_experience',

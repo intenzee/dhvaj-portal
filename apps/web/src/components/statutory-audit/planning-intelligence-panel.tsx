@@ -2,7 +2,17 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Info, Plus, RefreshCw, Sparkles } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Info,
+  Lock,
+  Plus,
+  RefreshCw,
+  Sparkles,
+} from 'lucide-react';
 import {
   AUDIT_ORIENTATION_LABEL,
   AUDIT_ORIENTATIONS,
@@ -13,6 +23,8 @@ import {
   PLANNING_DESTINATIONS,
   type AreaOfFocusRecord,
   type AuditOrientation,
+  type EngagementIntelligenceView,
+  type FocusPickLists,
   type PlanningAttention,
   type PlanningChangeCategory,
   type PlanningChangeFrImpact,
@@ -37,6 +49,11 @@ import {
   MattersSection,
 } from './planning-strategy-sections';
 import { SectionLauncher } from './section-launcher';
+import { FrameworkReferences } from './framework-references';
+import { PlanningSourceLink } from './planning-source-link';
+
+/** The 03.1 header guidance (SA 300, SA 315, the ICAI implementation guides). */
+const HEADER_GUIDANCE = ['view_sa_300', 'view_sa_315', 'view_ig_sa_300', 'view_ig_rba'];
 
 /**
  * 03.1 Planning Intelligence & Overall Audit Strategy (DHVAJ 03.1) — the
@@ -95,6 +112,7 @@ const FR_IMPACT_LABEL: Record<PlanningChangeFrImpact, string> = {
 };
 
 type Tab =
+  | 'intelligence'
   | 'signals'
   | 'changes'
   | 'focus'
@@ -138,6 +156,10 @@ export function PlanningIntelligencePanel({
     queryKey: [...qk, 'focus'],
     queryFn: () => apiFetch<AreaOfFocusRecord[]>(`${base}/areas-of-focus`),
   });
+  const view = useQuery({
+    queryKey: [...qk, 'facts'],
+    queryFn: () => apiFetch<EngagementIntelligenceView>(`${base}/planning-intelligence/facts`),
+  });
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: qk });
@@ -155,6 +177,18 @@ export function PlanningIntelligencePanel({
       refresh();
     },
     onError: (e) => toast(errMsg(e, 'Could not generate Engagement Intelligence.')),
+  });
+  const review = useMutation({
+    mutationFn: () =>
+      apiFetch<PlanningIntelligenceSummary>(`${base}/planning-intelligence/review`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: () => {
+      toast('Engagement Intelligence marked reviewed.');
+      refresh();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not mark the intelligence reviewed.')),
   });
 
   if (summary.isLoading) return <Spinner label="Loading planning intelligence…" />;
@@ -182,8 +216,28 @@ export function PlanningIntelligencePanel({
     },
   ];
   const outstanding = s.completion.filter((c) => !c.met).length;
+  const v = view.data;
+  const gateLocked = v ? !v.gate.unlocked : false;
+  const generatedAt = s.record.intelligenceGeneratedAt;
+  const reviewedAt = s.record.intelligenceReviewedAt;
+  const reviewed = !!generatedAt && !!reviewedAt && reviewedAt >= generatedAt;
+  const sourceChanged = v?.sourceChangedSignals ?? 0;
+  if (sourceChanged) {
+    tiles.push({
+      label: 'Source changed — reassess',
+      value: sourceChanged,
+      tone: 'warn',
+      onClick: () => setTab('signals'),
+    });
+  }
 
   const sections: [Tab, string][] = [
+        [
+          'intelligence',
+          generatedAt && !reviewed
+            ? 'Engagement Intelligence (to review)'
+            : 'Engagement Intelligence',
+        ],
         ['signals', 'Signal register'],
         ['changes', 'Significant changes (PI-01)'],
         ['focus', 'Areas of Focus'],
@@ -201,17 +255,22 @@ export function PlanningIntelligencePanel({
           <Badge tone={s.record.status === 'complete' ? 'success' : 'info'}>
             {STATUS_LABEL[s.record.status]}
           </Badge>
-          {s.record.intelligenceGeneratedAt && (
+          {generatedAt && (
             <span className="text-[11px] text-ink-faint">
-              Intelligence generated {new Date(s.record.intelligenceGeneratedAt).toLocaleString()}
+              Intelligence generated {new Date(generatedAt).toLocaleString()}
             </span>
+          )}
+          {reviewed && (
+            <Badge tone="success">
+              Reviewed{s.record.intelligenceReviewedByName ? ` by ${s.record.intelligenceReviewedByName}` : ''}
+            </Badge>
           )}
         </div>
         {editable && (
           <Button
             variant="secondary"
             onClick={() => generate.mutate()}
-            disabled={generate.isPending}
+            disabled={generate.isPending || gateLocked}
             title="Generated automatically on first open; refresh after a Section 01/02 change. Safe to re-run."
           >
             <RefreshCw className="mr-1.5 h-4 w-4" />
@@ -219,6 +278,38 @@ export function PlanningIntelligencePanel({
           </Button>
         )}
       </div>
+
+      {v && !v.gate.unlocked && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Section 03 opens once the Audit Framework (02.8) is approved — {v.gate.reason}
+          </span>
+        </div>
+      )}
+      {v?.gate.unlocked && v.stale && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            Section 01/02 facts changed since the intelligence was generated.
+          </span>
+          {editable && (
+            <Button size="sm" variant="secondary" onClick={() => generate.mutate()} disabled={generate.isPending}>
+              Refresh now
+            </Button>
+          )}
+        </div>
+      )}
+      {sourceChanged > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {sourceChanged} signal{sourceChanged === 1 ? '' : 's'} no longer match{sourceChanged === 1 ? 'es' : ''} its Section
+            01/02 source. Reassess {sourceChanged === 1 ? 'it' : 'them'} in the register — signals
+            are never deleted automatically.
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {tiles.map((t) => (
@@ -245,7 +336,28 @@ export function PlanningIntelligencePanel({
         ))}
       </div>
 
+      <details className="rounded-lg border border-line px-3 py-2 text-sm">
+        <summary className="cursor-pointer text-xs font-medium text-ink-muted">
+          Guidance — SA 300, SA 315 and the ICAI implementation guides
+        </summary>
+        <div className="mt-2">
+          <FrameworkReferences contextKey="03.1" anchors={HEADER_GUIDANCE} />
+        </div>
+      </details>
+
       <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.1 Planning Intelligence & Overall Audit Strategy">
+        {tab === 'intelligence' && (
+          <IntelligenceFacts
+            view={v}
+            loading={view.isLoading}
+            reviewed={reviewed}
+            reviewedAt={reviewedAt}
+            reviewedBy={s.record.intelligenceReviewedByName}
+            canReview={editable && !!generatedAt && !reviewed}
+            reviewing={review.isPending}
+            onReview={() => review.mutate()}
+          />
+        )}
         {tab === 'signals' && (
           <SignalRegister
             engagementId={engagementId}
@@ -324,6 +436,93 @@ export function PlanningIntelligencePanel({
           />
         )}
       </SectionLauncher>
+    </div>
+  );
+}
+
+// ── 03.1.1 Engagement Intelligence (§5, §8) ─────────────────────────────────
+
+function IntelligenceFacts({
+  view,
+  loading,
+  reviewed,
+  reviewedAt,
+  reviewedBy,
+  canReview,
+  reviewing,
+  onReview,
+}: {
+  view: EngagementIntelligenceView | undefined;
+  loading: boolean;
+  reviewed: boolean;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  canReview: boolean;
+  reviewing: boolean;
+  onReview: () => void;
+}): JSX.Element {
+  if (loading) return <Spinner label="Reading Sections 01 and 02…" />;
+  if (!view) return <p className="text-sm text-ink-muted">The engagement facts are unavailable.</p>;
+  return (
+    <div className="space-y-3">
+      <p className="flex items-start gap-1.5 text-xs text-ink-muted">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        The confirmed Section 01 and Section 02 facts the Planning Signals are built from. They
+        are read-only here — change them where they are owned, then refresh the intelligence.
+      </p>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {view.groups.map((g) => (
+          <Card key={g.key} className="p-3">
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <h4 className="text-sm font-semibold text-ink">{g.title}</h4>
+              <span className="font-mono text-[11px] text-ink-faint">{g.section}</span>
+            </div>
+            {g.items.length === 0 ? (
+              <p className="text-xs text-ink-faint">Nothing recorded yet.</p>
+            ) : (
+              <dl className="grid grid-cols-[minmax(0,11rem)_1fr] gap-x-3 gap-y-1.5 text-sm">
+                {g.items.map((item) => (
+                  <div key={item.key} className="contents">
+                    <dt className="text-ink-muted">{item.label}</dt>
+                    <dd className="min-w-0 text-ink">
+                      <span className="break-words">{item.value}</span>
+                      {item.sourceLink && (
+                        <span className="ml-1.5">
+                          <PlanningSourceLink link={item.sourceLink} />
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </Card>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+        {reviewed ? (
+          <span className="inline-flex items-center gap-1.5 text-sm text-success-700">
+            <CheckCircle2 className="h-4 w-4" />
+            Reviewed{reviewedBy ? ` by ${reviewedBy}` : ''}
+            {reviewedAt ? ` on ${new Date(reviewedAt).toLocaleString()}` : ''}
+          </span>
+        ) : view.generatedAt ? (
+          <span className="text-sm text-ink-muted">
+            Not yet reviewed since it was generated on{' '}
+            {new Date(view.generatedAt).toLocaleString()}.
+          </span>
+        ) : (
+          <span className="text-sm text-ink-muted">Intelligence has not been generated yet.</span>
+        )}
+        {canReview && (
+          <Button size="sm" onClick={onReview} disabled={reviewing || view.stale}>
+            Mark intelligence reviewed
+          </Button>
+        )}
+        {canReview && view.stale && (
+          <span className="text-xs text-warning-700">Refresh the intelligence first.</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -460,7 +659,21 @@ function SignalCard({
             <span className="mr-2 font-mono text-xs text-ink-faint">{signal.signalCode}</span>
             <span className="text-sm text-ink">{signal.observation}</span>
             <span className="mt-1 flex flex-wrap gap-1.5">
-              <Badge>{SOURCE_LABEL[signal.source]}</Badge>
+              <Badge>
+                {SOURCE_LABEL[signal.source]}
+                {signal.sourceSection ? ` · ${signal.sourceSection}` : ''}
+              </Badge>
+              {signal.ruleCode && (
+                <span title="Planning Signal Library rule and the version it fired under">
+                  <Badge tone="neutral">
+                    {signal.ruleCode} v{signal.ruleVersion}
+                  </Badge>
+                </span>
+              )}
+              {signal.status === 'closed' && <Badge tone="neutral">Closed</Badge>}
+              {signal.sourceChangedAt && !signal.sourceChangeAcknowledgedAt && (
+                <Badge tone="warn">Source changed — reassess</Badge>
+              )}
               {signal.managerAssessment && (
                 <Badge tone="info">{ASSESSMENT_LABEL[signal.managerAssessment]}</Badge>
               )}
@@ -487,8 +700,25 @@ function SignalCard({
               <p className="text-ink">{signal.potentialImplications}</p>
             </div>
           )}
+          {signal.sourceChangedAt && (
+            <p className="rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-800">
+              The Section 01/02 fact behind this signal no longer holds (
+              {new Date(signal.sourceChangedAt).toLocaleDateString()}).{' '}
+              {signal.sourceChangeAcknowledgedAt
+                ? 'Reassessed by the Manager.'
+                : 'Reassess it — close it if it no longer matters.'}
+            </p>
+          )}
           {signal.sourceLink && (
-            <p className="text-xs text-ink-faint">Source: {signal.sourceLink}</p>
+            <p className="flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
+              Source: <PlanningSourceLink link={signal.sourceLink} />
+            </p>
+          )}
+          {signal.guidanceAnchors.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-ink-muted">Guidance</div>
+              <FrameworkReferences contextKey="03.1" anchors={signal.guidanceAnchors} />
+            </div>
           )}
           {signal.suggestedAttention !== signal.attention && (
             <p className="text-xs text-ink-faint">
@@ -863,6 +1093,12 @@ function FocusSection({
   });
   const [adding, setAdding] = useState(false);
   const byId = new Map(signals.map((s) => [s.id, s]));
+  const pickLists = useQuery({
+    queryKey: ['planning-focus-pick-lists'],
+    queryFn: () => apiFetch<FocusPickLists>(`${base}/planning-intelligence/focus-pick-lists`),
+    staleTime: 10 * 60_000,
+  });
+  const lists = pickLists.data ?? { fsAreas: [], assertions: [] };
 
   return (
     <div className="space-y-2">
@@ -878,6 +1114,7 @@ function FocusSection({
           focus={f}
           signals={signals}
           byId={byId}
+          lists={lists}
           editable={editable}
           onChanged={onChanged}
         />
@@ -891,6 +1128,7 @@ function FocusSection({
         (adding ? (
           <FocusForm
             signals={signals}
+            lists={lists}
             onCancel={() => setAdding(false)}
             submitLabel="Create Area of Focus"
             submit={(body) =>
@@ -916,6 +1154,7 @@ function FocusCard({
   focus,
   signals,
   byId,
+  lists,
   editable,
   onChanged,
 }: {
@@ -923,6 +1162,7 @@ function FocusCard({
   focus: AreaOfFocusRecord;
   signals: PlanningSignalRecord[];
   byId: Map<string, PlanningSignalRecord>;
+  lists: FocusPickLists;
   editable: boolean;
   onChanged: () => void;
 }): JSX.Element {
@@ -932,6 +1172,7 @@ function FocusCard({
       <FocusForm
         initial={focus}
         signals={signals}
+        lists={lists}
         onCancel={() => setEditing(false)}
         submitLabel="Save"
         submit={(body) =>
@@ -955,6 +1196,18 @@ function FocusCard({
           <span className="font-medium text-ink">{focus.name}</span>
           {focus.whyRequiresAttention && (
             <p className="text-ink-muted">{focus.whyRequiresAttention}</p>
+          )}
+          {(focus.potentialFsAreas.length > 0 || focus.potentialAssertions.length > 0) && (
+            <p className="mt-1 text-xs text-ink-faint">
+              {[
+                focus.potentialFsAreas.length > 0 &&
+                  `FS areas: ${focus.potentialFsAreas.join(', ')}`,
+                focus.potentialAssertions.length > 0 &&
+                  `Assertions: ${focus.potentialAssertions.join(', ')}`,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
           )}
         </div>
         <div className="flex items-center gap-1.5">
@@ -987,6 +1240,7 @@ function FocusCard({
 function FocusForm({
   initial,
   signals,
+  lists,
   submitLabel,
   submit,
   onCancel,
@@ -994,6 +1248,7 @@ function FocusForm({
 }: {
   initial?: AreaOfFocusRecord;
   signals: PlanningSignalRecord[];
+  lists: FocusPickLists;
   submitLabel: string;
   submit: (body: Record<string, unknown>) => Promise<AreaOfFocusRecord>;
   onCancel: () => void;
@@ -1003,7 +1258,8 @@ function FocusForm({
   const [name, setName] = useState(initial?.name ?? '');
   const [why, setWhy] = useState(initial?.whyRequiresAttention ?? '');
   const [implication, setImplication] = useState(initial?.expectedStrategicImplication ?? '');
-  const [fsAreas, setFsAreas] = useState((initial?.potentialFsAreas ?? []).join(', '));
+  const [fsAreas, setFsAreas] = useState<string[]>(initial?.potentialFsAreas ?? []);
+  const [assertions, setAssertions] = useState<string[]>(initial?.potentialAssertions ?? []);
   const [partner, setPartner] = useState(initial?.partnerAttention ?? false);
   const [established, setEstablished] = useState(initial ? initial.status === 'established' : true);
   const [picked, setPicked] = useState<string[]>(initial?.signalIds ?? []);
@@ -1015,10 +1271,8 @@ function FocusForm({
         name,
         whyRequiresAttention: why || undefined,
         expectedStrategicImplication: implication || undefined,
-        potentialFsAreas: fsAreas
-          .split(',')
-          .map((x) => x.trim())
-          .filter(Boolean),
+        potentialFsAreas: fsAreas,
+        potentialAssertions: assertions,
         partnerAttention: partner,
         signalIds: picked,
         ...(initial ? { status: established ? 'established' : 'open' } : {}),
@@ -1042,13 +1296,32 @@ function FocusForm({
       <Field label="Why it requires attention">
         <Textarea rows={2} value={why} onChange={(e) => setWhy(e.target.value)} />
       </Field>
+      <Field label="Expected strategic implication">
+        <Input value={implication} onChange={(e) => setImplication(e.target.value)} />
+      </Field>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Potential FS areas" hint="Comma-separated. Not a final audit-area decision.">
-          <Input value={fsAreas} onChange={(e) => setFsAreas(e.target.value)} />
-        </Field>
-        <Field label="Expected strategic implication">
-          <Input value={implication} onChange={(e) => setImplication(e.target.value)} />
-        </Field>
+        <PickList
+          label="Potential FS areas"
+          hint="From the audit-area library. Not a final audit-area decision (03.5)."
+          options={lists.fsAreas.map((a) => ({
+            value: a.name,
+            label: a.name,
+            group: a.category ?? 'Other',
+          }))}
+          value={fsAreas}
+          onChange={setFsAreas}
+        />
+        <PickList
+          label="Potential assertions"
+          hint="Preliminary — the risk assessment in 03.6 / Section 04 decides."
+          options={lists.assertions.map((a) => ({
+            value: `${a.label} (${a.group})`,
+            label: a.label,
+            group: a.group,
+          }))}
+          value={assertions}
+          onChange={setAssertions}
+        />
       </div>
       <div>
         <div className="mb-1 text-sm font-medium text-ink">Underlying Planning Signals</div>
@@ -1098,6 +1371,67 @@ function FocusForm({
         </Button>
       </div>
     </Card>
+  );
+}
+
+/** A grouped, searchable checkbox list; values already saved stay selectable. */
+function PickList({
+  label,
+  hint,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  options: { value: string; label: string; group: string }[];
+  value: string[];
+  onChange: (next: string[]) => void;
+}): JSX.Element {
+  const [q, setQ] = useState('');
+  const known = new Set(options.map((o) => o.value));
+  const all = [
+    ...options,
+    ...value.filter((x) => !known.has(x)).map((x) => ({ value: x, label: x, group: 'Saved' })),
+  ];
+  const needle = q.trim().toLowerCase();
+  const shown = all.filter((o) => !needle || o.value.toLowerCase().includes(needle));
+  const groups = new Map<string, typeof shown>();
+  for (const o of shown) groups.set(o.group, [...(groups.get(o.group) ?? []), o]);
+  const toggle = (v: string) =>
+    onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
+  return (
+    <Field label={`${label}${value.length ? ` (${value.length})` : ''}`} hint={hint}>
+      <div className="rounded-lg border border-line">
+        <input
+          aria-label={`Search ${label.toLowerCase()}`}
+          className="w-full border-b border-line bg-transparent px-2 py-1 text-xs outline-none"
+          placeholder="Search…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <div className="max-h-40 space-y-1.5 overflow-y-auto p-2">
+          {shown.length === 0 && <p className="text-xs text-ink-faint">No matches.</p>}
+          {[...groups.entries()].map(([group, opts]) => (
+            <div key={group}>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                {group}
+              </div>
+              {opts.map((o) => (
+                <label key={o.value} className="flex items-center gap-2 text-xs text-ink">
+                  <input
+                    type="checkbox"
+                    checked={value.includes(o.value)}
+                    onChange={() => toggle(o.value)}
+                  />
+                  {o.label}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Field>
   );
 }
 

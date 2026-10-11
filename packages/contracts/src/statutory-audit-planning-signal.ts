@@ -140,6 +140,20 @@ export interface PlanningSignalRecord {
   status: PlanningSignalStatus;
   /** True when auto-derived by the intelligence generator (vs. professionally raised). */
   isAuto: boolean;
+  /** Planning Signal Library rule (e.g. `PSR-014`) and the version it fired under. */
+  ruleCode: string | null;
+  ruleVersion: number | null;
+  /** `context '03.1'` guidance anchors (FrameworkReferences) for "View SA …" links. */
+  guidanceAnchors: string[];
+  /** The section whose fact raised the signal (e.g. `02.6`, `01.4`). */
+  sourceSection: string | null;
+  /**
+   * Set when the Section 01/02 fact behind an auto signal no longer holds. The
+   * signal is never deleted — the Manager reassesses (closes) it.
+   */
+  sourceChangedAt: string | null;
+  /** Set when the Manager reassessed the signal after its source changed. */
+  sourceChangeAcknowledgedAt: string | null;
   documentId: string | null;
   version: number;
   createdAt: string;
@@ -189,8 +203,10 @@ export interface AreaOfFocusRecord {
   focusCode: string;
   name: string;
   whyRequiresAttention: string | null;
-  /** Potential FS areas (free text tags); not a final audit-area determination. */
+  /** Potential FS areas (03.5 library names); not a final audit-area determination. */
   potentialFsAreas: string[];
+  /** Potential assertions (assertion master labels); refined in 03.5/03.6. */
+  potentialAssertions: string[];
   expectedStrategicImplication: string | null;
   partnerAttention: boolean;
   destinations: PlanningDestination[];
@@ -206,6 +222,7 @@ export interface CreateAreaOfFocusInput {
   name: string;
   whyRequiresAttention?: string | null;
   potentialFsAreas?: string[];
+  potentialAssertions?: string[];
   expectedStrategicImplication?: string | null;
   partnerAttention?: boolean;
   destinations?: PlanningDestination[];
@@ -216,6 +233,7 @@ export interface UpdateAreaOfFocusInput {
   name?: string;
   whyRequiresAttention?: string | null;
   potentialFsAreas?: string[];
+  potentialAssertions?: string[];
   expectedStrategicImplication?: string | null;
   partnerAttention?: boolean;
   destinations?: PlanningDestination[];
@@ -378,6 +396,9 @@ export interface PlanningIntelligenceRecord {
   strategySummary: string | null;
   /** Timestamp Engagement Intelligence was last generated. */
   intelligenceGeneratedAt: string | null;
+  /** The Manager confirmed the generated intelligence (§5 "Review"). */
+  intelligenceReviewedAt: string | null;
+  intelligenceReviewedByName: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -410,4 +431,116 @@ export interface PlanningIntelligenceSummary {
   initialAudit: boolean;
   /** §20 completion checklist; 03.1 completes only when every check is met. */
   completion: PlanningCompletionCheck[];
+}
+
+// ── 03.1.1 Engagement Intelligence facts panel (§5) ──────────────────────────
+
+/** One confirmed Section 01/02 fact, shown read-only with a link to its source. */
+export interface PlanningFactItem {
+  key: string;
+  label: string;
+  value: string;
+  /** `<phase>:<place>` — e.g. `framework:02.6`, `acceptance:question-acc_03`. */
+  sourceLink: string | null;
+}
+
+export interface PlanningFactGroup {
+  key: string;
+  title: string;
+  /** Owning section, e.g. `01`, `02.1`, `02.6`. */
+  section: string;
+  items: PlanningFactItem[];
+}
+
+/** Section 03 entry gate (02.8 AF-02), as 03.1 sees it. */
+export interface PlanningFrameworkGate {
+  unlocked: boolean;
+  route: string;
+  reason: string;
+}
+
+export interface EngagementIntelligenceView {
+  gate: PlanningFrameworkGate;
+  groups: PlanningFactGroup[];
+  generatedAt: string | null;
+  reviewedAt: string | null;
+  reviewedByName: string | null;
+  /** True when the Section 01/02 facts moved since the last generation. */
+  stale: boolean;
+  /** Auto signals whose source fact no longer holds (to reassess). */
+  sourceChangedSignals: number;
+}
+
+// ── Planning Signal Library (admin, §21) ─────────────────────────────────────
+
+export const PLANNING_RULE_TRIGGER_SOURCE = {
+  section01: 'section_01',
+  section02: 'section_02',
+  currentYearChange: 'current_year_change',
+} as const;
+export type PlanningRuleTriggerSource =
+  (typeof PLANNING_RULE_TRIGGER_SOURCE)[keyof typeof PLANNING_RULE_TRIGGER_SOURCE];
+export const PLANNING_RULE_TRIGGER_SOURCES: PlanningRuleTriggerSource[] = Object.values(
+  PLANNING_RULE_TRIGGER_SOURCE,
+);
+export const PLANNING_RULE_TRIGGER_SOURCE_LABEL: Record<PlanningRuleTriggerSource, string> = {
+  section_01: 'Section 01 — Acceptance',
+  section_02: 'Section 02 — Audit Framework',
+  current_year_change: 'Current-year change (PI-01)',
+};
+
+/** One insert-only version of a Planning Signal Library rule. */
+export interface PlanningSignalRuleRecord {
+  id: string;
+  ruleCode: string;
+  version: number;
+  ruleKey: string;
+  name: string;
+  triggerSource: PlanningRuleTriggerSource;
+  triggerSection: string;
+  /** JSON condition over the Planning Facts map. */
+  triggerCondition: Record<string, unknown>;
+  conditionVersion: number;
+  observationTemplate: string;
+  whyMayMatter: string;
+  potentialImplications: string;
+  guidanceAnchors: string[];
+  destinations: PlanningDestination[];
+  suggestedAttention: PlanningAttention;
+  sourceLink: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  active: boolean;
+  methodologyVersion: string;
+  changeNote: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+/** Add a new version of an existing rule, or the first version of a new rule. */
+export interface CreatePlanningSignalRuleVersionInput {
+  ruleCode: string;
+  ruleKey?: string;
+  name: string;
+  triggerSource: PlanningRuleTriggerSource;
+  triggerSection: string;
+  triggerCondition: Record<string, unknown>;
+  observationTemplate: string;
+  whyMayMatter: string;
+  potentialImplications: string;
+  guidanceAnchors?: string[];
+  destinations?: PlanningDestination[];
+  suggestedAttention: PlanningAttention;
+  sourceLink?: string | null;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+  active?: boolean;
+  methodologyVersion?: string;
+  changeNote: string;
+}
+
+/** Pick-lists for an Area of Focus (03.5 audit-area library + assertion master). */
+export interface FocusPickLists {
+  fsAreas: Array<{ code: string; name: string; category: string | null }>;
+  assertions: Array<{ id: string; group: string; label: string }>;
 }

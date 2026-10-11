@@ -3,6 +3,8 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
   type AreaOfFocusRecord,
+  type EngagementIntelligenceView,
+  type FocusPickLists,
   type PlanningChangeRecord,
   type PlanningIntelligenceSummary,
   type PlanningSignalRecord,
@@ -61,6 +63,46 @@ export class AuditPlanningIntelligenceController {
       id,
       workflowInstanceId,
     );
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/planning-intelligence/review')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Mark the Engagement Intelligence reviewed (§8)',
+    description: 'A later regeneration that changes a signal clears the review.',
+  })
+  review(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<PlanningIntelligenceSummary> {
+    return this.intelligence.reviewIntelligence(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+    );
+  }
+
+  @Get(':id/statutory-audit/:workflowInstanceId/planning-intelligence/facts')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Engagement Intelligence — the Section 01/02 facts, grouped (§7)' })
+  facts(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<EngagementIntelligenceView> {
+    return this.intelligence.getIntelligenceFacts(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+    );
+  }
+
+  @Get(':id/statutory-audit/:workflowInstanceId/planning-intelligence/focus-pick-lists')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Area of Focus pick-lists — FS areas and assertions (§13)' })
+  focusPickLists(@CurrentPrincipal() principal: Principal): Promise<FocusPickLists> {
+    return this.intelligence.getFocusPickLists(rlsContextFromPrincipal(principal));
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-intelligence')

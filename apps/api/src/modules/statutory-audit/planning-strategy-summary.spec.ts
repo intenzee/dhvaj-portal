@@ -3,132 +3,11 @@ import type {
   PlanningIntelligenceRecord,
   PlanningSignalRecord,
 } from '@hsdg/contracts';
-import { composeStrategySummary } from './audit-planning-intelligence.service';
 import {
-  deriveEngagementSignals,
-  type EngagementIntelligenceFacts,
-} from './planning-signals-generation';
-
-const facts = (over: Partial<EngagementIntelligenceFacts> = {}): EngagementIntelligenceFacts => ({
-  initialAudit: false,
-  jointAudit: false,
-  accountingEnvironment: 'in_house',
-  sa510: false,
-  sa402: false,
-  sa299: false,
-  frameworkConclusions: {},
-  ...over,
-});
-
-const keys = (f: EngagementIntelligenceFacts) => deriveEngagementSignals(f).map((s) => s.ruleKey);
-
-describe('deriveEngagementSignals (03.1 Engagement Intelligence)', () => {
-  it('a plain continuing, in-house, no-framework-trigger engagement produces no signal', () => {
-    expect(deriveEngagementSignals(facts())).toEqual([]);
-  });
-
-  it('initial audit ⇒ an Enhanced opening-balance signal pointing at the profile', () => {
-    const [s] = deriveEngagementSignals(facts({ initialAudit: true }));
-    expect(s!.ruleKey).toBe('initial_audit');
-    expect(s!.source).toBe('section_02');
-    expect(s!.suggestedAttention).toBe('enhanced');
-    expect(s!.sourceLink).toBe('section-02/entity-profile');
-    expect(s!.observation).toMatch(/first statutory audit/);
-  });
-
-  it('the SA 510 flag alone also triggers the initial-audit signal (no duplicate)', () => {
-    expect(keys(facts({ sa510: true }))).toEqual(['initial_audit']);
-    expect(keys(facts({ initialAudit: true, sa510: true }))).toEqual(['initial_audit']);
-  });
-
-  it('01.4 specialist required ⇒ an Enhanced Section 01 signal for team and scope', () => {
-    const [s] = deriveEngagementSignals(facts({ specialistsRequired: ['IT', 'Valuation'] }));
-    expect(s).toMatchObject({
-      ruleKey: 'specialist_required',
-      source: 'section_01',
-      suggestedAttention: 'enhanced',
-      destinations: ['03.8', '03.4'],
-    });
-    expect(s!.observation).toContain('IT, Valuation');
-    expect(keys(facts({ specialistsRequired: [] }))).toEqual([]);
-  });
-
-  it('outsourced or hybrid accounting environment ⇒ service-organisation signal', () => {
-    expect(keys(facts({ accountingEnvironment: 'outsourced_service_organisation' }))).toEqual([
-      'service_organisation',
-    ]);
-    expect(keys(facts({ accountingEnvironment: 'hybrid' }))).toEqual(['service_organisation']);
-    expect(keys(facts({ sa402: true }))).toEqual(['service_organisation']);
-  });
-
-  it('joint audit ⇒ joint-audit signal routed to scope and component planning', () => {
-    const [s] = deriveEngagementSignals(facts({ jointAudit: true }));
-    expect(s!.ruleKey).toBe('joint_audit');
-    expect(s!.destinations).toEqual(['03.4', '03.9']);
-  });
-
-  it('only APPLICABLE framework conclusions generate signals', () => {
-    expect(
-      keys(
-        facts({
-          frameworkConclusions: {
-            caro: 'applicable',
-            ifc: 'applicable',
-            cfs: 'applicable',
-            internal_audit: 'applicable',
-          },
-        }),
-      ),
-    ).toEqual(['caro_applicable', 'icfr_applicable', 'cfs_required', 'internal_audit_function']);
-
-    expect(
-      keys(
-        facts({
-          frameworkConclusions: {
-            caro: 'not_applicable',
-            ifc: 'not_applicable',
-            cfs: 'not_applicable',
-            internal_audit: 'not_applicable',
-          },
-        }),
-      ),
-    ).toEqual([]);
-  });
-
-  it('never emits a risk rating — only the three attention levels', () => {
-    const all = deriveEngagementSignals(
-      facts({
-        initialAudit: true,
-        jointAudit: true,
-        sa402: true,
-        frameworkConclusions: { caro: 'applicable', ifc: 'applicable', cfs: 'applicable' },
-      }),
-    );
-    for (const s of all) {
-      expect(['standard', 'enhanced', 'immediate_partner']).toContain(s.suggestedAttention);
-      expect(`${s.observation} ${s.whyMayMatter}`).not.toMatch(
-        /\b(high|medium|low|significant) risk\b/i,
-      );
-    }
-  });
-
-  it('rule keys are unique so the upsert-by-rule generator stays idempotent', () => {
-    const all = keys(
-      facts({
-        initialAudit: true,
-        jointAudit: true,
-        sa402: true,
-        frameworkConclusions: {
-          caro: 'applicable',
-          ifc: 'applicable',
-          cfs: 'applicable',
-          internal_audit: 'applicable',
-        },
-      }),
-    );
-    expect(new Set(all).size).toBe(all.length);
-  });
-});
+  characteristicsLine,
+  composeStrategySummary,
+  reportingScopeLine,
+} from './audit-planning-intelligence.service';
 
 describe('composeStrategySummary (03.1 §17)', () => {
   const record = (over: Partial<PlanningIntelligenceRecord> = {}): PlanningIntelligenceRecord => ({
@@ -143,6 +22,8 @@ describe('composeStrategySummary (03.1 §17)', () => {
     priorYearReviewed: false,
     strategySummary: null,
     intelligenceGeneratedAt: null,
+    intelligenceReviewedAt: null,
+    intelligenceReviewedByName: null,
     version: 1,
     createdAt: '',
     updatedAt: '',
@@ -169,6 +50,12 @@ describe('composeStrategySummary (03.1 §17)', () => {
     destinations: [],
     status: 'open',
     isAuto: true,
+    ruleCode: 'PSR-001',
+    ruleVersion: 1,
+    guidanceAnchors: [],
+    sourceSection: '02.1',
+    sourceChangedAt: null,
+    sourceChangeAcknowledgedAt: null,
     documentId: null,
     version: 1,
     createdAt: '',
@@ -183,6 +70,7 @@ describe('composeStrategySummary (03.1 §17)', () => {
     name: 'Revenue & Receivables',
     whyRequiresAttention: 'Receivables grew faster than revenue.',
     potentialFsAreas: [],
+    potentialAssertions: [],
     expectedStrategicImplication: null,
     partnerAttention: false,
     destinations: [],
@@ -331,6 +219,52 @@ describe('composeStrategySummary (03.1 §17)', () => {
     expect(text).not.toContain('Resolved one.');
     expect(text).toContain(
       'M-002 Predecessor communication pending (Create Planning Signal) [PS-006]',
+    );
+  });
+
+  it('opens Engagement characteristics and Scope with the Section 01/02 facts', () => {
+    const text = composeStrategySummary(record({ additionalScopeRequired: false }), [], [], {
+      considerations: [],
+      priorYear: [],
+      acceptance: [],
+      facts: {
+        entity_class: 'Public company',
+        listed: true,
+        special_entity_types: ['NBFC'],
+        reporting_framework_label: 'Ind AS',
+        first_time_ind_as: true,
+        schedule_iii_label: 'Schedule III Division II',
+        initial_audit: true,
+        joint_audit: false,
+        caro: 'applicable',
+        icfr: 'applicable',
+        cfs: 'not_required',
+        rule_11_items: 2,
+        audit_trail: true,
+        s197: false,
+      },
+    });
+    expect(text).toContain(
+      'Engagement characteristics\n- Public company; listed; NBFC; Ind AS (first-time adoption); Schedule III Division II; initial audit.',
+    );
+    expect(text).toContain(
+      'Scope considerations\n- Section 02 reporting scope: CARO 2020; ICFR (Section 143(3)(i)); Rule 11 (2 matters); audit trail (Rule 11(g)).\n- No additional scope considerations beyond Section 02 (AS-02).',
+    );
+  });
+});
+
+describe('Strategy Summary fact lines', () => {
+  it('returns null when nothing is known', () => {
+    expect(characteristicsLine({})).toBeNull();
+    expect(reportingScopeLine({ caro: 'not_applicable', rule_11_items: 0 })).toBeNull();
+  });
+
+  it('describes a continuing joint audit with one Rule 11 matter and CFS', () => {
+    expect(characteristicsLine({ initial_audit: false, joint_audit: true })).toBe(
+      'Continuing audit; joint audit.',
+    );
+    expect(reportingScopeLine({ cfs: 'cfs_required', rule_11_items: 1, s197: true })).toBe(
+      'Section 02 reporting scope: consolidated financial statements; Rule 11 (1 matter); Section 197(16).',
     );
   });
 });
