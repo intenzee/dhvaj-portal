@@ -2,20 +2,21 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Sparkles, CheckCircle2, CheckCheck, Trash2, Plus } from 'lucide-react';
+import { Sparkles, CheckCheck, Trash2, Plus } from 'lucide-react';
 import {
   PERMISSION,
   type FrameworkAssessment,
   type FrameworkConclusion,
   type FrameworkState,
   type StatutoryAuditFramework,
+  type StatutoryAuditFrameworkSummary,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import { Card, Badge, Button, Spinner } from '@/components/ui';
-import { Field, Textarea } from '@/components/form';
+import { Textarea } from '@/components/form';
 import { ExpandToggle, InlinePanel } from '@/components/inline-panel';
 import { EntityProfileCard } from './entity-profile-card';
 import { FixLink } from './master-fact-list';
@@ -23,13 +24,15 @@ import { GroupCaroCard } from './group-caro-card';
 import { ReportingFactsCard } from './reporting-facts-card';
 import { ReportingFrameworkCard } from './reporting-framework-card';
 import { MattersCard } from './matters-card';
-import { SectionPackChecks } from './section-pack-card';
+import { FrameworkSummaryWorkspace } from './framework-summary-workspace';
+import { FRAMEWORK_SUMMARY_QK } from './framework-summary-types';
 
 /**
  * Framework (Phase 02) screen (Audit Spec §18–§20): the applicability/assessment
  * layer. Each area shows the advisory system suggestion and the professional
  * conclusion (Facts → System Assessment → Evidence → Decision → Basis → Impact).
- * Approving the Framework Memo freezes the conclusions and completes Phase 02.
+ * Section 02 is approved once, in 02.8 (AF-01 → memorandum → AF-02), which
+ * freezes the conclusions and completes Phase 02.
  */
 
 const STATE_TONE: Record<FrameworkState, string> = {
@@ -104,27 +107,27 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not accept the suggestions.'),
   });
 
-  const [memo, setMemo] = useState<string | null>(null);
-  const approve = useMutation({
-    mutationFn: (workflowInstanceId: string) =>
-      apiFetch<StatutoryAuditFramework>(
-        `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/framework/approve`,
-        // An unedited memo is left to the server, which records the draft.
-        { method: 'POST', body: memo?.trim() ? { memo } : {} },
+  // 02.8 owns the single Section 02 approval; the area cards freeze with it.
+  const summaryQuery = useQuery({
+    queryKey: FRAMEWORK_SUMMARY_QK(engagementId),
+    queryFn: () =>
+      apiFetch<StatutoryAuditFrameworkSummary[]>(
+        `/engagements/${engagementId}/statutory-audit/framework-summary`,
       ),
-    onSuccess: () => {
-      toast('Framework approved — Phase 02 complete.');
-      invalidate();
-    },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not approve the framework.'),
   });
 
   if (query.isLoading) return <Spinner label="Loading framework…" />;
   const framework = query.data?.[0];
   if (!framework) return null;
 
-  const approved = framework.approval != null;
-  const ready = framework.pack.ready;
+  const summary = summaryQuery.data?.find(
+    (x) => x.workflowInstanceId === framework.workflowInstanceId,
+  );
+  // Frozen while the 02.8 baseline is approved (a pre-02.8 file: its legacy approval).
+  const approved = summary
+    ? summary.baseline?.status === 'approved' ||
+      (summary.baseline == null && framework.approval != null)
+    : framework.approval != null;
   const waiting = framework.assessments.filter(
     (a) =>
       a.systemSuggestion != null &&
@@ -147,40 +150,30 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
         <ReportingFactsCard engagementId={engagementId} />
       </div>
       <Card
-        id="framework-02-10"
+        id="framework-02-areas"
         className="flex scroll-mt-2 flex-wrap items-center justify-between gap-3 p-4"
       >
         <div>
-          <h2 className="text-sm font-semibold text-ink">Audit Framework · Phase 02</h2>
+          <h2 className="text-sm font-semibold text-ink">Other framework areas · Phase 02</h2>
           <p className="text-xs text-ink-muted">
-            {approved ? (
-              <>
-                Approved
-                {framework.approval?.version ? ` (v${framework.approval.version})` : ''}
-                {framework.approval?.approvedByName
-                  ? ` · ${framework.approval.approvedByName}`
-                  : ''}
-              </>
-            ) : ready ? (
-              'All areas decided — ready to approve the Framework Memo.'
-            ) : framework.undecidedCount > 0 ? (
-              `${framework.undecidedCount} area(s) still need a professional conclusion.`
-            ) : (
-              'A blocking matter is open — resolve it below.'
-            )}
+            {approved
+              ? 'Frozen with the approved Audit Framework Baseline (02.8).'
+              : framework.undecidedCount > 0
+                ? `${framework.undecidedCount} area(s) still need a professional conclusion.`
+                : 'Every area carries a conclusion — approve the framework in 02.8 below.'}
           </p>
         </div>
-        {canManage && (
+        {canManage && !approved && (
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="secondary"
               onClick={() => runSuggestions.mutate(framework.workflowInstanceId)}
-              disabled={runSuggestions.isPending || approved}
+              disabled={runSuggestions.isPending}
             >
               <Sparkles className="mr-1.5 h-4 w-4" />
               Run system assessment
             </Button>
-            {waiting > 0 && !approved && (
+            {waiting > 0 && (
               <Button
                 variant="secondary"
                 onClick={() => acceptAll.mutate(framework.workflowInstanceId)}
@@ -191,43 +184,7 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
                 Accept {waiting} suggestion{waiting === 1 ? '' : 's'}
               </Button>
             )}
-            <Button
-              onClick={() => approve.mutate(framework.workflowInstanceId)}
-              disabled={approve.isPending || approved || !ready}
-              title={!ready ? 'See "What approval needs" below' : undefined}
-            >
-              <CheckCircle2 className="mr-1.5 h-4 w-4" />
-              {approved ? 'Approved' : 'Approve framework'}
-            </Button>
           </div>
-        )}
-      </Card>
-
-      <Card className="space-y-3 p-4">
-        <h3 className="text-sm font-semibold text-ink">Framework memo</h3>
-        {approved ? (
-          <p className="whitespace-pre-line text-sm text-ink-muted">
-            {framework.approval?.memo ?? 'No memo recorded.'}
-          </p>
-        ) : (
-          <>
-            <SectionPackChecks pack={framework.pack} />
-            <Field
-              label="Memo"
-              hint={
-                memo == null
-                  ? 'Drafted from the conclusions — recorded as is on approval unless you edit it.'
-                  : undefined
-              }
-            >
-              <Textarea
-                rows={7}
-                value={memo ?? framework.pack.draftMemo ?? ''}
-                disabled={!canManage}
-                onChange={(e) => setMemo(e.target.value)}
-              />
-            </Field>
-          </>
         )}
       </Card>
 
@@ -238,7 +195,7 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
         canManage={canManage && !approved}
       />
 
-      <div id="framework-02-8" className="scroll-mt-2 space-y-3">
+      <div className="space-y-3">
         {framework.assessments.map((a) => (
           <FrameworkAreaCard
             key={a.id}
@@ -248,6 +205,10 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
             onChanged={invalidate}
           />
         ))}
+      </div>
+
+      <div id="framework-02-8" className="scroll-mt-2">
+        <FrameworkSummaryWorkspace engagementId={engagementId} />
       </div>
     </div>
   );
