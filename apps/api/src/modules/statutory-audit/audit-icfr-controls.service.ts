@@ -95,6 +95,7 @@ import { readIcfrResultOn } from './icfr-read';
 import { componentAuditorFeedOn } from './consolidation-group-read';
 import { componentsFromDetail } from './consolidation-read';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
+import { inSequence } from '../../database/in-sequence';
 
 /** 02.6 perimeter relationships whose entities are components of the CFS. */
 const CFS_COMPONENT_RELATIONSHIPS = new Set(['subsidiary', 'associate', 'joint_venture']);
@@ -1607,15 +1608,15 @@ export class AuditIcfrControlsService {
     const readOnly = !(await isEngagementLead(client, engagementId));
     const prior = await readPriorAuditFile(client, workflowInstanceId);
     const [areaRows, controlRows, deficiencyRows, followUps, risks, workAreas, priorControls] =
-      await Promise.all([
-        ws ? this.loadAreas(client, ws.id) : Promise.resolve([] as AreaRow[]),
-        this.loadControls(client, workflowInstanceId),
-        this.loadDeficiencies(client, workflowInstanceId),
-        this.readFollowUps(client, workflowInstanceId),
-        this.readRisks(client, workflowInstanceId),
-        this.readWorkAreas(client, workflowInstanceId),
-        this.readPriorControls(client, prior),
-      ]);
+      await inSequence(
+        () => (ws ? this.loadAreas(client, ws.id) : Promise.resolve([] as AreaRow[])),
+        () => this.loadControls(client, workflowInstanceId),
+        () => this.loadDeficiencies(client, workflowInstanceId),
+        () => this.readFollowUps(client, workflowInstanceId),
+        () => this.readRisks(client, workflowInstanceId),
+        () => this.readWorkAreas(client, workflowInstanceId),
+        () => this.readPriorControls(client, prior),
+      );
     const evidence = await this.readEvidence(
       client,
       controlRows.map((c) => c.id),
@@ -2101,31 +2102,37 @@ export class AuditIcfrControlsService {
     client: PoolClient,
     workflowInstanceId: string,
   ): Promise<ScopingFacts> {
-    const [{ rows: areas }, { rows: risks }, { rows: profile }] = await Promise.all([
-      client.query<{ code: string | null; name: string; attention: 'standard' | 'enhanced' }>(
-        `SELECT a.area_code AS code, a.area_name AS name, a.attention
+    const [{ rows: areas }, { rows: risks }, { rows: profile }] = await inSequence(
+      () =>
+        client.query<{ code: string | null; name: string; attention: 'standard' | 'enhanced' }>(
+          `SELECT a.area_code AS code, a.area_name AS name, a.attention
            FROM hsdg.audit_engagement_area a
            JOIN hsdg.audit_area_review r ON r.id = a.review_id
           WHERE r.workflow_instance_id = $1 AND a.disposition = 'retained'
           ORDER BY a.seq`,
-        [workflowInstanceId],
-      ),
-      client.query<{
-        ref: string;
-        fs_area: string | null;
-        description: string;
-        is_significant: boolean;
-      }>(
-        `SELECT risk_ref AS ref, fs_area, description, is_significant
+          [workflowInstanceId],
+        ),
+      () =>
+        client.query<{
+          ref: string;
+          fs_area: string | null;
+          description: string;
+          is_significant: boolean;
+        }>(
+          `SELECT risk_ref AS ref, fs_area, description, is_significant
            FROM hsdg.audit_risks WHERE workflow_instance_id = $1 ORDER BY risk_ref`,
-        [workflowInstanceId],
-      ),
-      client.query<{ accounting_software: string | null; records_electronic: 'yes' | 'no' | null }>(
-        `SELECT accounting_software, records_electronic
+          [workflowInstanceId],
+        ),
+      () =>
+        client.query<{
+          accounting_software: string | null;
+          records_electronic: 'yes' | 'no' | null;
+        }>(
+          `SELECT accounting_software, records_electronic
            FROM hsdg.audit_entity_profile WHERE workflow_instance_id = $1`,
-        [workflowInstanceId],
-      ),
-    ]);
+          [workflowInstanceId],
+        ),
+    );
     return {
       areas,
       risks: risks.map((r) => ({
@@ -2195,31 +2202,34 @@ export class AuditIcfrControlsService {
     prior: PriorAuditFile | null,
   ): Promise<IcfrControlsPriorYear | null> {
     if (!prior) return null;
-    const [{ rows: sub }, { rows: ws }, { rows: defs }] = await Promise.all([
-      client.query<{ outcome: IcfrOutcome | null }>(
-        `SELECT COALESCE(conclusion, system_outcome) AS outcome
+    const [{ rows: sub }, { rows: ws }, { rows: defs }] = await inSequence(
+      () =>
+        client.query<{ outcome: IcfrOutcome | null }>(
+          `SELECT COALESCE(conclusion, system_outcome) AS outcome
            FROM hsdg.audit_framework_subassessment
           WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3`,
-        [prior.workflowInstanceId, SUB_SECTION_KEY.icfr, FRAMEWORK_AREA_KEY.ifc],
-      ),
-      client.query<{ conclusion: IcfrWorkstreamConclusion | null }>(
-        `SELECT conclusion FROM hsdg.audit_icfr_workstream WHERE workflow_instance_id = $1`,
-        [prior.workflowInstanceId],
-      ),
-      client.query<{
-        seq: number;
-        classification: IcfrDeficiencyClass;
-        description: string;
-        remediation_status: string;
-      }>(
-        `SELECT seq, classification, description, remediation_status
+          [prior.workflowInstanceId, SUB_SECTION_KEY.icfr, FRAMEWORK_AREA_KEY.ifc],
+        ),
+      () =>
+        client.query<{ conclusion: IcfrWorkstreamConclusion | null }>(
+          `SELECT conclusion FROM hsdg.audit_icfr_workstream WHERE workflow_instance_id = $1`,
+          [prior.workflowInstanceId],
+        ),
+      () =>
+        client.query<{
+          seq: number;
+          classification: IcfrDeficiencyClass;
+          description: string;
+          remediation_status: string;
+        }>(
+          `SELECT seq, classification, description, remediation_status
            FROM hsdg.audit_icfr_deficiency
           WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL
             AND classification IN ('significant_deficiency','material_weakness')
           ORDER BY seq`,
-        [prior.workflowInstanceId],
-      ),
-    ]);
+          [prior.workflowInstanceId],
+        ),
+    );
     if (!sub[0] && !ws[0] && !defs.length) return null;
     const pick = (c: IcfrDeficiencyClass) =>
       defs
@@ -2279,18 +2289,20 @@ export class AuditIcfrControlsService {
   }
 
   private async controlForReview(client: PoolClient, c: ControlRow) {
-    const [{ rows: ev }, { rows: defs }] = await Promise.all([
-      client.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM hsdg.audit_icfr_control_evidence
+    const [{ rows: ev }, { rows: defs }] = await inSequence(
+      () =>
+        client.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM hsdg.audit_icfr_control_evidence
           WHERE control_id = $1 AND removed_at IS NULL`,
-        [c.id],
-      ),
-      client.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM hsdg.audit_icfr_deficiency
+          [c.id],
+        ),
+      () =>
+        client.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM hsdg.audit_icfr_deficiency
           WHERE control_id = $1 AND withdrawn_at IS NULL`,
-        [c.id],
-      ),
-    ]);
+          [c.id],
+        ),
+    );
     return {
       purposeIcfr: c.purpose_icfr,
       design: c.design,
@@ -2324,15 +2336,16 @@ export class AuditIcfrControlsService {
     workflowInstanceId: string,
     workstreamId: string,
   ) {
-    const [areas, controls, defs, { rows: fus }] = await Promise.all([
-      this.loadAreas(client, workstreamId),
-      this.loadControls(client, workflowInstanceId),
-      this.loadDeficiencies(client, workflowInstanceId),
-      client.query<{ prior_ref: string; status: IcfrFollowUpStatus }>(
-        `SELECT prior_ref, status FROM hsdg.audit_icfr_followup WHERE workflow_instance_id = $1`,
-        [workflowInstanceId],
-      ),
-    ]);
+    const [areas, controls, defs, { rows: fus }] = await inSequence(
+      () => this.loadAreas(client, workstreamId),
+      () => this.loadControls(client, workflowInstanceId),
+      () => this.loadDeficiencies(client, workflowInstanceId),
+      () =>
+        client.query<{ prior_ref: string; status: IcfrFollowUpStatus }>(
+          `SELECT prior_ref, status FROM hsdg.audit_icfr_followup WHERE workflow_instance_id = $1`,
+          [workflowInstanceId],
+        ),
+    );
     const live = controls.filter((c) => !c.withdrawn_at);
     return {
       areas: areas.map((a) => ({

@@ -39,6 +39,7 @@ import {
   workflowPeriodStartOn,
 } from './other-reporting-records-read';
 import { crossRefLinksOf } from './reporting-records';
+import { inSequence } from '../../database/in-sequence';
 
 const trimOrNull = (s: string | null | undefined) => (s == null ? null : s.trim() || null);
 
@@ -685,16 +686,16 @@ export class AuditReportingRecordsService {
   ): Promise<StatutoryAuditReportingRecords> {
     const periodStart = await workflowPeriodStartOn(client, workflowInstanceId);
     const [fraud, candidates, directors, contacts, crossRefs, counts, links, isPartner] =
-      await Promise.all([
-        readFraudMattersOn(client, workflowInstanceId, periodStart),
-        this.candidatesOn(client, workflowInstanceId),
-        readDirectorChecksOn(client, workflowInstanceId),
-        contactDirectorsOn(client, workflowInstanceId),
-        reportingCrossRefsOn(client, workflowInstanceId),
-        reportingEvidenceCountsOn(client, workflowInstanceId),
-        readReportingEvidenceLinksOn(client, workflowInstanceId),
-        this.isEngagementPartner(client, ctx, engagementId),
-      ]);
+      await inSequence(
+        () => readFraudMattersOn(client, workflowInstanceId, periodStart),
+        () => this.candidatesOn(client, workflowInstanceId),
+        () => readDirectorChecksOn(client, workflowInstanceId),
+        () => contactDirectorsOn(client, workflowInstanceId),
+        () => reportingCrossRefsOn(client, workflowInstanceId),
+        () => reportingEvidenceCountsOn(client, workflowInstanceId),
+        () => readReportingEvidenceLinksOn(client, workflowInstanceId),
+        () => this.isEngagementPartner(client, ctx, engagementId),
+      );
     const onWorkpaper = new Set(
       directors.filter((d) => !d.withdrawn && d.contactId).map((d) => d.contactId),
     );

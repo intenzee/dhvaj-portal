@@ -65,6 +65,7 @@ import {
 } from './framework-summary-engine';
 import { lockFrameworkBaselineOn, reopenFrameworkBaselineOn } from './framework-reopen';
 import { onFrameworkApprovedOn, readImpactOn } from './framework-summary-impact';
+import { withFrameworkInputsCacheOn } from './framework-summary-inputs';
 import { readFrameworkMattersOn } from './framework-summary-matters';
 import {
   controlFrameworkMemoOn,
@@ -243,7 +244,20 @@ export class AuditFrameworkSummaryService {
     await this.otherReporting.prefillOn(client, ctx, engagementId);
   }
 
-  private async build(
+  /** The summary is a read: Track B's hooks share one read of the record inputs. */
+  private build(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    engagementServiceId?: string,
+  ): Promise<StatutoryAuditFrameworkSummary> {
+    return withFrameworkInputsCacheOn(client, () =>
+      this.buildSummary(client, ctx, engagementId, workflowInstanceId, engagementServiceId),
+    );
+  }
+
+  private async buildSummary(
     client: PoolClient,
     ctx: RlsContext,
     engagementId: string,

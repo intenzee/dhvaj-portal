@@ -102,6 +102,7 @@ import {
   type PriorComponent,
 } from './group-audit';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
+import { inSequence } from '../../database/in-sequence';
 
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const COMPONENT_SLOTS = new Set<GroupAuditFileSlot>([
@@ -933,31 +934,34 @@ export class AuditGroupAuditService {
           'No approved DHVAJ template for the Component Auditor Instructions yet — an administrator must upload and approve one under Settings → Document templates.',
         );
       const result = await readConsolidationResultOn(client, workflowInstanceId);
-      const [{ rows: mat }, { rows: risks }, { rows: others }] = await Promise.all([
-        client.query<{
-          version_no: number;
-          om: string | null;
-          pm: string | null;
-          ctt: string | null;
-        }>(
-          `SELECT version_no, selected_om::text AS om, selected_pm::text AS pm, selected_ctt::text AS ctt
+      const [{ rows: mat }, { rows: risks }, { rows: others }] = await inSequence(
+        () =>
+          client.query<{
+            version_no: number;
+            om: string | null;
+            pm: string | null;
+            ctt: string | null;
+          }>(
+            `SELECT version_no, selected_om::text AS om, selected_pm::text AS pm, selected_ctt::text AS ctt
              FROM hsdg.audit_materiality_determination
             WHERE workflow_instance_id = $1 AND status = 'complete'
             ORDER BY version_no DESC LIMIT 1`,
-          [workflowInstanceId],
-        ),
-        client.query<{ risk_ref: string; description: string }>(
-          `SELECT risk_ref, description FROM hsdg.audit_risks
+            [workflowInstanceId],
+          ),
+        () =>
+          client.query<{ risk_ref: string; description: string }>(
+            `SELECT risk_ref, description FROM hsdg.audit_risks
             WHERE workflow_instance_id = $1 AND is_significant ORDER BY risk_ref`,
-          [workflowInstanceId],
-        ),
-        client.query<{ component_name: string }>(
-          `SELECT component_name FROM hsdg.audit_group_component
+            [workflowInstanceId],
+          ),
+        () =>
+          client.query<{ component_name: string }>(
+            `SELECT component_name FROM hsdg.audit_group_component
             WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL AND id <> $2
             ORDER BY sort_order, component_name`,
-          [workflowInstanceId, row.id],
-        ),
-      ]);
+            [workflowInstanceId, row.id],
+          ),
+      );
       const relevance = packageRelevance(row.auditor_type, row.is_indian_company)!;
       return {
         row,
@@ -1357,49 +1361,54 @@ export class AuditGroupAuditService {
     const group = await this.loadGroup(client, workflowInstanceId);
     const lead = await isEngagementLead(client, engagementId);
     const matrix = groupMatrixState(result?.cfsRequired ?? null);
-    const [comps, branches, findings, files, packages, status, mat] = await Promise.all([
-      group
-        ? client
-            .query<ComponentRow>(
-              `${COMPONENT_SELECT} WHERE group_audit_id = $1 ORDER BY sort_order, component_name`,
-              [group.id],
-            )
-            .then((r) => r.rows)
-        : Promise.resolve([] as ComponentRow[]),
-      group
-        ? client
-            .query<BranchRow>(
-              `${BRANCH_SELECT} WHERE group_audit_id = $1 ORDER BY sort_order, branch_name`,
-              [group.id],
-            )
-            .then((r) => r.rows)
-        : Promise.resolve([] as BranchRow[]),
-      client
-        .query<FindingRow>(`${FINDING_SELECT} WHERE f.workflow_instance_id = $1 ORDER BY f.seq`, [
-          workflowInstanceId,
-        ])
-        .then((r) => r.rows),
-      this.loadFiles(client, workflowInstanceId),
-      client
-        .query<PackageRow>(
-          `SELECT p.component_row_id, p.package_key, p.status, p.note,
+    const [comps, branches, findings, files, packages, status, mat] = await inSequence(
+      () =>
+        group
+          ? client
+              .query<ComponentRow>(
+                `${COMPONENT_SELECT} WHERE group_audit_id = $1 ORDER BY sort_order, component_name`,
+                [group.id],
+              )
+              .then((r) => r.rows)
+          : Promise.resolve([] as ComponentRow[]),
+      () =>
+        group
+          ? client
+              .query<BranchRow>(
+                `${BRANCH_SELECT} WHERE group_audit_id = $1 ORDER BY sort_order, branch_name`,
+                [group.id],
+              )
+              .then((r) => r.rows)
+          : Promise.resolve([] as BranchRow[]),
+      () =>
+        client
+          .query<FindingRow>(`${FINDING_SELECT} WHERE f.workflow_instance_id = $1 ORDER BY f.seq`, [
+            workflowInstanceId,
+          ])
+          .then((r) => r.rows),
+      () => this.loadFiles(client, workflowInstanceId),
+      () =>
+        client
+          .query<PackageRow>(
+            `SELECT p.component_row_id, p.package_key, p.status, p.note,
                   e.full_name AS approved_by_name, p.approved_at
              FROM hsdg.audit_group_package p
              JOIN hsdg.audit_group_component c ON c.id = p.component_row_id
              LEFT JOIN hsdg.employees e ON e.id = p.approved_by_employee_id
             WHERE c.workflow_instance_id = $1`,
-          [workflowInstanceId],
-        )
-        .then((r) => r.rows),
-      groupAuditStatusOn(client, workflowInstanceId),
-      client
-        .query(
-          `SELECT 1 FROM hsdg.audit_materiality_determination
+            [workflowInstanceId],
+          )
+          .then((r) => r.rows),
+      () => groupAuditStatusOn(client, workflowInstanceId),
+      () =>
+        client
+          .query(
+            `SELECT 1 FROM hsdg.audit_materiality_determination
             WHERE workflow_instance_id = $1 AND status = 'complete' LIMIT 1`,
-          [workflowInstanceId],
-        )
-        .then((r) => r.rows.length > 0),
-    ]);
+            [workflowInstanceId],
+          )
+          .then((r) => r.rows.length > 0),
+    );
 
     const liveFile = (owner: string, slot: GroupAuditFileSlot, key: string | null = null) =>
       files.find(

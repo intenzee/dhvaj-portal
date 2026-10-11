@@ -12,6 +12,7 @@ import {
   type IcfrWorkstreamConclusion,
 } from '@hsdg/contracts';
 import { formatLongDate } from './acceptance-merge-values';
+import { inSequence } from '../../database/in-sequence';
 
 /** The 02.5 assessment and the ICFR workstream as stored — what the ICFR memo merges. */
 export interface IcfrMemoInput {
@@ -83,40 +84,43 @@ export async function readIcfrMemoInput(
   );
   const r = rows[0];
   if (!r) return null;
-  const [{ rows: ws }, { rows: defs }, { rows: cons }] = await Promise.all([
-    client.query<{
-      status: 'active' | 'withdrawn';
-      framework_label: string;
-      conclusion: IcfrWorkstreamConclusion | null;
-      in_scope: string[] | null;
-    }>(
-      `SELECT w.status, w.framework_label, w.conclusion,
+  const [{ rows: ws }, { rows: defs }, { rows: cons }] = await inSequence(
+    () =>
+      client.query<{
+        status: 'active' | 'withdrawn';
+        framework_label: string;
+        conclusion: IcfrWorkstreamConclusion | null;
+        in_scope: string[] | null;
+      }>(
+        `SELECT w.status, w.framework_label, w.conclusion,
               ARRAY(SELECT a.title FROM hsdg.audit_icfr_process_area a
                      WHERE a.workstream_id = w.id AND a.status = 'active' AND a.scoping = 'in_scope'
                      ORDER BY a.sort_order) AS in_scope
          FROM hsdg.audit_icfr_workstream w WHERE w.workflow_instance_id = $1`,
-      [workflowInstanceId],
-    ),
-    client.query<{ total: number; mw: number; sd: number }>(
-      `SELECT count(*)::int AS total,
+        [workflowInstanceId],
+      ),
+    () =>
+      client.query<{ total: number; mw: number; sd: number }>(
+        `SELECT count(*)::int AS total,
               count(*) FILTER (WHERE classification = 'material_weakness')::int AS mw,
               count(*) FILTER (WHERE classification = 'significant_deficiency')::int AS sd
          FROM hsdg.audit_icfr_deficiency
         WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL`,
-      [workflowInstanceId],
-    ),
-    client.query<{
-      status: 'active' | 'withdrawn';
-      parent_conclusion: IcfrParentConclusion | null;
-      components: number;
-    }>(
-      `SELECT c.status, c.parent_conclusion,
+        [workflowInstanceId],
+      ),
+    () =>
+      client.query<{
+        status: 'active' | 'withdrawn';
+        parent_conclusion: IcfrParentConclusion | null;
+        components: number;
+      }>(
+        `SELECT c.status, c.parent_conclusion,
               (SELECT count(*)::int FROM hsdg.audit_icfr_component m
                 WHERE m.consolidated_id = c.id AND m.withdrawn_at IS NULL) AS components
          FROM hsdg.audit_icfr_consolidated c WHERE c.workflow_instance_id = $1`,
-      [workflowInstanceId],
-    ),
-  ]);
+        [workflowInstanceId],
+      ),
+  );
   return {
     systemOutcome: r.system_outcome,
     systemBasis: r.system_basis,
