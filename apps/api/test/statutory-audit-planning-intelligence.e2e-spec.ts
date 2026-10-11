@@ -210,6 +210,94 @@ describe('Statutory Audit — 03.1 Planning Intelligence engine (e2e)', () => {
     expect(await signals(f.base)).toHaveLength(0);
   });
 
+  it('reads the 02.8 baseline, overrides and conditions and fires their rules (§5)', async () => {
+    const f = await newAuditFile();
+    // An override of a system result and an open AF-02 condition that lets
+    // Planning commence — recorded on the approved baseline.
+    await su((db) =>
+      db.query(
+        `UPDATE hsdg.audit_framework_assessments
+            SET is_overridden = true, system_suggestion = 'not_applicable',
+                conclusion = 'applicable', basis = 'Group policy requires it (e2e).',
+                decided_at = now()
+          WHERE workflow_instance_id = $1 AND area_key = 'cost_records'`,
+        [f.shellId],
+      ),
+    );
+    const conditionId = await su(async (db) => {
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO hsdg.audit_framework_condition
+           (baseline_id, workflow_instance_id, engagement_id, condition, due_date, impact,
+            planning_may_commence)
+         SELECT b.id, b.workflow_instance_id, b.engagement_id,
+                'Obtain the board resolution on CSR applicability', CURRENT_DATE + 30,
+                'CSR reporting route', true
+           FROM hsdg.audit_framework_baseline b
+          WHERE b.workflow_instance_id = $1 AND b.ep_approved_at IS NOT NULL
+         RETURNING id`,
+        [f.shellId],
+      );
+      return rows[0]!.id;
+    });
+
+    await get(`${f.base}/planning-intelligence`);
+    const facts = await get(`${f.base}/planning-intelligence/facts`);
+    expect(facts.body.gate.route).toBe('conditional');
+    const g = (
+      facts.body.groups as Array<{
+        key: string;
+        section: string;
+        items: Array<{ key: string; value: string; sourceLink: string }>;
+      }>
+    ).find((x) => x.key === 'changes')!;
+    expect(g.section).toBe('02.8');
+    const value = (k: string) => g.items.find((i) => i.key === k)?.value;
+    expect(value('baseline')).toMatch(/^v1\.\d+ approved .*subject to conditions/);
+    expect(value('overrides')).toContain('Not applicable → Applicable');
+    expect(value('overrides')).toContain('Group policy requires it');
+    expect(value('conditions')).toBe(
+      '1 of 1 open — Obtain the board resolution on CSR applicability',
+    );
+    for (const i of g.items) expect(i.sourceLink).toBe('framework:02.8');
+
+    const all = await signals(f.base);
+    const override = all.find((s) => s.ruleKey === 'framework_overrides')!;
+    const conditional = all.find((s) => s.ruleKey === 'framework_open_conditions')!;
+    expect(override).toEqual(
+      expect.objectContaining({
+        ruleCode: 'PSR-027',
+        suggestedAttention: 'standard',
+        sourceSection: '02.8',
+      }),
+    );
+    expect(conditional).toEqual(
+      expect.objectContaining({
+        ruleCode: 'PSR-028',
+        suggestedAttention: 'enhanced',
+        sourceSection: '02.8',
+      }),
+    );
+
+    // Resolving the condition moves the fact: the next open flags the signal.
+    await su((db) =>
+      db.query(
+        `UPDATE hsdg.audit_framework_condition
+            SET status = 'resolved', resolution = 'Resolution obtained (e2e).', resolved_at = now()
+          WHERE id = $1`,
+        [conditionId],
+      ),
+    );
+    expect((await get(`${f.base}/planning-intelligence/facts`)).body.stale).toBe(true);
+    await get(`${f.base}/planning-intelligence`);
+    const after = (await signals(f.base)).find((s) => s.id === conditional.id)!;
+    expect(after.sourceChangedAt).toBeTruthy();
+    const resolved = await get(`${f.base}/planning-intelligence/facts`);
+    const items = (
+      resolved.body.groups as Array<{ key: string; items: Array<{ key: string; value: string }> }>
+    ).find((x) => x.key === 'changes')!.items;
+    expect(items.find((i) => i.key === 'conditions')?.value).toBe('All 1 resolved');
+  });
+
   it('fires the change-category rule for a current-year change', async () => {
     const f = await newAuditFile();
     await get(`${f.base}/planning-intelligence`);

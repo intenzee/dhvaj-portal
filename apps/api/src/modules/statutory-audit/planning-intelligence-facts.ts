@@ -20,6 +20,8 @@ import {
   type SpecialEntityType,
 } from '@hsdg/contracts';
 import { readFinancialReportingResult } from './financial-reporting-result';
+import { readFrameworkApprovalOn } from './framework-approval-read';
+import { readFrameworkOverridesOn } from './framework-summary-overrides';
 import { readPriorYearChangesOn } from './framework-summary-prior-year';
 import {
   readFrameworkEngagementOn,
@@ -73,6 +75,35 @@ const SOFTWARE_LABEL: Record<string, string> = {
   zoho: 'Zoho Books',
 };
 
+/**
+ * "v1.0 approved by A. Partner on 2026-10-01" — plus the conditional route and
+ * any controlled revision in progress. Null before the first approval.
+ */
+export function baselineLine(
+  approval: {
+    everApproved: boolean;
+    approvedVersion: string | null;
+    currentVersion: string | null;
+    reopened: boolean;
+    planning: { route: string };
+  },
+  baseline: { ep_approved_at: Date | string | null; approved_by: string | null } | undefined,
+): string | null {
+  if (!approval.everApproved) return null;
+  if (!approval.approvedVersion) return 'Approved (before the 02.8 summary existed)';
+  const at = baseline?.ep_approved_at;
+  const on = at ? (typeof at === 'string' ? at : at.toISOString()).slice(0, 10) : null;
+  return [
+    `v${approval.approvedVersion} approved`,
+    baseline?.approved_by ? ` by ${baseline.approved_by}` : '',
+    on ? ` on ${on}` : '',
+    approval.planning.route === 'conditional' ? ', subject to conditions' : '',
+    approval.reopened && approval.currentVersion
+      ? `; controlled revision v${approval.currentVersion} in progress`
+      : '',
+  ].join('');
+}
+
 /** Keep an acceptance narrative short enough for a one-line observation. */
 function brief(v: unknown, max = 240): string | null {
   if (typeof v !== 'string') return null;
@@ -109,6 +140,28 @@ async function readFactsOn(
   const engagement = await readFrameworkEngagementOn(client, workflowInstanceId);
   const fr = await readFinancialReportingResult(client, workflowInstanceId);
   const pyChanges = await readPriorYearChangesOn(client, workflowInstanceId);
+  const approval = await readFrameworkApprovalOn(client, workflowInstanceId);
+  const overrides = await readFrameworkOverridesOn(client, workflowInstanceId);
+
+  // 02.8 — the approved baseline and its AF-02 conditions (§5 "conditions and
+  // approved framework baseline"). Conditions belong to the latest approved
+  // baseline; a resolved one no longer directs the plan.
+  const { rows: baselineRows } = await client.query<{
+    ep_approved_at: Date | null;
+    approved_by: string | null;
+  }>(
+    `SELECT b.ep_approved_at, e.full_name AS approved_by
+       FROM hsdg.audit_framework_baseline b
+       LEFT JOIN hsdg.employees e ON e.id = b.ep_approved_by_employee_id
+      WHERE b.id = $1`,
+    [approval.approvedBaselineId],
+  );
+  const { rows: conditionRows } = await client.query<{ condition: string; status: string }>(
+    `SELECT condition, status FROM hsdg.audit_framework_condition
+      WHERE baseline_id = $1 ORDER BY created_at, id`,
+    [approval.approvedBaselineId],
+  );
+  const openConditions = conditionRows.filter((c) => c.status === 'open');
 
   const { rows: profileRows } = await client.query<{
     special_entity_types: string[] | null;
@@ -244,6 +297,12 @@ async function readFactsOn(
     framework_change_labels: frameworkChanges.map((c) =>
       c.previous || c.current ? `${c.label} (${c.previous ?? '—'} → ${c.current ?? '—'})` : c.label,
     ),
+    framework_overrides: overrides.length,
+    framework_override_labels: overrides.map(
+      (o) => `${o.title} (${o.systemResult ?? '—'} → ${o.conclusion ?? '—'})`,
+    ),
+    framework_open_conditions: openConditions.length,
+    framework_open_condition_labels: openConditions.map((c) => brief(c.condition, 160) ?? ''),
   };
 
   // ── Read-only panel (grouped by owning section) ─────────────────────────
@@ -451,7 +510,13 @@ async function readFactsOn(
       ),
       item('s197', 'Section 197(16)', s197 === null ? null : yesNo(s197), 'framework:02.7'),
     ]),
-    group('changes', 'Framework changes since the prior year', '02.8', [
+    group('changes', 'Audit Framework approval & changes', '02.8', [
+      item(
+        'baseline',
+        'Approved baseline',
+        baselineLine(approval, baselineRows[0]),
+        'framework:02.8',
+      ),
       item(
         'py',
         pyChanges.available ? (pyChanges.priorPeriodLabel ?? 'Prior year') : 'Prior year',
@@ -462,6 +527,31 @@ async function readFactsOn(
           : pyChanges.reason,
         'framework:02.8',
       ),
+      approval.everApproved
+        ? item(
+            'overrides',
+            'System overrides',
+            overrides.length
+              ? overrides
+                  .map(
+                    (o) =>
+                      `${o.title}: ${o.systemResult ?? '—'} → ${o.conclusion ?? '—'}${o.reason ? ` (${brief(o.reason, 120)})` : ''}`,
+                  )
+                  .join('; ')
+              : 'None',
+            'framework:02.8',
+          )
+        : null,
+      conditionRows.length
+        ? item(
+            'conditions',
+            'Approval conditions',
+            openConditions.length
+              ? `${openConditions.length} of ${conditionRows.length} open — ${(facts.framework_open_condition_labels as string[]).join('; ')}`
+              : `All ${conditionRows.length} resolved`,
+            'framework:02.8',
+          )
+        : null,
     ]),
   ].filter((g): g is PlanningFactGroup => g !== null);
 
