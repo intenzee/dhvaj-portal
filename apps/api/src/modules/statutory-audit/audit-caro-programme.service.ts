@@ -60,6 +60,7 @@ import {
 import { componentAuditorFeedOn } from './consolidation-group-read';
 import { componentsFromDetail } from './consolidation-read';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
+import { inSequence } from '../../database/in-sequence';
 
 /** The Section 06 work area every CARO clause procedure lives in. */
 const CARO_WORK_AREA_KEY = 'caro';
@@ -1095,14 +1096,14 @@ export class AuditCaroProgrammeService {
     );
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
-    const [evidence, findings, components, areas, division, prior] = await Promise.all([
-      this.readEvidence(client, ids),
-      this.readFindings(client, ids),
-      this.readComponents(client, ids),
-      this.readWorkAreas(client, workflowInstanceId),
-      this.readDivision(client, workflowInstanceId),
-      this.readPriorClauses(client, priorFile),
-    ]);
+    const [evidence, findings, components, areas, division, prior] = await inSequence(
+      () => this.readEvidence(client, ids),
+      () => this.readFindings(client, ids),
+      () => this.readComponents(client, ids),
+      () => this.readWorkAreas(client, workflowInstanceId),
+      () => this.readDivision(client, workflowInstanceId),
+      () => this.readPriorClauses(client, priorFile),
+    );
     const areaTitle = new Map(areas.map((a) => [a.work_area_key, a.title]));
     return rows.map((r) => {
       const itemFindings = (findings.get(r.id) ?? []).map((f) => ({
@@ -1468,10 +1469,10 @@ export class AuditCaroProgrammeService {
   }
 
   private async blockersFor(client: PoolClient, item: ItemRow, forSubmit: boolean) {
-    const [findings, components] = await Promise.all([
-      this.readFindings(client, [item.id]),
-      this.readComponents(client, [item.id]),
-    ]);
+    const [findings, components] = await inSequence(
+      () => this.readFindings(client, [item.id]),
+      () => this.readComponents(client, [item.id]),
+    );
     return approvalBlockers(
       {
         relevance: item.relevance,

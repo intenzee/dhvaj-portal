@@ -93,7 +93,42 @@ export async function readFrameworkEngagementOn(
   };
 }
 
-export async function readFrameworkRecordInputsOn(
+const inputsCache = new WeakMap<PoolClient, Map<string, Promise<FrameworkRecordInputs>>>();
+
+/**
+ * Read the record inputs once per workflow instance while `fn` runs — the
+ * 02.8 summary build calls triggers, preview, prior year and impact, which all
+ * read the same facts. Only for read-only spans: nothing inside `fn` may change
+ * the 02.x facts. The cache ends with `fn`, so a later read sees new writes.
+ */
+export async function withFrameworkInputsCacheOn<T>(
+  client: PoolClient,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (inputsCache.has(client)) return fn();
+  inputsCache.set(client, new Map());
+  try {
+    return await fn();
+  } finally {
+    inputsCache.delete(client);
+  }
+}
+
+export function readFrameworkRecordInputsOn(
+  client: PoolClient,
+  workflowInstanceId: string,
+): Promise<FrameworkRecordInputs> {
+  const cache = inputsCache.get(client);
+  if (!cache) return readRecordInputsOn(client, workflowInstanceId);
+  let inputs = cache.get(workflowInstanceId);
+  if (!inputs) {
+    inputs = readRecordInputsOn(client, workflowInstanceId);
+    cache.set(workflowInstanceId, inputs);
+  }
+  return inputs;
+}
+
+async function readRecordInputsOn(
   client: PoolClient,
   workflowInstanceId: string,
 ): Promise<FrameworkRecordInputs> {

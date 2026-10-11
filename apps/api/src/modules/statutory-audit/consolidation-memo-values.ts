@@ -29,6 +29,7 @@ import { formatLongDate } from './acceptance-merge-values';
 import { groupAuditStatusOn } from './consolidation-group-read';
 import { readConsolidationResultOn } from './consolidation-read';
 import { findingRef, perimeterFromDetail } from './group-audit';
+import { inSequence } from '../../database/in-sequence';
 
 const t = (v: string | null | undefined): string | null => (v && v.trim() ? v.trim() : null);
 const outcomeLabel = (o: string | null): string | null =>
@@ -116,59 +117,67 @@ export async function readConsolidationMemoInput(
   if (!r) return null;
   const result = await readConsolidationResultOn(client, workflowInstanceId);
   const [status, { rows: comps }, { rows: group }, { rows: findings }, { rows: branches }] =
-    await Promise.all([
-      groupAuditStatusOn(client, workflowInstanceId),
-      client.query<{
-        component_name: string;
-        auditor_type: ComponentAuditorType;
-        firm_name: string | null;
-        report_type: ComponentReportType | null;
-        component_id: string;
-      }>(
-        `SELECT component_id, component_name, auditor_type, firm_name, report_type
+    await inSequence(
+      () => groupAuditStatusOn(client, workflowInstanceId),
+      () =>
+        client.query<{
+          component_name: string;
+          auditor_type: ComponentAuditorType;
+          firm_name: string | null;
+          report_type: ComponentReportType | null;
+          component_id: string;
+        }>(
+          `SELECT component_id, component_name, auditor_type, firm_name, report_type
            FROM hsdg.audit_group_component
           WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL
           ORDER BY sort_order, component_name`,
-        [workflowInstanceId],
-      ),
-      client.query<{
-        ga01: string | null;
-        br01: string;
-        work_status: string;
-        work_framework_label: string | null;
-        applicable: number;
-        linked: number;
-      }>(
-        `SELECT g.ga01, g.br01, g.work_status, g.work_framework_label,
+          [workflowInstanceId],
+        ),
+      () =>
+        client.query<{
+          ga01: string | null;
+          br01: string;
+          work_status: string;
+          work_framework_label: string | null;
+          applicable: number;
+          linked: number;
+        }>(
+          `SELECT g.ga01, g.br01, g.work_status, g.work_framework_label,
                 (SELECT count(*)::int FROM hsdg.audit_group_work_item w
                   WHERE w.group_audit_id = g.id AND w.status = 'active' AND w.applicable) AS applicable,
                 (SELECT count(*)::int FROM hsdg.audit_group_work_item w
                   WHERE w.group_audit_id = g.id AND w.status = 'active' AND w.applicable
                     AND w.procedure_id IS NOT NULL) AS linked
            FROM hsdg.audit_group_audit g WHERE g.workflow_instance_id = $1`,
-        [workflowInstanceId],
-      ),
-      client.query<{
-        seq: number;
-        subject: string | null;
-        category: GroupFindingCategory;
-        status: string;
-      }>(
-        `SELECT f.seq, COALESCE(c.component_name, b.branch_name) AS subject, f.category, f.status
+          [workflowInstanceId],
+        ),
+      () =>
+        client.query<{
+          seq: number;
+          subject: string | null;
+          category: GroupFindingCategory;
+          status: string;
+        }>(
+          `SELECT f.seq, COALESCE(c.component_name, b.branch_name) AS subject, f.category, f.status
            FROM hsdg.audit_group_finding f
            LEFT JOIN hsdg.audit_group_component c ON c.id = f.component_row_id
            LEFT JOIN hsdg.audit_group_branch b ON b.id = f.branch_id
           WHERE f.workflow_instance_id = $1 AND f.withdrawn_at IS NULL
           ORDER BY f.seq`,
-        [workflowInstanceId],
-      ),
-      client.query<{ branch_name: string; firm_name: string | null; conclusion: BranchConclusion }>(
-        `SELECT branch_name, firm_name, conclusion FROM hsdg.audit_group_branch
+          [workflowInstanceId],
+        ),
+      () =>
+        client.query<{
+          branch_name: string;
+          firm_name: string | null;
+          conclusion: BranchConclusion;
+        }>(
+          `SELECT branch_name, firm_name, conclusion FROM hsdg.audit_group_branch
           WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL
           ORDER BY sort_order, branch_name`,
-        [workflowInstanceId],
-      ),
-    ]);
+          [workflowInstanceId],
+        ),
+    );
   const g = group[0];
   return {
     systemOutcome: r.system_outcome,

@@ -8,6 +8,7 @@ import type {
   IcfrWorkstreamStatus,
 } from '@hsdg/contracts';
 import { summariseDeficiencies } from './icfr-controls';
+import { inSequence } from '../../database/in-sequence';
 
 /**
  * Plain reads of the 02.5 ICFR workstream and consolidated consideration for
@@ -84,39 +85,42 @@ export async function readIcfrReportingOn(
   client: PoolClient,
   workflowInstanceId: string,
 ): Promise<IcfrReportingSummary | null> {
-  const [{ rows: ws }, { rows: cs }, { rows: ds }] = await Promise.all([
-    client.query<{ status: string; conclusion: IcfrWorkstreamConclusion | null }>(
-      `SELECT status, conclusion FROM hsdg.audit_icfr_workstream WHERE workflow_instance_id = $1`,
-      [workflowInstanceId],
-    ),
-    client.query<{
-      status: string;
-      parent_conclusion: IcfrParentConclusion | null;
-      component_mw: number;
-    }>(
-      `SELECT c.status, c.parent_conclusion,
+  const [{ rows: ws }, { rows: cs }, { rows: ds }] = await inSequence(
+    () =>
+      client.query<{ status: string; conclusion: IcfrWorkstreamConclusion | null }>(
+        `SELECT status, conclusion FROM hsdg.audit_icfr_workstream WHERE workflow_instance_id = $1`,
+        [workflowInstanceId],
+      ),
+    () =>
+      client.query<{
+        status: string;
+        parent_conclusion: IcfrParentConclusion | null;
+        component_mw: number;
+      }>(
+        `SELECT c.status, c.parent_conclusion,
               (SELECT count(*)::int FROM hsdg.audit_icfr_component m
                 WHERE m.consolidated_id = c.id AND m.withdrawn_at IS NULL
                   AND m.material_weakness IS TRUE) AS component_mw
          FROM hsdg.audit_icfr_consolidated c WHERE c.workflow_instance_id = $1`,
-      [workflowInstanceId],
-    ),
-    client.query<{
-      seq: number;
-      classification: IcfrDeficiencyClass;
-      description: string;
-      status: 'open' | 'closed';
-      reviewed: boolean;
-      partner_concluded: boolean;
-    }>(
-      `SELECT seq, classification, description, status,
+        [workflowInstanceId],
+      ),
+    () =>
+      client.query<{
+        seq: number;
+        classification: IcfrDeficiencyClass;
+        description: string;
+        status: 'open' | 'closed';
+        reviewed: boolean;
+        partner_concluded: boolean;
+      }>(
+        `SELECT seq, classification, description, status,
               reviewed_at IS NOT NULL AS reviewed, partner_at IS NOT NULL AS partner_concluded
          FROM hsdg.audit_icfr_deficiency
         WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL
         ORDER BY seq`,
-      [workflowInstanceId],
-    ),
-  ]);
+        [workflowInstanceId],
+      ),
+  );
   const w = ws[0];
   const c = cs[0];
   if (!w && !c) return null;

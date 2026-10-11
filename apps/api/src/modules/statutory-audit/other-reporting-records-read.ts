@@ -41,6 +41,7 @@ import {
   planReportingProcedures,
   type PlannedReportingProcedure,
 } from './reporting-records';
+import { inSequence } from '../../database/in-sequence';
 
 /**
  * DI-free reads of the 02.7 Track B records (Fraud Matters, the §164(2)
@@ -148,10 +149,11 @@ export async function readFraudMattersOn(
   auditPeriodStart: string,
   onDate: string = today(),
 ): Promise<FraudMattersRead> {
-  const [versions, { rows }] = await Promise.all([
-    fraudRuleVersionsOn(client),
-    client.query<FraudMatterRow>(
-      `SELECT m.id, m.seq, m.nature, m.description, m.amount::text AS amount, m.amount_estimated,
+  const [versions, { rows }] = await inSequence(
+    () => fraudRuleVersionsOn(client),
+    () =>
+      client.query<FraudMatterRow>(
+        `SELECT m.id, m.seq, m.nature, m.description, m.amount::text AS amount, m.amount_estimated,
               m.perpetrator, m.parties_involved, m.knowledge_date, m.source, m.source_ref,
               m.procedure_id, p.procedure_ref, m.audit_procedures, m.tcwg_communication,
               m.board_reported_on, m.reply_received_on, m.cg_forwarded_on, m.adt4_reference,
@@ -166,9 +168,9 @@ export async function readFraudMattersOn(
          LEFT JOIN hsdg.employees cb ON cb.id = m.created_by_employee_id
         WHERE m.workflow_instance_id = $1
         ORDER BY m.seq`,
-      [workflowInstanceId],
-    ),
-  ]);
+        [workflowInstanceId],
+      ),
+  );
   const periodRules = fraudRulesOn(versions, auditPeriodStart);
   const evaluated = rows.map((r) => {
     const knowledgeDate = iso(r.knowledge_date);
@@ -371,11 +373,11 @@ export async function reportingCrossRefsOn(
   const clauses = await readCaroClauseStatus(client, workflowInstanceId);
 
   const cfs = await readConsolidationResultOn(client, workflowInstanceId);
-  const [icfr, icfrReporting, group] = await Promise.all([
-    readIcfrResultOn(client, workflowInstanceId),
-    readIcfrReportingOn(client, workflowInstanceId),
-    groupAuditStatusOn(client, workflowInstanceId, cfs),
-  ]);
+  const [icfr, icfrReporting, group] = await inSequence(
+    () => readIcfrResultOn(client, workflowInstanceId),
+    () => readIcfrReportingOn(client, workflowInstanceId),
+    () => groupAuditStatusOn(client, workflowInstanceId, cfs),
+  );
 
   const branchesExist =
     group.branchAuditPresent === 'yes' ? true : group.branchAuditPresent === 'no' ? false : null;

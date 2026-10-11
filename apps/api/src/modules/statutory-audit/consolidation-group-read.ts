@@ -29,6 +29,7 @@ import {
   suggestBr01,
   suggestGa01,
 } from './group-audit';
+import { inSequence } from '../../database/in-sequence';
 
 /**
  * DI-free 02.6 Part B readers (Track B — group / component / branch auditor
@@ -149,42 +150,44 @@ export async function groupAuditStatusOn(
     : [];
 
   const [{ rows: branches }, { rows: findings }] = group
-    ? await Promise.all([
-        client.query<{
-          branch_name: string;
-          significance: ComponentSignificance;
-          ga02: Ga02Answer;
-          ga03: GaYesNoPending;
-          ga04: GaYesNoPending;
-          principal_response: string | null;
-          conclusion: string;
-          has_report: boolean;
-        }>(
-          `SELECT b.branch_name, b.significance, b.ga02, b.ga03, b.ga04, b.principal_response,
+    ? await inSequence(
+        () =>
+          client.query<{
+            branch_name: string;
+            significance: ComponentSignificance;
+            ga02: Ga02Answer;
+            ga03: GaYesNoPending;
+            ga04: GaYesNoPending;
+            principal_response: string | null;
+            conclusion: string;
+            has_report: boolean;
+          }>(
+            `SELECT b.branch_name, b.significance, b.ga02, b.ga03, b.ga04, b.principal_response,
                   b.conclusion,
                   EXISTS (SELECT 1 FROM hsdg.audit_group_file f
                            WHERE f.branch_id = b.id AND f.slot = 'branch_report'
                              AND f.superseded_at IS NULL) AS has_report
              FROM hsdg.audit_group_branch b
             WHERE b.workflow_instance_id = $1 AND b.withdrawn_at IS NULL`,
-          [workflowInstanceId],
-        ),
-        client.query<{
-          seq: number;
-          subject_name: string | null;
-          category: GroupFindingCategory;
-          status: 'open' | 'resolved';
-        }>(
-          `SELECT f.seq, COALESCE(c.component_name, b.branch_name) AS subject_name, f.category,
+            [workflowInstanceId],
+          ),
+        () =>
+          client.query<{
+            seq: number;
+            subject_name: string | null;
+            category: GroupFindingCategory;
+            status: 'open' | 'resolved';
+          }>(
+            `SELECT f.seq, COALESCE(c.component_name, b.branch_name) AS subject_name, f.category,
                   f.status
              FROM hsdg.audit_group_finding f
              LEFT JOIN hsdg.audit_group_component c ON c.id = f.component_row_id
              LEFT JOIN hsdg.audit_group_branch b ON b.id = f.branch_id
             WHERE f.workflow_instance_id = $1 AND f.withdrawn_at IS NULL
               AND COALESCE(c.withdrawn_at, b.withdrawn_at) IS NULL`,
-          [workflowInstanceId],
-        ),
-      ])
+            [workflowInstanceId],
+          ),
+      )
     : [{ rows: [] }, { rows: [] }];
 
   const br01 =
