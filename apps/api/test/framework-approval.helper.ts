@@ -92,6 +92,13 @@ export async function approveFrameworkForTest(
         WHERE workflow_instance_id = $1 AND phase_key = 'framework'`,
       [shellId],
     );
+    // The same immutable audit event the real AF-02 approval writes.
+    await su.query(
+      `INSERT INTO hsdg.audit_events (actor_role, action, object_type, object_id, after_state)
+       VALUES ('e2e', 'statutory_audit.framework_ep_approved', 'audit_framework_baseline', $1,
+               '{"decision":"approve","source":"approveFrameworkForTest"}'::jsonb)`,
+      [shellId],
+    );
     await su.query('COMMIT');
   } catch (err) {
     await su.query('ROLLBACK');

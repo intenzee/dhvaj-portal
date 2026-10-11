@@ -12,6 +12,7 @@ import {
   type ReassessmentChangeType,
   type ReassessmentImpact,
   type FrameworkConclusion,
+  type FrameworkSourceSection,
   type ReassessmentDetection,
   type ReassessmentStatus,
   type StatutoryAuditReassessment,
@@ -28,6 +29,12 @@ import {
 } from './reassessment-automation';
 import { areaForRisk, type FsAreaInput } from './work-automation';
 import { planWorkAreas } from './work-generation';
+import {
+  lockFrameworkBaselineOn,
+  readLiveApprovedBaselineOn,
+  reopenFrameworkBaselineOn,
+} from './framework-reopen';
+import { sectionForRuleArea } from './framework-summary-engine';
 
 interface ShellRow {
   id: string;
@@ -220,6 +227,38 @@ export class AuditReassessmentService {
       };
       // Framework applicability → re-open approved areas for re-conclusion (§30).
       if (impact.framework) {
+        // 02.8 §15: an approved Audit Framework Baseline is reopened as the next
+        // version, so the change goes back through AF-01 / AF-02.
+        await lockFrameworkBaselineOn(client, workflowInstanceId);
+        const live = await readLiveApprovedBaselineOn(client, workflowInstanceId);
+        if (live) {
+          const { rows: approvedAreas } = await client.query<{ area_key: string }>(
+            `SELECT area_key FROM hsdg.audit_framework_assessments
+              WHERE workflow_instance_id = $1 AND state = 'approved'`,
+            [workflowInstanceId],
+          );
+          const sections = [
+            ...new Set(
+              approvedAreas
+                .map((a) => sectionForRuleArea(a.area_key))
+                .filter((x): x is FrameworkSourceSection => x != null),
+            ),
+          ];
+          const r = await reopenFrameworkBaselineOn(
+            client,
+            ctx,
+            engagementId,
+            workflowInstanceId,
+            live,
+            {
+              reason: `Section 08 reassessment: ${reason}`,
+              affectedSections: sections.length ? sections : ['other_areas'],
+              identifiedAt: new Date().toISOString(),
+              reapprovalRequired: true,
+            },
+          );
+          parts.push(`audit framework v${r.fromVersion} → draft v${r.toVersion}`);
+        }
         const r = await client.query(
           `UPDATE hsdg.audit_framework_assessments
               SET state = 'reassessment_required'

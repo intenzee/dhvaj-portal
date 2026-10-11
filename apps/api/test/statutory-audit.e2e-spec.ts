@@ -562,7 +562,7 @@ describe('Statutory Audit (e2e §35/§36)', () => {
       actions.push(...items.filter((e) => e.objectId === shellId).map((e) => e.action));
       if (actions.includes('statutory_audit.workflow_provisioned') || items.length < 100) break;
     }
-    expect(actions).toContain('statutory_audit.framework_approved');
+    expect(actions).toContain('statutory_audit.framework_ep_approved');
     expect(actions).toContain('statutory_audit.workflow_provisioned');
   });
 });
