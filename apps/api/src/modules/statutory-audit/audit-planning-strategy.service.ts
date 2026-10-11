@@ -55,6 +55,7 @@ import {
   insertSignal,
   maxSeq,
 } from './planning-shared';
+import { assertMatterOwnerScope } from './planning-governance';
 import { readPriorAuditFile } from './master-facts';
 import { priorYearMattersFromFile } from './planning-prior-year';
 
@@ -924,6 +925,7 @@ export class AuditPlanningStrategyService {
       );
       const current = rows[0];
       if (!current) throw new NotFoundException('Planning Matter not found.');
+      await assertMatterOwnerScope(client, engagementId, current.owner_employee_id, input);
       const nextStatus = input.status ?? current.status;
       const nextResolution =
         input.resolution !== undefined ? clean(input.resolution) : current.resolution;

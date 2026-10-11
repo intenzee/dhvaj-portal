@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type { PlanningAttention, PlanningSignalSource } from '@hsdg/contracts';
+import { syncPlanningAttention } from './planning-governance';
 
 /**
  * Helpers shared by the 03.1 services (Planning Intelligence + strategy
@@ -77,7 +78,11 @@ export async function assertSignalsInShell(
   }
 }
 
-/** Insert a (non-auto) Planning Signal into the shared register; returns its id. */
+/**
+ * Insert a (non-auto) Planning Signal into the shared register; returns its id.
+ * Every source lands here, so this is where the Manager is alerted to a new
+ * Enhanced / Immediate signal and an IPA signal reaches the EP (§10, §19).
+ */
 export async function insertSignal(
   client: PoolClient,
   engagementId: string,
@@ -91,6 +96,8 @@ export async function insertSignal(
     potentialImplications?: string | null;
     attention: PlanningAttention;
     documentId?: string | null;
+    /** §23: an engagement-team member's proposal, awaiting the Manager's assessment. */
+    proposedByEmployeeId?: string | null;
   },
 ): Promise<string> {
   const seq = (await maxSeq(client, 'audit_planning_signal', workflowInstanceId)) + 1;
@@ -98,8 +105,9 @@ export async function insertSignal(
     `INSERT INTO hsdg.audit_planning_signal
        (workflow_instance_id, engagement_id, seq, source, source_ref, source_link, observation,
         why_may_matter, potential_implications, suggested_attention, attention,
-        document_id, is_auto)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, false)
+        document_id, is_auto, proposed_by_employee_id, proposed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, false,
+             $12::uuid, CASE WHEN $12::uuid IS NULL THEN NULL ELSE now() END)
      RETURNING id`,
     [
       workflowInstanceId,
@@ -113,7 +121,10 @@ export async function insertSignal(
       signal.potentialImplications ?? null,
       signal.attention,
       signal.documentId ?? null,
+      signal.proposedByEmployeeId ?? null,
     ],
   );
-  return rows[0]!.id;
+  const id = rows[0]!.id;
+  await syncPlanningAttention(client, engagementId, workflowInstanceId);
+  return id;
 }
