@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Flag, Pencil, Undo2 } from 'lucide-react';
+import { FileText, Flag, Pencil, Undo2 } from 'lucide-react';
 import {
   FRAMEWORK_MATTER_CATEGORY_LABEL,
   type FrameworkSummaryMatter,
@@ -11,6 +11,8 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { useToast } from '@/lib/toast';
+import type { DocumentRow } from '@/lib/types';
+import { DocumentPreview } from '@/components/document-preview';
 import { Badge, Button, Card } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { PanelHeading, SourceLink } from './framework-summary-shared';
@@ -99,6 +101,7 @@ function MatterRow({
   const [owner, setOwner] = useState(m.ownerEmployeeId ?? '');
   const [due, setDue] = useState(m.dueDate ?? '');
   const [note, setNote] = useState('');
+  const [evidence, setEvidence] = useState<DocumentRow | null>(null);
   const base = `/engagements/${engagementId}/statutory-audit/${summary.workflowInstanceId}/framework-summary/matters/${m.id}`;
   const editable = canManage && m.open;
 
@@ -113,6 +116,15 @@ function MatterRow({
       toast(e instanceof ApiError ? e.message : 'Could not save the matter.', 'error');
     } finally {
       setBusy(false);
+    }
+  };
+  const openEvidence = async (documentId: string): Promise<void> => {
+    try {
+      setEvidence(
+        await apiFetch<DocumentRow>(`/engagements/${engagementId}/documents/${documentId}`),
+      );
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not open the evidence.', 'error');
     }
   };
   const ownerOptions = new Map(people);
@@ -144,6 +156,18 @@ function MatterRow({
           {m.impact && <p className="mt-0.5 text-xs text-ink-muted">Impact: {m.impact}</p>}
           {m.resolution && (
             <p className="mt-0.5 text-xs text-ink-muted">Resolution: {m.resolution}</p>
+          )}
+          {m.evidenceDocumentId && (
+            <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-ink-muted">
+              Evidence / memo:
+              <button
+                type="button"
+                className="inline-flex items-center gap-0.5 text-primary-700 hover:underline"
+                onClick={() => void openEvidence(m.evidenceDocumentId!)}
+              >
+                <FileText className="h-3 w-3" /> Open document
+              </button>
+            </p>
           )}
         </div>
         {editable && (
@@ -270,6 +294,16 @@ function MatterRow({
             </Button>
           </div>
         </div>
+      )}
+
+      {evidence && (
+        <DocumentPreview
+          engagementId={engagementId}
+          doc={evidence}
+          canEdit={false}
+          onClose={() => setEvidence(null)}
+          onSaved={onChanged}
+        />
       )}
     </li>
   );

@@ -10,6 +10,7 @@ import type {
   FrameworkMemoHistoryItem,
   FrameworkMemorandumCreated,
   FrameworkSummaryMatter,
+  FrameworkSystemOverride,
   StatutoryAuditCompletion,
   StatutoryAuditFrameworkSummary,
 } from '@hsdg/contracts';
@@ -401,8 +402,45 @@ describe('Statutory Audit — 02.8 Track B records (e2e)', () => {
       expect(i.evidence.facts.join(' ')).not.toMatch(/Audit Framework reopened/);
   });
 
-  it('an outsider sees no memoranda and no impact', async () => {
+  it('§12 lists every system result a professional overrode, with the reason', async () => {
+    expect((await get(pa, `${fs()}/overrides`).expect(200)).body).toEqual([]);
+    await su(async (c) => {
+      await c.query(
+        `UPDATE hsdg.audit_framework_subassessment
+            SET system_outcome = 'ind_as', conclusion = 'accounting_standards', is_overridden = true,
+                basis = 'Net worth measured on the standalone accounts', decided_at = now()
+          WHERE workflow_instance_id = $1 AND sub_section_key = '02.2'`,
+        [shellId],
+      );
+      await c.query(
+        `UPDATE hsdg.audit_framework_assessments
+            SET system_suggestion = 'applicable', conclusion = 'not_applicable',
+                is_overridden = true, basis = 'Below the CSR thresholds'
+          WHERE workflow_instance_id = $1 AND area_key = 'csr'`,
+        [shellId],
+      );
+    });
+    const overrides = (await get(pa, `${fs()}/overrides`).expect(200))
+      .body as FrameworkSystemOverride[];
+    expect(overrides).toEqual([
+      expect.objectContaining({
+        source: '02.2',
+        systemResult: 'Ind AS',
+        conclusion: 'Accounting Standards (AS)',
+        reason: 'Net worth measured on the standalone accounts',
+      }),
+      expect.objectContaining({
+        source: 'other_areas',
+        systemResult: 'Applicable',
+        conclusion: 'Not applicable',
+        reason: 'Below the CSR thresholds',
+      }),
+    ]);
+  });
+
+  it('an outsider sees no memoranda, no impact and no overrides', async () => {
     await get(pb, `${fs()}/memos`).expect(404);
     await get(pb, `${fs()}/impact`).expect(404);
+    await get(pb, `${fs()}/overrides`).expect(404);
   });
 });
