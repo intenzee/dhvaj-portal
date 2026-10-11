@@ -439,7 +439,7 @@ export class AuditFrameworkService {
       if (!current) throw new NotFoundException('Assessment not found.');
       if (current.state === 'approved') {
         throw new ConflictException(
-          'The framework is approved; reopen it before changing a conclusion.',
+          'The Audit Framework is approved — use Reopen Audit Framework in 02.8 (Controlled Reopen) before changing a conclusion.',
         );
       }
       if (current.area_key === FRAMEWORK_AREA_KEY.caro) {

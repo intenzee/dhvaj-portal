@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
   CARO_OUTCOME,
@@ -19,6 +24,7 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { readLiveApprovedBaselineOn } from './framework-reopen';
 
 /** The six Section-02 sub-sections, in dashboard order (for the current-year view). */
 const SECTIONS: Array<{ sub: SubSectionKey; area: string; title: string }> = [
@@ -96,6 +102,12 @@ export class AuditRollForwardService {
       if (!cmp.isContinuingAudit) {
         throw new BadRequestException(
           'Roll-forward applies to a continuing audit; 02.1 marks this a first-year (initial) audit.',
+        );
+      }
+      const approved = await readLiveApprovedBaselineOn(client, workflowInstanceId);
+      if (approved) {
+        throw new ConflictException(
+          `The Audit Framework v${approved.version} is approved — reopen it in 02.8 (Controlled Reopen) before rolling prior-year facts forward.`,
         );
       }
 

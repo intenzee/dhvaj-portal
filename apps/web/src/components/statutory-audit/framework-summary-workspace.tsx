@@ -6,6 +6,7 @@ import {
   FRAMEWORK_SUMMARY_STATUS_LABEL,
   PERMISSION,
   type FrameworkDashboardRow,
+  type FrameworkSummaryMatter,
   type FrameworkSummaryStatus,
   type StatutoryAuditFrameworkSummary,
 } from '@hsdg/contracts';
@@ -34,6 +35,9 @@ const STATUS_TONE: Record<FrameworkSummaryStatus, string> = {
 export function scrollToFrameworkAnchor(anchor: string): void {
   document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+/** Anchor of the aggregated Framework Matters panel (§7). */
+export const FRAMEWORK_MATTERS_ANCHOR = 'framework-02-8-matters';
 
 /**
  * 02.8 Audit Framework Summary & Approval — the consolidated, read-only view
@@ -70,10 +74,12 @@ export function FrameworkSummaryWorkspace({
   return (
     <div className="space-y-3">
       <FrameworkSummaryHeaderCard summary={summary} />
-      <FrameworkDashboard rows={summary.dashboard} />
+      <FrameworkDashboard rows={summary.dashboard} matters={summary.matters} />
       <FrameworkSummaryTriggers {...props} />
       <FrameworkSummaryPreview {...props} />
-      <FrameworkSummaryMatters {...props} />
+      <div id={FRAMEWORK_MATTERS_ANCHOR} className="scroll-mt-2">
+        <FrameworkSummaryMatters {...props} />
+      </div>
       <FrameworkSummaryPriorYear {...props} />
       <FrameworkSummaryImpact {...props} />
       <FrameworkSummaryMemo {...props} />
@@ -82,7 +88,7 @@ export function FrameworkSummaryWorkspace({
   );
 }
 
-function FrameworkSummaryHeaderCard({
+export function FrameworkSummaryHeaderCard({
   summary,
 }: {
   summary: StatutoryAuditFrameworkSummary;
@@ -97,6 +103,10 @@ function FrameworkSummaryHeaderCard({
             02.8 Audit Framework Summary &amp; Approval
           </h2>
           <p className="text-xs text-ink-muted">{h.periodLabel}</p>
+          <p className="mt-1 max-w-2xl text-xs text-ink-muted">
+            Review the statutory, financial reporting, auditing and reporting framework
+            determined for this engagement before audit planning begins.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={STATUS_TONE[h.status]}>{FRAMEWORK_SUMMARY_STATUS_LABEL[h.status]}</Badge>
@@ -108,14 +118,30 @@ function FrameworkSummaryHeaderCard({
         <HeaderFact label="Engagement Manager" value={h.engagementManagerName} />
         <HeaderFact label="Engagement Partner" value={h.engagementPartnerName} />
         <HeaderFact label="Methodology" value={h.methodologyVersion} />
-        <HeaderFact
-          label="Open matters"
-          value={
-            h.blockingMatterCount > 0
-              ? `${h.openMatterCount} (${h.blockingMatterCount} blocking)`
-              : String(h.openMatterCount)
-          }
-        />
+        <div className="flex gap-2">
+          <dt className="text-ink-faint">Open matters</dt>
+          <dd>
+            <button
+              type="button"
+              className="font-medium text-primary-700 hover:underline"
+              onClick={() => scrollToFrameworkAnchor(FRAMEWORK_MATTERS_ANCHOR)}
+            >
+              {h.openMatterCount}
+            </button>
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="text-ink-faint">Blocking matters</dt>
+          <dd>
+            <button
+              type="button"
+              className={`font-medium hover:underline ${h.blockingMatterCount > 0 ? 'text-danger-700' : 'text-primary-700'}`}
+              onClick={() => scrollToFrameworkAnchor(FRAMEWORK_MATTERS_ANCHOR)}
+            >
+              {h.blockingMatterCount}
+            </button>
+          </dd>
+        </div>
         <HeaderFact
           label="Section 03 Planning"
           value={gate.unlocked ? (gate.route === 'conditional' ? 'Open (conditional)' : 'Open') : 'Locked'}
@@ -131,6 +157,27 @@ function FrameworkSummaryHeaderCard({
         )}
         {gate.reason}
       </p>
+      {h.blockingMatterCount > 0 && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 rounded-md border border-danger-400 bg-danger-50 px-3 py-2 text-sm text-danger-700"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1 font-medium">
+            {h.blockingMatterCount === 1
+              ? '1 blocking matter prevents'
+              : `${h.blockingMatterCount} blocking matters prevent`}{' '}
+            Manager confirmation (AF-01) and Partner approval (AF-02).
+          </span>
+          <button
+            type="button"
+            className="text-xs font-semibold underline"
+            onClick={() => scrollToFrameworkAnchor(FRAMEWORK_MATTERS_ANCHOR)}
+          >
+            Resolve matters
+          </button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -145,7 +192,16 @@ function HeaderFact({ label, value }: { label: string; value: string | null }): 
 }
 
 /** §4 Section 02 dashboard — one row per source, each linking back to it. */
-export function FrameworkDashboard({ rows }: { rows: FrameworkDashboardRow[] }): JSX.Element {
+export function FrameworkDashboard({
+  rows,
+  matters = [],
+}: {
+  rows: FrameworkDashboardRow[];
+  matters?: FrameworkSummaryMatter[];
+}): JSX.Element {
+  const open = matters.filter((m) => m.open).length;
+  const blocking = matters.filter((m) => m.blocking).length;
+  const resolved = matters.length - open;
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-line px-4 py-3">
@@ -196,6 +252,34 @@ export function FrameworkDashboard({ rows }: { rows: FrameworkDashboardRow[] }):
             </div>
           </li>
         ))}
+        <li className="flex flex-wrap items-start gap-3 px-4 py-2.5">
+          <span className="w-12 shrink-0 pt-0.5 font-mono text-xs text-ink-faint">02.8</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-ink">Framework Matters</p>
+            <p className="text-xs text-ink-muted">
+              {open} open · {resolved} resolved · {blocking} blocking
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {blocking > 0 ? (
+              <Badge tone="danger">Blocking</Badge>
+            ) : open > 0 ? (
+              <Badge tone="warn">Attention required</Badge>
+            ) : (
+              <Badge tone="success">
+                <CheckCircle2 className="mr-1 h-3 w-3" />
+                Complete
+              </Badge>
+            )}
+            <button
+              type="button"
+              className="text-xs font-medium text-primary-700 hover:underline"
+              onClick={() => scrollToFrameworkAnchor(FRAMEWORK_MATTERS_ANCHOR)}
+            >
+              View Matters
+            </button>
+          </div>
+        </li>
       </ul>
     </Card>
   );

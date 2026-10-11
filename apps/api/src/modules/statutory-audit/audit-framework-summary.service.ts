@@ -1043,6 +1043,21 @@ export class AuditFrameworkSummaryService {
       await this.lockBaseline(client, workflowInstanceId);
       const err = validateReopen(input);
       if (err) throw new BadRequestException(err);
+      if (input.evidenceDocumentId) {
+        const { rowCount } = await client.query(
+          `SELECT 1 FROM hsdg.documents WHERE id = $1 AND engagement_id = $2 AND deleted_at IS NULL`,
+          [input.evidenceDocumentId, engagementId],
+        );
+        if (!rowCount)
+          throw new BadRequestException('Evidence document not found on this engagement.');
+      }
+      if (input.identifiedByEmployeeId) {
+        const { rowCount } = await client.query(`SELECT 1 FROM hsdg.employees WHERE id = $1`, [
+          input.identifiedByEmployeeId,
+        ]);
+        if (!rowCount)
+          throw new BadRequestException('The person who identified the change was not found.');
+      }
       const existing = await this.rawCurrent(client, workflowInstanceId);
       if (!existing || existing.status !== 'approved') {
         throw new BadRequestException('Only an approved framework baseline can be reopened.');

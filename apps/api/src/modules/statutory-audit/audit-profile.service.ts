@@ -86,6 +86,11 @@ import {
   regulatoryProfileFacts,
   type EngagementMasterFacts,
 } from './master-facts';
+import {
+  lockFrameworkBaselineOn,
+  readLiveApprovedBaselineOn,
+  reopenFrameworkBaselineOn,
+} from './framework-reopen';
 
 /** Relationship types that make an entity a holding OR subsidiary (§2(85)). */
 const HOLDING_SUBSIDIARY_TYPES = [
@@ -917,6 +922,39 @@ export class AuditProfileService {
       const changed = changedTrackedFacts(before, a.tracked);
       if (changed.length === 0) continue;
       const sections = downstreamSectionsFor(changed);
+      // An approved Audit Framework is never re-opened silently (02.8 §14–§15):
+      // the change opens the next baseline version through the controlled reopen
+      // (reason, affected sections, impact first pass, notifications). Only a lead
+      // can record that; for anyone else the change waits for a lead's visit.
+      const wf = a.row.workflow_instance_id;
+      if (await readLiveApprovedBaselineOn(client, wf)) {
+        if (!(await isEngagementLead(client, a.row.engagement_id))) continue;
+        await lockFrameworkBaselineOn(client, wf);
+        const live = await readLiveApprovedBaselineOn(client, wf);
+        if (!live) continue;
+        const reason = `Client master changed after framework approval: ${changed.map(trackedFactLabel).join(', ')}.`;
+        const r = await reopenFrameworkBaselineOn(client, ctx, a.row.engagement_id, wf, live, {
+          reason,
+          affectedSections: ['02.1', ...sections],
+          identifiedAt: new Date().toISOString(),
+          evidenceNote: 'Detected automatically from the client master.',
+          reapprovalRequired: true,
+        });
+        await this.audit.recordWith(client, ctx, {
+          action: 'statutory_audit.framework_reopened',
+          objectType: 'audit_framework_baseline',
+          objectId: wf,
+          reason,
+          after: {
+            from: r.fromVersion,
+            to: r.toVersion,
+            affectedSections: r.affectedSections,
+            automatic: true,
+          },
+        });
+        any = true;
+        continue;
+      }
       await client.query(
         `UPDATE hsdg.audit_entity_profile SET needs_reevaluation = true WHERE id = $1`,
         [a.row.id],
@@ -1668,6 +1706,12 @@ export class AuditProfileService {
       if (current.state !== PROFILE_STATE.confirmed) {
         throw new BadRequestException('Only a confirmed profile can be reopened.');
       }
+      const approved = await readLiveApprovedBaselineOn(client, workflowInstanceId);
+      if (approved) {
+        throw new ConflictException(
+          `The Audit Framework v${approved.version} is approved — use Reopen Audit Framework in 02.8 (Controlled Reopen) and name 02.1 as affected; that reopens this profile.`,
+        );
+      }
       if (current.needs_reevaluation) {
         throw new ConflictException('The profile is already open for re-evaluation.');
       }
@@ -1919,7 +1963,7 @@ export class AuditProfileService {
   private assertEditable(p: ProfileRow): void {
     if (p.state === PROFILE_STATE.confirmed && !p.needs_reevaluation) {
       throw new ConflictException(
-        'The profile is confirmed; a controlled reassessment must reopen it before editing.',
+        'The profile is confirmed — reopen it here, or once the Audit Framework is approved, through Reopen Audit Framework in 02.8 (Controlled Reopen).',
       );
     }
   }

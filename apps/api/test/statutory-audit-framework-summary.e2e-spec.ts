@@ -363,8 +363,47 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
       ).rejects.toThrow(/immutable|preserved/);
     });
 
+    it('02.1 is never reopened in place while the framework is approved (§14)', async () => {
+      const res = await post(pa, `${base2()}/${wf2}/profile/reopen`, {
+        reason: 'Turnover corrected after approval',
+      }).expect(409);
+      expect(res.body.message).toMatch(/Controlled Reopen/);
+      expect((await summary2()).baseline).toMatchObject({ version: '1.0', status: 'approved' });
+    });
+
     it('reopens v1.0 → draft v1.1 with the §15 fields, flagging only the affected sections', async () => {
       const before = await summary2();
+      // The evidence must be this engagement's document; the identifier a real person.
+      const { evidenceId, foreignId, ravi } = await su(async (c) => {
+        const doc = (sql: string, id: string) =>
+          c.query<{ id: string }>(sql, [id]).then((r) => r.rows[0]!.id);
+        const ins = `INSERT INTO hsdg.documents (engagement_id, title) VALUES ($1, 'NSE intimation') RETURNING id`;
+        return {
+          evidenceId: await doc(ins, eng2),
+          foreignId: await doc(ins, engId),
+          ravi: (
+            await c.query<{ id: string }>(
+              `SELECT e.id FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id
+                WHERE u.email = 'mp@dhvaj.in'`,
+            )
+          ).rows[0]!.id,
+        };
+      });
+      const valid = {
+        reason: 'Debt listed after approval',
+        affectedSections: ['02.4'],
+        identifiedAt: new Date().toISOString(),
+        reapprovalRequired: true,
+        recordVersion: before.recordVersion,
+      };
+      await post(pa, `${base2()}/${wf2}/framework-summary/reopen`, {
+        ...valid,
+        evidenceDocumentId: foreignId,
+      }).expect(400);
+      await post(pa, `${base2()}/${wf2}/framework-summary/reopen`, {
+        ...valid,
+        identifiedByEmployeeId: '00000000-0000-4000-8000-000000000000',
+      }).expect(400);
       // Every §15 field is mandatory; an outsider and a stale version are refused.
       await post(pa, `${base2()}/${wf2}/framework-summary/reopen`, {
         reason: 'Debt listed after approval',
@@ -392,7 +431,9 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
           reason: 'Debt listed after approval',
           affectedSections: ['02.4'],
           identifiedAt: new Date().toISOString(),
+          identifiedByEmployeeId: ravi,
           evidenceNote: 'Stock exchange intimation dated 12 Sep',
+          evidenceDocumentId: evidenceId,
           reapprovalRequired: true,
           recordVersion: before.recordVersion,
         }).expect(201)
@@ -403,7 +444,9 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
         affectedSections: ['02.4'],
         fromVersion: '1.0',
         reapprovalRequired: true,
+        evidenceDocumentId: evidenceId,
       });
+      expect(s.baseline!.reopen!.identifiedByName).toBeTruthy();
       expect(s.header.status).toBe('reopened');
       expect(s.history.map((b) => [b.version, b.status])).toEqual([
         ['1.1', 'draft'],
@@ -457,6 +500,45 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
         'Section 08 reassessment: Acquired a subsidiary in Q4',
       );
       expect(s.header.status).toBe('reopened');
+    });
+
+    it('a client-master change after approval opens the next version, never a silent edit', async () => {
+      await decideSection02(wf2);
+      await approveFrameworkForTest(wf2);
+      const approvedVersion = (await summary2()).baseline!.version;
+      // The confirmed 02.1 snapshot recorded a different financial year than the master now has.
+      await su((c) =>
+        c.query(
+          `UPDATE hsdg.audit_entity_profile
+              SET snapshot = jsonb_set(COALESCE(snapshot, '{}'::jsonb), '{tracked}',
+                                       '{"period": "FY 1999-00"}'::jsonb)
+            WHERE workflow_instance_id = $1`,
+          [wf2],
+        ),
+      );
+      await get(pa, `${base2()}/profile`).expect(200);
+      const s = await summary2();
+      expect(s.baseline).toMatchObject({ status: 'draft' });
+      expect(s.baseline!.reopen).toMatchObject({
+        fromVersion: approvedVersion,
+        reapprovalRequired: true,
+      });
+      expect(s.baseline!.reopen!.reason).toMatch(
+        /^Client master changed after framework approval: Financial year/,
+      );
+      expect(s.baseline!.reopen!.affectedSections).toContain('02.1');
+      // The 02.1 profile is flagged through the reopen (not edited in place).
+      const flagged = await su(
+        async (c) =>
+          (
+            await c.query<{ re: boolean }>(
+              `SELECT needs_reevaluation AS re FROM hsdg.audit_entity_profile
+                WHERE workflow_instance_id = $1`,
+              [wf2],
+            )
+          ).rows[0]!.re,
+      );
+      expect(flagged).toBe(true);
     });
   });
   describe('AF-02 "Approve Subject to Conditions"', () => {
