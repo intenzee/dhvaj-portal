@@ -9,16 +9,14 @@ import {
   FRAMEWORK_AREA_KEY,
   FRAMEWORK_BASELINE_STATUS,
   FRAMEWORK_DECIDED_STATES,
+  DEFAULT_METHODOLOGY_VERSION,
   SUB_SECTION_KEY,
   computeFrameworkGates,
   type ApproveFrameworkInput,
   type ConfirmFrameworkInput,
-  type DownstreamPreviewItem,
   type FrameworkBaselineRecord,
   type FrameworkState,
-  type FrameworkSummaryMatter,
   type FrameworkSummarySection,
-  type FrameworkTriggeredSa,
   type ReopenFrameworkInput,
   type StatutoryAuditFrameworkSummary,
   type SubSectionKey,
@@ -36,6 +34,12 @@ import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditProfileService } from './audit-profile.service';
 import { isEngagementLead } from './master-facts';
 import { AuditScheduleIiiService } from './audit-schedule-iii.service';
+import { readImpactOn } from './framework-summary-impact';
+import { readFrameworkMattersOn } from './framework-summary-matters';
+import { readFrameworkMemoOn } from './framework-summary-memo';
+import { readDownstreamPreviewOn } from './framework-summary-preview';
+import { readPriorYearChangesOn } from './framework-summary-prior-year';
+import { readTriggeredRequirementsOn } from './framework-summary-triggers';
 
 /** The six Section-02 sub-sections the summary aggregates, in dashboard order. */
 const SECTIONS: Array<{ sub: SubSectionKey; area: string; title: string }> = [
@@ -154,31 +158,69 @@ export class AuditFrameworkSummaryService {
   ): Promise<StatutoryAuditFrameworkSummary> {
     const sections = await this.sections(client, workflowInstanceId);
     const profileConfirmed = await this.profileConfirmed(client, workflowInstanceId);
-    const triggeredSAs = await this.triggeredSAs(client, workflowInstanceId, sections);
-    const matters = await this.matters(client, workflowInstanceId);
+    const triggeredRequirements = await readTriggeredRequirementsOn(
+      client,
+      workflowInstanceId,
+      sections,
+    );
+    const matters = await readFrameworkMattersOn(client, workflowInstanceId);
     const baseline = await this.currentBaseline(client, workflowInstanceId);
-    const downstreamPreview = this.downstreamPreview(sections);
+    const downstreamPreview = await readDownstreamPreviewOn(client, workflowInstanceId, sections);
+    const priorYear = await readPriorYearChangesOn(client, workflowInstanceId);
+    const memo = await readFrameworkMemoOn(client, workflowInstanceId, baseline?.id ?? null);
+    const impact = await readImpactOn(client, workflowInstanceId, baseline?.id ?? null);
 
     const hasBlockingMatter = matters.some((m) => m.blocking);
-    const gates = computeFrameworkGates({
-      sections,
-      profileConfirmed,
-      hasBlockingMatter,
-      baselineStatus: baseline?.status ?? null,
-    });
+    const gates = {
+      ...computeFrameworkGates({
+        sections,
+        profileConfirmed,
+        hasBlockingMatter,
+        baselineStatus: baseline?.status ?? null,
+        memoSubmitted: memo?.status === 'submitted',
+      }),
+      confirmBlockers: [],
+      approveBlockers: [],
+      checks: [],
+    };
     const isApproved = baseline?.status === FRAMEWORK_BASELINE_STATUS.approved;
 
     return {
       workflowInstanceId,
       engagementServiceId,
       engagementId,
+      header: {
+        status: isApproved ? 'approved' : 'draft',
+        preparedByName: null,
+        engagementManagerName: null,
+        engagementPartnerName: null,
+        periodLabel: '',
+        frameworkVersion: baseline ? `v${baseline.version}` : 'Draft v1.0',
+        methodologyVersion: baseline?.methodologyVersion ?? DEFAULT_METHODOLOGY_VERSION,
+        openMatterCount: matters.filter((m) => m.open).length,
+        blockingMatterCount: matters.filter((m) => m.blocking).length,
+        viewerIsPartner: false,
+        viewerIsManager: false,
+      },
       profileConfirmed,
+      dashboard: [],
       sections,
-      triggeredSAs,
-      matters,
+      triggeredRequirements,
       downstreamPreview,
+      matters,
+      priorYear,
+      memo,
+      impact,
+      returns: [],
       baseline,
+      history: baseline ? [baseline] : [],
+      approval: null,
       gates,
+      planning: {
+        unlocked: isApproved,
+        route: isApproved ? 'approved' : 'locked',
+        reason: isApproved ? 'Framework approved.' : 'Awaiting framework approval.',
+      },
       planningUnlocked: isApproved,
       recordVersion: baseline?.recordVersion ?? 0,
     };
@@ -198,9 +240,10 @@ export class AuditFrameworkSummaryService {
       rule_version_id: string | null;
       authority_provision_id: string | null;
       needs_reevaluation: boolean;
+      is_overridden: boolean;
     }>(
       `SELECT sub_section_key, area_key, title, state, system_outcome, conclusion,
-              rule_version_id, authority_provision_id, needs_reevaluation
+              rule_version_id, authority_provision_id, needs_reevaluation, is_overridden
          FROM hsdg.audit_framework_subassessment
         WHERE workflow_instance_id = $1`,
       [workflowInstanceId],
@@ -228,6 +271,7 @@ export class AuditFrameworkSummaryService {
         ruleVersionId: r?.rule_version_id ?? null,
         authorityProvisionId: r?.authority_provision_id ?? null,
         needsReevaluation: r?.needs_reevaluation ?? false,
+        isOverridden: r?.is_overridden ?? false,
         decided:
           r != null &&
           DECIDED.has(state) &&
@@ -242,119 +286,6 @@ export class AuditFrameworkSummaryService {
       [workflowInstanceId],
     );
     return rows[0]?.state === 'confirmed';
-  }
-
-  private async triggeredSAs(
-    client: PoolClient,
-    workflowInstanceId: string,
-    sections: FrameworkSummarySection[],
-  ): Promise<FrameworkTriggeredSa[]> {
-    const out: FrameworkTriggeredSa[] = [];
-    const { rows } = await client.query<{
-      sa510_flag: boolean;
-      sa402_flag: boolean;
-      sa299_flag: boolean;
-    }>(
-      `SELECT sa510_flag, sa402_flag, sa299_flag FROM hsdg.audit_entity_profile
-        WHERE workflow_instance_id = $1`,
-      [workflowInstanceId],
-    );
-    const p = rows[0];
-    if (p?.sa510_flag)
-      out.push({ code: 'SA 510', source: '02.1 profile', basis: 'Initial (first-year) audit.' });
-    if (p?.sa402_flag)
-      out.push({
-        code: 'SA 402',
-        source: '02.1 profile',
-        basis: 'A service organisation is in the accounting environment.',
-      });
-    if (p?.sa299_flag) out.push({ code: 'SA 299', source: '02.1 profile', basis: 'Joint audit.' });
-
-    // SA 600 / CFS come from the 02.6 consolidation detail.
-    const cfs = sections.find((s) => s.subSectionKey === SUB_SECTION_KEY.consolidation);
-    if (cfs) {
-      const { rows: cfsRows } = await client.query<{
-        system_detail: { usesOtherAuditors?: boolean } | null;
-      }>(
-        `SELECT system_detail FROM hsdg.audit_framework_subassessment
-          WHERE workflow_instance_id = $1 AND sub_section_key = $2 AND area_key = $3`,
-        [workflowInstanceId, SUB_SECTION_KEY.consolidation, FRAMEWORK_AREA_KEY.cfs],
-      );
-      if (cfsRows[0]?.system_detail?.usesOtherAuditors)
-        out.push({
-          code: 'SA 600',
-          source: '02.6 consolidation',
-          basis: 'A component is audited by another auditor.',
-        });
-      if (cfs.systemOutcome === 'cfs_required' || cfs.conclusion === 'cfs_required')
-        out.push({
-          code: 'CFS',
-          source: '02.6 consolidation',
-          basis: 'Consolidated financial statements are required.',
-        });
-    }
-    return out;
-  }
-
-  private async matters(
-    client: PoolClient,
-    workflowInstanceId: string,
-  ): Promise<FrameworkSummaryMatter[]> {
-    const { rows } = await client.query<{
-      category: string;
-      severity: string | null;
-      title: string;
-      source: string;
-      is_blocking: boolean;
-      status: string;
-    }>(
-      `SELECT category, severity, title, source, is_blocking, status
-         FROM hsdg.audit_matter
-        WHERE workflow_instance_id = $1
-        ORDER BY created_at ASC`,
-      [workflowInstanceId],
-    );
-    return rows.map((r) => ({
-      code: r.category,
-      severity: r.severity,
-      message: r.title,
-      source: r.source,
-      blocking: r.is_blocking && r.status !== 'resolved' && r.status !== 'accepted_with_approval',
-    }));
-  }
-
-  /** Derive the downstream configuration preview from the concluded outcomes. */
-  private downstreamPreview(sections: FrameworkSummarySection[]): DownstreamPreviewItem[] {
-    const out: DownstreamPreviewItem[] = [];
-    const outcomeOf = (sub: SubSectionKey): string | null => {
-      const s = sections.find((x) => x.subSectionKey === sub);
-      return s?.conclusion ?? s?.systemOutcome ?? null;
-    };
-    if (outcomeOf(SUB_SECTION_KEY.caro) === 'applicable')
-      out.push({
-        area: 'Audit Areas',
-        action: 'activate',
-        description: 'Instantiate the CARO 2020 clause work programme.',
-      });
-    else if (outcomeOf(SUB_SECTION_KEY.caro) === 'not_applicable_exempt')
-      out.push({
-        area: 'Audit Areas',
-        action: 'deactivate',
-        description: 'CARO clause programme not required (exempt).',
-      });
-    if (outcomeOf(SUB_SECTION_KEY.icfr) === 'applicable')
-      out.push({
-        area: 'Controls',
-        action: 'activate',
-        description: 'Configure the ICFR reporting workstream.',
-      });
-    if (outcomeOf(SUB_SECTION_KEY.consolidation) === 'cfs_required')
-      out.push({
-        area: 'Consolidation',
-        action: 'create',
-        description: 'Create the consolidation / group work programme.',
-      });
-    return out;
   }
 
   private async currentBaseline(
@@ -450,7 +381,7 @@ export class AuditFrameworkSummaryService {
       const snapshot = {
         generatedAt: new Date().toISOString(),
         sections: summary.sections,
-        triggeredSAs: summary.triggeredSAs,
+        triggeredRequirements: summary.triggeredRequirements,
         downstreamPreview: summary.downstreamPreview,
       };
       await client.query(
@@ -621,8 +552,25 @@ function mapBaseline(r: BaselineRow): FrameworkBaselineRecord {
     managerConfirmedAt: r.manager_confirmed_at ? r.manager_confirmed_at.toISOString() : null,
     epApprovedByName: r.ep_approved_by_name,
     epApprovedAt: r.ep_approved_at ? r.ep_approved_at.toISOString() : null,
+    previewReviewedByName: null,
+    previewReviewedAt: null,
+    managerNote: null,
+    epDecision: null,
     memoDocumentId: r.memo_document_id,
-    reopenReason: r.reopen_reason,
+    reopen: r.reopen_reason
+      ? {
+          reason: r.reopen_reason,
+          affectedSections: [],
+          identifiedAt: '',
+          identifiedByName: null,
+          evidenceNote: null,
+          evidenceDocumentId: null,
+          reapprovalRequired: true,
+          reopenedByName: null,
+          reopenedAt: '',
+          fromVersion: '',
+        }
+      : null,
     recordVersion: r.record_version,
   };
 }
