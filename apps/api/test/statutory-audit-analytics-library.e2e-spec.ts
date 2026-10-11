@@ -6,6 +6,7 @@ import type {
   InvestigationCardRecord,
 } from '@hsdg/contracts';
 import { V1_LIBRARY } from '../src/modules/statutory-audit/analytics-methodology-v1.fixture';
+import { inForce } from '../src/modules/statutory-audit/planning-analytics-engine';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { approveFrameworkForTest } from './framework-approval.helper';
@@ -16,8 +17,8 @@ import { approveFrameworkForTest } from './framework-approval.helper';
  * data the Methodology Admin maintains; a file runs on the versions in force on
  * its period end and a card keeps the rule code + version it was raised under.
  *
- * Library changes made here are dated in a 2031 window and the file under test
- * ends on 2031-03-31, so other suites sharing the database never see them.
+ * Library changes made here are dated in 2031 / 2032 windows and only the files
+ * under test end in them, so other suites sharing the database never see them.
  */
 describe('Statutory Audit — 03.2 analytics methodology library (e2e)', () => {
   let app: INestApplication;
@@ -388,5 +389,95 @@ describe('Statutory Audit — 03.2 analytics methodology library (e2e)', () => {
         { metricKey: 'loan_book', period: 'cy', amount: 1, sourceType: 'draft_fs', version: 0 },
       ],
     }).expect(400);
+  });
+
+  // §7: the sub-industry is chosen from the profile's taxonomy or entered as
+  // "Other"; either way it is stored as plain text and never overwritten.
+  describe('sub-industry taxonomy', () => {
+    const industry = (s: BusinessUnderstandingSummary) =>
+      s.sections.find((x) => x.key === 'industry')!;
+    const saveSubIndustry = async (base: string, value: string) => {
+      const sec = industry(await summary(base));
+      const res = await post(pa, `${base}/business-understanding/sections/industry`, {
+        answers: { ...sec.answers, sub_industry: value },
+        version: sec.version,
+      }).expect(201);
+      return res.body.answers.sub_industry as string | null;
+    };
+
+    it("offers each in-force profile's sub-industries; generic offers none", async () => {
+      const base = await newAuditFile('2027-28');
+      const s0 = await summary(base);
+      const on = s0.dataset.periodEnd ?? s0.analyticsMethodology.resolvedOn;
+      const lib = (await get(mp, LIB).expect(200)).body as AnalyticsLibrary;
+      const profiles = inForce(lib.profiles, (p) => p.profileKey, on);
+      expect(profiles.map((p) => p.profileKey).sort()).toEqual(
+        V1_LIBRARY.profiles.map((p) => p.profileKey).sort(),
+      );
+      expect(s0.analyticsMethodology.profileKey).toBe('generic');
+      expect(s0.subIndustryOptions).toEqual([]);
+      for (const p of profiles) {
+        await setProfile(base, p.profileKey, 201);
+        const s = await summary(base);
+        expect(s.analyticsMethodology.profileKey).toBe(p.profileKey);
+        expect(s.subIndustryOptions).toEqual(p.subIndustries);
+      }
+      expect(profiles.find((p) => p.profileKey === 'generic')!.subIndustries).toEqual([]);
+    });
+
+    it('a taxonomy value and an "Other" value both round-trip unchanged', async () => {
+      const base = await newAuditFile('2027-28');
+      await setProfile(base, 'manufacturing', 201);
+      const options = (await summary(base)).subIndustryOptions;
+      expect(options.length).toBeGreaterThan(0);
+
+      expect(await saveSubIndustry(base, options[1]!)).toBe(options[1]);
+      expect(industry(await summary(base)).answers.sub_industry).toBe(options[1]);
+
+      const other = 'Speciality chemicals — contract manufacturing (toll)';
+      expect(options).not.toContain(other);
+      expect(await saveSubIndustry(base, other)).toBe(other);
+      expect(industry(await summary(base)).answers.sub_industry).toBe(other);
+    });
+
+    it('a profile version that drops a sub-industry keeps the stored value', async () => {
+      const profile = {
+        profileKey: 'subindustry_e2e',
+        label: 'Sub-industry (e2e)',
+        description: 'Taxonomy versioning',
+        considerations: [],
+        debtMetrics: ['total_borrowings'],
+        financeCostBasis: 'closing',
+        inventoryCostBases: ['cost_of_sales'],
+        payableCostBases: ['purchases'],
+        inventoryTrendFallback: null,
+        effectiveFrom: '2032-01-01',
+        effectiveTo: '2032-12-31',
+      };
+      await post(mp, `${LIB}/profiles`, {
+        ...profile,
+        subIndustries: ['Alpha', 'Beta', 'Gamma'],
+        changeNote: 'e2e — taxonomy v1',
+      }).expect(201);
+
+      const base = await newAuditFile('2031-32');
+      await setProfile(base, 'subindustry_e2e', 201);
+      expect((await summary(base)).subIndustryOptions).toEqual(['Alpha', 'Beta', 'Gamma']);
+      expect(await saveSubIndustry(base, 'Gamma')).toBe('Gamma');
+
+      const v2 = await post(mp, `${LIB}/profiles`, {
+        ...profile,
+        subIndustries: ['Alpha', 'Beta'],
+        changeNote: 'e2e — taxonomy v2 drops Gamma',
+      }).expect(201);
+      expect(v2.body.version).toBe(2);
+
+      const after = await summary(base);
+      expect(after.analyticsMethodology).toEqual(
+        expect.objectContaining({ profileKey: 'subindustry_e2e', profileVersion: 2 }),
+      );
+      expect(after.subIndustryOptions).toEqual(['Alpha', 'Beta']);
+      expect(industry(after).answers.sub_industry).toBe('Gamma');
+    });
   });
 });
