@@ -459,4 +459,109 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
       expect(s.header.status).toBe('reopened');
     });
   });
+  describe('AF-02 "Approve Subject to Conditions"', () => {
+    let eng3: string;
+    let wf3: string;
+    const base3 = () => `/api/v1/engagements/${eng3}/statutory-audit`;
+    const summary3 = async (): Promise<StatutoryAuditFrameworkSummary> =>
+      (await get(pa, `${base3()}/framework-summary`).expect(200))
+        .body[0] as StatutoryAuditFrameworkSummary;
+    const planning3 = async (): Promise<StatutoryAuditPlanning> =>
+      (await get(pa, `${base3()}/planning`).expect(200)).body[0] as StatutoryAuditPlanning;
+
+    beforeAll(async () => {
+      ({ engId: eng3, shellId: wf3 } = await newFile());
+      await get(pa, `${base3()}/framework-summary`).expect(200);
+      await decideSection02(wf3);
+      // AF-01 for real; the memorandum (its own suite drafts it from the template) is
+      // placed submitted, so AF-02 is open to the Engagement Partner.
+      const s = await summary3();
+      const confirmed = (
+        await post(pa, `${base3()}/${wf3}/framework-summary/confirm`, {
+          decision: 'submit_for_partner_approval',
+          previewReviewed: true,
+          recordVersion: s.recordVersion,
+        }).expect(201)
+      ).body as StatutoryAuditFrameworkSummary;
+      await su(async (c) => {
+        const { rows: doc } = await c.query<{ id: string }>(
+          `INSERT INTO hsdg.documents (engagement_id, title)
+           VALUES ($1, 'Audit Framework Memorandum v1.0') RETURNING id`,
+          [eng3],
+        );
+        await c.query(
+          `INSERT INTO hsdg.audit_framework_memo
+             (baseline_id, workflow_instance_id, engagement_id, baseline_version, document_id,
+              status, submitted_at)
+           VALUES ($1, $2, $3, '1.0', $4, 'submitted', now())`,
+          [confirmed.baseline!.id, wf3, eng3, doc[0]!.id],
+        );
+      });
+    });
+
+    it('a condition that bars Planning keeps Section 03 locked until it is resolved', async () => {
+      const before = await summary3();
+      expect(before.gates.canApprove).toBe(true);
+      const s = (
+        await post(pa, `${base3()}/${wf3}/framework-summary/approve`, {
+          decision: 'approve_subject_to_conditions',
+          conditions: [
+            {
+              condition: 'Obtain the bank sanction letter',
+              dueDate: '2026-11-30',
+              impact: 'CARO 3(ii)(b) quarterly returns',
+              planningMayCommence: false,
+            },
+          ],
+          recordVersion: before.recordVersion,
+        }).expect(201)
+      ).body as StatutoryAuditFrameworkSummary;
+      expect(s.baseline).toMatchObject({
+        status: 'approved',
+        epDecision: 'approve_subject_to_conditions',
+      });
+      expect(s.memo).toMatchObject({ status: 'approved' });
+      expect(s.approval).toMatchObject({
+        decision: 'approve_subject_to_conditions',
+        baselineVersion: '1.0',
+      });
+      expect(s.approval!.conditions).toEqual([
+        expect.objectContaining({ status: 'open', planningMayCommence: false }),
+      ]);
+      expect(s.planning).toMatchObject({ unlocked: false, route: 'locked' });
+
+      // Section 03 stays locked: a write is refused with the condition's reason.
+      let planning = await planning3();
+      expect(planning.frameworkGate.unlocked).toBe(false);
+      const item = planning.items[0]!;
+      const refused = await post(pa, `${base3()}/planning/${item.id}`, {
+        state: 'in_progress',
+        version: item.version,
+      }).expect(409);
+      expect(refused.body.message).toMatch(/condition/);
+
+      // An outsider cannot resolve it; the Engagement Partner can.
+      const conditionId = s.approval!.conditions[0]!.id;
+      await post(pb, `${base3()}/framework-summary/conditions/${conditionId}/resolve`, {
+        resolution: 'x',
+      }).expect(404);
+      const after = (
+        await post(pa, `${base3()}/framework-summary/conditions/${conditionId}/resolve`, {
+          resolution: 'Sanction letter on file',
+        }).expect(201)
+      ).body as StatutoryAuditFrameworkSummary;
+      expect(after.approval!.conditions[0]).toMatchObject({
+        status: 'resolved',
+        resolution: 'Sanction letter on file',
+      });
+      expect(after.planning).toMatchObject({ unlocked: true, route: 'conditional' });
+
+      planning = await planning3();
+      expect(planning.frameworkApproved).toBe(true);
+      await post(pa, `${base3()}/planning/${item.id}`, {
+        state: 'in_progress',
+        version: item.version,
+      }).expect(201);
+    });
+  });
 });
