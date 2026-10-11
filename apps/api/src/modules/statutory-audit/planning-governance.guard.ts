@@ -19,6 +19,7 @@ import {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CAPABILITY_KEY = 'planning:capability';
 const LOCK_EXEMPT_KEY = 'planning:lockExempt';
+const SCOPE_KEY = 'planning:scope';
 
 /**
  * §23 — the 03.1 capability a write needs (any one of them). Undecorated
@@ -29,6 +30,9 @@ export const PlanningCapabilityRequired = (...capabilities: PlanningCapability[]
 
 /** The write is allowed while 03.1 is frozen (EP review, reopen, a draft that persists nothing). */
 export const PlanningLockExempt = () => SetMetadata(LOCK_EXEMPT_KEY, true);
+
+/** The Section 03 item a controller's writes belong to, for the denial message (default 03.1). */
+export const PlanningScope = (scope: string) => SetMetadata(SCOPE_KEY, scope);
 
 /**
  * 03.1 governance on every 03.1 write (DHVAJ 03.1 §19, §23):
@@ -64,6 +68,7 @@ export class PlanningGovernanceGuard implements CanActivate {
     ) ?? ['assess'];
     const lockExempt =
       this.reflector.getAllAndOverride<boolean | undefined>(LOCK_EXEMPT_KEY, targets) ?? false;
+    const scope = this.reflector.getAllAndOverride<string | undefined>(SCOPE_KEY, targets);
 
     await this.db.withRlsContext(rlsContextFromPrincipal(req.principal), async (client) => {
       const { rows } = await client.query<{ id: string }>(
@@ -77,7 +82,7 @@ export class PlanningGovernanceGuard implements CanActivate {
       if (capabilities.length) {
         const actor = await resolvePlanningActor(client, engagementId);
         if (!capabilities.some((c) => actor.capabilities[c])) {
-          assertPlanningCapability(actor, capabilities[0]!);
+          assertPlanningCapability(actor, capabilities[0]!, scope);
         }
       }
       if (lockExempt) return;

@@ -2,7 +2,20 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, ChevronRight, Database, Info, Plus, Sparkles } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  History,
+  Info,
+  Lock,
+  MessageSquare,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Target,
+} from 'lucide-react';
 import {
   DATASET_STATUSES,
   EXPECTATION_BASES,
@@ -17,9 +30,19 @@ import {
   METRIC_SOURCE_TYPES,
   ANALYTICS_RULE_KIND_LABEL,
   PLANNING_ATTENTION_LABEL,
+  UNDERSTANDING_CHALLENGE_TARGETS,
   UNDERSTANDING_SECTION_DEFS,
+  planningVersionLabel,
   type AnalyticsRuleOutcome,
+  type AreaOfFocusRecord,
   type BusinessUnderstandingSummary,
+  type IndustryConsiderationDecision,
+  type PlanningCapability,
+  type UnderstandingChallengeRecord,
+  type UnderstandingChallengeTarget,
+  type UnderstandingRevisionDetail,
+  type UnderstandingRevisionRecord,
+  type UnderstandingStatus,
   type DatasetStatus,
   type ExpectationBasis,
   type ExpectationConclusion,
@@ -45,6 +68,9 @@ import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
+import { FrameworkReferences } from './framework-references';
+import { PlanningEvidence } from './planning-evidence';
+import { PlanningGovernanceProvider, type PlanningGovernance } from './planning-governance';
 import { SectionLauncher } from './section-launcher';
 
 /**
@@ -52,11 +78,40 @@ import { SectionLauncher } from './section-launcher';
  * calculates, compares and relates; the auditor interprets. Exceptions open
  * Investigation Cards and findings become Planning Signals in the SAME register
  * as 03.1. No trial-balance import in v1 — figures are entered with a source.
+ *
+ * §23: Article / Senior record facts, figures, explanations and evidence; the
+ * Engagement Manager reviews, assesses, links signals and completes; the
+ * Engagement Partner views and challenges. A completed 03.2 is frozen until
+ * reopened for a controlled revision (§20). The API enforces all of it; the UI
+ * only hides what would be refused.
  */
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
-type Tab = 'understanding' | 'dataset' | 'analytics' | 'investigations' | 'expectations' | 'conclusion';
+type Tab =
+  | 'understanding'
+  | 'dataset'
+  | 'analytics'
+  | 'investigations'
+  | 'expectations'
+  | 'conclusion'
+  | 'review';
+
+const STATUS_BADGE: Record<UnderstandingStatus, [string, 'neutral' | 'info' | 'success' | 'danger']> = {
+  not_started: ['Not started', 'neutral'],
+  in_progress: ['In progress', 'info'],
+  complete: ['Complete', 'success'],
+  reassessment_required: ['Reassessment required', 'danger'],
+};
+
+const CHALLENGE_TARGET_LABEL: Record<UnderstandingChallengeTarget, string> = {
+  section: 'An understanding section',
+  dataset: 'Financial dataset',
+  analytics: 'Analytical review',
+  exception: 'An Investigation Card',
+  expectation: 'An expectation',
+  conclusion: 'Conclusion / BA-01',
+};
 
 const DATASET_STATUS_LABEL: Record<DatasetStatus, string> = {
   draft: 'Draft',
@@ -77,6 +132,7 @@ export function BusinessUnderstandingPanel({
   engagementId: string;
   workflowInstanceId: string;
   team: TeamMember[];
+  /** Section 03 is open (02.8 §14) — the §23 role and the 03.2 lock gate the rest. */
   editable: boolean;
   onChanged: () => void;
 }): JSX.Element {
@@ -130,6 +186,16 @@ export function BusinessUnderstandingPanel({
   const s = summary.data;
   if (!s) return <p className="text-sm text-ink-muted">03.2 is unavailable.</p>;
   const outstanding = s.completion.filter((c) => !c.met).length;
+  const a = s.access;
+  /** The §23 capability alone — for steps the 03.2 lock does not stop (EP review, reopen). */
+  const has = (c: PlanningCapability) => editable && !!a.capabilities[c];
+  /** May the caller do this now (capability and the completion / 03.12 lock)? */
+  const can = (c: PlanningCapability) => has(c) && !a.locked;
+  const facts = can('addFacts');
+  const assess = can('assess');
+  const gov: PlanningGovernance = { view: null, engagementId, base, can, has, refresh };
+  const openChallenges = s.challenges.filter((c) => c.status !== 'closed').length;
+  const [statusLabel, statusTone] = STATUS_BADGE[s.record.status];
 
   const sections: [Tab, string][] = [
         ['understanding', 'Understanding (03.2.1–6)'],
@@ -138,17 +204,22 @@ export function BusinessUnderstandingPanel({
         ['investigations', `Investigations${s.openInvestigations ? ` (${s.openInvestigations})` : ''}`],
         ['expectations', 'Expectations'],
         ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
+        ['review', `Partner review & revisions${openChallenges ? ` (${openChallenges})` : ''}`],
       ];
 
   return (
+    <PlanningGovernanceProvider value={gov}>
     <div className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Badge tone={s.record.status === 'complete' ? 'success' : 'info'}>
-            {s.record.status === 'complete' ? 'Complete' : s.record.status === 'in_progress' ? 'In progress' : 'Not started'}
-          </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={statusTone}>{statusLabel}</Badge>
+          <Badge tone="neutral">{s.versionInfo.versionLabel}</Badge>
           {s.openInvestigations > 0 && <Badge tone="warn">{s.openInvestigations} open investigation(s)</Badge>}
-          {editable && (
+          <span className="text-xs text-ink-faint">
+            You: {a.roleLabel}
+            {a.actingAsManager ? ' (acting as Engagement Manager)' : ''}
+          </span>
+          {facts && (
             <Button
               size="sm"
               variant="ghost"
@@ -165,7 +236,7 @@ export function BusinessUnderstandingPanel({
           <Field label="Industry analytics profile">
             <Select
               value={s.record.industryProfile}
-              disabled={!editable || setProfile.isPending}
+              disabled={!assess || setProfile.isPending}
               onChange={(e) => setProfile.mutate(e.target.value as IndustryProfile)}
             >
               {!s.industryProfiles.some((p) => p.key === s.record.industryProfile) && (
@@ -183,27 +254,45 @@ export function BusinessUnderstandingPanel({
         </div>
       </div>
 
+      <UnderstandingStatusStrip base={base} summary={s} mayReopen={has('reopen')} onChanged={refresh} />
+
+      <FrameworkReferences contextKey="03.2" anchors={s.authorityAnchors} />
+
       <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.2 Business Understanding & Preliminary Analytics">
         {tab === 'understanding' && (
           <div className="space-y-2">
-            {UNDERSTANDING_SECTION_DEFS.map((def) => (
-              <SectionCard
-                key={`${def.key}-${s.sections.find((x) => x.key === def.key)!.version}`}
-                base={base}
-                def={def}
-                section={s.sections.find((x) => x.key === def.key)!}
-                industryConsiderations={def.key === 'industry' ? s.industryConsiderations : []}
-                editable={editable}
-                onChanged={refresh}
-              />
-            ))}
+            {UNDERSTANDING_SECTION_DEFS.map((def) => {
+              const evidenceId = s.recordIds.sections[def.key];
+              return (
+                <SectionCard
+                  key={`${def.key}-${s.sections.find((x) => x.key === def.key)!.version}`}
+                  base={base}
+                  def={def}
+                  section={s.sections.find((x) => x.key === def.key)!}
+                  industryConsiderations={def.key === 'industry' ? s.industryConsiderations : []}
+                  decisions={s.industryConsiderationDecisions}
+                  evidenceId={evidenceId ?? null}
+                  evidenceCount={evidenceId ? (s.evidenceCounts[evidenceId] ?? 0) : 0}
+                  facts={facts}
+                  assess={assess}
+                  canPropose={can('proposeSignals')}
+                  onChanged={refresh}
+                />
+              );
+            })}
           </div>
         )}
         {tab === 'dataset' && (
-          <DatasetSection key={s.dataset.version} base={base} summary={s} editable={editable} onChanged={refresh} />
+          <DatasetSection key={s.dataset.version} base={base} summary={s} editable={facts} onChanged={refresh} />
         )}
         {tab === 'analytics' && (
-          <AnalyticsSection base={base} summary={s} editable={editable} onChanged={refresh} />
+          <AnalyticsSection
+            base={base}
+            summary={s}
+            // Refresh runs on a completed 03.2 too — a changed figure flags reassessment (§20).
+            editable={has('addFacts') && !a.planningLocked}
+            onChanged={refresh}
+          />
         )}
         {tab === 'investigations' && (
           <InvestigationsSection
@@ -212,7 +301,10 @@ export function BusinessUnderstandingPanel({
             qk={qk}
             team={team}
             signals={signals.data ?? []}
-            editable={editable}
+            evidenceCounts={s.evidenceCounts}
+            facts={facts}
+            assess={assess}
+            canFocus={can('focusAreas')}
             onChanged={refresh}
           />
         )}
@@ -222,14 +314,114 @@ export function BusinessUnderstandingPanel({
             base={base}
             qk={qk}
             summary={s}
-            editable={editable}
+            facts={facts}
+            assess={assess}
             onChanged={refresh}
           />
         )}
         {tab === 'conclusion' && (
-          <ConclusionSection key={s.record.version} base={base} summary={s} editable={editable} onChanged={refresh} />
+          <ConclusionSection key={s.record.version} base={base} summary={s} editable={assess} onChanged={refresh} />
+        )}
+        {tab === 'review' && (
+          <ReviewSection
+            engagementId={engagementId}
+            base={base}
+            qk={qk}
+            summary={s}
+            mayChallenge={has('partnerReview')}
+            mayRespond={has('respondToChallenge')}
+            onChanged={refresh}
+          />
         )}
       </SectionLauncher>
+    </div>
+    </PlanningGovernanceProvider>
+  );
+}
+
+// ── §20 status, completion lock and controlled revision ─────────────────────
+
+function UnderstandingStatusStrip({
+  base,
+  summary: s,
+  mayReopen,
+  onChanged,
+}: {
+  base: string;
+  summary: BusinessUnderstandingSummary;
+  mayReopen: boolean;
+  onChanged: () => void;
+}): JSX.Element | null {
+  const toast = useToast();
+  const [reopening, setReopening] = useState(false);
+  const [reason, setReason] = useState('');
+  const v = s.versionInfo;
+  const a = s.access;
+  const next = planningVersionLabel(v.versionNo + 1);
+  const reopen = useMutation({
+    mutationFn: () =>
+      apiFetch<BusinessUnderstandingSummary>(`${base}/business-understanding/reopen`, {
+        method: 'POST',
+        body: { reason, version: s.record.version },
+      }),
+    onSuccess: () => {
+      toast(`03.2 reopened — revising as ${next}.`);
+      setReopening(false);
+      setReason('');
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not reopen 03.2.')),
+  });
+  const reassess = s.record.status === 'reassessment_required' && v.reassessmentReason;
+  if (!reassess && !a.lockReason) return null;
+  return (
+    <div className="space-y-2">
+      {reassess && (
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Reassessment required — {v.reassessmentReason} The completed version is frozen in the revision history;
+            reassess the cards and answer BA-01 again.
+          </span>
+        </div>
+      )}
+      {a.lockReason && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2 text-sm text-ink-muted">
+          <span className="flex items-start gap-1.5">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              {a.lockReason}
+              {s.record.status === 'complete' && v.completedByName
+                ? ` Completed by ${v.completedByName}${v.completedAt ? ` on ${new Date(v.completedAt).toLocaleDateString()}` : ''}.`
+                : ''}
+            </span>
+          </span>
+          {s.record.status === 'complete' && !a.planningLocked && mayReopen && (
+            <Button size="sm" variant="secondary" onClick={() => setReopening((o) => !o)} aria-expanded={reopening}>
+              <RotateCcw className="h-4 w-4" /> {reopening ? '−' : '+'} Reopen for revision
+            </Button>
+          )}
+        </div>
+      )}
+      {reopening && (
+        <Card className="space-y-2 p-3">
+          <Field label="Why is 03.2 being revised?" required>
+            <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>
+          <p className="text-[11px] text-ink-faint">
+            {v.versionLabel} is frozen as the revision baseline; the revision becomes {next}. BA-01 must be answered
+            again before 03.2 is complete.
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending || !reason.trim()}>
+              Reopen as {next}
+            </Button>
+            <Button variant="ghost" onClick={() => setReopening(false)}>
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -241,16 +433,29 @@ function SectionCard({
   def,
   section,
   industryConsiderations,
-  editable,
+  decisions,
+  evidenceId,
+  evidenceCount,
+  facts,
+  assess,
+  canPropose,
   onChanged,
 }: {
   base: string;
   def: UnderstandingSectionDef;
   section: UnderstandingSectionRecord;
   industryConsiderations: string[];
-  editable: boolean;
+  decisions: Record<string, IndustryConsiderationDecision>;
+  evidenceId: string | null;
+  evidenceCount: number;
+  /** Record answers (Article / Senior up). */
+  facts: boolean;
+  /** Mark reviewed (Engagement Manager). */
+  assess: boolean;
+  canPropose: boolean;
   onChanged: () => void;
 }): JSX.Element {
+  const editable = facts;
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [changed, setChanged] = useState<'yes' | 'no' | null>(section.anythingChanged);
@@ -258,6 +463,8 @@ function SectionCard({
   const [raising, setRaising] = useState(false);
   // Ask "has anything changed?" before showing the detail (spec §5).
   const showDetail = changed !== null || section.version > 0;
+  const dirty =
+    changed !== section.anythingChanged || JSON.stringify(answers) !== JSON.stringify(section.answers);
 
   const save = useMutation({
     mutationFn: (reviewed?: boolean) =>
@@ -301,14 +508,13 @@ function SectionCard({
             </div>
           )}
           {industryConsiderations.length > 0 && (
-            <div className="rounded-lg bg-primary-50 p-2 text-xs text-primary-700">
-              <div className="mb-1 font-medium">Suggested industry considerations — confirm relevance below</div>
-              <ul className="list-disc pl-4">
-                {industryConsiderations.map((c) => (
-                  <li key={c}>{c}</li>
-                ))}
-              </ul>
-            </div>
+            <ConsiderationList
+              base={base}
+              items={industryConsiderations}
+              decisions={decisions}
+              assess={assess}
+              onChanged={onChanged}
+            />
           )}
           <div className="flex flex-wrap items-center gap-4">
             <span className="text-sm text-ink">Has anything changed since the prior understanding?</span>
@@ -333,24 +539,133 @@ function SectionCard({
               ))}
             </div>
           )}
-          {editable && (
+          {section.reviewed && facts && !assess && (
+            <p className="text-[11px] text-ink-faint">
+              Saving a change clears “Reviewed” — the Engagement Manager reviews the section again.
+            </p>
+          )}
+          {evidenceId && <PlanningEvidence targetType="understanding_section" targetId={evidenceId} count={evidenceCount} />}
+          {(facts || canPropose) && (
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={() => save.mutate(undefined)} disabled={save.isPending || changed === null}>
-                Save
-              </Button>
-              <Button onClick={() => save.mutate(true)} disabled={save.isPending || changed === null || section.reviewed}>
-                {section.reviewed ? 'Reviewed' : 'Save & mark reviewed'}
-              </Button>
-              <Button variant="ghost" onClick={() => setRaising((r) => !r)}>
-                <Plus className="mr-1.5 h-4 w-4" />
-                Raise Planning Signal
-              </Button>
+              {facts && (
+                <Button variant="secondary" onClick={() => save.mutate(undefined)} disabled={save.isPending || changed === null || !dirty}>
+                  Save
+                </Button>
+              )}
+              {assess && (
+                <Button onClick={() => save.mutate(true)} disabled={save.isPending || changed === null || (section.reviewed && !dirty)}>
+                  {section.reviewed && !dirty ? 'Reviewed' : 'Save & mark reviewed'}
+                </Button>
+              )}
+              {canPropose && (
+                <Button variant="ghost" onClick={() => setRaising((r) => !r)}>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  {assess ? 'Raise Planning Signal' : 'Propose Planning Signal'}
+                </Button>
+              )}
             </div>
           )}
           {raising && <RaiseSignalForm base={base} sourceLink={`03.2/${def.key}`} onDone={() => setRaising(false)} onChanged={onChanged} />}
         </div>
       )}
     </Card>
+  );
+}
+
+/** §7 — the Manager confirms whether each suggested consideration is relevant here. */
+function ConsiderationList({
+  base,
+  items,
+  decisions,
+  assess,
+  onChanged,
+}: {
+  base: string;
+  items: string[];
+  decisions: Record<string, IndustryConsiderationDecision>;
+  assess: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const decide = useMutation({
+    mutationFn: (body: { consideration: string; relevant: boolean | null; note?: string }) =>
+      apiFetch<BusinessUnderstandingSummary>(`${base}/business-understanding/considerations`, {
+        method: 'POST',
+        body,
+      }),
+    onSuccess: () => onChanged(),
+    onError: (e) => toast(errMsg(e, 'Could not record the decision.')),
+  });
+  const undecided = items.filter((c) => !decisions[c]).length;
+  return (
+    <div className="rounded-lg bg-primary-50 p-2 text-xs text-primary-700">
+      <div className="mb-1 font-medium">
+        Suggested industry considerations — the Engagement Manager confirms relevance
+        {undecided ? ` (${undecided} to confirm)` : ''}
+      </div>
+      <ul className="space-y-1.5">
+        {items.map((c) => {
+          const d = decisions[c];
+          return (
+            <li key={c} className="rounded-md bg-surface px-2 py-1.5 text-ink">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <span className="min-w-0">{c}</span>
+                {d ? (
+                  <Badge tone={d.relevant ? 'warn' : 'neutral'}>{d.relevant ? 'Relevant' : 'Not relevant'}</Badge>
+                ) : (
+                  <Badge tone="neutral">Not confirmed</Badge>
+                )}
+              </div>
+              {d && (
+                <p className="text-[11px] text-ink-faint">
+                  {d.note ? `${d.note} · ` : ''}
+                  {d.byName ?? '—'}, {new Date(d.at).toLocaleDateString()}
+                </p>
+              )}
+              {assess && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <div className="w-56">
+                    <Input
+                      placeholder="Note (optional)"
+                      aria-label={`Note on ${c}`}
+                      value={notes[c] ?? ''}
+                      onChange={(e) => setNotes((n) => ({ ...n, [c]: e.target.value }))}
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={decide.isPending}
+                    onClick={() => decide.mutate({ consideration: c, relevant: true, note: notes[c] || undefined })}
+                  >
+                    Relevant
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={decide.isPending}
+                    onClick={() => decide.mutate({ consideration: c, relevant: false, note: notes[c] || undefined })}
+                  >
+                    Not relevant
+                  </Button>
+                  {d && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={decide.isPending}
+                      onClick={() => decide.mutate({ consideration: c, relevant: null })}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -579,7 +894,23 @@ function DatasetSection({
   };
   const [cells, setCells] = useState<Record<string, CellState>>(initialCells);
   const [newMetric, setNewMetric] = useState('');
+  const [overrideReason, setOverrideReason] = useState('');
   const dirty = Object.entries(cells).filter(([, c]) => c.amount !== c.original || c.source !== c.originalSource);
+  const valueOf = (key: string) => {
+    const [metricKey, period] = key.split(':') as [string, FinancialPeriod];
+    return s.values.find((x) => x.metricKey === metricKey && x.period === period);
+  };
+  // §21 — changing or clearing a figure rolled forward from last year's approved file needs a reason.
+  const overridden = new Set(
+    dirty
+      .filter(([key, c]) => {
+        const rf = valueOf(key)?.rolledForward;
+        if (!rf?.approved) return false;
+        const amount = c.amount.trim() === '' ? null : Number(c.amount);
+        return amount === null || Math.abs(amount - rf.amount) >= 0.005;
+      })
+      .map(([key]) => key),
+  );
 
   const saveHeader = useMutation({
     mutationFn: () =>
@@ -617,6 +948,7 @@ function DatasetSection({
               period,
               amount: c.amount.trim() === '' ? null : Number(c.amount),
               sourceType: c.source || defaultSource(period),
+              overrideReason: overridden.has(key) ? overrideReason : undefined,
               version: c.version,
             };
           }),
@@ -624,6 +956,7 @@ function DatasetSection({
       }),
     onSuccess: (r) => {
       toast(`Figures saved — ${r.analytics.exceptions.length} exception(s) surfaced for investigation.`);
+      setOverrideReason('');
       onChanged();
     },
     onError: (e) => toast(errMsg(e, 'Could not save the figures.')),
@@ -703,6 +1036,18 @@ function DatasetSection({
           </Field>
         </div>
         {h.preparedByName && <p className="text-[11px] text-ink-faint">Prepared by {h.preparedByName}</p>}
+        {s.recordIds.dataset && (
+          <div>
+            <p className="text-[11px] text-ink-faint">
+              Board / management pack, budget or draft statements the figures come from:
+            </p>
+            <PlanningEvidence
+              targetType="financial_dataset"
+              targetId={s.recordIds.dataset}
+              count={s.evidenceCounts[s.recordIds.dataset] ?? 0}
+            />
+          </div>
+        )}
         {editable && (
           <Button variant="secondary" onClick={() => saveHeader.mutate()} disabled={saveHeader.isPending || !header.periodEnd || !header.units || !header.currency}>
             Save header
@@ -744,9 +1089,31 @@ function DatasetSection({
                     {(['cy', 'py'] as FinancialPeriod[]).map((p) => {
                       const key = `${m.key}:${p}`;
                       const c = cells[key]!;
+                      const rf = valueOf(key)?.rolledForward;
                       return [
                         <td key={`${key}-a`} className="w-32 py-1 pr-2">
-                          <Input inputMode="decimal" disabled={!editable} value={c.amount} onChange={(e) => set(key, { amount: e.target.value })} />
+                          <Input
+                            inputMode="decimal"
+                            disabled={!editable}
+                            aria-label={`${m.label} ${p.toUpperCase()}`}
+                            value={c.amount}
+                            onChange={(e) => set(key, { amount: e.target.value })}
+                          />
+                          {rf && (
+                            <span
+                              className="mt-0.5 flex items-center gap-1 text-[10px] text-ink-faint"
+                              title={
+                                rf.approved
+                                  ? `Rolled forward from the approved FY ${rf.fromFinancialYear ?? ''} audit file (${fmt(rf.amount)}). Changing it needs a reason.`
+                                  : `Rolled forward from the FY ${rf.fromFinancialYear ?? ''} audit file (${fmt(rf.amount)}).`
+                              }
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              {rf.fromFinancialYear ? `FY ${rf.fromFinancialYear}` : 'Prior file'}
+                              {rf.approved ? ' · approved' : ''}
+                              {valueOf(key)?.overrideReason ? ' · overridden' : ''}
+                            </span>
+                          )}
                         </td>,
                         <td key={`${key}-s`} className="w-44 py-1 pr-2">
                           <Select
@@ -769,9 +1136,27 @@ function DatasetSection({
               </tbody>
             </table>
           </div>
+          {editable && overridden.size > 0 && (
+            <div className="mt-3 space-y-1 rounded-md bg-warning-50 p-2 text-xs text-warning-700">
+              <p className="flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {overridden.size} figure(s) were rolled forward from last year’s approved audit file. Say why they
+                change — the reason is kept with the figure.
+              </p>
+              <Input
+                aria-label="Reason for changing rolled-forward figures"
+                placeholder="e.g. Prior year restated — note 42 of FY25 financial statements"
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+              />
+            </div>
+          )}
           {editable && (
             <div className="mt-3 flex flex-wrap items-end gap-2">
-              <Button onClick={() => saveValues.mutate()} disabled={saveValues.isPending || dirty.length === 0 || invalid}>
+              <Button
+                onClick={() => saveValues.mutate()}
+                disabled={saveValues.isPending || dirty.length === 0 || invalid || (overridden.size > 0 && !overrideReason.trim())}
+              >
                 Save {dirty.length ? `${dirty.length} change(s)` : 'figures'}
               </Button>
               <div className="w-56">
@@ -978,7 +1363,10 @@ function InvestigationsSection({
   qk,
   team,
   signals,
-  editable,
+  evidenceCounts,
+  facts,
+  assess,
+  canFocus,
   onChanged,
 }: {
   engagementId: string;
@@ -986,7 +1374,10 @@ function InvestigationsSection({
   qk: string[];
   team: TeamMember[];
   signals: PlanningSignalRecord[];
-  editable: boolean;
+  evidenceCounts: Record<string, number>;
+  facts: boolean;
+  assess: boolean;
+  canFocus: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const cards = useQuery({
@@ -995,8 +1386,23 @@ function InvestigationsSection({
   });
   if (cards.isLoading) return <Spinner label="Loading investigations…" />;
   const list = cards.data ?? [];
+  // §18 — Enhanced / Immediate-Partner findings with a signal should feed an Area of Focus.
+  const unfocused = list.filter(
+    (c) => c.signalId && c.suggestedAttention !== 'standard' && !c.noLongerFlagged && c.focusAreas.length === 0,
+  );
   return (
     <div className="space-y-2">
+      {unfocused.length > 0 && (
+        <div role="status" className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700">
+          <Target className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {unfocused.map((c) => c.cardCode).join(', ')} {unfocused.length === 1 ? 'is' : 'are'} Enhanced / Immediate
+            Partner attention with a Planning Signal but no Area of Focus. Consider grouping{' '}
+            {unfocused.length === 1 ? 'it' : 'them'} so the risk flows into 03.5.
+          </span>
+        </div>
+      )}
+      {canFocus && <FocusLinker base={base} engagementId={engagementId} qk={qk} cards={list} onChanged={onChanged} />}
       <p className="text-xs text-ink-muted">
         Each flagged exception needs an auditor assessment. A management explanation on its own does
         not close it. Findings become Planning Signals in the 03.1 register — no separate risk register.
@@ -1007,9 +1413,132 @@ function InvestigationsSection({
         </p>
       )}
       {list.map((c) => (
-        <InvestigationCard key={`${c.id}-${c.version}`} engagementId={engagementId} card={c} team={team} signals={signals} editable={editable} onChanged={onChanged} />
+        <InvestigationCard
+          key={`${c.id}-${c.version}`}
+          engagementId={engagementId}
+          card={c}
+          team={team}
+          signals={signals}
+          evidenceCount={evidenceCounts[c.id] ?? 0}
+          facts={facts}
+          assess={assess}
+          onChanged={onChanged}
+        />
       ))}
     </div>
+  );
+}
+
+/** §18 — the Manager groups investigation findings into an Area of Focus (03.1 register). */
+function FocusLinker({
+  base,
+  engagementId,
+  qk,
+  cards,
+  onChanged,
+}: {
+  base: string;
+  engagementId: string;
+  qk: string[];
+  cards: InvestigationCardRecord[];
+  onChanged: () => void;
+}): JSX.Element | null {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [target, setTarget] = useState('');
+  const [name, setName] = useState('');
+  const focus = useQuery({
+    queryKey: [...qk, 'focus-areas'],
+    queryFn: () => apiFetch<AreaOfFocusRecord[]>(`${base}/areas-of-focus`),
+    enabled: open,
+  });
+  const withSignal = cards.filter((c) => c.signalId && !c.noLongerFlagged);
+  const signalIds = [...new Set(withSignal.filter((c) => picked.includes(c.id)).map((c) => c.signalId!))];
+  const link = useMutation({
+    mutationFn: () => {
+      if (target) {
+        const fa = (focus.data ?? []).find((f) => f.id === target)!;
+        return apiFetch<AreaOfFocusRecord>(`/engagements/${engagementId}/statutory-audit/areas-of-focus/${target}`, {
+          method: 'POST',
+          body: { signalIds: [...new Set([...fa.signalIds, ...signalIds])] },
+        });
+      }
+      return apiFetch<AreaOfFocusRecord>(`${base}/areas-of-focus`, { method: 'POST', body: { name, signalIds } });
+    },
+    onSuccess: (fa) => {
+      toast(`${signalIds.length} signal(s) linked to ${fa.focusCode}.`);
+      setPicked([]);
+      setName('');
+      setTarget('');
+      setOpen(false);
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not link to the Area of Focus.')),
+  });
+  if (withSignal.length === 0) return null;
+  return (
+    <Card className="p-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left text-sm font-medium text-ink"
+      >
+        {open ? <ChevronDown className="h-4 w-4 text-ink-faint" /> : <ChevronRight className="h-4 w-4 text-ink-faint" />}
+        <Target className="h-4 w-4 text-ink-faint" />
+        Link findings to an Area of Focus
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3 border-t border-line pt-3 text-sm">
+          <div className="space-y-1">
+            {withSignal.map((c) => (
+              <label key={c.id} className="flex items-start gap-2 text-xs text-ink">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={picked.includes(c.id)}
+                  onChange={(e) => setPicked((p) => (e.target.checked ? [...p, c.id] : p.filter((x) => x !== c.id)))}
+                />
+                <span>
+                  <span className="mr-1 font-mono text-ink-faint">{c.cardCode}</span>
+                  {c.signalCode} — {c.observation}
+                  {c.focusAreas.length > 0 && (
+                    <span className="text-ink-faint"> · in {c.focusAreas.map((f) => f.code).join(', ')}</span>
+                  )}
+                </span>
+              </label>
+            ))}
+          </div>
+          {focus.isLoading ? (
+            <Spinner label="Loading Areas of Focus…" />
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Area of Focus">
+                <Select value={target} onChange={(e) => setTarget(e.target.value)}>
+                  <option value="">+ New Area of Focus</option>
+                  {(focus.data ?? [])
+                    .filter((f) => f.status !== 'superseded')
+                    .map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.focusCode} — {f.name}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+              {!target && (
+                <Field label="Name" required>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Revenue cut-off on project billing" />
+                </Field>
+              )}
+            </div>
+          )}
+          <Button onClick={() => link.mutate()} disabled={link.isPending || signalIds.length === 0 || (!target && !name.trim())}>
+            Link {signalIds.length || ''} signal(s)
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1018,16 +1547,23 @@ function InvestigationCard({
   card: c,
   team,
   signals,
-  editable,
+  evidenceCount,
+  facts,
+  assess,
   onChanged,
 }: {
   engagementId: string;
   card: InvestigationCardRecord;
   team: TeamMember[];
   signals: PlanningSignalRecord[];
-  editable: boolean;
+  evidenceCount: number;
+  /** Explanation, corroboration and affected areas (Article / Senior up). */
+  facts: boolean;
+  /** Assessment, signal decision, owner and due date (Engagement Manager). */
+  assess: boolean;
   onChanged: () => void;
 }): JSX.Element {
+  const editable = facts || assess;
   const toast = useToast();
   const [open, setOpen] = useState(c.needsReassessment);
   const [explanation, setExplanation] = useState(c.managementExplanation ?? '');
@@ -1044,26 +1580,32 @@ function InvestigationCard({
 
   const elevated = c.suggestedAttention !== 'standard';
   const blocked =
-    (assessment === 'further_information_required' && !owner) ||
-    (decision === 'none' && elevated && !rationale.trim()) ||
-    (decision === 'link' && !linkId && !c.signalId);
+    assess &&
+    ((assessment === 'further_information_required' && !owner) ||
+      (decision === 'none' && elevated && !rationale.trim()) ||
+      (decision === 'link' && !linkId && !c.signalId));
 
   const save = useMutation({
     mutationFn: () =>
       apiFetch<InvestigationCardRecord>(`/engagements/${engagementId}/statutory-audit/analytics-exceptions/${c.id}`, {
         method: 'POST',
+        // The team records facts only; the Manager's fields are sent only by the Manager (§23).
         body: {
           managementExplanation: explanation || undefined,
           explanationBy: by || undefined,
           explanationDate: date || undefined,
           evidence: evidence || undefined,
-          assessment: assessment || undefined,
           affectedAreas: areas.split(',').map((x) => x.trim()).filter(Boolean),
-          signalDecision: decision || undefined,
-          linkSignalId: decision === 'link' && linkId ? linkId : undefined,
-          noSignalRationale: decision === 'none' ? rationale || undefined : undefined,
-          ownerEmployeeId: owner || undefined,
-          dueDate: due || undefined,
+          ...(assess
+            ? {
+                assessment: assessment || undefined,
+                signalDecision: decision || undefined,
+                linkSignalId: decision === 'link' && linkId ? linkId : undefined,
+                noSignalRationale: decision === 'none' ? rationale || undefined : undefined,
+                ownerEmployeeId: owner || undefined,
+                dueDate: due || undefined,
+              }
+            : {}),
           version: c.version,
         },
       }),
@@ -1087,6 +1629,11 @@ function InvestigationCard({
               {c.needsReassessment && <Badge tone="danger">Figures changed — reassess</Badge>}
               {c.noLongerFlagged && <Badge>No longer flagged</Badge>}
               {c.signalCode && <Badge>{c.signalCode}</Badge>}
+              {c.focusAreas.map((f) => (
+                <span key={f.id} title={f.name}>
+                  <Badge tone="info">{f.code}</Badge>
+                </span>
+              ))}
               {c.ownerName && <Badge>Owner: {c.ownerName}</Badge>}
             </span>
           </span>
@@ -1104,25 +1651,26 @@ function InvestigationCard({
               Rule {c.ruleCode} v{c.ruleVersion} · {c.methodologyVersion}
             </p>
           )}
+          <PlanningEvidence targetType="analytics_exception" targetId={c.id} count={evidenceCount} />
           {editable ? (
             <div className="space-y-3 rounded-lg bg-surface-raised p-3">
               <Field label="Management explanation">
-                <Textarea rows={2} value={explanation} onChange={(e) => setExplanation(e.target.value)} />
+                <Textarea rows={2} disabled={!facts} value={explanation} onChange={(e) => setExplanation(e.target.value)} />
               </Field>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="Provided by">
-                  <Input value={by} onChange={(e) => setBy(e.target.value)} />
+                  <Input disabled={!facts} value={by} onChange={(e) => setBy(e.target.value)} />
                 </Field>
                 <Field label="Date">
-                  <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                  <Input type="date" disabled={!facts} value={date} onChange={(e) => setDate(e.target.value)} />
                 </Field>
                 <Field label="Evidence / corroboration" hint="Link or reference; optional until obtained.">
-                  <Input value={evidence} onChange={(e) => setEvidence(e.target.value)} />
+                  <Input disabled={!facts} value={evidence} onChange={(e) => setEvidence(e.target.value)} />
                 </Field>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Auditor assessment">
-                  <Select value={assessment} onChange={(e) => setAssessment(e.target.value as InvestigationAssessment)}>
+                <Field label="Auditor assessment" hint={assess ? undefined : 'The Engagement Manager assesses.'}>
+                  <Select disabled={!assess} value={assessment} onChange={(e) => setAssessment(e.target.value as InvestigationAssessment)}>
                     <option value="">— Not yet assessed —</option>
                     {INVESTIGATION_ASSESSMENTS.map((x) => (
                       <option key={x} value={x}>
@@ -1132,9 +1680,11 @@ function InvestigationCard({
                   </Select>
                 </Field>
                 <Field label="Potentially affected FS areas" hint="Suggested — edit as needed. Final areas are 03.5.">
-                  <Input value={areas} onChange={(e) => setAreas(e.target.value)} />
+                  <Input disabled={!facts} value={areas} onChange={(e) => setAreas(e.target.value)} />
                 </Field>
               </div>
+              {assess && (
+              <>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Owner" required={assessment === 'further_information_required'}>
                   <Select value={owner} onChange={(e) => setOwner(e.target.value)}>
@@ -1188,6 +1738,8 @@ function InvestigationCard({
                   </div>
                 )}
               </div>
+              </>
+              )}
               <Button onClick={() => save.mutate()} disabled={save.isPending || blocked}>
                 Save investigation
               </Button>
@@ -1199,7 +1751,9 @@ function InvestigationCard({
                   Management ({c.explanationBy ?? '—'}, {c.explanationDate ?? '—'}): {c.managementExplanation}
                 </p>
               )}
+              {c.evidence && <p>Corroboration: {c.evidence}</p>}
               {c.noSignalRationale && <p>No signal because: {c.noSignalRationale}</p>}
+              {c.dueDate && <p>Due {c.dueDate}</p>}
             </div>
           )}
         </div>
@@ -1215,16 +1769,21 @@ function ExpectationsSection({
   base,
   qk,
   summary: s,
-  editable,
+  facts,
+  assess,
   onChanged,
 }: {
   engagementId: string;
   base: string;
   qk: string[];
   summary: BusinessUnderstandingSummary;
-  editable: boolean;
+  /** Record an expectation (Article / Senior up). */
+  facts: boolean;
+  /** Conclude on it (Engagement Manager). */
+  assess: boolean;
   onChanged: () => void;
 }): JSX.Element {
+  const editable = facts;
   const toast = useToast();
   const list = useQuery({
     queryKey: [...qk, 'expectations'],
@@ -1287,7 +1846,14 @@ function ExpectationsSection({
         SA 520.
       </p>
       {(list.data ?? []).map((e) => (
-        <ExpectationCard key={`${e.id}-${e.version}`} engagementId={engagementId} expectation={e} editable={editable} onChanged={onChanged} />
+        <ExpectationCard
+          key={`${e.id}-${e.version}`}
+          engagementId={engagementId}
+          expectation={e}
+          evidenceCount={s.evidenceCounts[e.id] ?? 0}
+          editable={assess}
+          onChanged={onChanged}
+        />
       ))}
       {editable && (
         <Card className="space-y-3 p-3">
@@ -1363,11 +1929,13 @@ function ExpectationsSection({
 function ExpectationCard({
   engagementId,
   expectation: e,
+  evidenceCount,
   editable,
   onChanged,
 }: {
   engagementId: string;
   expectation: PlanningExpectationRecord;
+  evidenceCount: number;
   editable: boolean;
   onChanged: () => void;
 }): JSX.Element {
@@ -1408,6 +1976,7 @@ function ExpectationCard({
           {e.signalCode && <Badge>{e.signalCode}</Badge>}
         </div>
       </div>
+      <PlanningEvidence targetType="planning_expectation" targetId={e.id} count={evidenceCount} />
       {editable && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg bg-surface-raised p-2 text-xs text-ink">
           <label className="inline-flex items-center gap-1.5">
@@ -1507,5 +2076,327 @@ function ConclusionSection({
         )}
       </Card>
     </div>
+  );
+}
+
+// ── §23 Engagement Partner review + §20 revision history ────────────────────
+
+function ReviewSection({
+  engagementId,
+  base,
+  qk,
+  summary: s,
+  mayChallenge,
+  mayRespond,
+  onChanged,
+}: {
+  engagementId: string;
+  base: string;
+  qk: string[];
+  summary: BusinessUnderstandingSummary;
+  mayChallenge: boolean;
+  mayRespond: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <h4 className="flex items-center gap-1.5 text-sm font-medium text-ink">
+          <MessageSquare className="h-4 w-4 text-ink-faint" /> Engagement Partner comments &amp; challenges
+        </h4>
+        <p className="text-xs text-ink-muted">
+          The Engagement Partner reviews 03.2 and may comment on or challenge any part of it. An open challenge
+          stops 03.2 being completed until the Manager responds and the Partner closes it.
+        </p>
+        {s.challenges.length === 0 && (
+          <p className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-sm text-ink-muted">
+            No Partner comments yet.
+          </p>
+        )}
+        {s.challenges.map((c) => (
+          <ChallengeCard
+            key={`${c.id}-${c.version}`}
+            engagementId={engagementId}
+            challenge={c}
+            mayClose={mayChallenge}
+            mayRespond={mayRespond}
+            onChanged={onChanged}
+          />
+        ))}
+        {mayChallenge && <RaiseChallengeForm base={base} qk={qk} onChanged={onChanged} />}
+      </div>
+      <div className="space-y-2">
+        <h4 className="flex items-center gap-1.5 text-sm font-medium text-ink">
+          <History className="h-4 w-4 text-ink-faint" /> Version history
+        </h4>
+        <p className="text-xs text-ink-muted">
+          Current version {s.versionInfo.versionLabel}. Each reopening freezes the completed version as a baseline —
+          expand a revision to see what changed.
+        </p>
+        {s.revisions.length === 0 && (
+          <p className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-sm text-ink-muted">
+            No revisions — 03.2 has not been reopened.
+          </p>
+        )}
+        {s.revisions.map((r) => (
+          <RevisionRow key={r.id} base={base} qk={qk} revision={r} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RaiseChallengeForm({
+  base,
+  qk,
+  onChanged,
+}: {
+  base: string;
+  qk: string[];
+  onChanged: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const [targetType, setTargetType] = useState<UnderstandingChallengeTarget>('section');
+  const [targetRef, setTargetRef] = useState('');
+  const [kind, setKind] = useState<'comment' | 'challenge'>('challenge');
+  const [body, setBody] = useState('');
+  const cards = useQuery({
+    queryKey: [...qk, 'exceptions'],
+    queryFn: () => apiFetch<InvestigationCardRecord[]>(`${base}/analytics-exceptions`),
+    enabled: targetType === 'exception',
+  });
+  const expectations = useQuery({
+    queryKey: [...qk, 'expectations'],
+    queryFn: () => apiFetch<PlanningExpectationRecord[]>(`${base}/planning-expectations`),
+    enabled: targetType === 'expectation',
+  });
+  const refs: Array<{ value: string; label: string }> =
+    targetType === 'section'
+      ? UNDERSTANDING_SECTION_DEFS.map((d) => ({ value: d.key, label: `${d.code} ${d.title}` }))
+      : targetType === 'exception'
+        ? (cards.data ?? []).map((c) => ({ value: c.id, label: `${c.cardCode} — ${c.observation.slice(0, 70)}` }))
+        : targetType === 'expectation'
+          ? (expectations.data ?? []).map((e) => ({ value: e.id, label: e.metricLabel }))
+          : [];
+  const raise = useMutation({
+    mutationFn: () =>
+      apiFetch<BusinessUnderstandingSummary>(`${base}/business-understanding/challenges`, {
+        method: 'POST',
+        body: { targetType, targetRef: targetRef || null, kind, body },
+      }),
+    onSuccess: (r) => {
+      toast(`${r.challenges[0]?.code ?? 'Comment'} raised — the Engagement Manager has been notified.`);
+      setBody('');
+      setTargetRef('');
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not raise the comment.')),
+  });
+  return (
+    <Card className="space-y-3 p-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="About">
+          <Select
+            value={targetType}
+            onChange={(e) => {
+              setTargetType(e.target.value as UnderstandingChallengeTarget);
+              setTargetRef('');
+            }}
+          >
+            {UNDERSTANDING_CHALLENGE_TARGETS.map((t) => (
+              <option key={t} value={t}>
+                {CHALLENGE_TARGET_LABEL[t]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {refs.length > 0 && (
+          <Field label="Which one">
+            <Select value={targetRef} onChange={(e) => setTargetRef(e.target.value)}>
+              <option value="">— The whole area —</option>
+              {refs.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        <Field label="Type">
+          <Select value={kind} onChange={(e) => setKind(e.target.value as 'comment' | 'challenge')}>
+            <option value="challenge">Challenge — needs a response</option>
+            <option value="comment">Comment</option>
+          </Select>
+        </Field>
+      </div>
+      <Field label="Comment" required>
+        <Textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} />
+      </Field>
+      <Button onClick={() => raise.mutate()} disabled={raise.isPending || !body.trim()}>
+        Raise {kind}
+      </Button>
+    </Card>
+  );
+}
+
+function ChallengeCard({
+  engagementId,
+  challenge: c,
+  mayClose,
+  mayRespond,
+  onChanged,
+}: {
+  engagementId: string;
+  challenge: UnderstandingChallengeRecord;
+  mayClose: boolean;
+  mayRespond: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const [response, setResponse] = useState(c.response ?? '');
+  const url = `/engagements/${engagementId}/statutory-audit/understanding-challenges/${c.id}`;
+  const respond = useMutation({
+    mutationFn: () =>
+      apiFetch<BusinessUnderstandingSummary>(`${url}/respond`, { method: 'POST', body: { response, version: c.version } }),
+    onSuccess: () => {
+      toast(`Response to ${c.code} recorded.`);
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not record the response.')),
+  });
+  const close = useMutation({
+    mutationFn: () => apiFetch<BusinessUnderstandingSummary>(`${url}/close`, { method: 'POST', body: { version: c.version } }),
+    onSuccess: () => {
+      toast(`${c.code} closed.`);
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not close it.')),
+  });
+  const tone = c.status === 'closed' ? 'neutral' : c.status === 'responded' ? 'info' : 'warn';
+  return (
+    <Card className="space-y-2 p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="mr-2 font-mono text-xs text-ink-faint">{c.code}</span>
+          <span className="text-xs text-ink-muted">{c.targetLabel}</span>
+          <p className="mt-1 whitespace-pre-wrap text-ink">{c.body}</p>
+          <p className="text-[11px] text-ink-faint">
+            {c.raisedByName ?? '—'}, {new Date(c.raisedAt).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="flex gap-1.5">
+          <Badge tone={c.kind === 'challenge' ? 'warn' : 'neutral'}>{c.kind === 'challenge' ? 'Challenge' : 'Comment'}</Badge>
+          <Badge tone={tone}>{c.status === 'open' ? 'Open' : c.status === 'responded' ? 'Responded' : 'Closed'}</Badge>
+        </div>
+      </div>
+      {c.response && (
+        <div className="rounded-md bg-surface-raised p-2 text-xs text-ink">
+          <span className="font-medium">Response</span> ({c.respondedByName ?? '—'}
+          {c.respondedAt ? `, ${new Date(c.respondedAt).toLocaleDateString()}` : ''}): {c.response}
+        </div>
+      )}
+      {c.status !== 'closed' && (mayRespond || mayClose) && (
+        <div className="space-y-2">
+          {mayRespond && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[16rem] flex-1">
+                <Textarea
+                  rows={2}
+                  aria-label={`Response to ${c.code}`}
+                  placeholder="Manager's response"
+                  value={response}
+                  onChange={(e) => setResponse(e.target.value)}
+                />
+              </div>
+              <Button variant="secondary" onClick={() => respond.mutate()} disabled={respond.isPending || !response.trim() || response === c.response}>
+                {c.response ? 'Update response' : 'Respond'}
+              </Button>
+            </div>
+          )}
+          {mayClose && (
+            <Button
+              variant="ghost"
+              onClick={() => close.mutate()}
+              disabled={close.isPending || (c.kind === 'challenge' && !c.response)}
+              title={c.kind === 'challenge' && !c.response ? 'A challenge is closed once the Manager has responded.' : undefined}
+            >
+              Close {c.kind}
+            </Button>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function RevisionRow({
+  base,
+  qk,
+  revision: r,
+}: {
+  base: string;
+  qk: string[];
+  revision: UnderstandingRevisionRecord;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const detail = useQuery({
+    queryKey: [...qk, 'revision', r.id, r.status],
+    queryFn: () => apiFetch<UnderstandingRevisionDetail>(`${base}/business-understanding/revisions/${r.id}`),
+    enabled: open,
+  });
+  return (
+    <Card className="p-3 text-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-2 text-left"
+      >
+        <span className="flex min-w-0 items-start gap-2">
+          {open ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" /> : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" />}
+          <span className="min-w-0">
+            <span className="font-medium text-ink">
+              {r.fromLabel} → {r.toLabel}
+            </span>
+            <span className="block text-xs text-ink-muted">{r.reason}</span>
+            <span className="block text-[11px] text-ink-faint">
+              Reopened by {r.openedByName ?? 'the system'} on {new Date(r.openedAt).toLocaleDateString()}
+              {r.completedAt ? ` · completed by ${r.completedByName ?? '—'} on ${new Date(r.completedAt).toLocaleDateString()}` : ''}
+            </span>
+          </span>
+        </span>
+        <Badge tone={r.status === 'open' ? 'warn' : 'success'}>{r.status === 'open' ? 'In revision' : 'Completed'}</Badge>
+      </button>
+      {open && (
+        <div className="mt-3 border-t border-line pt-3">
+          {detail.isLoading ? (
+            <Spinner label="Comparing versions…" />
+          ) : !detail.data || detail.data.changes.length === 0 ? (
+            <p className="text-xs text-ink-muted">No differences from {r.fromLabel}.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-ink-faint">
+                    <th className="py-1 pr-2 font-medium">What</th>
+                    <th className="py-1 pr-2 font-medium">{r.fromLabel}</th>
+                    <th className="py-1 font-medium">{r.status === 'open' ? 'Now' : r.toLabel}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.data.changes.map((ch, i) => (
+                    <tr key={i} className="border-t border-line align-top">
+                      <td className="py-1 pr-2 text-ink">{ch.label}</td>
+                      <td className="py-1 pr-2 text-ink-muted">{ch.before ?? '—'}</td>
+                      <td className="py-1 text-ink">{ch.after ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
