@@ -3,6 +3,7 @@ import request from 'supertest';
 import { type RollForwardComparison } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Prior-year roll-forward — end-to-end (Implementation Guide §12). Creates a
@@ -112,5 +113,14 @@ describe('Statutory Audit — prior-year roll-forward (e2e §12)', () => {
   it('an outsider (not on the engagement) cannot read or apply the roll-forward (§35)', async () => {
     await request(app.getHttpServer()).get(base()).set(bearer(pb)).expect(404);
     await request(app.getHttpServer()).post(`${base()}/apply`).set(bearer(pb)).expect(404);
+  });
+
+  it('once the Audit Framework is approved, roll-forward waits for a Controlled Reopen (02.8 §14)', async () => {
+    await approveFrameworkForTest(currentShellId);
+    const res = await request(app.getHttpServer())
+      .post(`${base()}/apply`)
+      .set(bearer(pa))
+      .expect(409);
+    expect(res.body.message).toMatch(/Controlled Reopen/);
   });
 });

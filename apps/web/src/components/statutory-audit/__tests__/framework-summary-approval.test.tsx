@@ -1,14 +1,23 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type {
   FrameworkBaselineRecord,
   FrameworkCompletionCheck,
+  FrameworkSummaryMatter,
   StatutoryAuditFrameworkSummary,
 } from '@hsdg/contracts';
-import { FrameworkSummaryApproval } from '../framework-summary-approval';
-import { FrameworkDashboard } from '../framework-summary-workspace';
+import {
+  ApprovedFrameworkBanner,
+  FRAMEWORK_REOPEN_EVENT,
+  FrameworkSummaryApproval,
+} from '../framework-summary-approval';
+import {
+  FRAMEWORK_MATTERS_ANCHOR,
+  FrameworkDashboard,
+  FrameworkSummaryHeaderCard,
+} from '../framework-summary-workspace';
 
 const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
@@ -148,7 +157,19 @@ beforeEach(() => {
   apiFetch.mockImplementation((url: string) =>
     url.startsWith('/employees')
       ? Promise.resolve({ items: [{ id: 'emp1', fullName: 'Ravi' }], total: 1 })
-      : Promise.resolve(summary()),
+      : url.includes('/documents')
+        ? Promise.resolve({
+            items: [
+              {
+                id: 'doc9',
+                title: 'Listing approval',
+                currentFilename: 'nse.pdf',
+                currentVersionNo: 1,
+              },
+            ],
+            total: 1,
+          })
+        : Promise.resolve(summary()),
   );
 });
 
@@ -316,5 +337,163 @@ describe('02.8 framework summary & approval', () => {
       reapprovalRequired: true,
       recordVersion: 3,
     });
+  });
+
+  it('reopen records who identified the change and links an evidence document', async () => {
+    const approved = baseline({ status: 'approved' });
+    const s = summary({
+      baseline: approved,
+      history: [approved],
+      gates: { ...summary().gates, canReopen: true },
+    });
+    const user = userEvent.setup();
+    render(wrap(<FrameworkSummaryApproval {...props(s)} />));
+    await user.click(screen.getByRole('button', { name: /Reopen the approved framework/ }));
+    await user.type(screen.getByLabelText(/Reason for reopening/), 'NCD listing');
+    await user.click(screen.getByRole('checkbox', { name: '02.1 Entity & Regulatory Profile' }));
+    await screen.findByRole('option', { name: 'Ravi' });
+    await user.selectOptions(screen.getByLabelText('Change identified by'), 'emp1');
+    await user.click(screen.getByRole('button', { name: /Link an evidence document/ }));
+    await user.click(await screen.findByRole('button', { name: 'Link' }));
+    expect(screen.getByText('Listing approval')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reopen framework' }));
+    const [, init] = apiFetch.mock.calls.find((c) => String(c[0]).endsWith('/reopen'))!;
+    expect(init.body).toMatchObject({
+      identifiedByEmployeeId: 'emp1',
+      evidenceDocumentId: 'doc9',
+    });
+  });
+
+  it('the reopen form opens when the Section 02 banner asks for it', async () => {
+    const approved = baseline({ status: 'approved' });
+    const s = summary({
+      baseline: approved,
+      history: [approved],
+      gates: { ...summary().gates, canReopen: true },
+    });
+    render(wrap(<FrameworkSummaryApproval {...props(s)} />));
+    expect(screen.queryByLabelText(/Reason for reopening/)).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new CustomEvent(FRAMEWORK_REOPEN_EVENT));
+    });
+    expect(await screen.findByLabelText(/Reason for reopening/)).toBeInTheDocument();
+  });
+
+  it('the baseline history keeps the §15 reopen record and opens its evidence', async () => {
+    const reopened = baseline({
+      id: 'b2',
+      version: '1.1',
+      reopen: {
+        reason: 'NCD listing',
+        affectedSections: ['02.1', '02.5'],
+        identifiedAt: '2026-10-05T00:00:00Z',
+        identifiedByName: 'Ravi',
+        evidenceNote: 'NSE intimation',
+        evidenceDocumentId: 'doc9',
+        reapprovalRequired: true,
+        reopenedByName: 'Priya',
+        reopenedAt: '2026-10-06T00:00:00Z',
+        fromVersion: '1.0',
+      } as FrameworkBaselineRecord['reopen'],
+    });
+    const user = userEvent.setup();
+    render(wrap(<FrameworkSummaryApproval {...props(summary({ history: [reopened] }))} />));
+    await user.click(screen.getByRole('button', { name: /Baseline history/ }));
+    expect(screen.getByText(/by Ravi/)).toBeInTheDocument();
+    expect(screen.getByText('Evidence: NSE intimation')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Open the evidence document/ }));
+    expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/documents/doc9');
+  });
+});
+
+describe('§14 approved banner', () => {
+  it('routes a change through Reopen Audit Framework', async () => {
+    const heard = jest.fn();
+    window.addEventListener(FRAMEWORK_REOPEN_EVENT, heard);
+    const user = userEvent.setup();
+    render(<ApprovedFrameworkBanner version="1.0" canReopen />);
+    expect(screen.getByText(/Audit Framework v1.0 approved/)).toBeInTheDocument();
+    expect(screen.getByText(/Section 02 is read-only/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reopen Audit Framework' }));
+    expect(heard).toHaveBeenCalled();
+    window.removeEventListener(FRAMEWORK_REOPEN_EVENT, heard);
+  });
+
+  it('points everyone else to the engagement lead', () => {
+    render(<ApprovedFrameworkBanner version="1.0" canReopen={false} />);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByText(/Ask the engagement lead/)).toBeInTheDocument();
+  });
+});
+
+const matter = (over: Partial<FrameworkSummaryMatter>): FrameworkSummaryMatter => ({
+  id: 'm',
+  code: 'M-001',
+  source: '02.4',
+  category: 'other' as FrameworkSummaryMatter['category'],
+  title: 'Matter',
+  description: null,
+  impact: null,
+  ownerEmployeeId: null,
+  ownerName: null,
+  dueDate: null,
+  status: 'open',
+  partnerAttention: false,
+  resolution: null,
+  evidenceDocumentId: null,
+  blocking: false,
+  open: true,
+  ...over,
+});
+
+describe('§3 header and §4 matters row', () => {
+  let target: HTMLDivElement;
+  beforeEach(() => {
+    target = document.createElement('div');
+    target.id = FRAMEWORK_MATTERS_ANCHOR;
+    target.scrollIntoView = jest.fn();
+    document.body.appendChild(target);
+  });
+  afterEach(() => target.remove());
+
+  it('shows the purpose, links the matter counts and warns while a matter blocks', async () => {
+    const s = summary();
+    const user = userEvent.setup();
+    render(
+      <FrameworkSummaryHeaderCard
+        summary={{ ...s, header: { ...s.header, openMatterCount: 3, blockingMatterCount: 2 } }}
+      />,
+    );
+    expect(screen.getByText(/before audit planning begins/)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '2 blocking matters prevent Manager confirmation (AF-01) and Partner approval (AF-02).',
+    );
+    await user.click(screen.getByRole('button', { name: '3' }));
+    await user.click(screen.getByRole('button', { name: 'Resolve matters' }));
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(2);
+  });
+
+  it('no warning without a blocking matter', () => {
+    render(<FrameworkSummaryHeaderCard summary={summary()} />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('the dashboard counts the Framework Matters and links to them', async () => {
+    const user = userEvent.setup();
+    render(
+      <FrameworkDashboard
+        rows={[]}
+        matters={[
+          matter({ id: 'a' }),
+          matter({ id: 'b', status: 'blocking', blocking: true }),
+          matter({ id: 'c', status: 'resolved', open: false }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('Framework Matters')).toBeInTheDocument();
+    expect(screen.getByText('2 open · 1 resolved · 1 blocking')).toBeInTheDocument();
+    expect(screen.getByText('Blocking')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'View Matters' }));
+    expect(target.scrollIntoView).toHaveBeenCalled();
   });
 });

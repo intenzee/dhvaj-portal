@@ -1225,7 +1225,7 @@ export class AuditConsolidationService {
   private assertNotApproved(row: SubRow): void {
     if (row.state === 'approved' && !row.needs_reevaluation) {
       throw new ConflictException(
-        'The framework is approved; a controlled reassessment must reopen it before editing 02.6.',
+        'The Audit Framework is approved — use Reopen Audit Framework in 02.8 (Controlled Reopen) and name 02.6 as affected before editing it.',
       );
     }
   }

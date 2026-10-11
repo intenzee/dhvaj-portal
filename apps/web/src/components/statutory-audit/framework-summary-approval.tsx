@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Circle, History, RotateCcw, Send, Undo2 } from 'lucide-react';
+import { CheckCircle2, Circle, History, Link2, Lock, RotateCcw, Send, Undo2, X } from 'lucide-react';
 import {
   AF01_DECISION,
   AF02_DECISION,
@@ -22,11 +22,13 @@ import {
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import type { EmployeeRow } from '@/lib/types';
+import type { DocumentRow, EmployeeRow } from '@/lib/types';
 import { Badge, Button, Card } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
+import { DocumentPreview } from '@/components/document-preview';
 import type { FrameworkSummaryPanelProps } from './framework-summary-types';
+import { LinkPicker } from './acceptance-file-card';
 
 const fmtDate = (iso: string | null): string =>
   iso
@@ -84,8 +86,10 @@ export function FrameworkSummaryApproval(props: FrameworkSummaryPanelProps): JSX
       )}
       {status === 'manager_confirmed' && <Af02Card {...props} people={people} />}
       {summary.approval && <ApprovalRecord {...props} />}
-      {summary.gates.canReopen && canManage && <ReopenCard {...props} />}
-      {summary.history.length > 0 && <BaselineHistory history={summary.history} />}
+      {summary.gates.canReopen && canManage && <ReopenCard {...props} people={people} />}
+      {summary.history.length > 0 && (
+        <BaselineHistory engagementId={props.engagementId} history={summary.history} />
+      )}
     </div>
   );
 }
@@ -776,21 +780,74 @@ function Fact({ label, value }: { label: string; value: string | null }): JSX.El
 
 // ── Controlled reopen (§15) ───────────────────────────────────────────────────
 
-function ReopenCard(props: FrameworkSummaryPanelProps): JSX.Element {
-  const { summary } = props;
+/** Fired by the Section 02 "approved" banner to open the reopen form (§14). */
+export const FRAMEWORK_REOPEN_EVENT = 'hsdg:framework-reopen';
+export const FRAMEWORK_REOPEN_ANCHOR = 'framework-02-8-reopen';
+
+/**
+ * §14 Controlled Reopen prompt: once the framework is approved, Section 02 is
+ * read-only and every change goes through Reopen Audit Framework in 02.8.
+ */
+export function ApprovedFrameworkBanner({
+  version,
+  canReopen,
+}: {
+  version: string | null;
+  canReopen: boolean;
+}): JSX.Element {
+  const openReopen = () => {
+    document
+      .getElementById(FRAMEWORK_REOPEN_ANCHOR)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.dispatchEvent(new CustomEvent(FRAMEWORK_REOPEN_EVENT));
+  };
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-3 rounded-md border border-success-200 bg-success-50 px-3 py-2"
+    >
+      <Lock className="h-4 w-4 shrink-0 text-success-700" />
+      <p className="min-w-0 flex-1 text-sm text-ink">
+        <span className="font-semibold">
+          Audit Framework{version ? ` v${version}` : ''} approved
+        </span>{' '}
+        — Section 02 is read-only. To change a fact or conclusion, reopen the framework in 02.8
+        (Controlled Reopen) and name the affected sections.
+      </p>
+      {canReopen ? (
+        <Button size="sm" variant="secondary" onClick={openReopen}>
+          Reopen Audit Framework
+        </Button>
+      ) : (
+        <span className="text-xs text-ink-muted">Ask the engagement lead to reopen it.</span>
+      )}
+    </div>
+  );
+}
+
+function ReopenCard(props: FrameworkSummaryPanelProps & { people: EmployeeRow[] }): JSX.Element {
+  const { summary, people, engagementId } = props;
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [sections, setSections] = useState<FrameworkSourceSection[]>([]);
   const [identifiedAt, setIdentifiedAt] = useState(todayIso());
+  const [identifiedBy, setIdentifiedBy] = useState('');
   const [evidenceNote, setEvidenceNote] = useState('');
+  const [evidenceDoc, setEvidenceDoc] = useState<{ id: string; title: string } | null>(null);
+  const [linking, setLinking] = useState(false);
   const [reapprovalRequired, setReapprovalRequired] = useState(true);
   const reopen = useSummaryAction<ReopenFrameworkInput>(
     props,
     () => `${summary.workflowInstanceId}/framework-summary/reopen`,
     'Framework reopened — a new draft version is open.',
   );
+  useEffect(() => {
+    const onRequest = () => setOpen(true);
+    window.addEventListener(FRAMEWORK_REOPEN_EVENT, onRequest);
+    return () => window.removeEventListener(FRAMEWORK_REOPEN_EVENT, onRequest);
+  }, []);
   return (
-    <Card className="p-4">
+    <Card id={FRAMEWORK_REOPEN_ANCHOR} className="scroll-mt-2 p-4">
       <button
         type="button"
         className="group flex w-full items-center gap-2 text-left"
@@ -819,9 +876,57 @@ function ReopenCard(props: FrameworkSummaryPanelProps): JSX.Element {
                 onChange={(e) => setIdentifiedAt(e.target.value)}
               />
             </Field>
-            <Field label="Evidence">
-              <Input value={evidenceNote} onChange={(e) => setEvidenceNote(e.target.value)} />
+            <Field label="Change identified by">
+              <Select value={identifiedBy} onChange={(e) => setIdentifiedBy(e.target.value)}>
+                <option value="">Me</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.fullName}
+                  </option>
+                ))}
+              </Select>
             </Field>
+          </div>
+          <Field label="Supporting evidence">
+            <Input
+              value={evidenceNote}
+              placeholder="What shows the change (optional)"
+              onChange={(e) => setEvidenceNote(e.target.value)}
+            />
+          </Field>
+          <div className="space-y-1">
+            {evidenceDoc ? (
+              <p className="flex items-center gap-2 text-xs text-ink">
+                <Link2 className="h-3.5 w-3.5 text-ink-muted" />
+                Evidence document: <span className="font-medium">{evidenceDoc.title}</span>
+                <button
+                  type="button"
+                  className="text-ink-faint hover:text-danger-600"
+                  aria-label="Remove the evidence document"
+                  onClick={() => setEvidenceDoc(null)}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </p>
+            ) : (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs font-medium text-primary-700 hover:underline"
+                onClick={() => setLinking((v) => !v)}
+              >
+                <Link2 className="h-3.5 w-3.5" /> Link an evidence document
+              </button>
+            )}
+            {linking && !evidenceDoc && (
+              <LinkPicker
+                engagementId={engagementId}
+                exclude={[]}
+                onPick={async (documentId, title) => {
+                  setEvidenceDoc({ id: documentId, title: title ?? 'Linked document' });
+                  setLinking(false);
+                }}
+              />
+            )}
           </div>
           <label className="flex items-center gap-2 text-sm text-ink">
             <input
@@ -838,7 +943,9 @@ function ReopenCard(props: FrameworkSummaryPanelProps): JSX.Element {
                 reason: reason.trim(),
                 affectedSections: sections,
                 identifiedAt: new Date(`${identifiedAt}T00:00:00`).toISOString(),
+                identifiedByEmployeeId: identifiedBy || undefined,
                 evidenceNote: evidenceNote.trim() || undefined,
+                evidenceDocumentId: evidenceDoc?.id,
                 reapprovalRequired,
                 recordVersion: summary.recordVersion,
               })
@@ -854,8 +961,23 @@ function ReopenCard(props: FrameworkSummaryPanelProps): JSX.Element {
 
 // ── Baseline history ──────────────────────────────────────────────────────────
 
-function BaselineHistory({ history }: { history: FrameworkBaselineRecord[] }): JSX.Element {
+function BaselineHistory({
+  engagementId,
+  history,
+}: {
+  engagementId: string;
+  history: FrameworkBaselineRecord[];
+}): JSX.Element {
   const [open, setOpen] = useState(false);
+  const [openDoc, setOpenDoc] = useState<DocumentRow | null>(null);
+  const toast = useToast();
+  const openEvidence = async (documentId: string): Promise<void> => {
+    try {
+      setOpenDoc(await apiFetch<DocumentRow>(`/engagements/${engagementId}/documents/${documentId}`));
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not open the evidence document.', 'error');
+    }
+  };
   return (
     <Card className="p-4">
       <button
@@ -887,11 +1009,39 @@ function BaselineHistory({ history }: { history: FrameworkBaselineRecord[] }): J
                   Reopened from v{b.reopen.fromVersion} by {b.reopen.reopenedByName ?? '—'} on{' '}
                   {fmtDate(b.reopen.reopenedAt)} — {b.reopen.reason} (
                   {b.reopen.affectedSections.join(', ')})
+                  <span className="block">
+                    Identified {fmtDate(b.reopen.identifiedAt)}
+                    {b.reopen.identifiedByName ? ` by ${b.reopen.identifiedByName}` : ''} ·{' '}
+                    {b.reopen.reapprovalRequired
+                      ? 'Partner reapproval required'
+                      : 'No Partner reapproval required'}
+                  </span>
+                  {b.reopen.evidenceNote && (
+                    <span className="block">Evidence: {b.reopen.evidenceNote}</span>
+                  )}
+                  {b.reopen.evidenceDocumentId && (
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 font-medium text-primary-700 hover:underline"
+                      onClick={() => void openEvidence(b.reopen!.evidenceDocumentId!)}
+                    >
+                      <Link2 className="h-3 w-3" /> Open the evidence document
+                    </button>
+                  )}
                 </span>
               )}
             </li>
           ))}
         </ul>
+      )}
+      {openDoc && (
+        <DocumentPreview
+          engagementId={engagementId}
+          doc={openDoc}
+          canEdit={false}
+          onClose={() => setOpenDoc(null)}
+          onSaved={() => undefined}
+        />
       )}
     </Card>
   );

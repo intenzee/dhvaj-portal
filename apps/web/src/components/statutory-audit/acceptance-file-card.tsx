@@ -627,7 +627,7 @@ export function LinkPicker({
 }: {
   engagementId: string;
   exclude: string[];
-  onPick: (documentId: string) => Promise<void>;
+  onPick: (documentId: string, title?: string) => Promise<void>;
 }): JSX.Element {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -668,7 +668,7 @@ export function LinkPicker({
                 disabled={busy !== null}
                 onClick={async () => {
                   setBusy(d.id);
-                  await onPick(d.id);
+                  await onPick(d.id, d.title);
                   setBusy(null);
                 }}
               >

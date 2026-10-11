@@ -26,6 +26,7 @@ import { ReportingFrameworkCard } from './reporting-framework-card';
 import { MattersCard } from './matters-card';
 import { FrameworkSummaryWorkspace } from './framework-summary-workspace';
 import { FRAMEWORK_SUMMARY_QK } from './framework-summary-types';
+import { ApprovedFrameworkBanner } from './framework-summary-approval';
 
 /**
  * Framework (Phase 02) screen (Audit Spec §18–§20): the applicability/assessment
@@ -136,6 +137,12 @@ export function FrameworkPanel({ engagementId }: { engagementId: string }): JSX.
 
   return (
     <div className="space-y-3">
+      {approved && (
+        <ApprovedFrameworkBanner
+          version={summary?.baseline?.version ?? null}
+          canReopen={canManage && (summary?.gates.canReopen ?? false)}
+        />
+      )}
       {/* Anchors for the 02.1 workspace's Section 02 navigation (SECTION_ANCHOR). */}
       <div id="framework-02-1" className="scroll-mt-2">
         <EntityProfileCard engagementId={engagementId} />
@@ -454,3 +461,4 @@ function FrameworkAreaCard({
     </Card>
   );
 }
+
