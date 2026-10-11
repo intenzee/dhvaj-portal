@@ -424,6 +424,17 @@ export interface UpdatePlanningIntelligenceInput {
   version: number;
 }
 
+/**
+ * Draft the Strategy Summary with the Manager's on-screen AS-01 / AS-02 answers
+ * (not yet saved). Omitted fields fall back to the saved record; nothing is saved.
+ */
+export interface DraftStrategySummaryInput {
+  orientation?: AuditOrientation;
+  orientationNote?: string;
+  additionalScopeRequired?: boolean;
+  additionalScope?: string;
+}
+
 // ── Control-room summary (§4 landing tiles) ──────────────────────────────────
 
 /** The 03.1 landing "control room" roll-up. */

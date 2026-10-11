@@ -49,13 +49,23 @@ export function sourceLinkLabel(link: string | null | undefined): string | null 
   return `${p.phase} ${p.place}`;
 }
 
-/** Scroll to a raw DOM id once the opened phase has rendered it. */
-function scrollToId(id: string, tries = 20): void {
-  const el = document.getElementById(id);
-  if (!el) {
-    if (tries > 0) setTimeout(() => scrollToId(id, tries - 1), 100);
+const isShown = (el: HTMLElement | null): el is HTMLElement =>
+  !!el && el.getBoundingClientRect().height > 0;
+
+/**
+ * Scroll to the first of `ids` that has rendered with content, once the opened
+ * phase is up. A Section 02 card with nothing recorded yet renders empty, so
+ * the link falls back to the 02.8 summary (which states every fact), then to
+ * the phase itself — it never silently goes nowhere.
+ */
+function scrollToFirstShown(ids: readonly string[], tries = 20): void {
+  const el = ids.map((id) => document.getElementById(id)).find(isShown);
+  const primary = ids[0] ? document.getElementById(ids[0]) : null;
+  if (!isShown(primary) && tries > 0) {
+    setTimeout(() => scrollToFirstShown(ids, tries - 1), 100);
     return;
   }
+  if (!el) return;
   el.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   el.classList.add('ring-2', 'ring-primary-400');
   setTimeout(() => el.classList.remove('ring-2', 'ring-primary-400'), 1600);
@@ -67,7 +77,9 @@ export function goToSourceLink(link: string | null | undefined): void {
   if (p.phase === 'framework') {
     openAuditPhase('framework');
     const id = frameworkAnchor(p.place);
-    if (id) scrollToId(id);
+    scrollToFirstShown(
+      [id, FRAMEWORK_SUMMARY_ANCHOR, 'audit-phase-framework'].filter((x): x is string => !!x),
+    );
     return;
   }
   openAuditPhase(p.phase, p.place);

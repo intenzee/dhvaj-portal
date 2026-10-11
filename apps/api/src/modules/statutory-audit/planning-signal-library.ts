@@ -206,7 +206,25 @@ export function effectiveRules(
   rules: readonly PlanningSignalRule[],
   on: string,
 ): PlanningSignalRule[] {
-  const best = new Map<string, PlanningSignalRule>();
+  return effectiveVersions(rules, on);
+}
+
+/** The versioning fields every planning library row carries. */
+export interface VersionedLibraryRule {
+  ruleCode: string;
+  version: number;
+  /** ISO dates; `effectiveTo` inclusive, null = open-ended. */
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  active: boolean;
+}
+
+/** {@link effectiveRules} for any versioned planning library (signals, considerations). */
+export function effectiveVersions<T extends VersionedLibraryRule>(
+  rules: readonly T[],
+  on: string,
+): T[] {
+  const best = new Map<string, T>();
   for (const r of rules) {
     if (r.effectiveFrom > on || (r.effectiveTo !== null && r.effectiveTo < on)) continue;
     const cur = best.get(r.ruleCode);

@@ -19,6 +19,7 @@ describe('Statutory Audit — 03.1 Planning Intelligence engine (e2e)', () => {
   let pa: string;
   let mp: string;
   const TEST_RULE = 'PSR-099';
+  const TEST_CONSIDERATION = 'PCR-099';
 
   const token = async (email: string): Promise<string> => {
     const res = await request(app.getHttpServer())
@@ -111,6 +112,11 @@ describe('Statutory Audit — 03.1 Planning Intelligence engine (e2e)', () => {
   afterAll(async () => {
     await su((db) =>
       db.query(`DELETE FROM hsdg.planning_signal_rule WHERE rule_code = $1`, [TEST_RULE]),
+    );
+    await su((db) =>
+      db.query(`DELETE FROM hsdg.planning_consideration_rule WHERE rule_code = $1`, [
+        TEST_CONSIDERATION,
+      ]),
     );
     await app?.close();
   });
@@ -318,6 +324,34 @@ describe('Statutory Audit — 03.1 Planning Intelligence engine (e2e)', () => {
     expect(sig.guidanceAnchors.length).toBeGreaterThan(0);
   });
 
+  it('drafts the Strategy Summary from the on-screen AS-01/AS-02 answers without saving them', async () => {
+    const f = await newAuditFile();
+    await get(`${f.base}/planning-intelligence`);
+    const draft = async (body: Record<string, unknown>) =>
+      (await post(pa, `${f.base}/planning-intelligence/strategy-draft`, body).expect(201)).body
+        .draft as string;
+
+    expect(await draft({})).toContain('Not yet recorded (AS-01).');
+    const onScreen = await draft({
+      orientation: 'combined',
+      orientationNote: 'Revenue controls tested at interim.',
+      additionalScopeRequired: true,
+      additionalScope: 'Stock count at the new warehouse.',
+    });
+    expect(onScreen).toContain('Combined controls and substantive (preliminary;');
+    expect(onScreen).toContain('- Revenue controls tested at interim.');
+    expect(onScreen).toContain('- Stock count at the new warehouse.');
+    expect(onScreen).not.toContain('Not yet recorded (AS-01).');
+    await post(pa, `${f.base}/planning-intelligence/strategy-draft`, {
+      orientation: 'nope',
+    }).expect(400);
+
+    // Nothing was saved.
+    const record = (await get(`${f.base}/planning-intelligence`)).body.record;
+    expect(record.orientation).toBeNull();
+    expect(record.additionalScope).toBeNull();
+  });
+
   it('offers the Area of Focus pick-lists and keeps the chosen assertions', async () => {
     const f = await newAuditFile();
     const lists = await get(`${f.base}/planning-intelligence/focus-pick-lists`);
@@ -404,6 +438,94 @@ describe('Statutory Audit — 03.1 Planning Intelligence engine (e2e)', () => {
       await expect(
         db.query(`UPDATE hsdg.planning_signal_rule SET name = 'x' WHERE rule_code = $1`, [
           TEST_RULE,
+        ]),
+      ).rejects.toThrow(/permission denied/);
+    });
+  });
+
+  it('derives considerations from the versioned Strategic Consideration Library (§13.2–13.3, §21)', async () => {
+    const url = '/api/v1/planning-consideration-rules';
+    const lib = await get(url, mp);
+    const codes = new Set((lib.body as Array<{ ruleCode: string }>).map((r) => r.ruleCode));
+    expect(codes.has('PCR-001')).toBe(true);
+    expect(codes.has('PCR-017')).toBe(true);
+    await request(app.getHttpServer()).get(url).set(bearer(pa)).expect(403);
+
+    const rule = {
+      ruleCode: TEST_CONSIDERATION,
+      considerationKey: 'e2e_test_consideration',
+      kind: 'resource',
+      label: 'E2E consideration',
+      basis: 'Testing.',
+      matchChangeCategories: ['fraud'],
+      // Far in the future: only a file whose period ends after it sees the rule.
+      effectiveFrom: '2099-04-01',
+      changeNote: 'E2E',
+    };
+    await post(mp, url, { ...rule, matchChangeCategories: [] }).expect(400);
+    await post(mp, url, { ...rule, matchRuleKeys: ['no_such_rule'] }).expect(400);
+    await post(mp, url, { ...rule, considerationKey: 'tax_expertise' }).expect(409);
+    const v1 = await post(mp, url, rule).expect(201);
+    expect(v1.body).toEqual(expect.objectContaining({ version: 1, kind: 'resource' }));
+    await post(mp, url, { ...rule, considerationKey: undefined, kind: 'timing' }).expect(400);
+    const v2 = await post(mp, url, {
+      ...rule,
+      considerationKey: undefined,
+      label: 'E2E consideration, reworded',
+      changeNote: 'Reworded',
+    }).expect(201);
+    expect(v2.body).toEqual(
+      expect.objectContaining({ version: 2, considerationKey: 'e2e_test_consideration' }),
+    );
+
+    type Consideration = {
+      considerationKey: string;
+      label: string;
+      ruleCode: string | null;
+      ruleVersion: number | null;
+    };
+    const fraudFile = async (financialYear?: string) => {
+      const f = await newAuditFile();
+      if (financialYear) {
+        await su((db) =>
+          db.query(`UPDATE hsdg.engagements SET financial_year = $2 WHERE id = $1`, [
+            f.engId,
+            financialYear,
+          ]),
+        );
+      }
+      await get(`${f.base}/planning-intelligence`);
+      await post(pa, `${f.base}/planning-changes`, {
+        category: 'fraud',
+        description: 'Whistle-blower complaint on vendor payments',
+        createSignal: true,
+      }).expect(201);
+      return (await get(`${f.base}/planning-considerations`)).body as Consideration[];
+    };
+
+    // A 2024-25 file reads the seeded library only.
+    const now = await fraudFile();
+    expect(now.find((c) => c.considerationKey === 'forensic_expertise')).toEqual(
+      expect.objectContaining({ ruleCode: 'PCR-016', ruleVersion: 1 }),
+    );
+    expect(now.some((c) => c.considerationKey === 'e2e_test_consideration')).toBe(false);
+
+    // A file whose period ends after the rule's effective date gets its latest version.
+    const later = await fraudFile('2099-00');
+    expect(later.find((c) => c.considerationKey === 'e2e_test_consideration')).toEqual(
+      expect.objectContaining({
+        label: 'E2E consideration, reworded',
+        ruleCode: TEST_CONSIDERATION,
+        ruleVersion: 2,
+      }),
+    );
+
+    // Insert-only for the application role.
+    await su(async (db) => {
+      await db.query(`SET ROLE hsdg_app`);
+      await expect(
+        db.query(`UPDATE hsdg.planning_consideration_rule SET label = 'x' WHERE rule_code = $1`, [
+          TEST_CONSIDERATION,
         ]),
       ).rejects.toThrow(/permission denied/);
     });
