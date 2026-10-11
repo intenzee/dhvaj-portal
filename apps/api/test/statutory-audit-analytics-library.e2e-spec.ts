@@ -254,6 +254,9 @@ describe('Statutory Audit — 03.2 analytics methodology library (e2e)', () => {
     // it may now suggest Immediate Partner Attention.
     const lib = (await get(mp, LIB).expect(200)).body as AnalyticsLibrary;
     const mov = lib.rules.find((r) => r.ruleKey === 'movement_revenue' && r.version === 1)!;
+    // Other suites (03.2 governance G7) may append their own dated versions of this rule first.
+    const nextVersion =
+      Math.max(...lib.rules.filter((r) => r.ruleCode === mov.ruleCode).map((r) => r.version)) + 1;
     const v2 = await post(mp, `${LIB}/rules`, {
       ruleCode: mov.ruleCode,
       name: mov.name,
@@ -273,7 +276,7 @@ describe('Statutory Audit — 03.2 analytics methodology library (e2e)', () => {
       methodologyVersion: 'dhvaj-analytics-2031.1',
       changeNote: 'e2e — 2031 revenue parameter',
     }).expect(201);
-    expect(v2.body.version).toBe(2);
+    expect(v2.body.version).toBe(nextVersion);
 
     const stale = await summary(base);
     expect(stale.analyticsMethodology.staleCards).toBeGreaterThanOrEqual(1);
@@ -286,7 +289,7 @@ describe('Statutory Audit — 03.2 analytics methodology library (e2e)', () => {
     expect(after).toEqual(
       expect.objectContaining({
         ruleCode: mov.ruleCode,
-        ruleVersion: 2,
+        ruleVersion: nextVersion,
         methodologyVersion: 'dhvaj-analytics-2031.1',
         suggestedAttention: 'immediate_partner',
       }),
