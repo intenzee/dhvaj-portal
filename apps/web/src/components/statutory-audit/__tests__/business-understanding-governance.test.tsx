@@ -295,3 +295,58 @@ describe('03.2 §23 Partner review', () => {
     });
   });
 });
+
+describe('03.2 §7 sub-industry from the industry profile', () => {
+  const OPTIONS = ['EPC — infrastructure', 'Real estate development'];
+  const withIndustry = (answers: Record<string, string>, subIndustryOptions = OPTIONS) => {
+    const base = summary(TEAM);
+    return summary(TEAM, {
+      subIndustryOptions,
+      sections: base.sections.map((x) =>
+        x.key === 'industry' ? { ...x, anythingChanged: 'no' as const, answers, version: 1 } : x,
+      ),
+    });
+  };
+  const saveBody = () =>
+    apiFetch.mock.calls.find(([url]) => String(url).endsWith('/business-understanding/sections/industry'))?.[1]
+      ?.body as { answers: Record<string, unknown> } | undefined;
+  const subIndustry = () => screen.getByRole('combobox', { name: 'Sub-industry' });
+
+  it('offers the profile list and saves the picked value', async () => {
+    renderPanel(withIndustry({}));
+    await openTab(/Understanding \(03\.2\.1–6\)/);
+    await openSection('Industry');
+    expect(within(subIndustry()).getByRole('option', { name: 'Other (specify)' })).toBeInTheDocument();
+    await userEvent.selectOptions(subIndustry(), 'Real estate development');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(saveBody()?.answers.sub_industry).toBe('Real estate development');
+  });
+
+  it('takes free text under Other', async () => {
+    renderPanel(withIndustry({}));
+    await openTab(/Understanding \(03\.2\.1–6\)/);
+    await openSection('Industry');
+    await userEvent.selectOptions(subIndustry(), 'Other (specify)');
+    await userEvent.type(screen.getByLabelText('Sub-industry — other'), 'Metro rail signalling');
+    expect(screen.queryByText(/Not in the current profile list/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(saveBody()?.answers.sub_industry).toBe('Metro rail signalling');
+  });
+
+  it('keeps a saved value the profile no longer lists, shown as Other', async () => {
+    renderPanel(withIndustry({ sub_industry: 'Dredging' }));
+    await openTab(/Understanding \(03\.2\.1–6\)/);
+    await openSection('Industry');
+    expect(subIndustry()).toHaveValue('__other__');
+    expect(screen.getByLabelText('Sub-industry — other')).toHaveValue('Dredging');
+    expect(screen.getByText(/Not in the current profile list — kept as entered/)).toBeInTheDocument();
+  });
+
+  it('stays free text when the profile has no list', async () => {
+    renderPanel(withIndustry({ sub_industry: 'Anything' }, []));
+    await openTab(/Understanding \(03\.2\.1–6\)/);
+    await openSection('Industry');
+    expect(screen.queryByRole('combobox', { name: 'Sub-industry' })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('Anything')).toBeInTheDocument();
+  });
+});
