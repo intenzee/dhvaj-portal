@@ -8,12 +8,14 @@ import {
   ApproveFrameworkDto,
   ConfirmFrameworkDto,
   ReopenFrameworkDto,
+  ResolveFrameworkItemDto,
 } from './dto/framework-summary.dto';
 
 /**
- * Statutory Audit — 02.8 Audit Framework Summary & Approval endpoints (Guide
- * §9.8, §13). Reads gated by `engagement.read`, mutations by `engagement.manage`;
- * RLS does the real gating (members read; only leads mutate the audit file).
+ * Statutory Audit — 02.8 Audit Framework Summary & Approval endpoints. Reads
+ * gated by `engagement.read`, mutations by `engagement.manage`; the service
+ * enforces the roles (AF-01 / reopen: engagement lead; AF-02: the Engagement
+ * Partner only) and RLS does the row gating.
  */
 @ApiTags('engagements')
 @Controller('engagements')
@@ -32,7 +34,7 @@ export class AuditFrameworkSummaryController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/framework-summary/confirm')
   @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'AF-01 — Manager confirmation of the audit framework' })
+  @ApiOperation({ summary: 'AF-01 — Manager review: submit for Partner approval or return' })
   confirm(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -42,6 +44,8 @@ export class AuditFrameworkSummaryController {
     return this.summary.confirmManager(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
       decision: dto.decision,
       note: dto.note,
+      previewReviewed: dto.previewReviewed,
+      returnItems: dto.returnItems,
       recordVersion: dto.recordVersion,
     });
   }
@@ -49,7 +53,7 @@ export class AuditFrameworkSummaryController {
   @Post(':id/statutory-audit/:workflowInstanceId/framework-summary/approve')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
-    summary: 'AF-02 — Engagement Partner approval; freezes the baseline & unlocks Planning',
+    summary: 'AF-02 — Engagement Partner: approve, approve subject to conditions, or return',
   })
   approve(
     @CurrentPrincipal() principal: Principal,
@@ -60,6 +64,9 @@ export class AuditFrameworkSummaryController {
     return this.summary.approve(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
       decision: dto.decision,
       methodologyVersion: dto.methodologyVersion,
+      conditions: dto.conditions,
+      returnReason: dto.returnReason,
+      returnSections: dto.returnSections,
       recordVersion: dto.recordVersion,
     });
   }
@@ -67,7 +74,7 @@ export class AuditFrameworkSummaryController {
   @Post(':id/statutory-audit/:workflowInstanceId/framework-summary/reopen')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
-    summary: 'Controlled reopen (§13) — preserves the approved baseline, opens the next version',
+    summary: 'Controlled reopen (§15) — preserves the approved baseline, opens the next version',
   })
   reopen(
     @CurrentPrincipal() principal: Principal,
@@ -77,10 +84,41 @@ export class AuditFrameworkSummaryController {
   ): Promise<StatutoryAuditFrameworkSummary> {
     return this.summary.reopen(rlsContextFromPrincipal(principal), id, workflowInstanceId, {
       reason: dto.reason,
-      affectedSections: [],
-      identifiedAt: new Date().toISOString(),
-      reapprovalRequired: true,
+      affectedSections: dto.affectedSections,
+      identifiedAt: dto.identifiedAt,
+      identifiedByEmployeeId: dto.identifiedByEmployeeId,
+      evidenceNote: dto.evidenceNote,
+      evidenceDocumentId: dto.evidenceDocumentId,
+      reapprovalRequired: dto.reapprovalRequired,
       recordVersion: dto.recordVersion,
+    });
+  }
+
+  @Post(':id/statutory-audit/framework-summary/returns/:returnId/resolve')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Clear an AF-01 / AF-02 returned item (owner or lead)' })
+  resolveReturn(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('returnId', new ParseUUIDPipe()) returnId: string,
+    @Body() dto: ResolveFrameworkItemDto,
+  ): Promise<StatutoryAuditFrameworkSummary> {
+    return this.summary.resolveReturn(rlsContextFromPrincipal(principal), id, returnId, {
+      resolution: dto.resolution,
+    });
+  }
+
+  @Post(':id/statutory-audit/framework-summary/conditions/:conditionId/resolve')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Resolve an approval condition (owner or lead)' })
+  resolveCondition(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('conditionId', new ParseUUIDPipe()) conditionId: string,
+    @Body() dto: ResolveFrameworkItemDto,
+  ): Promise<StatutoryAuditFrameworkSummary> {
+    return this.summary.resolveCondition(rlsContextFromPrincipal(principal), id, conditionId, {
+      resolution: dto.resolution,
     });
   }
 }

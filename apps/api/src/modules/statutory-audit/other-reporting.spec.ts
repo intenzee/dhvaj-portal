@@ -802,7 +802,9 @@ describe('02.7 — Section 196 appointment checks (spec §2)', () => {
     expect(r.detail.remuneration.outcome).toBe(REMUNERATION_OUTCOME.withinLimit);
     const m = r.detail.matters.filter((x) => x.code === 'section_196_appointment');
     expect(m).toHaveLength(2);
-    expect(m.every((x) => x.severity === 'medium' && x.cardKey === CARD.s197Remuneration)).toBe(true);
+    expect(m.every((x) => x.severity === 'medium' && x.cardKey === CARD.s197Remuneration)).toBe(
+      true,
+    );
     expect(r.outcome).toBe(OTHER_REPORTING_OUTCOME.attentionRequired);
     expect(r.detail.missingFacts.filter((x) => x.blocking)).toEqual([]);
   });
@@ -821,7 +823,14 @@ describe('02.7 — Section 196 appointment checks (spec §2)', () => {
       facts({
         managerialPersons: [
           { id: 'p1', name: 'MD', category: 'managing_director', remuneration: 40 * LAKH },
-          { id: 'p2', name: 'NED', category: 'non_executive_director', remuneration: 1 * LAKH, age: 80, termYears: 9 },
+          {
+            id: 'p2',
+            name: 'NED',
+            category: 'non_executive_director',
+            remuneration: 1 * LAKH,
+            age: 80,
+            termYears: 9,
+          },
         ],
       }),
       resolve,

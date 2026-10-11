@@ -41,14 +41,3 @@ export class AddFrameworkEvidenceDto {
   @MaxLength(4000)
   note?: string;
 }
-
-/** Approve the Framework Memo (§18). */
-export class ApproveFrameworkDto {
-  @ApiPropertyOptional({
-    description: 'The framework memo / rationale recorded with the approval.',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(8000)
-  memo?: string;
-}

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type ScopeApproachSummary } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -19,6 +19,7 @@ import {
   StartScopeRevisionDto,
   UpdateScopeApproachDto,
 } from './dto/scope-approach.dto';
+import { Section03LockGuard } from './section-03-lock.guard';
 
 const BASE = ':id/statutory-audit/:workflowInstanceId/scope-approach';
 
@@ -29,6 +30,7 @@ const BASE = ':id/statutory-audit/:workflowInstanceId/scope-approach';
  */
 @ApiTags('engagements')
 @Controller('engagements')
+@UseGuards(Section03LockGuard)
 export class AuditScopeApproachController {
   constructor(private readonly scope: AuditScopeApproachService) {}
 

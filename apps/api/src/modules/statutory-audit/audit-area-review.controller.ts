@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type AuditAreaReviewSummary } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -18,6 +18,7 @@ import {
   SignalResolutionDto,
   UpdateAuditAreaDto,
 } from './dto/area-review.dto';
+import { Section03LockGuard } from './section-03-lock.guard';
 
 const BASE = ':id/statutory-audit/:workflowInstanceId/audit-areas';
 
@@ -28,6 +29,7 @@ const BASE = ':id/statutory-audit/:workflowInstanceId/audit-areas';
  */
 @ApiTags('engagements')
 @Controller('engagements')
+@UseGuards(Section03LockGuard)
 export class AuditAreaReviewController {
   constructor(private readonly areas: AuditAreaReviewService) {}
 

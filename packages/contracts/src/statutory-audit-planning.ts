@@ -1,3 +1,4 @@
+import type { FrameworkPlanningGate } from './statutory-audit-framework-summary';
 import type { SectionPack } from './statutory-audit-section-pack';
 /**
  * Statutory Audit — Planning (Phase 03) vocabulary (Audit Spec §21, §30).
@@ -22,8 +23,7 @@ export const PLANNING_ITEM_STATE = {
   complete: 'complete',
   needsAttention: 'needs_attention',
 } as const;
-export type PlanningItemState =
-  (typeof PLANNING_ITEM_STATE)[keyof typeof PLANNING_ITEM_STATE];
+export type PlanningItemState = (typeof PLANNING_ITEM_STATE)[keyof typeof PLANNING_ITEM_STATE];
 
 /** States in which a planning item counts as done (contributes to readiness). */
 export const PLANNING_ITEM_DONE_STATES: readonly PlanningItemState[] = ['complete'];
@@ -60,7 +60,11 @@ export interface PlanningItemDefinition {
  * approval action (not a documented item), so it is not seeded here. */
 export const PLANNING_ITEMS: readonly PlanningItemDefinition[] = [
   { itemKey: 'audit_strategy', title: 'Audit Strategy', sortOrder: 1 },
-  { itemKey: 'engagement_understanding', title: 'Preliminary Engagement Understanding', sortOrder: 2 },
+  {
+    itemKey: 'engagement_understanding',
+    title: 'Preliminary Engagement Understanding',
+    sortOrder: 2,
+  },
   { itemKey: 'materiality', title: 'Materiality', sortOrder: 3 },
   { itemKey: 'overall_audit_plan', title: 'Overall Audit Plan', sortOrder: 4 },
   { itemKey: 'audit_approach', title: 'Audit Approach', sortOrder: 5 },
@@ -74,7 +78,11 @@ export const PLANNING_ITEMS: readonly PlanningItemDefinition[] = [
   { itemKey: 'pbc_strategy', title: 'PBC Strategy', sortOrder: 13 },
   { itemKey: 'timeline_milestones', title: 'Timeline & Milestones', sortOrder: 14 },
   { itemKey: 'communication_review_plan', title: 'Communication & Review Plan', sortOrder: 15 },
-  { itemKey: 'significant_matters', title: 'Significant Matters / Consultation Plan', sortOrder: 16 },
+  {
+    itemKey: 'significant_matters',
+    title: 'Significant Matters / Consultation Plan',
+    sortOrder: 16,
+  },
 ] as const;
 
 /** One planning sub-area on a live audit file (§21). */
@@ -122,8 +130,15 @@ export interface StatutoryAuditPlanning {
   workflowInstanceId: string;
   engagementServiceId: string;
   engagementId: string;
-  /** Whether the Framework Memo is approved — the gate for planning approval (§21). */
+  /**
+   * Whether the Audit Framework is approved (02.8 AF-02) with no open condition
+   * that holds Planning back, and not reopened — the gate for planning approval.
+   */
   frameworkApproved: boolean;
+  /** 02.8 §14 — whether Section 03 is open, and on which route. */
+  frameworkGate: FrameworkPlanningGate;
+  /** 02.8 §15 — an approved framework was reopened and awaits re-approval. */
+  frameworkReopened: boolean;
   items: PlanningItem[];
   materiality: Materiality | null;
   /** The current (latest) planning approval, or null while unapproved. */

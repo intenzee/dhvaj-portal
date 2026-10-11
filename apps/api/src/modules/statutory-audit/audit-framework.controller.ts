@@ -1,14 +1,19 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type StatutoryAuditFramework } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditFrameworkService } from './audit-framework.service';
-import {
-  AddFrameworkEvidenceDto,
-  ApproveFrameworkDto,
-  FrameworkDecisionDto,
-} from './dto/framework.dto';
+import { AddFrameworkEvidenceDto, FrameworkDecisionDto } from './dto/framework.dto';
 
 /**
  * Statutory Audit — Framework (Phase 02) endpoints (Audit Spec §18–§20).
@@ -112,25 +117,20 @@ export class AuditFrameworkController {
     return this.framework.removeEvidence(rlsContextFromPrincipal(principal), id, evidenceId);
   }
 
+  /**
+   * Retired: Section 02 is approved once, through 02.8 (AF-01 Manager review →
+   * Audit Framework Memorandum → AF-02 Engagement Partner conclusion).
+   */
   @Post(':id/statutory-audit/:workflowInstanceId/framework/approve')
   @RequirePermissions(PERMISSION.engagementManage)
   @ApiOperation({
-    summary: 'Approve the Framework Memo — freezes conclusions and completes Phase 02 (§18)',
-    description: 'Rejected (400) while any area still lacks a professional conclusion.',
+    summary: 'Retired — approve the framework through 02.8 AF-02',
+    description: 'Always 409: the framework is approved by the Engagement Partner in 02.8.',
+    deprecated: true,
   })
-  approve(
-    @CurrentPrincipal() principal: Principal,
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
-    @Body() dto: ApproveFrameworkDto,
-  ): Promise<StatutoryAuditFramework> {
-    return this.framework.approveFramework(
-      rlsContextFromPrincipal(principal),
-      id,
-      workflowInstanceId,
-      {
-        memo: dto.memo,
-      },
+  approve(): never {
+    throw new ConflictException(
+      'Section 02 is approved in 02.8 Audit Framework Summary & Approval (AF-01, then AF-02).',
     );
   }
 }

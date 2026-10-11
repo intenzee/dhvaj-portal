@@ -9,6 +9,7 @@ import {
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { answerSection01Clean, recommendSection01 } from './section01.helper';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Reassessment detects changes in the file: a moved completion date (raised in
@@ -117,7 +118,7 @@ describe('Statutory Audit — Reassessment from the file (e2e)', () => {
         version: a.version,
       }).expect(201);
     }
-    await post(pa, `${base}/${shellId}/framework/approve`, { memo: 'Approved (e2e).' }).expect(201);
+    await approveFrameworkForTest(shellId);
 
     // The audit work: every area and procedure due on the planned end date.
     await get(pa, `${base}/work-areas`);

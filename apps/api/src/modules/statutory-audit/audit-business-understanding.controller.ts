@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
@@ -31,6 +32,7 @@ import {
   UpdatePlanningExpectationDto,
   UpdateUnderstandingSectionDto,
 } from './dto/business-understanding.dto';
+import { Section03LockGuard } from './section-03-lock.guard';
 
 /**
  * Statutory Audit — 03.2 Business Understanding & Preliminary Analytics.
@@ -39,6 +41,7 @@ import {
  */
 @ApiTags('engagements')
 @Controller('engagements')
+@UseGuards(Section03LockGuard)
 export class AuditBusinessUnderstandingController {
   constructor(private readonly understanding: AuditBusinessUnderstandingService) {}
 

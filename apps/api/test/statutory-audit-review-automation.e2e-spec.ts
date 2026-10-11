@@ -9,6 +9,7 @@ import {
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { answerSection01Clean, recommendSection01 } from './section01.helper';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * Review reads the file: each queued procedure / area carries pre-review
@@ -117,7 +118,7 @@ describe('Statutory Audit — Review from the file (e2e)', () => {
         version: a.version,
       }).expect(201);
     }
-    await post(pa, `${base}/${shellId}/framework/approve`, { memo: 'Approved (e2e).' }).expect(201);
+    await approveFrameworkForTest(shellId);
 
     // A small file: the CARO workstream and overall responses, with procedures.
     const gen = (await get(pa, `${base}/work-areas`)).body[0] as StatutoryAuditWorkGeneration;
