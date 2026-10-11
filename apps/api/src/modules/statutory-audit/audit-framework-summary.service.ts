@@ -195,32 +195,52 @@ export class AuditFrameworkSummaryService {
         [engagementId],
       );
       if (shells.length === 0) return [];
-      // Facts the portal already holds (02.1, 02.2, 02.4–02.7) are
-      // filled on first sight, so the summary shows outcomes, not blanks.
-      for (const s of shells) {
-        await this.profile.seedProfileOn(client, s.id, engagementId);
-        await this.financialReporting.seedOn(client, s.id, engagementId);
-        await this.scheduleIii.seedOn(client, s.id, engagementId);
-        await this.caro.seedOn(client, s.id, engagementId);
-        await this.consolidation.seedOn(client, s.id, engagementId);
-        await this.icfr.seedOn(client, s.id, engagementId);
-        await this.otherReporting.seedOn(client, s.id, engagementId);
-      }
-      // 02.1 first: CARO / ICFR read its special entity types.
-      await this.profile.prefillOn(client, ctx, engagementId);
-      await this.financialReporting.prefillOn(client, ctx, engagementId);
-      // 02.3 captures nothing: it routes from 02.1 / 02.2, so refresh it now.
-      if (await isEngagementLead(client, engagementId))
-        await this.scheduleIii.refreshOn(client, engagementId);
-      await this.caro.prefillOn(client, ctx, engagementId);
-      await this.consolidation.prefillOn(client, ctx, engagementId);
-      await this.icfr.prefillOn(client, ctx, engagementId);
-      await this.otherReporting.prefillOn(client, ctx, engagementId);
+      // An approved, live baseline freezes 02.1–02.7: seeding and prefilling
+      // would change nothing, so a read of an approved framework skips them.
+      const { rows: frozen } = await client.query<{ n: number }>(
+        `SELECT count(DISTINCT workflow_instance_id)::int AS n
+           FROM hsdg.audit_framework_baseline
+          WHERE workflow_instance_id = ANY($1::uuid[]) AND status = 'approved'`,
+        [shells.map((s) => s.id)],
+      );
+      if (frozen[0]!.n < shells.length)
+        await this.seedAndPrefill(client, ctx, engagementId, shells);
       const out: StatutoryAuditFrameworkSummary[] = [];
       for (const s of shells)
         out.push(await this.build(client, ctx, engagementId, s.id, s.engagement_service_id));
       return out;
     });
+  }
+
+  /**
+   * Facts the portal already holds (02.1, 02.2, 02.4–02.7) are filled on
+   * first sight, so the summary shows outcomes, not blanks.
+   */
+  private async seedAndPrefill(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    shells: Array<{ id: string }>,
+  ): Promise<void> {
+    for (const s of shells) {
+      await this.profile.seedProfileOn(client, s.id, engagementId);
+      await this.financialReporting.seedOn(client, s.id, engagementId);
+      await this.scheduleIii.seedOn(client, s.id, engagementId);
+      await this.caro.seedOn(client, s.id, engagementId);
+      await this.consolidation.seedOn(client, s.id, engagementId);
+      await this.icfr.seedOn(client, s.id, engagementId);
+      await this.otherReporting.seedOn(client, s.id, engagementId);
+    }
+    // 02.1 first: CARO / ICFR read its special entity types.
+    await this.profile.prefillOn(client, ctx, engagementId);
+    await this.financialReporting.prefillOn(client, ctx, engagementId);
+    // 02.3 captures nothing: it routes from 02.1 / 02.2, so refresh it now.
+    if (await isEngagementLead(client, engagementId))
+      await this.scheduleIii.refreshOn(client, engagementId);
+    await this.caro.prefillOn(client, ctx, engagementId);
+    await this.consolidation.prefillOn(client, ctx, engagementId);
+    await this.icfr.prefillOn(client, ctx, engagementId);
+    await this.otherReporting.prefillOn(client, ctx, engagementId);
   }
 
   private async build(
