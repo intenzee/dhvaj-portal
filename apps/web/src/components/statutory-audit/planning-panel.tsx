@@ -254,6 +254,7 @@ export function PlanningPanel({
             item={selected}
             editable={editable}
             canManage={canManage}
+            sectionOpen={planning.frameworkGate.unlocked}
             onChanged={invalidate}
           />
         )}
@@ -289,6 +290,7 @@ function PlanningItemWork({
   item,
   editable,
   canManage,
+  sectionOpen,
   onChanged,
 }: {
   engagementId: string;
@@ -297,6 +299,8 @@ function PlanningItemWork({
   item: PlanningItem;
   editable: boolean;
   canManage: boolean;
+  /** Section 03 is unlocked (02.8 §14) — 03.1 then gates by the §23 role itself. */
+  sectionOpen: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
@@ -337,7 +341,7 @@ function PlanningItemWork({
             engagementId={engagementId}
             workflowInstanceId={workflowInstanceId}
             team={team}
-            editable={editable}
+            editable={sectionOpen}
             onChanged={onChanged}
           />
         </div>
