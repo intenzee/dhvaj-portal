@@ -8,8 +8,6 @@ import type { PoolClient } from 'pg';
 import {
   CUSTOM_METRIC_PREFIX,
   FINANCIAL_UNIT_FACTOR,
-  FINANCIAL_METRIC_DEFS,
-  INDUSTRY_PROFILE_LABEL,
   INVESTIGATION_ASSESSMENT,
   INVESTIGATION_ASSESSMENT_LABEL,
   INVESTIGATION_SIGNAL_DECISION,
@@ -18,6 +16,8 @@ import {
   PLANNING_SIGNAL_SOURCE,
   UNDERSTANDING_SECTION_DEFS,
   UNDERSTANDING_SECTIONS,
+  type AnalyticsMethodologySummary,
+  type AnalyticsProfileOption,
   type AnalyticsResult,
   type AssessInvestigationInput,
   type Ba01Answer,
@@ -66,7 +66,12 @@ import {
   readPriorAuditFile,
   understandingContextFacts,
 } from './master-facts';
-import { INDUSTRY_PROFILE_CONFIG, runPreliminaryAnalytics } from './planning-analytics-engine';
+import {
+  metricsForProfile,
+  runPreliminaryAnalytics,
+  type AnalyticsMethodology,
+} from './planning-analytics-engine';
+import { loadAnalyticsMethodology } from './planning-analytics-library';
 import {
   assertShell,
   assertSignalsInShell,
@@ -78,8 +83,6 @@ import { mergePriorSections, priorYearValues } from './planning-prior-year';
 
 /** The Phase 03 checklist row 03.2 rolls its state up into. */
 const UNDERSTANDING_ITEM_KEY = 'engagement_understanding';
-
-const CANONICAL_KEYS = new Set<string>(FINANCIAL_METRIC_DEFS.map((d) => d.key));
 
 /** PI-01 change categories surfaced as read-only context per section (never re-asked). */
 const SECTION_CHANGE_CONTEXT: Partial<
@@ -96,6 +99,15 @@ const SECTION_CHANGE_CONTEXT: Partial<
     'subsidiary_jv_associate',
   ],
   performance: ['borrowings_financing', 'going_concern'],
+};
+
+/** Engine input figures for one metric, built per file. */
+type MutableFigures = {
+  cy?: number | null;
+  py?: number | null;
+  pp?: number | null;
+  cySource?: MetricSourceType | null;
+  pySource?: MetricSourceType | null;
 };
 
 interface RecordRow {
@@ -147,6 +159,10 @@ interface ExceptionRow {
   id: string;
   seq: number;
   rule_key: string;
+  rule_code: string | null;
+  rule_version: number | null;
+  methodology_version: string;
+  why_may_matter: string | null;
   observation: string;
   why_flagged: string;
   suggested_attention: PlanningAttention;
@@ -191,7 +207,8 @@ interface ExpectationRow {
 }
 
 const EXCEPTION_SELECT = `
-  SELECT x.id, x.seq, x.rule_key, x.observation, x.why_flagged, x.suggested_attention, x.values,
+  SELECT x.id, x.seq, x.rule_key, x.rule_code, x.rule_version, x.methodology_version,
+         x.why_may_matter, x.observation, x.why_flagged, x.suggested_attention, x.values,
          x.management_explanation, x.explanation_by, x.explanation_date::text, x.evidence,
          x.assessment, x.affected_areas, x.signal_decision, x.no_signal_rationale, x.signal_id,
          s.seq AS signal_seq, x.owner_employee_id, owner.full_name AS owner_name,
@@ -283,6 +300,10 @@ export class AuditBusinessUnderstandingService {
           : current.conclusion_summary;
 
       if (nextProfile !== current.industry_profile) {
+        const { profiles } = await this.fileMethodology(client, workflowInstanceId);
+        if (!profiles.some((p) => p.profileKey === nextProfile)) {
+          throw new BadRequestException(`Industry profile "${nextProfile}" is not in force.`);
+        }
         // The profile changes the analytics; refresh the cards before checking completion.
         await client.query(
           `UPDATE hsdg.audit_business_understanding SET industry_profile = $2
@@ -542,11 +563,10 @@ export class AuditBusinessUnderstandingService {
           'Record the period end, currency and units before entering figures.',
         );
       }
-      const custom = new Set(
-        (await this.readCustomMetrics(client, workflowInstanceId)).map((c) => c.key),
-      );
+      const allowed = await this.allowedMetricKeys(client, workflowInstanceId);
       for (const v of input.values) {
-        if (!CANONICAL_KEYS.has(v.metricKey) && !custom.has(v.metricKey)) {
+        // A figure already recorded may always be cleared, even if the metric left the profile.
+        if (!allowed.has(v.metricKey) && v.amount !== null) {
           throw new BadRequestException(`Unknown metric "${v.metricKey}".`);
         }
         let result;
@@ -633,6 +653,36 @@ export class AuditBusinessUnderstandingService {
   }
 
   /**
+   * Re-run the analytics on the methodology versions now in force (§23) —
+   * after the Methodology Admin changes a rule, cards raised under an older
+   * version pick up the new wording / attention; figures are unchanged, so an
+   * assessed card is not reopened.
+   */
+  async refreshAnalytics(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<BusinessUnderstandingSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      await this.syncExceptions(client, engagementId, workflowInstanceId);
+      const summary = await this.buildSummary(client, workflowInstanceId);
+      await this.audit.recordWith(client, ctx, {
+        action: 'business_understanding.analytics_refreshed',
+        objectType: 'service_workflow_instance',
+        objectId: workflowInstanceId,
+        after: {
+          methodologyVersion: summary.analyticsMethodology.methodologyVersion,
+          profile: summary.analyticsMethodology.profileKey,
+          profileVersion: summary.analyticsMethodology.profileVersion,
+        },
+      });
+      return summary;
+    });
+  }
+
+  /**
    * Record the investigation of an exception (§16). A management explanation on
    * its own never closes the card — only the auditor's assessment does.
    */
@@ -693,7 +743,7 @@ export class AuditBusinessUnderstandingService {
           sourceRef: card.id,
           sourceLink: '03.2/analytics',
           observation: card.observation,
-          whyMayMatter: card.why_flagged,
+          whyMayMatter: card.why_may_matter ?? card.why_flagged,
           potentialImplications: areas.length
             ? `Potentially affected areas: ${areas.join(', ')}.`
             : null,
@@ -797,10 +847,8 @@ export class AuditBusinessUnderstandingService {
     }
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      const custom = new Set(
-        (await this.readCustomMetrics(client, workflowInstanceId)).map((c) => c.key),
-      );
-      if (!CANONICAL_KEYS.has(input.metricKey) && !custom.has(input.metricKey)) {
+      const allowed = await this.allowedMetricKeys(client, workflowInstanceId);
+      if (!allowed.has(input.metricKey)) {
         throw new BadRequestException('Unknown metric.');
       }
       const { rows } = await client.query<{ id: string }>(
@@ -928,11 +976,14 @@ export class AuditBusinessUnderstandingService {
     const analytics = await this.computeAnalytics(client, workflowInstanceId);
     const { rows: existing } = await client.query<{
       rule_key: string;
+      rule_code: string | null;
+      rule_version: number | null;
       values: Record<string, number | null>;
       status: InvestigationStatus;
       no_longer_flagged: boolean;
     }>(
-      `SELECT rule_key, values, status, no_longer_flagged FROM hsdg.audit_analytics_exception
+      `SELECT rule_key, rule_code, rule_version, values, status, no_longer_flagged
+         FROM hsdg.audit_analytics_exception
         WHERE workflow_instance_id = $1`,
       [workflowInstanceId],
     );
@@ -950,30 +1001,37 @@ export class AuditBusinessUnderstandingService {
         await client.query(
           `INSERT INTO hsdg.audit_analytics_exception
              (workflow_instance_id, engagement_id, seq, rule_key, methodology_version, observation,
-              why_flagged, suggested_attention, values, affected_areas)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)`,
+              why_flagged, suggested_attention, values, affected_areas, rule_code, rule_version,
+              why_may_matter)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13)`,
           [
             workflowInstanceId,
             engagementId,
             seq,
             e.ruleKey,
-            analytics.methodologyVersion,
+            e.methodologyVersion,
             e.observation,
             e.whyFlagged,
             e.suggestedAttention,
             JSON.stringify(e.values),
             e.affectedAreas,
+            e.ruleCode,
+            e.ruleVersion,
+            e.whyMayMatter,
           ],
         );
         continue;
       }
       const changed = JSON.stringify(sortKeys(prior.values)) !== JSON.stringify(sortKeys(e.values));
-      if (!changed && !prior.no_longer_flagged) continue;
+      // A new rule version in force (Refresh analytics) re-words the card without reopening it.
+      const newRule = prior.rule_code !== e.ruleCode || prior.rule_version !== e.ruleVersion;
+      if (!changed && !prior.no_longer_flagged && !newRule) continue;
       await client.query(
         `UPDATE hsdg.audit_analytics_exception
             SET observation = $3, why_flagged = $4, suggested_attention = $5, values = $6::jsonb,
                 methodology_version = $7, no_longer_flagged = false,
                 needs_reassessment = needs_reassessment OR (status <> 'open' AND $8),
+                rule_code = $9, rule_version = $10, why_may_matter = $11,
                 version = version + 1
           WHERE workflow_instance_id = $1 AND rule_key = $2`,
         [
@@ -983,8 +1041,11 @@ export class AuditBusinessUnderstandingService {
           e.whyFlagged,
           e.suggestedAttention,
           JSON.stringify(e.values),
-          analytics.methodologyVersion,
+          e.methodologyVersion,
           changed,
+          e.ruleCode,
+          e.ruleVersion,
+          e.whyMayMatter,
         ],
       );
     }
@@ -1002,25 +1063,107 @@ export class AuditBusinessUnderstandingService {
     }
   }
 
-  private async computeAnalytics(
+  /**
+   * The Analytics Methodology Library versions in force for this file: its
+   * industry profile (generic when that profile is not in force) on the audit
+   * period end, or today before the period end is recorded (§23).
+   */
+  private async fileMethodology(
     client: PoolClient,
     workflowInstanceId: string,
-  ): Promise<AnalyticsResult> {
+    header?: FinancialDatasetHeader,
+  ) {
     const { rows: rec } = await client.query<{ industry_profile: IndustryProfile }>(
       `SELECT industry_profile FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
       [workflowInstanceId],
     );
+    const h = header ?? (await this.readDataset(client, workflowInstanceId));
+    const on = h.periodEnd ?? new Date().toISOString().slice(0, 10);
+    const resolved = await loadAnalyticsMethodology(
+      client,
+      rec[0]?.industry_profile ?? 'generic',
+      on,
+    );
+    if (!resolved) {
+      throw new ConflictException(`No analytics methodology is in force on ${on}.`);
+    }
+    return { ...resolved, on };
+  }
+
+  /**
+   * Last year's audit file's prior-year figures (PY−1), in this file's units,
+   * for trend rules and average opening balances. Amount metrics only are
+   * converted; nothing is returned when the units cannot be reconciled.
+   */
+  private async priorPeriodValues(
+    client: PoolClient,
+    workflowInstanceId: string,
+    header: FinancialDatasetHeader,
+    methodology: AnalyticsMethodology,
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const prior = await readPriorAuditFile(client, workflowInstanceId);
+    if (!prior || !header.units) return out;
+    const { rows: pd } = await client.query<{
+      units: FinancialUnit | null;
+      py_units: FinancialUnit | null;
+    }>(`SELECT units, py_units FROM hsdg.audit_financial_dataset WHERE workflow_instance_id = $1`, [
+      prior.workflowInstanceId,
+    ]);
+    const from = pd[0]?.py_units ?? pd[0]?.units ?? null;
+    const pf = from ? FINANCIAL_UNIT_FACTOR[from] : null;
+    const tf = FINANCIAL_UNIT_FACTOR[header.units];
+    const valueType = new Map(methodology.metrics.map((m) => [m.metricKey, m.valueType]));
+    const { rows } = await client.query<{ metric_key: string; amount: string }>(
+      `SELECT metric_key, amount::text FROM hsdg.audit_financial_value
+        WHERE workflow_instance_id = $1 AND period = 'py'`,
+      [prior.workflowInstanceId],
+    );
+    for (const r of rows) {
+      const type = valueType.get(r.metric_key);
+      if (!type) continue;
+      if (type !== 'amount') out.set(r.metric_key, Number(r.amount));
+      else if (pf && tf) out.set(r.metric_key, (Number(r.amount) * pf) / tf);
+    }
+    return out;
+  }
+
+  private async computeAnalytics(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<AnalyticsResult> {
     const header = await this.readDataset(client, workflowInstanceId);
+    const { methodology } = await this.fileMethodology(client, workflowInstanceId, header);
     const values = await this.readValues(client, workflowInstanceId);
     const customMetrics = await this.readCustomMetrics(client, workflowInstanceId);
-    const map: Record<string, { cy?: number | null; py?: number | null }> = {};
-    for (const v of values) (map[v.metricKey] ??= {})[v.period] = v.amount;
-    return runPreliminaryAnalytics({
-      profile: rec[0]?.industry_profile ?? 'generic',
+    const map: Record<string, MutableFigures> = {};
+    for (const v of values) {
+      const m = (map[v.metricKey] ??= {});
+      m[v.period] = v.amount;
+      m[v.period === 'cy' ? 'cySource' : 'pySource'] = v.sourceType;
+    }
+    for (const [k, pp] of await this.priorPeriodValues(
+      client,
+      workflowInstanceId,
       header,
-      values: map,
-      customMetrics,
-    });
+      methodology,
+    )) {
+      (map[k] ??= {}).pp = pp;
+    }
+    return runPreliminaryAnalytics({ methodology, header, values: map, customMetrics });
+  }
+
+  /** Metric keys a figure / expectation may use: library metrics for the profile, or custom ones. */
+  private async allowedMetricKeys(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<Set<string>> {
+    const { methodology } = await this.fileMethodology(client, workflowInstanceId);
+    const custom = await this.readCustomMetrics(client, workflowInstanceId);
+    return new Set([
+      ...metricsForProfile(methodology).map((m) => m.metricKey),
+      ...custom.map((c) => c.key),
+    ]);
   }
 
   /** §22 completion checklist. */
@@ -1166,10 +1309,51 @@ export class AuditBusinessUnderstandingService {
           AND (status <> 'assessed' OR needs_reassessment)`,
       [workflowInstanceId],
     );
+    const { methodology, profiles, on } = await this.fileMethodology(client, workflowInstanceId);
+    const { profile } = methodology;
+    const inForceVersion = new Map(methodology.rules.map((x) => [x.ruleCode, x.version]));
+    const { rows: cards } = await client.query<{
+      rule_code: string | null;
+      rule_version: number | null;
+    }>(
+      `SELECT rule_code, rule_version FROM hsdg.audit_analytics_exception
+        WHERE workflow_instance_id = $1 AND NOT no_longer_flagged`,
+      [workflowInstanceId],
+    );
+    const analyticsMethodology: AnalyticsMethodologySummary = {
+      profileKey: profile.profileKey,
+      profileLabel: profile.label,
+      profileVersion: profile.version,
+      methodologyVersion: profile.methodologyVersion,
+      resolvedOn: on,
+      averageBalances: profile.averageBalances,
+      debtDefinition: profile.debtMetrics
+        .map((k) => methodology.metrics.find((m) => m.metricKey === k)?.label ?? k)
+        .join(' + '),
+      financeCostBasis: profile.financeCostBasis,
+      metrics: metricsForProfile(methodology).map((m) => ({
+        key: m.metricKey,
+        label: m.label,
+        note: m.note,
+        core: m.core,
+        valueType: m.valueType,
+      })),
+      staleCards: cards.filter(
+        (c) => !c.rule_code || inForceVersion.get(c.rule_code) !== c.rule_version,
+      ).length,
+    };
+    const industryProfiles: AnalyticsProfileOption[] = profiles.map((p) => ({
+      key: p.profileKey,
+      label: p.label,
+      description: p.description,
+    }));
     return {
       record,
       sections: await this.readSections(client, workflowInstanceId),
-      industryConsiderations: [...INDUSTRY_PROFILE_CONFIG[r.industry_profile].considerations],
+      industryConsiderations: [...profile.considerations],
+      industryProfiles,
+      subIndustryOptions: [...profile.subIndustries],
+      analyticsMethodology,
       dataset: await this.readDataset(client, workflowInstanceId),
       customMetrics: await this.readCustomMetrics(client, workflowInstanceId),
       values: await this.readValues(client, workflowInstanceId),
@@ -1358,9 +1542,10 @@ export class AuditBusinessUnderstandingService {
       [workflowInstanceId],
     );
     const analytics = await this.computeAnalytics(client, workflowInstanceId);
+    const { methodology } = await this.fileMethodology(client, workflowInstanceId);
     const custom = await this.readCustomMetrics(client, workflowInstanceId);
     const labelOf = (k: string) =>
-      FINANCIAL_METRIC_DEFS.find((d) => d.key === k)?.label ??
+      methodology.metrics.find((d) => d.metricKey === k)?.label ??
       custom.find((c) => c.key === k)?.label ??
       k;
     return rows.map((e) => {
@@ -1770,7 +1955,7 @@ export function composeUnderstandingConclusion(
   block(
     'External / industry matters',
     [
-      `Industry profile: ${INDUSTRY_PROFILE_LABEL[s.record.industryProfile]}`,
+      `Industry profile: ${s.analyticsMethodology.profileLabel}`,
       answerText(ind.competition) && `Competition: ${answerText(ind.competition)}`,
       answerText(ind.demand_pricing),
       ind.regulatory_change === 'Yes' &&
@@ -1848,6 +2033,10 @@ function mapException(x: ExceptionRow): InvestigationCardRecord {
     id: x.id,
     cardCode: displayCode('AX', x.seq)!,
     ruleKey: x.rule_key,
+    ruleCode: x.rule_code,
+    ruleVersion: x.rule_version,
+    methodologyVersion: x.methodology_version,
+    whyMayMatter: x.why_may_matter,
     observation: x.observation,
     whyFlagged: x.why_flagged,
     suggestedAttention: x.suggested_attention,

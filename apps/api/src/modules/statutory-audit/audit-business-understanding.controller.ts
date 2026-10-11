@@ -183,6 +183,21 @@ export class AuditBusinessUnderstandingController {
     );
   }
 
+  @Post(':id/statutory-audit/:workflowInstanceId/analytics/refresh')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({ summary: 'Re-run 03.2.8 analytics on the methodology versions now in force' })
+  refreshAnalytics(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) workflowInstanceId: string,
+  ): Promise<BusinessUnderstandingSummary> {
+    return this.understanding.refreshAnalytics(
+      rlsContextFromPrincipal(principal),
+      id,
+      workflowInstanceId,
+    );
+  }
+
   @Get(':id/statutory-audit/:workflowInstanceId/analytics-exceptions')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: '03.2.9 Investigation Cards' })
