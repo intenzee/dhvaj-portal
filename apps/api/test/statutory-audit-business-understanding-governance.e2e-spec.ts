@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Client } from 'pg';
 import request from 'supertest';
 import type {
+  AnalyticsLibrary,
   BusinessUnderstandingSummary,
   InvestigationCardRecord,
   PlanningEvidenceView,
@@ -21,13 +22,16 @@ import { approveFrameworkForTest } from './framework-approval.helper';
  *   G4 evidence on 03.2 records;
  *   G5 an open EP challenge blocks completion until answered;
  *   G6 §20 completion freezes 03.2 (writes and evidence → 409); reopening makes
- *      v1.1 with a frozen baseline and a diff of what changed.
+ *      v1.1 with a frozen baseline and a diff of what changed;
+ *   G7 a methodology change after completion (Refresh analytics) that surfaces
+ *      a new exception flags the completed 03.2 for reassessment (v1.2).
  */
 describe('Statutory Audit — 03.2 governance (e2e)', () => {
   let app: INestApplication;
   let pa: string; // Engagement Partner
   let mx: string; // Engagement Manager
   let sy: string; // Senior (engagement team)
+  let mp: string; // Methodology Admin (service.manage)
   let su: Client;
   let ids: Map<string, string>;
   let engId: string;
@@ -92,6 +96,7 @@ describe('Statutory Audit — 03.2 governance (e2e)', () => {
     pa = await token('partner.a@dhvaj.in');
     mx = await token('manager.x@dhvaj.in');
     sy = await token('senior.y@dhvaj.in');
+    mp = await token('mp@dhvaj.in');
     su = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
     await su.connect();
     const { rows } = await su.query<{ id: string; full_name: string }>(
@@ -375,7 +380,7 @@ describe('Statutory Audit — 03.2 governance (e2e)', () => {
     }
     s = await summary();
     await post(mx, `${base}/financial-dataset`, {
-      periodEnd: '2025-03-31',
+      periodEnd: '2033-03-31',
       currency: 'INR',
       units: 'inr_lakh',
       dataStatus: 'final',
@@ -467,5 +472,71 @@ describe('Statutory Audit — 03.2 governance (e2e)', () => {
       [shellId],
     );
     expect(rows[0]).toEqual({ status: 'in_progress', version_no: 2 });
+  });
+
+  it('G7 — a rule change after completion that surfaces a new exception flags reassessment', async () => {
+    // Complete the v1.1 revision again (the edited section is reviewed again).
+    let s = await summary();
+    const bm = s.sections.find((x) => x.key === 'business_model')!;
+    await post(mx, `${base}/business-understanding/sections/business_model`, {
+      anythingChanged: bm.anythingChanged ?? 'yes',
+      reviewed: true,
+      version: bm.version,
+    }).expect(201);
+    s = await summary();
+    const done = await post(mx, `${base}/business-understanding`, {
+      ba01: 'yes_complete',
+      conclusionSummary: 'Revenue flat; business description restated.',
+      version: s.record.version,
+    });
+    if (done.status !== 201) throw new Error(`03.2 did not complete: ${JSON.stringify(done.body)}`);
+    expect((done.body as BusinessUnderstandingSummary).versionInfo.versionLabel).toBe('v1.1');
+    const before = (await cards()).filter((c) => !c.noLongerFlagged).length;
+
+    // The Methodology Admin tightens the revenue movement rule for 2033 periods.
+    const lib = (await get(mp, '/api/v1/planning-analytics-library').expect(200))
+      .body as AnalyticsLibrary;
+    const mov = lib.rules.find((r) => r.ruleKey === 'movement_revenue' && r.version === 1)!;
+    await post(mp, '/api/v1/planning-analytics-library/rules', {
+      ruleCode: mov.ruleCode,
+      name: mov.name,
+      kind: mov.kind,
+      formula: mov.formula,
+      definition: mov.definition,
+      requiredMetrics: mov.requiredMetrics,
+      parameterType: mov.parameterType,
+      parameterValue: 0.5,
+      enhancedAt: 30,
+      immediateAt: 45,
+      signalWording: mov.signalWording,
+      whyMayMatter: mov.whyMayMatter,
+      affectedAreas: mov.affectedAreas,
+      effectiveFrom: '2033-01-01',
+      effectiveTo: '2033-12-31',
+      methodologyVersion: 'dhvaj-analytics-2033.e2e',
+      changeNote: 'e2e — 03.2 reassessment after completion',
+    }).expect(201);
+
+    // Anyone who records facts may refresh, even on a completed 03.2.
+    const refreshed = (await post(sy, `${base}/analytics/refresh`, {}).expect(201))
+      .body as BusinessUnderstandingSummary;
+    expect((await cards()).filter((c) => !c.noLongerFlagged).length).toBe(before + 1);
+    expect(refreshed.record.status).toBe('reassessment_required');
+    expect(refreshed.record.ba01).toBeNull();
+    expect(refreshed.versionInfo).toMatchObject({
+      versionLabel: 'v1.2',
+      reassessmentReason: expect.stringMatching(/AX-\d{3}/),
+    });
+    expect(refreshed.access.locked).toBe(false);
+    expect(refreshed.revisions[0]).toMatchObject({
+      fromLabel: 'v1.1',
+      toLabel: 'v1.2',
+      openedByName: null,
+    });
+    expect(await notes('manager.x@dhvaj.in', 'planning_understanding_reassessment')).toHaveLength(
+      1,
+    );
+    // The new card must be assessed before 03.2 completes again.
+    expect(refreshed.completion.find((c) => c.key === 'exceptions')?.met).toBe(false);
   });
 });
