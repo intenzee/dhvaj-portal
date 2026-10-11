@@ -5,6 +5,7 @@ import {
   FRAMEWORK_AREA_KEY,
   FRAUD_ROUTE,
   MANAGERIAL_CATEGORY,
+  MANAGERIAL_CATEGORY_LABEL,
   OTHER_REPORTING_OUTCOME,
   OTHER_REPORTING_REFERENCE_ANCHOR as ANCHOR,
   OTHER_REPORTING_RULE_CODE,
@@ -68,6 +69,11 @@ const AREA_143 = FRAMEWORK_AREA_KEY.section143;
 const AREA_11 = FRAMEWORK_AREA_KEY.rule11;
 const C = RULE_CRITERION;
 
+const APPOINTMENT_RULES = new Set<string>([
+  OTHER_REPORTING_RULE_CODE.managerialTermMaxYears,
+  OTHER_REPORTING_RULE_CODE.managerialMinAge,
+  OTHER_REPORTING_RULE_CODE.managerialAgeSrTrigger,
+]);
 const EXECUTIVE = new Set<string>([
   MANAGERIAL_CATEGORY.managingDirector,
   MANAGERIAL_CATEGORY.wholeTimeDirector,
@@ -377,7 +383,49 @@ function scheduleV(
   };
 }
 
+/**
+ * Section 196 appointment checks for each MD / WTD / Manager (spec §2 —
+ * "only where relevant to the remuneration / appointment workpaper"): term
+ * not above the Rules Library maximum, age not below the minimum, and an
+ * appointment at/above the special-resolution age carries one. Only recorded
+ * facts are tested — a blank age or term raises nothing.
+ */
+export function appointmentFlags(
+  persons: ManagerialPersonInput[],
+  resolve: RuleResolver,
+): string[] {
+  const maxTerm = resolve(AREA_143, C.managerialTermMaxYears)?.threshold ?? null;
+  const minAge = resolve(AREA_143, C.managerialMinAge)?.threshold ?? null;
+  const srAge = resolve(AREA_143, C.managerialAgeSrTrigger)?.threshold ?? null;
+  const flags: string[] = [];
+  for (const p of persons) {
+    if (!EXECUTIVE.has(p.category)) continue;
+    const who = p.name || MANAGERIAL_CATEGORY_LABEL[p.category];
+    if (maxTerm != null && p.termYears != null && p.termYears > maxTerm)
+      flags.push(
+        `${who}: appointed for ${p.termYears} years — Section 196(2) allows at most ${maxTerm} years at a time.`,
+      );
+    if (minAge != null && p.age != null && p.age < minAge)
+      flags.push(`${who}: age ${p.age} is below the Section 196(3)(a) minimum of ${minAge}.`);
+    if (srAge != null && p.age != null && p.age >= srAge && !p.ageSpecialResolution)
+      flags.push(
+        `${who}: age ${p.age} (${srAge} or above) — Section 196(3)(a) requires a special resolution; none recorded.`,
+      );
+  }
+  return flags;
+}
+
 function remuneration(f: OtherReportingBaseFacts, resolve: RuleResolver): RemunerationResult {
+  return {
+    ...remunerationLimits(f, resolve),
+    appointmentFlags: appointmentFlags(f.managerialPersons, resolve),
+  };
+}
+
+function remunerationLimits(
+  f: OtherReportingBaseFacts,
+  resolve: RuleResolver,
+): Omit<RemunerationResult, 'appointmentFlags'> {
   const persons = f.managerialPersons;
   const executives = persons.filter((p) => EXECUTIVE.has(p.category));
   const nonExec = persons.filter((p) => p.category === MANAGERIAL_CATEGORY.nonExecutiveDirector);
@@ -1257,6 +1305,24 @@ export function otherReportingRulesUsed(resolve: RuleResolver): OtherReportingRu
       resolve(AREA_143, C.remunerationNonExecWithoutMgmtPercent),
     ),
     ruleUsed(
+      R.managerialTermMaxYears,
+      'MD / WTD / Manager — maximum term (Section 196(2))',
+      'years',
+      resolve(AREA_143, C.managerialTermMaxYears),
+    ),
+    ruleUsed(
+      R.managerialMinAge,
+      'MD / WTD / Manager — minimum age (Section 196(3))',
+      'years',
+      resolve(AREA_143, C.managerialMinAge),
+    ),
+    ruleUsed(
+      R.managerialAgeSrTrigger,
+      'MD / WTD / Manager — special resolution from age',
+      'years',
+      resolve(AREA_143, C.managerialAgeSrTrigger),
+    ),
+    ruleUsed(
       R.fraudThreshold,
       'Fraud — Central Government route',
       '₹ (>= routes to CG)',
@@ -1353,7 +1419,12 @@ export function assessOtherReporting(
   const rules = otherReportingRulesUsed(resolve);
   for (const r of notCompany ? [] : rules)
     if (r.code !== OTHER_REPORTING_RULE_CODE.auditTrailEffective && r.value == null)
-      miss(`rule_${r.code}`, `Rules Library value ${r.code} missing for the audit period`, true);
+      miss(
+        `rule_${r.code}`,
+        `Rules Library value ${r.code} missing for the audit period`,
+        // The Section 196 appointment checks are advisory — never block on them.
+        !APPOINTMENT_RULES.has(r.code),
+      );
 
   const matters: ReportingMatter[] = [];
   for (const c of cards)
@@ -1368,6 +1439,14 @@ export function assessOtherReporting(
             ? 'high'
             : 'medium',
         message: `${c.clause}: ${e}`,
+      });
+  if (!notCompany)
+    for (const flag of rem.appointmentFlags)
+      matters.push({
+        code: 'section_196_appointment',
+        cardKey: CARD.s197Remuneration,
+        severity: 'medium',
+        message: `Section 196: ${flag}`,
       });
   if (fr.identified && !f.fraud.overdue && !notCompany)
     matters.push({

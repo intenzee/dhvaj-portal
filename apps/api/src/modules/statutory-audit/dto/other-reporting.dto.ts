@@ -11,6 +11,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   ValidateIf,
@@ -117,6 +118,21 @@ export class ManagerialPersonDto {
   @ApiPropertyOptional({ nullable: true, description: 'Remuneration for the year (₹).' })
   @Amount()
   remuneration!: number | null;
+  @ApiPropertyOptional({ nullable: true, description: 'Section 196(3) — age (years) at appointment.' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(120)
+  age?: number | null;
+  @ApiPropertyOptional({ nullable: true, description: 'Section 196(2) — term of the appointment (years).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(50)
+  termYears?: number | null;
+  @ApiPropertyOptional({ description: 'Section 196(3)(a) proviso — special resolution for 70+.' })
+  @Bool()
+  ageSpecialResolution?: boolean;
 }
 
 export class RemunerationApprovalsDto {

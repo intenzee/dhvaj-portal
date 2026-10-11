@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   REPORTING_APPLICABILITY_LABEL,
+  REPORTING_CARD as CARD,
   REPORTING_STATUS_LABEL,
   TRI_LABEL,
   type ReportingApplicability,
+  type ReportingCardKey,
   type ReportingStatus,
   type SetOtherReportingFactsInput,
   type Tri,
@@ -87,6 +89,39 @@ export function TriSelect({
   );
 }
 
+/** The workspace panel that holds each card's workpaper (spec §16 "Open Workpaper"). */
+export const CARD_WORKPAPER_SECTION: Record<ReportingCardKey, string> = {
+  [CARD.s143Information]: 'or-143-facts',
+  [CARD.s143Books]: 'or-143-facts',
+  [CARD.s143BranchReturns]: 'or-cross-refs',
+  [CARD.s143BranchReport]: 'or-cross-refs',
+  [CARD.s143Agreement]: 'or-143-facts',
+  [CARD.s143Standards]: 'or-143-facts',
+  [CARD.s143Adverse]: 'or-143-facts',
+  [CARD.s143Directors]: 'or-directors',
+  [CARD.s143AccountsQualification]: 'or-143-facts',
+  [CARD.s143Icfr]: 'or-cross-refs',
+  [CARD.s143Other]: 'or-143-facts',
+  [CARD.r11Litigation]: 'or-rule11',
+  [CARD.r11Losses]: 'or-rule11',
+  [CARD.r11Iepf]: 'or-rule11',
+  [CARD.r11eAdvanced]: 'or-rule11',
+  [CARD.r11eReceived]: 'or-rule11',
+  [CARD.r11fDividend]: 'or-rule11',
+  [CARD.r11gAuditTrail]: 'or-audit-trail',
+  [CARD.s197Remuneration]: 'or-197',
+  [CARD.s143_12Fraud]: 'or-fraud',
+  [CARD.branchReporting]: 'or-cross-refs',
+  [CARD.caro]: 'or-cross-refs',
+};
+
+const OPEN_SECTION_EVENT = 'hsdg:or-open-section';
+
+/** Expand a workspace panel in place and bring it into view. */
+export function openWorkspaceSection(id: string): void {
+  window.dispatchEvent(new CustomEvent<string>(OPEN_SECTION_EVENT, { detail: id }));
+}
+
 export function Section({
   id,
   title,
@@ -101,6 +136,17 @@ export function Section({
   children: ReactNode;
 }): JSX.Element {
   const [open, setOpen] = useState(initial);
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== id) return;
+      setOpen(true);
+      requestAnimationFrame(() =>
+        document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
+      );
+    };
+    window.addEventListener(OPEN_SECTION_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SECTION_EVENT, onOpen);
+  }, [id]);
   return (
     <Card id={id} className="scroll-mt-2 p-3">
       <button

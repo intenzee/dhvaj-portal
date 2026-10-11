@@ -97,6 +97,9 @@ export function OtherReportingRemuneration({
             <th>DIN</th>
             <th>Category</th>
             <th>Remuneration (₹)</th>
+            <th title="Section 196(3) — age at appointment">Age</th>
+            <th title="Section 196(2) — term of the appointment">Term (yrs)</th>
+            <th title="Section 196(3)(a) proviso — special resolution for 70 or above">SR 70+</th>
             <th />
           </tr>
         </thead>
@@ -142,6 +145,36 @@ export function OtherReportingRemuneration({
                   onChange={(e) => setPerson(i, { remuneration: num(e.target.value) })}
                 />
               </td>
+              <td className="w-16 pr-2">
+                <Input
+                  aria-label="Age"
+                  inputMode="numeric"
+                  value={str(p.age ?? null)}
+                  disabled={disabled || p.category === 'non_executive_director'}
+                  onChange={(e) => {
+                    const n = num(e.target.value);
+                    setPerson(i, { age: n == null ? null : Math.trunc(n) });
+                  }}
+                />
+              </td>
+              <td className="w-16 pr-2">
+                <Input
+                  aria-label="Term (years)"
+                  inputMode="decimal"
+                  value={str(p.termYears ?? null)}
+                  disabled={disabled || p.category === 'non_executive_director'}
+                  onChange={(e) => setPerson(i, { termYears: num(e.target.value) })}
+                />
+              </td>
+              <td className="pr-2 text-center">
+                <input
+                  type="checkbox"
+                  aria-label="Special resolution (70 or above)"
+                  checked={!!p.ageSpecialResolution}
+                  disabled={disabled || p.category === 'non_executive_director'}
+                  onChange={(e) => setPerson(i, { ageSpecialResolution: e.target.checked })}
+                />
+              </td>
               <td>
                 {!disabled && (
                   <button
@@ -158,6 +191,17 @@ export function OtherReportingRemuneration({
           ))}
         </tbody>
       </table>
+
+      {result && result.appointmentFlags?.length > 0 && (
+        <ul
+          className="ml-5 list-disc text-xs text-warning-800"
+          aria-label="Section 196 appointment checks"
+        >
+          {result.appointmentFlags.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+      )}
 
       <div className="grid gap-2 sm:grid-cols-2">
         <Field label="Section 198 net profit (₹)" hint="Negative for a loss">

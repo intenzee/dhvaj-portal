@@ -135,6 +135,9 @@ const SEED: Seed = {
     effectiveFrom: '2023-04-01',
   },
   [`${A11}|${C.retentionYears}`]: { operator: '>=', threshold: 8 },
+  [`${A143}|${C.managerialTermMaxYears}`]: { operator: '<=', threshold: 5 },
+  [`${A143}|${C.managerialMinAge}`]: { operator: '>=', threshold: 21 },
+  [`${A143}|${C.managerialAgeSrTrigger}`]: { operator: '>=', threshold: 70 },
 };
 
 function makeResolver(overrides: Seed = {}): RuleResolver {
@@ -772,5 +775,74 @@ describe('02.7 fact merge (validation-pipe DTOs)', () => {
     expect(merged.foreseeableLosses.hasLongTermContracts).toBe('no');
     expect(merged.foreseeableLosses.linkedWorkpapers).toEqual([]);
     expect(merged.foreseeableLosses.provisionAdequate).toBe('pending');
+  });
+});
+
+describe('02.7 — Section 196 appointment checks (spec §2)', () => {
+  const md = (p: Partial<OtherReportingBaseFacts['managerialPersons'][number]>) =>
+    facts({
+      managerialPersons: [
+        { id: 'p1', name: 'A. Rao', category: 'managing_director', remuneration: 40 * LAKH, ...p },
+      ],
+    });
+
+  it('raises nothing when age and term are within the Rules Library values or not recorded', () => {
+    expect(assessOtherReporting(md({}), resolve).detail.remuneration.appointmentFlags).toEqual([]);
+    const ok = assessOtherReporting(md({ age: 45, termYears: 5 }), resolve);
+    expect(ok.detail.remuneration.appointmentFlags).toEqual([]);
+    expect(ok.outcome).toBe(OTHER_REPORTING_OUTCOME.configured);
+  });
+
+  it('flags a term above 5 years and an age below 21 as non-blocking matters on the 197(16) card', () => {
+    const r = assessOtherReporting(md({ age: 19, termYears: 6 }), resolve);
+    expect(r.detail.remuneration.appointmentFlags).toHaveLength(2);
+    expect(r.detail.remuneration.appointmentFlags[0]).toMatch(/6 years.*at most 5/);
+    expect(r.detail.remuneration.appointmentFlags[1]).toMatch(/age 19.*minimum of 21/);
+    // The remuneration outcome itself is untouched.
+    expect(r.detail.remuneration.outcome).toBe(REMUNERATION_OUTCOME.withinLimit);
+    const m = r.detail.matters.filter((x) => x.code === 'section_196_appointment');
+    expect(m).toHaveLength(2);
+    expect(m.every((x) => x.severity === 'medium' && x.cardKey === CARD.s197Remuneration)).toBe(true);
+    expect(r.outcome).toBe(OTHER_REPORTING_OUTCOME.attentionRequired);
+    expect(r.detail.missingFacts.filter((x) => x.blocking)).toEqual([]);
+  });
+
+  it('requires a special resolution from age 70 and clears once it is recorded', () => {
+    const r = assessOtherReporting(md({ age: 72 }), resolve);
+    expect(r.detail.remuneration.appointmentFlags).toEqual([
+      expect.stringMatching(/age 72 \(70 or above\).*special resolution/),
+    ]);
+    const sr = assessOtherReporting(md({ age: 72, ageSpecialResolution: true }), resolve);
+    expect(sr.detail.remuneration.appointmentFlags).toEqual([]);
+  });
+
+  it('tests only MD / WTD / Manager — never non-executive directors', () => {
+    const r = assessOtherReporting(
+      facts({
+        managerialPersons: [
+          { id: 'p1', name: 'MD', category: 'managing_director', remuneration: 40 * LAKH },
+          { id: 'p2', name: 'NED', category: 'non_executive_director', remuneration: 1 * LAKH, age: 80, termYears: 9 },
+        ],
+      }),
+      resolve,
+    );
+    expect(r.detail.remuneration.appointmentFlags).toEqual([]);
+  });
+
+  it('shows the three values in the rules used and never blocks when they are missing', () => {
+    const codes = assessOtherReporting(md({}), resolve).detail.rulesUsed.map((x) => x.code);
+    expect(codes).toEqual(
+      expect.arrayContaining(['MGR_TERM_MAX_YEARS', 'MGR_MIN_AGE', 'MGR_AGE_SR_TRIGGER']),
+    );
+    const bare = makeResolver({
+      [`${A143}|${C.managerialTermMaxYears}`]: null,
+      [`${A143}|${C.managerialMinAge}`]: null,
+      [`${A143}|${C.managerialAgeSrTrigger}`]: null,
+    });
+    const r = assessOtherReporting(md({ age: 19, termYears: 9 }), bare);
+    expect(r.detail.remuneration.appointmentFlags).toEqual([]);
+    const miss = r.detail.missingFacts.find((x) => x.key === 'rule_MGR_MIN_AGE');
+    expect(miss?.blocking).toBe(false);
+    expect(r.outcome).toBe(OTHER_REPORTING_OUTCOME.configured);
   });
 });
