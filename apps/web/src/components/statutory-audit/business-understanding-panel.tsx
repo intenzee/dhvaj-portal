@@ -270,6 +270,7 @@ export function BusinessUnderstandingPanel({
                   def={def}
                   section={s.sections.find((x) => x.key === def.key)!}
                   industryConsiderations={def.key === 'industry' ? s.industryConsiderations : []}
+                  subIndustryOptions={s.subIndustryOptions}
                   decisions={s.industryConsiderationDecisions}
                   evidenceId={evidenceId ?? null}
                   evidenceCount={evidenceId ? (s.evidenceCounts[evidenceId] ?? 0) : 0}
@@ -433,6 +434,7 @@ function SectionCard({
   def,
   section,
   industryConsiderations,
+  subIndustryOptions,
   decisions,
   evidenceId,
   evidenceCount,
@@ -445,6 +447,8 @@ function SectionCard({
   def: UnderstandingSectionDef;
   section: UnderstandingSectionRecord;
   industryConsiderations: string[];
+  /** §7 sub-industry taxonomy of the in-force industry profile ([] = free text). */
+  subIndustryOptions: string[];
   decisions: Record<string, IndustryConsiderationDecision>;
   evidenceId: string | null;
   evidenceCount: number;
@@ -529,12 +533,22 @@ function SectionCard({
             <div className="grid gap-3 sm:grid-cols-2">
               {def.fields.map((f) => (
                 <div key={f.key} className={f.type === 'repeat' || f.type === 'multi' ? 'sm:col-span-2' : ''}>
-                  <FieldInput
-                    field={f}
-                    value={answers[f.key] ?? null}
-                    disabled={!editable}
-                    onChange={(v) => setAnswers((a) => ({ ...a, [f.key]: v }))}
-                  />
+                  {f.key === 'sub_industry' && subIndustryOptions.length > 0 ? (
+                    <SubIndustryInput
+                      field={f}
+                      options={subIndustryOptions}
+                      value={(answers[f.key] as string | null) ?? null}
+                      disabled={!editable}
+                      onChange={(v) => setAnswers((a) => ({ ...a, [f.key]: v }))}
+                    />
+                  ) : (
+                    <FieldInput
+                      field={f}
+                      value={answers[f.key] ?? null}
+                      disabled={!editable}
+                      onChange={(v) => setAnswers((a) => ({ ...a, [f.key]: v }))}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -666,6 +680,71 @@ function ConsiderationList({
         })}
       </ul>
     </div>
+  );
+}
+
+const OTHER_SUB_INDUSTRY = '__other__';
+
+/**
+ * §7 sub-industry: a pick list from the in-force industry profile, with "Other"
+ * free text always allowed. The answer stays a plain string, so a value the
+ * profile no longer lists (a later methodology version) shows as Other with its
+ * text — never silently cleared.
+ */
+function SubIndustryInput({
+  field,
+  options,
+  value,
+  disabled,
+  onChange,
+}: {
+  field: UnderstandingFieldDef;
+  options: string[];
+  value: string | null;
+  disabled: boolean;
+  onChange: (v: string | null) => void;
+}): JSX.Element {
+  const listed = !!value && options.includes(value);
+  // Other is derived from the value, so a value a newly selected profile does not
+  // list still shows (and stays editable); state only holds an Other picked with no text yet.
+  const [otherPicked, setOtherPicked] = useState(false);
+  const [saved] = useState(value);
+  const selected = listed ? value! : value || otherPicked ? OTHER_SUB_INDUSTRY : '';
+  return (
+    <Field label={field.label} hint={field.hint}>
+      <div className="space-y-1.5">
+        <Select
+          aria-label={field.label}
+          disabled={disabled}
+          value={selected}
+          onChange={(e) => {
+            const v = e.target.value;
+            setOtherPicked(v === OTHER_SUB_INDUSTRY);
+            onChange(v === OTHER_SUB_INDUSTRY ? (listed ? null : value) : v || null);
+          }}
+        >
+          <option value="">— Select —</option>
+          {options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+          <option value={OTHER_SUB_INDUSTRY}>Other (specify)</option>
+        </Select>
+        {selected === OTHER_SUB_INDUSTRY && (
+          <Input
+            aria-label={`${field.label} — other`}
+            placeholder="Describe the sub-industry"
+            disabled={disabled}
+            value={value ?? ''}
+            onChange={(e) => onChange(e.target.value || null)}
+          />
+        )}
+        {!!value && !listed && value === saved && (
+          <p className="text-[11px] text-ink-faint">Not in the current profile list — kept as entered.</p>
+        )}
+      </div>
+    </Field>
   );
 }
 
@@ -1216,7 +1295,7 @@ function AnalyticsSection({
       <p className="flex items-start gap-1.5 text-xs text-ink-muted">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
-          Preliminary planning analytics (SA 315 / SA 520) — not substantive evidence. Attention
+          Preliminary planning analytics — not substantive evidence. Attention
           parameters only surface items to investigate; they are not materiality and never a
           conclusion. Methodology {m.methodologyVersion} · {m.profileLabel} profile v{m.profileVersion} (in
           force on {m.resolvedOn}) · Debt = {m.debtDefinition} · finance cost on{' '}
@@ -1842,8 +1921,8 @@ function ExpectationsSection({
     <div className="space-y-2">
       <p className="text-xs text-ink-muted">
         Optional planning expectations from budget, prior trend or operational drivers. If later used
-        as a substantive analytical procedure, the audit-programme workpaper must separately satisfy
-        SA 520.
+        as a substantive analytical procedure, the audit-programme workpaper must separately meet the
+        standard on substantive analytical procedures (see Framework references).
       </p>
       {(list.data ?? []).map((e) => (
         <ExpectationCard
