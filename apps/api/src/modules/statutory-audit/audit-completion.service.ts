@@ -32,6 +32,7 @@ import {
 } from './completion-automation';
 import { readCaroClauseStatus } from './caro-programme-read';
 import { readIcfrReportingOn } from './icfr-controls-read';
+import { readFrameworkRevisionOn } from './framework-summary-impact';
 import { readOtherReportingCompletionOn } from './other-reporting-records-read';
 import { isEngagementLead } from './master-facts';
 import { planSignOff, type SignOffFacts } from './sign-off-automation';
@@ -330,6 +331,7 @@ export class AuditCompletionService {
       caroClauses: await readCaroClauseStatus(client, wi),
       icfr: await readIcfrReportingOn(client, wi),
       otherReporting: await readOtherReportingCompletionOn(client, wi),
+      frameworkRevision: await readFrameworkRevisionOn(client, wi),
     };
   }
 

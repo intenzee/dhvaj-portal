@@ -42,6 +42,8 @@ import { AuditOtherReportingService } from './audit-other-reporting.service';
 import { AuditOtherReportingController } from './audit-other-reporting.controller';
 import { AuditFrameworkSummaryService } from './audit-framework-summary.service';
 import { AuditFrameworkSummaryController } from './audit-framework-summary.controller';
+import { AuditFrameworkRecordsService } from './audit-framework-records.service';
+import { AuditFrameworkRecordsController } from './audit-framework-records.controller';
 import { AuditRollForwardService } from './audit-rollforward.service';
 import { AuditRollForwardController } from './audit-rollforward.controller';
 import { AuditFrameworkService } from './audit-framework.service';
@@ -117,6 +119,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditReportingRecordsController,
     AuditOtherReportingController,
     AuditFrameworkSummaryController,
+    AuditFrameworkRecordsController,
     AuditRollForwardController,
     AuditFrameworkController,
     AuditMattersController,
@@ -160,6 +163,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditReportingRecordsService,
     AuditOtherReportingService,
     AuditFrameworkSummaryService,
+    AuditFrameworkRecordsService,
     AuditRollForwardService,
     AuditFrameworkService,
     AuditMattersService,
