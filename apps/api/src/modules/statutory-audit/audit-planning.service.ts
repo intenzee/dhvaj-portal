@@ -457,10 +457,19 @@ export class AuditPlanningService {
       throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
   }
 
-  /** Planning content is frozen once approved (history is never rewritten, §30). */
+  /**
+   * Planning content is frozen once approved (history is never rewritten, §30)
+   * — until a reassessment or a 03.1 revision reopens Planning (phase →
+   * needs_attention), when the flagged sub-areas are re-performed for re-approval.
+   */
   private async assertNotApproved(client: PoolClient, workflowInstanceId: string): Promise<void> {
     const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.audit_planning_approvals WHERE workflow_instance_id = $1 LIMIT 1`,
+      `SELECT 1 FROM hsdg.audit_planning_approvals
+        WHERE workflow_instance_id = $1
+          AND NOT EXISTS (SELECT 1 FROM hsdg.audit_workflow_phases p
+                           WHERE p.workflow_instance_id = $1 AND p.phase_key = 'planning'
+                             AND p.state = 'needs_attention')
+        LIMIT 1`,
       [workflowInstanceId],
     );
     if (rows[0]) {

@@ -76,6 +76,15 @@ import {
   insertSignal,
   maxSeq,
 } from './planning-shared';
+import {
+  assertPlanningCapability,
+  closePlanningRevision,
+  markRaisedByPartner,
+  resolvePlanningActor,
+  signalAuthorship,
+  syncPlanningAttention,
+} from './planning-governance';
+import { onOrientationChanged, readFocusRouting, routeFocusChange } from './planning-downstream';
 
 /** The planning sub-area 03.1 rolls its state up into (existing Phase 03 checklist). */
 const STRATEGY_ITEM_KEY = 'audit_strategy';
@@ -479,6 +488,7 @@ export class AuditPlanningIntelligenceService {
     const changed = created + refreshed + sourceChanged;
 
     await this.strategy.syncConsiderations(client, engagementId, workflowInstanceId);
+    await syncPlanningAttention(client, engagementId, workflowInstanceId);
     if (created + sourceChanged > 0) {
       // §25 (03.5): new or changed intelligence can make a completed 03.5 Update Required.
       await this.areaReview.markImpacted(client, workflowInstanceId);
@@ -564,7 +574,7 @@ export class AuditPlanningIntelligenceService {
   ): Promise<PlanningIntelligenceSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      await this.ensureRecord(client, engagementId, workflowInstanceId);
+      const prior = await this.ensureRecord(client, engagementId, workflowInstanceId);
 
       if (input.status === PLANNING_INTELLIGENCE_STATUS.complete) {
         await this.assertCompletable(client, workflowInstanceId, input);
@@ -607,11 +617,30 @@ export class AuditPlanningIntelligenceService {
         );
       }
       await this.rollUpStrategyItem(client, ctx, workflowInstanceId, row.status);
+      // §19: changing a recorded AS-01 orientation reopens the downstream strategy work.
+      const flagged =
+        prior.orientation && row.orientation !== prior.orientation
+          ? await onOrientationChanged(
+              client,
+              workflowInstanceId,
+              AUDIT_ORIENTATION_LABEL[prior.orientation],
+              row.orientation ? AUDIT_ORIENTATION_LABEL[row.orientation] : null,
+            )
+          : [];
+      // Completing 03.1 closes an open controlled revision (v1.n is ready for 03.12).
+      const revised =
+        row.status === PLANNING_INTELLIGENCE_STATUS.complete &&
+        (await closePlanningRevision(client, workflowInstanceId));
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.planning_intelligence_updated',
         objectType: 'audit_planning_intelligence',
         objectId: row.id,
-        after: { status: row.status, orientation: row.orientation },
+        after: {
+          status: row.status,
+          orientation: row.orientation,
+          ...(flagged.length && { flagged }),
+          ...(revised && { revisionCompleted: true }),
+        },
       });
       return this.buildSummary(
         client,
@@ -672,6 +701,9 @@ export class AuditPlanningIntelligenceService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       const attention = input.suggestedAttention ?? PLANNING_ATTENTION.standard;
+      // §23: a signal from someone who cannot assess is a proposal for the Manager.
+      const actor = await resolvePlanningActor(client, engagementId);
+      const proposedBy = signalAuthorship(actor, input.source);
       const id = await insertSignal(client, engagementId, workflowInstanceId, {
         source: input.source,
         sourceLink: clean(input.sourceLink),
@@ -680,15 +712,21 @@ export class AuditPlanningIntelligenceService {
         potentialImplications: clean(input.potentialImplications),
         attention,
         documentId: input.documentId ?? null,
+        proposedByEmployeeId: proposedBy,
       });
-      await this.strategy.syncConsiderations(client, engagementId, workflowInstanceId);
-      // §25 (03.5): a new Enhanced / Immediate signal can make a completed 03.5 Update Required.
-      await this.areaReview.markImpacted(client, workflowInstanceId);
+      if (input.source === PLANNING_SIGNAL_SOURCE.partner) {
+        await markRaisedByPartner(client, { signalId: id });
+      }
+      if (!proposedBy) {
+        await this.strategy.syncConsiderations(client, engagementId, workflowInstanceId);
+        // §25 (03.5): a new Enhanced / Immediate signal can make a completed 03.5 Update Required.
+        await this.areaReview.markImpacted(client, workflowInstanceId);
+      }
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.planning_signal_created',
         objectType: 'audit_planning_signal',
         objectId: id,
-        after: { source: input.source, attention },
+        after: { source: input.source, attention, ...(proposedBy && { proposed: true }) },
       });
       return this.readSignalById(client, id);
     });
@@ -743,12 +781,15 @@ export class AuditPlanningIntelligenceService {
       const nextOwner =
         input.ownerEmployeeId !== undefined ? input.ownerEmployeeId : current.owner_employee_id;
 
+      // §10: leaving Immediate Partner Attention — suggested by the system or set
+      // since (e.g. flagged by the EP) — always needs a recorded rationale.
       const downgradesIpa =
-        current.suggested_attention === PLANNING_ATTENTION.immediatePartner &&
+        (current.suggested_attention === PLANNING_ATTENTION.immediatePartner ||
+          current.attention === PLANNING_ATTENTION.immediatePartner) &&
         nextAttention !== PLANNING_ATTENTION.immediatePartner;
       if (downgradesIpa && !nextAttentionRationale) {
         throw new BadRequestException(
-          'Downgrading a system-suggested Immediate Partner Attention signal requires a rationale.',
+          'Downgrading an Immediate Partner Attention signal requires a rationale.',
         );
       }
       if (nextAssessment === PLANNING_SIGNAL_ASSESSMENT.notRelevant && !nextAssessmentRationale) {
@@ -805,6 +846,7 @@ export class AuditPlanningIntelligenceService {
       if ((result.rowCount ?? 0) === 0) {
         throw new ConflictException('This signal changed since you loaded it; refresh and retry.');
       }
+      await syncPlanningAttention(client, engagementId, current.workflow_instance_id);
       await this.strategy.syncConsiderations(client, engagementId, current.workflow_instance_id);
       await this.areaReview.markImpacted(client, current.workflow_instance_id);
       // The first assessment moves 03.1 into Manager Assessment (§4 status flow).
@@ -895,11 +937,30 @@ export class AuditPlanningIntelligenceService {
           input.signalIds,
         );
       }
+      // §23: an Area of Focus the EP raises is a Partner focus area — it carries
+      // Partner attention and stays in the EP's queue.
+      const actor = await resolvePlanningActor(client, engagementId);
+      if (actor.role === 'partner' && !actor.actingAsManager) {
+        await client.query(
+          `UPDATE hsdg.audit_area_of_focus SET partner_attention = true WHERE id = $1`,
+          [id],
+        );
+      }
+      await syncPlanningAttention(client, engagementId, workflowInstanceId);
+      if (actor.role === 'partner') await markRaisedByPartner(client, { focusId: id });
+      // §19: a new Area of Focus reaches the downstream work its destinations name.
+      const flagged = await routeFocusChange(
+        client,
+        this.areaReview,
+        workflowInstanceId,
+        input.destinations ?? [],
+        `03.1 Area of Focus added: ${name}.`,
+      );
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.area_of_focus_created',
         objectType: 'audit_area_of_focus',
         objectId: id,
-        after: { name, signals: input.signalIds?.length ?? 0 },
+        after: { name, signals: input.signalIds?.length ?? 0, ...(flagged.length && { flagged }) },
       });
       return this.readFocusById(client, id);
     });
@@ -924,6 +985,7 @@ export class AuditPlanningIntelligenceService {
       );
       const current = rows[0];
       if (!current) throw new NotFoundException('Area of Focus not found.');
+      const before = await readFocusRouting(client, focusId);
 
       const result = await client.query(
         `UPDATE hsdg.audit_area_of_focus
@@ -967,11 +1029,33 @@ export class AuditPlanningIntelligenceService {
           input.signalIds,
         );
       }
+      await syncPlanningAttention(client, engagementId, current.workflow_instance_id);
+      // §19: superseding, re-routing or regrouping an Area of Focus reaches the
+      // downstream work it was (and now is) routed to.
+      const after = await readFocusRouting(client, focusId);
+      const flagged =
+        before.status !== after.status ||
+        before.destinations.join() !== after.destinations.join() ||
+        input.signalIds !== undefined
+          ? await routeFocusChange(
+              client,
+              this.areaReview,
+              current.workflow_instance_id,
+              [...new Set([...before.destinations, ...after.destinations])],
+              after.status === 'superseded' && before.status !== 'superseded'
+                ? `03.1 Area of Focus superseded: ${after.name}.`
+                : `03.1 Area of Focus changed: ${after.name}.`,
+            )
+          : [];
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.area_of_focus_updated',
         objectType: 'audit_area_of_focus',
         objectId: focusId,
-        after: { status: input.status, signals: input.signalIds?.length },
+        after: {
+          status: input.status,
+          signals: input.signalIds?.length,
+          ...(flagged.length && { flagged }),
+        },
       });
       return this.readFocusById(client, focusId);
     });
@@ -1007,6 +1091,8 @@ export class AuditPlanningIntelligenceService {
   ): Promise<PlanningChangeRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
+      // §23: the team records the fact; turning it into a signal is the Manager's call.
+      if (input.createSignal) await this.assertMayAssess(client, engagementId);
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO hsdg.audit_planning_change
            (workflow_instance_id, engagement_id, category, description, effective_date,
@@ -1057,6 +1143,7 @@ export class AuditPlanningIntelligenceService {
       );
       const current = rows[0];
       if (!current) throw new NotFoundException('Change not found.');
+      if (input.createSignal) await this.assertMayAssess(client, engagementId);
 
       const result = await client.query(
         `UPDATE hsdg.audit_planning_change
@@ -1106,6 +1193,10 @@ export class AuditPlanningIntelligenceService {
   }
 
   // ── internals ──────────────────────────────────────────────────────────────
+
+  private async assertMayAssess(client: PoolClient, engagementId: string): Promise<void> {
+    assertPlanningCapability(await resolvePlanningActor(client, engagementId), 'assess');
+  }
 
   /**
    * Generate the one Planning Signal a change may produce, and link it. The
@@ -1215,7 +1306,7 @@ export class AuditPlanningIntelligenceService {
     const { rows } = await client.query<{
       initial_audit: boolean | null;
       unassessed: string;
-      ipa_unassessed: string;
+      ipa_unacknowledged: string;
       changes: string;
       considerations_open: string;
       py_total: string;
@@ -1231,9 +1322,18 @@ export class AuditPlanningIntelligenceService {
          (SELECT count(*) FROM hsdg.audit_planning_signal
            WHERE workflow_instance_id = $1 AND status <> 'closed'
              AND manager_assessment IS NULL AND owner_employee_id IS NULL) AS unassessed,
-         (SELECT count(*) FROM hsdg.audit_planning_signal
-           WHERE workflow_instance_id = $1 AND status <> 'closed'
-             AND attention = 'immediate_partner' AND manager_assessment IS NULL) AS ipa_unassessed,
+         -- §20: every live Immediate Partner Attention item reached the EP and was acknowledged.
+         (SELECT count(*) FROM hsdg.audit_planning_signal s
+           WHERE s.workflow_instance_id = $1 AND s.status <> 'closed'
+             AND s.attention = 'immediate_partner'
+             AND NOT EXISTS (SELECT 1 FROM hsdg.audit_planning_attention a
+                              WHERE a.signal_id = s.id AND a.partner_status = 'acknowledged'))
+         + (SELECT count(*) FROM hsdg.audit_area_of_focus f
+             WHERE f.workflow_instance_id = $1 AND f.partner_attention
+               AND f.status <> 'superseded'
+               AND NOT EXISTS (SELECT 1 FROM hsdg.audit_planning_attention a
+                                WHERE a.focus_id = f.id AND a.partner_status = 'acknowledged'))
+           AS ipa_unacknowledged,
          (SELECT count(*) FROM hsdg.audit_planning_change
            WHERE workflow_instance_id = $1) AS changes,
          (SELECT count(*) FROM hsdg.audit_planning_consideration
@@ -1299,9 +1399,9 @@ export class AuditPlanningIntelligenceService {
       ),
       check(
         'partner_attention',
-        'Immediate Partner Attention signals surfaced',
-        n(r.ipa_unassessed) === 0,
-        `${n(r.ipa_unassessed)} Immediate Partner Attention signal(s) not yet assessed.`,
+        'Immediate Partner Attention surfaced to the EP',
+        n(r.ipa_unacknowledged) === 0,
+        `${n(r.ipa_unacknowledged)} Immediate Partner Attention item(s) not yet acknowledged by the Engagement Partner.`,
       ),
       check(
         'as01',
@@ -1435,6 +1535,18 @@ export class AuditPlanningIntelligenceService {
     engagementId: string,
     workflowInstanceId: string,
   ): Promise<PlanningIntelligenceRecord> {
+    const { rows: exists } = await client.query(
+      `SELECT 1 FROM hsdg.audit_planning_intelligence WHERE workflow_instance_id = $1`,
+      [workflowInstanceId],
+    );
+    if (exists[0]) return this.readRecord(client, workflowInstanceId);
+    // Only a lead may create the record (RLS checks the INSERT even when it
+    // would conflict) — the engagement team reads it once the Manager opens 03.1.
+    if (!(await isEngagementLead(client, engagementId))) {
+      throw new ConflictException(
+        '03.1 has not been opened yet — the Engagement Manager or Partner opens it first.',
+      );
+    }
     await client.query(
       `INSERT INTO hsdg.audit_planning_intelligence (workflow_instance_id, engagement_id)
        VALUES ($1, $2) ON CONFLICT (workflow_instance_id) DO NOTHING`,

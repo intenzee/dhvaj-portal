@@ -22,16 +22,18 @@ import {
   UpdatePlanningMatterDto,
 } from './dto/planning-strategy.dto';
 import { Section03LockGuard } from './section-03-lock.guard';
+import { PlanningCapabilityRequired, PlanningGovernanceGuard } from './planning-governance.guard';
 
 /**
  * Statutory Audit — 03.1 remaining sub-sections: strategic timing/resource
  * considerations, prior-year intelligence, acceptance carry-forward, the team
- * planning discussion and the Planning Matter register. Reads gated by
- * `engagement.read`, mutations by `engagement.manage`; RLS does the real gating.
+ * planning discussion and the Planning Matter register. Reads need
+ * `engagement.read`; writes also pass the §23 capability matrix and the 03.12
+ * lock (`PlanningGovernanceGuard`). RLS remains the backstop.
  */
 @ApiTags('engagements')
 @Controller('engagements')
-@UseGuards(Section03LockGuard)
+@UseGuards(Section03LockGuard, PlanningGovernanceGuard)
 export class AuditPlanningStrategyController {
   constructor(private readonly strategy: AuditPlanningStrategyService) {}
 
@@ -54,6 +56,7 @@ export class AuditPlanningStrategyController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-considerations')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Add a Manager timing / resource consideration' })
   createConsideration(
     @CurrentPrincipal() principal: Principal,
@@ -71,6 +74,7 @@ export class AuditPlanningStrategyController {
 
   @Post(':id/statutory-audit/planning-considerations/:considerationId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Assess a timing / resource consideration' })
   assessConsideration(
     @CurrentPrincipal() principal: Principal,
@@ -101,6 +105,7 @@ export class AuditPlanningStrategyController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/prior-year-matters/import')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({
     summary: "Bring last year's matters forward from the prior-year audit file (03.1.6)",
     description:
@@ -120,7 +125,8 @@ export class AuditPlanningStrategyController {
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/prior-year-matters')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('addFacts')
   @ApiOperation({ summary: 'Add a prior-year matter with source evidence' })
   createPriorYear(
     @CurrentPrincipal() principal: Principal,
@@ -138,6 +144,7 @@ export class AuditPlanningStrategyController {
 
   @Post(':id/statutory-audit/prior-year-matters/:matterId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Reassess a prior-year matter for the current year' })
   assessPriorYear(
     @CurrentPrincipal() principal: Principal,
@@ -165,6 +172,7 @@ export class AuditPlanningStrategyController {
 
   @Post(':id/statutory-audit/acceptance-carry-forward/:matterId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Convert, link or conclude an acceptance matter' })
   concludeAcceptance(
     @CurrentPrincipal() principal: Principal,
@@ -190,6 +198,7 @@ export class AuditPlanningStrategyController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-discussion')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('discussion')
   @ApiOperation({ summary: 'Record / update the team planning discussion' })
   saveDiscussion(
     @CurrentPrincipal() principal: Principal,
@@ -220,6 +229,7 @@ export class AuditPlanningStrategyController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/planning-matters')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('discussion')
   @ApiOperation({ summary: 'Raise a Planning Matter / Action' })
   createMatter(
     @CurrentPrincipal() principal: Principal,
@@ -236,7 +246,8 @@ export class AuditPlanningStrategyController {
   }
 
   @Post(':id/statutory-audit/planning-matters/:matterId')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('discussion', 'addFacts')
   @ApiOperation({ summary: 'Update a Planning Matter (resolution required on closure)' })
   updateMatter(
     @CurrentPrincipal() principal: Principal,

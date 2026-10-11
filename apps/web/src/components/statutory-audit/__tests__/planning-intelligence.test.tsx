@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type {
   EngagementIntelligenceView,
+  PlanningCapabilities,
+  PlanningGovernanceView,
   PlanningIntelligenceSummary,
   PlanningSignalRecord,
   PlanningSignalRuleRecord,
@@ -84,7 +86,7 @@ const rule = (over: Partial<PlanningSignalRuleRecord> = {}): PlanningSignalRuleR
 describe('Planning Signal Library (admin, §21)', () => {
   beforeEach(() => {
     apiFetch.mockReset();
-    apiFetch.mockImplementation((url: string, init?: { method?: string; body?: unknown }) => {
+    apiFetch.mockImplementation((_url: string, init?: { method?: string; body?: unknown }) => {
       if (init?.method === 'POST') return Promise.resolve(rule({ version: 3 }));
       return Promise.resolve([
         rule({ id: 'r2', version: 2, changeNote: 'Reworded' }),
@@ -216,10 +218,44 @@ const view = (over: Partial<EngagementIntelligenceView> = {}): EngagementIntelli
   ...over,
 });
 
+// The Engagement Manager on an open, unapproved 03.1 — every Track A gate is `assess`.
+const ALL: PlanningCapabilities = {
+  proposeSignals: true,
+  addFacts: true,
+  assess: true,
+  focusAreas: true,
+  discussion: true,
+  partnerSignals: false,
+  partnerReview: false,
+  respondToChallenge: true,
+  reopen: false,
+};
+const governanceView = (caps: Partial<PlanningCapabilities> = {}): PlanningGovernanceView => ({
+  access: {
+    role: 'manager',
+    roleLabel: 'Engagement Manager',
+    actingAsManager: false,
+    employeeId: 'emp-1',
+    capabilities: { ...ALL, ...caps },
+    approved: false,
+    locked: false,
+    lockReason: null,
+    versionNo: 1,
+    versionLabel: 'v1.0',
+    openRevision: null,
+    revisions: [],
+  },
+  partnerAttention: { engagementPartnerName: 'Partner A', items: [], outstanding: 0 },
+  proposals: {},
+  evidenceCounts: {},
+  downstreamFlags: [],
+});
+
 describe('03.1 Planning Intelligence panel', () => {
-  const mount = (v: EngagementIntelligenceView) => {
+  const mount = (v: EngagementIntelligenceView, caps: Partial<PlanningCapabilities> = {}) => {
     apiFetch.mockReset();
     apiFetch.mockImplementation((url: string, init?: { method?: string }) => {
+      if (url.endsWith('/planning-governance')) return Promise.resolve(governanceView(caps));
       if (url.endsWith('/planning-intelligence/facts')) return Promise.resolve(v);
       if (url.endsWith('/planning-intelligence/review')) return Promise.resolve(summary());
       if (url.endsWith('/planning-intelligence') && !init) return Promise.resolve(summary());
@@ -286,5 +322,19 @@ describe('03.1 Planning Intelligence panel', () => {
     mount(view({ stale: true, sourceChangedSignals: 0 }));
     expect(await screen.findByText(/facts changed since the intelligence/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh now' })).toBeEnabled();
+  });
+
+  it('leaves the refresh and the review to a role that may assess (§23)', async () => {
+    const user = userEvent.setup();
+    mount(view({ stale: true, sourceChangedSignals: 0 }), { assess: false });
+    expect(await screen.findByText(/facts changed since the intelligence/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh now' })).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: /Engagement Intelligence \(to review\)/ }),
+    );
+    expect(await screen.findByText('Consolidated FS')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Mark intelligence reviewed' }),
+    ).not.toBeInTheDocument();
   });
 });
