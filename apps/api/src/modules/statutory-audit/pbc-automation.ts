@@ -77,7 +77,8 @@ export interface PbcSuggestionFacts {
 
 /** A request topic → the 03.5 area (by name) it belongs to. */
 const TOPICS: ReadonlyArray<[RegExp, RegExp]> = [
-  [/bank/, /cash|bank/],
+  // "Cash Flow Statement" is not where bank evidence lands.
+  [/bank/, /bank|cash(?!\s*flow)/],
   [/receivable/, /receivable|debtor/],
   [/payable/, /payable|creditor/],
   [/inventory|stock/, /^inventor|stock/],
