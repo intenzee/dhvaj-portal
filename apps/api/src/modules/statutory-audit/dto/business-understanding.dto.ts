@@ -15,6 +15,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -28,7 +29,11 @@ import {
   INVESTIGATION_ASSESSMENTS,
   INVESTIGATION_SIGNAL_DECISIONS,
   METRIC_SOURCE_TYPES,
+  UNDERSTANDING_CHALLENGE_KINDS,
+  UNDERSTANDING_CHALLENGE_TARGETS,
   type Ba01Answer,
+  type UnderstandingChallengeKind,
+  type UnderstandingChallengeTarget,
   type DatasetStatus,
   type ExpectationBasis,
   type ExpectationConclusion,
@@ -190,6 +195,15 @@ export class FinancialValueDto {
   @MaxLength(1000)
   note?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Required to change or clear a figure rolled forward from an approved prior-year file.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  overrideReason?: string | null;
+
   @ApiProperty({ description: '0 for a new figure.' })
   @IsInt()
   @Min(0)
@@ -339,4 +353,76 @@ export class UpdatePlanningExpectationDto {
   @IsInt()
   @Min(1)
   version!: number;
+}
+
+// ── §20 controlled revision, §23 challenges, §7 consideration decisions ─────
+
+export class ReopenUnderstandingDto {
+  @ApiProperty({ description: 'Why the completed 03.2 is being revised.' })
+  @IsString()
+  @MaxLength(2000)
+  reason!: string;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+export class CreateUnderstandingChallengeDto {
+  @ApiProperty({ enum: UNDERSTANDING_CHALLENGE_TARGETS })
+  @IsIn(UNDERSTANDING_CHALLENGE_TARGETS)
+  targetType!: UnderstandingChallengeTarget;
+
+  @ApiPropertyOptional({ description: 'Section key, Investigation Card id or expectation id.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  targetRef?: string | null;
+
+  @ApiProperty({ enum: UNDERSTANDING_CHALLENGE_KINDS })
+  @IsIn(UNDERSTANDING_CHALLENGE_KINDS)
+  kind!: UnderstandingChallengeKind;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(4000)
+  body!: string;
+}
+
+export class RespondUnderstandingChallengeDto {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(4000)
+  response!: string;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+export class CloseUnderstandingChallengeDto {
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+export class DecideIndustryConsiderationDto {
+  @ApiProperty({ description: 'The suggested consideration, as listed in the summary.' })
+  @IsString()
+  @MaxLength(500)
+  consideration!: string;
+
+  @ApiProperty({ nullable: true, description: 'null clears the decision.' })
+  @ValidateIf((o: DecideIndustryConsiderationDto) => o.relevant !== null)
+  @IsBoolean()
+  relevant!: boolean | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string | null;
 }

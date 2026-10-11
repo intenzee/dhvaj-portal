@@ -19,7 +19,8 @@ import { usePlanningGov } from './planning-governance';
 
 /**
  * §24 evidence on a 03.1 record (signal, significant change, prior-year matter,
- * acceptance matter, team discussion). Files live in the engagement workspace
+ * acceptance matter, team discussion) or a 03.2 one (section, dataset,
+ * Investigation Card, expectation — DHVAJ 03.2 §20). Files live in the engagement workspace
  * (SharePoint when Microsoft 365 is on): Add File stores a new engagement
  * document, Link Existing File points at one — never a copy. Opens inline
  * under the record with +/−; the count comes from the governance read so a
@@ -28,13 +29,16 @@ import { usePlanningGov } from './planning-governance';
 export function PlanningEvidence({
   targetType,
   targetId,
+  count: knownCount,
 }: {
   targetType: PlanningEvidenceTarget;
   targetId: string;
+  /** The count when the host read it (03.2); else the 03.1 governance read's. */
+  count?: number;
 }): JSX.Element {
   const gov = usePlanningGov();
   const [open, setOpen] = useState(false);
-  const count = gov.view?.evidenceCounts[targetId] ?? 0;
+  const count = knownCount ?? gov.view?.evidenceCounts[targetId] ?? 0;
   return (
     <div>
       <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

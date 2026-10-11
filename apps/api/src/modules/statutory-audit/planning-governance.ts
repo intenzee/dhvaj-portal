@@ -140,10 +140,15 @@ export async function resolvePlanningActor(
   };
 }
 
-export function assertPlanningCapability(actor: PlanningActor, capability: PlanningCapability) {
+/** `scope` names the Section 03 item the write belongs to (03.1 by default). */
+export function assertPlanningCapability(
+  actor: PlanningActor,
+  capability: PlanningCapability,
+  scope = '03.1',
+) {
   if (!actor.capabilities[capability]) {
     throw new ForbiddenException(
-      `${CAPABILITY_DENIED[capability]} (You are: ${PLANNING_ACTOR_ROLE_LABEL[actor.role]}.)`,
+      `${CAPABILITY_DENIED[capability].replace('03.1', scope)} (You are: ${PLANNING_ACTOR_ROLE_LABEL[actor.role]}.)`,
     );
   }
 }
