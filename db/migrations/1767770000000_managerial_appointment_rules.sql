@@ -15,6 +15,8 @@
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- Up Migration
+-- authority_provision is FORCE RLS: lift it so the provision joins resolve.
+ALTER TABLE hsdg.authority_provision NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_version NO FORCE ROW LEVEL SECURITY;
 
@@ -40,8 +42,25 @@ JOIN hsdg.audit_rule r ON r.code = v.rule_code
 LEFT JOIN hsdg.authority_provision p ON p.code = 'COS_ACT_196' AND p.effective_to IS NULL
 ON CONFLICT (audit_rule_id, version) DO NOTHING;
 
+-- Backfill: a database migrated through 1767700000000 before its RLS fix seeded
+-- the 02.7 rule versions without their authority provision (no View Provision).
+UPDATE hsdg.audit_rule_version v
+   SET authority_provision_id = p.id
+  FROM hsdg.audit_rule r,
+       (VALUES ('REM_ONE_MDWTD_MANAGER', 'COS_ACT_197'), ('REM_MULTI_MDWTD_MANAGER', 'COS_ACT_197'),
+               ('REM_NONEXEC_WITH_MGMT', 'COS_ACT_197'), ('REM_NONEXEC_WITHOUT_MGMT', 'COS_ACT_197'),
+               ('FRAUD_INITIAL_NOTICE_DAYS', 'AUDIT_RULE_13'),
+               ('AUDIT_TRAIL_EFFECTIVE_DATE', 'AUDIT_RULE_11G'),
+               ('SCHEDULE_V_CEILING', 'SCH_V'), ('FRAUD_CG_THRESHOLD', 'COS_ACT_143_12'))
+         AS m(rule_code, prov_code),
+       hsdg.authority_provision p
+ WHERE v.audit_rule_id = r.id AND r.code = m.rule_code
+   AND p.code = m.prov_code AND p.effective_to IS NULL
+   AND v.authority_provision_id IS NULL;
+
 ALTER TABLE hsdg.audit_rule FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.audit_rule_version FORCE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.authority_provision FORCE ROW LEVEL SECURITY;
 
 -- Down Migration
 ALTER TABLE hsdg.audit_rule NO FORCE ROW LEVEL SECURITY;
