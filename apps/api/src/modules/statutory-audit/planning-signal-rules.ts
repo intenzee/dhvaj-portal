@@ -55,6 +55,16 @@ const RULE_SELECT = `
          r.change_note, e.full_name AS created_by_name, r.created_at
     FROM hsdg.planning_signal_rule r
     LEFT JOIN hsdg.employees e ON e.id = r.created_by_employee_id`;
+// The engine never shows the creator, so it skips the employees join — that
+// table's per-row RLS (shares_engagement_with) grows with the firm's engagements.
+const ENGINE_SELECT = `
+  SELECT r.id, r.rule_code, r.version, r.rule_key, r.name, r.trigger_source,
+         r.trigger_section, r.trigger_condition, r.condition_version,
+         r.observation_template, r.why_may_matter, r.potential_implications,
+         r.guidance_anchors, r.destinations, r.suggested_attention, r.source_link,
+         r.effective_from::text, r.effective_to::text, r.active, r.methodology_version,
+         r.change_note, NULL::text AS created_by_name, r.created_at
+    FROM hsdg.planning_signal_rule r`;
 
 function toRule(r: RuleRow): PlanningSignalRule {
   return {
@@ -84,7 +94,7 @@ function toRule(r: RuleRow): PlanningSignalRule {
  * them. DI-free; a malformed row is skipped rather than allowed to misfire.
  */
 export async function readSignalRulesOn(client: PoolClient): Promise<PlanningSignalRule[]> {
-  const { rows } = await client.query<RuleRow>(`${RULE_SELECT} ORDER BY r.rule_code, r.version`);
+  const { rows } = await client.query<RuleRow>(`${ENGINE_SELECT} ORDER BY r.rule_code, r.version`);
   return rows.map(toRule).filter(isUsableRule);
 }
 
