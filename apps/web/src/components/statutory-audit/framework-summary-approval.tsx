@@ -804,7 +804,7 @@ export function ApprovedFrameworkBanner({
   return (
     <div
       role="status"
-      className="flex flex-wrap items-center gap-3 rounded-md border border-success-200 bg-success-50 px-3 py-2"
+      className="flex flex-wrap items-center gap-3 rounded-md border border-success-500/30 bg-success-50 px-3 py-2"
     >
       <Lock className="h-4 w-4 shrink-0 text-success-700" />
       <p className="min-w-0 flex-1 text-sm text-ink">

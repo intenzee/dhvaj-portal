@@ -16,6 +16,7 @@ import { can } from '@/lib/principal';
 import { Badge, Card, Spinner } from '@/components/ui';
 import { FrameworkSummaryApproval } from './framework-summary-approval';
 import { FrameworkSummaryImpact } from './framework-summary-impact';
+import { FrameworkSummaryJudgments } from './framework-summary-judgments';
 import { FrameworkSummaryMatters } from './framework-summary-matters';
 import { FrameworkSummaryMemo } from './framework-summary-memo';
 import { FrameworkSummaryPreview } from './framework-summary-preview';
@@ -80,6 +81,7 @@ export function FrameworkSummaryWorkspace({
       <div id={FRAMEWORK_MATTERS_ANCHOR} className="scroll-mt-2">
         <FrameworkSummaryMatters {...props} />
       </div>
+      <FrameworkSummaryJudgments {...props} />
       <FrameworkSummaryPriorYear {...props} />
       <FrameworkSummaryImpact {...props} />
       <FrameworkSummaryMemo {...props} />
@@ -160,7 +162,7 @@ export function FrameworkSummaryHeaderCard({
       {h.blockingMatterCount > 0 && (
         <div
           role="alert"
-          className="flex flex-wrap items-center gap-2 rounded-md border border-danger-400 bg-danger-50 px-3 py-2 text-sm text-danger-700"
+          className="flex flex-wrap items-center gap-2 rounded-md border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-700"
         >
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span className="min-w-0 flex-1 font-medium">

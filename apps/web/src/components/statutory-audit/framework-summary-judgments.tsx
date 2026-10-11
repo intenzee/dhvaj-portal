@@ -85,7 +85,7 @@ export function FrameworkSummaryJudgments({
           {overrides.data!.map((o) => (
             <li
               key={`${o.source}:${o.title}`}
-              className="rounded-md border border-warn-200 bg-warn-50/40 p-2 text-sm"
+              className="rounded-md border border-warning-500/30 bg-warning-50/60 p-2 text-sm"
             >
               <p className="flex flex-wrap items-center gap-1.5">
                 <span className="font-medium text-ink">{o.title}</span>
