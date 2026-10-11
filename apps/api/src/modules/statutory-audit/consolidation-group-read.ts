@@ -4,6 +4,7 @@ import {
   FRAMEWORK_AREA_KEY,
   SUB_SECTION_KEY,
   type Br01Answer,
+  type ConsolidationApprovedResult,
   type ComponentAuditorFeed,
   type ComponentAuditorType,
   type ComponentReportType,
@@ -123,8 +124,13 @@ function pendingPackageOf(r: ComponentRow): number {
 export async function groupAuditStatusOn(
   client: PoolClient,
   workflowInstanceId: string,
+  /** The 02.6 result when the caller already read it (saves a re-read). */
+  consolidation?: ConsolidationApprovedResult | null,
 ): Promise<GroupAuditStatus> {
-  const result = await readConsolidationResultOn(client, workflowInstanceId);
+  const result =
+    consolidation !== undefined
+      ? consolidation
+      : await readConsolidationResultOn(client, workflowInstanceId);
   if (!result) return emptyGroupAuditStatus();
   const perimeter = await readPerimeterOn(client, workflowInstanceId);
   const expected = matrixComponents(perimeter).map((c) => c.id);

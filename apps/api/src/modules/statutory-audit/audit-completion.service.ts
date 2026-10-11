@@ -108,11 +108,14 @@ export class AuditCompletionService {
     engagementId: string,
   ): Promise<StatutoryAuditCompletion[]> {
     return this.db.withRlsContext(ctx, async (client) => {
-      // A lead opening the checklist brings it up to date with the file.
+      // A lead opening the checklist brings it up to date with the file. The
+      // facts the sync loaded are reused for the read (the sync writes only
+      // checklist items and phases, which the facts never read).
+      const known = new Map<string, CompletionFacts>();
       if (await isEngagementLead(client, engagementId)) {
-        await this.syncEngagement(client, engagementId);
+        await this.syncEngagement(client, engagementId, undefined, known);
       }
-      return this.readCompletion(client, engagementId);
+      return this.readCompletion(client, engagementId, known);
     });
   }
 
@@ -126,9 +129,15 @@ export class AuditCompletionService {
       if (!(await isEngagementLead(client, engagementId))) {
         throw new NotFoundException('Statutory-audit workflow not found on this engagement.');
       }
-      const itemsUpdated = await this.syncEngagement(client, engagementId, workflowInstanceId);
+      const known = new Map<string, CompletionFacts>();
+      const itemsUpdated = await this.syncEngagement(
+        client,
+        engagementId,
+        workflowInstanceId,
+        known,
+      );
       return {
-        completion: await this.readOne(client, engagementId, workflowInstanceId),
+        completion: await this.readOne(client, engagementId, workflowInstanceId, known),
         itemsUpdated,
       };
     });
@@ -144,6 +153,8 @@ export class AuditCompletionService {
     client: PoolClient,
     engagementId: string,
     onlyShell?: string,
+    /** Filled with the facts loaded per shell, for a read that follows. */
+    loaded?: Map<string, CompletionFacts>,
   ): Promise<number> {
     const { rows: shells } = await client.query<{
       id: string;
@@ -166,7 +177,9 @@ export class AuditCompletionService {
       if (shell.frozen) continue;
       // Completion approved → Section 09 is under way.
       if (shell.completion_approved) await this.unlockPhase(client, shell.id, 'sign_off');
-      const plan = planCompletionItems(await this.loadFacts(client, engagementId, shell.id));
+      const shellFacts = await this.loadFacts(client, engagementId, shell.id);
+      loaded?.set(shell.id, shellFacts);
+      const plan = planCompletionItems(shellFacts);
       const { rows: items } = await client.query<ItemRow>(
         `SELECT * FROM hsdg.audit_completion_items WHERE workflow_instance_id = $1`,
         [shell.id],
@@ -323,6 +336,7 @@ export class AuditCompletionService {
   private async readCompletion(
     client: PoolClient,
     engagementId: string,
+    known?: Map<string, CompletionFacts>,
   ): Promise<StatutoryAuditCompletion[]> {
     const { rows: shells } = await client.query<ShellRow>(
       `SELECT wi.id, wi.engagement_service_id, wi.engagement_id, wi.status,
@@ -375,7 +389,7 @@ export class AuditCompletionService {
     const plans = new Map<string, Map<string, PlannedCompletionItem>>();
     const facts = new Map<string, CompletionFacts>();
     for (const shell of shells) {
-      const f = await this.loadFacts(client, engagementId, shell.id);
+      const f = known?.get(shell.id) ?? (await this.loadFacts(client, engagementId, shell.id));
       facts.set(shell.id, f);
       plans.set(shell.id, planCompletionItems(f));
     }
@@ -910,8 +924,9 @@ export class AuditCompletionService {
     client: PoolClient,
     engagementId: string,
     workflowInstanceId: string,
+    known?: Map<string, CompletionFacts>,
   ): Promise<StatutoryAuditCompletion> {
-    const all = await this.readCompletion(client, engagementId);
+    const all = await this.readCompletion(client, engagementId, known);
     const shell = all.find((c) => c.workflowInstanceId === workflowInstanceId);
     return shell ?? all[0]!;
   }
