@@ -652,4 +652,151 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
     });
     if (res.status !== 201) throw new Error(`03.1 completion failed: ${JSON.stringify(res.body)}`);
   }
+
+  /**
+   * 03.1 generates itself when the Engagement Partner records AF-02 (02.8), so a
+   * team member who opens Planning first finds the intelligence ready — the
+   * lead-only RLS on the 03.1 tables never meets a Senior's first read.
+   */
+  describe('auto-generation at AF-02', () => {
+    /** A fresh file (EP Partner A, EM Manager X, Senior Y in charge) at AF-02. */
+    const fileAtAf02 = async (): Promise<{ eng: string; wf: string; base: string }> => {
+      const entity = await post(pa, '/api/v1/entities', {
+        legalName: `Planning Autogen ${stamp()}`,
+        typeSlug: 'private_limited',
+        officeCode: 'NORTH',
+      }).expect(201);
+      const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
+      const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
+      const e = await post(pa, '/api/v1/engagements', {
+        entityId: entity.body.id,
+        serviceId: itr,
+        financialYear: '2024-25',
+        periodLabel: `P${stamp()}`,
+        status: 'accepted',
+        engagementManagerEmployeeId: ids.get('Manager X'),
+      }).expect(201);
+      const id = e.body.id as string;
+      await post(pa, `/api/v1/engagements/${id}/services`, { serviceId: stat }).expect(201);
+      await post(pa, `/api/v1/engagements/${id}/team`, {
+        employeeId: ids.get('Senior Y'),
+        roleOnEngagement: 'in_charge',
+      }).expect(201);
+      await su.query(
+        `UPDATE hsdg.engagements SET engagement_partner_id =
+           (SELECT e.id FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id
+             WHERE u.email = 'partner.a@dhvaj.in')
+          WHERE id = $1`,
+        [id],
+      );
+      const root = `/api/v1/engagements/${id}/statutory-audit`;
+      const wf = (await get(pa, root).expect(200)).body[0].workflowInstanceId as string;
+      // Seed 02.8, then decide 02.1–02.7 directly (their own suites drive them).
+      await get(pa, `${root}/framework-summary`).expect(200);
+      await su.query(
+        `UPDATE hsdg.audit_entity_profile SET state = 'confirmed', confirmed_at = now(),
+                needs_reevaluation = false
+          WHERE workflow_instance_id = $1`,
+        [wf],
+      );
+      await su.query(
+        `UPDATE hsdg.audit_framework_subassessment
+            SET state = CASE WHEN sub_section_key = '02.2' THEN 'approved' ELSE 'not_applicable' END,
+                conclusion = COALESCE(conclusion, system_outcome, 'not_applicable'),
+                needs_reevaluation = false, decided_at = now()
+          WHERE workflow_instance_id = $1`,
+        [wf],
+      );
+      await su.query(
+        `UPDATE hsdg.audit_framework_assessments
+            SET state = 'not_applicable', conclusion = 'not_applicable', decided_at = now()
+          WHERE workflow_instance_id = $1`,
+        [wf],
+      );
+      await su.query(
+        `UPDATE hsdg.audit_matter SET status = 'resolved', resolution = 'e2e'
+          WHERE workflow_instance_id = $1 AND status <> 'resolved'`,
+        [wf],
+      );
+      // AF-01 for real; the memorandum (its own suite) is placed submitted.
+      const s = (await get(pa, `${root}/framework-summary`).expect(200)).body[0];
+      const confirmed = (
+        await post(pa, `${root}/${wf}/framework-summary/confirm`, {
+          decision: 'submit_for_partner_approval',
+          previewReviewed: true,
+          recordVersion: s.recordVersion,
+        }).expect(201)
+      ).body;
+      const { rows: doc } = await su.query<{ id: string }>(
+        `INSERT INTO hsdg.documents (engagement_id, title)
+         VALUES ($1, 'Audit Framework Memorandum v1.0') RETURNING id`,
+        [id],
+      );
+      await su.query(
+        `INSERT INTO hsdg.audit_framework_memo
+           (baseline_id, workflow_instance_id, engagement_id, baseline_version, document_id,
+            status, submitted_at)
+         VALUES ($1, $2, $3, '1.0', $4, 'submitted', now())`,
+        [confirmed.baseline.id, wf, id, doc[0]!.id],
+      );
+      return { eng: root, wf, base: `${root}/${wf}` };
+    };
+    const generatedAt = async (wf: string): Promise<Date | null> =>
+      (
+        await su.query<{ at: Date | null }>(
+          `SELECT intelligence_generated_at AS at FROM hsdg.audit_planning_intelligence
+            WHERE workflow_instance_id = $1`,
+          [wf],
+        )
+      ).rows[0]?.at ?? null;
+    const recordVersion = async (root: string): Promise<number> =>
+      (await get(pa, `${root}/framework-summary`).expect(200)).body[0].recordVersion as number;
+
+    it('a Senior opening 03.1 first after AF-02 "Approve" sees generated intelligence', async () => {
+      const f = await fileAtAf02();
+      await post(pa, `${f.base}/framework-summary/approve`, {
+        decision: 'approve',
+        recordVersion: await recordVersion(f.eng),
+      }).expect(201);
+      expect(await generatedAt(f.wf)).not.toBeNull();
+
+      // No lead has opened Planning: the Senior is the first reader.
+      const res = await get(sy, `${f.base}/planning-intelligence`).expect(200);
+      expect(res.body.record.intelligenceGeneratedAt).not.toBeNull();
+      expect(res.body.totalSignals).toBeGreaterThan(0);
+      const seen = (await get(sy, `${f.base}/planning-signals`).expect(200))
+        .body as PlanningSignalRecord[];
+      expect(seen.length).toBe(res.body.totalSignals);
+    });
+
+    it('a condition that bars Planning defers generation until the EP resolves it', async () => {
+      const f = await fileAtAf02();
+      const approved = (
+        await post(pa, `${f.base}/framework-summary/approve`, {
+          decision: 'approve_subject_to_conditions',
+          conditions: [
+            {
+              condition: 'Obtain the bank sanction letter',
+              dueDate: '2026-11-30',
+              impact: 'CARO 3(ii)(b) quarterly returns',
+              planningMayCommence: false,
+            },
+          ],
+          recordVersion: await recordVersion(f.eng),
+        }).expect(201)
+      ).body;
+      expect(approved.planning).toMatchObject({ unlocked: false });
+      expect(await generatedAt(f.wf)).toBeNull();
+
+      await post(
+        pa,
+        `${f.eng}/framework-summary/conditions/${approved.approval.conditions[0].id}/resolve`,
+        { resolution: 'Sanction letter on file' },
+      ).expect(201);
+      expect(await generatedAt(f.wf)).not.toBeNull();
+      const res = await get(sy, `${f.base}/planning-intelligence`).expect(200);
+      expect(res.body.record.intelligenceGeneratedAt).not.toBeNull();
+      expect(res.body.totalSignals).toBeGreaterThan(0);
+    });
+  });
 });
