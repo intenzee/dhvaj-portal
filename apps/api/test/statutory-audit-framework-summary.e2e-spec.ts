@@ -4,6 +4,7 @@ import { Client } from 'pg';
 import { type StatutoryAuditFrameworkSummary, type StatutoryAuditPlanning } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { approveFrameworkForTest } from './framework-approval.helper';
 
 /**
  * 02.8 Audit Framework Summary & Approval — end-to-end through the HTTP API:
@@ -62,8 +63,9 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
   };
 
   /** 02.1 confirmed, 02.2–02.7 and every other Phase-02 area decided. */
-  const decideSection02 = () =>
+  const decideSection02 = (wf: string = shellId) =>
     su(async (c) => {
+      const shellId = wf;
       await c.query(
         `UPDATE hsdg.audit_entity_profile SET state = 'confirmed', confirmed_at = now(),
                 needs_reevaluation = false
@@ -101,6 +103,11 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
 
+    ({ engId, shellId } = await newFile());
+  });
+
+  /** A fresh audit file on its own engagement, Partner A its Engagement Partner (AF-02 is EP-only). */
+  const newFile = async (): Promise<{ engId: string; shellId: string }> => {
     const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
     const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
@@ -111,20 +118,21 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
       periodLabel: uniquePeriod(),
       status: 'accepted',
     }).expect(201);
-    engId = created.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: statAuditId }).expect(201);
-    shellId = (await get(pa, base()).expect(200)).body[0].workflowInstanceId as string;
-    // Partner A is the Engagement Partner (AF-02 is EP-only).
+    const eng = created.body.id as string;
+    await post(pa, `/api/v1/engagements/${eng}/services`, { serviceId: statAuditId }).expect(201);
+    const wf = (await get(pa, `/api/v1/engagements/${eng}/statutory-audit`).expect(200)).body[0]
+      .workflowInstanceId as string;
     await su((c) =>
       c.query(
         `UPDATE hsdg.engagements SET engagement_partner_id =
            (SELECT e.id FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id
              WHERE u.email = 'partner.a@dhvaj.in')
           WHERE id = $1`,
-        [engId],
+        [eng],
       ),
     );
-  });
+    return { engId: eng, shellId: wf };
+  };
 
   afterAll(async () => {
     await app?.close();
@@ -317,5 +325,138 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
       previewReviewed: true,
       recordVersion: 0,
     }).expect(404);
+  });
+  describe('an approved baseline', () => {
+    let eng2: string;
+    let wf2: string;
+    const base2 = () => `/api/v1/engagements/${eng2}/statutory-audit`;
+    const summary2 = async (): Promise<StatutoryAuditFrameworkSummary> =>
+      (await get(pa, `${base2()}/framework-summary`).expect(200))
+        .body[0] as StatutoryAuditFrameworkSummary;
+
+    beforeAll(async () => {
+      ({ engId: eng2, shellId: wf2 } = await newFile());
+      // Prefill/seed the sections first, then decide and approve them.
+      await get(pa, `${base2()}/framework-summary`).expect(200);
+      await decideSection02(wf2);
+      await approveFrameworkForTest(wf2);
+    });
+
+    it('is approved, opens Planning, and cannot be changed in place', async () => {
+      const s = await summary2();
+      expect(s.baseline).toMatchObject({ version: '1.0', status: 'approved' });
+      expect(s.header.status).toBe('approved');
+      expect(s.planning).toMatchObject({ unlocked: true, route: 'approved' });
+      expect(s.gates.canReopen).toBe(true);
+      const planning = (await get(pa, `${base2()}/planning`).expect(200))
+        .body[0] as StatutoryAuditPlanning;
+      expect(planning.frameworkApproved).toBe(true);
+      expect(planning.frameworkGate.unlocked).toBe(true);
+
+      // §14: the approved row is immutable — even to a direct UPDATE.
+      await expect(
+        su((c) =>
+          c.query(`UPDATE hsdg.audit_framework_baseline SET snapshot = '{}'::jsonb WHERE id = $1`, [
+            s.baseline!.id,
+          ]),
+        ),
+      ).rejects.toThrow(/immutable|preserved/);
+    });
+
+    it('reopens v1.0 → draft v1.1 with the §15 fields, flagging only the affected sections', async () => {
+      const before = await summary2();
+      // Every §15 field is mandatory; an outsider and a stale version are refused.
+      await post(pa, `${base2()}/${wf2}/framework-summary/reopen`, {
+        reason: 'Debt listed after approval',
+        affectedSections: [],
+        identifiedAt: new Date().toISOString(),
+        reapprovalRequired: true,
+        recordVersion: before.recordVersion,
+      }).expect(400);
+      await post(pb, `${base2()}/${wf2}/framework-summary/reopen`, {
+        reason: 'x',
+        affectedSections: ['02.4'],
+        identifiedAt: new Date().toISOString(),
+        reapprovalRequired: true,
+        recordVersion: before.recordVersion,
+      }).expect(404);
+      await post(pa, `${base2()}/${wf2}/framework-summary/reopen`, {
+        reason: 'Debt listed after approval',
+        affectedSections: ['02.4'],
+        identifiedAt: new Date().toISOString(),
+        reapprovalRequired: true,
+        recordVersion: before.recordVersion + 1,
+      }).expect(409);
+      const s = (
+        await post(pa, `${base2()}/${wf2}/framework-summary/reopen`, {
+          reason: 'Debt listed after approval',
+          affectedSections: ['02.4'],
+          identifiedAt: new Date().toISOString(),
+          evidenceNote: 'Stock exchange intimation dated 12 Sep',
+          reapprovalRequired: true,
+          recordVersion: before.recordVersion,
+        }).expect(201)
+      ).body as StatutoryAuditFrameworkSummary;
+      expect(s.baseline).toMatchObject({ version: '1.1', status: 'draft' });
+      expect(s.baseline!.reopen).toMatchObject({
+        reason: 'Debt listed after approval',
+        affectedSections: ['02.4'],
+        fromVersion: '1.0',
+        reapprovalRequired: true,
+      });
+      expect(s.header.status).toBe('reopened');
+      expect(s.history.map((b) => [b.version, b.status])).toEqual([
+        ['1.1', 'draft'],
+        ['1.0', 'superseded'],
+      ]);
+      // Only 02.4 goes back for re-evaluation; 02.5 stays as it was.
+      const subs = await su(
+        async (c) =>
+          (
+            await c.query<{ k: string; re: boolean }>(
+              `SELECT sub_section_key AS k, needs_reevaluation AS re
+                 FROM hsdg.audit_framework_subassessment WHERE workflow_instance_id = $1`,
+              [wf2],
+            )
+          ).rows,
+      );
+      expect(subs.find((r) => r.k === '02.4')!.re).toBe(true);
+      expect(subs.find((r) => r.k === '02.5')!.re).toBe(false);
+
+      // Planning keeps going on the approved v1.0, but cannot be approved, and no new
+      // work is generated, until the revision is re-approved.
+      const planning = (await get(pa, `${base2()}/planning`).expect(200))
+        .body[0] as StatutoryAuditPlanning;
+      expect(planning.frameworkReopened).toBe(true);
+      expect(planning.frameworkGate.unlocked).toBe(true);
+      const gen = await post(pa, `${base2()}/${wf2}/work-areas/generate`).expect(409);
+      expect(gen.body.message).toMatch(/controlled revision/);
+      // Reopening again needs an approved baseline.
+      await post(pa, `${base2()}/${wf2}/framework-summary/reopen`, {
+        reason: 'Again',
+        affectedSections: ['02.4'],
+        identifiedAt: new Date().toISOString(),
+        reapprovalRequired: true,
+        recordVersion: s.recordVersion,
+      }).expect(400);
+    });
+
+    it('a Section 08 reassessment with framework impact reopens the next approved version', async () => {
+      // Re-approve (stands in for AF-01 → AF-02 of v1.1), then a new subsidiary arrives.
+      await decideSection02(wf2);
+      await approveFrameworkForTest(wf2);
+      expect((await summary2()).baseline).toMatchObject({ status: 'approved' });
+      const res = await post(pa, `${base2()}/${wf2}/reassessments`, {
+        changeType: 'new_subsidiary',
+        reason: 'Acquired a subsidiary in Q4',
+      }).expect(201);
+      expect(JSON.stringify(res.body)).toMatch(/audit framework v1\.\d → draft v1\.\d/);
+      const s = await summary2();
+      expect(s.baseline).toMatchObject({ status: 'draft' });
+      expect(s.baseline!.reopen!.reason).toBe(
+        'Section 08 reassessment: Acquired a subsidiary in Q4',
+      );
+      expect(s.header.status).toBe('reopened');
+    });
   });
 });
