@@ -1,18 +1,29 @@
 import type { PoolClient } from 'pg';
 import {
+  ASSESSMENT_ANSWER,
   FRAMEWORK_AREA_KEY,
+  FRAMEWORK_JUDGMENT_CATEGORIES,
   FRAMEWORK_MATTER_CATEGORY_LABEL,
   FRAMEWORK_SOURCE_SECTION_LABEL,
+  FRAUD_MATTER_ROUTE_LABEL,
+  INVESTEE_RELATIONSHIP,
+  INVESTEE_RELATIONSHIP_LABEL,
   REPORTING_APPLICABILITY,
   REPORTING_APPLICABILITY_LABEL,
   SUB_SECTION_KEY,
   formatInrCrore,
+  type AssessmentAnswer,
+  type FraudMatter,
   type FrameworkSnapshotFacts,
+  type FrameworkSystemOverride,
+  type InvesteeRelationship,
   type ReportingApplicability,
   type StatutoryAuditFrameworkSummary,
 } from '@hsdg/contracts';
 import { formatLongDate } from './acceptance-merge-values';
+import { readFrameworkOverridesOn } from './framework-summary-overrides';
 import { readOtherReportingResultOn } from './other-reporting-read';
+import { readFraudMattersOn, workflowPeriodStartOn } from './other-reporting-records-read';
 
 /**
  * The Audit Framework Memorandum merge values (02.8 §10): one `afm.*` field per
@@ -22,11 +33,11 @@ import { readOtherReportingResultOn } from './other-reporting-read';
  * the memo shows "Actual | Limit | Operator | Result", not "criteria satisfied".
  */
 
-/** One numerical test line (§10). */
 /** A section's stored system_detail — shapes vary by 02.x, every read is guarded. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LooseDetail = Record<string, any>;
 
+/** One numerical test line (§10). */
 export interface MemoNumericTest {
   label: string;
   actual: string | null;
@@ -59,6 +70,10 @@ export interface FrameworkMemoDetails {
     applicability: ReportingApplicability;
   }>;
   perimeter: Array<{ name: string; relationship: string; method: string; included: string }>;
+  /** 02.6: the non-percentage control / influence basis of each associate and joint venture. */
+  influenceBasis: string[];
+  /** §12: every system result a professional overrode (the review screen's list). */
+  overrides: FrameworkSystemOverride[];
 }
 
 const RESULT_LABEL: Record<string, string> = {
@@ -108,6 +123,190 @@ function conditionTests(
 }
 
 const crore = (v: number | null | undefined) => (v == null ? null : formatInrCrore(v));
+const pct = (v: number) => `${Number(v.toFixed(2))}%`;
+const OPERATOR_SIGN: Record<string, string> = { '>=': '≥', '<=': '≤', '>': '>', '<': '<' };
+
+/** The significant-influence presumption in force (Rules Library, area `cfs`). */
+export interface InfluenceRule {
+  threshold: number;
+  operator: string;
+}
+
+/** The 02.6 perimeter entry and the captured investee facts the memo reads. */
+export interface InfluenceInvestee {
+  name: string;
+  relationship: InvesteeRelationship;
+  ownershipPercent: number | null;
+  votingDirect: number | null;
+  votingIndirect: number | null;
+  factors: string[];
+  basis: string | null;
+  significantInfluence: AssessmentAnswer | null;
+  jointControl: AssessmentAnswer | null;
+}
+
+const ANSWER_WORD: Record<AssessmentAnswer, string> = {
+  yes: 'Yes',
+  no: 'No',
+  further_assessment: 'Further assessment',
+};
+const INFLUENCE_RELATIONSHIPS: readonly InvesteeRelationship[] = [
+  INVESTEE_RELATIONSHIP.associate,
+  INVESTEE_RELATIONSHIP.jointVenture,
+];
+
+/**
+ * 02.6 associates and joint ventures (§10): voting power (direct + indirect)
+ * against the significant-influence presumption, and the non-percentage basis
+ * the relationship rests on (pure).
+ */
+export function influenceTests(
+  investees: InfluenceInvestee[],
+  rule: InfluenceRule | null,
+): { tests: MemoNumericTest[]; basis: string[] } {
+  const tests: MemoNumericTest[] = [];
+  const basis: string[] = [];
+  for (const inv of investees.filter((i) => INFLUENCE_RELATIONSHIPS.includes(i.relationship))) {
+    const label = INVESTEE_RELATIONSHIP_LABEL[inv.relationship];
+    const captured = inv.votingDirect != null || inv.votingIndirect != null;
+    const voting = captured ? (inv.votingDirect ?? 0) + (inv.votingIndirect ?? 0) : null;
+    const indicator = voting ?? inv.ownershipPercent;
+    const meets =
+      indicator == null || !rule
+        ? null
+        : rule.operator === '>'
+          ? indicator > rule.threshold
+          : indicator >= rule.threshold;
+    tests.push({
+      label: `Significant influence — ${inv.name} (02.6)`,
+      actual:
+        voting != null
+          ? `Voting power ${pct(voting)} (direct ${pct(inv.votingDirect ?? 0)} + indirect ${pct(inv.votingIndirect ?? 0)})`
+          : inv.ownershipPercent != null
+            ? `Ownership ${pct(inv.ownershipPercent)} (no voting % captured)`
+            : null,
+      limit: rule ? pct(rule.threshold) : null,
+      operator: rule ? (OPERATOR_SIGN[rule.operator] ?? rule.operator) : null,
+      result:
+        meets == null
+          ? `${label} — not tested against a percentage`
+          : meets
+            ? `${label} — presumption met`
+            : `${label} — below the presumption; rests on the basis below`,
+    });
+    const factors = inv.factors.filter((f) => !/^(Ownership interest|Voting power) /.test(f));
+    basis.push(
+      `${inv.name} (${label}) basis: ${[
+        ...factors,
+        inv.significantInfluence
+          ? `Significant influence concluded: ${ANSWER_WORD[inv.significantInfluence]}`
+          : null,
+        inv.jointControl ? `Joint control concluded: ${ANSWER_WORD[inv.jointControl]}` : null,
+        inv.basis,
+      ]
+        .filter(Boolean)
+        .join('; ')}`,
+    );
+  }
+  return { tests, basis };
+}
+
+const DEADLINE_STATUS_WORD: Record<FraudMatter['deadlines'][number]['status'], string> = {
+  met: 'Met',
+  met_late: 'Met late',
+  due: 'Due',
+  overdue: 'Overdue',
+};
+
+/**
+ * 02.7 Fraud Matters (§10): for each live matter, the reporting route against
+ * the Rule 13 amount threshold, then each Rule 13 step against its statutory
+ * period (pure). Withdrawn matters are not reported.
+ */
+export function fraudTests(
+  matters: FraudMatter[],
+  thresholdAmount: number | null,
+): MemoNumericTest[] {
+  const tests: MemoNumericTest[] = [];
+  for (const m of matters.filter((x) => !x.withdrawn)) {
+    tests.push({
+      label: `${m.ref} ${m.nature} — reporting route, Section 143(12) (02.7)`,
+      actual:
+        m.amount != null
+          ? `${formatInrCrore(m.amount)}${m.amountEstimated ? ' (estimated)' : ''}`
+          : 'Not yet determined',
+      limit: crore(thresholdAmount),
+      operator: '≥',
+      result: FRAUD_MATTER_ROUTE_LABEL[m.route],
+    });
+    for (const d of m.deadlines)
+      tests.push({
+        label: `${m.ref} — ${d.label} (02.7)`,
+        actual: d.metOn ? `Done ${formatLongDate(d.metOn)}` : 'Not yet done',
+        limit: `${d.days} days from ${d.fromEvent} (${formatLongDate(d.fromDate)}) — due ${formatLongDate(d.dueDate)}`,
+        operator: '≤',
+        result: `${DEADLINE_STATUS_WORD[d.status]}${d.provisional ? ' (route provisional)' : ''}`,
+      });
+  }
+  return tests;
+}
+
+/** The significant-influence rule version in force on `onDate` (null = none active). */
+async function influenceRuleOn(client: PoolClient, onDate: string): Promise<InfluenceRule | null> {
+  const { rows } = await client.query<{ threshold: string; operator: string }>(
+    `SELECT v.threshold::text AS threshold, r.operator
+       FROM hsdg.audit_rule r
+       JOIN hsdg.audit_rule_version v ON v.audit_rule_id = r.id
+      WHERE r.area_key = 'cfs' AND r.criterion = 'significant_influence_ownership' AND r.is_active
+        AND v.effective_from <= $1::date AND (v.effective_to IS NULL OR v.effective_to >= $1::date)
+      ORDER BY v.effective_from DESC
+      LIMIT 1`,
+    [onDate],
+  );
+  return rows[0] ? { threshold: Number(rows[0].threshold), operator: rows[0].operator } : null;
+}
+
+/** The audit period end for a period start (start + 1 year − 1 day). */
+function periodEndOf(start: string): string {
+  const d = new Date(`${start}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const answerOf = (v: unknown) =>
+  (Object.values(ASSESSMENT_ANSWER) as string[]).includes(v as string)
+    ? (v as AssessmentAnswer)
+    : null;
+
+/** Join the 02.6 perimeter to the captured investee facts by id (stored shapes are guarded). */
+function influenceInvestees(
+  detail: LooseDetail | null,
+  facts: LooseDetail | null,
+): InfluenceInvestee[] {
+  const captured = new Map<string, LooseDetail>(
+    ((facts?.investees ?? []) as LooseDetail[])
+      .filter((i) => typeof i?.id === 'string')
+      .map((i) => [i.id as string, i]),
+  );
+  return ((detail?.perimeter ?? []) as LooseDetail[])
+    .filter((p) => typeof p?.name === 'string' && p.name.trim())
+    .map((p) => {
+      const f = captured.get(p.id) ?? {};
+      return {
+        name: (p.name as string).trim(),
+        relationship: p.relationship as InvesteeRelationship,
+        ownershipPercent: num(p.ownershipPercent),
+        votingDirect: num(f.votingDirect),
+        votingIndirect: num(f.votingIndirect),
+        factors: Array.isArray(p.factors) ? (p.factors as string[]) : [],
+        basis: typeof p.basis === 'string' ? p.basis : null,
+        significantInfluence: answerOf(f.significantInfluence),
+        jointControl: answerOf(f.jointControl),
+      };
+    });
+}
 
 /** Read the bases, the profile classification and the stored engine detail (DI-free). */
 export async function readFrameworkMemoDetailsOn(
@@ -124,9 +323,10 @@ export async function readFrameworkMemoDetailsOn(
     basis: string | null;
     is_overridden: boolean;
     system_detail: Record<string, unknown> | null;
+    facts: Record<string, unknown> | null;
   }>(
     `SELECT sub_section_key, area_key, title, system_outcome, system_basis, conclusion, basis,
-            is_overridden, system_detail
+            is_overridden, system_detail, facts
        FROM hsdg.audit_framework_subassessment
       WHERE workflow_instance_id = $1
       ORDER BY sub_section_key`,
@@ -180,10 +380,19 @@ export async function readFrameworkMemoDetailsOn(
   const icfr = detailOf(SUB_SECTION_KEY.icfr);
   tests.push(...conditionTests('ICFR exemption test (02.5)', icfr?.conditions));
 
+  const cfsRow = subs.find((s) => s.area_key === FRAMEWORK_AREA_KEY.cfs);
+  const cfs = (cfsRow?.system_detail ?? null) as LooseDetail | null;
+  const periodStart = await workflowPeriodStartOn(client, workflowInstanceId);
+  const influence = influenceTests(
+    influenceInvestees(cfs, (cfsRow?.facts ?? null) as LooseDetail | null),
+    await influenceRuleOn(client, periodEndOf(periodStart)),
+  );
+  tests.push(...influence.tests);
+  const fraud = await readFraudMattersOn(client, workflowInstanceId, periodStart);
+  tests.push(...fraudTests(fraud.matters, fraud.periodRules.thresholdAmount));
+
   const other = await readOtherReportingResultOn(client, workflowInstanceId);
-  const cfs = subs.find((s) => s.area_key === FRAMEWORK_AREA_KEY.cfs)?.system_detail as {
-    perimeter?: Array<{ name?: string; relationship?: string; method?: string; included?: string }>;
-  } | null;
+  const overrides = await readFrameworkOverridesOn(client, workflowInstanceId);
   return {
     bases: subs.map((s) => ({
       subSectionKey: s.sub_section_key,
@@ -206,14 +415,16 @@ export async function readFrameworkMemoDetailsOn(
       clause: c.clause,
       applicability: c.applicability,
     })),
-    perimeter: (cfs?.perimeter ?? [])
-      .filter((p) => p.name?.trim())
+    perimeter: ((cfs?.perimeter ?? []) as LooseDetail[])
+      .filter((p) => typeof p.name === 'string' && p.name.trim())
       .map((p) => ({
-        name: p.name!.trim(),
+        name: (p.name as string).trim(),
         relationship: p.relationship ?? 'none',
         method: p.method ?? 'none',
         included: p.included ?? 'no',
       })),
+    influenceBasis: influence.basis,
+    overrides,
   };
 }
 
@@ -251,9 +462,7 @@ export function frameworkMemorandumValues(
       c.applicability === REPORTING_APPLICABILITY.applicable ||
       c.applicability === REPORTING_APPLICABILITY.conditional,
   );
-  const judgments = s.matters.filter((m) =>
-    ['technical_judgment', 'legal_interpretation', 'partner_consultation'].includes(m.category),
-  );
+  const judgments = s.matters.filter((m) => FRAMEWORK_JUDGMENT_CATEGORIES.includes(m.category));
   const openNonBlocking = s.matters.filter((m) => m.open && !m.blocking);
   const conditions = (s.approval?.conditions ?? []).filter((c) => c.status === 'open');
 
@@ -294,6 +503,8 @@ export function frameworkMemorandumValues(
           (p) =>
             `${p.name} — ${human(p.relationship)}; ${human(p.method)}; ${p.included === 'yes' ? 'in perimeter' : 'excluded'}`,
         ),
+      ...tests('(02.6)'),
+      ...d.influenceBasis,
     ]),
     'afm.s08OtherAuditors': lines(
       [
@@ -307,6 +518,7 @@ export function frameworkMemorandumValues(
       ...applicableCards.map(
         (c) => `${c.clause} ${c.requirement} — ${REPORTING_APPLICABILITY_LABEL[c.applicability]}`,
       ),
+      ...tests('(02.7)'),
     ]),
     'afm.s10TriggeredConsiderations': lines(
       s.triggeredRequirements.map(
@@ -323,12 +535,10 @@ export function frameworkMemorandumValues(
       'No significant framework judgments recorded.',
     ),
     'afm.s12Overrides': lines(
-      d.bases
-        .filter((b) => b.isOverridden)
-        .map(
-          (b) =>
-            `${b.title}: system ${human(b.systemOutcome) ?? '—'} → conclusion ${human(b.conclusion) ?? '—'}; reason: ${b.basis ?? '—'}`,
-        ),
+      d.overrides.map(
+        (o) =>
+          `${o.title} (${FRAMEWORK_SOURCE_SECTION_LABEL[o.source]}): system ${o.systemResult ?? '—'} → conclusion ${o.conclusion ?? '—'}; reason: ${o.reason ?? '—'}${o.overriddenByName ? `; by ${o.overriddenByName}` : ''}${o.overriddenAt ? ` on ${formatLongDate(o.overriddenAt)}` : ''}`,
+      ),
       'No system results overridden.',
     ),
     'afm.s13PriorYearChanges': s.priorYear.available

@@ -169,3 +169,28 @@ export interface FrameworkRevisionNotice {
   /** True once the revision is re-approved (the notice then becomes history). */
   reapproved: boolean;
 }
+
+// ── Significant judgments and system overrides (§12) ─────────────────────────
+
+/** The matter categories the Engagement Partner reviews as Significant Framework Judgments. */
+export const FRAMEWORK_JUDGMENT_CATEGORIES: readonly FrameworkMatterCategory[] = [
+  'technical_judgment',
+  'legal_interpretation',
+  'partner_consultation',
+];
+
+/**
+ * A system result a professional overrode (§12) — the same list the memorandum
+ * prints in its "System Overrides" section.
+ */
+export interface FrameworkSystemOverride {
+  source: FrameworkSourceSection;
+  title: string;
+  /** The system's result in words (null = the engine recorded only a basis). */
+  systemResult: string | null;
+  /** The professional conclusion in words. */
+  conclusion: string | null;
+  reason: string | null;
+  overriddenByName: string | null;
+  overriddenAt: string | null;
+}
