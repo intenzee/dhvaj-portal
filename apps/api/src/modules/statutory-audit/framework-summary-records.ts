@@ -118,13 +118,13 @@ export function rule11Cards(inputs: FrameworkRecordInputs) {
   );
 }
 
-function auditTrailApplies(inputs: FrameworkRecordInputs): boolean | null {
+export function auditTrailApplies(inputs: FrameworkRecordInputs): boolean | null {
   const c = card(inputs, REPORTING_CARD.r11gAuditTrail);
   if (!c || c.applicability === REPORTING_APPLICABILITY.pending) return null;
   return applies(c.applicability);
 }
 
-function s197Applies(inputs: FrameworkRecordInputs): boolean | null {
+export function s197Applies(inputs: FrameworkRecordInputs): boolean | null {
   const c = card(inputs, REPORTING_CARD.s197Remuneration);
   if (!c || c.applicability === REPORTING_APPLICABILITY.pending) return null;
   return applies(c.applicability);

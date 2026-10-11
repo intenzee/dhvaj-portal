@@ -150,6 +150,14 @@ export class CreateAreaOfFocusDto {
   @MaxLength(120, { each: true })
   potentialFsAreas?: string[];
 
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  potentialAssertions?: string[];
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -197,6 +205,14 @@ export class UpdateAreaOfFocusDto {
   @IsString({ each: true })
   @MaxLength(120, { each: true })
   potentialFsAreas?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  potentialAssertions?: string[];
 
   @ApiPropertyOptional()
   @IsOptional()

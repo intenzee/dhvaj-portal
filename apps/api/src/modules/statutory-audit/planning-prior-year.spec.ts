@@ -53,6 +53,82 @@ describe('03.1.6 prior-year matters from last year’s file', () => {
   });
 });
 
+describe('03.1.6 prior-year matters — CARO, ICFR, estimates, opinion and misstatements', () => {
+  const planned = priorYearMattersFromFile({
+    financialYear: '2023-24',
+    risks: [
+      {
+        id: 'e1',
+        ref: 'R-004',
+        description: 'ECL provisioning model',
+        fsArea: 'Loans',
+        isFraudRisk: false,
+        source: 'estimate',
+        response: null,
+      },
+    ],
+    focusAreas: [],
+    blockingNotes: [],
+    exceptions: [],
+    caroMatters: [
+      { id: 'c1', clauseRef: '3(vii)(a)', title: 'Statutory dues', draft: 'PF paid late.' },
+    ],
+    icfrDeficiencies: [
+      {
+        id: 'd1',
+        seq: 2,
+        classification: 'material_weakness',
+        description: 'No review of journal entries',
+        remediationStatus: 'in_progress',
+      },
+      {
+        id: 'd2',
+        seq: 3,
+        classification: 'control_deficiency',
+        description: 'Minor',
+        remediationStatus: 'not_started',
+      },
+    ],
+    completionNotes: [
+      { id: 'a1', itemKey: 'auditors_report', note: 'Qualified opinion on inventory.' },
+      { id: 'm1', itemKey: 'misstatements', note: 'Uncorrected misstatements: INR 12 lakh.' },
+    ],
+  });
+
+  it('maps each source to its matter type; plain control deficiencies stay behind', () => {
+    expect(planned.map((m) => [m.sourceRef, m.matterType])).toEqual([
+      ['risk:e1', 'significant_estimate'],
+      ['caro:c1', 'caro_exception'],
+      ['icfr:d1', 'control_deficiency'],
+      ['report:a1', 'modified_opinion'],
+      ['misstatements:m1', 'unadjusted_misstatement'],
+    ]);
+    expect(planned[0]!.description).toBe('Significant estimate — Loans: ECL provisioning model');
+    expect(planned[1]!.description).toBe('CARO 3(vii)(a) — Statutory dues: PF paid late.');
+    expect(planned[2]!.description).toBe('Material weakness: No review of journal entries');
+    expect(planned[2]!.sourceEvidence).toBe(
+      'FY 2023-24 audit file — ICFR deficiency ICD-002 (remediation in progress)',
+    );
+  });
+
+  it('ignores clean report and misstatement notes', () => {
+    expect(
+      priorYearMattersFromFile({
+        financialYear: '2023-24',
+        risks: [],
+        focusAreas: [],
+        blockingNotes: [],
+        exceptions: [],
+        completionNotes: [
+          { id: 'a', itemKey: 'auditors_report', note: "Auditor's report prepared under SA 700." },
+          { id: 'b', itemKey: 'misstatements', note: 'No misstatements carried forward.' },
+          { id: 'c', itemKey: 'misstatements', note: null },
+        ],
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe('03.2 carry-forward', () => {
   it('seeds unsaved sections from last year, with this year’s master answers on top', () => {
     const merged = mergePriorSections(

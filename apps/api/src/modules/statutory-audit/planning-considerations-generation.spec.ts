@@ -75,4 +75,22 @@ describe('deriveStrategicConsiderations (03.1 §13.2–13.3)', () => {
     ]);
     for (const c of out) expect(c.label).not.toMatch(/\d{1,2}[-/ ]\w{3}|\d{4}-\d{2}/);
   });
+
+  it('library rules from Sections 01/02 prompt their timing and resource considerations', () => {
+    expect(keys([sig({ ruleKey: 'branch_auditors' })])).toEqual(['component_reporting_dependency']);
+    expect(keys([sig({ ruleKey: 'first_time_ind_as' })])).toEqual([
+      'transition_date_balances',
+      'ind_as_transition_expertise',
+    ]);
+    expect(keys([sig({ ruleKey: 'listed_entity' })])).toEqual(['regulatory_reporting_deadlines']);
+    expect(keys([sig({ ruleKey: 'audit_trail_reporting' })])).toEqual([
+      'audit_trail_log_access',
+      'it_expertise',
+    ]);
+    expect(keys([sig({ ruleKey: 'specialist_required' })])).toEqual(['specialist_involvement']);
+    expect(keys([sig({ ruleKey: 'regulated_entity' })])).toEqual([
+      'regulatory_reporting_deadlines',
+      'industry_regulatory_expertise',
+    ]);
+  });
 });
