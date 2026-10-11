@@ -23,6 +23,7 @@ import type {
   OtherReportingCompletionSummary,
   CompletionItemState,
   FrameworkConclusion,
+  FrameworkRevisionNotice,
 } from '@hsdg/contracts';
 
 export interface CompletionProcedure {
@@ -86,6 +87,11 @@ export interface CompletionFacts {
    * the Management Representation Letter carries. Null when 02.7 is not seeded.
    */
   otherReporting?: OtherReportingCompletionSummary | null;
+  /**
+   * 02.8 §17 — a reopened Audit Framework revision. Until it is re-approved the
+   * reporting items it touches carry the change and cannot be marked ready.
+   */
+  frameworkRevision?: FrameworkRevisionNotice | null;
 }
 
 export interface PlannedCompletionItem {
@@ -627,7 +633,53 @@ export function planCompletionItems(f: CompletionFacts): Map<string, PlannedComp
     });
   }
 
+  applyFrameworkRevision(out, f.frameworkRevision ?? null);
   return out;
+}
+
+/** The completion / reporting items a framework revision must be surfaced on (§17). */
+const REVISION_ITEMS = [
+  'completion_memo',
+  'auditors_report',
+  'caro',
+  'ifc',
+  'rule_11_143',
+] as const;
+
+/**
+ * 02.8 §17 — while a reopened framework revision is not re-approved, prefix the
+ * reporting items with the change and hold them not-ready; the completion memo
+ * records the revision. Approved history stays as it is.
+ */
+export function applyFrameworkRevision(
+  out: Map<string, PlannedCompletionItem>,
+  rev: FrameworkRevisionNotice | null,
+): void {
+  if (!rev || rev.reapproved) return;
+  const head =
+    `Audit Framework reopened — revision v${rev.baselineVersion} of approved v${rev.comparedToVersion}` +
+    (rev.reason ? `: ${rev.reason}` : '') +
+    '. Re-approve the framework (02.8) before concluding.';
+  const impacts = rev.reportingImpacts.map((i) => `Framework change — ${i}`);
+  for (const key of REVISION_ITEMS) {
+    const item = out.get(key);
+    if (!item) continue;
+    out.set(key, {
+      evidence: {
+        ...item.evidence,
+        facts: [head, ...impacts, ...item.evidence.facts],
+        ready: false,
+        goTo: item.evidence.goTo ?? FRAMEWORK,
+      },
+      draftNote:
+        key === 'completion_memo' && item.draftNote
+          ? `${item.draftNote}
+Framework revision: v${rev.baselineVersion} (reopened from v${rev.comparedToVersion})${
+              rev.reportingImpacts.length ? ` — ${rev.reportingImpacts.join('; ')}` : ''
+            }.`
+          : item.draftNote,
+    });
+  }
 }
 
 // ── 02.7 other Companies Act reporting ─────────────────────────────────────

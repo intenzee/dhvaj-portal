@@ -29,6 +29,8 @@ export const DOCUMENT_TEMPLATE_KEY = {
   consolidationGroupAuditMemo: 'consolidation_group_audit_memo',
   /** 02.6 §14 — group instructions to another component auditor (SA 600). */
   componentAuditorInstructions: 'component_auditor_instructions',
+  /** 02.8 §10 — the Audit Framework Memorandum (one per framework baseline version). */
+  auditFrameworkMemorandum: 'audit_framework_memorandum',
   /**
    * 02.3 §16 — the Financial Statements Workbook (Excel), one key per Schedule
    * III framework; each framework version names its key (`templateKey`).
@@ -47,7 +49,7 @@ export interface DocumentTemplateDefinition {
   /** File name of a created document; `{client}` is replaced with the client's name. */
   filenamePattern: string;
   /** The audit-file section that creates it (Section 01 lists only its own). */
-  section: '01' | '02.2' | '02.3' | '02.4' | '02.5' | '02.6';
+  section: '01' | '02.2' | '02.3' | '02.4' | '02.5' | '02.6' | '02.8';
   /** The file the firm uploads: a Word document (merged) or an Excel workbook. */
   format: TemplateFormat;
 }
@@ -129,6 +131,13 @@ export const DOCUMENT_TEMPLATE_DEFINITIONS: readonly DocumentTemplateDefinition[
     title: 'Component Auditor Instructions',
     filenamePattern: 'Component Auditor Instructions - {component} - {client}.docx',
     section: '02.6',
+    format: 'docx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.auditFrameworkMemorandum,
+    title: 'Audit Framework Memorandum',
+    filenamePattern: 'Audit Framework Memorandum v{version} - {client}.docx',
+    section: '02.8',
     format: 'docx',
   },
   {
@@ -455,6 +464,54 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
     source: '02.4 / 02.6',
   },
   { key: 'ga.deadline', label: 'Group reporting deadline', source: '02.6 §14' },
+  {
+    key: 'afm.baselineVersion',
+    label: 'Audit Framework baseline version',
+    source: '02.8 baseline',
+  },
+  { key: 'afm.methodologyVersion', label: 'DHVAJ methodology version', source: '02.1 / 02.8' },
+  { key: 'afm.s01EngagementDetails', label: '1. Engagement details', source: 'Engagement' },
+  {
+    key: 'afm.s02EntityClassification',
+    label: '2. Entity & regulatory classification',
+    source: '02.1',
+  },
+  { key: 'afm.s03ReportingFramework', label: '3. Financial reporting framework', source: '02.2' },
+  { key: 'afm.s04ScheduleIii', label: '4. Schedule III / presentation', source: '02.3' },
+  { key: 'afm.s05Caro', label: '5. CARO 2020', source: '02.4' },
+  { key: 'afm.s06Icfr', label: '6. ICFR', source: '02.5' },
+  { key: 'afm.s07Consolidation', label: '7. CFS / consolidation', source: '02.6' },
+  { key: 'afm.s08OtherAuditors', label: '8. Component / branch auditors', source: '02.6' },
+  { key: 'afm.s09OtherReporting', label: '9. Other statutory reporting', source: '02.7' },
+  {
+    key: 'afm.s10TriggeredConsiderations',
+    label: '10. Triggered audit considerations',
+    source: '02.8 §5',
+  },
+  {
+    key: 'afm.s11Judgments',
+    label: '11. Significant framework judgments',
+    source: '02.1–02.7 matters',
+  },
+  { key: 'afm.s12Overrides', label: '12. System overrides', source: '02.1–02.7' },
+  { key: 'afm.s13PriorYearChanges', label: '13. Prior-year changes', source: '02.8 §8' },
+  { key: 'afm.s14OpenMatters', label: '14. Open non-blocking matters', source: '02.8 §7' },
+  { key: 'afm.s15ManagerConclusion', label: '15. Manager conclusion (AF-01)', source: '02.8 §9' },
+  {
+    key: 'afm.s16PartnerApproval',
+    label: '16. Engagement Partner approval (AF-02)',
+    source: '02.8 §12',
+  },
+  {
+    key: 'afm.numericTests',
+    label: 'Numerical tests (actual | limit | operator | result)',
+    source: '02.1–02.7',
+  },
+  {
+    key: 'afm.downstreamConfiguration',
+    label: 'Downstream configuration preview',
+    source: '02.8 §6',
+  },
   { key: 'today', label: "Today's date", source: 'System' },
 ] as const;
 

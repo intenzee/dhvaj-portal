@@ -30,6 +30,10 @@ export const NOTIFICATION_TYPE = {
   highRiskException: 'high_risk_exception',
   /** A document was uploaded — notifies the reviewer; powers the "to review" inbox. */
   documentUploaded: 'document_uploaded',
+  /** 02.8 §17 — an approved Audit Framework was reopened (Engagement Manager / Partner). */
+  frameworkReopened: 'framework_reopened',
+  /** 02.8 §17 — downstream work was created, invalidated or needs reassessment (owners). */
+  frameworkWorkImpacted: 'framework_work_impacted',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
