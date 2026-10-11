@@ -210,6 +210,7 @@ export class AuditPlanningGovernanceService {
         ? `${PLANNING_ACTOR_ROLE_LABEL.partner} (acting as Manager)`
         : PLANNING_ACTOR_ROLE_LABEL[actor.role],
       actingAsManager: actor.actingAsManager,
+      employeeId: actor.employeeId,
       capabilities: actor.capabilities,
       approved: lock.approved,
       locked: lock.locked,

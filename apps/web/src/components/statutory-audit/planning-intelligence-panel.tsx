@@ -36,6 +36,15 @@ import {
   DiscussionSection,
   MattersSection,
 } from './planning-strategy-sections';
+import { PlanningEvidence } from './planning-evidence';
+import {
+  PartnerAttentionPanel,
+  PlanningGovernanceProvider,
+  PlanningGovernanceStrip,
+  ProposalBadge,
+  usePlanningGov,
+  usePlanningGovernance,
+} from './planning-governance';
 import { SectionLauncher } from './section-launcher';
 
 /**
@@ -98,6 +107,7 @@ type Tab =
   | 'signals'
   | 'changes'
   | 'focus'
+  | 'partner'
   | 'considerations'
   | 'carried'
   | 'discussion'
@@ -116,6 +126,7 @@ export function PlanningIntelligencePanel({
   engagementId: string;
   workflowInstanceId: string;
   team: TeamMember[];
+  /** Section 03 is open; the §23 role and the 03.12 lock decide the rest. */
   editable: boolean;
   /** Called after any change so the parent Planning checklist can refresh. */
   onChanged: () => void;
@@ -143,6 +154,8 @@ export function PlanningIntelligencePanel({
     void qc.invalidateQueries({ queryKey: qk });
     onChanged();
   };
+  const gov = usePlanningGovernance(engagementId, base, qk, editable, refresh);
+  const can = gov.can;
 
   const generate = useMutation({
     mutationFn: () =>
@@ -159,7 +172,12 @@ export function PlanningIntelligencePanel({
 
   if (summary.isLoading) return <Spinner label="Loading planning intelligence…" />;
   const s = summary.data;
-  if (!s) return <p className="text-sm text-ink-muted">Planning Intelligence is unavailable.</p>;
+  if (!s)
+    return (
+      <p className="text-sm text-ink-muted">
+        {errMsg(summary.error, 'Planning Intelligence is unavailable.')}
+      </p>
+    );
 
   const tiles: { label: string; value: number; tone?: string; onClick?: () => void }[] = [
     { label: 'Planning Signals', value: s.totalSignals, onClick: () => setTab('signals') },
@@ -174,6 +192,7 @@ export function PlanningIntelligencePanel({
       label: 'Partner attention',
       value: s.partnerAttention,
       tone: s.partnerAttention ? 'danger' : undefined,
+      onClick: () => setTab('partner'),
     },
     {
       label: 'Open planning matters',
@@ -187,6 +206,12 @@ export function PlanningIntelligencePanel({
         ['signals', 'Signal register'],
         ['changes', 'Significant changes (PI-01)'],
         ['focus', 'Areas of Focus'],
+        [
+          'partner',
+          gov.view?.partnerAttention.outstanding
+            ? `Partner attention (${gov.view.partnerAttention.outstanding} with EP)`
+            : 'Partner attention',
+        ],
         ['considerations', 'Timing & resources'],
         ['carried', 'Prior year & acceptance'],
         ['discussion', 'Team discussion'],
@@ -195,7 +220,9 @@ export function PlanningIntelligencePanel({
       ];
 
   return (
+    <PlanningGovernanceProvider value={gov}>
     <div className="space-y-3">
+      <PlanningGovernanceStrip />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Badge tone={s.record.status === 'complete' ? 'success' : 'info'}>
@@ -207,7 +234,7 @@ export function PlanningIntelligencePanel({
             </span>
           )}
         </div>
-        {editable && (
+        {can('assess') && (
           <Button
             variant="secondary"
             onClick={() => generate.mutate()}
@@ -253,12 +280,12 @@ export function PlanningIntelligencePanel({
             signals={signals.data ?? []}
             loading={signals.isLoading}
             team={team}
-            editable={editable}
+            editable={can('assess')}
             onChanged={refresh}
           />
         )}
         {tab === 'changes' && (
-          <ChangesSection base={base} qk={qk} editable={editable} onChanged={refresh} />
+          <ChangesSection base={base} qk={qk} editable={can('addFacts')} onChanged={refresh} />
         )}
         {tab === 'focus' && (
           <FocusSection
@@ -266,9 +293,12 @@ export function PlanningIntelligencePanel({
             base={base}
             qk={qk}
             signals={signals.data ?? []}
-            editable={editable}
+            editable={can('focusAreas')}
             onChanged={refresh}
           />
+        )}
+        {tab === 'partner' && (
+          <PartnerAttentionPanel signals={signals.data ?? []} focus={focusAreas.data ?? []} />
         )}
         {tab === 'considerations' && (
           <ConsiderationsSection
@@ -276,7 +306,7 @@ export function PlanningIntelligencePanel({
             base={base}
             qk={qk}
             signals={signals.data ?? []}
-            editable={editable}
+            editable={can('assess')}
             onChanged={refresh}
           />
         )}
@@ -287,7 +317,7 @@ export function PlanningIntelligencePanel({
             qk={qk}
             signals={signals.data ?? []}
             initialAudit={s.initialAudit}
-            editable={editable}
+            editable={can('assess')}
             onChanged={refresh}
           />
         )}
@@ -298,7 +328,7 @@ export function PlanningIntelligencePanel({
             team={team}
             signals={signals.data ?? []}
             focus={focusAreas.data ?? []}
-            editable={editable}
+            editable={can('discussion')}
             onChanged={refresh}
           />
         )}
@@ -310,7 +340,7 @@ export function PlanningIntelligencePanel({
             team={team}
             signals={signals.data ?? []}
             focus={focusAreas.data ?? []}
-            editable={editable}
+            editable={can('discussion')}
             onChanged={refresh}
           />
         )}
@@ -319,12 +349,13 @@ export function PlanningIntelligencePanel({
             key={s.record.version}
             base={base}
             summary={s}
-            editable={editable}
+            editable={can('assess')}
             onChanged={refresh}
           />
         )}
       </SectionLauncher>
     </div>
+    </PlanningGovernanceProvider>
   );
 }
 
@@ -348,6 +379,8 @@ function SignalRegister({
   onChanged: () => void;
 }): JSX.Element {
   const [adding, setAdding] = useState(false);
+  const gov = usePlanningGov();
+  const mayRaise = editable || gov.can('proposeSignals') || gov.can('partnerSignals');
   if (loading) return <Spinner label="Loading signals…" />;
   return (
     <div className="space-y-2">
@@ -372,7 +405,7 @@ function SignalRegister({
           onChanged={onChanged}
         />
       ))}
-      {editable &&
+      {mayRaise &&
         (adding ? (
           <NewSignalForm base={base} onDone={() => setAdding(false)} onChanged={onChanged} />
         ) : (
@@ -465,6 +498,7 @@ function SignalCard({
                 <Badge tone="info">{ASSESSMENT_LABEL[signal.managerAssessment]}</Badge>
               )}
               {signal.ownerName && <Badge>Owner: {signal.ownerName}</Badge>}
+              <ProposalBadge signalId={signal.id} />
             </span>
           </span>
         </span>
@@ -587,6 +621,7 @@ function SignalCard({
               <p className="text-ink-muted">Rationale: {signal.assessmentRationale}</p>
             )
           )}
+          <PlanningEvidence targetType="signal" targetId={signal.id} />
         </div>
       )}
     </Card>
@@ -603,7 +638,10 @@ function NewSignalForm({
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
-  const [source, setSource] = useState<PlanningSignalSource>('manager');
+  const gov = usePlanningGov();
+  const [source, setSource] = useState<PlanningSignalSource>(
+    gov.can('partnerSignals') ? 'partner' : 'manager',
+  );
   const [observation, setObservation] = useState('');
   const [why, setWhy] = useState('');
   const [attention, setAttention] = useState<PlanningAttention>('standard');
@@ -632,9 +670,13 @@ function NewSignalForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Raised by">
           <Select value={source} onChange={(e) => setSource(e.target.value as PlanningSignalSource)}>
-            <option value="manager">Manager</option>
-            <option value="partner">Engagement Partner</option>
-            <option value="prior_year">Prior-year matter</option>
+            {gov.can('proposeSignals') && (
+              <option value="manager">
+                {gov.can('assess') ? 'Manager' : 'Engagement team (proposal for the Manager)'}
+              </option>
+            )}
+            {gov.can('partnerSignals') && <option value="partner">Engagement Partner</option>}
+            {gov.can('proposeSignals') && <option value="prior_year">Prior-year matter</option>}
           </Select>
         </Field>
         <Field label="Attention level">
@@ -679,6 +721,7 @@ function ChangesSection({
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
+  const mayAssess = usePlanningGov().can('assess');
   const changes = useQuery({
     queryKey: [...qk, 'changes'],
     queryFn: () => apiFetch<PlanningChangeRecord[]>(`${base}/planning-changes`),
@@ -739,6 +782,7 @@ function ChangesSection({
                 .filter(Boolean)
                 .join(' · ')}
             </p>
+            <PlanningEvidence targetType="change" targetId={c.id} />
           </div>
           {c.signalId && <Badge tone="info">Signal raised</Badge>}
         </Card>
@@ -809,14 +853,16 @@ function ChangesSection({
                   </Select>
                 </Field>
               </div>
-              <label className="inline-flex items-center gap-2 text-sm text-ink">
-                <input
-                  type="checkbox"
-                  checked={createSignal}
-                  onChange={(e) => setCreateSignal(e.target.checked)}
-                />
-                Raise a Planning Signal from this change
-              </label>
+              {mayAssess && (
+                <label className="inline-flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    checked={createSignal}
+                    onChange={(e) => setCreateSignal(e.target.checked)}
+                  />
+                  Raise a Planning Signal from this change
+                </label>
+              )}
             </>
           )}
           <Button
@@ -827,7 +873,7 @@ function ChangesSection({
                 effectiveDate: effectiveDate || undefined,
                 sourceEvidence: sourceEvidence || undefined,
                 frImpactKnown: frImpact || undefined,
-                createSignal: !isNone && createSignal,
+                createSignal: !isNone && createSignal && mayAssess,
               })
             }
             disabled={add.isPending || !category}

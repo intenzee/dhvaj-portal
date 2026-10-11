@@ -132,6 +132,7 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
   it('B1 — enforces the §23 role matrix on the engagement assignment', async () => {
     const team = await governance(sy);
     expect(team.access.role).toBe('team');
+    expect(team.access.employeeId).toBe(ids.get('Senior Y'));
     expect(team.access.capabilities).toMatchObject({
       proposeSignals: true,
       addFacts: true,

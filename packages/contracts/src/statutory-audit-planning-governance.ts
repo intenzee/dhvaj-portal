@@ -1,5 +1,11 @@
-import type { PlanningAttention, PlanningSignalAssessment } from './statutory-audit-planning-signal';
-import type { PlanningAffectedModule, PlanningMatterCategory } from './statutory-audit-planning-strategy';
+import type {
+  PlanningAttention,
+  PlanningSignalAssessment,
+} from './statutory-audit-planning-signal';
+import type {
+  PlanningAffectedModule,
+  PlanningMatterCategory,
+} from './statutory-audit-planning-strategy';
 
 /**
  * Statutory Audit — 03.1 governance & dynamics (DHVAJ 03.1 §10, §19, §20,
@@ -92,6 +98,8 @@ export interface PlanningAccess {
   roleLabel: string;
   /** The EP is acting as Manager because no Engagement Manager is assigned. */
   actingAsManager: boolean;
+  /** The caller's employee id (owner checks on discussion actions). */
+  employeeId: string | null;
   capabilities: PlanningCapabilities;
   /** Planning has been approved in 03.12. */
   approved: boolean;
@@ -188,9 +196,8 @@ export const PLANNING_EVIDENCE_TARGET = {
 } as const;
 export type PlanningEvidenceTarget =
   (typeof PLANNING_EVIDENCE_TARGET)[keyof typeof PLANNING_EVIDENCE_TARGET];
-export const PLANNING_EVIDENCE_TARGETS: PlanningEvidenceTarget[] = Object.values(
-  PLANNING_EVIDENCE_TARGET,
-);
+export const PLANNING_EVIDENCE_TARGETS: PlanningEvidenceTarget[] =
+  Object.values(PLANNING_EVIDENCE_TARGET);
 
 export interface PlanningEvidenceFile {
   id: string;
