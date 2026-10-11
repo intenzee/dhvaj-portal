@@ -40,6 +40,14 @@ const RULE_SELECT = `
          r.change_note, e.full_name AS created_by_name, r.created_at
     FROM hsdg.planning_consideration_rule r
     LEFT JOIN hsdg.employees e ON e.id = r.created_by_employee_id`;
+// The engine never shows the creator, so it skips the employees join — that
+// table's per-row RLS (shares_engagement_with) grows with the firm's engagements.
+const ENGINE_SELECT = `
+  SELECT r.id, r.rule_code, r.version, r.consideration_key, r.kind, r.label, r.basis,
+         r.match_rule_keys, r.match_change_categories, r.match_attention,
+         r.effective_from::text, r.effective_to::text, r.active, r.methodology_version,
+         r.change_note, NULL::text AS created_by_name, r.created_at
+    FROM hsdg.planning_consideration_rule r`;
 
 function toRule(r: RuleRow): PlanningConsiderationRule {
   return {
@@ -62,7 +70,7 @@ function toRule(r: RuleRow): PlanningConsiderationRule {
 export async function readConsiderationRulesOn(
   client: PoolClient,
 ): Promise<PlanningConsiderationRule[]> {
-  const { rows } = await client.query<RuleRow>(`${RULE_SELECT} ORDER BY r.rule_code, r.version`);
+  const { rows } = await client.query<RuleRow>(`${ENGINE_SELECT} ORDER BY r.rule_code, r.version`);
   return rows.map(toRule);
 }
 

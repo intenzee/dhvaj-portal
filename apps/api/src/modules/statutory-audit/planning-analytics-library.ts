@@ -81,23 +81,32 @@ interface RuleRow extends Versioning {
   suggested_attention: AnalyticsRuleDef['suggestedAttention'];
 }
 
-const VERSIONING = `t.id, t.version, t.effective_from::text, t.effective_to::text, t.active,
-         t.methodology_version, t.change_note, e.full_name AS created_by_name, t.created_at`;
-const JOIN_CREATOR = `LEFT JOIN hsdg.employees e ON e.id = t.created_by_employee_id`;
-const METRIC_SELECT = `
-  SELECT ${VERSIONING}, t.metric_key, t.label, t.value_type, t.core, t.note, t.applies_to, t.sort_order
-    FROM hsdg.analytics_metric_definition t ${JOIN_CREATOR}`;
-const PROFILE_SELECT = `
-  SELECT ${VERSIONING}, t.profile_key, t.label, t.description, t.sub_industries, t.considerations,
+// The creator's name joins hsdg.employees, whose RLS (shares_engagement_with) is
+// evaluated per row and grows with the firm's engagements — so only the admin
+// listing pays for it; resolving a file's methodology never needs names.
+const versioning = (
+  creators: boolean,
+) => `t.id, t.version, t.effective_from::text, t.effective_to::text, t.active,
+         t.methodology_version, t.change_note, ${creators ? 'e.full_name' : 'NULL::text'} AS created_by_name, t.created_at`;
+const joinCreator = (creators: boolean) =>
+  creators ? `LEFT JOIN hsdg.employees e ON e.id = t.created_by_employee_id` : '';
+const metricSelect = (creators = true) => `
+  SELECT ${versioning(creators)}, t.metric_key, t.label, t.value_type, t.core, t.note, t.applies_to, t.sort_order
+    FROM hsdg.analytics_metric_definition t ${joinCreator(creators)}`;
+const profileSelect = (creators = true) => `
+  SELECT ${versioning(creators)}, t.profile_key, t.label, t.description, t.sub_industries, t.considerations,
          t.average_balances, t.debt_metrics, t.finance_cost_basis, t.inventory_cost_bases,
          t.payable_cost_bases, t.inventory_trend_fallback
-    FROM hsdg.analytics_industry_profile t ${JOIN_CREATOR}`;
-const RULE_SELECT = `
-  SELECT ${VERSIONING}, t.rule_code, t.rule_key, t.name, t.kind, t.applies_to, t.excluded_for,
+    FROM hsdg.analytics_industry_profile t ${joinCreator(creators)}`;
+const ruleSelect = (creators = true) => `
+  SELECT ${versioning(creators)}, t.rule_code, t.rule_key, t.name, t.kind, t.applies_to, t.excluded_for,
          t.required_metrics, t.formula, t.definition, t.parameter_type, t.parameter_value::text,
          t.enhanced_at::text, t.immediate_at::text, t.min_data_status, t.min_source_types,
          t.signal_wording, t.why_may_matter, t.affected_areas, t.suggested_attention
-    FROM hsdg.analytics_rule t ${JOIN_CREATOR}`;
+    FROM hsdg.analytics_rule t ${joinCreator(creators)}`;
+const METRIC_SELECT = metricSelect();
+const PROFILE_SELECT = profileSelect();
+const RULE_SELECT = ruleSelect();
 
 const num = (v: string | null): number | null => (v === null ? null : Number(v));
 
@@ -171,13 +180,24 @@ function toRule(r: RuleRow): AnalyticsRuleRecord {
   };
 }
 
-/** Every version of every library row (any authenticated role may read it — no client data). */
-export async function readAnalyticsLibrary(client: PoolClient): Promise<AnalyticsLibrary> {
-  const [m, p, r] = await Promise.all([
-    client.query<MetricRow>(`${METRIC_SELECT} ORDER BY t.sort_order, t.metric_key, t.version DESC`),
-    client.query<ProfileRow>(`${PROFILE_SELECT} ORDER BY t.profile_key, t.version DESC`),
-    client.query<RuleRow>(`${RULE_SELECT} ORDER BY t.rule_code, t.version DESC`),
-  ]);
+/**
+ * Every version of every library row (any authenticated role may read it — no
+ * client data). `creators: false` leaves createdByName null and skips the
+ * employees join (see `versioning`). One client runs one query at a time.
+ */
+export async function readAnalyticsLibrary(
+  client: PoolClient,
+  { creators = true }: { creators?: boolean } = {},
+): Promise<AnalyticsLibrary> {
+  const m = await client.query<MetricRow>(
+    `${metricSelect(creators)} ORDER BY t.sort_order, t.metric_key, t.version DESC`,
+  );
+  const p = await client.query<ProfileRow>(
+    `${profileSelect(creators)} ORDER BY t.profile_key, t.version DESC`,
+  );
+  const r = await client.query<RuleRow>(
+    `${ruleSelect(creators)} ORDER BY t.rule_code, t.version DESC`,
+  );
   return {
     metrics: m.rows.map(toMetric),
     profiles: p.rows.map(toProfile),
@@ -191,7 +211,7 @@ export async function readAnalyticsLibrary(client: PoolClient): Promise<Analytic
  * the generic profile when that profile is not in force.
  */
 export async function loadAnalyticsMethodology(client: PoolClient, profileKey: string, on: string) {
-  const library = await readAnalyticsLibrary(client);
+  const library = await readAnalyticsLibrary(client, { creators: false });
   return resolveMethodology(library, profileKey, on);
 }
 
@@ -563,7 +583,7 @@ export class PlanningAnalyticsLibraryService {
 
   /** A metric a rule or profile in the library still reads cannot be retired. */
   private async assertMetricUnused(client: PoolClient, key: string): Promise<void> {
-    const library = await readAnalyticsLibrary(client);
+    const library = await readAnalyticsLibrary(client, { creators: false });
     const latestRules = new Map<string, AnalyticsRuleDef>();
     for (const r of library.rules) if (!latestRules.has(r.ruleCode)) latestRules.set(r.ruleCode, r);
     const latestProfiles = new Map<string, AnalyticsProfileDef>();
