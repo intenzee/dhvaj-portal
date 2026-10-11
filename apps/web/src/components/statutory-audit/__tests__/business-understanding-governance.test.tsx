@@ -342,6 +342,43 @@ describe('03.2 §7 sub-industry from the industry profile', () => {
     expect(screen.getByText(/Not in the current profile list — kept as entered/)).toBeInTheDocument();
   });
 
+  it('keeps an unlisted value visible as Other when the profile changes under an open section', async () => {
+    const first = summary(MANAGER, {
+      subIndustryOptions: OPTIONS,
+      sections: summary(MANAGER).sections.map((x) =>
+        x.key === 'industry'
+          ? { ...x, anythingChanged: 'no' as const, answers: { sub_industry: 'Real estate development' }, version: 1 }
+          : x,
+      ),
+    });
+    let current = first;
+    apiFetch.mockImplementation((url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST' && String(url).endsWith('/business-understanding')) {
+        current = {
+          ...first,
+          record: { ...first.record, industryProfile: 'generic' },
+          subIndustryOptions: ['Wholesale', 'Retail'],
+        };
+        return Promise.resolve(current);
+      }
+      if (String(url).endsWith('/business-understanding')) return Promise.resolve(current);
+      return Promise.resolve([]);
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <BusinessUnderstandingPanel engagementId="e1" workflowInstanceId="wf1" team={[]} editable onChanged={jest.fn()} />
+      </QueryClientProvider>,
+    );
+    await openTab(/Understanding \(03\.2\.1–6\)/);
+    await openSection('Industry');
+    expect(subIndustry()).toHaveValue('Real estate development');
+    await userEvent.selectOptions(screen.getByLabelText('Industry analytics profile'), 'generic');
+    expect(await screen.findByRole('option', { name: 'Wholesale' })).toBeInTheDocument();
+    expect(subIndustry()).toHaveValue('__other__');
+    expect(screen.getByLabelText('Sub-industry — other')).toHaveValue('Real estate development');
+  });
+
   it('stays free text when the profile has no list', async () => {
     renderPanel(withIndustry({ sub_industry: 'Anything' }, []));
     await openTab(/Understanding \(03\.2\.1–6\)/);

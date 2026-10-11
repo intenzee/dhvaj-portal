@@ -705,9 +705,11 @@ function SubIndustryInput({
   onChange: (v: string | null) => void;
 }): JSX.Element {
   const listed = !!value && options.includes(value);
-  const [other, setOther] = useState(!!value && !listed);
+  // Other is derived from the value, so a value a newly selected profile does not
+  // list still shows (and stays editable); state only holds an Other picked with no text yet.
+  const [otherPicked, setOtherPicked] = useState(false);
   const [saved] = useState(value);
-  const selected = listed ? value! : other ? OTHER_SUB_INDUSTRY : '';
+  const selected = listed ? value! : value || otherPicked ? OTHER_SUB_INDUSTRY : '';
   return (
     <Field label={field.label} hint={field.hint}>
       <div className="space-y-1.5">
@@ -717,7 +719,7 @@ function SubIndustryInput({
           value={selected}
           onChange={(e) => {
             const v = e.target.value;
-            setOther(v === OTHER_SUB_INDUSTRY);
+            setOtherPicked(v === OTHER_SUB_INDUSTRY);
             onChange(v === OTHER_SUB_INDUSTRY ? (listed ? null : value) : v || null);
           }}
         >
