@@ -120,8 +120,9 @@ export class AuditReportingRecordsService {
   ): Promise<StatutoryAuditReportingRecords> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertShell(client, engagementId, workflowInstanceId);
-      await this.ensureOn(client, ctx, engagementId, workflowInstanceId);
-      return this.readView(client, ctx, engagementId, workflowInstanceId);
+      const lead = await isEngagementLead(client, engagementId);
+      if (lead) await this.ensureOn(client, ctx, engagementId, workflowInstanceId);
+      return this.readView(client, ctx, engagementId, workflowInstanceId, lead);
     });
   }
 
@@ -561,7 +562,8 @@ export class AuditReportingRecordsService {
   /**
    * First open by a lead: the records row, the legacy single-fraud 02.7 facts
    * moved into a first Fraud Matter (once), and the §164(2) workpaper filled
-   * from the contacts master (once). Members who cannot write just read.
+   * from the contacts master (once). Members who cannot write just read, so
+   * callers run this for a lead only.
    */
   private async ensureOn(
     client: PoolClient,
@@ -569,7 +571,6 @@ export class AuditReportingRecordsService {
     engagementId: string,
     workflowInstanceId: string,
   ): Promise<void> {
-    if (!(await isEngagementLead(client, engagementId))) return;
     await client.query(
       `INSERT INTO hsdg.audit_reporting_records (workflow_instance_id, engagement_id)
        VALUES ($1, $2) ON CONFLICT (workflow_instance_id) DO NOTHING`,
@@ -680,9 +681,10 @@ export class AuditReportingRecordsService {
     ctx: RlsContext,
     engagementId: string,
     workflowInstanceId: string,
+    canManage: boolean,
   ): Promise<StatutoryAuditReportingRecords> {
     const periodStart = await workflowPeriodStartOn(client, workflowInstanceId);
-    const [fraud, candidates, directors, contacts, crossRefs, counts, links, canManage, isPartner] =
+    const [fraud, candidates, directors, contacts, crossRefs, counts, links, isPartner] =
       await Promise.all([
         readFraudMattersOn(client, workflowInstanceId, periodStart),
         this.candidatesOn(client, workflowInstanceId),
@@ -691,7 +693,6 @@ export class AuditReportingRecordsService {
         reportingCrossRefsOn(client, workflowInstanceId),
         reportingEvidenceCountsOn(client, workflowInstanceId),
         readReportingEvidenceLinksOn(client, workflowInstanceId),
-        isEngagementLead(client, engagementId),
         this.isEngagementPartner(client, ctx, engagementId),
       ]);
     const onWorkpaper = new Set(
@@ -808,7 +809,7 @@ export class AuditReportingRecordsService {
         throw new ForbiddenException('Only the engagement leads can change the 02.7 records.');
       await this.ensureOn(client, ctx, engagementId, workflowInstanceId);
       await fn(client);
-      return this.readView(client, ctx, engagementId, workflowInstanceId);
+      return this.readView(client, ctx, engagementId, workflowInstanceId, true);
     });
   }
 
