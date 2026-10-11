@@ -113,6 +113,12 @@ export const RULE_CRITERION = {
   auditTrailEffective: 'audit_trail_effective',
   /** Schedule V effective-capital bands (child band table, versioned). */
   scheduleVCeiling: 'schedule_v_ceiling',
+  /** §196(2) maximum term (years) of an MD / WTD / Manager appointment. */
+  managerialTermMaxYears: 'managerial_term_max_years',
+  /** §196(3)(a) minimum age (years) of an MD / WTD / Manager. */
+  managerialMinAge: 'managerial_min_age',
+  /** §196(3)(a) proviso — age (years) from which a special resolution is required. */
+  managerialAgeSrTrigger: 'managerial_age_sr_trigger',
 } as const;
 export type RuleCriterion = (typeof RULE_CRITERION)[keyof typeof RULE_CRITERION];
 export const RULE_CRITERIA: RuleCriterion[] = Object.values(RULE_CRITERION);

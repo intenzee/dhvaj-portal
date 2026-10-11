@@ -300,6 +300,44 @@ describe('Statutory Audit — 02.7 Other Reporting (e2e §9.7)', () => {
     expect((route.body as StatutoryAuditOtherReporting).assessment.needsReevaluation).toBe(true);
   });
 
+  it('Section 196 appointment checks read the Rules Library and raise non-blocking matters', async () => {
+    const o = await getOther(pa);
+    const values = Object.fromEntries(o.detail!.rulesUsed.map((r) => [r.code, r.value]));
+    expect(values).toMatchObject({ MGR_TERM_MAX_YEARS: 5, MGR_MIN_AGE: 21, MGR_AGE_SR_TRIGGER: 70 });
+    await post(pa, 'facts', {
+      managerialPersons: [
+        { name: 'A. Rao', category: 'managing_director', remuneration: 4_000_000, age: 150 },
+      ],
+      version: o.assessment.version,
+    }).expect(400);
+    const res = await post(pa, 'facts', {
+      managerialPersons: [
+        { name: 'A. Rao', category: 'managing_director', remuneration: 4_000_000, age: 72, termYears: 6 },
+      ],
+      version: o.assessment.version,
+    }).expect(201);
+    const r = res.body as StatutoryAuditOtherReporting;
+    expect(r.detail!.remuneration.appointmentFlags).toEqual([
+      expect.stringMatching(/6 years.*at most 5/),
+      expect.stringMatching(/age 72.*special resolution/),
+    ]);
+    expect(r.detail!.matters.filter((m) => m.code === 'section_196_appointment')).toHaveLength(2);
+    expect(r.detail!.missingFacts.filter((m) => m.key.startsWith('rule_MGR'))).toEqual([]);
+    const fixed = await post(pa, 'facts', {
+      managerialPersons: [
+        {
+          ...r.capturedFacts.managerialPersons[0],
+          termYears: 5,
+          ageSpecialResolution: true,
+        },
+      ],
+      version: r.assessment.version,
+    }).expect(201);
+    const f = fixed.body as StatutoryAuditOtherReporting;
+    expect(f.detail!.remuneration.appointmentFlags).toEqual([]);
+    expect(f.capturedFacts.managerialPersons[0]).toMatchObject({ age: 72, termYears: 5 });
+  });
+
   it('records an immutable audit event for the decision', async () => {
     const res = await request(app.getHttpServer())
       .get(`/api/v1/audit?limit=100`)

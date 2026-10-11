@@ -454,6 +454,12 @@ export interface ManagerialPersonInput {
   din?: string | null;
   category: ManagerialCategory;
   remuneration: number | null;
+  /** §196(3) — age (years) at appointment / re-appointment; null when not recorded. */
+  age?: number | null;
+  /** §196(2) — term of the current appointment in years; null when not recorded. */
+  termYears?: number | null;
+  /** §196(3)(a) proviso — appointment at 70 or above approved by special resolution. */
+  ageSpecialResolution?: boolean;
 }
 
 /** Shareholder approvals relevant to the ordinary-route limits. */
@@ -546,6 +552,12 @@ export interface RemunerationResult {
   scheduleVRoute: boolean;
   categories: RemunerationCategoryTest[];
   scheduleV: ScheduleVResult;
+  /**
+   * Section 196 appointment checks (term, minimum age, 70+ special resolution)
+   * from the Rules Library. Non-blocking matters for the remuneration /
+   * appointment workpaper; they never change the reporting outcome.
+   */
+  appointmentFlags: string[];
   basis: string;
 }
 
@@ -935,6 +947,9 @@ export const OTHER_REPORTING_RULE_CODE = {
   fraudForwardDays: 'FRAUD_CG_FORWARD_DAYS',
   auditTrailEffective: 'AUDIT_TRAIL_EFFECTIVE_DATE',
   booksRetention: 'AUDIT_TRAIL_RETENTION',
+  managerialTermMaxYears: 'MGR_TERM_MAX_YEARS',
+  managerialMinAge: 'MGR_MIN_AGE',
+  managerialAgeSrTrigger: 'MGR_AGE_SR_TRIGGER',
 } as const;
 
 /** Empty Track B statuses (before B's records exist). */

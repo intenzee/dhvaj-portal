@@ -29,7 +29,14 @@ import { Field, Input, Select, Textarea } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 import { FrameworkReferences } from './framework-references';
 import { ReportingCardEvidence } from './other-reporting-evidence';
-import { ApplicabilityBadge, Fact, ReportingStatusBadge, type FactsPatch } from './other-reporting-ui';
+import {
+  ApplicabilityBadge,
+  CARD_WORKPAPER_SECTION,
+  Fact,
+  ReportingStatusBadge,
+  openWorkspaceSection,
+  type FactsPatch,
+} from './other-reporting-ui';
 
 /**
  * 02.7 requirement cards (spec §4, §16, §17): one card per statutory reporting
@@ -176,7 +183,16 @@ function CardDetail({
         <Fact label="Work configured" value={REPORTING_WORK_CONFIGURED_LABEL[card.workConfigured]} />
         <Fact label="Final conclusion stage" value={card.finalStage} />
       </dl>
-      <p className="text-ink-muted">{card.applicabilityBasis}</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="text-ink-muted">{card.applicabilityBasis}</p>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => openWorkspaceSection(CARD_WORKPAPER_SECTION[card.key])}
+        >
+          Open workpaper
+        </Button>
+      </div>
       {card.systemExceptions.length > 0 && (
         <ul className="ml-5 list-disc text-danger-700" aria-label="System exceptions">
           {card.systemExceptions.map((e) => (

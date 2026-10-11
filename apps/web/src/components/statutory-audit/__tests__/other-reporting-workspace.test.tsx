@@ -108,6 +108,7 @@ const detail = (over: Partial<OtherReportingDetail> = {}): OtherReportingDetail 
         exceeding: [],
         basis: '',
       },
+      appointmentFlags: [],
       basis: '',
     },
     fraud: {
@@ -360,5 +361,52 @@ describe('02.7 Other reporting workspace', () => {
     expect(screen.getByRole('button', { name: 'Save card' })).toBeEnabled();
     expect(screen.queryByLabelText('Override applicability')).toBeNull();
     expect(screen.getByRole('button', { name: /Confirm System Assessment/ })).toBeDisabled();
+  });
+
+  it('a card opens its workpaper panel in place', async () => {
+    const user = userEvent.setup();
+    render(wrap(<OtherReportingWorkspace engagementId="e1" or={or()} canManage />));
+    const panel = screen.getByRole('button', { name: /Section 143\(3\) — team confirmations/ });
+    expect(panel).toHaveAttribute('aria-expanded', 'false');
+    await user.click(screen.getByRole('button', { name: /Section 143\(3\)\(b\)/ }));
+    await user.click(screen.getByRole('button', { name: 'Open workpaper' }));
+    expect(panel).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('captures the Section 196 appointment facts and shows the system flags', async () => {
+    const user = userEvent.setup();
+    const flag = 'A. Rao: age 72 (70 or above) — Section 196(3)(a) requires a special resolution; none recorded.';
+    const d = detail({
+      remuneration: { ...detail().remuneration, applicable: true, appointmentFlags: [flag] },
+    });
+    const o = or(
+      {
+        baseFacts: { isPublicCompany: true, publicCompanySource: 'Entity type: public limited' },
+        capturedFacts: {
+          ...EMPTY_OTHER_REPORTING_CAPTURED,
+          managerialPersons: [
+            { id: 'p1', name: 'A. Rao', category: 'managing_director', remuneration: 4_000_000 },
+          ],
+        },
+      },
+      d,
+    );
+    render(wrap(<OtherReportingWorkspace engagementId="e1" or={o} canManage />));
+    await user.click(screen.getByRole('button', { name: /Section 197\(16\) — managerial remuneration/ }));
+    expect(screen.getByRole('list', { name: 'Section 196 appointment checks' })).toHaveTextContent(flag);
+    await user.type(screen.getByLabelText('Age'), '72');
+    await user.type(screen.getByLabelText('Term (years)'), '5');
+    await user.click(screen.getByLabelText('Special resolution (70 or above)'));
+    await user.click(screen.getByRole('button', { name: 'Save remuneration' }));
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/engagements/e1/statutory-audit/wf1/other-reporting/facts',
+      expect.objectContaining({
+        body: expect.objectContaining({
+          managerialPersons: [
+            expect.objectContaining({ name: 'A. Rao', age: 72, termYears: 5, ageSpecialResolution: true }),
+          ],
+        }),
+      }),
+    );
   });
 });
