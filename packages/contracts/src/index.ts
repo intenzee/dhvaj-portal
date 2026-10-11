@@ -50,6 +50,7 @@ export * from './statutory-audit-planning-signal';
 export * from './statutory-audit-planning-strategy';
 export * from './statutory-audit-planning-governance';
 export * from './statutory-audit-planning-analytics';
+export * from './statutory-audit-analytics-library';
 export * from './statutory-audit-materiality';
 export * from './statutory-audit-scope-approach';
 export * from './statutory-audit-areas-assertions';

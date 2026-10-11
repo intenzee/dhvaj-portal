@@ -10,6 +10,7 @@ import {
   IsNumber,
   IsObject,
   IsOptional,
+  Matches,
   IsString,
   IsUUID,
   Max,
@@ -24,7 +25,7 @@ import {
   EXPECTATION_DIRECTIONS,
   EXPECTATION_TYPES,
   FINANCIAL_UNITS,
-  INDUSTRY_PROFILES,
+  INDUSTRY_PROFILE_KEY_PATTERN,
   INVESTIGATION_ASSESSMENTS,
   INVESTIGATION_SIGNAL_DECISIONS,
   METRIC_SOURCE_TYPES,
@@ -48,9 +49,11 @@ const AMOUNT = { maxDecimalPlaces: 2, allowNaN: false, allowInfinity: false } as
 
 /** 03.2 record: industry profile, BA-01, conclusion. */
 export class UpdateBusinessUnderstandingDto {
-  @ApiPropertyOptional({ enum: INDUSTRY_PROFILES })
+  @ApiPropertyOptional({
+    description: 'An industry profile key in force in the Analytics Methodology Library.',
+  })
   @IsOptional()
-  @IsIn(INDUSTRY_PROFILES)
+  @Matches(INDUSTRY_PROFILE_KEY_PATTERN, { message: 'industryProfile must be a profile key.' })
   industryProfile?: IndustryProfile;
 
   @ApiPropertyOptional({ enum: BA01_ANSWERS })

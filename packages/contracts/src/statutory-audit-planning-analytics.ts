@@ -12,6 +12,13 @@
  * the same fields without redesigning the analytics.
  */
 
+import type {
+  AnalyticsExceptionKind,
+  AnalyticsMethodologySummary,
+  AnalyticsProfileOption,
+  AnalyticsRuleStatus,
+  RatioUnit,
+} from './statutory-audit-analytics-library';
 import type { PlanningAttention } from './statutory-audit-planning-signal';
 import type { PlanningCompletionCheck } from './statutory-audit-planning-strategy';
 
@@ -212,6 +219,11 @@ export interface UpdateUnderstandingSectionInput {
 
 // ── Industry Analytics Profiles (§17) ────────────────────────────────────────
 
+/**
+ * The profiles seeded in the Analytics Methodology Library. Profiles are
+ * versioned library data (statutory-audit-analytics-library.ts): the
+ * Methodology Admin may add more, so a profile key is any library key.
+ */
 export const INDUSTRY_PROFILE = {
   generic: 'generic',
   manufacturing: 'manufacturing',
@@ -221,9 +233,13 @@ export const INDUSTRY_PROFILE = {
   nbfc: 'nbfc',
   section8: 'section8',
 } as const;
-export type IndustryProfile = (typeof INDUSTRY_PROFILE)[keyof typeof INDUSTRY_PROFILE];
+/** An Analytics Methodology Library profile key (seeded keys above, or admin-added). */
+export type IndustryProfile = string;
+export const INDUSTRY_PROFILE_KEY_PATTERN = /^[a-z0-9_]{2,40}$/;
+/** The seeded profile keys. The live list is `BusinessUnderstandingSummary.industryProfiles`. */
 export const INDUSTRY_PROFILES: IndustryProfile[] = Object.values(INDUSTRY_PROFILE);
 
+/** Labels of the seeded profiles (the live label comes from the library). */
 export const INDUSTRY_PROFILE_LABEL: Record<IndustryProfile, string> = {
   generic: 'Generic corporate',
   manufacturing: 'Manufacturing',
@@ -263,6 +279,11 @@ export const FINANCIAL_METRIC = {
 } as const;
 export type CanonicalMetricKey = (typeof FINANCIAL_METRIC)[keyof typeof FINANCIAL_METRIC];
 
+/**
+ * @deprecated The v1 seed of the canonical metric definitions. The Analytics
+ * Methodology Library (`analytics_metric_definition`) is the source of truth —
+ * read `BusinessUnderstandingSummary.analyticsMethodology.metrics`.
+ */
 export interface FinancialMetricDef {
   key: CanonicalMetricKey;
   label: string;
@@ -271,6 +292,7 @@ export interface FinancialMetricDef {
   note: string;
 }
 
+/** @deprecated See {@link FinancialMetricDef}; kept as the v1 seed for reference. */
 export const FINANCIAL_METRIC_DEFS: readonly FinancialMetricDef[] = [
   { key: 'revenue', label: 'Revenue from operations', core: true, note: 'Core' },
   { key: 'other_income', label: 'Other income', core: true, note: 'Core' },
@@ -415,31 +437,6 @@ export interface SaveFinancialValuesInput {
 
 // ── 03.2.8 Preliminary Analytical Review ─────────────────────────────────────
 
-/**
- * Planning ATTENTION parameters — methodology-configured and versioned. They
- * only surface exceptions for auditor assessment. They are NOT materiality
- * thresholds and never evidence of misstatement or significant risk (§15).
- */
-export interface AnalyticsAttentionParameters {
-  /** Surface a single-line movement at or above this |%|. */
-  movementPct: number;
-  /** Surface a relationship when growth rates diverge by at least this many % points. */
-  relationshipGapPts: number;
-  /** Surface a margin / cost-ratio shift of at least this many % points. */
-  ratioShiftPts: number;
-  /** Suggest Enhanced Attention when a gap/movement is at least this multiple of the parameter. */
-  enhancedMultiple: number;
-}
-
-export const ANALYTICS_METHODOLOGY_VERSION = 'dhvaj-analytics-2026.1';
-
-export const DEFAULT_ANALYTICS_PARAMETERS: AnalyticsAttentionParameters = {
-  movementPct: 25,
-  relationshipGapPts: 20,
-  ratioShiftPts: 3,
-  enhancedMultiple: 2,
-};
-
 export interface MetricMovement {
   metricKey: string;
   label: string;
@@ -460,12 +457,17 @@ export interface RatioResult {
   label: string;
   /** Human formula including the basis, e.g. `Inventory / Cost of sales × 365`. */
   formula: string;
-  unit: '%' | 'days' | 'x' | 'amount';
+  unit: RatioUnit;
   cy: number | null;
   py: number | null;
   status: AnalyticsResultStatus;
   /** Why it was not calculated, when it wasn't. */
   reason: string | null;
+  /** Analytics Methodology Library rule the ratio comes from. */
+  ruleCode: string;
+  ruleVersion: number;
+  /** Balance / base disclosure (average vs closing, cost base, debt definition). */
+  basisNote: string | null;
   /** Underlying values used (CY/PY), for transparency. */
   inputs: { metricKey: string; label: string; cy: number | null; py: number | null }[];
 }
@@ -473,9 +475,16 @@ export interface RatioResult {
 /** An exception the engine surfaces (becomes / refreshes an Investigation Card). */
 export interface DerivedAnalyticsException {
   ruleKey: string;
-  kind: 'movement' | 'relationship' | 'ratio_shift' | 'liquidity';
+  /** Library rule code + version it fired under (kept on the card). */
+  ruleCode: string;
+  ruleVersion: number;
+  methodologyVersion: string;
+  kind: AnalyticsExceptionKind;
   observation: string;
+  /** The configured attention rule that flagged it. */
   whyFlagged: string;
+  /** Methodology explanation of why it may matter. */
+  whyMayMatter: string;
   suggestedAttention: PlanningAttention;
   affectedAreas: string[];
   /** Snapshot of the values behind the exception (drives reassessment on change). */
@@ -488,9 +497,12 @@ export interface AnalyticsWarning {
 }
 
 export interface AnalyticsResult {
+  /** Methodology version of the industry profile in force. */
   methodologyVersion: string;
   profile: IndustryProfile;
-  parameters: AnalyticsAttentionParameters;
+  profileLabel: string;
+  /** Every rule in force for the profile and how it fared (formula + parameter shown). */
+  rules: AnalyticsRuleStatus[];
   /** True once the header is complete enough to calculate. */
   ready: boolean;
   warnings: AnalyticsWarning[];
@@ -542,8 +554,13 @@ export interface InvestigationCardRecord {
   /** Human code, e.g. `AX-001`. */
   cardCode: string;
   ruleKey: string;
+  /** Library rule code + version the card was raised / last refreshed under. */
+  ruleCode: string | null;
+  ruleVersion: number | null;
+  methodologyVersion: string;
   observation: string;
   whyFlagged: string;
+  whyMayMatter: string | null;
   suggestedAttention: PlanningAttention;
   values: Record<string, number | null>;
   managementExplanation: string | null;
@@ -691,6 +708,12 @@ export interface BusinessUnderstandingSummary {
   sections: UnderstandingSectionRecord[];
   /** System-suggested industry considerations for 03.2.3 (Manager confirms). */
   industryConsiderations: string[];
+  /** Industry profiles in force (the 03.2 profile selector). */
+  industryProfiles: AnalyticsProfileOption[];
+  /** Sub-industry taxonomy of the selected profile ([] = free text only). */
+  subIndustryOptions: string[];
+  /** The analytics methodology this file runs on. */
+  analyticsMethodology: AnalyticsMethodologySummary;
   dataset: FinancialDatasetHeader;
   customMetrics: CustomMetricRecord[];
   values: FinancialValueRecord[];

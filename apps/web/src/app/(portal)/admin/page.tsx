@@ -12,8 +12,9 @@ import { TemplatesSection } from '@/components/admin/templates-section';
 import { RulesLibrarySection } from '@/components/admin/rules-library-section';
 import { PlanningSignalLibrarySection } from '@/components/admin/planning-signal-library-section';
 import { PlanningConsiderationLibrarySection } from '@/components/admin/planning-consideration-library-section';
+import { AnalyticsMethodologySection } from '@/components/admin/analytics-methodology-section';
 
-type Tab = 'users' | 'offices' | 'templates' | 'rules' | 'signals';
+type Tab = 'users' | 'offices' | 'templates' | 'rules' | 'signals' | 'analytics';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -45,13 +46,17 @@ export default function AdministrationPage(): JSX.Element {
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'signals' as const, label: 'Planning Signal Library' }]
       : []),
+    // The 03.2 Analytics Methodology Library — methodology only, no client data.
+    ...(can(principal, PERMISSION.serviceManage)
+      ? [{ id: 'analytics' as const, label: 'Analytics Methodology' }]
+      : []),
   ];
 
   return (
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library and the Planning Signal Library. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library and the Analytics Methodology Library. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -78,6 +83,8 @@ export default function AdministrationPage(): JSX.Element {
             <OfficesSection />
           ) : tab === 'rules' ? (
             <RulesLibrarySection />
+          ) : tab === 'analytics' ? (
+            <AnalyticsMethodologySection />
           ) : tab === 'signals' ? (
             <div className="space-y-8">
               <PlanningSignalLibrarySection />

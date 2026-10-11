@@ -9,17 +9,16 @@ import {
   EXPECTATION_BASIS_LABEL,
   EXPECTATION_CONCLUSION_LABEL,
   EXPECTATION_CONCLUSIONS,
-  FINANCIAL_METRIC_DEFS,
   FINANCIAL_UNIT_LABEL,
   FINANCIAL_UNITS,
-  INDUSTRY_PROFILE_LABEL,
-  INDUSTRY_PROFILES,
   INVESTIGATION_ASSESSMENT_LABEL,
   INVESTIGATION_ASSESSMENTS,
   METRIC_SOURCE_TYPE_LABEL,
   METRIC_SOURCE_TYPES,
+  ANALYTICS_RULE_KIND_LABEL,
   PLANNING_ATTENTION_LABEL,
   UNDERSTANDING_SECTION_DEFS,
+  type AnalyticsRuleOutcome,
   type BusinessUnderstandingSummary,
   type DatasetStatus,
   type ExpectationBasis,
@@ -169,9 +168,14 @@ export function BusinessUnderstandingPanel({
               disabled={!editable || setProfile.isPending}
               onChange={(e) => setProfile.mutate(e.target.value as IndustryProfile)}
             >
-              {INDUSTRY_PROFILES.map((p) => (
-                <option key={p} value={p}>
-                  {INDUSTRY_PROFILE_LABEL[p]}
+              {!s.industryProfiles.some((p) => p.key === s.record.industryProfile) && (
+                <option value={s.record.industryProfile}>
+                  {s.record.industryProfile} (retired — using {s.analyticsMethodology.profileLabel})
+                </option>
+              )}
+              {s.industryProfiles.map((p) => (
+                <option key={p.key} value={p.key} title={p.description}>
+                  {p.label}
                 </option>
               ))}
             </Select>
@@ -198,7 +202,9 @@ export function BusinessUnderstandingPanel({
         {tab === 'dataset' && (
           <DatasetSection key={s.dataset.version} base={base} summary={s} editable={editable} onChanged={refresh} />
         )}
-        {tab === 'analytics' && <AnalyticsSection summary={s} />}
+        {tab === 'analytics' && (
+          <AnalyticsSection base={base} summary={s} editable={editable} onChanged={refresh} />
+        )}
         {tab === 'investigations' && (
           <InvestigationsSection
             engagementId={engagementId}
@@ -539,7 +545,19 @@ function DatasetSection({
     p === 'py' ? 'audited_py_fs' : h.dataStatus === 'management_accounts' ? 'management_accounts' : 'draft_fs';
 
   const metrics = [
-    ...FINANCIAL_METRIC_DEFS.map((d) => ({ key: d.key as string, label: d.label, note: d.note })),
+    ...s.analyticsMethodology.metrics.map((d) => ({
+      key: d.key,
+      label: d.valueType === 'amount' ? d.label : `${d.label} (${d.valueType === 'count' ? 'number' : '%'} — not in ${h.units ? FINANCIAL_UNIT_LABEL[h.units] : 'units'})`,
+      note: d.note,
+    })),
+    // Figures recorded under a metric the profile no longer offers stay visible (and clearable).
+    ...[...new Set(s.values.map((v) => v.metricKey))]
+      .filter(
+        (k) =>
+          !s.analyticsMethodology.metrics.some((d) => d.key === k) &&
+          !s.customMetrics.some((c) => c.key === k),
+      )
+      .map((k) => ({ key: k, label: k, note: 'Not in this profile' })),
     ...s.customMetrics.map((c) => ({ key: c.key, label: c.label, note: 'Custom' })),
   ];
   const initialCells = () => {
@@ -774,18 +792,65 @@ function DatasetSection({
 
 // ── 03.2.8 Preliminary Analytical Review ────────────────────────────────────
 
-function AnalyticsSection({ summary: s }: { summary: BusinessUnderstandingSummary }): JSX.Element {
+const RULE_OUTCOME: Record<AnalyticsRuleOutcome, { label: string; tone: 'warn' | 'neutral' | 'info' }> = {
+  flagged: { label: 'Flagged', tone: 'warn' },
+  not_flagged: { label: 'Not flagged', tone: 'neutral' },
+  not_applicable: { label: 'Not applicable', tone: 'neutral' },
+  insufficient_data: { label: 'Insufficient data', tone: 'info' },
+  data_quality: { label: 'Below data quality', tone: 'info' },
+};
+
+function AnalyticsSection({
+  base,
+  summary: s,
+  editable,
+  onChanged,
+}: {
+  base: string;
+  summary: BusinessUnderstandingSummary;
+  editable: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const toast = useToast();
   const a = s.analytics;
+  const m = s.analyticsMethodology;
   const unit = s.dataset.units ? FINANCIAL_UNIT_LABEL[s.dataset.units] : '';
+  const [showRules, setShowRules] = useState(false);
+  const rerun = useMutation({
+    mutationFn: () =>
+      apiFetch<BusinessUnderstandingSummary>(`${base}/analytics/refresh`, { method: 'POST', body: {} }),
+    onSuccess: () => {
+      toast('Analytics re-run on the methodology now in force.');
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not refresh the analytics.')),
+  });
+  const attentionRules = a.rules.filter((r) => r.kind !== 'ratio');
   return (
     <div className="space-y-3">
       <p className="flex items-start gap-1.5 text-xs text-ink-muted">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        Preliminary planning analytics (SA 315 / SA 520) — not substantive evidence. Attention
-        parameters (movement {a.parameters.movementPct}%, relationship gap {a.parameters.relationshipGapPts}{' '}
-        points, ratio shift {a.parameters.ratioShiftPts} points; {a.methodologyVersion}) only surface
-        items to investigate. They are not materiality.
+        <span>
+          Preliminary planning analytics (SA 315 / SA 520) — not substantive evidence. Attention
+          parameters only surface items to investigate; they are not materiality and never a
+          conclusion. Methodology {m.methodologyVersion} · {m.profileLabel} profile v{m.profileVersion} (in
+          force on {m.resolvedOn}) · Debt = {m.debtDefinition} · finance cost on{' '}
+          {m.financeCostBasis === 'average' ? 'average' : 'closing'} debt ·{' '}
+          {m.averageBalances ? 'day ratios on average balances where available' : 'day ratios on closing balances'}.
+        </span>
       </p>
+      {m.staleCards > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-primary-50 px-2 py-1.5 text-xs text-primary-700">
+          <span>
+            {m.staleCards} investigation card(s) were raised under an earlier methodology version.
+          </span>
+          {editable && (
+            <Button size="sm" variant="ghost" disabled={rerun.isPending} onClick={() => rerun.mutate()}>
+              Refresh analytics
+            </Button>
+          )}
+        </div>
+      )}
       {a.warnings.map((w) => (
         <p key={w.code} className="flex items-center gap-1.5 rounded-md bg-warning-50 px-2 py-1.5 text-xs text-warning-700">
           <AlertTriangle className="h-3.5 w-3.5" />
@@ -847,12 +912,59 @@ function AnalyticsSection({ summary: s }: { summary: BusinessUnderstandingSummar
               <div className="text-[11px] text-ink-faint">
                 {r.formula}
                 {r.reason ? ` — ${r.reason}` : ''}
+                {r.basisNote ? ` · ${r.basisNote}` : ''}
+                {r.ruleCode ? ` · ${r.ruleCode} v${r.ruleVersion}` : ''}
                 {r.status === 'calculated' &&
                   ` · inputs: ${r.inputs.map((i) => `${i.label} ${fmt(i.cy)} / ${fmt(i.py)}`).join('; ')}`}
               </div>
             </div>
           ))}
         </div>
+      </Card>
+      <Card className="p-3">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between text-left text-sm font-medium text-ink"
+          onClick={() => setShowRules((v) => !v)}
+        >
+          <span>
+            Attention rules applied ({attentionRules.filter((r) => r.outcome === 'flagged').length} flagged of{' '}
+            {attentionRules.length})
+          </span>
+          {showRules ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+        {showRules && (
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-ink-muted">
+                  <th className="py-1 pr-2 font-medium">Rule</th>
+                  <th className="py-1 pr-2 font-medium">Type</th>
+                  <th className="py-1 pr-2 font-medium">Attention parameter</th>
+                  <th className="py-1 pr-2 font-medium">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attentionRules.map((r) => (
+                  <tr key={r.ruleCode} className="border-t border-line align-top">
+                    <td className="py-1 pr-2">
+                      <div className="text-ink">{r.name}</div>
+                      <div className="text-ink-faint">
+                        {r.ruleCode} v{r.ruleVersion} · {r.formula}
+                      </div>
+                    </td>
+                    <td className="py-1 pr-2 text-ink-muted">{ANALYTICS_RULE_KIND_LABEL[r.kind]}</td>
+                    <td className="py-1 pr-2 text-ink-muted">{r.parameterText ?? '—'}</td>
+                    <td className="py-1 pr-2">
+                      <Badge tone={RULE_OUTCOME[r.outcome].tone}>{RULE_OUTCOME[r.outcome].label}</Badge>
+                      {r.reason && <div className="mt-0.5 text-ink-faint">{r.reason}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -986,6 +1098,12 @@ function InvestigationCard({
       {open && (
         <div className="mt-3 space-y-3 border-t border-line pt-3 text-sm">
           <p className="text-xs text-ink-muted">Why flagged: {c.whyFlagged}</p>
+          {c.whyMayMatter && <p className="text-xs text-ink-muted">Why it may matter: {c.whyMayMatter}</p>}
+          {c.ruleCode && (
+            <p className="text-[11px] text-ink-faint">
+              Rule {c.ruleCode} v{c.ruleVersion} · {c.methodologyVersion}
+            </p>
+          )}
           {editable ? (
             <div className="space-y-3 rounded-lg bg-surface-raised p-3">
               <Field label="Management explanation">
@@ -1123,7 +1241,7 @@ function ExpectationsSection({
   const [basisNote, setBasisNote] = useState('');
 
   const metrics = [
-    ...FINANCIAL_METRIC_DEFS.map((d) => ({ key: d.key as string, label: d.label })),
+    ...s.analyticsMethodology.metrics.map((d) => ({ key: d.key, label: d.label })),
     ...s.customMetrics.map((c) => ({ key: c.key, label: c.label })),
   ];
   const create = useMutation({

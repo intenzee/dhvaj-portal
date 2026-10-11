@@ -1,166 +1,157 @@
 import {
-  ANALYTICS_METHODOLOGY_VERSION,
-  DEFAULT_ANALYTICS_PARAMETERS,
-  FINANCIAL_METRIC_DEFS,
+  ANALYTICS_RULE_KINDS,
+  ATTENTION_PARAMETER_TYPES,
+  DATASET_STATUSES,
   FINANCIAL_UNIT_FACTOR,
+  METRIC_SOURCE_TYPES,
   PLANNING_ATTENTION,
-  type AnalyticsAttentionParameters,
+  PLANNING_ATTENTIONS,
+  type AnalyticsExpr,
+  type AnalyticsMetricDef,
+  type AnalyticsProfileDef,
   type AnalyticsResult,
+  type AnalyticsRuleDef,
+  type AnalyticsRuleDefinition,
+  type AnalyticsRuleOutcome,
+  type AnalyticsRuleStatus,
   type AnalyticsWarning,
+  type DatasetStatus,
   type DerivedAnalyticsException,
   type FinancialUnit,
-  type IndustryProfile,
   type MetricMovement,
+  type MetricSourceType,
   type PlanningAttention,
   type RatioResult,
+  type RatioUnit,
 } from '@hsdg/contracts';
 
 /**
  * 03.2.8 Preliminary Analytical Review — pure, DB-free engine (DHVAJ 03.2 §12–§17).
  *
- * Calculates movements, ratios and relationships from the manually entered
- * Focused Financial Dataset and surfaces exceptions for the auditor to
- * investigate. It never concludes misstatement or risk: wording is factual,
- * attention parameters are methodology-configured (not materiality), and a
- * ratio is only calculated when its inputs exist and its denominator is
- * meaningful. Inventory / payable days never fall back to Revenue.
+ * Runs the Analytics Methodology Library in force (metric definitions, the
+ * industry profile and its ratio / attention rules — versioned data, see
+ * planning-analytics-library.ts) over the manually entered Focused Financial
+ * Dataset and surfaces exceptions for the auditor to investigate. It never
+ * concludes misstatement or risk: wording is factual, attention parameters are
+ * methodology-configured (not materiality), and a ratio is only calculated when
+ * its inputs exist and its denominator is meaningful. Inventory / payable days
+ * never fall back to Revenue.
  */
 
+/** The library versions in force for one file. */
+export interface AnalyticsMethodology {
+  profile: AnalyticsProfileDef;
+  /** Metric definitions in force (all profiles; the engine filters). */
+  metrics: readonly AnalyticsMetricDef[];
+  /** Rules in force (all profiles; the engine filters by appliesTo / excludedFor). */
+  rules: readonly AnalyticsRuleDef[];
+}
+
 export interface AnalyticsInput {
-  profile: IndustryProfile;
+  methodology: AnalyticsMethodology;
   header: {
     periodEnd: string | null;
     pyPeriodEnd: string | null;
     currency: string | null;
     units: FinancialUnit | null;
     pyUnits: FinancialUnit | null;
+    dataStatus?: DatasetStatus | null;
   };
-  /** metricKey → CY/PY amounts as entered (PY in `pyUnits` when set). */
-  values: Readonly<Record<string, { cy?: number | null; py?: number | null }>>;
+  /**
+   * metricKey → figures as entered: CY, PY (in `pyUnits` when set) and `pp` —
+   * the prior file's prior-year figure (PY−1), already in CY units.
+   */
+  values: Readonly<
+    Record<
+      string,
+      {
+        cy?: number | null;
+        py?: number | null;
+        pp?: number | null;
+        cySource?: MetricSourceType | null;
+        pySource?: MetricSourceType | null;
+      }
+    >
+  >;
   customMetrics?: readonly { key: string; label: string }[];
-  parameters?: AnalyticsAttentionParameters;
 }
 
-interface ProfileConfig {
-  /** Ratios / rules that are not meaningful for the profile. */
-  excludedRatios: readonly string[];
-  excludedRules: readonly string[];
-  /** System-suggested industry considerations for 03.2.3 (Manager confirms). */
-  considerations: readonly string[];
+type Period = 'cy' | 'py' | 'pp';
+type Getter = (key: string, period: Period) => number | null;
+
+// ── library resolution ───────────────────────────────────────────────────────
+
+interface Versioned {
+  version: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  active: boolean;
 }
 
-const WORKING_CAPITAL_RATIOS = [
-  'receivable_days',
-  'inventory_days',
-  'payable_days',
-  'current_ratio',
-  'working_capital',
-];
+/**
+ * The version of each item in force on `on` (ISO date): inside its effective
+ * window, highest version wins; a retired item (that version inactive) drops out.
+ */
+export function inForce<T extends Versioned>(
+  rows: readonly T[],
+  keyOf: (r: T) => string,
+  on: string,
+): T[] {
+  const best = new Map<string, T>();
+  for (const r of rows) {
+    if (r.effectiveFrom > on || (r.effectiveTo !== null && r.effectiveTo < on)) continue;
+    const k = keyOf(r);
+    const cur = best.get(k);
+    if (!cur || r.version > cur.version) best.set(k, r);
+  }
+  return [...best.values()].filter((r) => r.active);
+}
 
-/** Industry Analytics Profiles (§17) — versioned with ANALYTICS_METHODOLOGY_VERSION. */
-export const INDUSTRY_PROFILE_CONFIG: Readonly<Record<IndustryProfile, ProfileConfig>> = {
-  generic: {
-    excludedRatios: [],
-    excludedRules: [],
-    considerations: [],
+/** Resolve the methodology for `profileKey` on `on`; falls back to `generic`. */
+export function resolveMethodology(
+  library: {
+    metrics: readonly AnalyticsMetricDef[];
+    profiles: readonly AnalyticsProfileDef[];
+    rules: readonly AnalyticsRuleDef[];
   },
-  manufacturing: {
-    excludedRatios: [],
-    excludedRules: [],
-    considerations: [
-      'Inventory existence and valuation (raw material / WIP / finished goods mix)',
-      'Capacity utilisation and production KPIs',
-      'Commodity / input-price sensitivity',
-      'Standard costing and overhead absorption',
-    ],
-  },
-  trading: {
-    excludedRatios: [],
-    excludedRules: [],
-    considerations: [
-      'Customer and supplier concentration',
-      'Returns, discounts and rebates',
-      'Inventory ageing and slow-moving stock',
-    ],
-  },
-  services: {
-    excludedRatios: ['inventory_days'],
-    excludedRules: ['rel_revenue_inventory', 'movement_inventory'],
-    considerations: [
-      'Unbilled / accrued revenue and contract cut-off',
-      'Revenue per employee / utilisation metrics',
-      'Contract and customer concentration',
-    ],
-  },
-  construction: {
-    excludedRatios: [],
-    excludedRules: [],
-    considerations: [
-      'Order book and stage-of-completion measurement',
-      'Contract assets / liabilities, retentions and advances',
-      'Onerous contracts and cost-to-complete estimates',
-    ],
-  },
-  nbfc: {
-    excludedRatios: [...WORKING_CAPITAL_RATIOS, 'gross_margin'],
-    excludedRules: [
-      'rel_revenue_receivables',
-      'rel_revenue_inventory',
-      'gross_margin_shift',
-      'liquidity_current_ratio',
-    ],
-    considerations: [
-      'Sector-specific RBI regulatory metrics (capital adequacy, NPA / ECL staging)',
-      'Generic working-capital ratios do not apply — use the sector methodology',
-      'Asset-liability maturity profile and liquidity coverage',
-    ],
-  },
-  section8: {
-    excludedRatios: ['gross_margin', 'inventory_days'],
-    excludedRules: ['gross_margin_shift', 'rel_revenue_inventory'],
-    considerations: [
-      'Grants, donations and restricted funds',
-      'Programme / utilisation metrics and application of income',
-      'Compliance with registration conditions',
-    ],
-  },
-};
+  profileKey: string,
+  on: string,
+): { methodology: AnalyticsMethodology; profiles: AnalyticsProfileDef[] } | null {
+  const profiles = inForce(library.profiles, (p) => p.profileKey, on).sort((a, b) =>
+    a.profileKey === 'generic'
+      ? -1
+      : b.profileKey === 'generic'
+        ? 1
+        : a.label.localeCompare(b.label),
+  );
+  const profile =
+    profiles.find((p) => p.profileKey === profileKey) ??
+    profiles.find((p) => p.profileKey === 'generic') ??
+    null;
+  if (!profile) return null;
+  return {
+    profiles,
+    methodology: {
+      profile,
+      metrics: inForce(library.metrics, (m) => m.metricKey, on).sort(
+        (a, b) => a.sortOrder - b.sortOrder,
+      ),
+      rules: inForce(library.rules, (r) => r.ruleCode, on).sort((a, b) =>
+        a.ruleCode.localeCompare(b.ruleCode),
+      ),
+    },
+  };
+}
 
-const LABEL: Record<string, string> = Object.fromEntries(
-  FINANCIAL_METRIC_DEFS.map((d) => [d.key, d.label]),
-);
+/** Metrics offered in the dataset grid for a profile. */
+export function metricsForProfile(m: AnalyticsMethodology): AnalyticsMetricDef[] {
+  return m.metrics.filter(
+    (d) => d.appliesTo.length === 0 || d.appliesTo.includes(m.profile.profileKey),
+  );
+}
 
-/** Metrics whose standalone movement is worth surfacing. */
-const MOVEMENT_METRICS = [
-  'revenue',
-  'gross_profit',
-  'pbt',
-  'pat',
-  'cash_bank',
-  'trade_receivables',
-  'inventory',
-  'trade_payables',
-  'total_borrowings',
-  'employee_cost',
-  'finance_cost',
-  'related_party',
-] as const;
-
-/** Suggested (editable) FS areas per metric — never a final area decision (03.5). */
-const AREAS: Record<string, string[]> = {
-  revenue: ['Revenue'],
-  gross_profit: ['Revenue', 'Cost of sales'],
-  pbt: ['Profit & loss'],
-  pat: ['Profit & loss', 'Taxation'],
-  cash_bank: ['Cash & bank'],
-  trade_receivables: ['Trade receivables', 'Revenue'],
-  inventory: ['Inventory', 'Cost of sales'],
-  trade_payables: ['Trade payables', 'Purchases'],
-  total_borrowings: ['Borrowings'],
-  employee_cost: ['Employee benefits'],
-  finance_cost: ['Finance cost', 'Borrowings'],
-  related_party: ['Related parties'],
-};
+const ruleIsForProfile = (r: AnalyticsRuleDef, profile: string) =>
+  r.appliesTo.length === 0 || r.appliesTo.includes(profile);
 
 // ── number helpers ───────────────────────────────────────────────────────────
 
@@ -180,19 +171,95 @@ function pctLabel(cy: number | null, py: number | null): string {
 }
 
 const fmtPct = (n: number) => `${n > 0 ? '+' : ''}${round(n)}%`;
+const signed = (n: number, dp = 1) => `${n > 0 ? '+' : ''}${round(n, dp)}`;
+
+const UNIT_DP: Record<RatioUnit, number> = { '%': 1, days: 1, x: 2, amount: 2, per_unit: 2 };
+/** A ratio value with its unit, e.g. `12.5%`, `64 days`, `1.52×`. */
+function withUnit(v: number, unit: RatioUnit): string {
+  const n = round(v, UNIT_DP[unit]);
+  return unit === '%' ? `${n}%` : unit === 'days' ? `${n} days` : unit === 'x' ? `${n}×` : `${n}`;
+}
+/** A change in a ratio, e.g. `+3.1 points`, `−12 days`. */
+function deltaWithUnit(d: number, unit: RatioUnit): string {
+  const n = signed(d, UNIT_DP[unit]);
+  return unit === '%' ? `${n} points` : unit === 'days' ? `${n} days` : unit === 'x' ? `${n}×` : n;
+}
+const unitWord = (unit: RatioUnit | null) =>
+  unit === '%' ? 'points' : unit === 'days' ? 'days' : unit === 'x' ? '×' : '';
+
+/** Render `{{name}}` placeholders; unknown names render empty. */
+export function renderWording(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, k: string) => vars[k] ?? '');
+}
+
+const attentionRank: Record<PlanningAttention, number> = {
+  standard: 0,
+  enhanced: 1,
+  immediate_partner: 2,
+};
+const maxAttention = (a: PlanningAttention, b: PlanningAttention) =>
+  attentionRank[b] > attentionRank[a] ? b : a;
+
+/** Base attention raised by the rule's Enhanced / Immediate Partner levels. */
+function attentionFor(rule: AnalyticsRuleDef, size: number): PlanningAttention {
+  let a = rule.suggestedAttention;
+  if (rule.enhancedAt !== null && Math.abs(size) >= rule.enhancedAt)
+    a = maxAttention(a, PLANNING_ATTENTION.enhanced);
+  if (rule.immediateAt !== null && Math.abs(size) >= rule.immediateAt) {
+    a = maxAttention(a, PLANNING_ATTENTION.immediatePartner);
+  }
+  return a;
+}
+
+/** e.g. `≥ 25% movement (Enhanced ≥ 50; Immediate Partner ≥ 100)`. */
+export function parameterText(rule: AnalyticsRuleDef): string | null {
+  if (rule.kind === 'ratio' || rule.parameterValue === null) return null;
+  const p = rule.parameterValue;
+  const unit =
+    rule.parameterType === 'percent' ? '%' : rule.parameterType === 'relationship' ? ' points' : '';
+  const def = rule.definition;
+  let main: string;
+  if (def.kind === 'threshold') {
+    const op = { lt: '<', lte: '≤', gt: '>', gte: '≥' }[def.op];
+    main = `${op} ${p}`;
+  } else if (def.kind === 'trend_reversal') {
+    main = `direction reverses, each move ≥ ${p}`;
+  } else if (def.kind === 'ratio_shift') {
+    main = `shift ≥ ${p}`;
+  } else {
+    main = `≥ ${p}${unit}${def.kind === 'movement' ? ' movement' : def.kind === 'relationship' ? ' gap' : ' change'}`;
+  }
+  if (def.kind === 'ratio_change' && def.crossBelow !== undefined)
+    main += `, or falls below ${def.crossBelow}`;
+  const lv = [
+    rule.enhancedAt !== null ? `Enhanced ≥ ${rule.enhancedAt}` : null,
+    rule.immediateAt !== null ? `Immediate Partner ≥ ${rule.immediateAt}` : null,
+  ].filter(Boolean);
+  return lv.length ? `${main} (${lv.join('; ')})` : main;
+}
 
 // ── engine ───────────────────────────────────────────────────────────────────
 
+interface RatioCalc extends RatioResult {
+  /** PY−1 value (from the prior file), used by trend rules only. */
+  pp: number | null;
+}
+
 export function runPreliminaryAnalytics(input: AnalyticsInput): AnalyticsResult {
-  const params = input.parameters ?? DEFAULT_ANALYTICS_PARAMETERS;
-  const profile = INDUSTRY_PROFILE_CONFIG[input.profile];
-  const { header } = input;
+  const { methodology: m, header } = input;
+  const profile = m.profile;
   const warnings: AnalyticsWarning[] = [];
   const ready = !!(header.periodEnd && header.currency && header.units);
   if (!ready) {
     warnings.push({
       code: 'header_incomplete',
       message: 'Record the period end, currency and units before entering figures.',
+    });
+  }
+  if (header.dataStatus && header.dataStatus !== 'final') {
+    warnings.push({
+      code: 'unaudited_data',
+      message: `Current-year figures are ${header.dataStatus === 'draft' ? 'draft' : 'management accounts'} — unaudited; analytics are preliminary.`,
     });
   }
 
@@ -229,21 +296,24 @@ export function runPreliminaryAnalytics(input: AnalyticsInput): AnalyticsResult 
     }
   }
 
-  const v = (key: string, period: 'cy' | 'py'): number | null => {
+  const defs = new Map(m.metrics.map((d) => [d.metricKey, d]));
+  const isAmount = (k: string) => (defs.get(k)?.valueType ?? 'amount') === 'amount';
+  const v: Getter = (key, period) => {
     const raw = input.values[key]?.[period];
     if (raw === null || raw === undefined) return null;
-    if (period === 'py') return pyFactor === null ? null : raw * pyFactor;
+    if (period === 'py' && isAmount(key)) return pyFactor === null ? null : raw * pyFactor;
     return raw;
   };
   const labelOf = (key: string) =>
-    LABEL[key] ?? input.customMetrics?.find((c) => c.key === key)?.label ?? key;
+    defs.get(key)?.label ?? input.customMetrics?.find((c) => c.key === key)?.label ?? key;
 
-  // Movements for every metric with any figure, canonical order then custom.
-  const orderedKeys = [
-    ...FINANCIAL_METRIC_DEFS.map((d) => d.key as string),
+  // Movements for every metric with a figure: library order, custom, then any other.
+  const ordered = [
+    ...m.metrics.map((d) => d.metricKey),
     ...(input.customMetrics ?? []).map((c) => c.key),
   ];
-  const movements: MetricMovement[] = orderedKeys
+  for (const k of Object.keys(input.values)) if (!ordered.includes(k)) ordered.push(k);
+  const movements: MetricMovement[] = ordered
     .filter((k) => input.values[k] && (input.values[k]!.cy != null || input.values[k]!.py != null))
     .map((k) => {
       const cy = v(k, 'cy');
@@ -259,394 +329,728 @@ export function runPreliminaryAnalytics(input: AnalyticsInput): AnalyticsResult 
       };
     });
 
-  const ratios = computeRatios(v, labelOf).map((r) =>
-    profile.excludedRatios.includes(r.key)
-      ? {
-          ...r,
-          cy: null,
-          py: null,
-          status: 'not_applicable' as const,
-          reason: 'Not meaningful for this industry profile.',
-        }
-      : r,
-  );
+  const ctx = new EvalContext(profile, v, labelOf);
+  const rules = m.rules.filter((r) => ruleIsForProfile(r, profile.profileKey));
+  const excluded = (r: AnalyticsRuleDef) => r.excludedFor.includes(profile.profileKey);
 
-  const exceptions = ready
-    ? deriveExceptions(v, labelOf, params).filter((e) => !profile.excludedRules.includes(e.ruleKey))
-    : [];
+  // Ratios (§12).
+  const ratioMap = new Map<string, RatioCalc>();
+  for (const r of rules) {
+    if (r.definition.kind !== 'ratio') continue;
+    const calc = excluded(r) ? notApplicableRatio(r, ctx) : computeRatio(r, r.definition, ctx);
+    ratioMap.set(r.ruleKey, calc);
+  }
+  const ratios: RatioResult[] = [...ratioMap.values()].map(({ pp: _pp, ...r }) => r);
+
+  // Attention rules (§13, §15).
+  const exceptions: DerivedAnalyticsException[] = [];
+  const statuses: AnalyticsRuleStatus[] = [];
+  const status = (r: AnalyticsRuleDef, outcome: AnalyticsRuleOutcome, reason: string | null) =>
+    statuses.push({
+      ruleCode: r.ruleCode,
+      ruleVersion: r.version,
+      ruleKey: r.ruleKey,
+      name: r.name,
+      kind: r.kind,
+      formula: r.formula,
+      parameterText: parameterText(r),
+      outcome,
+      reason,
+    });
+
+  for (const r of rules) {
+    if (r.definition.kind === 'ratio') {
+      const calc = ratioMap.get(r.ruleKey)!;
+      status(
+        r,
+        calc.status === 'calculated'
+          ? 'not_flagged'
+          : calc.status === 'not_applicable'
+            ? 'not_applicable'
+            : 'insufficient_data',
+        calc.status === 'calculated' ? null : calc.reason,
+      );
+      continue;
+    }
+    if (excluded(r)) {
+      status(r, 'not_applicable', 'Not meaningful for this industry profile.');
+      continue;
+    }
+    if (!ready) {
+      status(r, 'insufficient_data', 'The dataset header is incomplete.');
+      continue;
+    }
+    const dq = dataQualityProblem(r, header.dataStatus ?? null, input.values);
+    if (dq) {
+      status(r, 'data_quality', dq);
+      continue;
+    }
+    const outcome = evaluateRule(r, r.definition, ctx, ratioMap);
+    if (outcome.kind === 'skip') {
+      status(r, 'insufficient_data', outcome.reason);
+    } else if (outcome.kind === 'quiet') {
+      status(r, 'not_flagged', null);
+    } else {
+      status(r, 'flagged', null);
+      const ref = `${r.ruleCode} v${r.version}, ${r.methodologyVersion}; a planning attention parameter, not a materiality threshold`;
+      exceptions.push({
+        ruleKey: r.ruleKey,
+        ruleCode: r.ruleCode,
+        ruleVersion: r.version,
+        methodologyVersion: r.methodologyVersion,
+        kind: r.definition.kind,
+        observation: outcome.observation,
+        whyFlagged: `${outcome.why} (${ref}).`,
+        whyMayMatter: r.whyMayMatter,
+        suggestedAttention: outcome.attention,
+        affectedAreas: [...r.affectedAreas],
+        values: snapshot(ctx.usedMetrics(r), v),
+      });
+    }
+  }
 
   return {
-    methodologyVersion: ANALYTICS_METHODOLOGY_VERSION,
-    profile: input.profile,
-    parameters: params,
+    methodologyVersion: profile.methodologyVersion,
+    profile: profile.profileKey,
+    profileLabel: profile.label,
+    rules: statuses,
     ready,
     warnings,
     movements,
     ratios,
-    exceptions,
+    exceptions: ready ? exceptions : [],
   };
 }
 
-type Getter = (key: string, period: 'cy' | 'py') => number | null;
-
-function computeRatios(v: Getter, labelOf: (k: string) => string): RatioResult[] {
-  const out: RatioResult[] = [];
-  const inputs = (...keys: string[]) =>
-    keys.map((k) => ({ metricKey: k, label: labelOf(k), cy: v(k, 'cy'), py: v(k, 'py') }));
-
-  /** num / den × scale for each period, with explicit missing / non-meaningful handling. */
-  const ratio = (
-    key: string,
-    label: string,
-    formula: string,
-    unit: RatioResult['unit'],
-    num: string,
-    den: string,
-    scale: number,
-    denMustBePositive = true,
-  ) => {
-    const calc = (p: 'cy' | 'py') => {
-      const n = v(num, p);
-      const d = v(den, p);
-      if (n === null || d === null) return { value: null, why: 'missing' as const };
-      if (d === 0 || (denMustBePositive && d < 0)) return { value: null, why: 'nm' as const };
-      return { value: round((n / d) * scale, unit === 'x' ? 2 : 1), why: null };
-    };
-    const cy = calc('cy');
-    const py = calc('py');
-    const any = cy.value !== null || py.value !== null;
-    const status: RatioResult['status'] = any
-      ? 'calculated'
-      : cy.why === 'nm' || py.why === 'nm'
-        ? 'not_meaningful'
-        : 'insufficient_data';
-    out.push({
-      key,
-      label,
-      formula,
-      unit,
-      cy: cy.value,
-      py: py.value,
-      status,
-      reason:
-        status === 'insufficient_data'
-          ? `Needs ${labelOf(num)} and ${labelOf(den)}.`
-          : status === 'not_meaningful'
-            ? `${labelOf(den)} is zero or negative — ratio not meaningful.`
-            : null,
-      inputs: inputs(num, den),
-    });
-  };
-
-  ratio(
-    'gross_margin',
-    'Gross margin',
-    'Gross profit / Revenue × 100',
-    '%',
-    'gross_profit',
-    'revenue',
-    100,
+function snapshot(keys: readonly string[], v: Getter): Record<string, number | null> {
+  return Object.fromEntries(
+    [...new Set(keys)].flatMap((k) => [
+      [`${k}_cy`, v(k, 'cy')],
+      [`${k}_py`, v(k, 'py')],
+    ]),
   );
-  ratio(
-    'pbt_margin',
-    'PBT margin',
-    'Profit before tax / Revenue × 100',
-    '%',
-    'pbt',
-    'revenue',
-    100,
-  );
-  ratio('pat_margin', 'PAT margin', 'Profit after tax / Revenue × 100', '%', 'pat', 'revenue', 100);
-  ratio(
-    'receivable_days',
-    'Receivable days',
-    'Trade receivables (closing) / Revenue × 365',
-    'days',
-    'trade_receivables',
-    'revenue',
-    365,
-  );
-  // Never Revenue: cost of sales is required (§12).
-  ratio(
-    'inventory_days',
-    'Inventory days',
-    'Inventory (closing) / Cost of sales × 365',
-    'days',
-    'inventory',
-    'cost_of_sales',
-    365,
-  );
-  // Purchases preferred, cost of sales as the disclosed alternative; never Revenue.
-  const payableBase =
-    v('purchases', 'cy') !== null || v('purchases', 'py') !== null ? 'purchases' : 'cost_of_sales';
-  ratio(
-    'payable_days',
-    'Payable days',
-    `Trade payables (closing) / ${labelOf(payableBase)} × 365`,
-    'days',
-    'trade_payables',
-    payableBase,
-    365,
-  );
-  ratio(
-    'current_ratio',
-    'Current ratio',
-    'Current assets / Current liabilities',
-    'x',
-    'current_assets',
-    'current_liabilities',
-    1,
-  );
-  ratio(
-    'debt_equity',
-    'Debt to equity',
-    'Total borrowings / Net worth (debt = total borrowings)',
-    'x',
-    'total_borrowings',
-    'net_worth',
-    1,
-  );
-  ratio(
-    'finance_cost_rate',
-    'Finance cost to borrowings',
-    'Finance cost / Closing borrowings × 100',
-    '%',
-    'finance_cost',
-    'total_borrowings',
-    100,
-  );
-  ratio(
-    'employee_cost_ratio',
-    'Employee-cost ratio',
-    'Employee cost / Revenue × 100',
-    '%',
-    'employee_cost',
-    'revenue',
-    100,
-  );
-
-  // Working capital (amount): receivables + inventory − payables.
-  const wc = (p: 'cy' | 'py') => {
-    const r = v('trade_receivables', p);
-    const i = v('inventory', p);
-    const t = v('trade_payables', p);
-    if (r === null && i === null && t === null) return null;
-    return (r ?? 0) + (i ?? 0) - (t ?? 0);
-  };
-  const wcCy = wc('cy');
-  const wcPy = wc('py');
-  out.push({
-    key: 'working_capital',
-    label: 'Trade working capital',
-    formula: 'Trade receivables + Inventory − Trade payables',
-    unit: 'amount',
-    cy: wcCy,
-    py: wcPy,
-    status: wcCy === null && wcPy === null ? 'insufficient_data' : 'calculated',
-    reason:
-      wcCy === null && wcPy === null
-        ? 'Needs trade receivables, inventory or trade payables.'
-        : null,
-    inputs: inputs('trade_receivables', 'inventory', 'trade_payables'),
-  });
-  return out;
 }
 
-function deriveExceptions(
-  v: Getter,
-  labelOf: (k: string) => string,
-  p: AnalyticsAttentionParameters,
-): DerivedAnalyticsException[] {
-  const out: DerivedAnalyticsException[] = [];
-  const attention = (size: number, param: number): PlanningAttention =>
-    Math.abs(size) >= param * p.enhancedMultiple
-      ? PLANNING_ATTENTION.enhanced
-      : PLANNING_ATTENTION.standard;
-  const growth = (k: string) => pctChange(v(k, 'cy'), v(k, 'py'));
-  const snap = (...keys: string[]) =>
-    Object.fromEntries(
-      keys.flatMap((k) => [
-        [`${k}_cy`, v(k, 'cy')],
-        [`${k}_py`, v(k, 'py')],
-      ]),
-    );
-
-  // Single-line movements.
-  for (const k of MOVEMENT_METRICS) {
-    const cy = v(k, 'cy');
-    const py = v(k, 'py');
-    if (cy === null || py === null) continue;
-    const g = growth(k);
-    if (py === 0 && cy !== 0 && k === 'related_party') {
-      out.push({
-        ruleKey: `movement_${k}`,
-        kind: 'movement',
-        observation: `${labelOf(k)} is ${cy} this year against nil last year (new relationship).`,
-        whyFlagged: 'A new related-party relationship or balance arose during the year.',
-        suggestedAttention: PLANNING_ATTENTION.standard,
-        affectedAreas: AREAS[k] ?? [],
-        values: snap(k),
-      });
-      continue;
-    }
-    if (g === null || Math.abs(g) < p.movementPct) continue;
-    out.push({
-      ruleKey: `movement_${k}`,
-      kind: 'movement',
-      observation: `${labelOf(k)} moved ${fmtPct(g)} (CY ${cy} vs PY ${py}).`,
-      whyFlagged: `Movement of ${fmtPct(g)} is at or above the planning attention parameter of ${p.movementPct}% (methodology ${ANALYTICS_METHODOLOGY_VERSION}; not a materiality threshold).`,
-      suggestedAttention: attention(g, p.movementPct),
-      affectedAreas: AREAS[k] ?? [],
-      values: snap(k),
-    });
+/** §15 minimum data quality: dataset status and the source of the figures used. */
+function dataQualityProblem(
+  r: AnalyticsRuleDef,
+  dataStatus: DatasetStatus | null,
+  values: AnalyticsInput['values'],
+): string | null {
+  if (r.minDataStatus.length && (!dataStatus || !r.minDataStatus.includes(dataStatus))) {
+    return `Needs dataset status ${r.minDataStatus.join(' / ')} (dataset is ${dataStatus ?? 'not set'}).`;
   }
-
-  // Relationship analytics (§13) — compare growth rates across metrics.
-  const relationship = (
-    ruleKey: string,
-    a: string,
-    b: string,
-    observation: (ga: number, gb: number) => string,
-    areas: string[],
-  ) => {
-    const ga = growth(a);
-    const gb = growth(b);
-    if (ga === null || gb === null) return;
-    const gap = ga - gb;
-    if (Math.abs(gap) < p.relationshipGapPts) return;
-    out.push({
-      ruleKey,
-      kind: 'relationship',
-      observation: observation(ga, gb),
-      whyFlagged: `Growth rates diverge by ${round(Math.abs(gap))} percentage points, at or above the relationship attention parameter of ${p.relationshipGapPts} points.`,
-      suggestedAttention: attention(gap, p.relationshipGapPts),
-      affectedAreas: areas,
-      values: snap(a, b),
-    });
-  };
-
-  relationship(
-    'rel_revenue_receivables',
-    'trade_receivables',
-    'revenue',
-    (gr, grev) =>
-      `Trade receivables moved ${fmtPct(gr)} while revenue moved ${fmtPct(grev)} — receivables have grown ${gr > grev ? 'materially faster' : 'materially slower'} than revenue.`,
-    ['Trade receivables', 'Revenue'],
-  );
-  const costBase =
-    v('cost_of_sales', 'cy') !== null && v('cost_of_sales', 'py') !== null
-      ? 'cost_of_sales'
-      : 'revenue';
-  relationship(
-    'rel_revenue_inventory',
-    'inventory',
-    costBase,
-    (gi, gb) =>
-      `Inventory moved ${fmtPct(gi)} while ${labelOf(costBase).toLowerCase()} moved ${fmtPct(gb)} — inventory movement is inconsistent with the ${costBase === 'revenue' ? 'revenue' : 'cost'} trend.`,
-    ['Inventory', 'Cost of sales'],
-  );
-  relationship(
-    'rel_borrowings_finance_cost',
-    'finance_cost',
-    'total_borrowings',
-    (gf, gb) =>
-      `Finance cost moved ${fmtPct(gf)} while borrowings moved ${fmtPct(gb)} — the finance-cost movement appears inconsistent with the debt movement.`,
-    ['Finance cost', 'Borrowings'],
-  );
-  // Profit vs cash: directions differ and the gap is large.
-  {
-    const gp = growth('pat');
-    const gc = growth('cash_bank');
-    if (
-      gp !== null &&
-      gc !== null &&
-      Math.sign(gp) !== Math.sign(gc) &&
-      Math.abs(gp - gc) >= p.relationshipGapPts
-    ) {
-      out.push({
-        ruleKey: 'rel_profit_cash',
-        kind: 'relationship',
-        observation: `Profit after tax moved ${fmtPct(gp)} while cash & bank moved ${fmtPct(gc)} — the profit trend is inconsistent with the cash trend.`,
-        whyFlagged: `Profit and cash moved in opposite directions, diverging by ${round(Math.abs(gp - gc))} percentage points (parameter ${p.relationshipGapPts} points).`,
-        suggestedAttention: attention(gp - gc, p.relationshipGapPts),
-        affectedAreas: ['Revenue', 'Trade receivables', 'Cash & bank'],
-        values: snap('pat', 'cash_bank'),
-      });
-    }
-  }
-
-  // Ratio shifts (percentage points).
-  const shift = (ruleKey: string, num: string, den: string, label: string, areas: string[]) => {
-    const r = (per: 'cy' | 'py') => {
-      const n = v(num, per);
-      const d = v(den, per);
-      return n === null || d === null || d <= 0 ? null : (n / d) * 100;
-    };
-    const cy = r('cy');
-    const py = r('py');
-    if (cy === null || py === null) return;
-    const d = cy - py;
-    if (Math.abs(d) < p.ratioShiftPts) return;
-    out.push({
-      ruleKey,
-      kind: 'ratio_shift',
-      observation: `${label} moved from ${round(py)}% to ${round(cy)}% (${d > 0 ? '+' : ''}${round(d)} points).`,
-      whyFlagged: `A shift of ${round(Math.abs(d))} points is at or above the ratio attention parameter of ${p.ratioShiftPts} points.`,
-      suggestedAttention: attention(d, p.ratioShiftPts),
-      affectedAreas: areas,
-      values: snap(num, den),
-    });
-  };
-  shift('gross_margin_shift', 'gross_profit', 'revenue', 'Gross margin', [
-    'Revenue',
-    'Cost of sales',
-    'Inventory',
-  ]);
-  shift('rel_revenue_employee_cost', 'employee_cost', 'revenue', 'Employee-cost ratio', [
-    'Employee benefits',
-  ]);
-
-  // Liquidity: current ratio falls below 1, or moves sharply.
-  {
-    const ca = (per: 'cy' | 'py') => v('current_assets', per);
-    const cl = (per: 'cy' | 'py') => v('current_liabilities', per);
-    const cyR = ca('cy') !== null && (cl('cy') ?? 0) > 0 ? ca('cy')! / cl('cy')! : null;
-    const pyR = ca('py') !== null && (cl('py') ?? 0) > 0 ? ca('py')! / cl('py')! : null;
-    if (cyR !== null && pyR !== null) {
-      const change = pctChange(cyR, pyR)!;
-      const crossed = cyR < 1 && pyR >= 1;
-      if (crossed || Math.abs(change) >= p.movementPct) {
-        out.push({
-          ruleKey: 'liquidity_current_ratio',
-          kind: 'liquidity',
-          observation: `Current ratio moved from ${round(pyR, 2)} to ${round(cyR, 2)}${crossed ? ' and is now below 1' : ''}.`,
-          whyFlagged: crossed
-            ? 'Current liabilities now exceed current assets.'
-            : `The current ratio moved ${fmtPct(change)}, at or above the ${p.movementPct}% attention parameter.`,
-          suggestedAttention: crossed
-            ? PLANNING_ATTENTION.enhanced
-            : attention(change, p.movementPct),
-          affectedAreas: ['Going concern / liquidity', 'Borrowings'],
-          values: snap('current_assets', 'current_liabilities'),
-        });
+  if (r.minSourceTypes.length) {
+    for (const k of r.requiredMetrics) {
+      const val = values[k];
+      for (const [amount, src] of [
+        [val?.cy, val?.cySource],
+        [val?.py, val?.pySource],
+      ] as const) {
+        if (amount === null || amount === undefined) continue;
+        if (!src || !r.minSourceTypes.includes(src)) {
+          return `Needs figures sourced from ${r.minSourceTypes.join(' / ')}.`;
+        }
       }
     }
   }
+  return null;
+}
 
-  // Negative net worth.
-  {
-    const nw = v('net_worth', 'cy');
-    if (nw !== null && nw < 0) {
-      out.push({
-        ruleKey: 'negative_net_worth',
-        kind: 'liquidity',
-        observation: `Net worth is negative at the period end (${nw}).`,
-        whyFlagged: 'Total equity is below zero.',
-        suggestedAttention: PLANNING_ATTENTION.enhanced,
-        affectedAreas: ['Going concern / liquidity', 'Equity'],
-        values: snap('net_worth'),
-      });
+// ── expressions ──────────────────────────────────────────────────────────────
+
+class EvalContext {
+  private readonly used = new Map<string, Set<string>>();
+  private current: string | null = null;
+
+  constructor(
+    readonly profile: AnalyticsProfileDef,
+    readonly v: Getter,
+    readonly labelOf: (k: string) => string,
+  ) {}
+
+  begin(ruleKey: string): void {
+    this.current = ruleKey;
+    if (!this.used.has(ruleKey)) this.used.set(ruleKey, new Set());
+  }
+  touch(key: string): void {
+    if (this.current) this.used.get(this.current)!.add(key);
+  }
+  usedMetrics(r: AnalyticsRuleDef): string[] {
+    return [...(this.used.get(r.ruleKey) ?? []), ...r.requiredMetrics];
+  }
+
+  /** First base metric with figures in both years, else in either, else the first listed. */
+  resolveBase(base: 'inventory_cost' | 'payable_cost' | 'inventory_trend'): string | null {
+    const p = this.profile;
+    const list =
+      base === 'payable_cost'
+        ? p.payableCostBases
+        : base === 'inventory_cost'
+          ? p.inventoryCostBases
+          : [
+              ...p.inventoryCostBases,
+              ...(p.inventoryTrendFallback ? [p.inventoryTrendFallback] : []),
+            ];
+    const both = list.find((k) => this.v(k, 'cy') !== null && this.v(k, 'py') !== null);
+    if (both) return both;
+    // The trend fallback is only for a relationship, which needs both years anyway.
+    const either = list.find((k) => this.v(k, 'cy') !== null || this.v(k, 'py') !== null);
+    return either ?? list[0] ?? null;
+  }
+
+  debtLabel(): string {
+    return this.profile.debtMetrics.map((k) => this.labelOf(k)).join(' + ');
+  }
+
+  label(e: AnalyticsExpr): string {
+    if ('metric' in e) return this.labelOf(e.metric);
+    if ('debt' in e)
+      return this.profile.debtMetrics.length === 1
+        ? this.labelOf(this.profile.debtMetrics[0]!)
+        : 'Debt';
+    if ('base' in e) {
+      const b = this.resolveBase(e.base);
+      return b ? this.labelOf(b) : 'Cost base';
+    }
+    return [
+      ...e.sum.map((x) => this.label(x)),
+      ...(e.less ?? []).map((x) => `− ${this.label(x)}`),
+    ].join(' + ');
+  }
+
+  /** Metric keys an expression reads (after resolving bases and the debt definition). */
+  keys(e: AnalyticsExpr): string[] {
+    if ('metric' in e) return [e.metric];
+    if ('debt' in e) return [...this.profile.debtMetrics];
+    if ('base' in e) {
+      const b = this.resolveBase(e.base);
+      return b ? [b] : [];
+    }
+    return [...e.sum, ...(e.less ?? [])].flatMap((x) => this.keys(x));
+  }
+
+  /** Closing (or average) value; `notes` collects the basis disclosure. */
+  value(e: AnalyticsExpr, period: Period, notes: Set<string>): number | null {
+    if ('sum' in e) {
+      const plus = e.sum.map((x) => this.value(x, period, notes));
+      const minus = (e.less ?? []).map((x) => this.value(x, period, notes));
+      if ([...plus, ...minus].every((x) => x === null)) return null;
+      return (
+        plus.reduce<number>((s, x) => s + (x ?? 0), 0) -
+        minus.reduce<number>((s, x) => s + (x ?? 0), 0)
+      );
+    }
+    const keys = this.keys(e);
+    if (!keys.length) return null;
+    const balance = e.balance ?? 'closing';
+    const useAverage =
+      balance === 'average'
+        ? this.profile.averageBalances
+        : balance === 'finance_cost_basis'
+          ? this.profile.financeCostBasis === 'average'
+          : false;
+    let total: number | null = null;
+    for (const k of keys) {
+      this.touch(k);
+      const closing = this.v(k, period);
+      if (closing === null) continue;
+      let x = closing;
+      if (useAverage) {
+        const opening =
+          period === 'cy' ? this.v(k, 'py') : period === 'py' ? this.v(k, 'pp') : null;
+        if (opening !== null) {
+          x = (opening + closing) / 2;
+          notes.add(`${period.toUpperCase()} on average balance ((opening + closing) / 2)`);
+        } else if (period !== 'pp') {
+          notes.add(`${period.toUpperCase()} on closing balance — no opening balance available`);
+        }
+      }
+      total = (total ?? 0) + x;
+    }
+    return total;
+  }
+}
+
+function notApplicableRatio(r: AnalyticsRuleDef, ctx: EvalContext): RatioCalc {
+  const def = r.definition as Extract<AnalyticsRuleDefinition, { kind: 'ratio' }>;
+  return {
+    key: r.ruleKey,
+    label: r.name,
+    formula: r.formula,
+    unit: def.unit,
+    cy: null,
+    py: null,
+    pp: null,
+    status: 'not_applicable',
+    reason: 'Not meaningful for this industry profile.',
+    ruleCode: r.ruleCode,
+    ruleVersion: r.version,
+    basisNote: null,
+    inputs: inputsOf(def, ctx),
+  };
+}
+
+function inputsOf(
+  def: Extract<AnalyticsRuleDefinition, { kind: 'ratio' }>,
+  ctx: EvalContext,
+): RatioResult['inputs'] {
+  const keys = [
+    ...new Set(
+      [def.value, def.num, def.den]
+        .filter((e): e is AnalyticsExpr => !!e)
+        .flatMap((e) => ctx.keys(e)),
+    ),
+  ];
+  return keys.map((k) => ({
+    metricKey: k,
+    label: ctx.labelOf(k),
+    cy: ctx.v(k, 'cy'),
+    py: ctx.v(k, 'py'),
+  }));
+}
+
+function computeRatio(
+  r: AnalyticsRuleDef,
+  def: Extract<AnalyticsRuleDefinition, { kind: 'ratio' }>,
+  ctx: EvalContext,
+): RatioCalc {
+  ctx.begin(r.ruleKey);
+  const notes = new Set<string>();
+  const dp = UNIT_DP[def.unit];
+  const denPositive = def.denPositive ?? true;
+
+  const calc = (p: Period, n: Set<string>) => {
+    if (def.value) {
+      const x = ctx.value(def.value, p, n);
+      return {
+        value: x === null ? null : round(x, dp),
+        why: x === null ? ('missing' as const) : null,
+      };
+    }
+    const num = ctx.value(def.num!, p, n);
+    const den = ctx.value(def.den!, p, n);
+    if (num === null || den === null) return { value: null, why: 'missing' as const };
+    if (den === 0 || (denPositive && den < 0)) return { value: null, why: 'nm' as const };
+    return { value: round((num / den) * (def.scale ?? 1), dp), why: null };
+  };
+  const cy = calc('cy', notes);
+  const py = calc('py', notes);
+  const pp = calc('pp', new Set());
+  const any = cy.value !== null || py.value !== null;
+  const status: RatioResult['status'] = any
+    ? 'calculated'
+    : cy.why === 'nm' || py.why === 'nm'
+      ? 'not_meaningful'
+      : 'insufficient_data';
+
+  // Disclose the basis: cost base chosen, debt definition, average vs closing.
+  const exprs = [def.value, def.num, def.den].filter((e): e is AnalyticsExpr => !!e);
+  const basis: string[] = [];
+  const walk = (e: AnalyticsExpr) => {
+    if ('sum' in e) return [...e.sum, ...(e.less ?? [])].forEach(walk);
+    if ('base' in e) basis.push(`Cost base: ${ctx.label(e)}`);
+    if ('debt' in e) basis.push(`Debt = ${ctx.debtLabel()}`);
+  };
+  exprs.forEach(walk);
+  basis.push(...notes);
+  const missingLabels = () => {
+    if (def.value) return ctx.label(def.value);
+    return `${ctx.label(def.num!)} and ${ctx.label(def.den!)}`;
+  };
+
+  return {
+    key: r.ruleKey,
+    label: r.name,
+    formula: r.formula,
+    unit: def.unit,
+    cy: cy.value,
+    py: py.value,
+    pp: pp.value,
+    status,
+    reason:
+      status === 'insufficient_data'
+        ? `Needs ${missingLabels()}.`
+        : status === 'not_meaningful'
+          ? `${def.den ? ctx.label(def.den) : 'The denominator'} is zero or negative — ratio not meaningful.`
+          : null,
+    ruleCode: r.ruleCode,
+    ruleVersion: r.version,
+    basisNote: basis.length ? [...new Set(basis)].join('; ') : null,
+    inputs: inputsOf(def, ctx),
+  };
+}
+
+type Outcome =
+  | { kind: 'skip'; reason: string }
+  | { kind: 'quiet' }
+  | { kind: 'flag'; observation: string; why: string; attention: PlanningAttention };
+
+function evaluateRule(
+  r: AnalyticsRuleDef,
+  def: Exclude<AnalyticsRuleDefinition, { kind: 'ratio' }>,
+  ctx: EvalContext,
+  ratios: Map<string, RatioCalc>,
+): Outcome {
+  ctx.begin(r.ruleKey);
+  const p = r.parameterValue ?? 0;
+  const words = (vars: Record<string, string>, template = r.signalWording) =>
+    renderWording(template, vars);
+  const ratioOf = (key: string): RatioCalc | { unavailable: string } => {
+    const x = ratios.get(key);
+    if (!x) return { unavailable: `Ratio "${key}" is not in force for this profile.` };
+    if (x.status === 'not_applicable')
+      return { unavailable: `${x.label} is not applicable for this profile.` };
+    x.inputs.forEach((i) => ctx.touch(i.metricKey));
+    return x;
+  };
+
+  switch (def.kind) {
+    case 'movement': {
+      const cy = ctx.value({ metric: def.metric }, 'cy', new Set());
+      const py = ctx.value({ metric: def.metric }, 'py', new Set());
+      const label = ctx.labelOf(def.metric);
+      if (cy === null || py === null) return { kind: 'skip', reason: `Needs CY and PY ${label}.` };
+      if (py === 0) {
+        if (def.newFromNil && cy !== 0) {
+          return {
+            kind: 'flag',
+            observation: words(
+              { label, cy: String(cy), py: String(py) },
+              def.nilWording ?? r.signalWording,
+            ),
+            why: 'The figure is new this year (nil in the prior year)',
+            attention: r.suggestedAttention,
+          };
+        }
+        return { kind: 'skip', reason: 'Prior year is nil — % movement not meaningful (N/M).' };
+      }
+      const g = pctChange(cy, py)!;
+      if (Math.abs(g) < p) return { kind: 'quiet' };
+      return {
+        kind: 'flag',
+        observation: words({
+          label,
+          change: fmtPct(g),
+          cy: String(round(cy, 2)),
+          py: String(round(py, 2)),
+        }),
+        why: `Movement of ${fmtPct(g)} is at or above the planning attention parameter of ${p}%`,
+        attention: attentionFor(r, g),
+      };
+    }
+
+    case 'relationship': {
+      const n = new Set<string>();
+      const growth = (e: AnalyticsExpr) => pctChange(ctx.value(e, 'cy', n), ctx.value(e, 'py', n));
+      const ga = growth(def.a);
+      const gb = growth(def.b);
+      if (ga === null || gb === null) {
+        return {
+          kind: 'skip',
+          reason: `Needs CY and PY ${ctx.label(def.a)} and ${ctx.label(def.b)} (PY not nil).`,
+        };
+      }
+      const gap = ga - gb;
+      if (def.oppositeDirection && Math.sign(ga) === Math.sign(gb)) return { kind: 'quiet' };
+      if (Math.abs(gap) < p) return { kind: 'quiet' };
+      const aLabel = ctx.label(def.a);
+      const bLabel = ctx.label(def.b);
+      const fallback = [def.a, def.b].some(
+        (e) =>
+          'base' in e &&
+          e.base === 'inventory_trend' &&
+          ctx.resolveBase(e.base) === ctx.profile.inventoryTrendFallback,
+      );
+      const why =
+        (def.oppositeDirection
+          ? `The two moved in opposite directions, diverging by ${round(Math.abs(gap))} percentage points (relationship attention parameter ${p} points)`
+          : `Growth rates diverge by ${round(Math.abs(gap))} percentage points, at or above the relationship attention parameter of ${p} points`) +
+        (fallback
+          ? `; no cost base was available, so ${bLabel.toLowerCase()} is used under the profile’s fallback`
+          : '');
+      return {
+        kind: 'flag',
+        observation: words({
+          a: aLabel,
+          b: bLabel,
+          aLower: aLabel.toLowerCase(),
+          bLower: bLabel.toLowerCase(),
+          ga: fmtPct(ga),
+          gb: fmtPct(gb),
+          gap: String(round(Math.abs(gap))),
+          fasterSlower: ga > gb ? 'materially faster' : 'materially slower',
+        }),
+        why,
+        attention: attentionFor(r, gap),
+      };
+    }
+
+    case 'ratio_shift': {
+      const x = ratioOf(def.ratio);
+      if ('unavailable' in x) return { kind: 'skip', reason: x.unavailable };
+      if (x.cy === null || x.py === null)
+        return { kind: 'skip', reason: `Needs ${x.label} for both years.` };
+      const d = x.cy - x.py;
+      if (Math.abs(d) < p) return { kind: 'quiet' };
+      return {
+        kind: 'flag',
+        observation: words({
+          label: x.label,
+          cy: withUnit(x.cy, x.unit),
+          py: withUnit(x.py, x.unit),
+          delta: deltaWithUnit(d, x.unit),
+        }),
+        why: `A shift of ${round(Math.abs(d), UNIT_DP[x.unit])} ${unitWord(x.unit)} is at or above the ratio attention parameter of ${p} ${unitWord(x.unit)}`,
+        attention: attentionFor(r, d),
+      };
+    }
+
+    case 'ratio_change': {
+      const x = ratioOf(def.ratio);
+      if ('unavailable' in x) return { kind: 'skip', reason: x.unavailable };
+      if (x.cy === null || x.py === null)
+        return { kind: 'skip', reason: `Needs ${x.label} for both years.` };
+      const change = pctChange(x.cy, x.py);
+      const crossed =
+        def.crossBelow !== undefined && x.cy < def.crossBelow && x.py >= def.crossBelow;
+      if (!crossed && (change === null || Math.abs(change) < p)) return { kind: 'quiet' };
+      const vars = {
+        label: x.label,
+        cy: withUnit(x.cy, x.unit),
+        py: withUnit(x.py, x.unit),
+        change: change === null ? 'N/M' : fmtPct(change),
+        level: String(def.crossBelow ?? ''),
+      };
+      let attention = change === null ? r.suggestedAttention : attentionFor(r, change);
+      if (crossed) attention = maxAttention(attention, def.crossAttention ?? r.suggestedAttention);
+      return {
+        kind: 'flag',
+        observation: words(vars, crossed ? (def.crossWording ?? r.signalWording) : r.signalWording),
+        why: crossed
+          ? `The ratio fell below the configured level of ${def.crossBelow}`
+          : `The ratio moved ${fmtPct(change!)}, at or above the ${p}% attention parameter`,
+        attention,
+      };
+    }
+
+    case 'trend_reversal': {
+      const x = ratioOf(def.ratio);
+      if ('unavailable' in x) return { kind: 'skip', reason: x.unavailable };
+      if (x.cy === null || x.py === null)
+        return { kind: 'skip', reason: `Needs ${x.label} for both years.` };
+      if (x.pp === null) {
+        return {
+          kind: 'skip',
+          reason:
+            'Needs the prior-year comparatives from last year’s audit file (PY−1) to establish a trend.',
+        };
+      }
+      const d1 = x.py - x.pp;
+      const d2 = x.cy - x.py;
+      if (Math.sign(d1) === Math.sign(d2) || Math.abs(d1) < p || Math.abs(d2) < p)
+        return { kind: 'quiet' };
+      return {
+        kind: 'flag',
+        observation: words({
+          label: x.label,
+          pp: withUnit(x.pp, x.unit),
+          py: withUnit(x.py, x.unit),
+          cy: withUnit(x.cy, x.unit),
+          dir1: d1 > 0 ? 'rose' : 'fell',
+          dir2: d2 > 0 ? 'rose' : 'fell',
+        }),
+        why: `The ratio moved at least ${p} ${unitWord(x.unit)} in each of the last two years, in opposite directions (trend attention parameter)`,
+        attention: attentionFor(r, Math.min(Math.abs(d1), Math.abs(d2))),
+      };
+    }
+
+    case 'threshold': {
+      let value: number | null;
+      let label: string;
+      let shown: string;
+      if (def.ratio) {
+        const x = ratioOf(def.ratio);
+        if ('unavailable' in x) return { kind: 'skip', reason: x.unavailable };
+        value = x.cy;
+        label = x.label;
+        shown = value === null ? '' : withUnit(value, x.unit);
+      } else {
+        const key = def.metric!;
+        value = ctx.value({ metric: key }, 'cy', new Set());
+        label = ctx.labelOf(key);
+        shown = value === null ? '' : String(round(value, 2));
+      }
+      if (value === null) return { kind: 'skip', reason: `Needs the CY ${label}.` };
+      const hit =
+        def.op === 'lt'
+          ? value < p
+          : def.op === 'lte'
+            ? value <= p
+            : def.op === 'gt'
+              ? value > p
+              : value >= p;
+      if (!hit) return { kind: 'quiet' };
+      const opText = { lt: 'below', lte: 'at or below', gt: 'above', gte: 'at or above' }[def.op];
+      return {
+        kind: 'flag',
+        observation: words({ label, value: shown, threshold: String(p) }),
+        why: `The figure is ${opText} the configured level of ${p}`,
+        attention: r.suggestedAttention,
+      };
     }
   }
-  return out;
+}
+
+// ── library validation (Methodology Admin) ───────────────────────────────────
+
+const EXPR_KEYS = new Set(['metric', 'debt', 'base', 'sum', 'less', 'balance']);
+
+function exprProblem(e: unknown, metrics: ReadonlySet<string>, depth = 0): string | null {
+  if (depth > 4) return 'Expressions are nested too deeply.';
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return 'An operand must be an object.';
+  const o = e as Record<string, unknown>;
+  const extra = Object.keys(o).find((k) => !EXPR_KEYS.has(k));
+  if (extra) return `Unknown operand field "${extra}".`;
+  if (
+    o.balance !== undefined &&
+    !['closing', 'average', 'finance_cost_basis'].includes(o.balance as string)
+  ) {
+    return 'balance must be closing, average or finance_cost_basis.';
+  }
+  if ('metric' in o) {
+    if (typeof o.metric !== 'string' || !metrics.has(o.metric))
+      return `Unknown metric "${String(o.metric)}".`;
+    return null;
+  }
+  if ('debt' in o) return o.debt === true ? null : 'debt must be true.';
+  if ('base' in o) {
+    return ['inventory_cost', 'payable_cost', 'inventory_trend'].includes(o.base as string)
+      ? null
+      : 'base must be inventory_cost, payable_cost or inventory_trend.';
+  }
+  if ('sum' in o) {
+    if (!Array.isArray(o.sum) || o.sum.length === 0) return 'sum needs at least one operand.';
+    if (o.less !== undefined && !Array.isArray(o.less)) return 'less must be a list.';
+    for (const x of [...o.sum, ...((o.less as unknown[]) ?? [])]) {
+      const p = exprProblem(x, metrics, depth + 1);
+      if (p) return p;
+    }
+    return null;
+  }
+  return 'An operand needs metric, debt, base or sum.';
+}
+
+/**
+ * Why a rule version cannot be saved, or null. `metrics` are the metric keys in
+ * the library; `ratioKind` maps ratio rule keys to their unit (for references).
+ */
+export function analyticsRuleProblem(
+  rule: Pick<
+    AnalyticsRuleDef,
+    | 'kind'
+    | 'definition'
+    | 'parameterType'
+    | 'parameterValue'
+    | 'enhancedAt'
+    | 'immediateAt'
+    | 'suggestedAttention'
+    | 'requiredMetrics'
+    | 'minDataStatus'
+    | 'minSourceTypes'
+    | 'signalWording'
+    | 'whyMayMatter'
+  >,
+  metrics: ReadonlySet<string>,
+  ratioKeys: ReadonlySet<string>,
+): string | null {
+  if (!ANALYTICS_RULE_KINDS.includes(rule.kind)) return `Unknown rule kind "${rule.kind}".`;
+  const def = rule.definition as AnalyticsRuleDefinition | undefined;
+  if (!def || typeof def !== 'object' || def.kind !== rule.kind) {
+    return 'The definition must be an object whose kind matches the rule kind.';
+  }
+  const bad = rule.requiredMetrics.find((k) => !metrics.has(k));
+  if (bad) return `Unknown required metric "${bad}".`;
+  if (rule.minDataStatus.some((s) => !DATASET_STATUSES.includes(s)))
+    return 'Unknown dataset status.';
+  if (rule.minSourceTypes.some((s) => !METRIC_SOURCE_TYPES.includes(s)))
+    return 'Unknown source type.';
+  if (!PLANNING_ATTENTIONS.includes(rule.suggestedAttention)) return 'Unknown suggested attention.';
+  const expr = (e: unknown) => exprProblem(e, metrics);
+
+  if (def.kind === 'ratio') {
+    if (!['%', 'days', 'x', 'amount', 'per_unit'].includes(def.unit)) return 'Unknown ratio unit.';
+    if (def.value) {
+      if (def.num || def.den) return 'A ratio is either a value or num / den, not both.';
+      return expr(def.value);
+    }
+    if (!def.num || !def.den) return 'A ratio needs num and den (or value).';
+    if (def.scale !== undefined && !(Number.isFinite(def.scale) && def.scale > 0))
+      return 'scale must be > 0.';
+    // §12 / §24: inventory and payable days never silently use Revenue. (Working-capital
+    // days over a sum of balances are a revenue-based cycle measure and stay allowed.)
+    const denKeys = JSON.stringify(def.den);
+    const numMetric = 'metric' in def.num ? def.num.metric : null;
+    if (
+      def.unit === 'days' &&
+      /"metric":"revenue"/.test(denKeys) &&
+      numMetric &&
+      /inventory|payable/.test(numMetric)
+    ) {
+      return 'Inventory / payable days must use a cost base, never Revenue.';
+    }
+    return expr(def.num) ?? expr(def.den);
+  }
+
+  // Attention rules need a parameter and wording.
+  if (rule.parameterType === null || !ATTENTION_PARAMETER_TYPES.includes(rule.parameterType)) {
+    return 'An attention rule needs a parameter type.';
+  }
+  if (rule.parameterValue === null || !Number.isFinite(rule.parameterValue)) {
+    return 'An attention rule needs a parameter value.';
+  }
+  if (def.kind !== 'threshold' && rule.parameterValue < 0)
+    return 'The parameter must not be negative.';
+  for (const [lvl, name] of [
+    [rule.enhancedAt, 'Enhanced'],
+    [rule.immediateAt, 'Immediate Partner'],
+  ] as const) {
+    if (lvl !== null && (!Number.isFinite(lvl) || lvl < 0)) return `${name} level must be ≥ 0.`;
+  }
+  if (rule.enhancedAt !== null && rule.immediateAt !== null && rule.immediateAt < rule.enhancedAt) {
+    return 'The Immediate Partner level must be at or above the Enhanced level.';
+  }
+  if (!rule.signalWording.trim()) return 'An attention rule needs neutral signal wording.';
+  if (!rule.whyMayMatter.trim()) return 'An attention rule needs "why it may matter".';
+  // §15: attention parameters are never described as materiality / misstatement / risk conclusions.
+  const extraWording = [
+    def.kind === 'movement' ? def.nilWording : undefined,
+    def.kind === 'ratio_change' ? def.crossWording : undefined,
+  ].filter((w): w is string => typeof w === 'string');
+  if (extraWording.some((w) => w.length > 1000)) return 'Wording must be at most 1000 characters.';
+  const text = [rule.signalWording, rule.whyMayMatter, ...extraWording].join(' ').toLowerCase();
+  if (/\bmaterial(ity)?\b|misstat|significant risk|audit risk|\brmm\b/.test(text)) {
+    return 'Signal wording must be neutral — no materiality, misstatement or risk conclusions.';
+  }
+
+  switch (def.kind) {
+    case 'movement':
+      return metrics.has(def.metric) ? null : `Unknown metric "${def.metric}".`;
+    case 'relationship':
+      return expr(def.a) ?? expr(def.b);
+    case 'ratio_shift':
+    case 'trend_reversal':
+      return ratioKeys.has(def.ratio) ? null : `Unknown ratio "${def.ratio}".`;
+    case 'ratio_change':
+      if (!ratioKeys.has(def.ratio)) return `Unknown ratio "${def.ratio}".`;
+      if (def.crossAttention && !PLANNING_ATTENTIONS.includes(def.crossAttention))
+        return 'Unknown cross attention.';
+      return null;
+    case 'threshold':
+      if (!['lt', 'lte', 'gt', 'gte'].includes(def.op)) return 'op must be lt, lte, gt or gte.';
+      if (!!def.metric === !!def.ratio) return 'A threshold reads exactly one metric or ratio.';
+      if (def.metric && !metrics.has(def.metric)) return `Unknown metric "${def.metric}".`;
+      if (def.ratio && !ratioKeys.has(def.ratio)) return `Unknown ratio "${def.ratio}".`;
+      return null;
+  }
 }
