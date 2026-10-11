@@ -39,7 +39,7 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import type { TeamMember } from '@/lib/types';
-import { Badge, Button, Card, Spinner } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import {
   CarriedMattersSection,
@@ -133,6 +133,12 @@ type Tab =
   | 'strategy';
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
+/**
+ * A file approved before 03.1 generated itself at AF-02: until the Engagement
+ * Manager or Partner opens it, a team member's read is refused with a 409.
+ */
+const notOpenedYet = (e: unknown) =>
+  e instanceof ApiError && e.status === 409 && /not been opened/i.test(e.message);
 
 export function PlanningIntelligencePanel({
   engagementId,
@@ -158,6 +164,8 @@ export function PlanningIntelligencePanel({
   const summary = useQuery({
     queryKey: [...qk, 'summary'],
     queryFn: () => apiFetch<PlanningIntelligenceSummary>(`${base}/planning-intelligence`),
+    // The app's single retry, except for "not opened yet" — that waits for the lead.
+    retry: (n, e) => n < 1 && !notOpenedYet(e),
   });
   const signals = useQuery({
     queryKey: [...qk, 'signals'],
@@ -206,6 +214,24 @@ export function PlanningIntelligencePanel({
 
   if (summary.isLoading) return <Spinner label="Loading planning intelligence…" />;
   const s = summary.data;
+  if (!s && notOpenedYet(summary.error))
+    return (
+      <EmptyState>
+        <p>
+          The Engagement Manager or Partner opens 03.1 first — the Engagement Intelligence
+          appears here once they do.
+        </p>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="mt-3"
+          disabled={summary.isFetching}
+          onClick={() => void summary.refetch()}
+        >
+          Check again
+        </Button>
+      </EmptyState>
+    );
   if (!s)
     return (
       <p className="text-sm text-ink-muted">

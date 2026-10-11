@@ -14,11 +14,19 @@ import { PlanningIntelligencePanel } from '../planning-intelligence-panel';
 import { goToSourceLink, parseSourceLink, sourceLinkLabel } from '../planning-source-link';
 import { PlanningSignalLibrarySection } from '../../admin/planning-signal-library-section';
 import { openAuditPhase } from '../audit-file-nav';
+import { ApiError } from '@/lib/api';
 
 const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => apiFetch(...args),
-  ApiError: class ApiError extends Error {},
+  ApiError: class ApiError extends Error {
+    constructor(
+      readonly status: number,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
 }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
 jest.mock('@/lib/auth', () => ({ useAuth: () => ({ principal: {} }) }));
@@ -329,12 +337,67 @@ describe('03.1 Planning Intelligence panel', () => {
     mount(view({ stale: true, sourceChangedSignals: 0 }), { assess: false });
     expect(await screen.findByText(/facts changed since the intelligence/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Refresh now' })).not.toBeInTheDocument();
-    await user.click(
-      screen.getByRole('button', { name: /Engagement Intelligence \(to review\)/ }),
-    );
+    await user.click(screen.getByRole('button', { name: /Engagement Intelligence \(to review\)/ }));
     expect(await screen.findByText('Consolidated FS')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Mark intelligence reviewed' }),
     ).not.toBeInTheDocument();
+  });
+
+  // Files approved before 03.1 generated itself at AF-02: a team member's read is refused.
+  const mountRefused = (error: Error) => {
+    let refused = true;
+    apiFetch.mockReset();
+    apiFetch.mockImplementation((url: string) => {
+      if (url.endsWith('/planning-governance')) return Promise.resolve(governanceView());
+      if (url.endsWith('/planning-intelligence'))
+        return refused ? Promise.reject(error) : Promise.resolve(summary());
+      if (url.endsWith('/planning-intelligence/facts')) return Promise.resolve(view());
+      return Promise.resolve([]);
+    });
+    render(
+      wrap(
+        <PlanningIntelligencePanel
+          engagementId="e"
+          workflowInstanceId="w"
+          team={[]}
+          editable
+          onChanged={jest.fn()}
+        />,
+      ),
+    );
+    return () => {
+      refused = false;
+    };
+  };
+
+  it('tells a team member 03.1 is waiting for the Manager or Partner, then picks it up', async () => {
+    const user = userEvent.setup();
+    const open = mountRefused(
+      new ApiError(
+        409,
+        '03.1 has not been opened yet — the Engagement Manager or Partner opens it first.',
+      ),
+    );
+    expect(
+      await screen.findByText(/The Engagement Manager or Partner opens 03.1 first/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/has not been opened yet/)).not.toBeInTheDocument();
+    // Not retried in the background: one read, then the user asks again.
+    expect(apiFetch.mock.calls.filter(([u]) => u.endsWith('/planning-intelligence'))).toHaveLength(
+      1,
+    );
+    open();
+    await user.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByRole('button', { name: /Signal register/ })).toBeInTheDocument();
+  });
+
+  it('still reports any other failure as an error', async () => {
+    mountRefused(new ApiError(403, 'Not on this engagement.'));
+    // After the app's one retry (≈1 s back-off).
+    expect(
+      await screen.findByText('Not on this engagement.', undefined, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check again' })).not.toBeInTheDocument();
   });
 });
