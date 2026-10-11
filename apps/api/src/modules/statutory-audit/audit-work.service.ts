@@ -30,6 +30,7 @@ import { AuditFrameworkDownstreamService } from './audit-framework-downstream.se
 import { AuditCaroProgrammeService } from './audit-caro-programme.service';
 import { AuditIcfrControlsService } from './audit-icfr-controls.service';
 import { AuditGroupAuditService } from './audit-group-audit.service';
+import { readFrameworkApprovalOn, readFrameworkApprovalStateOn } from './framework-approval-read';
 import { isEngagementLead } from './master-facts';
 import { reportingProceduresOn } from './other-reporting-records-read';
 import {
@@ -131,7 +132,13 @@ export class AuditWorkService {
         [engagementId],
       );
       if (due.length && (await isEngagementLead(client, engagementId))) {
-        for (const sh of due) await this.buildWork(client, ctx, engagementId, sh.id, true);
+        // A reopened framework (02.8 §15) waits for its re-approval.
+        const fw = await readFrameworkApprovalStateOn(
+          client,
+          due.map((d) => d.id),
+        );
+        for (const sh of due)
+          if (fw.get(sh.id)?.approved) await this.buildWork(client, ctx, engagementId, sh.id, true);
       }
       return this.readGeneration(client, engagementId);
     });
@@ -383,6 +390,12 @@ export class AuditWorkService {
     const approvalVersion = verRows[0]?.version ?? null;
     if (approvalVersion == null) {
       throw new ConflictException('Approve the Framework Memo before generating work (§20).');
+    }
+    const fw = await readFrameworkApprovalOn(client, workflowInstanceId);
+    if (!fw.approved) {
+      throw new ConflictException(
+        `A controlled revision of the Audit Framework (v${fw.currentVersion}) is in progress — the Engagement Partner re-approves it (02.8) before work is generated.`,
+      );
     }
     // Section 04's suggested risks first, so their responses become procedures.
     await this.risk.ensureSeeded(client, ctx, engagementId, workflowInstanceId);
