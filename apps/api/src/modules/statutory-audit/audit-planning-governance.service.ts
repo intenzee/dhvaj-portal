@@ -70,7 +70,40 @@ const EVIDENCE_TARGET_SQL: Record<PlanningEvidenceTarget, string> = {
   acceptance: `SELECT 1 FROM hsdg.audit_matter
                 WHERE id = $1 AND workflow_instance_id = $2 AND section = 'acceptance'`,
   discussion: `SELECT 1 FROM hsdg.audit_planning_discussion WHERE id = $1 AND workflow_instance_id = $2`,
+  // 03.2 (DHVAJ 03.2 §20): sections, the dataset, Investigation Cards, expectations.
+  understanding_section: `SELECT 1 FROM hsdg.audit_understanding_section
+                           WHERE id = $1 AND workflow_instance_id = $2`,
+  financial_dataset: `SELECT 1 FROM hsdg.audit_financial_dataset
+                       WHERE id = $1 AND workflow_instance_id = $2`,
+  analytics_exception: `SELECT 1 FROM hsdg.audit_analytics_exception
+                         WHERE id = $1 AND workflow_instance_id = $2`,
+  planning_expectation: `SELECT 1 FROM hsdg.audit_planning_expectation
+                          WHERE id = $1 AND workflow_instance_id = $2`,
 };
+
+/** Evidence on these is frozen with 03.2 once it is complete (reopen for a controlled revision). */
+const UNDERSTANDING_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>([
+  'understanding_section',
+  'financial_dataset',
+  'analytics_exception',
+  'planning_expectation',
+]);
+
+async function understandingFrozen(
+  client: PoolClient,
+  workflowInstanceId: string,
+  targetType: PlanningEvidenceTarget,
+): Promise<boolean> {
+  if (!UNDERSTANDING_EVIDENCE_TARGETS.has(targetType)) return false;
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
+    [workflowInstanceId],
+  );
+  return rows[0]?.status === 'complete';
+}
+
+const UNDERSTANDING_FROZEN =
+  '03.2 is complete — reopen it for a controlled revision to change its evidence.';
 
 interface AttentionRow {
   id: string;
@@ -636,6 +669,7 @@ export class AuditPlanningGovernanceService {
         workflowInstanceId,
         input.targetType,
         input.targetId,
+        true,
       );
       const actor = await resolvePlanningActor(client, engagementId);
       if (!mayUpload(actor)) {
@@ -685,6 +719,7 @@ export class AuditPlanningGovernanceService {
         workflowInstanceId,
         input.targetType,
         input.targetId,
+        true,
       );
       const { rows } = await client.query(
         `SELECT 1 FROM hsdg.documents WHERE id = $1 AND engagement_id = $2 AND deleted_at IS NULL`,
@@ -720,6 +755,9 @@ export class AuditPlanningGovernanceService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       const row = await this.loadEvidence(client, workflowInstanceId, evidenceId);
+      if (await understandingFrozen(client, workflowInstanceId, row.target_type)) {
+        throw new ConflictException(UNDERSTANDING_FROZEN);
+      }
       const actor = await resolvePlanningActor(client, engagementId);
       if (!mayRemove(actor, row.linked_by_employee_id)) {
         throw new ForbiddenException(
@@ -775,16 +813,20 @@ export class AuditPlanningGovernanceService {
     workflowInstanceId: string,
     targetType: PlanningEvidenceTarget,
     targetId: string,
+    write = false,
   ): Promise<void> {
     await assertShell(client, engagementId, workflowInstanceId);
     if (!PLANNING_EVIDENCE_TARGETS.includes(targetType)) {
-      throw new BadRequestException('Unknown 03.1 evidence target.');
+      throw new BadRequestException('Unknown planning evidence target.');
     }
     const { rows } = await client.query(EVIDENCE_TARGET_SQL[targetType], [
       targetId,
       workflowInstanceId,
     ]);
-    if (!rows[0]) throw new NotFoundException('That 03.1 record is not on this audit file.');
+    if (!rows[0]) throw new NotFoundException('That planning record is not on this audit file.');
+    if (write && (await understandingFrozen(client, workflowInstanceId, targetType))) {
+      throw new ConflictException(UNDERSTANDING_FROZEN);
+    }
   }
 
   private async insertEvidence(
@@ -863,7 +905,8 @@ export class AuditPlanningGovernanceService {
     );
     const actor = await resolvePlanningActor(client, engagementId);
     const lock = await readPlanningLock(client, workflowInstanceId);
-    const open = !lock.locked;
+    const open =
+      !lock.locked && !(await understandingFrozen(client, workflowInstanceId, targetType));
     return {
       targetType,
       targetId,

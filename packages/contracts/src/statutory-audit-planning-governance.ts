@@ -193,6 +193,11 @@ export const PLANNING_EVIDENCE_TARGET = {
   priorYear: 'prior_year',
   acceptance: 'acceptance',
   discussion: 'discussion',
+  /** 03.2 records (§20): a 03.2.1–03.2.6 section, the dataset, an Investigation Card, an expectation. */
+  understandingSection: 'understanding_section',
+  financialDataset: 'financial_dataset',
+  analyticsException: 'analytics_exception',
+  planningExpectation: 'planning_expectation',
 } as const;
 export type PlanningEvidenceTarget =
   (typeof PLANNING_EVIDENCE_TARGET)[keyof typeof PLANNING_EVIDENCE_TARGET];
