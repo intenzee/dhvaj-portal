@@ -494,7 +494,7 @@ export class FilingWorkspaceService {
         );
       }
 
-      const kind = dto.referenceKind ?? defaultReferenceKind(inst.stream);
+      const kind = dto.referenceKind ?? defaultReferenceKind(inst.stream, inst.section);
       const ref = checkReference(kind, dto.referenceNo, inst.stream);
       if ('error' in ref) throw new BadRequestException(ref.error);
       const filedOn = dto.filedOn.slice(0, 10);
@@ -920,8 +920,12 @@ export class FilingWorkspaceService {
     }
 
     const outputTax = sumPrefix(figures.figures, 'output_');
+    // Late fee and interest attach to returns; Inward reconciliation files nothing.
     const lateCharges =
-      inst.stream === 'gst' && !live && inst.workflow_status !== 'not_applicable'
+      inst.stream === 'gst' &&
+      inst.section !== 'inward' &&
+      !live &&
+      inst.workflow_status !== 'not_applicable'
         ? indicativeLateCharges({
             dueDate: inst.due,
             asOf: today,

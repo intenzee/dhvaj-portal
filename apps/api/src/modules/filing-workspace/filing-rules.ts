@@ -11,8 +11,15 @@ import {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** The reference a stream's portal issues on filing. */
-export function defaultReferenceKind(stream: string | null): FilingReferenceKind {
+/**
+ * The reference a stream's portal issues on filing. Inward reconciliation,
+ * Bookkeeping and MIS close inside the firm, so they carry an internal one.
+ */
+export function defaultReferenceKind(
+  stream: string | null,
+  section?: string | null,
+): FilingReferenceKind {
+  if (section === 'inward') return FILING_REFERENCE_KIND.internal;
   switch (stream) {
     case 'gst':
       return FILING_REFERENCE_KIND.arn;

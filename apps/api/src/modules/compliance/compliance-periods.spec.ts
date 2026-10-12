@@ -1,4 +1,9 @@
-import { CALENDAR_V2_RULES, seedVersion, type SeedRule } from './calendar-v2-rules';
+import {
+  CALENDAR_V2_RULES,
+  FIRM_POLICY_RULES,
+  seedVersion,
+  type SeedRule,
+} from './calendar-v2-rules';
 import {
   applyVariants,
   conditionHolds,
@@ -16,7 +21,7 @@ import {
 const NO_HOLIDAYS = new Set<string>();
 
 function rule(code: string): SeedRule {
-  const r = CALENDAR_V2_RULES.find((x) => x.code === code);
+  const r = [...CALENDAR_V2_RULES, ...FIRM_POLICY_RULES].find((x) => x.code === code);
   if (!r) throw new Error(`no seed rule ${code}`);
   return r;
 }
@@ -297,6 +302,41 @@ describe('compliance-periods', () => {
       expect(
         legacyPeriodDue(v, '2026-27', { referenceDate: '2026-10-31' }, NO_HOLIDAYS),
       ).toBeNull();
+    });
+  });
+
+  describe('firm-policy rules (Inward reconciliation, Bookkeeping, MIS)', () => {
+    it('a regular GSTIN reconciles inward supplies every month, by the 18th', () => {
+      const r = rule('GST_ITC_RECON_M');
+      expect(periodsForFrequency(r.frequency, '2026-27')).toHaveLength(12);
+      expect(due('GST_ITC_RECON_M', '2026-27', '2026-09')).toMatchObject({
+        statutoryDeadline: '2026-10-18',
+        internalSlaDate: '2026-10-16',
+      });
+      expect(due('GST_ITC_RECON_M', '2026-27', '2027-02')!.statutoryDeadline).toBe('2027-03-18');
+      expect(conditionHolds(r.condition, { gst_scheme: 'regular' })).toBe(true);
+      expect(conditionHolds(r.condition, { gst_scheme: 'qrmp' })).toBe(false);
+    });
+
+    it('a QRMP GSTIN reconciles once a quarter instead', () => {
+      const r = rule('GST_ITC_RECON_Q');
+      expect(periodsForFrequency(r.frequency, '2026-27')).toHaveLength(4);
+      expect(due('GST_ITC_RECON_Q', '2026-27', '2026-27:Q2')!.statutoryDeadline).toBe('2026-10-18');
+      expect(conditionHolds(r.condition, { gst_scheme: 'qrmp' })).toBe(true);
+      expect(conditionHolds(r.condition, { gst_scheme: 'regular' })).toBe(false);
+    });
+
+    it('books close by the 15th and the MIS pack goes out by the 20th of the next month', () => {
+      expect(due('BK_MONTH_CLOSE', '2026-27', '2026-10')!.statutoryDeadline).toBe('2026-11-15');
+      expect(due('BK_MONTH_CLOSE', '2026-27', '2027-03')!.statutoryDeadline).toBe('2027-04-15');
+      expect(due('MIS_MONTHLY_PACK', '2026-27', '2026-09')!.statutoryDeadline).toBe('2026-10-20');
+    });
+
+    it("are the firm's own dates, kept apart from the statutory catalogue", () => {
+      for (const r of FIRM_POLICY_RULES) {
+        expect(r.dueDateCategory).toBe('HSDG_RECURRING');
+        expect(CALENDAR_V2_RULES.some((x) => x.code === r.code)).toBe(false);
+      }
     });
   });
 });

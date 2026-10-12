@@ -11,6 +11,34 @@ export const FILING_STATUS_LABEL: Record<FilingStatus, string> = {
   not_applicable: 'Not applicable',
 };
 
+/**
+ * What finishing an item is called. A return is lodged and Filed; an Inward
+ * reconciliation, a Bookkeeping month-close or an MIS pack ends inside the firm.
+ */
+export function filingEnd(
+  stream: string | null,
+  section?: string | null,
+): { action: string; done: string; ready: string } {
+  if (stream === 'gst' && section === 'inward')
+    return { action: 'Mark reconciled', done: 'Reconciled', ready: 'Ready to reconcile' };
+  if (stream === 'bookkeeping')
+    return { action: 'Close books', done: 'Books closed', ready: 'Ready to close' };
+  if (stream === 'mis') return { action: 'Mark sent', done: 'Sent to client', ready: 'Ready to send' };
+  return { action: 'Lodge filing', done: 'Filed', ready: 'Ready to file' };
+}
+
+/** A status label in the item's own words (Filed → Reconciled, …). */
+export function filingStatusLabel(
+  status: FilingStatus,
+  stream?: string | null,
+  section?: string | null,
+): string {
+  const end = filingEnd(stream ?? null, section);
+  if (status === 'filed') return end.done;
+  if (status === 'ready_to_file') return end.ready;
+  return FILING_STATUS_LABEL[status];
+}
+
 const TONE: Record<FilingStatus, string> = {
   not_started: 'neutral',
   awaiting_data: 'warn',
@@ -25,15 +53,19 @@ export function FilingStatusBadge({
   status,
   isLate,
   isOverdue,
+  stream,
+  section,
 }: {
   status: FilingStatus;
   isLate?: boolean;
   isOverdue?: boolean;
+  stream?: string | null;
+  section?: string | null;
 }): JSX.Element {
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
-      <Badge tone={isOverdue ? 'danger' : TONE[status]}>{FILING_STATUS_LABEL[status]}</Badge>
-      {isLate && <Badge tone="warn">Filed late</Badge>}
+      <Badge tone={isOverdue ? 'danger' : TONE[status]}>{filingStatusLabel(status, stream, section)}</Badge>
+      {isLate && <Badge tone="warn">{filingEnd(stream ?? null, section).done} late</Badge>}
     </span>
   );
 }
