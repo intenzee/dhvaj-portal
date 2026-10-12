@@ -1,9 +1,4 @@
-import type {
-  ClientDependencyStatus,
-  TaskPriority,
-  TaskStatus,
-  WorkType,
-} from '@hsdg/contracts';
+import type { ClientDependencyStatus, TaskPriority, TaskStatus, WorkType } from '@hsdg/contracts';
 
 /** A blocker link shown on a task's detail. */
 export interface TaskDependencyRef {

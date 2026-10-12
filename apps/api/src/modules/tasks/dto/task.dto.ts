@@ -66,7 +66,9 @@ export class CreateTaskDto {
   @IsBoolean()
   isBillable?: boolean;
 
-  @ApiPropertyOptional({ description: 'Change 3 — the stream (engagement service) this work is in.' })
+  @ApiPropertyOptional({
+    description: 'Change 3 — the stream (engagement service) this work is in.',
+  })
   @IsOptional()
   @IsUUID()
   engagementServiceId?: string;

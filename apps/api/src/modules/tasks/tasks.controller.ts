@@ -127,7 +127,8 @@ export class TasksController {
   @Post(`:id/tasks/:taskId/:action(${TASK_ACTIONS.join('|')})`)
   @RequirePermissions(PERMISSION.taskUpdate)
   @ApiOperation({
-    summary: 'Move a task: start · pause · block · send-for-review · start-review · approve · return',
+    summary:
+      'Move a task: start · pause · block · send-for-review · start-review · approve · return',
     description:
       'Change 3. Opens and closes time in the same transaction (Compliance engagements with ' +
       'ff_auto_time): start opens a work entry and closes whatever the caller had running; pause, ' +
