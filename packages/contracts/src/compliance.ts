@@ -22,6 +22,9 @@ export const CALCULATION_BASIS = {
   fixedDate: 'fixed_date',
   /** An event date supplied per instance (e.g. notice received). */
   eventDate: 'event_date',
+  /** A per-period table of due dates (rule version `schedule`), e.g. TDS
+   *  statements 31 Jul / 31 Oct / 31 Jan / 31 May. */
+  schedule: 'schedule',
 } as const;
 export type CalculationBasis = (typeof CALCULATION_BASIS)[keyof typeof CALCULATION_BASIS];
 export const CALCULATION_BASES: CalculationBasis[] = Object.values(CALCULATION_BASIS);

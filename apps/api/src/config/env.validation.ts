@@ -192,6 +192,13 @@ export const envSchema = z.object({
   // always on; add `email` and/or `teams` to fan out to those (stub transports
   // for now). Example: NOTIFICATION_CHANNELS=portal,email
   NOTIFICATION_CHANNELS: z.string().default('portal'),
+
+  // ── Feature flags (Engagement Restructure phases) ─────────────────────────
+  // Comma list of enabled flags (ff_engagement_kinds, ff_calendar_v2,
+  // ff_gst_tab, ff_compliance_tabs, ff_auto_time), 'all', or 'none'. Unset →
+  // 'all' outside production (dev/test cover the new paths) and 'none' in
+  // production, so each phase is switched on deliberately per environment.
+  FEATURE_FLAGS: z.string().optional(),
   // How many days ahead the sweep flags an internal SLA / statutory deadline as
   // "approaching".
   NOTIFICATION_SLA_LEAD_DAYS: z.coerce.number().int().nonnegative().default(3),
