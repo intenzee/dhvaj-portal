@@ -135,6 +135,12 @@ export interface WorkspaceInstance {
   /** Slots, items and figures are read-only (filed, or the month's 3B filed). */
   isLocked: boolean;
   lockedReason: string | null;
+  /** The rule's late-fee note (Verify rules carry a caution). */
+  lateFeeNote: string | null;
+  /** Indicative GST late fee / interest while past due and unfiled — a hint, never posted. */
+  lateCharges: { daysLate: number; lateFee: number; interest: number | null } | null;
+  /** Not applicable: the reason recorded. */
+  notApplicableReason: string | null;
 }
 
 export interface WorkspaceTask {

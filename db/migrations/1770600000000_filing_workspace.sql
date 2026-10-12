@@ -428,6 +428,21 @@ INSERT INTO _filing_templates VALUES
   {"code":"REVIEW","label":"Review","required":true,"sequence":6,"autoTick":"review"},
   {"code":"LODGE","label":"Lodge GSTR-3B","slotCode":"ACK_3B","required":true,"sequence":7,"autoTick":"lodge"}
 ]}'),
+('FILING_GST_PMT06', 'GST — PMT-06 (QRMP monthly payment)', '{"items":[
+  {"code":"PURCHASE_SALES","label":"Sales and purchase registers received","slotCode":"REGISTERS","required":false,"sequence":1,"autoTick":"document","note":"Fixed-sum (35%) method needs none"},
+  {"code":"LIABILITY","label":"Tax payable worked out","slotCode":"WORKING_PMT06","required":true,"sequence":2,"autoTick":"document","note":"Fixed-sum or self-assessment method"},
+  {"code":"CLIENT_APPROVAL","label":"Client approval of tax payable","slotCode":"CLIENT_APPROVAL","required":true,"sequence":3,"autoTick":"document"},
+  {"code":"REVIEW","label":"Review","required":true,"sequence":4,"autoTick":"review"},
+  {"code":"LODGE","label":"Lodge PMT-06 (payment)","slotCode":"PMT06_CHALLAN","required":true,"sequence":5,"autoTick":"lodge","note":"CPIN, CIN, bank, date, amount by head"}
+]}'),
+('FILING_GST_CMP08', 'GST — CMP-08 (composition)', '{"items":[
+  {"code":"SALES_REGISTER","label":"Sales register received","slotCode":"SALES_REGISTER","required":true,"sequence":1,"autoTick":"document"},
+  {"code":"RCM","label":"Reverse-charge purchases identified","slotCode":"RCM_LIST","required":false,"sequence":2,"autoTick":"document"},
+  {"code":"LIABILITY","label":"Tax payable computed","slotCode":"WORKING_CMP08","required":true,"sequence":3,"autoTick":"document"},
+  {"code":"CLIENT_APPROVAL","label":"Client approval of tax payable","slotCode":"CLIENT_APPROVAL","required":true,"sequence":4,"autoTick":"document"},
+  {"code":"REVIEW","label":"Review","required":true,"sequence":5,"autoTick":"review"},
+  {"code":"LODGE","label":"Lodge CMP-08","slotCode":"ACK_CMP08","required":true,"sequence":6,"autoTick":"lodge"}
+]}'),
 ('FILING_GST_ANNUAL', 'GST — Annual returns', '{"items":[
   {"code":"DATA","label":"Year data compiled from books and returns","slotCode":"ANNUAL_WORKING","required":true,"sequence":1,"autoTick":"document"},
   {"code":"RECON","label":"Reconciled with GSTR-1 / 3B / 2B","slotCode":"ANNUAL_RECON","required":true,"sequence":2,"autoTick":"document"},
@@ -473,16 +488,40 @@ ON CONFLICT DO NOTHING;
 ALTER TABLE hsdg.catalogue_template_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.catalogue_templates FORCE ROW LEVEL SECURITY;
 
+-- ── 8. The team sees the registrations it files for ─────────────────────
+-- Registrations (and their compliance profile) are otherwise visible through
+-- the client entity, which is office-scoped; a member from another office
+-- working the filing still needs the GSTIN / TAN and its QRMP profile.
+CREATE POLICY entity_registrations_filing_member_read ON hsdg.entity_registrations
+  FOR SELECT USING (
+    EXISTS (SELECT 1 FROM hsdg.compliance_instances ci
+             WHERE ci.registration_id = entity_registrations.id
+               AND hsdg.is_engagement_member(ci.engagement_id))
+  );
+CREATE POLICY registration_compliance_profiles_filing_member_read
+  ON hsdg.registration_compliance_profiles
+  FOR SELECT USING (
+    EXISTS (SELECT 1 FROM hsdg.compliance_instances ci
+             WHERE ci.registration_id = registration_compliance_profiles.registration_id
+               AND hsdg.is_engagement_member(ci.engagement_id))
+  );
+
 -- Down Migration
+
+DROP POLICY IF EXISTS registration_compliance_profiles_filing_member_read
+  ON hsdg.registration_compliance_profiles;
+DROP POLICY IF EXISTS entity_registrations_filing_member_read ON hsdg.entity_registrations;
 
 ALTER TABLE hsdg.catalogue_templates NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.catalogue_template_versions NO FORCE ROW LEVEL SECURITY;
 DELETE FROM hsdg.catalogue_template_versions v USING hsdg.catalogue_templates t
  WHERE v.catalogue_template_id = t.id
    AND t.code IN ('FILING_GST_OUTWARD','FILING_GST_INWARD','FILING_GST_SUMMARY','FILING_GST_ANNUAL',
+                  'FILING_GST_PMT06','FILING_GST_CMP08',
                   'FILING_TDS','FILING_INCOME_TAX','FILING_ROC','FILING_GENERIC');
 DELETE FROM hsdg.catalogue_templates
  WHERE code IN ('FILING_GST_OUTWARD','FILING_GST_INWARD','FILING_GST_SUMMARY','FILING_GST_ANNUAL',
+                  'FILING_GST_PMT06','FILING_GST_CMP08',
                 'FILING_TDS','FILING_INCOME_TAX','FILING_ROC','FILING_GENERIC');
 ALTER TABLE hsdg.catalogue_template_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.catalogue_templates FORCE ROW LEVEL SECURITY;
