@@ -1,166 +1,202 @@
-# Microsoft 365 document editing — SharePoint Online provisioning checklist
+# Microsoft 365 — SharePoint storage + Office editing: setup & cutover
 
-This is the one-time setup to make the portal's in-app document editor open
-Word / Excel / PowerPoint in **Microsoft's genuine Office-for-the-web editor**
-(with co-authoring), backed by your existing **SharePoint Online** (the same
-thing that opens files in the browser when you use SharePoint today).
+This is the one-time setup that connects the portal to the firm's Microsoft 365
+tenant (`hsdgassociates`, Business Basic/Standard) for two things:
 
-The application code is already built and is **inert until you complete these
-steps and set the environment values** (`M365_ENABLED=true`). Until then the
-portal keeps using OnlyOffice, then the built-in editors, exactly as before.
+1. **All document storage in SharePoint** — every uploaded version, client
+   upload and template version is kept in one locked-down SharePoint site
+   (`STORAGE_PROVIDER=sharepoint`), instead of the server's disk / Azure Blob.
+2. **Office editing** — Word / Excel / PowerPoint open in **Microsoft's genuine
+   Office-for-the-web editor** (with co-authoring) via short-lived anonymous
+   links (`M365_ENABLED=true`). OnlyOffice, then the built-in editors, remain the
+   automatic fallbacks.
 
-**Who does this:** a Microsoft 365 **Global/SharePoint admin** in your tenant.
-Budget ~30–60 minutes plus tenant-admin consent. **No Azure subscription or
-pay-as-you-go billing is required** — SharePoint storage is covered by your
-Microsoft 365 Enterprise licences.
+Both are **inert until the values below are set**. No Azure subscription or
+pay-as-you-go billing is needed — SharePoint storage comes with the Microsoft 365
+licences (1 TB + 10 GB per licence).
+
+Not in scope (decided 2026-10-12): Microsoft sign-in to the portal, Outlook
+email and Teams messages — the portal's own login, notifications and reminders
+cover those.
 
 ---
 
-## Why it's shaped this way (context)
+## How it's shaped
 
-Microsoft only renders its real Office web editor/viewer for files that live
-*inside* Microsoft, and it will only render to a browser that is **either signed
-into a Microsoft account, or opening an anonymous ("Anyone with the link")
-sharing link.** Because the portal must open files **without asking each user to
-sign into their own Microsoft account** — the whole feature runs on **one
-enterprise identity** — the portal mints **anonymous** links.
-
-So the document **bytes are copied into a single, dedicated SharePoint site**
-that the portal owns, and:
-
-- **No end user is a member of that SharePoint site** — there is nothing for
-  them to browse to, and they never see a Microsoft login.
-- Only the portal's **Entra app** can touch the site, scoped with
-  **`Sites.Selected`** to just that one site (the tight, recommended grant).
-- When a user opens a document, the **portal API checks RLS first** (its own
-  auth is the single gatekeeper), then mints a **short-lived anonymous sharing
-  link** to just that one file. The link opens in genuine Office 365 for the web
-  with no sign-in. Its short expiry (default 2 h, `M365_LINK_EXPIRY_MINUTES`)
-  limits the value of a copied URL; the user just gets a fresh link next time.
-- Users who may manage the engagement get **edit** links (co-authoring +
-  commit); everyone else gets **view**. If the tenant/site refuses anonymous
-  edit links, the bridge transparently falls back to a view link so the file
-  still opens. Set `M365_ALLOW_ANON_EDIT=false` to force view-only everywhere.
-
-PostgreSQL stays the record of truth for metadata, versions and the audit trail;
-SharePoint holds only the live editing/viewing copy.
-
-> **Tenant policy requirement:** the no-login model needs the provisioned site's
-> external-sharing setting to allow **"Anyone" (anonymous) links**. If your
-> tenant forbids anonymous sharing outright, this no-login model is not possible
-> and users would have to sign into Microsoft instead.
+- **One dedicated SharePoint site** holds the files. **No staff member is a
+  member of it** — nobody browses it; the portal is the only way in.
+- Only the portal's **Entra app** can touch the site, through **`Sites.Selected`**
+  scoped to *just that one site*. The app has no access to any other site,
+  mailbox or OneDrive in the tenant.
+- Library layout:
+  - `vault/{engagementId}/{documentId}/{uuid}` — stored versions (immutable;
+    every new version gets a new file). Templates live under `vault/templates/…`.
+  - `portal/{engagementId}/{documentId}/v{n}/{filename}` — the live copy the
+    Office editor co-authors. Edits come back into the portal as a **new audited
+    version** when the editor closes — the stored versions are never edited in
+    place.
+- When someone opens a document, the **portal API checks their access first**
+  (RLS), then mints a **short-lived anonymous link** (default 2 h,
+  `M365_LINK_EXPIRY_MINUTES`) to that one file. It opens in real Office for the
+  web with **no Microsoft sign-in**. Engagement managers get edit links; everyone
+  else view links; approved/locked documents always open read-only.
+- PostgreSQL stays the record of truth for metadata, checksums, versions and the
+  audit trail.
 
 ---
 
 ## Checklist
 
-### 1. Create a dedicated SharePoint site
-- [ ] In the **SharePoint admin center**, create a new site (e.g.
-      "Dhvaj Portal Documents"). Do **not** add end users as members — leave
-      membership to admins/service only.
-- [ ] Note the site's URL. You'll get its **site id** in step 4.
+Already done ✅: app registration created — tenant `f631fbcc-8fbb-43e2-a022-c1827230f4d9`,
+client `628308a0-3a3c-4ea6-b039-a771075d6ff8`; site created at
+`https://hsdgassociates.sharepoint.com/sites/DHVAJPortalFiles`.
 
-### 2. Register (or reuse) an Entra app registration
-- [ ] In **Entra ID → App registrations**, register an app (or reuse the
-      portal's existing API app). Note the **Directory (tenant) ID** and
-      **Application (client) ID**.
-- [ ] Add a **client secret** (or, preferred for production, a certificate).
-      Record it securely — it goes into `M365_CLIENT_SECRET`.
+### 1. App permissions — only one is needed
+- [ ] entra.microsoft.com → **App registrations → DHVAJ Portal → API permissions**.
+- [ ] Keep **Microsoft Graph → Application → `Sites.Selected`** and click
+      **Grant admin consent for HSDG** (status must show a green tick).
+- [ ] **Remove** anything else added earlier (`Mail.Send`, `User.Read.All`,
+      `TeamsAppInstallation.ReadWriteSelfForUser.All`, any `Sites.ReadWrite.All`)
+      — email/Teams are out of scope, and least privilege matters.
 
-### 3. Grant Graph permissions (site-scoped)
-- [ ] Under **API permissions → Microsoft Graph → Application permissions**, add
-      **`Sites.Selected`** and **grant admin consent**.
-- [ ] Grant this app **write** access to *only* the site from step 1. Using
-      Graph (as a SharePoint admin), POST to:
-      `POST /sites/{siteId}/permissions`
-      ```json
-      {
-        "roles": ["write"],
-        "grantedToIdentities": [
-          { "application": { "id": "<application (client) id>", "displayName": "Dhvaj Portal" } }
-        ]
-      }
-      ```
-      This is what makes `Sites.Selected` resolve to *this one site* and nothing
-      else in the tenant.
+### 2. Client secret
+- [ ] **Certificates & secrets → New client secret** (e.g. 24 months). Copy the
+      **Value** column (not the Secret ID) — it is shown only once.
+- [ ] Put a calendar reminder a few weeks before it expires; when it does, files
+      stop opening until a new secret is set.
 
-### 4. Get the site id and drive id
-- [ ] **Site id:** `GET /sites/{hostname}:/sites/{site-path}` — e.g.
-      `GET /sites/contoso.sharepoint.com:/sites/DhvajPortalDocuments` → `id`.
-- [ ] **Drive id (recommended to pin):** `GET /sites/{siteId}/drive` → `id`
-      (the default document library). Record it → `M365_DRIVE_ID`.
-  - You can instead set only `M365_SITE_ID` and let the portal resolve the
-    default drive on first use; pinning `M365_DRIVE_ID` just skips that lookup.
+### 3. Grant the app access to the one site (Graph Explorer, ~3 minutes)
+`Sites.Selected` grants *nothing* until a site is explicitly granted:
 
-### 5. Set environment values (portal API)
-Set these in the API's deployment secret store (do **not** commit them; the repo
-`.env` is treated as a secret and is not read by tooling):
+1. Open <https://developer.microsoft.com/graph/graph-explorer> and sign in as the
+   Global Admin.
+2. **Modify permissions** tab → consent to **`Sites.FullControl.All`** (this is
+   for *you* in Graph Explorer, not the portal app).
+3. Run **GET**
+   `https://graph.microsoft.com/v1.0/sites/hsdgassociates.sharepoint.com:/sites/DHVAJPortalFiles?$select=id`
+   → copy the `id` (looks like `hsdgassociates.sharepoint.com,xxxx,yyyy`).
+4. Run **POST** `https://graph.microsoft.com/v1.0/sites/{that id}/permissions`
+   with body:
+   ```json
+   {
+     "roles": ["write"],
+     "grantedToIdentities": [
+       { "application": { "id": "628308a0-3a3c-4ea6-b039-a771075d6ff8", "displayName": "DHVAJ Portal" } }
+     ]
+   }
+   ```
+   A `201 Created` response means the portal can now read/write that site and
+   nothing else. Keep the returned permission `id` (needed only for step 4b).
+
+### 4. Allow anonymous ("Anyone") links — for Office editing only
+Storage works without this; the Office editor needs it.
+
+- [ ] **SharePoint admin center → Policies → Sharing**:
+  - External sharing, **SharePoint** slider → **Anyone** (OneDrive can stay lower).
+  - **File and folder links → Default link type → "Only people in your
+    organization"** (or "Specific people") so staff's own everyday sharing does
+    *not* default to anonymous.
+  - **"Anyone" links → Files: View and edit** (needed for editing in Office).
+    Expiry: any value ≥ 1 day is fine (the portal sets 2 h itself).
+- [ ] **Sites → Active sites → DHVAJPortalFiles → Settings → External file
+      sharing → Anyone**.
+- [ ] Check your *other* sites (e.g. the main team site) are still at the level
+      you want — set them to "Only people in your organization" if they should
+      never allow anonymous links.
+
+**4b. Only if `m365:check` says the link was refused even after the above:**
+upgrade the grant from step 3 — **PATCH**
+`https://graph.microsoft.com/v1.0/sites/{site id}/permissions/{permission id}`
+with `{ "roles": ["fullcontrol"] }`.
+
+### 5. Environment values (API)
+Add to `apps/api/.env` locally, and to the hosting provider's secret settings in
+production (never commit the secret):
 
 ```
+M365_TENANT_ID=f631fbcc-8fbb-43e2-a022-c1827230f4d9
+M365_CLIENT_ID=628308a0-3a3c-4ea6-b039-a771075d6ff8
+M365_CLIENT_SECRET=<the secret VALUE from step 2>
+M365_SITE_URL=https://hsdgassociates.sharepoint.com/sites/DHVAJPortalFiles
+# Optional: pin what `m365:check` prints to skip a lookup at boot
+# M365_DRIVE_ID=b!...
+
+# Office editing (step 4 must be done)
 M365_ENABLED=true
-M365_TENANT_ID=<directory (tenant) id>
-M365_CLIENT_ID=<application (client) id>
-M365_CLIENT_SECRET=<client secret>       # or wire a certificate instead
-M365_SITE_ID=<site id>                    # optional if M365_DRIVE_ID is set
-M365_DRIVE_ID=<document library drive id> # recommended (pin it)
-# Optional (defaults shown):
-# M365_LINK_EXPIRY_MINUTES=120  # how long each no-login link stays valid
-# M365_ALLOW_ANON_EDIT=true     # true = anonymous edit/co-author; auto-falls back to view if the tenant refuses
-# M365_GRAPH_BASE_URL=https://graph.microsoft.com/v1.0   # override for national clouds
-# M365_LOGIN_BASE_URL=https://login.microsoftonline.com  # override for national clouds
+# M365_LINK_EXPIRY_MINUTES=120
+# M365_ALLOW_ANON_EDIT=true    # false = view-only everywhere
+
+# All storage in SharePoint — set ONLY at cutover (section "Moving the files")
+# STORAGE_PROVIDER=sharepoint
+# STORAGE_SHAREPOINT_ROOT=vault
 ```
 
-### 5a. Allow anonymous ("Anyone") links on the site
-- [ ] In the **SharePoint admin center → the site's sharing settings**, set the
-      site's external sharing to **"Anyone"** so the portal can mint no-login
-      links. (Tenant-level external sharing must also permit "Anyone".) Without
-      this, Graph rejects the link creation and the portal falls back to
-      OnlyOffice. If your policy cannot allow anonymous links, the no-login goal
-      is not achievable — see the note in "Why it's shaped this way".
+Web (`apps/web/.env.local`, and the web host's settings):
 
-### 6. Set environment values (portal web)
 ```
 NEXT_PUBLIC_M365_ENABLED=true
 ```
-(The file opens via the portal-minted anonymous link — **no Microsoft sign-in is
-required of the user**. The portal's own login/RLS is the gatekeeper, so this
-works regardless of which portal auth provider you run.)
+
+### 6. Verify the connection
+```
+npm run m365:check --workspace @hsdg/api
+```
+It signs in as the app, finds the site and library, writes / reads back / deletes
+a small test file, and mints an anonymous view + edit link — printing a ✓ per
+step, or the exact fix (wrong secret, missing grant, sharing not "Anyone", …).
 
 ---
 
-## After provisioning — hand back to engineering
+## Moving the files (cutover to `STORAGE_PROVIDER=sharepoint`)
 
-The sharing shape depends on your tenant's external-sharing policy, verified live
-against the provisioned site (`apps/api/src/modules/documents/m365/graph-client.ts`,
-`createShareLink`):
+The migration copies every stored file — document versions (including client
+uploads) and template versions — into `vault/…` under **the same reference**, so
+no database rows change. Each source file is checked against the SHA-256
+recorded at upload before copying. It never modifies or deletes the source and is
+safe to re-run (already-copied files are skipped).
 
-- The bridge mints a **short-lived anonymous link** via the `createLink` action
-  (`scope: anonymous`, `type: view`, `expirationDateTime`) so files open with no
-  user login. If the tenant/site does not allow anonymous links, this call is
-  rejected and the portal falls back to OnlyOffice — set the site sharing to
-  "Anyone" (step 5a). Anonymous **edit** links (`type: edit`, gated by
-  `M365_ALLOW_ANON_EDIT`) are enabled only where the tenant permits them.
+```
+# 0. See what would move (nothing is written)
+npm run storage:migrate-sharepoint --workspace @hsdg/api -- --dry-run
 
-We also confirm the **embed vs. new-tab** behaviour: SharePoint may refuse to
-render its editor inside the portal's iframe (frame-ancestors). The editor
-component already shows an **"Open in Microsoft 365"** button that launches the
-same URL in a new tab (never subject to that restriction), so viewing/editing
-works either way; we tune which is the default once we see the tenant's headers.
+# 1. Copy while the portal is still running (the bulk of the work)
+npm run storage:migrate-sharepoint --workspace @hsdg/api -- --verify
+
+# 2. Stop the API, then copy anything uploaded since step 1
+npm run storage:migrate-sharepoint --workspace @hsdg/api -- --verify
+
+# 3. Set STORAGE_PROVIDER=sharepoint, start the API
+```
+
+Flags: `--from=local|azure_blob` (defaults to the current `STORAGE_PROVIDER`),
+`--concurrency=N` (default 4), `--db-url=…` (defaults to
+`DATABASE_MIGRATE_URL`, the owner role, so RLS doesn't hide rows). The script
+reads files from the same `STORAGE_LOCAL_DIR` / Azure settings the API uses, so
+run it with the API's environment.
+
+Only switch when the run ends with **"All files are in SharePoint"**. Anything
+listed as `missing` or `corrupt` was already broken in the old store — the
+summary names each one so it can be re-uploaded or written off.
+
+**Keep the old store** (disk folder / Azure container) untouched for a few weeks
+as a fallback.
+
+---
 
 ## Verification (once live)
-1. Open an `.xlsx` document in the portal **without** signing into Microsoft.
-2. Confirm it opens in the **real Excel for the web** (not OnlyOffice), with no
-   Microsoft login prompt — embedded, or via **Open in Microsoft 365**.
-3. (If `M365_ALLOW_ANON_EDIT=true`) Edit a cell → click **Commit version** →
-   confirm a new version appears in the document's history with note "Edited in
-   Microsoft 365", and downloading it returns the edited bytes.
-4. As a user who is **not** a member of the engagement, confirm the document is
-   not accessible (404) — the portal's RLS is intact.
-5. Copy a link, wait past `M365_LINK_EXPIRY_MINUTES`, and confirm it has expired.
-6. Set `M365_ENABLED=false` → confirm the portal **falls back to OnlyOffice**,
-   then to the built-in editors.
+1. Upload a document, download it → identical bytes; it appears in the site under
+   `vault/{engagement}/{document}/…` (visible to the admin in SharePoint).
+2. Open an `.xlsx` **without** being signed into Microsoft → it opens in the real
+   Excel for the web with no login prompt (embedded, or via **Open in Microsoft
+   365** if SharePoint refuses the iframe).
+3. As an engagement manager, edit a cell and close the editor → a new version
+   appears with the note "Edited in Microsoft 365".
+4. As a user **outside** the engagement → the document is not accessible (404).
+5. After `M365_LINK_EXPIRY_MINUTES`, a copied link no longer opens.
 
 ## Rollback
-Set `M365_ENABLED=false` (API) and `NEXT_PUBLIC_M365_ENABLED=false` (web). The
-portal reverts to OnlyOffice with no data migration — committed versions never
-lived in SharePoint, only the live editing copies did.
+- **Office editing:** set `M365_ENABLED=false` / `NEXT_PUBLIC_M365_ENABLED=false`
+  → back to OnlyOffice / built-in editors. No data moves.
+- **Storage:** set `STORAGE_PROVIDER` back to its old value. Files uploaded
+  *while on SharePoint* exist only in SharePoint, so before rolling back copy them
+  the other way (or leave SharePoint on and fix forward).

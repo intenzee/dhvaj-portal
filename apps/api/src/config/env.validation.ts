@@ -67,7 +67,12 @@ export const envSchema = z.object({
   // ── Document storage (Phase 10) ──────────────────────────────────────────
   // Where document bytes live. `local` is a filesystem provider for dev/test;
   // `azure_blob` is the production path. The database only ever holds metadata.
-  STORAGE_PROVIDER: z.enum(['local', 'azure_blob']).default('local'),
+  // `sharepoint` stores every version in the firm's SharePoint Online site
+  // (uses the M365_* connection settings below).
+  STORAGE_PROVIDER: z.enum(['local', 'azure_blob', 'sharepoint']).default('local'),
+  // Folder in the SharePoint document library that holds stored versions
+  // (separate from the editor's live co-authoring copies under `portal/`).
+  STORAGE_SHAREPOINT_ROOT: z.string().default('vault'),
   // Base directory for the local provider (defaults to an OS temp dir if blank).
   STORAGE_LOCAL_DIR: z.string().optional(),
   // Azure Blob (required only when STORAGE_PROVIDER=azure_blob; validated at use).
@@ -108,13 +113,14 @@ export const envSchema = z.object({
   // RLS-checks access, then mints a SHORT-LIVED ANONYMOUS ("Anyone with the
   // link") sharing link to just one file (via Microsoft Graph) so it opens in
   // real Office 365 for the web with NO per-user Microsoft sign-in — the portal
-  // is the single gatekeeper. PostgreSQL stays the record of truth; SharePoint
-  // is only the editing/viewing surface (see the `documents/m365` bridge).
-  // OnlyOffice remains the automatic fallback when this is off/unavailable.
+  // is the single gatekeeper. PostgreSQL stays the record of truth for metadata
+  // (see the `documents/m365` bridge). OnlyOffice remains the automatic fallback
+  // when this is off/unavailable. The same connection settings back
+  // STORAGE_PROVIDER=sharepoint, which keeps every stored version in the site.
   //
   // OFF by default: the feature is inert until the SharePoint site + Entra app
   // registration are provisioned and these values are supplied. Secrets have no
-  // defaults. Storage is covered by the M365 Enterprise licences (no separate
+  // defaults. Storage is covered by the Microsoft 365 licences (no separate
   // Azure subscription needed).
   M365_ENABLED: z
     .enum(['true', 'false'])
@@ -128,8 +134,11 @@ export const envSchema = z.object({
   // Client secret for that app registration (a certificate is preferable in
   // production; this scaffold uses the client-credentials secret flow).
   M365_CLIENT_SECRET: z.string().optional(),
-  // The locked-down SharePoint site id whose document library holds live editing
-  // copies. Used to resolve the drive id when M365_DRIVE_ID is not pinned.
+  // The locked-down SharePoint site, by URL (simplest — e.g.
+  // https://contoso.sharepoint.com/sites/PortalFiles). Resolved to its id once.
+  M365_SITE_URL: z.string().url().optional(),
+  // ...or by id (`host,siteCollectionId,webId`), which skips the URL lookup.
+  // Either is used to resolve the drive id when M365_DRIVE_ID is not pinned.
   M365_SITE_ID: z.string().optional(),
   // The document-library drive id the portal writes into. Preferred: pin it to
   // skip a per-boot site→drive lookup. If blank, it is resolved from M365_SITE_ID.
