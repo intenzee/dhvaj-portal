@@ -5,7 +5,12 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { PERMISSION, type ClientMasterSection, type Paginated } from '@hsdg/contracts';
+import {
+  FEATURE_FLAG,
+  PERMISSION,
+  type ClientMasterSection,
+  type Paginated,
+} from '@hsdg/contracts';
 import { AlertTriangle, Plus, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -26,6 +31,8 @@ import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { EntityDetailActions } from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
+import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import {
   ClientMasterModal,
   SECTION_ANCHOR,
@@ -43,6 +50,7 @@ export default function EntityDetailPage(): JSX.Element {
   const params = useSearchParams();
   const { principal } = useAuth();
   const canManage = can(principal, PERMISSION.entityManage);
+  const { isOn } = useFeatureFlags();
   // `?edit=<section>` (from an audit file's "add on client master" link) opens
   // that section's form straight away; `?fy=` picks the year for figures.
   const requested = params.get('edit');
@@ -215,6 +223,8 @@ export default function EntityDetailPage(): JSX.Element {
           </CardBody>
         </Card>
       </div>
+
+      {isOn(FEATURE_FLAG.calendarV2) && <ComplianceProfilesCard entityId={e.id} />}
 
       {/* Year-wise financials (§16) */}
       <Card id={SECTION_ANCHOR.financials}>
