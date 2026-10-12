@@ -207,6 +207,11 @@ describe('Statutory Audit — 03.3 governance (e2e)', () => {
     });
     const ep = await summary(pa);
     expect(ep.governance.access.capabilities).toMatchObject({ partnerReview: true, assess: false });
+    // MAT-08 is the Engagement Manager's — the EP challenges / approves at 03.12, never completes 03.3.
+    await post(pa, `${base}/materiality`, {
+      mat08: 'yes_complete',
+      version: ep.determination.version,
+    }).expect(403);
   });
 
   it('M2 — evidence on 03.3 records; normalisation adjustments need support', async () => {
