@@ -1,9 +1,11 @@
 import {
+  AREA_CONDITION_LABEL,
   AREA_INDICATOR_LABEL,
   ASSERTION_IDS,
   AREA_VALIDATION_LABEL,
   FINANCIAL_UNIT_FACTOR,
   FINANCIAL_UNIT_LABEL,
+  GENERAL_CORPORATE_INDUSTRY,
   REMOVAL_REASON_NEEDS_TEXT,
   type AreaAmountSource,
   type AreaAttention,
@@ -90,15 +92,27 @@ export function applicableLibrary(
         (profile.frf !== 'unknown' && r.frameworkProfile === profile.frf),
     )
     .filter(
-      (r) => r.industryProfile === 'general_corporate' || r.industryProfile === profile.industry,
-    )
-    .filter(
       (r) =>
-        !r.conditionKey ||
-        (r.conditionKey === 'cfs_applicable' && profile.cfsApplicable) ||
-        (r.conditionKey === 'initial_audit' && profile.initialAudit),
+        r.industryProfile === GENERAL_CORPORATE_INDUSTRY || r.industryProfile === profile.industry,
     )
+    .filter((r) => !r.conditionKey || conditionHolds(r.conditionKey, profile))
     .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+/** §4 — whether a library condition holds for the engagement profile. */
+export function conditionHolds(key: AreaConditionKey, profile: AreaLibraryProfile): boolean {
+  switch (key) {
+    case 'cfs_applicable':
+      return profile.cfsApplicable;
+    case 'initial_audit':
+      return profile.initialAudit;
+    case 'caro_applicable':
+      return profile.caroApplicable === true;
+    case 'ifc_applicable':
+      return profile.ifcApplicable === true;
+    case 'ind_as_transition':
+      return profile.indAsTransition === true;
+  }
 }
 
 // ── Facts ───────────────────────────────────────────────────────────────────
@@ -184,6 +198,16 @@ export function specificMatchesArea(
       (area.areaCode && t === area.areaCode.toLowerCase()) ||
       names.some((n) => t === n || ` ${t} `.includes(` ${n} `) || ` ${n} `.includes(` ${t} `)),
   );
+}
+
+/** §20 — whether free text (a prior-year matter) names the area or one of its aliases. */
+export function textMentionsArea(
+  text: string,
+  area: { areaName: string; areaCode: string | null; aliases: string[] },
+): boolean {
+  const hay = ` ${norm(text)} `;
+  const names = [area.areaName, ...area.aliases].map(norm).filter((x) => x.length >= 3);
+  return names.some((n) => hay.includes(` ${n} `));
 }
 
 /** §17 — assertions a linked signal suggests for Enhanced Attention. */
@@ -363,8 +387,15 @@ export function deriveArea(a: StoredArea, c: DeriveContext): EngagementAuditArea
     ind('cfs', 'Consolidated financial statements applicable (Section 02)');
   if (tags.includes('caro') && facts.caroApplicable)
     ind('caro', 'CARO 2020 applicable (Section 02)');
-  if (c.priorYear)
-    ind('prior_year', c.priorYear.retained ? 'Retained last year' : 'Removed last year');
+  if (c.priorYear) {
+    const matters = c.priorYear.matters.map((m) => m.code).join(', ');
+    const last = c.priorYear.inPriorMatrix
+      ? c.priorYear.retained
+        ? 'Retained last year'
+        : 'Removed last year'
+      : 'Prior-year matter';
+    ind('prior_year', `${last}${matters ? ` · ${matters}` : ''}`);
+  }
 
   const highSignals = activeSignals.filter((s) => s.attention !== 'standard');
   const strong: string[] = [];
@@ -380,6 +411,9 @@ export function deriveArea(a: StoredArea, c: DeriveContext): EngagementAuditArea
     facts.profile.initialAudit && isOpeningBalances({ areaCode: a.areaCode, conditionKey });
   if (cfsConsol) strong.push('CFS applicable');
   if (initialOb) strong.push('Initial audit');
+  if (c.priorYear?.matters.length) {
+    strong.push(`Prior-year matter (${c.priorYear.matters.map((m) => m.code).join(', ')})`);
+  }
 
   const warnings: AreaWarning[] = [];
   if (amt.cy !== null || amt.py !== null) {
@@ -429,6 +463,13 @@ export function deriveArea(a: StoredArea, c: DeriveContext): EngagementAuditArea
       key: 'initial_opening_balances',
       severity: 'high',
       text: 'This is an initial audit — removing Opening Balances sets Requires Review until resolved.',
+    });
+  }
+  for (const m of c.priorYear?.matters ?? []) {
+    warnings.push({
+      key: `prior_year:${m.id}`,
+      severity: 'normal',
+      text: `${m.code} · prior-year ${m.matterType.replace(/_/g, ' ')}: ${m.description}`,
     });
   }
 
@@ -534,6 +575,8 @@ export function deriveArea(a: StoredArea, c: DeriveContext): EngagementAuditArea
     authorities: c.authorities,
     priorYear: c.priorYear,
     downstreamWork: 0,
+    downstreamDetail: { risks: 0, procedures: 0, workAreas: 0 },
+    evidenceCount: 0,
     version: a.version,
   };
 }
@@ -583,11 +626,21 @@ export function specificMatters(
 
 // ── §21 Validations ─────────────────────────────────────────────────────────
 
+/** An open Partner challenge / reassessment / downstream request (§25, §27). */
+export interface OpenReviewItem {
+  id: string;
+  kind: 'challenge' | 'reassessment_request' | 'downstream_request';
+  areaId: string | null;
+  label: string;
+}
+
 export interface ValidationState {
   profile: AreaLibraryProfile;
   areas: EngagementAuditArea[];
   specific: AreaSpecificMatter[];
   signals: AreaSignalRef[];
+  /** Open blocking review items — 03.5 stays Requires Review until answered. */
+  openItems?: OpenReviewItem[];
 }
 
 export function validations(s: ValidationState): AreaValidation[] {
@@ -635,6 +688,7 @@ export function validations(s: ValidationState): AreaValidation[] {
   const obMissing = s.profile.initialAudit && !ob.length;
   const undocumented = removed.filter((a) => a.strongIndicators.length && !a.removalReasonText);
   const review = s.areas.filter((a) => a.displayAttention === 'requires_review');
+  const openItems = s.openItems ?? [];
   const broken = removed.filter(
     (a) =>
       a.removalReasonCode === 'COVERED_ELSEWHERE' &&
@@ -689,7 +743,28 @@ export function validations(s: ValidationState): AreaValidation[] {
       (b) =>
         `Removed despite strong applicability indicators without documented rationale: ${names(b)}.`,
     ),
-    v('VAL-09', review, (b) => `Requires Review: ${names(b)}.`),
+    {
+      id: 'VAL-09',
+      label: AREA_VALIDATION_LABEL['VAL-09'],
+      met: !review.length && !openItems.length,
+      detail:
+        review.length || openItems.length
+          ? [
+              review.length ? `Requires Review: ${names(review)}.` : '',
+              openItems.length
+                ? `Open review item(s) to answer: ${openItems.map((i) => i.label).join('; ')}.`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+          : null,
+      areaIds: [
+        ...new Set([
+          ...review.map((a) => a.id),
+          ...openItems.map((i) => i.areaId).filter((x): x is string => !!x),
+        ]),
+      ],
+    },
     v(
       'VAL-10',
       broken,
@@ -784,10 +859,22 @@ export interface CompletionBasis {
   cfsApplicable: boolean;
   initialAudit: boolean;
   metricKeys: string[];
+  /** Added with 2026.2 — absent on older completions. */
+  caroApplicable?: boolean;
+  ifcApplicable?: boolean;
+  indAsTransition?: boolean;
+  industry?: string;
+  /** Library area codes applicable at completion (new applicability is measured against it). */
+  applicableCodes?: string[];
 }
 
-export function completionBasis(facts: AreaFacts): CompletionBasis {
+export function completionBasis(facts: AreaFacts, applicable: LibraryRow[] = []): CompletionBasis {
   return {
+    applicableCodes: applicable.map((l) => l.areaCode),
+    caroApplicable: facts.profile.caroApplicable === true,
+    ifcApplicable: facts.profile.ifcApplicable === true,
+    indAsTransition: facts.profile.indAsTransition === true,
+    industry: facts.profile.industry,
     om: facts.om,
     specificKeys: facts.specific.map((x) => x.key),
     signalIds: facts.signals.filter(requiresMapping).map((x) => x.id),
@@ -808,9 +895,25 @@ export function assessImpacts(
   facts: AreaFacts,
   areas: EngagementAuditArea[],
   library: LibraryRow[],
+  extra: {
+    /** The engagement's whole library version (for signals pointing outside the population). */
+    fullLibrary?: LibraryRow[];
+    /** Open Partner reassessment / downstream requests. */
+    openItems?: OpenReviewItem[];
+  } = {},
 ): AreaImpact[] {
-  if (!basis) return [];
   const out: AreaImpact[] = [];
+  // §25 / §27 — requests stand regardless of the completion basis.
+  for (const i of extra.openItems ?? []) {
+    if (i.kind === 'challenge') continue;
+    out.push({
+      key: `request:${i.id}`,
+      kind: i.kind === 'downstream_request' ? 'downstream_area_missing' : 'partner_reassessment',
+      message: i.label,
+      areaIds: i.areaId ? [i.areaId] : [],
+    });
+  }
+  if (!basis) return out;
   const rupees = (a: EngagementAuditArea) => {
     const f = a.unit ? FINANCIAL_UNIT_FACTOR[a.unit] : null;
     if (f === null) return null;
@@ -872,6 +975,43 @@ export function assessImpacts(
       kind: 'initial_audit_change',
       message: `Initial-audit status corrected (${basis.initialAudit ? 'initial' : 'continuing'} → ${facts.profile.initialAudit ? 'initial' : 'continuing'}) — reassess Opening Balances.`,
       areaIds: hit.map((a) => a.id),
+    });
+  }
+  // §25 — a newly applicable condition / industry area (material disclosure,
+  // Ind AS transition, CARO / IFC) that is not in the population.
+  const present = new Set(areas.map((a) => a.areaCode).filter(Boolean));
+  const reported = new Set<string>();
+  const flipped = (k: AreaConditionKey) =>
+    (k === 'cfs_applicable' && basis.cfsApplicable !== facts.profile.cfsApplicable) ||
+    (k === 'initial_audit' && basis.initialAudit !== facts.profile.initialAudit);
+  for (const l of basis.applicableCodes ? library : []) {
+    if (basis.applicableCodes!.includes(l.areaCode) || present.has(l.areaCode)) continue;
+    if (l.conditionKey && flipped(l.conditionKey)) continue;
+    const why = l.conditionKey
+      ? AREA_CONDITION_LABEL[l.conditionKey]
+      : l.industryProfile !== GENERAL_CORPORATE_INDUSTRY
+        ? `industry profile ${l.industryProfile}`
+        : 'applicable library area';
+    reported.add(l.areaCode);
+    out.push({
+      key: `disclosure:${l.areaCode}`,
+      kind: 'new_disclosure_area',
+      message: `${l.areaName} is now applicable (${why}) but is not in 03.5 — add it from the library.`,
+      areaIds: [],
+    });
+  }
+  // A new Enhanced / Immediate signal that points at a library area outside the population.
+  const fresh = facts.signals.filter((x) => requiresMapping(x) && !basis.signalIds.includes(x.id));
+  for (const l of (extra.fullLibrary ?? []).filter((x) => x.active)) {
+    if (present.has(l.areaCode) || reported.has(l.areaCode)) continue;
+    const hit = fresh.filter((x) => l.signalMappingTags.some((t) => tagMatches(t, x)));
+    if (!hit.length) continue;
+    reported.add(l.areaCode);
+    out.push({
+      key: `disclosure:${l.areaCode}`,
+      kind: 'new_disclosure_area',
+      message: `${hit.map((h) => h.code).join(', ')} points to ${l.areaName}, which is not in 03.5 — consider adding it.`,
+      areaIds: [],
     });
   }
   const newKeys = Object.entries(facts.metrics)

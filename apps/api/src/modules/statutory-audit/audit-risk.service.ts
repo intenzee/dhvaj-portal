@@ -1,8 +1,15 @@
 import { planRisk } from './section-packs';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  ASSERTION_IDS,
   RISK_RATING,
+  type AssertionId,
   type AuditRisk,
   type RiskAssertion,
   type RiskRating,
@@ -17,6 +24,7 @@ import { isEngagementLead, readEngagementMasterFacts, readInitialAudit } from '.
 import { nextRiskRef } from './plan-risk';
 import { displayCode } from './planning-shared';
 import { suggestRisks, type RiskSuggestionFacts } from './risk-suggestions';
+import { procedureAssertions } from './work-automation';
 
 interface RiskRow {
   id: string;
@@ -26,6 +34,8 @@ interface RiskRow {
   source: RiskSource;
   fs_area: string | null;
   assertion: RiskAssertion | null;
+  audit_area_id: string | null;
+  assertion_ids: AssertionId[] | null;
   rating: RiskRating;
   is_significant: boolean;
   is_fraud_risk: boolean;
@@ -48,6 +58,10 @@ export interface RiskInput {
   source: RiskSource;
   fsArea?: string | null;
   assertion?: RiskAssertion | null;
+  /** §24 — the retained 03.5 Audit Area (structural lineage). */
+  auditAreaId?: string | null;
+  /** Canonical SA 315 assertion ids; must be active on the area when one is set. */
+  assertionIds?: AssertionId[] | null;
   rating: RiskRating;
   isSignificant?: boolean;
   isFraudRisk?: boolean;
@@ -179,8 +193,12 @@ export class AuditRiskService {
         `INSERT INTO hsdg.audit_risks
            (workflow_instance_id, engagement_id, risk_ref, description, source, fs_area,
             assertion, rating, is_significant, is_fraud_risk, response, owner_employee_id,
-            reviewer_employee_id, status, source_key, source_note)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+            reviewer_employee_id, status, source_key, source_note, audit_area_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+                 (SELECT a.id FROM hsdg.audit_engagement_area a
+                    JOIN hsdg.audit_area_review rv ON rv.id = a.review_id
+                   WHERE $15 LIKE 'area:%' AND a.id::text = substring($15 FROM 6)
+                     AND rv.workflow_instance_id = $1))
          ON CONFLICT DO NOTHING`,
         [
           workflowInstanceId,
@@ -306,7 +324,7 @@ export class AuditRiskService {
 
     const { rows: risks } = await client.query<RiskRow>(
       `SELECT r.id, r.workflow_instance_id, r.risk_ref, r.description, r.source, r.fs_area,
-              r.assertion, r.rating, r.is_significant, r.is_fraud_risk, r.response,
+              r.assertion, r.audit_area_id, r.assertion_ids, r.rating, r.is_significant, r.is_fraud_risk, r.response,
               r.owner_employee_id, owner.full_name AS owner_name,
               r.reviewer_employee_id, reviewer.full_name AS reviewer_name,
               r.status, r.conclusion, r.source_key, r.source_note, r.version, r.created_at,
@@ -337,6 +355,25 @@ export class AuditRiskService {
       [shellIds],
     );
 
+    // §24 — the retained 03.5 areas (with their active assertions) a risk may sit in.
+    const { rows: areaRows } = await client.query<{
+      workflow_instance_id: string;
+      id: string;
+      area_name: string;
+      assertions: { id: AssertionId; label: string }[];
+    }>(
+      `SELECT rv.workflow_instance_id, a.id, a.area_name,
+              COALESCE((SELECT json_agg(json_build_object('id', m.id, 'label', m.label) ORDER BY m.sort_order)
+                          FROM hsdg.audit_area_assertion x
+                          JOIN hsdg.audit_assertion m ON m.id = x.assertion_id
+                         WHERE x.area_id = a.id AND x.active), '[]'::json) AS assertions
+         FROM hsdg.audit_area_review rv
+         JOIN hsdg.audit_engagement_area a ON a.review_id = rv.id AND a.disposition = 'retained'
+        WHERE rv.workflow_instance_id = ANY($1::uuid[])
+        ORDER BY a.seq`,
+      [shellIds],
+    );
+
     return shells.map((shell) => {
       const shellRisks = risks.filter((r) => r.workflow_instance_id === shell.id);
       return {
@@ -353,6 +390,9 @@ export class AuditRiskService {
             .map((p) => ({ riskId: p.risk_id })),
         }),
         // A significant risk requires an explicit response (§29).
+        areaOptions: areaRows
+          .filter((a) => a.workflow_instance_id === shell.id)
+          .map((a) => ({ id: a.id, name: a.area_name, assertions: a.assertions })),
         significantRisksWithoutResponse: shellRisks.filter(
           (r) =>
             (r.is_significant || r.rating === RISK_RATING.significant) &&
@@ -378,6 +418,12 @@ export class AuditRiskService {
         [workflowInstanceId],
       );
       const isSignificant = input.isSignificant ?? input.rating === RISK_RATING.significant;
+      const link = await resolveAreaLink(
+        client,
+        workflowInstanceId,
+        input.auditAreaId ?? null,
+        input.assertionIds ?? [],
+      );
 
       // Assign the next ref, retrying on the rare concurrent-insert collision.
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -396,8 +442,8 @@ export class AuditRiskService {
             `INSERT INTO hsdg.audit_risks
                (workflow_instance_id, engagement_id, risk_ref, description, source, fs_area,
                 assertion, rating, is_significant, is_fraud_risk, response, owner_employee_id,
-                reviewer_employee_id, status, conclusion)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                reviewer_employee_id, status, conclusion, audit_area_id, assertion_ids)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
              RETURNING id`,
             [
               workflowInstanceId,
@@ -405,8 +451,8 @@ export class AuditRiskService {
               riskRef,
               input.description.trim(),
               input.source,
-              input.fsArea?.trim() || null,
-              input.assertion ?? null,
+              input.fsArea?.trim() || link.areaName,
+              input.assertion ?? link.legacyAssertion,
               input.rating,
               isSignificant,
               input.isFraudRisk ?? false,
@@ -415,13 +461,21 @@ export class AuditRiskService {
               input.reviewerEmployeeId ?? null,
               input.status ?? 'identified',
               input.conclusion?.trim() || null,
+              link.areaId,
+              link.assertionIds,
             ],
           );
           await this.audit.recordWith(client, ctx, {
             action: 'statutory_audit.risk_created',
             objectType: 'audit_risk',
             objectId: rows[0]!.id,
-            after: { riskRef, rating: input.rating, isSignificant },
+            after: {
+              riskRef,
+              rating: input.rating,
+              isSignificant,
+              auditAreaId: link.areaId,
+              assertionIds: link.assertionIds,
+            },
           });
           const [register] = await this.readRegister(client, engagementId);
           return register!;
@@ -443,8 +497,15 @@ export class AuditRiskService {
     input: Partial<RiskInput> & { version: number },
   ): Promise<StatutoryAuditRiskRegister> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const { rows } = await client.query<{ id: string; rating: RiskRating }>(
-        `SELECT id, rating FROM hsdg.audit_risks WHERE id = $1 AND engagement_id = $2`,
+      const { rows } = await client.query<{
+        id: string;
+        rating: RiskRating;
+        workflow_instance_id: string;
+        audit_area_id: string | null;
+        assertion_ids: AssertionId[];
+      }>(
+        `SELECT id, rating, workflow_instance_id, audit_area_id, assertion_ids
+           FROM hsdg.audit_risks WHERE id = $1 AND engagement_id = $2`,
         [riskId, engagementId],
       );
       const current = rows[0];
@@ -465,6 +526,23 @@ export class AuditRiskService {
       if (input.source !== undefined) set('source', input.source);
       if (input.fsArea !== undefined) set('fs_area', input.fsArea?.trim() || null);
       if (input.assertion !== undefined) set('assertion', input.assertion ?? null);
+      if (input.auditAreaId !== undefined || input.assertionIds !== undefined) {
+        const areaId =
+          input.auditAreaId !== undefined ? (input.auditAreaId ?? null) : current.audit_area_id;
+        const link = await resolveAreaLink(
+          client,
+          current.workflow_instance_id,
+          areaId,
+          input.assertionIds !== undefined ? (input.assertionIds ?? []) : current.assertion_ids,
+          // An area change keeps only the assertions still active on the new area.
+          input.assertionIds === undefined,
+        );
+        set('audit_area_id', link.areaId);
+        set('assertion_ids', link.assertionIds);
+        if (input.fsArea === undefined && link.areaName) set('fs_area', link.areaName);
+        if (input.assertion === undefined && link.legacyAssertion)
+          set('assertion', link.legacyAssertion);
+      }
       if (input.rating !== undefined) set('rating', input.rating);
       // A risk rated "significant" is significant unless the caller says otherwise.
       if (input.isSignificant !== undefined) set('is_significant', input.isSignificant);
@@ -491,7 +569,12 @@ export class AuditRiskService {
         action: 'statutory_audit.risk_updated',
         objectType: 'audit_risk',
         objectId: riskId,
-        after: { status: input.status, rating: input.rating },
+        after: {
+          status: input.status,
+          rating: input.rating,
+          auditAreaId: input.auditAreaId,
+          assertionIds: input.assertionIds,
+        },
       });
       const [register] = await this.readRegister(client, engagementId);
       return register!;
@@ -545,6 +628,8 @@ function mapRisk(r: RiskRow): AuditRisk {
     source: r.source,
     fsArea: r.fs_area,
     assertion: r.assertion,
+    auditAreaId: r.audit_area_id,
+    assertionIds: r.assertion_ids ?? [],
     rating: r.rating,
     isSignificant: r.is_significant,
     isFraudRisk: r.is_fraud_risk,
@@ -560,5 +645,64 @@ function mapRisk(r: RiskRow): AuditRisk {
     version: r.version,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
+  };
+}
+
+/**
+ * §24 lineage (03.5 → Section 04) — a risk sits in a RETAINED Audit Area of
+ * this file's 03.5 and bears on assertions ACTIVE on that area (AT-20: only
+ * retained areas and active assertions are the current planning population).
+ * Without an area the canonical ids are still validated against the master.
+ */
+async function resolveAreaLink(
+  client: PoolClient,
+  workflowInstanceId: string,
+  areaId: string | null,
+  assertionIds: readonly string[],
+  dropInactive = false,
+): Promise<{
+  areaId: string | null;
+  areaName: string | null;
+  assertionIds: AssertionId[];
+  legacyAssertion: RiskAssertion | null;
+}> {
+  const ids = [...new Set(assertionIds)];
+  const unknown = ids.filter((i) => !(ASSERTION_IDS as readonly string[]).includes(i));
+  if (unknown.length) {
+    throw new BadRequestException(`Unknown assertion id(s): ${unknown.join(', ')}.`);
+  }
+  let areaName: string | null = null;
+  let kept = ids as AssertionId[];
+  if (areaId) {
+    const { rows } = await client.query<{ area_name: string; active: AssertionId[] }>(
+      `SELECT a.area_name,
+              ARRAY(SELECT x.assertion_id FROM hsdg.audit_area_assertion x
+                     WHERE x.area_id = a.id AND x.active) AS active
+         FROM hsdg.audit_engagement_area a
+         JOIN hsdg.audit_area_review rv ON rv.id = a.review_id
+        WHERE a.id = $1 AND rv.workflow_instance_id = $2 AND a.disposition = 'retained'`,
+      [areaId, workflowInstanceId],
+    );
+    const area = rows[0];
+    if (!area) {
+      throw new BadRequestException(
+        'Choose a retained 03.5 Audit Area of this audit file — or ask 03.5 to add the area.',
+      );
+    }
+    areaName = area.area_name;
+    const inactive = kept.filter((i) => !area.active.includes(i));
+    if (inactive.length && !dropInactive) {
+      throw new BadRequestException(
+        `Not an active assertion of ${area.area_name} in 03.5: ${inactive.join(', ')}.`,
+      );
+    }
+    kept = kept.filter((i) => area.active.includes(i));
+  }
+  const legacy = procedureAssertions(kept);
+  return {
+    areaId,
+    areaName,
+    assertionIds: kept,
+    legacyAssertion: legacy.length === 1 ? (legacy[0] as RiskAssertion) : null,
   };
 }

@@ -1,3 +1,4 @@
+import type { AssertionId } from './statutory-audit-areas-assertions';
 import type { SectionPack } from './statutory-audit-section-pack';
 /**
  * Statutory Audit — Risk Assessment (Phase 04) vocabulary (Audit Spec §22, §30).
@@ -74,6 +75,10 @@ export interface AuditRisk {
   /** The financial-statement area, e.g. "Revenue", free text. */
   fsArea: string | null;
   assertion: RiskAssertion | null;
+  /** §24 lineage — the 03.5 engagement Audit Area this risk sits in (structural link). */
+  auditAreaId: string | null;
+  /** Canonical SA 315 assertion ids (03.5 §15) the risk bears on. */
+  assertionIds: AssertionId[];
   rating: RiskRating;
   isSignificant: boolean;
   isFraudRisk: boolean;
@@ -106,6 +111,15 @@ export interface StatutoryAuditRiskRegister {
   significantRisksWithoutResponse: number;
   /** Whether the register is ready to drive the audit work, and what to know. */
   pack: SectionPack;
+  /** §24 — retained 03.5 Audit Areas a risk may sit in, with their active assertions. */
+  areaOptions: RiskAreaOption[];
+}
+
+/** A retained 03.5 Audit Area offered to the risk register (03.5 §24). */
+export interface RiskAreaOption {
+  id: string;
+  name: string;
+  assertions: { id: AssertionId; label: string }[];
 }
 
 /** Result of refreshing the suggested risks on a register. */

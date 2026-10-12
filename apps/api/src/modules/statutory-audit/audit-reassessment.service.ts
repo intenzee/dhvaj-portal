@@ -521,8 +521,9 @@ export class AuditReassessmentService {
       description: string;
       fs_area: string | null;
       source_key: string | null;
+      audit_area_id: string | null;
     }>(
-      `SELECT r.id, r.risk_ref, r.description, r.fs_area, r.source_key
+      `SELECT r.id, r.risk_ref, r.description, r.fs_area, r.source_key, r.audit_area_id
          FROM hsdg.audit_risks r
         WHERE r.workflow_instance_id = $1 AND r.is_significant AND r.status <> 'concluded'
           AND NOT EXISTS (SELECT 1 FROM hsdg.audit_procedures p WHERE p.risk_id = r.id)
@@ -603,6 +604,7 @@ export class AuditReassessmentService {
               response: null,
               status: 'identified',
               sourceKey: r.source_key,
+              auditAreaId: r.audit_area_id,
             },
             fsAreas,
           )?.id ?? null,

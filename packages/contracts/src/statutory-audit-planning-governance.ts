@@ -208,6 +208,9 @@ export const PLANNING_EVIDENCE_TARGET = {
   materialityAdjustment: 'materiality_adjustment',
   materialitySpecific: 'materiality_specific',
   materialityQualitative: 'materiality_qualitative',
+  /** 03.5 records (§28): an engagement Audit Area and one of its assertions. */
+  auditArea: 'audit_area',
+  areaAssertion: 'area_assertion',
 } as const;
 export type PlanningEvidenceTarget =
   (typeof PLANNING_EVIDENCE_TARGET)[keyof typeof PLANNING_EVIDENCE_TARGET];

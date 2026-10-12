@@ -76,6 +76,8 @@ import { AuditScopeApproachService } from './audit-scope-approach.service';
 import { AuditScopeApproachController } from './audit-scope-approach.controller';
 import { AuditAreaReviewService } from './audit-area-review.service';
 import { AuditAreaReviewController } from './audit-area-review.controller';
+import { AuditAreaLibraryService } from './audit-area-library';
+import { AuditAreaLibraryController } from './audit-area-library.controller';
 import { AuditRiskService } from './audit-risk.service';
 import { AuditRiskController } from './audit-risk.controller';
 import { AuditProcedureService } from './audit-procedure.service';
@@ -146,6 +148,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditMaterialityController,
     AuditScopeApproachController,
     AuditAreaReviewController,
+    AuditAreaLibraryController,
     AuditRiskController,
     AuditProcedureController,
     AuditPbcController,
@@ -195,6 +198,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     AuditMaterialityService,
     AuditScopeApproachService,
     AuditAreaReviewService,
+    AuditAreaLibraryService,
     AuditRiskService,
     AuditProcedureService,
     AuditPbcService,

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type AuditAreaReviewSummary } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -11,6 +11,8 @@ import {
   AreaLinkDto,
   AssertionActionDto,
   CompleteAreaReviewDto,
+  DownstreamAreaRequestDto,
+  GrantAreaPermissionDto,
   RemoveAuditAreaDto,
   ReopenAreaReviewDto,
   RespondAreaCommentDto,
@@ -23,9 +25,11 @@ import { Section03LockGuard } from './section-03-lock.guard';
 const BASE = ':id/statutory-audit/:workflowInstanceId/audit-areas';
 
 /**
- * Statutory Audit — 03.5 Audit Areas & Assertions (§29 services). Reads gated
- * by `engagement.read`, mutations by `engagement.manage`; RLS does the real
- * gating (members read; EP/manager leads mutate).
+ * Statutory Audit — 03.5 Audit Areas & Assertions (§29 services). Every route
+ * needs `engagement.read`; the service enforces the §27 role matrix (Manager /
+ * EP acting as Manager / authorised Senior–Article prepare; Manager-equivalent
+ * completes; the EP challenges; any team member requests an area) and RLS is
+ * the backstop (lead or grant holder writes).
  */
 @ApiTags('engagements')
 @Controller('engagements')
@@ -45,7 +49,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/populate`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
     summary: 'Create the engagement population from the applicable library (idempotent)',
   })
@@ -58,7 +62,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/library`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Add Audit Area(s) from the DHVAJ library' })
   addFromLibrary(
     @CurrentPrincipal() p: Principal,
@@ -70,7 +74,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/custom`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Add an engagement-only custom Audit Area' })
   addCustom(
     @CurrentPrincipal() p: Principal,
@@ -82,7 +86,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/areas/:areaId`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Update attention / manual amount / owner / resolutions on an area' })
   update(
     @CurrentPrincipal() p: Principal,
@@ -95,7 +99,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/areas/:areaId/remove`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Remove an Audit Area (never deletes; reason required)' })
   remove(
     @CurrentPrincipal() p: Principal,
@@ -108,7 +112,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/areas/:areaId/restore`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Restore a removed Audit Area' })
   restore(
     @CurrentPrincipal() p: Principal,
@@ -121,7 +125,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/areas/:areaId/assertions/:assertionId`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Add / remove / restore an assertion or change its attention' })
   assertion(
     @CurrentPrincipal() p: Principal,
@@ -135,7 +139,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/areas/:areaId/links`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Link / unlink a Planning Signal or specific-materiality matter' })
   link(
     @CurrentPrincipal() p: Principal,
@@ -148,7 +152,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/signal-resolutions`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'VAL-05 — document "no Audit Area mapping required" for a signal' })
   resolveSignal(
     @CurrentPrincipal() p: Principal,
@@ -160,7 +164,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/complete`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'AA-01 — complete 03.5 and generate the immutable matrix version' })
   complete(
     @CurrentPrincipal() p: Principal,
@@ -172,7 +176,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/reopen`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Reopen a completed / update-required 03.5 as the next version' })
   reopen(
     @CurrentPrincipal() p: Principal,
@@ -184,7 +188,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/methodology-update`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Controlled refresh to the current Audit Area Library version' })
   methodologyUpdate(
     @CurrentPrincipal() p: Principal,
@@ -195,7 +199,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/comments`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Partner review comment / challenge / reassessment request' })
   comment(
     @CurrentPrincipal() p: Principal,
@@ -207,7 +211,7 @@ export class AuditAreaReviewController {
   }
 
   @Post(`${BASE}/comments/:commentId`)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Respond to (address) a review comment' })
   respond(
     @CurrentPrincipal() p: Principal,
@@ -217,5 +221,41 @@ export class AuditAreaReviewController {
     @Body() dto: RespondAreaCommentDto,
   ): Promise<AuditAreaReviewSummary> {
     return this.areas.respondComment(rlsContextFromPrincipal(p), id, wi, commentId, dto);
+  }
+
+  @Post(`${BASE}/requests`)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: '§25 — the risk assessment asks 03.5 for an area not in it' })
+  requestArea(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wi: string,
+    @Body() dto: DownstreamAreaRequestDto,
+  ): Promise<AuditAreaReviewSummary> {
+    return this.areas.requestArea(rlsContextFromPrincipal(p), id, wi, dto);
+  }
+
+  @Post(`${BASE}/permissions`)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: '§27 — authorise a Senior / Article to prepare (or complete) 03.5' })
+  grant(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wi: string,
+    @Body() dto: GrantAreaPermissionDto,
+  ): Promise<AuditAreaReviewSummary> {
+    return this.areas.grantPermission(rlsContextFromPrincipal(p), id, wi, dto);
+  }
+
+  @Delete(`${BASE}/permissions/:grantId`)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: '§27 — revoke a 03.5 authorisation' })
+  revoke(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wi: string,
+    @Param('grantId', new ParseUUIDPipe()) grantId: string,
+  ): Promise<AuditAreaReviewSummary> {
+    return this.areas.revokePermission(rlsContextFromPrincipal(p), id, wi, grantId);
   }
 }

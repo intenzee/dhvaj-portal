@@ -9,7 +9,9 @@ import {
   RISK_RATING,
   RISK_SOURCE,
   RISK_STATUS,
+  type AssertionId,
   type AuditRisk,
+  type RiskAreaOption,
   type RiskAssertion,
   type RiskRating,
   type RiskSource,
@@ -59,6 +61,10 @@ interface RiskDraft {
   description: string;
   source: RiskSource;
   fsArea: string;
+  /** §24 — the retained 03.5 Audit Area the risk sits in. */
+  auditAreaId: string;
+  /** Canonical SA 315 assertions of that area the risk bears on. */
+  assertionIds: AssertionId[];
   assertion: RiskAssertion | '';
   rating: RiskRating;
   isSignificant: boolean;
@@ -74,6 +80,8 @@ const EMPTY_DRAFT: RiskDraft = {
   description: '',
   source: RISK_SOURCE.error,
   fsArea: '',
+  auditAreaId: '',
+  assertionIds: [],
   assertion: '',
   rating: RISK_RATING.moderate,
   isSignificant: false,
@@ -91,7 +99,10 @@ function draftToBody(d: RiskDraft) {
     description: d.description,
     source: d.source,
     fsArea: d.fsArea || undefined,
-    assertion: d.assertion || undefined,
+    auditAreaId: d.auditAreaId || undefined,
+    assertionIds: d.assertionIds.length ? d.assertionIds : undefined,
+    // With a 03.5 area the API derives the legacy assertion from the canonical ones.
+    assertion: (!d.auditAreaId && d.assertion) || undefined,
     rating: d.rating,
     isSignificant: d.isSignificant,
     isFraudRisk: d.isFraudRisk,
@@ -110,7 +121,9 @@ function draftToUpdateBody(d: RiskDraft) {
     description: d.description,
     source: d.source,
     fsArea: d.fsArea.trim() || null,
-    assertion: d.assertion || null,
+    auditAreaId: d.auditAreaId || null,
+    assertionIds: d.assertionIds,
+    assertion: d.auditAreaId ? undefined : d.assertion || null,
     rating: d.rating,
     isSignificant: d.isSignificant,
     isFraudRisk: d.isFraudRisk,
@@ -237,6 +250,7 @@ export function RiskPanel({
         <RiskForm
           plain
           team={team}
+          areas={register.areaOptions}
           submitLabel="Add risk"
           pending={create.isPending}
           onCancel={() => setAdding(false)}
@@ -260,6 +274,8 @@ export function RiskPanel({
                 risk={risk}
                 focusAt={focus?.id === risk.id ? focus.at : null}
                 team={team}
+                areas={register.areaOptions}
+                workflowInstanceId={register.workflowInstanceId}
                 canManage={canManage}
                 onChanged={invalidate}
               />
@@ -276,6 +292,8 @@ function RiskRow({
   risk,
   focusAt,
   team,
+  areas,
+  workflowInstanceId,
   canManage,
   onChanged,
 }: {
@@ -284,6 +302,8 @@ function RiskRow({
   /** Set when a "Go to" link targets this risk — opens it for editing. */
   focusAt: number | null;
   team: TeamMember[];
+  areas: RiskAreaOption[];
+  workflowInstanceId: string;
   canManage: boolean;
   onChanged: () => void;
 }): JSX.Element {
@@ -365,10 +385,13 @@ function RiskRow({
           <RiskForm
             plain
             team={team}
+            areas={areas}
             initial={{
               description: risk.description,
               source: risk.source,
               fsArea: risk.fsArea ?? '',
+              auditAreaId: risk.auditAreaId ?? '',
+              assertionIds: risk.assertionIds,
               assertion: risk.assertion ?? '',
               rating: risk.rating,
               isSignificant: risk.isSignificant,
@@ -405,6 +428,14 @@ function RiskRow({
                 {risk.ownerName && ` · Owner: ${risk.ownerName}`}
                 {risk.reviewerName && ` · Reviewer: ${risk.reviewerName}`}
               </p>
+              <AreaLine risk={risk} areas={areas} />
+              {!risk.auditAreaId && (
+                <AreaRequest
+                  engagementId={engagementId}
+                  workflowInstanceId={workflowInstanceId}
+                  risk={risk}
+                />
+              )}
               {risk.response && (
                 <p className="mt-1.5 text-xs text-ink-muted">
                   <span className="font-semibold text-ink">Response:</span> {risk.response}
@@ -440,6 +471,7 @@ function RiskRow({
 
 function RiskForm({
   team,
+  areas,
   initial,
   submitLabel,
   pending,
@@ -450,6 +482,7 @@ function RiskForm({
   /** Render without its card (inside a pop-up). */
   plain?: boolean;
   team: TeamMember[];
+  areas: RiskAreaOption[];
   initial?: RiskDraft;
   submitLabel: string;
   pending: boolean;
@@ -460,6 +493,19 @@ function RiskForm({
   const set = <K extends keyof RiskDraft>(k: K, v: RiskDraft[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
   const Wrapper = plain ? 'div' : Card;
+  const area = areas.find((a) => a.id === draft.auditAreaId) ?? null;
+  const pickArea = (id: string) => {
+    const next = areas.find((a) => a.id === id) ?? null;
+    setDraft((d) => ({
+      ...d,
+      auditAreaId: id,
+      // Keep only assertions still active on the chosen area.
+      assertionIds: next
+        ? d.assertionIds.filter((x) => next.assertions.some((a) => a.id === x))
+        : [],
+      fsArea: next && (!d.fsArea.trim() || d.fsArea === area?.name) ? next.name : d.fsArea,
+    }));
+  };
 
   return (
     <Wrapper className={plain ? 'space-y-3' : 'space-y-3 p-4'}>
@@ -483,6 +529,23 @@ function RiskForm({
             ))}
           </Select>
         </Field>
+        <Field
+          label="03.5 Audit Area"
+          hint={
+            areas.length
+              ? 'Links the risk to the retained 03.5 area (lineage to the matrix and work).'
+              : '03.5 has no retained areas yet.'
+          }
+        >
+          <Select value={draft.auditAreaId} onChange={(e) => pickArea(e.target.value)}>
+            <option value="">— Not linked —</option>
+            {areas.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <Field label="FS area">
           <Input
             placeholder="e.g. Revenue"
@@ -490,19 +553,46 @@ function RiskForm({
             onChange={(e) => set('fsArea', e.target.value)}
           />
         </Field>
-        <Field label="Assertion">
-          <Select
-            value={draft.assertion}
-            onChange={(e) => set('assertion', e.target.value as RiskAssertion | '')}
-          >
-            <option value="">—</option>
-            {Object.values(RISK_ASSERTION).map((a) => (
-              <option key={a} value={a}>
-                {humanize(a)}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        {area ? (
+          <fieldset className="sm:col-span-2">
+            <legend className="mb-1 text-xs font-medium text-ink">
+              Assertions (active on {area.name} in 03.5)
+            </legend>
+            <div className="flex flex-wrap gap-3">
+              {area.assertions.map((a) => (
+                <label key={a.id} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draft.assertionIds.includes(a.id)}
+                    onChange={() =>
+                      set(
+                        'assertionIds',
+                        draft.assertionIds.includes(a.id)
+                          ? draft.assertionIds.filter((x) => x !== a.id)
+                          : [...draft.assertionIds, a.id],
+                      )
+                    }
+                  />
+                  {a.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : (
+          <Field label="Assertion">
+            <Select
+              value={draft.assertion}
+              onChange={(e) => set('assertion', e.target.value as RiskAssertion | '')}
+            >
+              <option value="">—</option>
+              {Object.values(RISK_ASSERTION).map((a) => (
+                <option key={a} value={a}>
+                  {humanize(a)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <Field label="Rating">
           <Select
             value={draft.rating}
@@ -598,5 +688,92 @@ function RiskForm({
         </Button>
       </div>
     </Wrapper>
+  );
+}
+
+/** §24 — where the risk sits in the 03.5 matrix. */
+function AreaLine({
+  risk,
+  areas,
+}: {
+  risk: AuditRisk;
+  areas: RiskAreaOption[];
+}): JSX.Element | null {
+  if (!risk.auditAreaId) return null;
+  const area = areas.find((a) => a.id === risk.auditAreaId);
+  const labels = risk.assertionIds.map(
+    (id) => area?.assertions.find((a) => a.id === id)?.label ?? id,
+  );
+  return (
+    <p className="mt-1 text-xs text-ink-muted">
+      <span className="font-semibold text-ink">03.5 area:</span>{' '}
+      {area ? area.name : 'no longer retained in 03.5 — review the link'}
+      {labels.length > 0 && ` · ${labels.join(', ')}`}
+    </p>
+  );
+}
+
+/** §25 — the risk needs an Audit Area 03.5 does not retain: ask the Manager, never create it here. */
+function AreaRequest({
+  engagementId,
+  workflowInstanceId,
+  risk,
+}: {
+  engagementId: string;
+  workflowInstanceId: string;
+  risk: AuditRisk;
+}): JSX.Element {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(risk.fsArea ?? '');
+  const [reason, setReason] = useState('');
+  const send = useMutation({
+    mutationFn: () =>
+      apiFetch(
+        `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}/audit-areas/requests`,
+        {
+          method: 'POST',
+          body: { proposedAreaName: name.trim(), reason: reason.trim(), riskId: risk.id },
+        },
+      ),
+    onSuccess: () => {
+      toast('Area request sent to 03.5 — the Manager adds or explains it.');
+      setOpen(false);
+      setReason('');
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not send the request.'),
+  });
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="mt-1 text-xs text-primary-700 hover:underline"
+        onClick={() => setOpen(true)}
+      >
+        Area missing from 03.5? Request it
+      </button>
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-line p-2">
+      <Field label="Area needed">
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <div className="min-w-[14rem] flex-1">
+        <Field label="Why the risk needs it">
+          <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </div>
+      <Button
+        variant="secondary"
+        disabled={send.isPending || !name.trim() || !reason.trim()}
+        onClick={() => send.mutate()}
+      >
+        Send to 03.5
+      </Button>
+      <Button variant="ghost" onClick={() => setOpen(false)}>
+        Cancel
+      </Button>
+    </div>
   );
 }

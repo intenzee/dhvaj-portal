@@ -15,6 +15,7 @@ import {
 import {
   AREA_ATTENTIONS,
   AREA_COMMENT_KINDS,
+  AREA_PERMISSION_LEVELS,
   AREA_TYPES,
   FINANCIAL_UNITS,
   REMOVAL_REASON_CODES,
@@ -24,10 +25,13 @@ import {
   type AreaCommentInput,
   type AreaCommentKind,
   type AreaLinkInput,
+  type AreaPermissionLevel,
   type AreaType,
   type AssertionActionInput,
   type CompleteAreaReviewInput,
+  type DownstreamAreaRequestInput,
   type FinancialUnit,
+  type GrantAreaPermissionInput,
   type RemovalReasonCode,
   type RemoveAuditAreaInput,
   type ReopenAreaReviewInput,
@@ -249,4 +253,42 @@ export class RespondAreaCommentDto implements RespondAreaCommentInput {
   @IsString()
   @MaxLength(4000)
   response!: string;
+
+  @ApiPropertyOptional({ description: 'Area request: the retained Audit Area that answers it.' })
+  @IsOptional()
+  @IsUUID()
+  resolvedAreaId?: string | null;
+}
+
+export class GrantAreaPermissionDto implements GrantAreaPermissionInput {
+  @ApiProperty()
+  @IsUUID()
+  employeeId!: string;
+
+  @ApiProperty({ enum: AREA_PERMISSION_LEVELS })
+  @IsIn(AREA_PERMISSION_LEVELS as unknown as string[])
+  level!: AreaPermissionLevel;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string | null;
+}
+
+export class DownstreamAreaRequestDto implements DownstreamAreaRequestInput {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(200)
+  proposedAreaName!: string;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(4000)
+  reason!: string;
+
+  @ApiPropertyOptional({ description: 'The risk (Section 04 register) that needs the area.' })
+  @IsOptional()
+  @IsUUID()
+  riskId?: string | null;
 }
