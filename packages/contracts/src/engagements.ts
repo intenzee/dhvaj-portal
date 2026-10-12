@@ -1,4 +1,5 @@
 /** Engagement vocabulary shared by the API and web. */
+import type { Stream } from './engagement-restructure';
 
 /**
  * Universal engagement lifecycle states. The guarded state machine (which
@@ -109,6 +110,9 @@ export interface EngagementServiceLine {
   leadEmployeeId: string | null;
   leadEmployeeName: string | null;
   createdAt: string;
+  /** The compliance stream this line belongs to (its own, or the stream its
+   *  folded legacy service became); null for audit and assignment lines. */
+  stream?: Stream | null;
 }
 
 /** How an entity participates in a multi-entity / group engagement (§5–§6, §30). */

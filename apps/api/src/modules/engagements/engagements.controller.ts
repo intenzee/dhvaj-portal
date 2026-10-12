@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -12,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  FEATURE_FLAG,
   LIFECYCLE_ACTION,
   PERMISSION,
   type LifecycleAction,
@@ -20,6 +22,7 @@ import {
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { PaginationQueryDto, paginate } from '../../common/pagination/pagination.dto';
+import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { EngagementsService } from './engagements.service';
 import { EngagementLifecycleService } from './lifecycle/engagement-lifecycle.service';
 import { EngagementWorkflowService } from './lifecycle/engagement-workflow.service';
@@ -49,6 +52,7 @@ export class EngagementsController {
     private readonly engagements: EngagementsService,
     private readonly lifecycle: EngagementLifecycleService,
     private readonly workflow: EngagementWorkflowService,
+    private readonly flags: FeatureFlagsService,
   ) {}
 
   @Get()
@@ -64,6 +68,7 @@ export class EngagementsController {
   ): Promise<Paginated<EngagementSummary>> {
     const filter: EngagementFilter = {};
     if (query.status) filter.status = query.status;
+    if (query.kind) filter.kind = query.kind;
     if (query.entityId) filter.entityId = query.entityId;
     if (query.serviceCode) filter.serviceCode = query.serviceCode;
     if (query.officeCode) filter.officeCode = query.officeCode;
@@ -102,6 +107,12 @@ export class EngagementsController {
     @CurrentPrincipal() principal: Principal,
     @Body() dto: CreateEngagementDto,
   ): Promise<EngagementDetail> {
+    if (
+      !this.flags.isOn(FEATURE_FLAG.engagementKinds) &&
+      (dto.kind !== undefined || dto.years !== undefined || dto.streams !== undefined)
+    ) {
+      throw new BadRequestException('Engagement kinds are not enabled.');
+    }
     return this.engagements.createEngagement(rlsContextFromPrincipal(principal), dto);
   }
 

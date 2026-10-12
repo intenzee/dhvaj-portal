@@ -518,3 +518,88 @@ export interface GenerateCalendarResult {
   flagged: number;
   notApplicable: number;
 }
+
+// ── Change 1: creating and scoping engagements by kind ─────────────────────
+
+/** One stream as the new-engagement wizard offers it (GET /streams). */
+export interface StreamCatalogueEntry {
+  stream: Stream;
+  label: string;
+  /** The live STREAM_* catalogue service the stream's line carries. */
+  serviceId: string;
+  serviceCode: string;
+  serviceName: string;
+  /** What it runs on: registration types, or 'pan' / 'entity'. */
+  registrationTypes: readonly string[];
+}
+
+/** A year in scope, as given when creating or adding it. */
+export interface ComplianceYearInput {
+  financialYear: string;
+  feeAmount?: number | null;
+  billingModel?: string | null;
+  budgetHours?: Partial<Record<Stream, number>>;
+  engagementLetterRef?: string | null;
+  engagementLetterDate?: string | null;
+  s144ApprovalRef?: string | null;
+}
+
+/** POST /engagements/:id/years — add a year (and its streams) to the scope. */
+export interface AddComplianceYearInput extends ComplianceYearInput {
+  /** Defaults to the streams of the latest year in scope. */
+  streams?: Stream[];
+  /** Defaults to the latest year's registrations per stream. */
+  streamRegistrations?: Partial<Record<Stream, string[]>>;
+  acknowledgedIndependenceRules?: IndependenceRule[];
+}
+
+/** PATCH /engagements/:id/years/:fy */
+export interface UpdateComplianceYearInput extends Omit<ComplianceYearInput, 'financialYear'> {
+  status?: 'open' | 'closed';
+  version: number;
+}
+
+/** PATCH /engagements/:id/years/:fy/streams — add or end streams for a year. */
+export interface UpdateYearStreamsInput {
+  add?: Stream[];
+  end?: Stream[];
+  /** Registrations per stream (replaces the stream's list when given). */
+  streamRegistrations?: Partial<Record<Stream, string[]>>;
+  /** Lead for a newly added stream's line. */
+  streamLeads?: Partial<Record<Stream, string>>;
+  acknowledgedIndependenceRules?: IndependenceRule[];
+  version: number;
+}
+
+/** POST /engagements/independence-check — preview the rules before submit. */
+export interface IndependenceCheckInput {
+  entityId: string;
+  kind: EngagementKind;
+  financialYears: string[];
+  streams?: Stream[];
+  /** Assignment: the service it carries. */
+  serviceId?: string;
+  s144ApprovalRef?: string | null;
+  /** Adding to an existing engagement (its own facts are no conflict). */
+  engagementId?: string;
+}
+
+export interface IndependenceCheckResult {
+  isCompany: boolean;
+  findings: IndependenceFinding[];
+  /** The first hard block, if any (submit returns 409 with its rule). */
+  block: IndependenceFinding | null;
+  /** The client's open Compliance engagement — "Add a year / stream to CR/…". */
+  openComplianceEngagement: { id: string; engagementCode: string } | null;
+}
+
+/** Body of the 409 a blocked create / add-year / add-stream returns. */
+export interface IndependenceBlockedError {
+  statusCode: 409;
+  message: string;
+  rule: IndependenceRule | 'COMPLIANCE_ENGAGEMENT_EXISTS' | 'ACKNOWLEDGEMENT_REQUIRED';
+  findings?: IndependenceFinding[];
+  /** For COMPLIANCE_ENGAGEMENT_EXISTS: the engagement to open instead. */
+  engagementId?: string;
+  engagementCode?: string;
+}

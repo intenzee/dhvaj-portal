@@ -4,12 +4,14 @@ import type {
   EngagementConfidentiality,
   EngagementCoveredEntity,
   EngagementEntityRole,
+  EngagementKind,
   EngagementPriority,
   EngagementServiceLine,
   EngagementServiceStatus,
   EngagementStatus,
   EngagementType,
   ReviewModelSlug,
+  Stream,
 } from '@hsdg/contracts';
 import type { EngagementDetail, EngagementSummary } from './engagements.types';
 
@@ -65,14 +67,17 @@ export async function selectEngagementServices(
     lead_employee_id: string | null;
     lead_employee_name: string | null;
     created_at: Date;
+    stream: Stream | null;
   }>(
     `SELECT es.id, es.service_id, s.code AS service_code, s.name AS service_name,
             es.is_primary, es.status, es.office_id, o.code AS office_code,
-            es.lead_employee_id, led.full_name AS lead_employee_name, es.created_at
+            es.lead_employee_id, led.full_name AS lead_employee_name, es.created_at,
+            COALESCE(s.stream, live.stream) AS stream
      FROM hsdg.engagement_services es
      JOIN hsdg.services s ON s.id = es.service_id
      JOIN hsdg.offices o ON o.id = es.office_id
      LEFT JOIN hsdg.employees led ON led.id = es.lead_employee_id
+     LEFT JOIN hsdg.services live ON live.id = s.folded_into_service_id
      WHERE es.engagement_id = $1
      ORDER BY es.is_primary DESC, s.name`,
     [engagementId],
@@ -89,6 +94,7 @@ export async function selectEngagementServices(
     leadEmployeeId: r.lead_employee_id,
     leadEmployeeName: r.lead_employee_name,
     createdAt: r.created_at.toISOString(),
+    stream: r.stream,
   }));
 }
 
@@ -97,7 +103,7 @@ export async function selectEngagementServices(
  * Phase 6 lifecycle/workflow services so they never drift against each other.
  */
 export const ENGAGEMENT_BASE = `
-  SELECT eng.id, eng.engagement_code, eng.entity_id, ent.entity_code, ent.legal_name AS entity_name,
+  SELECT eng.id, eng.engagement_code, eng.kind, eng.merged_into_id, eng.entity_id, ent.entity_code, ent.legal_name AS entity_name,
          eng.service_id, s.code AS service_code, s.name AS service_name,
          eng.financial_year, eng.period_label, eng.office_id, o.code AS office_code,
          eng.status, eng.engagement_partner_id, ep.full_name AS ep_name,
@@ -159,6 +165,8 @@ export const ENGAGEMENT_BASE = `
 export interface EngagementRow {
   id: string;
   engagement_code: string;
+  kind: EngagementKind;
+  merged_into_id: string | null;
   entity_id: string;
   entity_code: string;
   entity_name: string;
@@ -221,6 +229,8 @@ export function mapEngagement(row: EngagementRow & { team_count: string }): Enga
   return {
     id: row.id,
     engagementCode: row.engagement_code,
+    kind: row.kind,
+    mergedIntoId: row.merged_into_id,
     entityId: row.entity_id,
     entityCode: row.entity_code,
     entityName: row.entity_name,

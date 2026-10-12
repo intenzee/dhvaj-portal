@@ -14,7 +14,9 @@ function ctx(overrides: Partial<LifecycleGuardContext> = {}): LifecycleGuardCont
     ctx: { userId: 'u1', role: ROLE.partner },
     engagement: {
       id: 'e1',
-      engagementCode: 'ENG00001',
+      engagementCode: 'SA/00001',
+      kind: 'statutory_audit',
+      mergedIntoId: null,
       entityId: 'ent1',
       entityCode: 'ENT001',
       entityName: 'Acme',

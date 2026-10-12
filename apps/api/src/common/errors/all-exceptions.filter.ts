@@ -32,7 +32,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       (response.getHeader(CORRELATION_ID_HEADER) as string | undefined) ??
       'unknown';
 
-    const { status, error, message, details } = this.normalise(exception);
+    const { status, error, message, details, extra } = this.normalise(exception);
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       // Unexpected: log the full error, return a generic message.
@@ -47,6 +47,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     const body: ErrorResponse = {
+      ...extra,
       statusCode: status,
       error,
       message,
@@ -64,6 +65,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     error: string;
     message: string;
     details?: string[];
+    extra?: Record<string, unknown>;
   } {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
@@ -82,6 +84,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? rawMessage
           : exception.message;
 
+      // Structured context a business rule attached on purpose (e.g. the
+      // independence `rule` and `findings`, or the engagement a conflict points
+      // at) rides along; the envelope's own keys always win.
+      const extra = Object.fromEntries(
+        Object.entries(obj).filter(([key]) => !ENVELOPE_KEYS.has(key)),
+      );
+
       // Always derive the machine-readable `error` code from the HTTP status
       // (e.g. FORBIDDEN, NOT_FOUND) rather than Nest's human string ("Forbidden"),
       // so clients get a stable, uppercase code regardless of exception source.
@@ -90,6 +99,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error: codeFor(status),
         message,
         ...(details ? { details } : {}),
+        ...(Object.keys(extra).length > 0 ? { extra } : {}),
       };
     }
 
@@ -121,6 +131,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
   }
 }
+
+const ENVELOPE_KEYS = new Set(['statusCode', 'error', 'message']);
 
 function codeFor(status: number): string {
   const name = Object.entries(HttpStatus).find(([, value]) => value === status)?.[0];

@@ -70,7 +70,11 @@ export class ServiceComponentsService {
       const params: unknown[] = [];
       if (filter.serviceCode) {
         params.push(filter.serviceCode);
-        conditions.push(`s.code = $${params.length}`);
+        // A folded legacy service lists the components re-parented from it.
+        conditions.push(
+          `(s.code = $${params.length} OR sc.folded_from_service_id =
+             (SELECT id FROM hsdg.services WHERE code = $${params.length}))`,
+        );
       }
       if (filter.serviceId) {
         params.push(filter.serviceId);

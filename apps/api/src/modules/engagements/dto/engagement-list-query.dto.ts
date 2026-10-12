@@ -1,7 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
-import { ENGAGEMENT_STATUSES, type EngagementStatus } from '@hsdg/contracts';
+import {
+  ENGAGEMENT_KINDS,
+  ENGAGEMENT_STATUSES,
+  type EngagementKind,
+  type EngagementStatus,
+} from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
 
 const toBool = ({ value }: { value: unknown }): unknown =>
@@ -13,6 +18,11 @@ export class EngagementListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(ENGAGEMENT_STATUSES)
   status?: EngagementStatus;
+
+  @ApiPropertyOptional({ enum: ENGAGEMENT_KINDS, description: 'Filter by engagement kind.' })
+  @IsOptional()
+  @IsIn(ENGAGEMENT_KINDS)
+  kind?: EngagementKind;
 
   @ApiPropertyOptional({ description: 'Filter by client entity id.' })
   @IsOptional()
