@@ -484,8 +484,18 @@ describe('03.5 audit areas & assertions engine', () => {
   it('§4: CARO, IFC and Ind AS transition conditions select their library areas only when the fact holds', () => {
     const rows = [
       lib(),
-      lib({ areaCode: 'CARO', areaName: 'CARO reporting', conditionKey: 'caro_applicable', sortOrder: 2 }),
-      lib({ areaCode: 'IFC', areaName: 'IFC reporting', conditionKey: 'ifc_applicable', sortOrder: 3 }),
+      lib({
+        areaCode: 'CARO',
+        areaName: 'CARO reporting',
+        conditionKey: 'caro_applicable',
+        sortOrder: 2,
+      }),
+      lib({
+        areaCode: 'IFC',
+        areaName: 'IFC reporting',
+        conditionKey: 'ifc_applicable',
+        sortOrder: 3,
+      }),
       lib({
         areaCode: 'INDAS_TR',
         areaName: 'Ind AS transition',
@@ -498,7 +508,11 @@ describe('03.5 audit areas & assertions engine', () => {
     const codes = (p: AreaLibraryProfile) =>
       applicableLibrary(rows, p, '2026-03-31').map((r) => r.areaCode);
     expect(codes(profile())).toEqual(['REV']);
-    expect(codes(profile({ caroApplicable: true, ifcApplicable: true }))).toEqual(['REV', 'CARO', 'IFC']);
+    expect(codes(profile({ caroApplicable: true, ifcApplicable: true }))).toEqual([
+      'REV',
+      'CARO',
+      'IFC',
+    ]);
     expect(codes(profile({ frf: 'ind_as', indAsTransition: true }))).toEqual(['REV', 'INDAS_TR']);
     expect(codes(profile({ industry: 'banking' }))).toEqual(['REV', 'BANK']);
     expect(conditionHolds('caro_applicable', profile())).toBe(false);
@@ -522,10 +536,14 @@ describe('03.5 audit areas & assertions engine', () => {
       assertions: [],
       cy: null,
       unit: null,
-      matters: [{ id: 'm1', code: 'PYM-01', matterType: 'Audit finding', description: 'Sales cut-off' }],
+      matters: [
+        { id: 'm1', code: 'PYM-01', matterType: 'Audit finding', description: 'Sales cut-off' },
+      ],
     };
     const a = deriveArea(stored(), c);
-    expect(a.indicators.some((i) => i.key === 'prior_year' && i.detail.includes('PYM-01'))).toBe(true);
+    expect(a.indicators.some((i) => i.key === 'prior_year' && i.detail.includes('PYM-01'))).toBe(
+      true,
+    );
     expect(a.warnings.some((w) => w.key === 'prior_year:m1')).toBe(true);
     const removed = deriveArea(
       stored({ disposition: 'removed', removalReasonCode: 'NO_BALANCE_ACTIVITY' }),
@@ -539,7 +557,12 @@ describe('03.5 audit areas & assertions engine', () => {
     const a = derive(stored());
     const open = [
       { id: 'c1', kind: 'challenge' as const, areaId: 'a1', label: 'EP challenge on Revenue' },
-      { id: 'c2', kind: 'downstream_request' as const, areaId: null, label: 'Risk R3 needs Derivatives' },
+      {
+        id: 'c2',
+        kind: 'downstream_request' as const,
+        areaId: null,
+        label: 'Risk R3 needs Derivatives',
+      },
       { id: 'c3', kind: 'reassessment_request' as const, areaId: 'a1', label: 'Reassess Revenue' },
     ];
     const s = { ...state([a]), openItems: open };
@@ -555,7 +578,12 @@ describe('03.5 audit areas & assertions engine', () => {
   it('§25: a newly applicable condition area, or a new signal pointing outside the population, is a new disclosure area', () => {
     const rows = [
       lib(),
-      lib({ areaCode: 'CARO', areaName: 'CARO reporting', conditionKey: 'caro_applicable', sortOrder: 2 }),
+      lib({
+        areaCode: 'CARO',
+        areaName: 'CARO reporting',
+        conditionKey: 'caro_applicable',
+        sortOrder: 2,
+      }),
       lib({
         areaCode: 'DERIV',
         areaName: 'Derivatives',
@@ -569,15 +597,13 @@ describe('03.5 audit areas & assertions engine', () => {
     const a = derive(stored());
     const after = facts({
       profile: profile({ caroApplicable: true }),
-      signals: [signal({ id: 's7', code: 'PS-007', observation: 'New derivative contracts', ruleKey: 'x' })],
+      signals: [
+        signal({ id: 's7', code: 'PS-007', observation: 'New derivative contracts', ruleKey: 'x' }),
+      ],
     });
-    const impacts = assessImpacts(
-      basis,
-      after,
-      [a],
-      applicableLibrary(rows, after.profile, null),
-      { fullLibrary: rows },
-    );
+    const impacts = assessImpacts(basis, after, [a], applicableLibrary(rows, after.profile, null), {
+      fullLibrary: rows,
+    });
     const disclosure = impacts.filter((i) => i.kind === 'new_disclosure_area').map((i) => i.key);
     expect(disclosure).toEqual(expect.arrayContaining(['disclosure:CARO']));
     expect(impacts.some((i) => i.message.includes('Derivatives'))).toBe(true);

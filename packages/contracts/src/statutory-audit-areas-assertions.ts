@@ -407,7 +407,8 @@ export interface AreaWarning {
   severity: 'high' | 'normal';
 }
 
-export type AuthorityCategory = 'accounting' | 'auditing' | 'companies_act_caro' | 'schedule_iii' | 'other';
+export type AuthorityCategory =
+  'accounting' | 'auditing' | 'companies_act_caro' | 'schedule_iii' | 'other';
 export const AUTHORITY_CATEGORY_LABEL = labels<AuthorityCategory>({
   accounting: 'Accounting',
   auditing: 'Auditing',
@@ -488,7 +489,12 @@ export interface EngagementAuditArea {
   amountSource: AreaAmountSource | null;
   amountNote: string | null;
   /** Manual figures stored on the area (null → none). */
-  manualAmount: { cy: number | null; py: number | null; currency: string; unit: FinancialUnit } | null;
+  manualAmount: {
+    cy: number | null;
+    py: number | null;
+    currency: string;
+    unit: FinancialUnit;
+  } | null;
   /** 'Above OM' / 'Below OM' — informational only (§13). */
   omComparison: 'above_om' | 'below_om' | null;
   planningOwnerEmployeeId: string | null;
@@ -505,7 +511,12 @@ export interface EngagementAuditArea {
   signals: AreaSignalLink[];
   specific: AreaSpecificLink[];
   /** Portal suggestions not yet linked (library mapping tags / matter names). */
-  suggestedSignals: { signalId: string; code: string; observation: string; attention: PlanningAttention }[];
+  suggestedSignals: {
+    signalId: string;
+    code: string;
+    observation: string;
+    attention: PlanningAttention;
+  }[];
   suggestedSpecific: { specificKey: string; label: string }[];
   authorities: AreaAuthorityRef[];
   priorYear: AreaPriorYear | null;
@@ -572,7 +583,12 @@ export interface AreaMatrixRow {
   unit: FinancialUnit | null;
   currency: string | null;
   attention: AreaAttention;
-  assertions: { assertionId: AssertionId; label: string; group: AssertionGroup; attention: AreaAttention }[];
+  assertions: {
+    assertionId: AssertionId;
+    label: string;
+    group: AssertionGroup;
+    attention: AreaAttention;
+  }[];
   signals: { id: string; code: string; observation: string }[];
 }
 
