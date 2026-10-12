@@ -5,9 +5,33 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { FolderOpen } from 'lucide-react';
-import { TASK_STATUS, type Paginated } from '@hsdg/contracts';
+import {
+  ENGAGEMENT_KIND,
+  FEATURE_FLAG,
+  ROLE,
+  STREAM_LABEL,
+  TASK_STATUS,
+  type EngagementTabs,
+  type Paginated,
+  type Stream,
+} from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useFeatureFlags } from '@/lib/feature-flags';
+import { hasRole } from '@/lib/principal';
+import { useUrlState } from '@/lib/url-state';
+import type { TaskActionContext } from '@/lib/work-types';
+import { StreamTab } from '@/components/filing/stream-tab';
+import { WorkList } from '@/components/tasks/work-list';
+import { ActivityTab, TimePanel } from '@/components/engagement/activity-tab';
+import { BillFromTime } from '@/components/engagement/bill-from-time';
+import { DocumentsTab } from '@/components/engagement/documents-tab';
+import {
+  OverviewWidgets,
+  ScopeByYearCard,
+  StreamLeadsCard,
+  useEngagementTabs,
+} from '@/components/engagement/overview-widgets';
 import { engagementAbilities } from '@/lib/engagement-permissions';
 import { formatDate, humanize } from '@/lib/format';
 import type {
@@ -66,17 +90,7 @@ import { RecordEventButton } from '@/components/compliance/record-event-modal';
 import { ObligationExtensionActions } from '@/components/compliance/extension-modals';
 import { DeadlineLayersModal } from '@/components/compliance/deadline-layers-modal';
 
-type TabKey =
-  | 'overview'
-  | 'services'
-  | 'work'
-  | 'compliance'
-  | 'documents'
-  | 'team'
-  | 'time'
-  | 'activity'
-  | 'invoices'
-  | 'notes';
+type TabKey = string;
 
 /** Each tab with one plain line on what it's for — shown under the tab bar. */
 const TABS: { key: TabKey; label: string; hint: string }[] = [
@@ -116,6 +130,82 @@ const TABS: { key: TabKey; label: string; hint: string }[] = [
   { key: 'notes', label: 'Notes', hint: 'Internal notes for the team.' },
 ];
 
+const STREAM_HINT: Record<Stream, string> = {
+  mis: 'Monthly MIS packs for the client.',
+  bookkeeping: 'Bookkeeping by period — data in, books closed.',
+  gst: 'GST month by month: Outward, Inward and Summary, each worked and lodged here.',
+  tds: 'TDS deposits and quarterly returns.',
+  income_tax: 'Advance tax, the return and assessments.',
+  roc: 'ROC / MCA annual filings and event forms.',
+};
+
+const STREAM_ORDER: Stream[] = ['mis', 'bookkeeping', 'gst', 'tds', 'income_tax', 'roc'];
+
+/** Change 3 — the 12 Compliance tabs (stream tabs only when in scope for the year). */
+function complianceTabs(
+  tabs: EngagementTabs,
+  fy: string | null,
+): { key: TabKey; label: string; hint: string }[] {
+  const inScope = new Set(
+    tabs.streams.filter((s) => !fy || s.financialYears.includes(fy)).map((s) => s.stream),
+  );
+  return [
+    {
+      key: 'overview',
+      label: 'Overview',
+      hint: 'What is due, overdue and waiting on the client; hours and fees.',
+    },
+    { key: 'services', label: 'Services', hint: 'Scope by year, and all work across the streams.' },
+    ...STREAM_ORDER.filter((s) => inScope.has(s)).map((s) => ({
+      key: s,
+      label: STREAM_LABEL[s],
+      hint: STREAM_HINT[s],
+    })),
+    {
+      key: 'documents',
+      label: 'Documents',
+      hint: 'Every paper, filterable by stream, year, period and GSTIN.',
+    },
+    { key: 'team', label: 'Team', hint: 'Who is on this engagement and who leads each stream.' },
+    {
+      key: 'activity',
+      label: 'Activity',
+      hint: 'Everything that happened, comments, and recorded time.',
+    },
+    {
+      key: 'invoices',
+      label: 'Invoices',
+      hint: 'Raise invoices (or bill from time) and record payments.',
+    },
+  ];
+}
+
+/** Change 3 — the six Statutory Audit tabs. */
+const AUDIT_TABS: { key: TabKey; label: string; hint: string }[] = [
+  {
+    key: 'overview',
+    label: 'Overview',
+    hint: 'Who is responsible, where things stand and the key details.',
+  },
+  {
+    key: 'audit_file',
+    label: 'Audit file',
+    hint: 'The audit file, its tasks and what the client owes.',
+  },
+  {
+    key: 'documents',
+    label: 'Documents',
+    hint: 'Working papers and client files — upload, open and edit here.',
+  },
+  { key: 'team', label: 'Team', hint: 'Who is on this engagement and in what role.' },
+  {
+    key: 'activity',
+    label: 'Activity',
+    hint: 'Everything that happened, comments, and recorded time.',
+  },
+  { key: 'invoices', label: 'Invoices', hint: 'Raise invoices and record payments received.' },
+];
+
 /** Audit-file phases (and cross-cutting trackers) that expand a workspace inline. */
 const AUDIT_PHASE_PANELS = [
   'acceptance',
@@ -147,7 +237,30 @@ interface ActivityRecord {
 export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const { principal } = useAuth();
-  const [tab, setTab] = useState<TabKey>('overview');
+  const url = useUrlState();
+  const { isOn } = useFeatureFlags();
+  const tabsQ = useEngagementTabs(id);
+  const kind = tabsQ.data?.kind ?? null;
+  // Layout by kind and flags; the legacy tabs until ff_compliance_tabs is on.
+  const layout: 'compliance' | 'audit' | 'legacy' =
+    kind === ENGAGEMENT_KIND.compliance && isOn(FEATURE_FLAG.complianceTabs)
+      ? 'compliance'
+      : kind === ENGAGEMENT_KIND.statutoryAudit && isOn(FEATURE_FLAG.complianceTabs)
+        ? 'audit'
+        : 'legacy';
+  const pageFy = url.get('fy') ?? tabsQ.data?.financialYear ?? null;
+  const visibleTabs =
+    layout === 'compliance' && tabsQ.data
+      ? complianceTabs(tabsQ.data, pageFy)
+      : layout === 'audit'
+        ? AUDIT_TABS
+        : TABS;
+  const requested = url.get('tab') ?? 'overview';
+  const tab: TabKey = visibleTabs.some((t) => t.key === requested) ? requested : 'overview';
+  const setTab = (key: TabKey) =>
+    url.set({ tab: key === 'overview' ? null : key, m: null, p: null });
+  const gstOn = isOn(FEATURE_FLAG.gstTab);
+  const autoTimeOn = isOn(FEATURE_FLAG.autoTime);
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
   // Tasks open their work inline under their row; several can be open at once.
   const [openTasks, setOpenTasks] = useState<ReadonlySet<string>>(new Set());
@@ -169,24 +282,24 @@ export default function EngagementDetailPage(): JSX.Element {
   const tasks = useQuery({
     queryKey: ['engagement', id, 'tasks'],
     queryFn: () => apiFetch<Paginated<MyTask>>(`/engagements/${id}/tasks?limit=50`),
-    enabled: tab === 'work',
+    enabled: tab === 'work' || tab === 'audit_file',
   });
   const deps = useQuery({
     queryKey: ['engagement', id, 'client-dependencies'],
     queryFn: () =>
       apiFetch<Paginated<MyClientDependency>>(`/engagements/${id}/client-dependencies?limit=50`),
-    enabled: tab === 'work',
+    enabled: tab === 'work' || tab === 'audit_file',
   });
   const compliance = useQuery({
     queryKey: ['engagement', id, 'compliance'],
     queryFn: () => apiFetch<Paginated<ComplianceRow>>(`/engagements/${id}/compliance?limit=50`),
-    enabled: tab === 'compliance',
+    enabled: tab === 'compliance' || (tab === 'gst' && !gstOn),
   });
   const activity = useQuery({
     queryKey: ['engagement', id, 'lifecycle-history'],
     queryFn: () =>
       apiFetch<Paginated<ActivityRecord>>(`/engagements/${id}/lifecycle-history?limit=50`),
-    enabled: tab === 'activity',
+    enabled: tab === 'activity' && layout === 'legacy',
   });
 
   if (eng.isLoading) return <Spinner label="Loading engagement…" />;
@@ -194,6 +307,15 @@ export default function EngagementDetailPage(): JSX.Element {
     return <EmptyState>Engagement not found, or you don&rsquo;t have access to it.</EmptyState>;
 
   const e = eng.data;
+  const me = principal?.employeeId ?? null;
+  const ctx: TaskActionContext = {
+    me,
+    isLead:
+      hasRole(principal, ROLE.managingPartner) ||
+      (!!me && (me === e.engagementPartnerId || me === e.engagementManagerId)),
+  };
+  const tabs = tabsQ.data;
+  const leadsTeam = planningTeam(e);
 
   return (
     <div>
@@ -235,7 +357,7 @@ export default function EngagementDetailPage(): JSX.Element {
 
       {/* Tab bar */}
       <div className="flex gap-1 overflow-x-auto border-b border-line-strong" role="tablist">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.key}
             role="tab"
@@ -252,11 +374,12 @@ export default function EngagementDetailPage(): JSX.Element {
           </button>
         ))}
       </div>
-      <p className="mb-4 mt-2 text-xs text-ink-muted">{TABS.find((t) => t.key === tab)?.hint}</p>
+      <p className="mb-4 mt-2 text-xs text-ink-muted">{visibleTabs.find((t) => t.key === tab)?.hint}</p>
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
       {tab === 'overview' && (
         <div className="space-y-4">
+          {layout !== 'legacy' && tabs && <OverviewWidgets engagementId={e.id} tabs={tabs} />}
           <Card>
             <CardHeader>
               <CardTitle>Overview</CardTitle>
@@ -310,13 +433,38 @@ export default function EngagementDetailPage(): JSX.Element {
       {/* ── Services (multi-service + components + work) ──────────────────── */}
       {tab === 'services' && (
         <div>
+          {layout === 'compliance' && tabs && <ScopeByYearCard tabs={tabs} />}
           <ServicesSection engagementId={e.id} services={e.services} />
           <ComponentWorkSection engagementId={e.id} />
+          {layout === 'compliance' && (
+            <Card className="mt-4">
+              <CardHeader className="flex items-center justify-between">
+                <CardTitle>All work</CardTitle>
+                <CreateTaskModal engagementId={e.id} team={e.team} />
+              </CardHeader>
+              <CardBody>
+                <WorkList engagementId={e.id} ctx={ctx} team={leadsTeam} showFilters />
+              </CardBody>
+            </Card>
+          )}
         </div>
       )}
 
+      {/* ── Stream tabs (Change 5/6): MIS, Bookkeeping, GST, TDS, IT, ROC ──── */}
+      {layout === 'compliance' &&
+        STREAM_ORDER.includes(tab as Stream) &&
+        !(tab === 'gst' && !gstOn) && (
+          <StreamTab
+            key={tab}
+            engagementId={e.id}
+            stream={tab as Stream}
+            ctx={ctx}
+            defaultFy={pageFy}
+          />
+        )}
+
       {/* ── Work (digital audit file + tasks + client dependencies) ──────── */}
-      {tab === 'work' && (
+      {(tab === 'work' || tab === 'audit_file') && (
         <div>
           {/* Statutory Audit file navigation (§8, §10) — renders only when the
               engagement carries a statutory-audit service. */}
@@ -520,7 +668,7 @@ export default function EngagementDetailPage(): JSX.Element {
       )}
 
       {/* ── Compliance ───────────────────────────────────────────────────── */}
-      {tab === 'compliance' && (
+      {(tab === 'compliance' || (tab === 'gst' && !gstOn)) && (
         <section>
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-ink">Compliance obligations</h2>
@@ -610,7 +758,12 @@ export default function EngagementDetailPage(): JSX.Element {
       )}
 
       {/* ── Documents ────────────────────────────────────────────────────── */}
-      {tab === 'documents' && <DocumentsSection engagementId={e.id} />}
+      {tab === 'documents' &&
+        (layout === 'compliance' ? (
+          <DocumentsTab engagementId={e.id} financialYears={tabs?.financialYears ?? []} />
+        ) : (
+          <DocumentsSection engagementId={e.id} />
+        ))}
 
       {/* Secure client upload link (opened from the client dependencies table). */}
       {linkForDep && (
@@ -623,13 +776,39 @@ export default function EngagementDetailPage(): JSX.Element {
       )}
 
       {/* ── Team ─────────────────────────────────────────────────────────── */}
-      {tab === 'team' && <TeamSection engagementId={e.id} team={e.team} />}
+      {tab === 'team' && (
+        <>
+          {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} />}
+          <TeamSection engagementId={e.id} team={e.team} />
+        </>
+      )}
 
       {/* ── Time (manual stopwatch + per-person totals) ──────────────────── */}
       {tab === 'time' && <TimeSection engagementId={e.id} />}
 
       {/* ── Activity (lifecycle history) ─────────────────────────────────── */}
-      {tab === 'activity' && (
+      {tab === 'activity' && layout !== 'legacy' && (
+        <ActivityTab
+          engagementId={e.id}
+          team={leadsTeam}
+          isLead={ctx.isLead}
+          timeView={
+            autoTimeOn && layout === 'compliance' ? (
+              <TimePanel
+                engagementId={e.id}
+                isLead={ctx.isLead}
+                streams={(tabs?.streams ?? []).map((s) => ({
+                  stream: s.stream,
+                  engagementServiceId: s.engagementServiceId,
+                }))}
+              />
+            ) : (
+              <TimeSection engagementId={e.id} />
+            )
+          }
+        />
+      )}
+      {tab === 'activity' && layout === 'legacy' && (
         <section>
           <h2 className="mb-2 text-sm font-semibold text-ink">Activity</h2>
           <Card className="overflow-hidden p-0">
@@ -669,7 +848,12 @@ export default function EngagementDetailPage(): JSX.Element {
       )}
 
       {/* ── Commercial & Billing (§31) ───────────────────────────────────── */}
-      {tab === 'invoices' && <InvoicesSection engagementId={e.id} />}
+      {tab === 'invoices' && (
+        <>
+          {layout === 'compliance' && <BillFromTime engagementId={e.id} />}
+          <InvoicesSection engagementId={e.id} />
+        </>
+      )}
 
       {/* ── Notes (§26) ──────────────────────────────────────────────────── */}
       {tab === 'notes' && <NotesSection engagementId={e.id} />}
