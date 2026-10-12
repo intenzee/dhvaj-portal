@@ -3,7 +3,11 @@ import type {
   EngagementConfidentiality,
   EngagementCoveredEntity,
   EngagementEntityRole,
+  ComplianceYearInput,
+  EngagementKind,
   EngagementPriority,
+  IndependenceRule,
+  Stream,
   EngagementServiceLine,
   EngagementStatus,
   EngagementType,
@@ -33,6 +37,10 @@ export interface ReviewModelRef {
 export interface EngagementSummary {
   id: string;
   engagementCode: string;
+  /** statutory_audit | compliance | assignment (spec Change 1). */
+  kind: EngagementKind;
+  /** Set when this per-FY Compliance engagement was merged into the standing one. */
+  mergedIntoId: string | null;
   entityId: string;
   entityCode: string;
   entityName: string;
@@ -130,6 +138,7 @@ export interface AddCoveredEntityInput {
 
 export interface EngagementFilter {
   status?: EngagementStatus;
+  kind?: EngagementKind;
   entityId?: string;
   serviceCode?: string;
   officeCode?: string;
@@ -140,8 +149,10 @@ export interface EngagementFilter {
 }
 
 export interface CreateEngagementInput {
+  kind?: EngagementKind;
   entityId: string;
-  serviceId: string;
+  /** Required for an assignment (or when kind is omitted). */
+  serviceId?: string;
   financialYear: string;
   periodLabel?: string;
   officeCode?: string;
@@ -158,6 +169,12 @@ export interface CreateEngagementInput {
   billingModel?: BillingModel;
   mandateLetterReference?: string;
   mandateLetterDate?: string;
+  /** Compliance: years in scope (default: financialYear). */
+  years?: ComplianceYearInput[];
+  streams?: Stream[];
+  streamRegistrations?: Partial<Record<Stream, string[]>>;
+  streamLeads?: Partial<Record<Stream, string>>;
+  acknowledgedIndependenceRules?: IndependenceRule[];
 }
 
 /**

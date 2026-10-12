@@ -15,12 +15,15 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
-import { translatePgError as mapPgError } from '../../common/errors/pg-error.util';
+import { translatePgError } from './engagement-pg-error';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StatutoryAuditWorkflowService } from '../statutory-audit/statutory-audit-workflow.service';
+import { EngagementKindsService } from './engagement-kinds.service';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
+export { translatePgError } from './engagement-pg-error';
+
 import type {
   AddCoveredEntityInput,
   AddServiceInput,
@@ -60,6 +63,7 @@ export class EngagementsService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly statutoryAudit: StatutoryAuditWorkflowService,
+    private readonly kinds: EngagementKindsService,
   ) {}
 
   async listEngagements(
@@ -72,6 +76,10 @@ export class EngagementsService {
     if (filter.status) {
       params.push(filter.status);
       conditions.push(`eng.status = $${params.length}`);
+    }
+    if (filter.kind) {
+      params.push(filter.kind);
+      conditions.push(`eng.kind = $${params.length}`);
     }
     if (filter.entityId) {
       params.push(filter.entityId);
@@ -97,8 +105,13 @@ export class EngagementsService {
     }
     if (filter.search) {
       params.push(`%${filter.search}%`);
+      // A Compliance engagement also answers to the codes merged into it, so an
+      // old per-year code still finds the standing engagement.
       conditions.push(
-        `(eng.engagement_code ILIKE $${params.length} OR ent.legal_name ILIKE $${params.length})`,
+        `(eng.engagement_code ILIKE $${params.length} OR ent.legal_name ILIKE $${params.length}
+          OR EXISTS (SELECT 1 FROM hsdg.engagements m
+                      WHERE m.merged_into_id = eng.id
+                        AND m.engagement_code ILIKE $${params.length}))`,
       );
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -163,6 +176,10 @@ export class EngagementsService {
         if (managerId === null && grade === 'manager') managerId = ctx.employeeId;
       }
 
+      // Kind, service, streams and years in scope; independence rules (Change 1).
+      const plan = await this.kinds.planCreate(client, input);
+      const status = input.status ?? 'prospect';
+
       let id: string;
       try {
         const { rows } = await client.query<{ id: string }>(
@@ -171,20 +188,20 @@ export class EngagementsService {
               engagement_partner_id, engagement_manager_id, status,
               predecessor_engagement_id, planned_start_date, planned_end_date, accepted_at,
               engagement_type, priority, confidentiality, currency, billing_model,
-              mandate_letter_reference, mandate_letter_date)
+              mandate_letter_reference, mandate_letter_date, kind)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
               COALESCE($13,'recurring_compliance'),COALESCE($14,'normal'),
-              COALESCE($15,'normal'),COALESCE($16,'INR'),$17,$18,$19)
+              COALESCE($15,'normal'),COALESCE($16,'INR'),$17,$18,$19,$20)
            RETURNING id`,
           [
             input.entityId,
-            input.serviceId,
-            input.financialYear,
+            plan.serviceId,
+            plan.financialYear,
             input.periodLabel ?? 'FY',
             officeId,
             epId,
             managerId,
-            input.status ?? 'prospect',
+            status,
             input.predecessorEngagementId ?? null,
             input.plannedStartDate ?? null,
             input.plannedEndDate ?? null,
@@ -196,12 +213,23 @@ export class EngagementsService {
             input.billingModel ?? null,
             input.mandateLetterReference ?? null,
             input.mandateLetterDate ?? null,
+            plan.kind,
           ],
         );
         id = rows[0]!.id;
       } catch (err) {
         throw translatePgError(err);
       }
+      await this.kinds.completeCreate(
+        client,
+        ctx,
+        id,
+        officeId,
+        serviceStatusFromEngagement(status),
+        plan,
+        input.streamLeads,
+        input.acknowledgedIndependenceRules,
+      );
 
       // When the primary service is Statutory Audit, provision its versioned
       // workflow shell now (§5, §36) — the AFTER-INSERT trigger has already
@@ -640,25 +668,4 @@ export class EngagementsService {
 
 function isAccepted(status: EngagementStatus | undefined): boolean {
   return status !== undefined && !EP_OPTIONAL_STATUSES.includes(status);
-}
-
-/** Map PostgreSQL constraint/RLS violations to clean HTTP errors (engagement domain). */
-export function translatePgError(err: unknown): Error {
-  return mapPgError(err, {
-    unique: [
-      {
-        match: 'identity',
-        message: 'An engagement already exists for this client, service, year and period.',
-      },
-      { match: 'engagement_team', message: 'That employee is already on the engagement team.' },
-    ],
-    uniqueDefault: 'A duplicate value violates a unique constraint.',
-    foreignKey: 'A referenced record does not exist.',
-    check: 'Invalid engagement state — an accepted engagement requires an Engagement Partner.',
-    // Raised by the engagement grade-/review-plan triggers; the message is a
-    // fixed, developer-authored string — safe to surface when short.
-    raise: (message) =>
-      message && message.length <= 200 ? message : 'Invalid engagement accountability.',
-    forbidden: 'Not permitted to write this engagement.',
-  });
 }

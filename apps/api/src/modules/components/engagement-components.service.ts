@@ -156,9 +156,12 @@ export class EngagementComponentsService {
         `SELECT id, service_id, code, name, description, default_applicability, default_frequency,
                 compliance_rule_id, requires_registration, applies_to_categories
          FROM hsdg.service_components
-         WHERE service_id = $1 AND is_active = true
+         WHERE is_active = true
+           AND (service_id = $1
+                -- a folded legacy line: the components re-parented from it
+                OR (service_id = $2 AND folded_from_service_id = $1))
          ORDER BY display_order, code`,
-        [eng.service_id],
+        [eng.service_id, eng.folded_into_service_id],
       );
 
       // §11 — the client facts applicability is decided against (entity legal
@@ -285,11 +288,7 @@ export class EngagementComponentsService {
       const component = await this.resolveComponent(client, input.serviceComponentCode);
       // A folded legacy service's components now live on its stream service
       // (same rule as hsdg.enforce_engagement_component_service).
-      const folded = await client.query<{ folded_into_service_id: string | null }>(
-        `SELECT folded_into_service_id FROM hsdg.services WHERE id = $1`,
-        [line.service_id],
-      );
-      const owners = [line.service_id, folded.rows[0]?.folded_into_service_id].filter(Boolean);
+      const owners = [line.service_id, line.folded_into_service_id].filter(Boolean);
       if (!owners.includes(component.service_id)) {
         throw new BadRequestException(
           `Component "${component.code}" does not belong to the selected service.`,
@@ -755,10 +754,11 @@ export class EngagementComponentsService {
     engagement_service_id: string;
     service_id: string;
     service_code: string;
+    folded_into_service_id: string | null;
     financial_year: string;
   }> {
     const base = `SELECT es.id AS engagement_service_id, es.service_id,
-                         s.code AS service_code, es.financial_year
+                         s.code AS service_code, s.folded_into_service_id, es.financial_year
                   FROM hsdg.engagement_services es
                   JOIN hsdg.services s ON s.id = es.service_id
                   WHERE es.engagement_id = $1`;
@@ -779,6 +779,7 @@ export class EngagementComponentsService {
       engagement_service_id: string;
       service_id: string;
       service_code: string;
+      folded_into_service_id: string | null;
       financial_year: string;
     };
   }

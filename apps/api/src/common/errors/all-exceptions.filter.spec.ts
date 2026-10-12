@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, HttpStatus } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  HttpStatus,
+} from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 import { CORRELATION_ID_HEADER } from '../logging/logger.config';
@@ -57,6 +62,31 @@ describe('AllExceptionsFilter (uniform error envelope)', () => {
     expect(body.statusCode).toBe(400);
     expect(body.message).toBe('Validation failed');
     expect(body.details).toEqual(['name must not be empty', 'pan is invalid']);
+  });
+
+  it('carries the structured context a business rule attaches, envelope keys winning', () => {
+    const { host, json } = mockHost();
+
+    filter.catch(
+      new ConflictException({
+        message: 'A Compliance engagement is already open for this client.',
+        rule: 'COMPLIANCE_ENGAGEMENT_EXISTS',
+        engagementId: 'eng-1',
+        statusCode: 200,
+        path: '/spoofed',
+      }),
+      host,
+    );
+
+    const body = json.mock.calls[0][0];
+    expect(body).toMatchObject({
+      statusCode: 409,
+      error: 'CONFLICT',
+      message: 'A Compliance engagement is already open for this client.',
+      rule: 'COMPLIANCE_ENGAGEMENT_EXISTS',
+      engagementId: 'eng-1',
+      path: '/api/v1/thing',
+    });
   });
 
   it('does NOT leak internals for unexpected errors (fail-closed)', () => {
