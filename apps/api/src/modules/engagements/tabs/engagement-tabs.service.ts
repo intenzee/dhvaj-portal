@@ -230,7 +230,8 @@ export class EngagementTabsService {
           budgetHoursThisYear: m.budget === null ? null : Number(m.budget),
           feeAmount: fee,
           invoicedAmount: invoiced,
-          unbilledAmount: fee === null ? null : Math.max(0, Math.round((fee - invoiced) * 100) / 100),
+          unbilledAmount:
+            fee === null ? null : Math.max(0, Math.round((fee - invoiced) * 100) / 100),
         },
       };
     });
