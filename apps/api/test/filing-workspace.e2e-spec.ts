@@ -3,6 +3,7 @@ import request from 'supertest';
 import { Client } from 'pg';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 import { MonthlyDataRequestScheduler } from '../src/modules/filing-workspace/monthly-data-request.scheduler';
 
 /**
@@ -43,8 +44,11 @@ describe('Filing workspace (e2e)', () => {
     reg: string;
     entityId: string;
   }> => {
-    const entityId = (await http().get('/api/v1/entities?search=Bharat&limit=100').set(bearer(mp)))
-      .body.items[0].id as string;
+    // One standing Compliance engagement per client, so each setup gets its own.
+    const entityId = await freshClient(
+      (await http().get('/api/v1/entities?search=Bharat&limit=100').set(bearer(mp))).body.items[0]
+        .id as string,
+    );
     const serviceId = (
       await http().get('/api/v1/services?search=ITR_FILING&limit=100').set(bearer(mp))
     ).body.items[0].id as string;
@@ -407,7 +411,9 @@ describe('Filing workspace (e2e)', () => {
     // Documents tab filters: by filing section / year / stream, with slot links.
     const docs = (
       await http()
-        .get(`/api/v1/engagements/${eng}/documents?section=summary&financialYear=2026-27&stream=gst`)
+        .get(
+          `/api/v1/engagements/${eng}/documents?section=summary&financialYear=2026-27&stream=gst`,
+        )
         .set(bearer(sy))
         .expect(200)
     ).body.items as Array<{ slotCode: string; complianceInstanceId: string; periodKey: string }>;
