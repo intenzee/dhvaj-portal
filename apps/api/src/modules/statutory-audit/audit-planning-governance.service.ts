@@ -41,6 +41,7 @@ import {
   type PlanningSignalAssessment,
   type ReopenPlanningIntelligenceInput,
   type RespondPartnerAttentionInput,
+  areaReviewVersionLabel,
   materialityVersionLabel,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -62,6 +63,7 @@ import {
   type PlanningActor,
 } from './planning-governance';
 import { assertShell, clean, displayCode, insertSignal } from './planning-shared';
+import { assertAreaCapability, resolveAreaAccess } from './area-review-access';
 
 /** The 03.1 record each evidence target lives in (all carry workflow_instance_id). */
 const EVIDENCE_TARGET_SQL: Record<PlanningEvidenceTarget, string> = {
@@ -92,7 +94,18 @@ const EVIDENCE_TARGET_SQL: Record<PlanningEvidenceTarget, string> = {
   materiality_qualitative: `SELECT d.status, d.version_no FROM hsdg.audit_materiality_qualitative x
                               JOIN hsdg.audit_materiality_determination d ON d.id = x.determination_id
                              WHERE x.id = $1 AND d.workflow_instance_id = $2`,
+  // 03.5 (DHVAJ 03.5 §28): supporting schedules on an Audit Area / an assertion of it.
+  audit_area: `SELECT rv.status, rv.version_no FROM hsdg.audit_engagement_area a
+                 JOIN hsdg.audit_area_review rv ON rv.id = a.review_id
+                WHERE a.id = $1 AND rv.workflow_instance_id = $2`,
+  area_assertion: `SELECT rv.status, rv.version_no FROM hsdg.audit_area_assertion x
+                     JOIN hsdg.audit_engagement_area a ON a.id = x.area_id
+                     JOIN hsdg.audit_area_review rv ON rv.id = a.review_id
+                    WHERE x.id = $1 AND rv.workflow_instance_id = $2`,
 };
+
+/** 03.5 records follow the 03.5 review's own versioning (complete = frozen until reopened). */
+const AREA_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>(['audit_area', 'area_assertion']);
 
 /** Evidence on these is frozen with 03.2 once it is complete (reopen for a controlled revision). */
 const UNDERSTANDING_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>([
@@ -125,6 +138,16 @@ async function evidenceFrozenReason(
   targetType: PlanningEvidenceTarget,
   targetId: string,
 ): Promise<string | null> {
+  if (AREA_EVIDENCE_TARGETS.has(targetType)) {
+    const { rows } = await client.query<{ status: string; version_no: number }>(
+      EVIDENCE_TARGET_SQL[targetType],
+      [targetId, workflowInstanceId],
+    );
+    const r = rows[0];
+    return r && r.status !== 'in_progress'
+      ? `03.5 ${areaReviewVersionLabel(r.version_no)} is ${r.status === 'complete' ? 'complete' : 'Update Required'} — reopen it to change its evidence.`
+      : null;
+  }
   if (MATERIALITY_EVIDENCE_TARGETS.has(targetType)) {
     const { rows } = await client.query<{ status: string; version_no: number }>(
       EVIDENCE_TARGET_SQL[targetType],
@@ -871,6 +894,9 @@ export class AuditPlanningGovernanceService {
     if (write) {
       const frozen = await evidenceFrozenReason(client, workflowInstanceId, targetType, targetId);
       if (frozen) throw new ConflictException(frozen);
+      if (AREA_EVIDENCE_TARGETS.has(targetType)) {
+        assertAreaCapability(await resolveAreaAccess(client, engagementId), 'prepare');
+      }
     }
   }
 
@@ -968,7 +994,11 @@ export class AuditPlanningGovernanceService {
         editLocked: r.edit_locked,
         removable: open && mayRemove(actor, r.linked_by_employee_id),
       })),
-      canAdd: open && actor.capabilities.addFacts,
+      canAdd:
+        open &&
+        (AREA_EVIDENCE_TARGETS.has(targetType)
+          ? (await resolveAreaAccess(client, engagementId)).capabilities.prepare
+          : actor.capabilities.addFacts),
       canUpload: open && mayUpload(actor),
       m365Enabled: this.m365.enabled,
     };

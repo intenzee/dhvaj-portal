@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  AREA_PERMISSION_LEVEL_LABEL,
   ASSERTION_IDS,
+  BLOCKING_AREA_COMMENT_KINDS,
+  GENERAL_CORPORATE_INDUSTRY,
+  NOTIFICATION_TYPE,
   REMOVAL_REASON_LABEL,
   REMOVAL_REASON_NEEDS_TEXT,
   areaReviewVersionLabel,
@@ -15,12 +19,18 @@ import {
   type AddLibraryAreasInput,
   type AreaAuthorityRef,
   type AreaCommentInput,
+  type AreaCommentKind,
+  type AreaGrantCandidate,
   type AreaImpact,
   type AreaLibraryProfile,
   type AreaLinkInput,
   type AreaMatrixVersion,
   type AreaPriorYear,
+  type AreaPriorYearMatter,
+  type AreaReviewAccess,
+  type AreaReviewCapabilities,
   type AreaReviewComment,
+  type AreaReviewGrant,
   type AreaReviewRecord,
   type AssertionActionInput,
   type AssertionGroup,
@@ -30,8 +40,10 @@ import {
   type AuditAreaReviewSummary,
   type AuthorityCategory,
   type CompleteAreaReviewInput,
+  type DownstreamAreaRequestInput,
   type EngagementAuditArea,
   type FinancialUnit,
+  type GrantAreaPermissionInput,
   type PlanningAttention,
   type RemoveAuditAreaInput,
   type ReopenAreaReviewInput,
@@ -59,12 +71,14 @@ import {
   specificMatchesArea,
   specificMatters,
   suggestSignals,
+  textMentionsArea,
   tiles,
   validations,
   type AreaFacts,
   type AttentionRule,
   type CompletionBasis,
   type LibraryRow,
+  type OpenReviewItem,
   type StoredArea,
   type StoredAssertion,
 } from './area-review-engine';
@@ -76,6 +90,8 @@ import {
   displayCode,
 } from './planning-shared';
 import { readPriorAuditFile } from './master-facts';
+import { assertAreaCapability, resolveAreaAccess } from './area-review-access';
+import { notifyPlanning } from './planning-governance';
 
 /** Phase 03 checklist row 03.5 rolls its state up into. */
 const AREA_ITEM_KEY = 'areas_and_assertions';
@@ -96,7 +112,14 @@ interface Workspace {
   impacts: AreaImpact[];
   materialityLabel: string | null;
   periodEnd: string | null;
+  master: AssertionMasterItem[];
+  /** Open EP challenges / reassessment requests / downstream requests (VAL-09, §25). */
+  openItems: OpenReviewItem[];
+  /** §28 evidence counts keyed by audit_area_assertion id. */
+  assertionEvidence: Record<string, number>;
 }
+
+const BLOCKING = BLOCKING_AREA_COMMENT_KINDS as string[];
 
 /**
  * 03.5 Audit Areas & Assertions (DHVAJ 03.5 — FROZEN). The engagement receives
@@ -110,7 +133,12 @@ export class AuditAreaReviewService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly understanding: AuditBusinessUnderstandingService,
-  ) {}
+  ) {
+    // §25 — a 03.2 figure change (new financial area / dataset) can affect a completed 03.5.
+    understanding.onFiguresChanged((client, _ctx, _engagementId, wi) =>
+      this.markImpacted(client, wi),
+    );
+  }
 
   // ── Reads ────────────────────────────────────────────────────────────────
 
@@ -121,7 +149,7 @@ export class AuditAreaReviewService {
   ): Promise<AuditAreaReviewSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -133,8 +161,9 @@ export class AuditAreaReviewService {
   ): Promise<AuditAreaReviewSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
-      await this.ensure(client, ctx, engagementId, wi);
-      return this.buildSummary(client, wi);
+      const access = await resolveAreaAccess(client, engagementId);
+      if (access.capabilities.prepare) await this.ensure(client, ctx, engagementId, wi);
+      return this.buildSummary(client, engagementId, wi, undefined, access);
     });
   }
 
@@ -155,8 +184,14 @@ export class AuditAreaReviewService {
       if (area.disposition === 'removed')
         throw new ConflictException('The Audit Area is already removed.');
       if (area.downstreamWork > 0) {
+        const d = area.downstreamDetail;
+        const parts = [
+          d.risks ? `${d.risks} risk(s)` : '',
+          d.procedures ? `${d.procedures} procedure(s) in progress` : '',
+          d.workAreas ? `${d.workAreas} work area(s) started` : '',
+        ].filter(Boolean);
         throw new ConflictException(
-          'Downstream work already exists for this Audit Area — resolve or reassign it before removing the area.',
+          `Downstream work already references ${area.areaName} (${parts.join(', ')}) — resolve or reassign it before removing the area.`,
         );
       }
       const text = clean(input.reasonText);
@@ -204,7 +239,7 @@ export class AuditAreaReviewService {
           warnings: area.warnings.map((w) => w.text),
         },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -254,7 +289,7 @@ export class AuditAreaReviewService {
         },
         after: { disposition: 'retained', area: area.areaName },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -271,7 +306,7 @@ export class AuditAreaReviewService {
     return this.db.withRlsContext(ctx, async (client) => {
       const reviewId = await this.editable(client, ctx, engagementId, wi);
       const ws = await this.workspace(client, wi);
-      const added: string[] = [];
+      const libs: LibraryRow[] = [];
       for (const id of ids) {
         const lib = ws.library.find((l) => l.id === id && l.active);
         if (!lib)
@@ -286,17 +321,20 @@ export class AuditAreaReviewService {
               : `${lib.areaName} is already in the population.`,
           );
         }
-        const areaId = await this.insertLibraryArea(
-          client,
-          ctx,
-          engagementId,
-          reviewId,
-          lib,
-          'added_from_library',
-          null,
-          ws.facts,
-        );
-        added.push(lib.areaName);
+        libs.push(lib);
+      }
+      const inserted = await this.insertLibraryAreas(
+        client,
+        ctx,
+        engagementId,
+        reviewId,
+        libs,
+        'added_from_library',
+        null,
+        ws.facts,
+      );
+      for (const lib of libs) {
+        const areaId = inserted.get(lib.id)!;
         await this.audit.recordWith(client, ctx, {
           action: 'statutory_audit.audit_area_added',
           objectType: 'audit_engagement_area',
@@ -310,7 +348,7 @@ export class AuditAreaReviewService {
         });
       }
       await this.touched(client, ctx, wi, reviewId);
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -355,7 +393,7 @@ export class AuditAreaReviewService {
         objectId: areaId,
         after: { source: 'custom', name, areaType: input.areaType, reason, signalIds },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -369,7 +407,13 @@ export class AuditAreaReviewService {
     input: UpdateAuditAreaInput,
   ): Promise<AuditAreaReviewSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const reviewId = await this.editable(client, ctx, engagementId, wi);
+      const reviewId = await this.editable(
+        client,
+        ctx,
+        engagementId,
+        wi,
+        input.resolveReviewFlag !== undefined ? 'complete' : 'prepare',
+      );
       const ws = await this.workspace(client, wi);
       const area = this.area(ws, areaId);
       const cur = ws.stored.find((a) => a.id === areaId)!;
@@ -474,7 +518,7 @@ export class AuditAreaReviewService {
         set('review_flag_source', null, 'reviewFlagSource', cur.reviewFlagSource);
         after.resolution = note;
       }
-      if (!sets.length) return this.buildSummary(client, wi);
+      if (!sets.length) return this.buildSummary(client, engagementId, wi);
       params.push(ctx.employeeId ?? null);
       await client.query(
         `UPDATE hsdg.audit_engagement_area SET ${sets.join(', ')}, updated_by_employee_id = $${params.length},
@@ -493,7 +537,7 @@ export class AuditAreaReviewService {
         before,
         after,
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -589,7 +633,7 @@ export class AuditAreaReviewService {
         before: { assertionId, ...before },
         after: { assertionId, area: area.areaName, ...after },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -650,7 +694,7 @@ export class AuditAreaReviewService {
           specificKey: input.specificKey ?? null,
         },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -686,7 +730,7 @@ export class AuditAreaReviewService {
         objectId: reviewId,
         after: { signalId: input.signalId, note },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -701,8 +745,9 @@ export class AuditAreaReviewService {
     if (input.confirm !== true)
       throw new BadRequestException('AA-01 must be confirmed to complete 03.5.');
     return this.db.withRlsContext(ctx, async (client) => {
-      const reviewId = await this.editable(client, ctx, engagementId, wi);
-      const summary = await this.buildSummary(client, wi);
+      const reviewId = await this.editable(client, ctx, engagementId, wi, 'complete');
+      const ws = await this.workspace(client, wi);
+      const summary = await this.buildSummary(client, engagementId, wi, ws);
       const rec = summary.record!;
       this.checkVersion(rec.version, input.version);
       const failing = summary.validations.filter((v) => !v.met);
@@ -711,7 +756,6 @@ export class AuditAreaReviewService {
           `03.5 cannot be completed: ${failing.map((v) => `${v.id} ${v.detail ?? v.label}`).join(' ')}`,
         );
       }
-      const ws = await this.workspace(client, wi);
       await client.query(
         `INSERT INTO hsdg.audit_area_matrix_version
            (review_id, engagement_id, version_no, library_version, matrix, summary, confirmed_by_employee_id)
@@ -731,7 +775,13 @@ export class AuditAreaReviewService {
             SET status = 'complete', completion_basis = $2::jsonb, completed_by_employee_id = $3,
                 completed_at = now(), update_reason = NULL, version = version + 1
           WHERE id = $1`,
-        [reviewId, JSON.stringify(completionBasis(ws.facts)), ctx.employeeId ?? null],
+        [
+          reviewId,
+          JSON.stringify(
+            completionBasis(ws.facts, applicableLibrary(ws.library, ws.facts.profile, ws.periodEnd)),
+          ),
+          ctx.employeeId ?? null,
+        ],
       );
       await this.rollUp(client, ctx, wi, 'complete');
       await this.audit.recordWith(client, ctx, {
@@ -745,7 +795,18 @@ export class AuditAreaReviewService {
           ...summary.completeness,
         },
       });
-      return this.buildSummary(client, wi);
+      const leads = await this.leads(client, engagementId);
+      await notifyPlanning(client, [leads.partnerId], {
+        type: NOTIFICATION_TYPE.planningAreasReview,
+        title: `03.5 Audit Areas & Assertions ${areaReviewVersionLabel(rec.versionNo)} completed`,
+        body: `${summary.completeness.retained} retained / ${summary.completeness.removed} removed areas — the matrix is ready for your review.`,
+        engagementId,
+        objectType: 'audit_area_review',
+        objectId: reviewId,
+        dedup: `areas-complete:${reviewId}:${rec.versionNo}`,
+        except: ctx.employeeId ?? null,
+      });
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -760,6 +821,7 @@ export class AuditAreaReviewService {
     if (!reason) throw new BadRequestException('Reopening 03.5 needs a reason.');
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
+      assertAreaCapability(await resolveAreaAccess(client, engagementId), 'complete');
       await this.lockReview(client, wi);
       const ws = await this.workspace(client, wi);
       const rec = ws.record;
@@ -806,7 +868,7 @@ export class AuditAreaReviewService {
           impacts: ws.impacts.map((i) => i.message),
         },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -817,7 +879,7 @@ export class AuditAreaReviewService {
     wi: string,
   ): Promise<AuditAreaReviewSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const reviewId = await this.editable(client, ctx, engagementId, wi);
+      const reviewId = await this.editable(client, ctx, engagementId, wi, 'complete');
       const ws = await this.workspace(client, wi);
       const current = await this.currentLibraryVersion(client);
       if (!current || current === ws.record!.libraryVersion) {
@@ -828,22 +890,19 @@ export class AuditAreaReviewService {
         ws.facts.profile,
         ws.periodEnd,
       );
-      const added: string[] = [];
+      const fresh = next.filter((lib) => !ws.stored.some((a) => a.areaCode === lib.areaCode));
+      await this.insertLibraryAreas(
+        client,
+        ctx,
+        engagementId,
+        reviewId,
+        fresh,
+        'methodology_refresh',
+        `Added by methodology update ${current} — review.`,
+        ws.facts,
+      );
+      const added = fresh.map((l) => l.areaName);
       const withdrawn: string[] = [];
-      for (const lib of next) {
-        if (ws.stored.some((a) => a.areaCode === lib.areaCode)) continue;
-        await this.insertLibraryArea(
-          client,
-          ctx,
-          engagementId,
-          reviewId,
-          lib,
-          'methodology_refresh',
-          `Added by methodology update ${current} — review.`,
-          ws.facts,
-        );
-        added.push(lib.areaName);
-      }
       for (const a of ws.stored.filter((x) => x.source === 'library')) {
         if (next.some((l) => l.areaCode === a.areaCode)) continue;
         await client.query(
@@ -865,7 +924,7 @@ export class AuditAreaReviewService {
         before: { libraryVersion: ws.record!.libraryVersion },
         after: { libraryVersion: current, added, withdrawn },
       });
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -879,11 +938,22 @@ export class AuditAreaReviewService {
   ): Promise<AuditAreaReviewSummary> {
     const body = clean(input.body);
     if (!body) throw new BadRequestException('Write the comment.');
+    if (input.kind === 'downstream_request') {
+      throw new BadRequestException(
+        'Ask for a missing area with "Request an area" (it names the area and the risk).',
+      );
+    }
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
+      const access = await resolveAreaAccess(client, engagementId);
+      // §27 — the EP comments, challenges and requests reassessment; the
+      // preparer may leave a plain comment.
+      if (input.kind !== 'comment' || !access.capabilities.prepare) {
+        assertAreaCapability(access, 'partnerReview');
+      }
       const ws = await this.workspace(client, wi);
       if (!ws.record) throw new ConflictException('03.5 has not been started on this audit file.');
-      if (input.areaId) this.area(ws, input.areaId);
+      const target = input.areaId ? this.area(ws, input.areaId) : null;
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO hsdg.audit_area_review_comment (review_id, engagement_id, area_id, kind, body, created_by_employee_id)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
@@ -902,7 +972,27 @@ export class AuditAreaReviewService {
         objectId: ws.record.id,
         after: { commentId: rows[0]!.id, kind: input.kind, areaId: input.areaId ?? null, body },
       });
-      return this.buildSummary(client, wi);
+      const what = KIND_NOUN[input.kind];
+      const on = target ? ` on ${target.areaName}` : '';
+      // §25 — a reassessment request on a completed 03.5 makes it Update Required.
+      const flagged =
+        input.kind === 'reassessment_request' && ws.record.status === 'complete'
+          ? await this.flagUpdateRequired(
+              client,
+              ws.record.id,
+              `Engagement Partner requested reassessment${on}: ${body}`,
+            )
+          : false;
+      await this.notifyPreparers(client, engagementId, ws.record.id, {
+        type: flagged
+          ? NOTIFICATION_TYPE.planningAreasUpdateRequired
+          : NOTIFICATION_TYPE.planningAreasReview,
+        title: `03.5 — ${what}${on}`,
+        body,
+        dedup: `areas-comment:${rows[0]!.id}`,
+        except: ctx.employeeId ?? null,
+      });
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
@@ -917,28 +1007,238 @@ export class AuditAreaReviewService {
     if (!response) throw new BadRequestException('Write the response.');
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
-      const { rowCount } = await client.query(
-        `UPDATE hsdg.audit_area_review_comment c
-            SET status = 'addressed', response = $2, responded_by_employee_id = $3, version = c.version + 1
-           FROM hsdg.audit_area_review r
-          WHERE c.id = $1 AND c.review_id = r.id AND r.workflow_instance_id = $4 AND c.status = 'open'`,
-        [commentId, response, ctx.employeeId ?? null, wi],
+      assertAreaCapability(await resolveAreaAccess(client, engagementId), 'respond');
+      const { rows: found } = await client.query<{
+        kind: AreaCommentKind;
+        created_by_employee_id: string | null;
+        source_risk_id: string | null;
+        proposed_area_name: string | null;
+      }>(
+        `SELECT c.kind, c.created_by_employee_id, c.source_risk_id, c.proposed_area_name
+           FROM hsdg.audit_area_review_comment c
+           JOIN hsdg.audit_area_review r ON r.id = c.review_id
+          WHERE c.id = $1 AND r.workflow_instance_id = $2 AND c.status = 'open'
+          FOR UPDATE OF c`,
+        [commentId, wi],
       );
-      if (!rowCount) throw new NotFoundException('Open comment not found on this audit file.');
+      const comment = found[0];
+      if (!comment) throw new NotFoundException('Open comment not found on this audit file.');
+      let resolved: { id: string; name: string } | null = null;
+      if (input.resolvedAreaId) {
+        if (comment.kind !== 'downstream_request') {
+          throw new BadRequestException('Only an area request is answered with an Audit Area.');
+        }
+        const { rows: a } = await client.query<{ id: string; area_name: string }>(
+          `SELECT a.id, a.area_name FROM hsdg.audit_engagement_area a
+             JOIN hsdg.audit_area_review r ON r.id = a.review_id
+            WHERE a.id = $1 AND r.workflow_instance_id = $2 AND a.disposition = 'retained'`,
+          [input.resolvedAreaId, wi],
+        );
+        if (!a[0]) throw new BadRequestException('Answer the request with a retained Audit Area.');
+        resolved = { id: a[0].id, name: a[0].area_name };
+      }
+      await client.query(
+        `UPDATE hsdg.audit_area_review_comment
+            SET status = 'addressed', response = $2, responded_by_employee_id = $3,
+                responded_at = now(), resolved_area_id = $4, version = version + 1
+          WHERE id = $1`,
+        [commentId, response, ctx.employeeId ?? null, resolved?.id ?? null],
+      );
+      // §24 — the requesting risk now sits in the area that answers it.
+      let riskLinked = false;
+      if (resolved && comment.source_risk_id) {
+        const { rowCount } = await client.query(
+          `UPDATE hsdg.audit_risks SET audit_area_id = $2, fs_area = COALESCE(fs_area, $3),
+                  version = version + 1
+            WHERE id = $1 AND workflow_instance_id = $4 AND audit_area_id IS NULL`,
+          [comment.source_risk_id, resolved.id, resolved.name, wi],
+        );
+        riskLinked = !!rowCount;
+      }
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.audit_area_comment_addressed',
         objectType: 'audit_area_review_comment',
         objectId: commentId,
-        after: { response },
+        after: {
+          response,
+          kind: comment.kind,
+          resolvedAreaId: resolved?.id ?? null,
+          riskLinked,
+        },
       });
-      return this.buildSummary(client, wi);
+      await notifyPlanning(client, [comment.created_by_employee_id], {
+        type: NOTIFICATION_TYPE.planningAreasReview,
+        title:
+          comment.kind === 'downstream_request'
+            ? `03.5 answered your area request "${comment.proposed_area_name}"`
+            : `03.5 — the Manager answered your ${KIND_NOUN[comment.kind].toLowerCase()}`,
+        body: resolved ? `${response} (Audit Area: ${resolved.name})` : response,
+        engagementId,
+        objectType: 'audit_area_review_comment',
+        objectId: commentId,
+        dedup: `areas-answer:${commentId}`,
+        except: ctx.employeeId ?? null,
+      });
+      return this.buildSummary(client, engagementId, wi);
     });
   }
 
   /**
-   * §25 hook for upstream modules (03.3 completion): a completed 03.5 whose
-   * completeness is affected becomes Update Required — never silently changed.
+   * §25 "03.6 identifies an affected area not present → allow return / addition
+   * to 03.5". Any team member (typically from the risk register) names the
+   * missing area; 03.5 shows it as an open review item (VAL-09) and a
+   * completed 03.5 becomes Update Required. The Manager answers it by adding /
+   * restoring the area and responding with it (the risk is then linked).
    */
+  async requestArea(
+    ctx: RlsContext,
+    engagementId: string,
+    wi: string,
+    input: DownstreamAreaRequestInput,
+  ): Promise<AuditAreaReviewSummary> {
+    const name = clean(input.proposedAreaName);
+    const reason = clean(input.reason);
+    if (!name || !reason) {
+      throw new BadRequestException('Name the Audit Area needed and why the risk assessment needs it.');
+    }
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, wi);
+      assertAreaCapability(await resolveAreaAccess(client, engagementId), 'requestArea');
+      const { rows: rv } = await client.query<{ id: string; status: StoredAreaReviewStatus }>(
+        `SELECT id, status FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
+        [wi],
+      );
+      const review = rv[0];
+      if (!review) {
+        throw new ConflictException(
+          '03.5 has not been started on this audit file — the Manager populates it first.',
+        );
+      }
+      if (input.riskId) {
+        const { rowCount } = await client.query(
+          `SELECT 1 FROM hsdg.audit_risks WHERE id = $1 AND workflow_instance_id = $2`,
+          [input.riskId, wi],
+        );
+        if (!rowCount) throw new BadRequestException('That risk is not on this audit file.');
+      }
+      const { rows: dup } = await client.query<{ area_name: string }>(
+        `SELECT area_name FROM hsdg.audit_engagement_area
+          WHERE review_id = $1 AND disposition = 'retained' AND lower(area_name) = lower($2)`,
+        [review.id, name],
+      );
+      if (dup[0]) {
+        throw new ConflictException(
+          `${dup[0].area_name} is already a retained Audit Area — link the risk to it instead.`,
+        );
+      }
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO hsdg.audit_area_review_comment
+           (review_id, engagement_id, kind, body, proposed_area_name, source_module, source_risk_id,
+            created_by_employee_id)
+         VALUES ($1, $2, 'downstream_request', $3, $4, $5, $6, hsdg.ctx_employee_id()) RETURNING id`,
+        [review.id, engagementId, reason, name, input.riskId ? 'section_04' : '03.6', input.riskId ?? null],
+      );
+      const flagged =
+        review.status === 'complete'
+          ? await this.flagUpdateRequired(
+              client,
+              review.id,
+              `The risk assessment needs an Audit Area not in 03.5: "${name}" — ${reason}`,
+            )
+          : false;
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.audit_area_requested',
+        objectType: 'audit_area_review',
+        objectId: review.id,
+        after: { commentId: rows[0]!.id, proposedAreaName: name, reason, riskId: input.riskId ?? null },
+      });
+      await this.notifyPreparers(client, engagementId, review.id, {
+        type: flagged
+          ? NOTIFICATION_TYPE.planningAreasUpdateRequired
+          : NOTIFICATION_TYPE.planningAreasReview,
+        title: `03.5 — the risk assessment asks for "${name}"`,
+        body: reason,
+        dedup: `areas-request:${rows[0]!.id}`,
+        except: ctx.employeeId ?? null,
+      });
+      return this.buildSummary(client, engagementId, wi);
+    });
+  }
+
+  // ── §27 Senior / Article authorisation ───────────────────────────────────
+
+  async grantPermission(
+    ctx: RlsContext,
+    engagementId: string,
+    wi: string,
+    input: GrantAreaPermissionInput,
+  ): Promise<AuditAreaReviewSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, wi);
+      assertAreaCapability(await resolveAreaAccess(client, engagementId), 'manageGrants');
+      const candidates = await this.grantCandidates(client, engagementId);
+      const who = candidates.find((c) => c.employeeId === input.employeeId);
+      if (!who) {
+        throw new BadRequestException(
+          'Authorise a Senior / Article on this engagement team (the EP and Manager need no grant).',
+        );
+      }
+      const note = clean(input.note);
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO hsdg.audit_area_review_permission
+           (engagement_id, employee_id, level, note, granted_by_employee_id)
+         VALUES ($1, $2, $3, $4, hsdg.ctx_employee_id())
+         ON CONFLICT (engagement_id, employee_id) DO UPDATE
+           SET level = EXCLUDED.level, note = EXCLUDED.note,
+               granted_by_employee_id = EXCLUDED.granted_by_employee_id, granted_at = now()
+         RETURNING id`,
+        [engagementId, input.employeeId, input.level, note],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.audit_area_permission_granted',
+        objectType: 'audit_area_review_permission',
+        objectId: rows[0]!.id,
+        after: { employeeId: input.employeeId, name: who.name, level: input.level, note },
+      });
+      await notifyPlanning(client, [input.employeeId], {
+        type: NOTIFICATION_TYPE.planningAreasReview,
+        title: `03.5 Audit Areas & Assertions — ${AREA_PERMISSION_LEVEL_LABEL[input.level]}`,
+        body: note ?? 'The Engagement Manager authorised you on 03.5 for this engagement.',
+        engagementId,
+        objectType: 'audit_area_review_permission',
+        objectId: rows[0]!.id,
+        dedup: `areas-grant:${rows[0]!.id}:${input.level}`,
+        except: ctx.employeeId ?? null,
+      });
+      return this.buildSummary(client, engagementId, wi);
+    });
+  }
+
+  async revokePermission(
+    ctx: RlsContext,
+    engagementId: string,
+    wi: string,
+    grantId: string,
+  ): Promise<AuditAreaReviewSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, wi);
+      assertAreaCapability(await resolveAreaAccess(client, engagementId), 'manageGrants');
+      const { rows } = await client.query<{ employee_id: string; level: string }>(
+        `DELETE FROM hsdg.audit_area_review_permission WHERE id = $1 AND engagement_id = $2
+         RETURNING employee_id, level`,
+        [grantId, engagementId],
+      );
+      if (!rows[0]) throw new NotFoundException('That 03.5 authorisation is not on this engagement.');
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.audit_area_permission_revoked',
+        objectType: 'audit_area_review_permission',
+        objectId: grantId,
+        before: { employeeId: rows[0].employee_id, level: rows[0].level },
+      });
+      return this.buildSummary(client, engagementId, wi);
+    });
+  }
+
   /**
    * The retained 03.5 areas as Section 05 / 06 reads them — names, attention,
    * live figures and active assertions — so the audit work never re-keys them.
@@ -948,26 +1248,51 @@ export class AuditAreaReviewService {
     wi: string,
   ): Promise<{ areas: EngagementAuditArea[]; datasetUnit: FinancialUnit | null }> {
     const ws = await this.workspace(client, wi);
-    if (!ws.record) return { areas: [], datasetUnit: ws.facts.datasetUnit ?? null };
+    const datasetUnit = ws.facts.datasetUnit ?? null;
+    if (!ws.record) return { areas: [], datasetUnit };
+    // §23 — once AA-01 has generated a matrix, the work follows the latest
+    // APPROVED matrix (a reopened draft changes nothing downstream until it is
+    // completed again); before that, the live retained population.
+    const { rows } = await client.query<{ matrix: AreaMatrixVersion['rows'] }>(
+      `SELECT matrix FROM hsdg.audit_area_matrix_version
+        WHERE review_id = $1 ORDER BY version_no DESC LIMIT 1`,
+      [ws.record.id],
+    );
+    const approved = rows[0]?.matrix;
+    if (!approved) {
+      return { areas: ws.areas.filter((a) => a.disposition === 'retained'), datasetUnit };
+    }
+    const byId = new Map(approved.map((r) => [r.areaId, r]));
     return {
-      areas: ws.areas.filter((a) => a.disposition === 'retained'),
-      datasetUnit: ws.facts.datasetUnit ?? null,
+      areas: ws.areas
+        .filter((a) => byId.has(a.id))
+        .map((a) => {
+          const row = byId.get(a.id)!;
+          const active = new Set(row.assertions.map((x) => x.assertionId));
+          return {
+            ...a,
+            attention: row.attention,
+            assertions: a.assertions.map((x) => ({ ...x, active: active.has(x.assertionId) })),
+          };
+        }),
+      datasetUnit,
     };
   }
 
+  /**
+   * §25 hook for upstream modules (03.2 figures, 03.3, 03.1 signals, Section
+   * 02): a completed 03.5 whose completeness is affected becomes Update
+   * Required — never silently changed. Cheap when 03.5 is not complete.
+   */
   async markImpacted(client: PoolClient, wi: string): Promise<void> {
+    const { rows } = await client.query<{ id: string; status: StoredAreaReviewStatus }>(
+      `SELECT id, status FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
+      [wi],
+    );
+    if (rows[0]?.status !== 'complete') return;
     const ws = await this.workspace(client, wi);
-    if (!ws.record || ws.record.status !== 'complete' || !ws.impacts.length) return;
-    await client.query(
-      `UPDATE hsdg.audit_area_review SET status = 'update_required', update_reason = $2, version = version + 1
-        WHERE id = $1`,
-      [ws.record.id, ws.impacts.map((i) => i.message).join(' ')],
-    );
-    await client.query(
-      `UPDATE hsdg.audit_planning_items SET state = 'needs_attention', version = version + 1
-        WHERE workflow_instance_id = $1 AND item_key = $2 AND state = 'complete'`,
-      [wi, AREA_ITEM_KEY],
-    );
+    if (!ws.impacts.length) return;
+    await this.flagUpdateRequired(client, rows[0].id, ws.impacts.map((i) => i.message).join(' '));
   }
 
   // ── internals ───────────────────────────────────────────────────────────
@@ -988,8 +1313,10 @@ export class AuditAreaReviewService {
     ctx: RlsContext,
     engagementId: string,
     wi: string,
+    capability: keyof AreaReviewCapabilities = 'prepare',
   ): Promise<string> {
     await assertShell(client, engagementId, wi);
+    assertAreaCapability(await resolveAreaAccess(client, engagementId), capability);
     const id = await this.ensure(client, ctx, engagementId, wi);
     const { rows } = await client.query<{ status: StoredAreaReviewStatus; version_no: number }>(
       `SELECT status, version_no FROM hsdg.audit_area_review WHERE id = $1`,
@@ -1032,9 +1359,74 @@ export class AuditAreaReviewService {
     );
   }
 
+  /**
+   * complete → update_required (+ the 03 checklist row), via the definer
+   * function so a team member's request or a non-lead's upstream change can
+   * flag it. Notifies the preparers once per transition.
+   */
+  private async flagUpdateRequired(
+    client: PoolClient,
+    reviewId: string,
+    reason: string,
+  ): Promise<boolean> {
+    const { rows } = await client.query<{ ok: boolean }>(
+      `SELECT hsdg.flag_area_review_update_required($1, $2) AS ok`,
+      [reviewId, reason],
+    );
+    if (!rows[0]?.ok) return false;
+    const { rows: rv } = await client.query<{ engagement_id: string; version_no: number }>(
+      `SELECT engagement_id, version_no FROM hsdg.audit_area_review WHERE id = $1`,
+      [reviewId],
+    );
+    if (rv[0]) {
+      await this.notifyPreparers(client, rv[0].engagement_id, reviewId, {
+        type: NOTIFICATION_TYPE.planningAreasUpdateRequired,
+        title: `03.5 ${areaReviewVersionLabel(rv[0].version_no)} is Update Required`,
+        body: reason,
+        dedup: `areas-update:${reviewId}:${rv[0].version_no}`,
+        except: null,
+      });
+    }
+    return true;
+  }
+
+  private async leads(
+    client: PoolClient,
+    engagementId: string,
+  ): Promise<{ partnerId: string | null; managerId: string | null }> {
+    const { rows } = await client.query<{ partner_id: string | null; manager_id: string | null }>(
+      `SELECT engagement_partner_id AS partner_id, engagement_manager_id AS manager_id
+         FROM hsdg.engagements WHERE id = $1`,
+      [engagementId],
+    );
+    return { partnerId: rows[0]?.partner_id ?? null, managerId: rows[0]?.manager_id ?? null };
+  }
+
+  /** The Manager (else the EP acting as Manager) and Manager-equivalent grant holders. */
+  private async notifyPreparers(
+    client: PoolClient,
+    engagementId: string,
+    reviewId: string,
+    n: { type: string; title: string; body: string; dedup: string; except: string | null },
+  ): Promise<void> {
+    const leads = await this.leads(client, engagementId);
+    const { rows } = await client.query<{ employee_id: string }>(
+      `SELECT employee_id FROM hsdg.audit_area_review_permission
+        WHERE engagement_id = $1 AND level = 'manager_equivalent'`,
+      [engagementId],
+    );
+    await notifyPlanning(
+      client,
+      [leads.managerId ?? leads.partnerId, ...rows.map((r) => r.employee_id)],
+      { ...n, engagementId, objectType: 'audit_area_review', objectId: reviewId },
+    );
+  }
+
+  /** New engagements are populated from the latest RELEASED library (drafts never). */
   private async currentLibraryVersion(client: PoolClient): Promise<string | null> {
     const { rows } = await client.query<{ library_version: string }>(
-      `SELECT library_version FROM hsdg.audit_area_library_release ORDER BY released_at DESC, library_version DESC LIMIT 1`,
+      `SELECT library_version FROM hsdg.audit_area_library_release
+        WHERE status = 'released' ORDER BY released_at DESC, library_version DESC LIMIT 1`,
     );
     return rows[0]?.library_version ?? null;
   }
@@ -1121,9 +1513,7 @@ export class AuditAreaReviewService {
     );
     if (!ins[0]) return (await this.lockReview(client, wi))!;
     const id = ins[0].id;
-    for (const lib of population) {
-      await this.insertLibraryArea(client, ctx, engagementId, id, lib, 'population', null, facts);
-    }
+    await this.insertLibraryAreas(client, ctx, engagementId, id, population, 'population', null, facts);
     await this.rollUp(client, ctx, wi, 'in_progress');
     await this.audit.recordWith(client, ctx, {
       action: 'statutory_audit.audit_area_population_created',
@@ -1134,56 +1524,135 @@ export class AuditAreaReviewService {
     return id;
   }
 
-  private async insertLibraryArea(
+  /**
+   * Inserts library areas with their default assertions, auto-suggested signal
+   * / specific-materiality links and §14/§17 attention suggestions — a fixed
+   * number of statements however large the population (was ~10 per area).
+   * Returns library id → engagement area id.
+   */
+  private async insertLibraryAreas(
     client: PoolClient,
     ctx: RlsContext,
     engagementId: string,
     reviewId: string,
-    lib: LibraryRow,
+    libs: LibraryRow[],
     origin: 'population' | 'added_from_library' | 'methodology_refresh',
     reviewFlag: string | null,
     facts: AreaFacts,
-  ): Promise<string> {
-    const { rows } = await client.query<{ id: string }>(
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!libs.length) return out;
+    const { rows } = await client.query<{ id: string; lib_id: string }>(
       `INSERT INTO hsdg.audit_engagement_area
          (review_id, engagement_id, seq, source, source_audit_area_id, area_code, library_version, origin,
           area_name, area_type, attention, review_flag, review_flag_source,
           created_by_employee_id, updated_by_employee_id)
-       VALUES ($1, $2, (SELECT COALESCE(MAX(seq),0)+1 FROM hsdg.audit_engagement_area WHERE review_id = $1),
-               'library', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12) RETURNING id`,
+       SELECT $1, $2, base.n + x.ord, 'library', x.lib_id, x.code, x.ver, $3, x.name, x.type, x.att,
+              $4, $5, $6, $6
+         FROM (SELECT COALESCE(MAX(seq), 0) AS n FROM hsdg.audit_engagement_area WHERE review_id = $1) base,
+              unnest($7::uuid[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[])
+                WITH ORDINALITY AS x(lib_id, code, ver, name, type, att, ord)
+       RETURNING id, source_audit_area_id AS lib_id`,
       [
         reviewId,
         engagementId,
-        lib.id,
-        lib.areaCode,
-        lib.libraryVersion,
         origin,
-        lib.areaName,
-        lib.areaType,
-        lib.defaultAttention,
         reviewFlag,
         reviewFlag ? 'methodology_refresh' : null,
         ctx.employeeId ?? null,
+        libs.map((l) => l.id),
+        libs.map((l) => l.areaCode),
+        libs.map((l) => l.libraryVersion),
+        libs.map((l) => l.areaName),
+        libs.map((l) => l.areaType),
+        libs.map((l) => l.defaultAttention),
       ],
     );
-    const areaId = rows[0]!.id;
-    await this.insertDefaultAssertions(client, areaId, engagementId, lib);
-    for (const sid of suggestSignals(lib, facts.signals)) {
+    for (const r of rows) out.set(r.lib_id, r.id);
+
+    const pairs = (f: (lib: LibraryRow) => string[]) => {
+      const ids: string[] = [];
+      const vals: string[] = [];
+      for (const lib of libs) {
+        for (const v of f(lib)) {
+          ids.push(out.get(lib.id)!);
+          vals.push(v);
+        }
+      }
+      return [ids, vals] as const;
+    };
+    const [asrAreas, asrIds] = pairs((l) => l.defaultAssertions);
+    if (asrAreas.length) {
+      await client.query(
+        `INSERT INTO hsdg.audit_area_assertion (area_id, engagement_id, assertion_id, origin)
+         SELECT x.area_id, $1, x.assertion_id, 'suggested'
+           FROM unnest($2::uuid[], $3::text[]) AS x(area_id, assertion_id)
+         ON CONFLICT (area_id, assertion_id) DO NOTHING`,
+        [engagementId, asrAreas, asrIds],
+      );
+    }
+    const linkedByLib = new Map(libs.map((l) => [l.id, suggestSignals(l, facts.signals)]));
+    const [sigAreas, sigIds] = pairs((l) => linkedByLib.get(l.id)!);
+    if (sigAreas.length) {
       await client.query(
         `INSERT INTO hsdg.audit_area_signal_link (area_id, engagement_id, signal_id, origin)
-         VALUES ($1, $2, $3, 'auto') ON CONFLICT DO NOTHING`,
-        [areaId, engagementId, sid],
+         SELECT x.area_id, $1, x.signal_id, 'auto'
+           FROM unnest($2::uuid[], $3::uuid[]) AS x(area_id, signal_id)
+         ON CONFLICT DO NOTHING`,
+        [engagementId, sigAreas, sigIds],
       );
     }
-    for (const sp of facts.specific.filter((x) => specificMatchesArea(x, lib))) {
+    const specByLib = new Map(
+      libs.map((l) => [l.id, facts.specific.filter((x) => specificMatchesArea(x, l)).map((x) => x.key)]),
+    );
+    const [spAreas, spKeys] = pairs((l) => specByLib.get(l.id)!);
+    if (spAreas.length) {
       await client.query(
         `INSERT INTO hsdg.audit_area_specific_link (area_id, engagement_id, specific_key, origin)
-         VALUES ($1, $2, $3, 'auto') ON CONFLICT DO NOTHING`,
-        [areaId, engagementId, sp.key],
+         SELECT x.area_id, $1, x.specific_key, 'auto'
+           FROM unnest($2::uuid[], $3::text[]) AS x(area_id, specific_key)
+         ON CONFLICT DO NOTHING`,
+        [engagementId, spAreas, spKeys],
       );
     }
-    await this.applySuggestionsFor(client, areaId, lib, facts);
-    return areaId;
+    // §14 / §17 suggestions, decided in memory from the links just made.
+    const enhance: string[] = [];
+    const sugAreas: string[] = [];
+    const sugIds: string[] = [];
+    const sugBasis: string[] = [];
+    for (const lib of libs) {
+      const areaId = out.get(lib.id)!;
+      const ids = new Set(linkedByLib.get(lib.id));
+      const linked = facts.signals.filter((x) => ids.has(x.id));
+      if (linked.some((x) => x.attention !== 'standard') || specByLib.get(lib.id)!.length) {
+        enhance.push(areaId);
+      }
+      for (const [assertionId, basis] of assertionSuggestions(lib.assertionAttentionRules, linked)) {
+        sugAreas.push(areaId);
+        sugIds.push(assertionId);
+        sugBasis.push(basis);
+      }
+    }
+    if (enhance.length) {
+      await client.query(
+        `UPDATE hsdg.audit_engagement_area SET attention = 'enhanced', attention_source = 'portal',
+                version = version + 1
+          WHERE id = ANY($1::uuid[]) AND attention = 'standard' AND attention_source = 'default'`,
+        [enhance],
+      );
+    }
+    if (sugAreas.length) {
+      await client.query(
+        `UPDATE hsdg.audit_area_assertion t
+            SET suggested_attention = 'enhanced', suggestion_basis = x.basis, attention = 'enhanced',
+                version = t.version + 1
+           FROM unnest($1::uuid[], $2::text[], $3::text[]) AS x(area_id, assertion_id, basis)
+          WHERE t.area_id = x.area_id AND t.assertion_id = x.assertion_id AND t.active
+            AND t.suggested_attention IS NULL`,
+        [sugAreas, sugIds, sugBasis],
+      );
+    }
+    return out;
   }
 
   private async insertDefaultAssertions(
@@ -1259,8 +1728,11 @@ export class AuditAreaReviewService {
       `SELECT initial_audit FROM hsdg.audit_entity_profile WHERE workflow_instance_id = $1`,
     );
     const frfRow = await one<Row>(
-      `SELECT conclusion FROM hsdg.audit_framework_subassessment
+      `SELECT conclusion, facts, system_detail FROM hsdg.audit_framework_subassessment
         WHERE workflow_instance_id = $1 AND sub_section_key = '02.2' ORDER BY updated_at DESC LIMIT 1`,
+    );
+    const buRow = await one<Row>(
+      `SELECT industry_profile FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
     );
     const { rows: fw } = await client.query<{ area_key: string; conclusion: string }>(
       `SELECT area_key, conclusion FROM hsdg.audit_framework_assessments
@@ -1269,6 +1741,13 @@ export class AuditAreaReviewService {
     );
     const concl = Object.fromEntries(fw.map((r) => [r.area_key, r.conclusion]));
     const frf = s(frfRow?.conclusion);
+    const industry = s(buRow?.industry_profile);
+    const frfFacts = (frfRow?.facts ?? {}) as Record<string, unknown>;
+    const frfDetail = (frfRow?.system_detail ?? {}) as Record<string, unknown>;
+    const firstTime =
+      typeof frfFacts.firstTimeAdoption === 'boolean'
+        ? frfFacts.firstTimeAdoption
+        : frfDetail.firstTimeIndAs === true;
     const profile: AreaLibraryProfile = {
       // 02.2 conclusion first; else the Section 02 "Ind AS / AS" assessment
       // (applicable = Ind AS, not applicable = AS).
@@ -1282,10 +1761,15 @@ export class AuditAreaReviewService {
               : concl.ind_as_as === 'not_applicable'
                 ? 'as'
                 : 'unknown',
-      industry: 'general_corporate',
+      // 03.2 industry profile; `generic` is the general corporate library.
+      industry: !industry || industry === 'generic' ? GENERAL_CORPORATE_INDUSTRY : industry,
       cfsApplicable: concl.cfs === 'applicable',
       initialAudit: profileRow?.initial_audit === true,
+      caroApplicable: concl.caro === 'applicable',
+      ifcApplicable: concl.ifc === 'applicable',
+      indAsTransition: false,
     };
+    profile.indAsTransition = profile.frf === 'ind_as' && firstTime;
 
     const { header, analytics } = await this.understanding.readFinancialBasis(client, wi);
     const metrics: AreaFacts['metrics'] = {};
@@ -1482,14 +1966,34 @@ export class AuditAreaReviewService {
     );
     for (const a of areas) {
       out.set(s(a.area_code) ?? `name:${String(a.area_name).toLowerCase()}`, {
+        inPriorMatrix: true,
         retained: a.disposition === 'retained',
         attention: (a.attention as AreaPriorYear['attention']) ?? null,
         assertions: arr(a.assertions),
         cy: n(a.cy_amount),
         unit: s(a.unit),
+        matters: [],
       });
     }
     return out;
+  }
+
+  /** §20 — this year's 03.1 register of prior-year matters (resolved ones drop out). */
+  private async readPriorYearMatters(
+    client: PoolClient,
+    wi: string,
+  ): Promise<AreaPriorYearMatter[]> {
+    const { rows } = await client.query<Row>(
+      `SELECT id, seq, matter_type, description FROM hsdg.audit_prior_year_matter
+        WHERE workflow_instance_id = $1 AND assessment IS DISTINCT FROM 'resolved' ORDER BY seq`,
+      [wi],
+    );
+    return rows.map((r) => ({
+      id: String(r.id),
+      code: displayCode('PY', Number(r.seq))!,
+      matterType: String(r.matter_type),
+      description: String(r.description),
+    }));
   }
 
   private async readAuthorities(
@@ -1547,6 +2051,8 @@ export class AuditAreaReviewService {
     );
     const libById = new Map(library.map((l) => [l.id, l]));
     const py = await this.readPriorYear(client, wi);
+    const pyMatters = await this.readPriorYearMatters(client, wi);
+    const usage = rec ? await this.readUsage(client, rec.id, wi) : null;
     const authorities = await this.readAuthorities(client, [
       ...new Set(library.flatMap((l) => l.relatedAuthorities)),
     ]);
@@ -1564,7 +2070,16 @@ export class AuditAreaReviewService {
         signalById,
         specificByKey,
         areaName,
-        priorYear: py.get(a.areaCode ?? `name:${a.areaName.toLowerCase()}`) ?? null,
+        priorYear: priorYearFor(
+          py.get(a.areaCode ?? `name:${a.areaName.toLowerCase()}`) ?? null,
+          pyMatters.filter((m) =>
+            textMentionsArea(m.description, {
+              areaName: a.areaName,
+              areaCode: a.areaCode,
+              aliases: lib?.aliases ?? [],
+            }),
+          ),
+        ),
         authorities: (lib?.relatedAuthorities ?? [])
           .filter((c) => !hideFrf || !c.startsWith(hideFrf))
           .map((c) => authorities.get(c))
@@ -1597,7 +2112,12 @@ export class AuditAreaReviewService {
           )
           .map((x) => ({ specificKey: x.key, label: x.label }));
       }
-      d.downstreamWork = downstreamWorkCount();
+      const dw = usage?.downstream.get(a.id);
+      if (dw) {
+        d.downstreamDetail = dw;
+        d.downstreamWork = dw.risks + dw.procedures + dw.workAreas;
+      }
+      d.evidenceCount = usage?.areaEvidence[a.id] ?? 0;
       return d;
     });
     const resolutions = new Map<string, string>();
@@ -1608,6 +2128,7 @@ export class AuditAreaReviewService {
       );
       for (const r of rows) resolutions.set(r.signal_id, r.note);
     }
+    const openItems = usage?.openItems(areaName) ?? [];
     const impacts =
       rec && rec.status !== 'in_progress'
         ? assessImpacts(
@@ -1615,6 +2136,7 @@ export class AuditAreaReviewService {
             facts,
             areas,
             applicableLibrary(library, facts.profile, periodEnd),
+            { fullLibrary: library, openItems },
           )
         : [];
     return {
@@ -1627,16 +2149,102 @@ export class AuditAreaReviewService {
       impacts,
       materialityLabel,
       periodEnd,
+      master,
+      openItems,
+      assertionEvidence: usage?.assertionEvidence ?? {},
     };
   }
 
-  private async buildSummary(client: PoolClient, wi: string): Promise<AuditAreaReviewSummary> {
-    const ws = await this.workspace(client, wi);
+  /**
+   * Per-review usage in three statements: §9.1/§24 downstream references
+   * (risks; procedures / work areas only once started — untouched generated
+   * work is simply regenerated), §28 evidence counts and the open blocking
+   * review items.
+   */
+  private async readUsage(client: PoolClient, reviewId: string, wi: string) {
+    const { rows: dw } = await client.query<{
+      area_id: string;
+      risks: number;
+      procedures: number;
+      work_areas: number;
+    }>(
+      `SELECT a.id AS area_id,
+              (SELECT count(*)::int FROM hsdg.audit_risks r WHERE r.audit_area_id = a.id) AS risks,
+              (SELECT count(*)::int FROM hsdg.audit_procedures p
+                WHERE p.audit_area_id = a.id AND p.state <> 'not_started') AS procedures,
+              (SELECT count(*)::int FROM hsdg.audit_work_areas w
+                WHERE w.audit_area_id = a.id AND w.is_active AND w.state <> 'not_started') AS work_areas
+         FROM hsdg.audit_engagement_area a WHERE a.review_id = $1`,
+      [reviewId],
+    );
+    const { rows: ev } = await client.query<{ target_type: string; target_id: string; n: number }>(
+      `SELECT target_type, target_id, count(*)::int AS n FROM hsdg.audit_planning_evidence
+        WHERE workflow_instance_id = $1 AND target_type IN ('audit_area', 'area_assertion')
+          AND removed_at IS NULL
+        GROUP BY target_type, target_id`,
+      [wi],
+    );
+    const { rows: open } = await client.query<{
+      id: string;
+      kind: OpenReviewItem['kind'];
+      area_id: string | null;
+      body: string;
+      proposed_area_name: string | null;
+    }>(
+      `SELECT id, kind, area_id, body, proposed_area_name FROM hsdg.audit_area_review_comment
+        WHERE review_id = $1 AND status = 'open' AND kind = ANY($2::text[]) ORDER BY created_at`,
+      [reviewId, BLOCKING],
+    );
+    const areaEvidence: Record<string, number> = {};
+    const assertionEvidence: Record<string, number> = {};
+    for (const r of ev) {
+      (r.target_type === 'audit_area' ? areaEvidence : assertionEvidence)[r.target_id] = r.n;
+    }
+    return {
+      downstream: new Map(
+        dw.map((r) => [
+          r.area_id,
+          { risks: r.risks, procedures: r.procedures, workAreas: r.work_areas },
+        ]),
+      ),
+      areaEvidence,
+      assertionEvidence,
+      openItems: (names: Map<string, string>): OpenReviewItem[] =>
+        open.map((c) => {
+          const on = c.area_id && names.get(c.area_id) ? ` on ${names.get(c.area_id)}` : '';
+          return {
+            id: c.id,
+            kind: c.kind,
+            areaId: c.area_id,
+            label:
+              c.kind === 'downstream_request'
+                ? `Risk assessment asks for "${c.proposed_area_name}" — ${c.body}`
+                : `${KIND_NOUN[c.kind]}${on}: ${c.body}`,
+          };
+        }),
+    };
+  }
+
+  private async buildSummary(
+    client: PoolClient,
+    engagementId: string,
+    wi: string,
+    workspace?: Workspace,
+    knownAccess?: AreaReviewAccess,
+  ): Promise<AuditAreaReviewSummary> {
+    const ws = workspace ?? (await this.workspace(client, wi));
+    const access = knownAccess ?? (await resolveAreaAccess(client, engagementId));
     const rec = ws.record;
     const specific = specificMatters(ws.facts, ws.areas);
     const signals = signalRefs(ws.facts, ws.areas, ws.resolutions);
     const checks = rec
-      ? validations({ profile: ws.facts.profile, areas: ws.areas, specific, signals })
+      ? validations({
+          profile: ws.facts.profile,
+          areas: ws.areas,
+          specific,
+          signals,
+          openItems: ws.openItems,
+        })
       : [];
     const current = await this.currentLibraryVersion(client);
     const initial =
@@ -1682,8 +2290,59 @@ export class AuditAreaReviewService {
       matrixVersions: rec ? await this.readMatrixVersions(client, rec.id) : [],
       impacts: ws.impacts,
       comments: rec ? await this.readComments(client, rec.id, ws.areas) : [],
-      assertionMaster: await this.readAssertionMaster(client),
+      assertionMaster: ws.master,
+      openReviewItems: ws.openItems.length,
+      access,
+      grants: await this.readGrants(client, engagementId),
+      grantCandidates: access.capabilities.manageGrants
+        ? await this.grantCandidates(client, engagementId)
+        : [],
+      assertionEvidenceCounts: ws.assertionEvidence,
     };
+  }
+
+  private async readGrants(client: PoolClient, engagementId: string): Promise<AreaReviewGrant[]> {
+    const { rows } = await client.query<Row>(
+      `SELECT p.id, p.employee_id, e.full_name AS employee_name, p.level, p.note,
+              g.full_name AS granted_by_name, p.granted_at
+         FROM hsdg.audit_area_review_permission p
+         LEFT JOIN hsdg.employees e ON e.id = p.employee_id
+         LEFT JOIN hsdg.employees g ON g.id = p.granted_by_employee_id
+        WHERE p.engagement_id = $1 ORDER BY p.granted_at`,
+      [engagementId],
+    );
+    return rows.map((r) => ({
+      id: String(r.id),
+      employeeId: String(r.employee_id),
+      employeeName: s(r.employee_name),
+      level: r.level as AreaReviewGrant['level'],
+      note: s(r.note),
+      grantedByName: s(r.granted_by_name),
+      grantedAt: iso(r.granted_at)!,
+    }));
+  }
+
+  /** Team members other than the EP / Manager (they need no grant). */
+  private async grantCandidates(
+    client: PoolClient,
+    engagementId: string,
+  ): Promise<AreaGrantCandidate[]> {
+    const { rows } = await client.query<Row>(
+      `SELECT t.employee_id, e.full_name, t.role_on_engagement
+         FROM hsdg.engagement_team t
+         JOIN hsdg.engagements g ON g.id = t.engagement_id
+         JOIN hsdg.employees e ON e.id = t.employee_id
+        WHERE t.engagement_id = $1
+          AND t.employee_id IS DISTINCT FROM g.engagement_partner_id
+          AND t.employee_id IS DISTINCT FROM g.engagement_manager_id
+        ORDER BY e.full_name`,
+      [engagementId],
+    );
+    return rows.map((r) => ({
+      employeeId: String(r.employee_id),
+      name: String(r.full_name),
+      roleOnEngagement: String(r.role_on_engagement),
+    }));
   }
 
   private async readMatrixVersions(
@@ -1713,8 +2372,10 @@ export class AuditAreaReviewService {
     areas: EngagementAuditArea[],
   ): Promise<AreaReviewComment[]> {
     const { rows } = await client.query<Row>(
-      `SELECT c.*, e.full_name AS created_by_name FROM hsdg.audit_area_review_comment c
+      `SELECT c.*, e.full_name AS created_by_name, rb.full_name AS responded_by_name
+         FROM hsdg.audit_area_review_comment c
          LEFT JOIN hsdg.employees e ON e.id = c.created_by_employee_id
+         LEFT JOIN hsdg.employees rb ON rb.id = c.responded_by_employee_id
         WHERE c.review_id = $1 ORDER BY c.created_at`,
       [reviewId],
     );
@@ -1728,6 +2389,12 @@ export class AuditAreaReviewService {
       response: s(r.response),
       createdByName: s(r.created_by_name),
       createdAt: iso(r.created_at)!,
+      respondedByName: s(r.responded_by_name),
+      respondedAt: iso(r.responded_at),
+      proposedAreaName: s(r.proposed_area_name),
+      sourceModule: (r.source_module as AreaReviewComment['sourceModule']) ?? null,
+      sourceRiskId: s(r.source_risk_id),
+      resolvedAreaId: s(r.resolved_area_id),
       version: Number(r.version),
     }));
   }
@@ -1739,10 +2406,28 @@ function publicRecord(r: AreaReviewRecord & { basis: CompletionBasis | null }): 
   return rest;
 }
 
-/**
- * §9.1 — downstream work linked to an Audit Area blocks its removal. 03.6
- * (risks / responses) is not built yet, so nothing links to an area today.
- */
-function downstreamWorkCount(): number {
-  return 0;
+const KIND_NOUN: Record<AreaCommentKind, string> = {
+  comment: 'Comment',
+  challenge: 'Engagement Partner challenge',
+  reassessment_request: 'Engagement Partner reassessment request',
+  downstream_request: 'Area request',
+};
+
+/** Prior-year context for an area: last year's matrix row and/or matching matters. */
+function priorYearFor(
+  row: AreaPriorYear | null,
+  matters: AreaPriorYearMatter[],
+): AreaPriorYear | null {
+  if (!row && !matters.length) return null;
+  return {
+    ...(row ?? {
+      inPriorMatrix: false,
+      retained: false,
+      attention: null,
+      assertions: [],
+      cy: null,
+      unit: null,
+    }),
+    matters,
+  };
 }

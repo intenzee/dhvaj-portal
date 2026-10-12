@@ -509,8 +509,8 @@ export class AuditWorkService {
       const result = await client.query(
         `INSERT INTO hsdg.audit_work_areas
            (workflow_instance_id, engagement_id, work_area_key, title, scope, source,
-            origin_area_key, sort_order, is_active, generated_from_version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9)
+            origin_area_key, sort_order, is_active, generated_from_version, audit_area_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10)
          ON CONFLICT (workflow_instance_id, work_area_key) DO UPDATE
            SET title = EXCLUDED.title,
                scope = EXCLUDED.scope,
@@ -518,7 +518,8 @@ export class AuditWorkService {
                origin_area_key = EXCLUDED.origin_area_key,
                sort_order = EXCLUDED.sort_order,
                is_active = true,
-               generated_from_version = EXCLUDED.generated_from_version`,
+               generated_from_version = EXCLUDED.generated_from_version,
+               audit_area_id = COALESCE(EXCLUDED.audit_area_id, hsdg.audit_work_areas.audit_area_id)`,
         [
           workflowInstanceId,
           engagementId,
@@ -529,6 +530,7 @@ export class AuditWorkService {
           d.originAreaKey,
           d.sortOrder,
           approvalVersion,
+          ('auditAreaId' in d ? d.auditAreaId : null) ?? null,
         ],
       );
       if (!prior) created += 1;
@@ -710,9 +712,11 @@ export class AuditWorkService {
       response: string | null;
       status: string;
       source_key: string | null;
+      audit_area_id: string | null;
+      assertion_ids: RiskInput['assertionIds'];
     }>(
       `SELECT id, risk_ref, description, fs_area, assertion, rating, is_significant,
-              is_fraud_risk, response, status, source_key
+              is_fraud_risk, response, status, source_key, audit_area_id, assertion_ids
          FROM hsdg.audit_risks WHERE workflow_instance_id = $1 ORDER BY created_at`,
       [wi],
     );
@@ -728,6 +732,8 @@ export class AuditWorkService {
       response: r.response,
       status: r.status,
       sourceKey: r.source_key,
+      auditAreaId: r.audit_area_id,
+      assertionIds: r.assertion_ids ?? [],
     }));
   }
 
@@ -896,8 +902,10 @@ export class AuditWorkService {
         `INSERT INTO hsdg.audit_procedures
            (workflow_instance_id, engagement_id, work_area_id, procedure_ref, title, objective,
             assertions, risk_id, owner_employee_id, reviewer_employee_id, due_date,
-            expected_evidence, source_key, source_note)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            expected_evidence, source_key, source_note, audit_area_id, assertion_ids)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+                 COALESCE($15::uuid, (SELECT audit_area_id FROM hsdg.audit_work_areas WHERE id = $3)),
+                 $16::text[])
          ON CONFLICT DO NOTHING`,
         [
           wi,
@@ -914,6 +922,8 @@ export class AuditWorkService {
           p.expectedEvidence,
           p.sourceKey,
           p.sourceNote,
+          p.auditAreaId ?? null,
+          p.assertionIds ?? [],
         ],
       );
       added += res.rowCount ?? 0;

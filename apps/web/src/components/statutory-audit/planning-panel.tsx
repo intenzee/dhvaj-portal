@@ -131,7 +131,8 @@ export function PlanningPanel({
         >
           <Lock className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            <span className="font-medium">Section 03 is locked.</span> {planning.frameworkGate.reason}
+            <span className="font-medium">Section 03 is locked.</span>{' '}
+            {planning.frameworkGate.reason}
           </span>
         </div>
       )}
@@ -390,8 +391,7 @@ function PlanningItemWork({
             engagementId={engagementId}
             workflowInstanceId={workflowInstanceId}
             team={team}
-            editable={editable}
-            canManage={canManage}
+            sectionOpen={sectionOpen}
             onChanged={onChanged}
           />
         </div>

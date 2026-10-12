@@ -48,6 +48,10 @@ export const NOTIFICATION_TYPE = {
   planningMaterialityReassessment: 'planning_materiality_reassessment',
   /** 03.3 §23 — the Engagement Partner commented on / challenged 03.3, or the Manager answered. */
   planningMaterialityChallenge: 'planning_materiality_challenge',
+  /** 03.5 §27 — the EP commented / challenged / requested reassessment, or an area was requested. */
+  planningAreasReview: 'planning_areas_review',
+  /** 03.5 §25 — a completed 03.5 became Update Required (Engagement Manager). */
+  planningAreasUpdateRequired: 'planning_areas_update_required',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);

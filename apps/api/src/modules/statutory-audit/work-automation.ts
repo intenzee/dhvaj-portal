@@ -56,6 +56,10 @@ export interface RiskInput {
   response: string | null;
   status: string;
   sourceKey: string | null;
+  /** §24 — the 03.5 Audit Area the risk is structurally linked to. */
+  auditAreaId?: string | null;
+  /** Canonical SA 315 assertion ids on the risk. */
+  assertionIds?: AssertionId[];
 }
 
 export interface PlannedArea {
@@ -65,6 +69,8 @@ export interface PlannedArea {
   source: string;
   originAreaKey: string | null;
   sortOrder: number;
+  /** The 03.5 engagement Audit Area this work area carries (§24 lineage). */
+  auditAreaId?: string | null;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -103,6 +109,7 @@ export function planPlanningWorkAreas(areas: readonly FsAreaInput[]): PlannedAre
       source: 'planning:03.5',
       originAreaKey: a.code,
       sortOrder: 100 + a.seq,
+      auditAreaId: a.id,
     });
   }
   return out;
@@ -135,6 +142,11 @@ const tokens = (s: string): string[] =>
 
 /** The 03.5 area a risk belongs to, or null (→ overall responses). */
 export function areaForRisk(risk: RiskInput, areas: readonly FsAreaInput[]): FsAreaInput | null {
+  // The structural 03.5 link wins over any text match (§24).
+  if (risk.auditAreaId) {
+    const hit = areas.find((a) => a.id === risk.auditAreaId);
+    if (hit) return hit;
+  }
   if (risk.sourceKey?.startsWith('area:')) {
     const id = risk.sourceKey.slice('area:'.length);
     const hit = areas.find((a) => a.id === id);
@@ -252,6 +264,9 @@ export interface SuggestedProcedure {
   assertions: ProcedureAssertion[];
   riskId: string | null;
   expectedEvidence: string | null;
+  /** §24 lineage: the 03.5 Audit Area and canonical assertions the procedure covers. */
+  auditAreaId?: string | null;
+  assertionIds?: AssertionId[];
 }
 
 const ASSERTION_MAP: Record<AssertionId, ProcedureAssertion> = {
@@ -587,9 +602,17 @@ export function suggestProcedures(input: {
       objective:
         r.response?.trim() ||
         `Design and perform further procedures responsive to ${r.ref} (SA 330)${r.isSignificant ? ', including tests of details for this significant risk (SA 330.21)' : ''}.`,
-      assertions: r.assertion ? [r.assertion] : area ? procedureAssertions(area.assertions) : [],
+      assertions: r.assertionIds?.length
+        ? procedureAssertions(r.assertionIds)
+        : r.assertion
+          ? [r.assertion]
+          : area
+            ? procedureAssertions(area.assertions)
+            : [],
       riskId: r.id,
       expectedEvidence: null,
+      auditAreaId: area?.id ?? null,
+      assertionIds: r.assertionIds?.length ? [...r.assertionIds] : area ? [...area.assertions] : [],
     });
   }
 
@@ -609,6 +632,8 @@ export function suggestProcedures(input: {
       assertions,
       riskId: null,
       expectedEvidence: 'Lead schedule agreed to the trial balance; analytics; sample testing.',
+      auditAreaId: a.id,
+      assertionIds: [...a.assertions],
     });
     const name = a.name.toLowerCase();
     for (const group of FS_TEMPLATES) {
@@ -623,6 +648,7 @@ export function suggestProcedures(input: {
           assertions: t.assertions,
           riskId: null,
           expectedEvidence: t.evidence,
+          auditAreaId: a.id,
         });
       }
     }

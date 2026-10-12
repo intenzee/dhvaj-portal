@@ -70,7 +70,24 @@ export const AREA_CATEGORY_LABEL = labels<AreaCategory>({
   disclosure_cross_cutting: 'Disclosure / Cross-cutting',
 });
 
-export type AreaConditionKey = 'cfs_applicable' | 'initial_audit';
+export const AREA_CONDITION_KEYS = [
+  'cfs_applicable',
+  'initial_audit',
+  'caro_applicable',
+  'ifc_applicable',
+  'ind_as_transition',
+] as const;
+export type AreaConditionKey = (typeof AREA_CONDITION_KEYS)[number];
+/** §4 library selection conditions — the area joins the population only when the fact holds. */
+export const AREA_CONDITION_LABEL = labels<AreaConditionKey>({
+  cfs_applicable: 'Consolidated financial statements applicable (Section 02)',
+  initial_audit: 'Initial audit (Section 01 / 02)',
+  caro_applicable: 'CARO 2020 applicable (Section 02)',
+  ifc_applicable: 'IFC reporting applicable (Section 02)',
+  ind_as_transition: 'First-time Ind AS adoption (02.2)',
+});
+/** Library industry profile every engagement receives (the 03.2 `generic` profile maps here). */
+export const GENERAL_CORPORATE_INDUSTRY = 'general_corporate';
 
 export const AREA_DISPOSITIONS = ['retained', 'removed'] as const;
 export type AreaDisposition = (typeof AREA_DISPOSITIONS)[number];
@@ -235,13 +252,92 @@ export const AREA_RETURN_BUTTON = 'Return to Review';
 
 // ── §27 Partner review comments ─────────────────────────────────────────────
 
-export const AREA_COMMENT_KINDS = ['comment', 'challenge', 'reassessment_request'] as const;
+export const AREA_COMMENT_KINDS = [
+  'comment',
+  'challenge',
+  'reassessment_request',
+  'downstream_request',
+] as const;
 export type AreaCommentKind = (typeof AREA_COMMENT_KINDS)[number];
 export const AREA_COMMENT_KIND_LABEL = labels<AreaCommentKind>({
   comment: 'Review comment',
   challenge: 'Challenge',
   reassessment_request: 'Request reassessment',
+  downstream_request: 'Area requested by risk assessment',
 });
+/** Kinds the Engagement Partner raises (§27). */
+export const PARTNER_AREA_COMMENT_KINDS: AreaCommentKind[] = [
+  'comment',
+  'challenge',
+  'reassessment_request',
+];
+/** Open items of these kinds keep 03.5 in Requires Review (VAL-09) until the Manager answers. */
+export const BLOCKING_AREA_COMMENT_KINDS: AreaCommentKind[] = [
+  'challenge',
+  'reassessment_request',
+  'downstream_request',
+];
+
+// ── §27 Roles and permissions ───────────────────────────────────────────────
+
+/**
+ * Explicit engagement permission for a Senior / Article (§27): `prepare` lets
+ * them retain / remove / add areas and edit assertions, attention, links and
+ * amounts; `manager_equivalent` also completes AA-01, reopens and answers the
+ * Engagement Partner.
+ */
+export const AREA_PERMISSION_LEVELS = ['prepare', 'manager_equivalent'] as const;
+export type AreaPermissionLevel = (typeof AREA_PERMISSION_LEVELS)[number];
+export const AREA_PERMISSION_LEVEL_LABEL = labels<AreaPermissionLevel>({
+  prepare: 'May prepare 03.5',
+  manager_equivalent: 'Manager-equivalent (may complete AA-01)',
+});
+
+/** What the acting user may do in 03.5 (the API enforces the same matrix). */
+export interface AreaReviewCapabilities {
+  /** Retain / remove / restore / add areas; assertions; attention; links; amounts; evidence. */
+  prepare: boolean;
+  /** Complete AA-01, reopen, refresh the library, resolve Requires Review. */
+  complete: boolean;
+  /** Answer an EP challenge / reassessment / downstream request. */
+  respond: boolean;
+  /** Grant / revoke 03.5 permission to Seniors / Articles. */
+  manageGrants: boolean;
+  /** Comment, challenge and request reassessment (Engagement Partner). */
+  partnerReview: boolean;
+  /** Ask for a missing area from the risk assessment (any team member). */
+  requestArea: boolean;
+}
+
+export type AreaReviewRole = 'partner' | 'manager' | 'oversight' | 'team' | 'none';
+
+export interface AreaReviewAccess {
+  role: AreaReviewRole;
+  roleLabel: string;
+  /** The EP is acting as Manager because no Engagement Manager is assigned. */
+  actingAsManager: boolean;
+  employeeId: string | null;
+  /** The caller's explicit 03.5 permission, when a team member holds one. */
+  grant: AreaPermissionLevel | null;
+  capabilities: AreaReviewCapabilities;
+}
+
+export interface AreaReviewGrant {
+  id: string;
+  employeeId: string;
+  employeeName: string | null;
+  level: AreaPermissionLevel;
+  note: string | null;
+  grantedByName: string | null;
+  grantedAt: string;
+}
+
+/** A team member the Manager may grant 03.5 permission to. */
+export interface AreaGrantCandidate {
+  employeeId: string;
+  name: string;
+  roleOnEngagement: string;
+}
 
 // ── Entities ────────────────────────────────────────────────────────────────
 
@@ -318,12 +414,32 @@ export interface AreaAuthorityRef {
   category: AuthorityCategory;
 }
 
+/** A prior-year matter (03.1 register) whose wording points at this area (§20). */
+export interface AreaPriorYearMatter {
+  id: string;
+  code: string;
+  matterType: string;
+  description: string;
+}
+
 export interface AreaPriorYear {
+  /** The area was in last year's 03.5 matrix (else only prior-year matters match it). */
+  inPriorMatrix: boolean;
   retained: boolean;
   attention: AreaAttention | null;
   assertions: string[];
   cy: number | null;
   unit: string | null;
+  /** Significant matters / findings carried from last year, matched to the area. */
+  matters: AreaPriorYearMatter[];
+}
+
+/** §9.1 / §24 — downstream work that references the area. */
+export interface AreaDownstreamWork {
+  risks: number;
+  procedures: number;
+  /** Work areas already started (not just generated). */
+  workAreas: number;
 }
 
 export interface EngagementAuditArea {
@@ -385,8 +501,11 @@ export interface EngagementAuditArea {
   suggestedSpecific: { specificKey: string; label: string }[];
   authorities: AreaAuthorityRef[];
   priorYear: AreaPriorYear | null;
-  /** Downstream work items that block removal (§9.1); none until 03.6 exists. */
+  /** Downstream work items that block removal (§9.1): risks + procedures + started work areas. */
   downstreamWork: number;
+  downstreamDetail: AreaDownstreamWork;
+  /** Supporting files linked to the area (§28). */
+  evidenceCount: number;
   version: number;
 }
 
@@ -460,7 +579,10 @@ export type AreaImpactKind =
   | 'new_signal'
   | 'cfs_change'
   | 'initial_audit_change'
-  | 'new_financial_area';
+  | 'new_financial_area'
+  | 'new_disclosure_area'
+  | 'downstream_area_missing'
+  | 'partner_reassessment';
 export const AREA_IMPACT_KIND_LABEL = labels<AreaImpactKind>({
   materiality_decrease: 'Materiality revised downward',
   new_specific_materiality: 'New specific materiality',
@@ -468,6 +590,9 @@ export const AREA_IMPACT_KIND_LABEL = labels<AreaImpactKind>({
   cfs_change: 'CFS status changed',
   initial_audit_change: 'Initial-audit status corrected',
   new_financial_area: 'New financial statement area identified',
+  new_disclosure_area: 'New material disclosure / applicability identified',
+  downstream_area_missing: 'Risk assessment needs an area not in 03.5',
+  partner_reassessment: 'Engagement Partner requested reassessment',
 });
 export interface AreaImpact {
   key: string;
@@ -486,6 +611,13 @@ export interface AreaReviewComment {
   response: string | null;
   createdByName: string | null;
   createdAt: string;
+  respondedByName: string | null;
+  respondedAt: string | null;
+  /** downstream_request: the area the risk work needs, where from, and what answered it. */
+  proposedAreaName: string | null;
+  sourceModule: '03.6' | 'section_04' | null;
+  sourceRiskId: string | null;
+  resolvedAreaId: string | null;
   version: number;
 }
 
@@ -506,9 +638,15 @@ export interface AreaReviewRecord {
 
 export interface AreaLibraryProfile {
   frf: 'as' | 'ind_as' | 'unknown';
+  /** 03.2 industry profile (`general_corporate` when none / generic). */
   industry: string;
   cfsApplicable: boolean;
   initialAudit: boolean;
+  /** Section 02 conclusions (optional: profiles stored before 2026.2 omit them). */
+  caroApplicable?: boolean;
+  ifcApplicable?: boolean;
+  /** 02.2 — first-time adoption of Ind AS (Ind AS 101 transition). */
+  indAsTransition?: boolean;
 }
 
 export interface AreaReviewTiles {
@@ -540,7 +678,17 @@ export interface AuditAreaReviewSummary {
   matrixVersions: AreaMatrixVersion[];
   impacts: AreaImpact[];
   comments: AreaReviewComment[];
+  /** Open challenges / reassessment / downstream requests — VAL-09 until answered. */
+  openReviewItems: number;
   assertionMaster: AssertionMasterItem[];
+  /** §27 — the acting user's 03.5 role and what they may do. */
+  access: AreaReviewAccess;
+  /** Explicit 03.5 permissions on this engagement. */
+  grants: AreaReviewGrant[];
+  /** Team members the Manager may grant permission to (empty unless manageGrants). */
+  grantCandidates: AreaGrantCandidate[];
+  /** §28 — evidence links per assertion row id (`area_assertion` target). */
+  assertionEvidenceCounts: Record<string, number>;
 }
 
 // ── Inputs ──────────────────────────────────────────────────────────────────
@@ -607,4 +755,79 @@ export interface AreaCommentInput {
 }
 export interface RespondAreaCommentInput {
   response: string;
+  /** downstream_request: the area (added / restored) that answers it. */
+  resolvedAreaId?: string | null;
 }
+export interface GrantAreaPermissionInput {
+  employeeId: string;
+  level: AreaPermissionLevel;
+  note?: string | null;
+}
+/** §25 — the risk assessment needs an area that is not in the retained population. */
+export interface DownstreamAreaRequestInput {
+  proposedAreaName: string;
+  reason: string;
+  riskId?: string | null;
+}
+
+// ── §4 / §7 Audit Area Library administration (methodology, versioned) ─────
+
+export type AuditAreaLibraryReleaseStatus = 'draft' | 'released';
+
+export interface AuditAreaLibraryRelease {
+  libraryVersion: string;
+  status: AuditAreaLibraryReleaseStatus;
+  basedOn: string | null;
+  note: string | null;
+  areaCount: number;
+  activeCount: number;
+  releasedAt: string | null;
+  createdAt: string;
+  /** The release new engagements are populated from. */
+  current: boolean;
+  /** Engagement 03.5 reviews on this release. */
+  engagementsUsing: number;
+}
+
+/** One library area as the admin edits it (all §6 master fields). */
+export interface AuditAreaLibraryAdminRow {
+  id: string;
+  libraryVersion: string;
+  areaCode: string;
+  areaName: string;
+  areaType: AreaType;
+  category: AreaCategory;
+  frameworkProfile: 'both' | 'as' | 'ind_as';
+  industryProfile: string;
+  conditionKey: AreaConditionKey | null;
+  defaultAssertions: AssertionId[];
+  nonAssertionWorkstream: boolean;
+  defaultAttention: AreaAttention;
+  relatedAuthorities: string[];
+  signalMappingTags: string[];
+  metricKeys: string[];
+  indicatorTags: string[];
+  aliases: string[];
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  active: boolean;
+  sortOrder: number;
+}
+
+export interface AuditAreaLibraryAdminView {
+  releases: AuditAreaLibraryRelease[];
+  /** The release shown. */
+  selected: AuditAreaLibraryRelease | null;
+  rows: AuditAreaLibraryAdminRow[];
+  assertionMaster: AssertionMasterItem[];
+  /** Industry profiles areas may target (03.2 profiles + general_corporate). */
+  industryProfiles: { key: string; label: string }[];
+}
+
+export interface CreateLibraryDraftInput {
+  /** New version id, e.g. `dhvaj-gc-2026.3`. */
+  libraryVersion: string;
+  note: string;
+}
+
+export type UpsertLibraryAreaInput = Omit<AuditAreaLibraryAdminRow, 'id' | 'libraryVersion'>;

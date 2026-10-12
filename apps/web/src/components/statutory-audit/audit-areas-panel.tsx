@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BookOpen, Info, Plus, RefreshCw, RotateCcw, Search } from 'lucide-react';
+import { AlertTriangle, BookOpen, Info, Plus, RefreshCw, RotateCcw, Search, UserPlus } from 'lucide-react';
 import {
   AA01_TEXT,
   AA01_TITLE,
@@ -10,11 +10,12 @@ import {
   AREA_AMOUNT_SOURCE_LABEL,
   AREA_CATEGORY_LABEL,
   AREA_COMMENT_KIND_LABEL,
-  AREA_COMMENT_KINDS,
   AREA_COMPLETE_BUTTON,
   AREA_CONFIRM_BUTTON,
   AREA_DISPOSITION_LABEL,
   AREA_IMPACT_KIND_LABEL,
+  AREA_PERMISSION_LEVEL_LABEL,
+  AREA_PERMISSION_LEVELS,
   AREA_RETURN_BUTTON,
   AREA_SECTION_STATUS_LABEL,
   AREA_SOURCE_LABEL,
@@ -23,9 +24,11 @@ import {
   AREA_TYPES,
   ASSERTION_GROUP_LABEL,
   AUTHORITY_CATEGORY_LABEL,
+  BLOCKING_AREA_COMMENT_KINDS,
   FINANCIAL_INFO_NOT_AVAILABLE,
   FINANCIAL_UNIT_LABEL,
   FINANCIAL_UNITS,
+  PARTNER_AREA_COMMENT_KINDS,
   REMOVAL_REASON_CODES,
   REMOVAL_REASON_LABEL,
   REMOVAL_REASON_NEEDS_TEXT,
@@ -34,6 +37,8 @@ import {
   REMOVE_MODAL_TITLE,
   type AreaCommentKind,
   type AreaDisplayAttention,
+  type AreaPermissionLevel,
+  type AreaReviewComment,
   type AreaSectionStatus,
   type AreaType,
   type AssertionGroup,
@@ -49,6 +54,8 @@ import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { Modal } from '@/components/modal';
 import { SectionLauncher } from './section-launcher';
+import { PlanningEvidence } from './planning-evidence';
+import { PlanningGovernanceProvider, type PlanningGovernance } from './planning-governance';
 
 /**
  * 03.5 Audit Areas & Assertions (DHVAJ 03.5 — FROZEN). The complete applicable
@@ -56,6 +63,11 @@ import { SectionLauncher } from './section-launcher';
  * what is not required, adds what is missing and reviews the suggested SA 315
  * assertions. Attention is Standard / Enhanced Attention / Requires Review only
  * — never a risk rating. The matrix feeds 03.6 as structured data.
+ *
+ * Who may do what follows the §5 role matrix the API returns (`summary.access`):
+ * the Manager (or a manager-equivalent grantee) prepares and completes, a
+ * granted Senior / Article prepares, the Engagement Partner reviews, anyone on
+ * the team may ask for a missing area. The UI only hides what would be refused.
  */
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
@@ -78,23 +90,20 @@ const ATTENTION_TONE: Record<AreaDisplayAttention, string> = {
 
 type Filter = 'all' | 'retained' | 'enhanced' | 'removed' | 'requires_review';
 type Tab = 'areas' | 'signals' | 'matrix' | 'review' | 'complete';
-type Post = (path: string, body: unknown, done: string, after?: () => void) => void;
+type Post = (path: string, body: unknown, done: string, after?: () => void, method?: 'POST' | 'DELETE') => void;
 
 export function AuditAreasPanel({
   engagementId,
   workflowInstanceId,
   team,
-  editable,
-  canManage,
+  sectionOpen,
   onChanged,
 }: {
   engagementId: string;
   workflowInstanceId: string;
   team: TeamMember[];
-  /** Planning is editable (lead, not yet approved). */
-  editable: boolean;
-  /** Lead rights: reopen a completed 03.5, comment as reviewer. */
-  canManage: boolean;
+  /** Section 03 is unlocked (02.8 §14); within it the §5 role matrix decides. */
+  sectionOpen: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const qc = useQueryClient();
@@ -104,8 +113,11 @@ export function AuditAreasPanel({
   const qk = ['engagement', engagementId, 'audit-areas', workflowInstanceId];
   const summary = useQuery({ queryKey: qk, queryFn: () => apiFetch<AuditAreaReviewSummary>(base) });
   const mutation = useMutation({
-    mutationFn: (v: { path: string; body: unknown; done: string; after?: () => void }) =>
-      apiFetch<AuditAreaReviewSummary>(`${base}${v.path}`, { method: 'POST', body: v.body }),
+    mutationFn: (v: { path: string; body: unknown; done: string; after?: () => void; method?: 'POST' | 'DELETE' }) =>
+      apiFetch<AuditAreaReviewSummary>(`${base}${v.path}`, {
+        method: v.method ?? 'POST',
+        body: v.method === 'DELETE' ? undefined : v.body,
+      }),
     onSuccess: (data, v) => {
       // Fresh summary from the response — no refetch of the same query.
       qc.setQueryData(qk, data);
@@ -115,116 +127,136 @@ export function AuditAreasPanel({
     },
     onError: (e) => toast(errMsg(e, 'Could not save 03.5.')),
   });
-  const post: Post = (path, body, done, after) => mutation.mutate({ path, body, done, after });
+  const post: Post = (path, body, done, after, method) => mutation.mutate({ path, body, done, after, method });
 
-  // §3 — first entry creates the population once (idempotent server-side).
+  // §3 — first entry by someone who may prepare creates the population once (idempotent server-side).
   const populated = useRef(false);
   const s = summary.data;
+  const mayPrepare = sectionOpen && !!s?.access.capabilities.prepare;
   useEffect(() => {
-    if (s && s.status === 'not_started' && editable && !populated.current) {
+    if (s && s.status === 'not_started' && mayPrepare && !populated.current) {
       populated.current = true;
       post('/populate', {}, 'Applicable Audit Area Library populated — all areas Retained.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s?.status, editable]);
+  }, [s?.status, mayPrepare]);
 
   if (summary.isLoading) return <Spinner label="Loading 03.5…" />;
   if (!s) return <p className="text-sm text-ink-muted">03.5 is unavailable.</p>;
   if (!s.record) {
     return (
       <Card className="p-3 text-sm text-ink-muted">
-        {editable
+        {mayPrepare
           ? 'Populating the applicable DHVAJ Audit Area Library…'
           : '03.5 has not been started. The Engagement Manager populates the applicable Audit Area Library on first entry.'}
       </Card>
     );
   }
   const r = s.record;
-  const canEdit = r.status === 'in_progress' && s.status !== 'update_required' && editable;
-  const canReopen = canManage && r.status !== 'in_progress';
+  const caps = s.access.capabilities;
+  const canEdit = r.status === 'in_progress' && s.status !== 'update_required' && mayPrepare;
+  /** Complete AA-01, refresh the library, resolve Requires Review: Manager / manager-equivalent. */
+  const canComplete = canEdit && caps.complete;
+  const canReopen = sectionOpen && caps.complete && r.status !== 'in_progress';
   const failing = s.validations.filter((v) => !v.met).length;
-  const openComments = s.comments.filter((c) => c.status === 'open').length;
+  // 03.5 evidence (§28) rides the shared planning-evidence panel; adding needs the 03.5 prepare right.
+  const gov: PlanningGovernance = {
+    view: null,
+    engagementId,
+    base: `/engagements/${engagementId}/statutory-audit/${workflowInstanceId}`,
+    can: (c) => c === 'addFacts' && canEdit,
+    has: (c) => c === 'addFacts' && canEdit,
+    refresh: () => void qc.invalidateQueries({ queryKey: qk }),
+  };
 
   const sections: [Tab, string][] = [
         ['areas', `Audit Areas (${s.areas.length})`],
         ['signals', `Signals & specific materiality`],
         ['matrix', `Matrix (${s.matrix.length})`],
-        ['review', openComments ? `Partner review (${openComments} open)` : 'Partner review'],
+        ['review', s.openReviewItems ? `Review & requests (${s.openReviewItems} open)` : 'Review & requests'],
         ['complete', failing ? `Completeness (${failing} to resolve)` : 'Completeness'],
       ];
 
   return (
-    <div className="space-y-3">
-      <div>
-        <h3 className="text-base font-semibold text-ink">Audit Areas &amp; Assertions</h3>
-        <p className="text-sm text-ink-muted">
-          Review the complete applicable Audit Area Library, remove areas not required for this engagement, add any
-          missing area and confirm relevant assertions.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={STATUS_TONE[s.status]}>
-          {r.versionLabel} · {AREA_SECTION_STATUS_LABEL[s.status]}
-        </Badge>
-        <span className="text-xs text-ink-muted">
-          Library {r.libraryVersion} · {s.profile.frf === 'ind_as' ? 'Ind AS' : s.profile.frf === 'as' ? 'AS' : 'FRF not concluded'}
-          {s.profile.cfsApplicable ? ' · CFS' : ''}
-          {s.profile.initialAudit ? ' · Initial audit' : ''}
-          {s.materiality ? ` · Materiality ${s.materiality.versionLabel}` : ' · Materiality not complete'}
-        </span>
-        {s.scopeApproachStatus !== 'complete' && (
-          <span className="text-xs text-warning-700">03.4 Scope &amp; Approach is not complete yet.</span>
-        )}
-      </div>
-
-      {s.methodologyUpdateAvailable && (
-        <Card className="flex flex-wrap items-center justify-between gap-2 border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
-          <span className="flex items-start gap-2">
-            <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            Methodology update available — library {s.currentLibraryVersion} (this engagement uses {r.libraryVersion}).
-            Nothing changes until a controlled refresh; new or withdrawn areas are then flagged Requires Review.
+    <PlanningGovernanceProvider value={gov}>
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-base font-semibold text-ink">Audit Areas &amp; Assertions</h3>
+          <p className="text-sm text-ink-muted">
+            Review the complete applicable Audit Area Library, remove areas not required for this engagement, add any
+            missing area and confirm relevant assertions.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={STATUS_TONE[s.status]}>
+            {r.versionLabel} · {AREA_SECTION_STATUS_LABEL[s.status]}
+          </Badge>
+          <span className="text-xs text-ink-muted">
+            Library {r.libraryVersion} · {s.profile.frf === 'ind_as' ? 'Ind AS' : s.profile.frf === 'as' ? 'AS' : 'FRF not concluded'}
+            {s.profile.cfsApplicable ? ' · CFS' : ''}
+            {s.profile.initialAudit ? ' · Initial audit' : ''}
+            {s.materiality ? ` · Materiality ${s.materiality.versionLabel}` : ' · Materiality not complete'}
           </span>
-          {canEdit && (
-            <Button
-              variant="secondary"
-              disabled={mutation.isPending}
-              onClick={() => post('/methodology-update', {}, 'Methodology refreshed — review the flagged areas.')}
-            >
-              <RefreshCw className="mr-1.5 h-4 w-4" />
-              Apply controlled refresh
-            </Button>
+          <Badge tone="neutral">
+            {s.access.roleLabel}
+            {s.access.grant ? ` · ${AREA_PERMISSION_LEVEL_LABEL[s.access.grant]}` : ''}
+          </Badge>
+          {s.scopeApproachStatus !== 'complete' && (
+            <span className="text-xs text-warning-700">03.4 Scope &amp; Approach is not complete yet.</span>
           )}
-        </Card>
-      )}
-      {(s.status === 'update_required' || r.status === 'complete') && (
-        <ReopenBanner s={s} canReopen={canReopen} pending={mutation.isPending} post={post} />
-      )}
+        </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {(
-          [
-            ['Applicable Library Areas', s.tiles.applicableLibraryAreas],
-            ['Retained', s.tiles.retained],
-            ['Removed', s.tiles.removed],
-            ['Enhanced Attention', s.tiles.enhanced],
-            ['Requires Review', s.tiles.requiresReview],
-          ] as [string, number][]
-        ).map(([t, v]) => (
-          <Card key={t} className="p-2.5">
-            <div className="text-[11px] uppercase tracking-wide text-ink-faint">{t}</div>
-            <div className="text-lg font-semibold text-ink">{v}</div>
+        {s.methodologyUpdateAvailable && (
+          <Card className="flex flex-wrap items-center justify-between gap-2 border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
+            <span className="flex items-start gap-2">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              Methodology update available — library {s.currentLibraryVersion} (this engagement uses {r.libraryVersion}).
+              Nothing changes until a controlled refresh; new or withdrawn areas are then flagged Requires Review.
+            </span>
+            {canComplete && (
+              <Button
+                variant="secondary"
+                disabled={mutation.isPending}
+                onClick={() => post('/methodology-update', {}, 'Methodology refreshed — review the flagged areas.')}
+              >
+                <RefreshCw className="mr-1.5 h-4 w-4" />
+                Apply controlled refresh
+              </Button>
+            )}
           </Card>
-        ))}
-      </div>
+        )}
+        {(s.status === 'update_required' || r.status === 'complete') && (
+          <ReopenBanner s={s} canReopen={canReopen} pending={mutation.isPending} post={post} />
+        )}
 
-      <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.5 Audit Areas & Assertions">
-        {tab === 'areas' && <AreasTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} team={team} />}
-        {tab === 'signals' && <SignalsTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
-        {tab === 'matrix' && <MatrixTab s={s} />}
-        {tab === 'review' && <ReviewTab s={s} canAct={canManage} post={post} pending={mutation.isPending} />}
-        {tab === 'complete' && <CompleteTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
-      </SectionLauncher>
-    </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {(
+            [
+              ['Applicable Library Areas', s.tiles.applicableLibraryAreas],
+              ['Retained', s.tiles.retained],
+              ['Removed', s.tiles.removed],
+              ['Enhanced Attention', s.tiles.enhanced],
+              ['Requires Review', s.tiles.requiresReview],
+            ] as [string, number][]
+          ).map(([t, v]) => (
+            <Card key={t} className="p-2.5">
+              <div className="text-[11px] uppercase tracking-wide text-ink-faint">{t}</div>
+              <div className="text-lg font-semibold text-ink">{v}</div>
+            </Card>
+          ))}
+        </div>
+
+        <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.5 Audit Areas & Assertions">
+          {tab === 'areas' && <AreasTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} team={team} />}
+          {tab === 'signals' && <SignalsTab s={s} canEdit={canEdit} post={post} pending={mutation.isPending} />}
+          {tab === 'matrix' && <MatrixTab s={s} />}
+          {tab === 'review' && (
+            <ReviewTab s={s} sectionOpen={sectionOpen} post={post} pending={mutation.isPending} />
+          )}
+          {tab === 'complete' && <CompleteTab s={s} canEdit={canComplete} post={post} pending={mutation.isPending} />}
+        </SectionLauncher>
+      </div>
+    </PlanningGovernanceProvider>
   );
 }
 
@@ -686,12 +718,25 @@ function AreaDetail({
             )}
           </div>
         )}
-        {a.priorYear && (
+        {a.priorYear?.inPriorMatrix && (
           <p className="text-xs text-ink-muted">
             Prior year (reference only): {a.priorYear.retained ? 'Retained' : 'Removed'}
             {a.priorYear.attention ? ` · ${AREA_ATTENTION_LABEL[a.priorYear.attention]}` : ''}
             {a.priorYear.assertions.length ? ` · ${a.priorYear.assertions.join(', ')}` : ''}
+            {a.priorYear.cy !== null ? ` · CY then ${a.priorYear.cy.toLocaleString('en-IN')}` : ''}
           </p>
+        )}
+        {a.priorYear && a.priorYear.matters.length > 0 && (
+          <div className="text-xs text-warning-800">
+            <div className="font-medium">Prior-year matters pointing at this area (03.1):</div>
+            <ul className="list-disc pl-4">
+              {a.priorYear.matters.map((m) => (
+                <li key={m.id}>
+                  <span className="font-mono">{m.code}</span> {m.matterType} — {m.description}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </Card>
 
@@ -713,7 +758,7 @@ function AreaDetail({
                 {w.text}
               </p>
             ))}
-          {canEdit && a.reviewFlag && (
+          {canEdit && s.access.capabilities.complete && a.reviewFlag && (
             <div className="flex flex-wrap items-end gap-2">
               <div className="min-w-[18rem] flex-1">
                 <Field label="How was this resolved?">
@@ -1011,6 +1056,25 @@ function AreaDetail({
         )}
       </Card>
 
+      {/* Evidence (§28) and downstream use (§24) */}
+      <Card className="space-y-1.5 p-3">
+        <div className="text-xs font-medium uppercase tracking-wide text-ink-faint">Supporting Evidence &amp; Downstream Use</div>
+        {a.downstreamDetail.risks + a.downstreamDetail.procedures + a.downstreamDetail.workAreas > 0 ? (
+          <p className="text-xs text-ink-muted">
+            Referenced downstream: {a.downstreamDetail.risks} risk{a.downstreamDetail.risks === 1 ? '' : 's'} ·{' '}
+            {a.downstreamDetail.procedures} procedure{a.downstreamDetail.procedures === 1 ? '' : 's'} started ·{' '}
+            {a.downstreamDetail.workAreas} work area{a.downstreamDetail.workAreas === 1 ? '' : 's'} started — the
+            area cannot be removed while these remain.
+          </p>
+        ) : (
+          <p className="text-xs text-ink-muted">Not yet referenced by risk assessment or audit work.</p>
+        )}
+        <PlanningEvidence targetType="audit_area" targetId={a.id} count={a.evidenceCount} />
+        {a.disposition === 'retained' && a.assertions.some((x) => x.active) && (
+          <AssertionEvidence a={a} counts={s.assertionEvidenceCounts} />
+        )}
+      </Card>
+
       {/* F — professional framework */}
       {a.disposition === 'retained' && a.authorities.length > 0 && (
         <Card className="space-y-1.5 p-3">
@@ -1053,6 +1117,40 @@ function AreaDetail({
               Restore
             </Button>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** §28 — supporting schedules per assertion, opened on demand to keep the detail light. */
+function AssertionEvidence({
+  a,
+  counts,
+}: {
+  a: EngagementAuditArea;
+  counts: Record<string, number>;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const active = a.assertions.filter((x) => x.active);
+  const total = active.reduce((n, x) => n + (counts[x.id] ?? 0), 0);
+  return (
+    <div>
+      <button type="button" className="text-xs text-primary-700 hover:underline" onClick={() => setOpen((o) => !o)}>
+        {open ? '−' : '+'} Evidence per assertion{total ? ` (${total})` : ''}
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1 pl-3">
+          {active.map((x) => (
+            <div key={x.id} className="flex flex-wrap items-start gap-2 text-sm">
+              <span className="w-56 shrink-0 pt-1.5 text-xs text-ink-muted">
+                {x.label} <span className="text-ink-faint">({x.assertionId})</span>
+              </span>
+              <div className="min-w-0 flex-1">
+                <PlanningEvidence targetType="area_assertion" targetId={x.id} count={counts[x.id] ?? 0} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -1481,72 +1579,61 @@ function MatrixTab({ s }: { s: AuditAreaReviewSummary }): JSX.Element {
   );
 }
 
-// ── §27 Partner review ──────────────────────────────────────────────────────
+// ── §27 Partner review · §25 downstream requests · §5 permissions ───────────
 
 function ReviewTab({
   s,
-  canAct,
+  sectionOpen,
   post,
   pending,
 }: {
   s: AuditAreaReviewSummary;
-  canAct: boolean;
+  sectionOpen: boolean;
   post: Post;
   pending: boolean;
 }): JSX.Element {
+  const caps = s.access.capabilities;
+  /** The EP raises any review kind; a preparer may leave a plain review comment. */
+  const kinds: AreaCommentKind[] = !sectionOpen
+    ? []
+    : caps.partnerReview
+      ? PARTNER_AREA_COMMENT_KINDS
+      : caps.prepare
+        ? ['comment']
+        : [];
   const [kind, setKind] = useState<AreaCommentKind>('comment');
   const [areaId, setAreaId] = useState('');
   const [body, setBody] = useState('');
-  const [responses, setResponses] = useState<Record<string, string>>({});
+  const open = s.comments.filter((c) => c.status === 'open');
+  const closed = s.comments.filter((c) => c.status !== 'open');
   return (
     <div className="space-y-3">
       <p className="text-xs text-ink-muted">
-        The Engagement Partner may view, challenge, comment and request reassessment. Formal planning approval
-        remains in 03.12.
+        The Engagement Partner may view, comment, challenge and request reassessment; the risk assessment may ask for an
+        area that is missing. Open challenges, reassessment requests and area requests must be answered before AA-01
+        (VAL-09). Formal planning approval remains in 03.12.
       </p>
-      {s.comments.map((c) => (
-        <Card key={c.id} className="space-y-1 p-3 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={c.status === 'open' ? 'warn' : 'success'}>{AREA_COMMENT_KIND_LABEL[c.kind]}</Badge>
-            {c.areaName && <span className="text-xs text-ink-muted">{c.areaName}</span>}
-            <span className="text-xs text-ink-faint">
-              {c.createdByName ?? ''} · {new Date(c.createdAt).toLocaleString('en-IN')}
-            </span>
-          </div>
-          <p>{c.body}</p>
-          {c.response && <p className="text-ink-muted">Response: {c.response}</p>}
-          {canAct && c.status === 'open' && (
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <Input
-                  placeholder="Response…"
-                  value={responses[c.id] ?? ''}
-                  onChange={(e) => setResponses({ ...responses, [c.id]: e.target.value })}
-                />
-              </div>
-              <Button
-                variant="secondary"
-                disabled={pending || !(responses[c.id] ?? '').trim()}
-                onClick={() => post(`/comments/${c.id}`, { response: responses[c.id] }, 'Response recorded.')}
-              >
-                Respond
-              </Button>
-            </div>
-          )}
-        </Card>
+      {open.length === 0 && closed.length === 0 && <p className="text-sm text-ink-muted">No review items yet.</p>}
+      {[...open, ...closed].map((c) => (
+        <ReviewItem key={c.id} c={c} s={s} canRespond={sectionOpen && caps.respond} post={post} pending={pending} />
       ))}
-      {canAct && (
+      {kinds.length > 0 && (
         <Card className="space-y-2 p-3">
+          <div className="text-sm font-medium text-ink">
+            {caps.partnerReview ? 'Engagement Partner review' : 'Review comment'}
+          </div>
           <div className="flex flex-wrap gap-2">
-            <Field label="Type">
-              <Select value={kind} onChange={(e) => setKind(e.target.value as AreaCommentKind)}>
-                {AREA_COMMENT_KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {AREA_COMMENT_KIND_LABEL[k]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            {kinds.length > 1 && (
+              <Field label="Type">
+                <Select value={kind} onChange={(e) => setKind(e.target.value as AreaCommentKind)}>
+                  {kinds.map((k) => (
+                    <option key={k} value={k}>
+                      {AREA_COMMENT_KIND_LABEL[k]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field label="Audit Area (optional)">
               <Select value={areaId} onChange={(e) => setAreaId(e.target.value)}>
                 <option value="">Whole section</option>
@@ -1563,17 +1650,236 @@ function ReviewTab({
             variant="secondary"
             disabled={pending || !body.trim()}
             onClick={() =>
-              post('/comments', { kind, body, areaId: areaId || null }, 'Comment added.', () => {
-                setBody('');
-                setAreaId('');
-              })
+              post(
+                '/comments',
+                { kind: kinds.includes(kind) ? kind : 'comment', body, areaId: areaId || null },
+                `${AREA_COMMENT_KIND_LABEL[kinds.includes(kind) ? kind : 'comment']} recorded.`,
+                () => {
+                  setBody('');
+                  setAreaId('');
+                },
+              )
             }
           >
             Add
           </Button>
         </Card>
       )}
+      {sectionOpen && caps.requestArea && <AreaRequestForm post={post} pending={pending} />}
+      <GrantsCard s={s} canManage={sectionOpen && caps.manageGrants} post={post} pending={pending} />
     </div>
+  );
+}
+
+function ReviewItem({
+  c,
+  s,
+  canRespond,
+  post,
+  pending,
+}: {
+  c: AreaReviewComment;
+  s: AuditAreaReviewSummary;
+  canRespond: boolean;
+  post: Post;
+  pending: boolean;
+}): JSX.Element {
+  const [response, setResponse] = useState('');
+  const [resolvedAreaId, setResolvedAreaId] = useState('');
+  const blocking = BLOCKING_AREA_COMMENT_KINDS.includes(c.kind);
+  const resolvedArea = c.resolvedAreaId ? s.areas.find((a) => a.id === c.resolvedAreaId) : null;
+  const retained = s.areas.filter((a) => a.disposition === 'retained');
+  return (
+    <Card className="space-y-1 p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={c.status === 'open' ? (blocking ? 'warn' : 'info') : 'success'}>
+          {AREA_COMMENT_KIND_LABEL[c.kind]}
+          {c.status === 'open' ? '' : ' · answered'}
+        </Badge>
+        {c.areaName && <span className="text-xs text-ink-muted">{c.areaName}</span>}
+        {c.kind === 'downstream_request' && (
+          <span className="text-xs text-ink-muted">
+            from {c.sourceModule === 'section_04' ? 'Section 04 risk register' : '03.6 risk assessment'}
+          </span>
+        )}
+        <span className="text-xs text-ink-faint">
+          {c.createdByName ?? ''} · {new Date(c.createdAt).toLocaleString('en-IN')}
+        </span>
+      </div>
+      {c.proposedAreaName && (
+        <p className="font-medium text-ink">Area requested: {c.proposedAreaName}</p>
+      )}
+      <p>{c.body}</p>
+      {c.response && (
+        <p className="text-ink-muted">
+          Response{c.respondedByName ? ` (${c.respondedByName})` : ''}: {c.response}
+          {resolvedArea ? ` — answered by ${resolvedArea.areaName}` : ''}
+        </p>
+      )}
+      {canRespond && c.status === 'open' && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[16rem] flex-1">
+            <Input placeholder="Response…" value={response} onChange={(e) => setResponse(e.target.value)} />
+          </div>
+          {c.kind === 'downstream_request' && (
+            <Field label="Answered by area (add or restore it first)">
+              <Select value={resolvedAreaId} onChange={(e) => setResolvedAreaId(e.target.value)}>
+                <option value="">No area — explain in the response</option>
+                {retained.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.areaName}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          <Button
+            variant="secondary"
+            disabled={pending || !response.trim()}
+            onClick={() =>
+              post(
+                `/comments/${c.id}`,
+                { response, resolvedAreaId: c.kind === 'downstream_request' ? resolvedAreaId || null : undefined },
+                'Response recorded.',
+              )
+            }
+          >
+            Respond
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** §25 — the risk work needs an area the retained population does not have. */
+function AreaRequestForm({ post, pending }: { post: Post; pending: boolean }): JSX.Element {
+  const [name, setName] = useState('');
+  const [reason, setReason] = useState('');
+  return (
+    <Card className="space-y-2 p-3">
+      <div className="text-sm font-medium text-ink">Request a missing Audit Area</div>
+      <p className="text-xs text-ink-muted">
+        Use this when risk assessment needs an area that is not retained. The Manager adds or restores it (or explains
+        why not); nothing is created automatically.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Area needed">
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <div className="min-w-[16rem] flex-1">
+          <Field label="Why it is needed">
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>
+        </div>
+        <Button
+          variant="secondary"
+          disabled={pending || !name.trim() || !reason.trim()}
+          onClick={() =>
+            post('/requests', { proposedAreaName: name, reason }, 'Area request sent to the Manager.', () => {
+              setName('');
+              setReason('');
+            })
+          }
+        >
+          Send request
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+/** §5 — the Manager grants Seniors / Articles the right to prepare (or complete) 03.5. */
+function GrantsCard({
+  s,
+  canManage,
+  post,
+  pending,
+}: {
+  s: AuditAreaReviewSummary;
+  canManage: boolean;
+  post: Post;
+  pending: boolean;
+}): JSX.Element | null {
+  const [employeeId, setEmployeeId] = useState('');
+  const [level, setLevel] = useState<AreaPermissionLevel>('prepare');
+  const [note, setNote] = useState('');
+  if (!canManage && s.grants.length === 0) return null;
+  const candidates = s.grantCandidates.filter((c) => !s.grants.some((g) => g.employeeId === c.employeeId));
+  return (
+    <Card className="space-y-2 p-3">
+      <div className="flex items-center gap-1.5 text-sm font-medium text-ink">
+        <UserPlus className="h-4 w-4" /> 03.5 permissions
+      </div>
+      {s.grants.length === 0 ? (
+        <p className="text-xs text-ink-muted">Only the Engagement Manager prepares 03.5 until a permission is granted.</p>
+      ) : (
+        <ul className="space-y-1">
+          {s.grants.map((g) => (
+            <li key={g.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span>
+                {g.employeeName ?? 'Team member'} — {AREA_PERMISSION_LEVEL_LABEL[g.level]}
+                <span className="ml-1 text-xs text-ink-faint">
+                  {g.grantedByName ? `by ${g.grantedByName}, ` : ''}
+                  {new Date(g.grantedAt).toLocaleDateString('en-IN')}
+                  {g.note ? ` · ${g.note}` : ''}
+                </span>
+              </span>
+              {canManage && (
+                <button
+                  type="button"
+                  className="text-xs text-danger-700 hover:underline"
+                  disabled={pending}
+                  onClick={() => post(`/permissions/${g.id}`, null, 'Permission revoked.', undefined, 'DELETE')}
+                >
+                  Revoke
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canManage && (
+        <div className="flex flex-wrap items-end gap-2 border-t border-line pt-2">
+          <Field label="Team member">
+            <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+              <option value="">Select…</option>
+              {candidates.map((c) => (
+                <option key={c.employeeId} value={c.employeeId}>
+                  {c.name} ({c.roleOnEngagement})
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Permission">
+            <Select value={level} onChange={(e) => setLevel(e.target.value as AreaPermissionLevel)}>
+              {AREA_PERMISSION_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {AREA_PERMISSION_LEVEL_LABEL[l]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="min-w-[12rem] flex-1">
+            <Field label="Note (optional)">
+              <Input value={note} onChange={(e) => setNote(e.target.value)} />
+            </Field>
+          </div>
+          <Button
+            variant="secondary"
+            disabled={pending || !employeeId}
+            onClick={() =>
+              post('/permissions', { employeeId, level, note: note.trim() || null }, 'Permission granted.', () => {
+                setEmployeeId('');
+                setNote('');
+              })
+            }
+          >
+            Grant
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }
 

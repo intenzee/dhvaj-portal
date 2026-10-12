@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -10,10 +12,12 @@ import {
   Min,
 } from 'class-validator';
 import {
+  ASSERTION_IDS,
   RISK_ASSERTION,
   RISK_RATING,
   RISK_SOURCE,
   RISK_STATUS,
+  type AssertionId,
   type RiskAssertion,
   type RiskRating,
   type RiskSource,
@@ -41,6 +45,18 @@ export class CreateRiskDto {
   @IsOptional()
   @IsIn(Object.values(RISK_ASSERTION))
   assertion?: RiskAssertion;
+
+  @ApiPropertyOptional({ description: '03.5 engagement Audit Area the risk sits in (§24 lineage).' })
+  @IsOptional()
+  @IsUUID()
+  auditAreaId?: string | null;
+
+  @ApiPropertyOptional({ enum: ASSERTION_IDS, isArray: true, description: 'Canonical SA 315 assertion ids (03.5 §15).' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(13)
+  @IsIn(ASSERTION_IDS, { each: true })
+  assertionIds?: AssertionId[];
 
   @ApiProperty({ enum: Object.values(RISK_RATING) })
   @IsIn(Object.values(RISK_RATING))
@@ -107,6 +123,18 @@ export class UpdateRiskDto {
   @IsOptional()
   @IsIn(Object.values(RISK_ASSERTION))
   assertion?: RiskAssertion;
+
+  @ApiPropertyOptional({ description: '03.5 engagement Audit Area the risk sits in (§24 lineage).' })
+  @IsOptional()
+  @IsUUID()
+  auditAreaId?: string | null;
+
+  @ApiPropertyOptional({ enum: ASSERTION_IDS, isArray: true, description: 'Canonical SA 315 assertion ids (03.5 §15).' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(13)
+  @IsIn(ASSERTION_IDS, { each: true })
+  assertionIds?: AssertionId[];
 
   @ApiPropertyOptional({ enum: Object.values(RISK_RATING) })
   @IsOptional()
