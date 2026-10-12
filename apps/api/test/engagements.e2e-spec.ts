@@ -164,8 +164,10 @@ describe('Engagement Core (e2e)', () => {
 
     it('enforces engagement identity uniqueness (409)', async () => {
       const pa = await token('partner.a@dhvaj.in');
-      const entityId = await findEntityId('Bharat');
-      const serviceId = await findServiceId('GST_MONTHLY');
+      // An assignment on a client of its own: a second Compliance engagement
+      // would be refused as COMPLIANCE_ENGAGEMENT_EXISTS before identity.
+      const entityId = await freshClient(await findEntityId('Bharat'));
+      const serviceId = await findServiceId('CERTIFICATION');
       const body = { entityId, serviceId, financialYear: '2023-24', periodLabel: uniquePeriod() };
       await request(app.getHttpServer())
         .post('/api/v1/engagements')

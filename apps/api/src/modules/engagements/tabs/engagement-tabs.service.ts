@@ -85,8 +85,9 @@ export class EngagementTabsService {
         add(y.fy, null);
         for (const s of y.streams) add(y.fy, s);
       }
-      // Instance years fill in only when the engagement has no year rows yet.
-      if (years.rows.length === 0) for (const r of instYears.rows) add(r.fy, r.stream);
+      // Filings count too: a stream with work on it keeps its tab even when the
+      // year's scope does not list it (legacy filings moved into the engagement).
+      for (const r of instYears.rows) add(r.fy, r.stream);
       const financialYears = [...byYear.keys()].sort().reverse();
       const currentFy = fyOf(today);
       const financialYear = financialYears.includes(currentFy)

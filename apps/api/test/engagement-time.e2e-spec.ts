@@ -42,7 +42,8 @@ describe('Engagement Time Tracking (e2e)', () => {
     opts: { status?: string; serviceCode?: string } = {},
   ): Promise<{ id: string; code: string }> => {
     const entityId = await findEntityId('Bharat'); // North client, Partner A's office
-    const serviceId = await findServiceId(opts.serviceCode ?? 'ITR_FILING');
+    // An assignment: on a Compliance engagement the clock follows the task.
+    const serviceId = await findServiceId(opts.serviceCode ?? 'CERTIFICATION');
     const res = await request(app.getHttpServer())
       .post('/api/v1/engagements')
       .set(bearer(pa))
@@ -111,7 +112,7 @@ describe('Engagement Time Tracking (e2e)', () => {
       const pa = await token('partner.a@dhvaj.in');
       await stopIfRunning(pa);
       const a = await createEngagement(pa, { status: 'accepted' });
-      const b = await createEngagement(pa, { status: 'accepted', serviceCode: 'GST_MONTHLY' });
+      const b = await createEngagement(pa, { status: 'accepted', serviceCode: 'VALUATION' });
 
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${a.id}/time/start`)

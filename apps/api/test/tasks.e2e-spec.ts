@@ -210,12 +210,12 @@ describe('Tasks & Client Dependencies (e2e)', () => {
         .expect(201);
       expect(linked.body.blockedByOpenCount).toBe(1);
 
-      // A cannot be completed while B is open.
+      // A cannot be completed while B is open (a state conflict).
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/tasks/${a.body.id}/status`)
         .set(bearer(pa))
         .send({ status: 'done' })
-        .expect(400);
+        .expect(409);
 
       // B → A would create a cycle ⇒ rejected.
       await request(app.getHttpServer())
