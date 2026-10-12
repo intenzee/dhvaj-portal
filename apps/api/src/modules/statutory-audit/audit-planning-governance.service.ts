@@ -42,6 +42,7 @@ import {
   type ReopenPlanningIntelligenceInput,
   type RespondPartnerAttentionInput,
   materialityVersionLabel,
+  scopeVersionLabel,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -92,7 +93,21 @@ const EVIDENCE_TARGET_SQL: Record<PlanningEvidenceTarget, string> = {
   materiality_qualitative: `SELECT d.status, d.version_no FROM hsdg.audit_materiality_qualitative x
                               JOIN hsdg.audit_materiality_determination d ON d.id = x.determination_id
                              WHERE x.id = $1 AND d.workflow_instance_id = $2`,
+  // 03.4 (DHVAJ 03.4 §28): the record and its child records — status of the 03.4 version.
+  scope_approach: `SELECT r.status, r.version_no FROM hsdg.audit_scope_approach r
+                    WHERE r.id = $1 AND r.workflow_instance_id = $2`,
+  scope_unit: scopeChildSql('audit_scope_unit'),
+  scope_service_org: scopeChildSql('audit_scope_service_org'),
+  scope_dependency: scopeChildSql('audit_scope_dependency'),
+  scope_limitation: scopeChildSql('audit_scope_limitation'),
+  scope_map_item: scopeChildSql('audit_scope_map_item'),
 };
+
+function scopeChildSql(table: string): string {
+  return `SELECT r.status, r.version_no FROM hsdg.${table} x
+            JOIN hsdg.audit_scope_approach r ON r.id = x.scope_id
+           WHERE x.id = $1 AND r.workflow_instance_id = $2`;
+}
 
 /** Evidence on these is frozen with 03.2 once it is complete (reopen for a controlled revision). */
 const UNDERSTANDING_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>([
@@ -108,6 +123,16 @@ const MATERIALITY_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>([
   'materiality_adjustment',
   'materiality_specific',
   'materiality_qualitative',
+]);
+
+/** 03.4 records follow the 03.4 version: only a draft takes evidence changes (§27/§28). */
+const SCOPE_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>([
+  'scope_approach',
+  'scope_unit',
+  'scope_service_org',
+  'scope_dependency',
+  'scope_limitation',
+  'scope_map_item',
 ]);
 
 const UNDERSTANDING_FROZEN =
@@ -135,6 +160,16 @@ async function evidenceFrozenReason(
       ? `Materiality ${materialityVersionLabel(r.version_no)} is ${r.status === 'complete' ? 'complete' : 'superseded'} — its evidence is part of that version. Start a revision (03.3.11) to change it.`
       : null;
   }
+  if (SCOPE_EVIDENCE_TARGETS.has(targetType)) {
+    const { rows } = await client.query<{ status: string; version_no: number }>(
+      EVIDENCE_TARGET_SQL[targetType],
+      [targetId, workflowInstanceId],
+    );
+    const r = rows[0];
+    return r && r.status !== 'draft'
+      ? `03.4 ${scopeVersionLabel(r.version_no)} is ${r.status === 'complete' ? 'complete' : 'flagged Reassessment Required'} — its evidence is part of that version. Start a revision (03.4) to change it.`
+      : null;
+  }
   const lock = await readPlanningLock(client, workflowInstanceId);
   if (lock.locked) return lock.lockReason;
   if (!UNDERSTANDING_EVIDENCE_TARGETS.has(targetType)) return null;
@@ -150,6 +185,7 @@ interface AttentionRow {
   signal_id: string | null;
   focus_id: string | null;
   materiality_determination_id: string | null;
+  scope_id: string | null;
   seq: number;
   title: string;
   detail: string | null;
@@ -317,8 +353,8 @@ export class AuditPlanningGovernanceService {
     const { rows } = await client.query<AttentionRow>(
       `${ATTENTION_SELECT} WHERE a.workflow_instance_id = $1 AND a.partner_surfaced_at IS NOT NULL
         ORDER BY (a.partner_status = 'acknowledged'), (a.focus_id IS NOT NULL),
-                 (a.materiality_determination_id IS NOT NULL),
-                 COALESCE(s.seq, f.seq, a.materiality_seq)`,
+                 (a.materiality_determination_id IS NOT NULL), (a.scope_id IS NOT NULL),
+                 COALESCE(s.seq, f.seq, a.materiality_seq, a.scope_seq)`,
       [workflowInstanceId],
     );
     const { rows: ep } = await client.query<{ name: string | null }>(
@@ -1074,16 +1110,23 @@ function staleItem(): ConflictException {
 
 type ItemRef = Pick<
   AttentionRow,
-  'signal_id' | 'focus_id' | 'materiality_determination_id' | 'seq'
+  'signal_id' | 'focus_id' | 'materiality_determination_id' | 'scope_id' | 'seq'
 >;
 
 function itemCode(r: ItemRef): string {
-  return displayCode(r.signal_id ? 'PS' : r.focus_id ? 'FA' : 'MT', r.seq)!;
+  return displayCode(
+    r.signal_id ? 'PS' : r.focus_id ? 'FA' : r.materiality_determination_id ? 'MT' : 'SC',
+    r.seq,
+  )!;
 }
 
-/** 03.3 materiality triggers share the 03.1 Partner Planning View queue. */
+/** 03.3 materiality and 03.4 scope triggers share the 03.1 Partner Planning View queue. */
 function itemSection(r: ItemRef): string {
-  return r.materiality_determination_id ? '03.3 Materiality' : '03.1';
+  return r.materiality_determination_id
+    ? '03.3 Materiality'
+    : r.scope_id
+      ? '03.4 Scope & Approach'
+      : '03.1';
 }
 
 function itemObject(r: ItemRef): { objectType: string; objectId: string } {
@@ -1091,20 +1134,25 @@ function itemObject(r: ItemRef): { objectType: string; objectId: string } {
     ? { objectType: 'audit_planning_signal', objectId: r.signal_id }
     : r.focus_id
       ? { objectType: 'audit_area_of_focus', objectId: r.focus_id }
-      : {
-          objectType: 'audit_materiality_determination',
-          objectId: r.materiality_determination_id!,
-        };
+      : r.materiality_determination_id
+        ? {
+            objectType: 'audit_materiality_determination',
+            objectId: r.materiality_determination_id,
+          }
+        : { objectType: 'audit_scope_approach', objectId: r.scope_id! };
 }
 
 const ATTENTION_SELECT = `
-  SELECT a.id, a.signal_id, a.focus_id, a.materiality_determination_id,
-         COALESCE(s.seq, f.seq, a.materiality_seq) AS seq,
+  SELECT a.id, a.signal_id, a.focus_id, a.materiality_determination_id, a.scope_id,
+         COALESCE(s.seq, f.seq, a.materiality_seq, a.scope_seq) AS seq,
          COALESCE(s.observation, f.name,
-                  'v1.' || (md.version_no - 1) || ' — ' || a.materiality_label) AS title,
-         COALESCE(s.why_may_matter, f.why_requires_attention, a.materiality_detail) AS detail,
+                  'v1.' || (md.version_no - 1) || ' — ' || a.materiality_label,
+                  'v1.' || (sc.version_no - 1) || ' — ' || a.scope_label) AS title,
+         COALESCE(s.why_may_matter, f.why_requires_attention, a.materiality_detail,
+                  a.scope_detail) AS detail,
          COALESCE(s.attention,
                   CASE WHEN a.materiality_attention = 'immediate_partner'
+                         OR a.scope_trigger_key LIKE 'limitation:%'
                        THEN 'immediate_partner' END) AS attention,
          s.manager_assessment, a.partner_surfaced_at, a.partner_status,
          a.raised_by_partner, a.partner_note, a.challenge, a.challenged_at, a.manager_response,
@@ -1114,14 +1162,21 @@ const ATTENTION_SELECT = `
     LEFT JOIN hsdg.audit_planning_signal s ON s.id = a.signal_id
     LEFT JOIN hsdg.audit_area_of_focus f ON f.id = a.focus_id
     LEFT JOIN hsdg.audit_materiality_determination md ON md.id = a.materiality_determination_id
+    LEFT JOIN hsdg.audit_scope_approach sc ON sc.id = a.scope_id
     LEFT JOIN hsdg.employees rb ON rb.id = a.responded_by_employee_id
     LEFT JOIN hsdg.employees vb ON vb.id = a.reviewed_by_employee_id`;
 
 function mapAttention(r: AttentionRow): PartnerAttentionItem {
   return {
     id: r.id,
-    kind: r.signal_id ? 'signal' : r.focus_id ? 'focus_area' : 'materiality',
-    targetId: (r.signal_id ?? r.focus_id ?? r.materiality_determination_id)!,
+    kind: r.signal_id
+      ? 'signal'
+      : r.focus_id
+        ? 'focus_area'
+        : r.materiality_determination_id
+          ? 'materiality'
+          : 'scope',
+    targetId: (r.signal_id ?? r.focus_id ?? r.materiality_determination_id ?? r.scope_id)!,
     code: itemCode(r),
     title: r.title,
     detail: r.detail,

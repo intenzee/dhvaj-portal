@@ -14,8 +14,9 @@ import { PlanningSignalLibrarySection } from '@/components/admin/planning-signal
 import { PlanningConsiderationLibrarySection } from '@/components/admin/planning-consideration-library-section';
 import { AnalyticsMethodologySection } from '@/components/admin/analytics-methodology-section';
 import { MaterialityMethodologySection } from '@/components/admin/materiality-methodology-section';
+import { ScopeMethodologySection } from '@/components/admin/scope-methodology-section';
 
-type Tab = 'users' | 'offices' | 'templates' | 'rules' | 'signals' | 'analytics' | 'materiality';
+type Tab = 'users' | 'offices' | 'templates' | 'rules' | 'signals' | 'analytics' | 'materiality' | 'scope';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -55,13 +56,17 @@ export default function AdministrationPage(): JSX.Element {
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'materiality' as const, label: 'Materiality Methodology' }]
       : []),
+    // The 03.4 Scope & Approach Methodology Library — decision lists only; it never concludes scope.
+    ...(can(principal, PERMISSION.serviceManage)
+      ? [{ id: 'scope' as const, label: 'Scope Methodology' }]
+      : []),
   ];
 
   return (
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library and the Analytics and Materiality Methodology Libraries. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library and the Analytics, Materiality and Scope & Approach Methodology Libraries. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -92,6 +97,8 @@ export default function AdministrationPage(): JSX.Element {
             <AnalyticsMethodologySection />
           ) : tab === 'materiality' ? (
             <MaterialityMethodologySection />
+          ) : tab === 'scope' ? (
+            <ScopeMethodologySection />
           ) : tab === 'signals' ? (
             <div className="space-y-8">
               <PlanningSignalLibrarySection />

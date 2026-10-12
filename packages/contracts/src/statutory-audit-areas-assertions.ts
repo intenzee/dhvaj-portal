@@ -81,7 +81,13 @@ export const AREA_DISPOSITION_LABEL = labels<AreaDisposition>({
 
 export type AreaSource = 'library' | 'custom';
 export const AREA_SOURCE_LABEL = labels<AreaSource>({ library: 'Library', custom: 'Custom' });
-export type AreaOrigin = 'population' | 'added_from_library' | 'methodology_refresh' | 'custom';
+export type AreaOrigin =
+  | 'population'
+  | 'added_from_library'
+  | 'methodology_refresh'
+  | 'custom'
+  /** Converted from a 03.4 Preliminary Audit Approach Map area (03.4 §23). */
+  | 'scope_map';
 
 // ── §14 Attention model — never a risk rating ───────────────────────────────
 
@@ -209,6 +215,7 @@ export const AREA_VALIDATION_IDS = [
   'VAL-08',
   'VAL-09',
   'VAL-10',
+  'VAL-11',
 ] as const;
 export type AreaValidationId = (typeof AREA_VALIDATION_IDS)[number];
 export const AREA_VALIDATION_LABEL = labels<AreaValidationId>({
@@ -222,6 +229,7 @@ export const AREA_VALIDATION_LABEL = labels<AreaValidationId>({
   'VAL-08': 'Significant removal documentation',
   'VAL-09': 'No Requires Review',
   'VAL-10': 'No broken coverage link',
+  'VAL-11': '03.4 Approach Map areas carried into 03.5',
 });
 
 // ── §22 Completion ──────────────────────────────────────────────────────────
@@ -387,7 +395,23 @@ export interface EngagementAuditArea {
   priorYear: AreaPriorYear | null;
   /** Downstream work items that block removal (§9.1); none until 03.6 exists. */
   downstreamWork: number;
+  /** The 03.4 Approach Map area this area carries (read-only strategy context). */
+  scopeStrategy: AreaScopeStrategy | null;
   version: number;
+}
+
+/** 03.4 §23 — the preliminary strategy of the Approach Map area linked to a 03.5 area. */
+export interface AreaScopeStrategy {
+  mapItemId: string;
+  /** AM-00n. */
+  code: string;
+  name: string;
+  controlsStrategy: string | null;
+  timing: string | null;
+  evidenceChannels: string[];
+  specialConsiderations: string[];
+  /** The map area is flagged Reassessment Required in 03.4. */
+  reassessmentRequired: boolean;
 }
 
 export interface AreaSpecificMatter {

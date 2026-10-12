@@ -21,6 +21,7 @@ import { PlanningIntelligencePanel } from './planning-intelligence-panel';
 import { BusinessUnderstandingPanel } from './business-understanding-panel';
 import { MaterialityPanel } from './materiality-panel';
 import { ScopeApproachPanel } from './scope-approach-panel';
+import { isScopeHandoffItem, ScopeHandoffCard } from './scope-handoff-card';
 import { AuditAreasPanel } from './audit-areas-panel';
 import { useAuditAnchor } from './audit-file-nav';
 import { SectionPackChecks } from './section-pack-card';
@@ -254,6 +255,7 @@ export function PlanningPanel({
             item={selected}
             editable={editable}
             canManage={canManage}
+            approved={approved}
             sectionOpen={planning.frameworkGate.unlocked}
             onChanged={invalidate}
           />
@@ -290,6 +292,7 @@ function PlanningItemWork({
   item,
   editable,
   canManage,
+  approved,
   sectionOpen,
   onChanged,
 }: {
@@ -299,6 +302,8 @@ function PlanningItemWork({
   item: PlanningItem;
   editable: boolean;
   canManage: boolean;
+  /** 03.12 Planning approval is recorded. */
+  approved: boolean;
   /** Section 03 is unlocked (02.8 §14) — 03.1 then gates by the §23 role itself. */
   sectionOpen: boolean;
   onChanged: () => void;
@@ -377,8 +382,8 @@ function PlanningItemWork({
             engagementId={engagementId}
             workflowInstanceId={workflowInstanceId}
             team={team}
-            editable={editable}
-            canRevise={canManage}
+            sectionOpen={sectionOpen}
+            approved={approved}
             onChanged={onChanged}
           />
         </div>
@@ -411,6 +416,13 @@ function PlanningItemWork({
         !isScopeCovered &&
         !isAreas && (
           <div className="mt-3 space-y-3 border-t border-line pt-3">
+            {isScopeHandoffItem(item.itemKey) && (
+              <ScopeHandoffCard
+                engagementId={engagementId}
+                workflowInstanceId={workflowInstanceId}
+                itemKey={item.itemKey}
+              />
+            )}
             {editable ? (
               <>
                 <Textarea

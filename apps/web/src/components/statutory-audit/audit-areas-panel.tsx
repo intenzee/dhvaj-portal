@@ -41,6 +41,10 @@ import {
   type EngagementAuditArea,
   type FinancialUnit,
   type RemovalReasonCode,
+  MAP_CONTROLS_STRATEGY_LABEL,
+  MAP_EVIDENCE_LABEL,
+  MAP_TIMING_LABEL,
+  SPECIAL_CONSIDERATION_LABEL,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
@@ -543,6 +547,23 @@ function AreaDetail({
           {a.coveredUnderName ? ` (covered under ${a.coveredUnderName})` : ''}
           {a.removalReasonText ? `: ${a.removalReasonText}` : ''}
         </p>
+      )}
+      {a.scopeStrategy && (
+        <div className="rounded bg-surface-raised px-2 py-1.5 text-xs">
+          <span className="font-medium text-ink">03.4 strategy</span>{' '}
+          <span className="font-mono text-ink-faint">{a.scopeStrategy.code}</span>{' '}
+          <span className="text-ink-muted">
+            {[
+              a.scopeStrategy.controlsStrategy && (MAP_CONTROLS_STRATEGY_LABEL as Record<string, string>)[a.scopeStrategy.controlsStrategy],
+              a.scopeStrategy.timing && (MAP_TIMING_LABEL as Record<string, string>)[a.scopeStrategy.timing],
+              a.scopeStrategy.evidenceChannels.map((x) => (MAP_EVIDENCE_LABEL as Record<string, string>)[x] ?? x).join(', '),
+              a.scopeStrategy.specialConsiderations.map((x) => (SPECIAL_CONSIDERATION_LABEL as Record<string, string>)[x] ?? x).join(', '),
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'Not yet set in 03.4'}
+          </span>
+          {a.scopeStrategy.reassessmentRequired && <Badge tone="danger" className="ml-2">03.4 reassessment required</Badge>}
+        </div>
       )}
       {edit && (
         <div className="flex flex-wrap items-end gap-2">
@@ -1661,7 +1682,7 @@ function CompleteTab({
             </table>
             {!allPass && (
               <p className="text-sm text-danger-700">
-                Confirm &amp; Complete is enabled only when VAL-01 to VAL-10 pass —{' '}
+                Confirm &amp; Complete is enabled only when VAL-01 to VAL-11 pass —{' '}
                 {s.validations
                   .filter((v) => !v.met)
                   .map((v) => v.id)

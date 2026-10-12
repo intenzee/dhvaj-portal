@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  scopeVersionLabel,
   type Materiality,
   type PlanningApproval,
   type PlanningItem,
@@ -350,6 +351,40 @@ export class AuditPlanningService {
         throw new BadRequestException(`${incomplete} planning sub-area(s) are not yet complete.`);
       }
 
+      // 03.4 §26 — the Engagement Partner's open challenges / requests on the
+      // scope & approach must be answered before Planning is approved.
+      const { rows: scopeRows } = await client.query<{
+        version_no: number;
+        status: string;
+        actions: {
+          action: string;
+          note: string | null;
+          status: string;
+          response: string | null;
+          versionNo: number | null;
+        }[];
+      }>(
+        `SELECT r.version_no, r.status,
+                COALESCE(json_agg(json_build_object(
+                  'action', a.action, 'note', a.note, 'status', a.status, 'response', a.response,
+                  'versionNo', a.scope_version_no) ORDER BY a.created_at)
+                  FILTER (WHERE a.id IS NOT NULL), '[]') AS actions
+           FROM hsdg.audit_scope_approach r
+           LEFT JOIN hsdg.audit_scope_partner_action a ON a.scope_id = r.id
+          WHERE r.workflow_instance_id = $1
+          GROUP BY r.id`,
+        [workflowInstanceId],
+      );
+      const scope = scopeRows[0] ?? null;
+      const openPartner = (scope?.actions ?? []).filter(
+        (a) => a.status === 'open' && a.action !== 'agree',
+      );
+      if (openPartner.length) {
+        throw new ConflictException(
+          `${openPartner.length} Engagement Partner challenge(s) / request(s) on 03.4 Scope & Approach are still open — the Manager answers them before Planning is approved.`,
+        );
+      }
+
       // A blank memo records the one drafted from the file.
       const draftMemo =
         (await this.readPlanning(client, engagementId)).find(
@@ -391,6 +426,19 @@ export class AuditPlanningService {
               clearlyTrivialThreshold: num(matRows[0].clearly_trivial_threshold),
               benchmark: matRows[0].benchmark,
               basis: matRows[0].basis,
+            }
+          : null,
+        scopeApproach: scope
+          ? {
+              versionLabel: scopeVersionLabel(scope.version_no),
+              status: scope.status,
+              partnerActions: scope.actions.map((a) => ({
+                action: a.action,
+                note: a.note,
+                status: a.status,
+                response: a.response,
+                version: a.versionNo === null ? null : scopeVersionLabel(a.versionNo),
+              })),
             }
           : null,
       };

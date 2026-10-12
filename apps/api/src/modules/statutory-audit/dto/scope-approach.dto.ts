@@ -13,6 +13,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import {
   AP01_OPTIONS,
@@ -48,6 +49,8 @@ import {
   UNIT_AUDITORS,
   UNIT_RELEVANCE,
   type Ap01Answer,
+  type ConvertScopeMapAreaInput,
+  type LinkScopeMapAreaInput,
   type Ap02Answer,
   type AssuranceReport,
   type ConfirmationArea,
@@ -171,6 +174,13 @@ export class ScopeUnitDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber(AMOUNT) finAmount?: number | null;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(SHORT) finSource?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() finNotAvailable?: boolean;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsInt() @Min(0) employees?: number | null;
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  transactionVolume?: number | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(SHORT) volumeNote?: string | null;
   @ApiPropertyOptional({ enum: UNIT_RELEVANCE, isArray: true })
   @IsOptional()
   @IsArray()
@@ -380,4 +390,18 @@ export class FlagScopeReassessmentDto {
   source!: ScopeReassessmentSource;
   @ApiProperty() @IsString() @MinLength(1) @MaxLength(TEXT) reason!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(60) cycleKey?: string | null;
+}
+
+/** §23 — link a map area to an existing 03.5 area (null unlinks). */
+export class LinkScopeMapAreaDto implements LinkScopeMapAreaInput {
+  @ApiProperty({ nullable: true })
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  areaId!: string | null;
+  @ApiProperty() @IsInt() @Min(0) version!: number;
+}
+
+/** §23 — create a 03.5 custom area from a map area that matches nothing. */
+export class ConvertScopeMapAreaDto implements ConvertScopeMapAreaInput {
+  @ApiProperty() @IsInt() @Min(0) version!: number;
 }
