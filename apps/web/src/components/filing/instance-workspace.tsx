@@ -103,7 +103,7 @@ export function InstanceWorkspace({
 
   return (
     <div className="space-y-4 text-sm">
-      <WorkspaceHeader ws={ws} ctx={ctx} />
+      <WorkspaceHeader ws={ws} ctx={ctx} team={team} />
 
       {ws.warnings.length > 0 && (
         <ul className="space-y-1" aria-label="Cross-checks">
@@ -194,7 +194,15 @@ export function InstanceWorkspace({
 
 type Run = (path: string, body: unknown, done: string, method?: string) => Promise<boolean>;
 
-function WorkspaceHeader({ ws, ctx }: { ws: Workspace; ctx: TaskActionContext }): JSX.Element {
+function WorkspaceHeader({
+  ws,
+  ctx,
+  team,
+}: {
+  ws: Workspace;
+  ctx: TaskActionContext;
+  team: { employeeId: string; employeeName: string }[];
+}): JSX.Element {
   const inst = ws.instance;
   const filed = inst.workflowStatus === 'filed' || inst.workflowStatus === 'not_applicable';
   const task: WorkTask | null = ws.task
@@ -286,7 +294,85 @@ function WorkspaceHeader({ ws, ctx }: { ws: Workspace; ctx: TaskActionContext })
           <TaskActions task={task} ctx={ctx} />
         </div>
       )}
+      {!task && !filed && ctx.isLead && ws.can.edit && !inst.isLocked && (
+        <AssignWork ws={ws} me={ctx.me} team={team} />
+      )}
     </header>
+  );
+}
+
+/**
+ * A filing from the calendar has no task until a lead assigns it: the task is
+ * what carries the preparer and reviewer, drives the status and runs the clock.
+ */
+function AssignWork({
+  ws,
+  me,
+  team,
+}: {
+  ws: Workspace;
+  me: string | null;
+  team: { employeeId: string; employeeName: string }[];
+}): JSX.Element {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const inst = ws.instance;
+  const [preparer, setPreparer] = useState('');
+  const [reviewer, setReviewer] = useState(me ?? '');
+  const assign = useMutation({
+    mutationFn: () =>
+      apiFetch(`/engagements/${inst.engagementId}/tasks`, {
+        method: 'POST',
+        body: {
+          title: [inst.formLabel ?? inst.ruleName, inst.periodKey ?? inst.financialYear, inst.registrationNumber]
+            .filter(Boolean)
+            .join(' · '),
+          assignedToEmployeeId: preparer,
+          ...(reviewer && reviewer !== preparer ? { reviewerEmployeeId: reviewer } : {}),
+          ...(inst.internalDate ? { dueDate: inst.internalDate } : {}),
+          complianceInstanceId: inst.id,
+        },
+      }),
+    onSuccess: () => {
+      toast('Assigned.');
+      void qc.invalidateQueries({ queryKey: workspaceKey(inst.id) });
+      void qc.invalidateQueries({ queryKey: ['filing', 'tree'] });
+    },
+    onError: (err) => toast(errText(err, 'Could not assign.'), 'error'),
+  });
+  return (
+    <form
+      aria-label="Assign this filing"
+      className="flex flex-wrap items-end gap-2 rounded-md border border-dashed border-line px-2.5 py-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (preparer) assign.mutate();
+      }}
+    >
+      <Field label="Preparer" required>
+        <Select value={preparer} onChange={(e) => setPreparer(e.target.value)} required>
+          <option value="">Choose…</option>
+          {team.map((m) => (
+            <option key={m.employeeId} value={m.employeeId}>
+              {m.employeeName}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Reviewer">
+        <Select value={reviewer} onChange={(e) => setReviewer(e.target.value)}>
+          <option value="">No review</option>
+          {team.map((m) => (
+            <option key={m.employeeId} value={m.employeeId}>
+              {m.employeeName}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Button type="submit" size="sm" disabled={!preparer || assign.isPending}>
+        Assign
+      </Button>
+    </form>
   );
 }
 

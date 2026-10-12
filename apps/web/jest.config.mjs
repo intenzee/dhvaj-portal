@@ -9,6 +9,8 @@ const config = {
   // Ignore build output so its copied package.json doesn't trigger a
   // jest-haste-map naming collision with the workspace root.
   modulePathIgnorePatterns: ['<rootDir>/.next/'],
+  // e2e/ holds the Playwright browser flows (npx playwright test).
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/e2e/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@hsdg/contracts$': '<rootDir>/../../packages/contracts/src/index.ts',
