@@ -40,7 +40,7 @@ const KEY = /^[a-z0-9_]{2,60}$/;
 const PROFILE_KEY = /^[a-z0-9_]{2,40}$/;
 
 /** Versioning fields every library append carries (03.2 §23). */
-class AnalyticsLibraryVersionDto {
+export class AnalyticsLibraryVersionDto {
   @ApiPropertyOptional({ example: '2026-04-01' })
   @IsOptional()
   @Matches(DATE, { message: 'effectiveFrom must be YYYY-MM-DD.' })

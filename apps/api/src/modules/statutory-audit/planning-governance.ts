@@ -5,7 +5,9 @@ import {
   PLANNING_ACTOR_ROLE,
   PLANNING_ACTOR_ROLE_LABEL,
   PLANNING_ATTENTION_LABEL,
+  materialityVersionLabel,
   planningVersionLabel,
+  type PartnerAttentionTrigger,
   type PlanningActorRole,
   type PlanningAttention,
   type PlanningCapabilities,
@@ -393,6 +395,7 @@ export async function syncPlanningAttention(
     `UPDATE hsdg.audit_planning_attention a
         SET partner_surfaced_at = NULL, partner_status = NULL, version = a.version + 1
       WHERE a.workflow_instance_id = $1 AND a.partner_surfaced_at IS NOT NULL
+        AND a.materiality_determination_id IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM hsdg.audit_planning_signal s
            WHERE s.id = a.signal_id AND s.attention = 'immediate_partner' AND s.status <> 'closed'
@@ -484,6 +487,121 @@ export async function syncPlanningAttention(
       dedup: `planning_partner_attention:${surfaced[0]!.attention_id}:${Date.now()}`,
     });
   }
+}
+
+/**
+ * 03.3 §19 — put the materiality Partner Attention triggers of the current
+ * determination version in the EP's Partner Planning View queue:
+ *   • one row per trigger per determination version (a revision raises its
+ *     triggers afresh); the label / detail snapshot follows the latest save;
+ *   • a trigger no longer raised, or one of an older version, leaves the queue;
+ *   • the EP is notified once per trigger per version (their own saves are
+ *     acknowledged on the spot, as for 03.1 items).
+ * Idempotent; the actor is the RLS context's employee.
+ */
+export async function syncMaterialityAttention(
+  client: PoolClient,
+  engagementId: string,
+  workflowInstanceId: string,
+  determination: { id: string; versionNo: number },
+  triggers: readonly PartnerAttentionTrigger[],
+): Promise<void> {
+  const keys = triggers.map((t) => t.key);
+  await client.query(
+    `UPDATE hsdg.audit_planning_attention
+        SET partner_surfaced_at = NULL, partner_status = NULL, version = version + 1
+      WHERE workflow_instance_id = $1 AND materiality_determination_id IS NOT NULL
+        AND partner_surfaced_at IS NOT NULL
+        AND (materiality_determination_id <> $2 OR NOT (materiality_trigger_key = ANY($3::text[])))`,
+    [workflowInstanceId, determination.id, keys],
+  );
+  for (const t of triggers) {
+    await client.query(
+      `INSERT INTO hsdg.audit_planning_attention
+         (workflow_instance_id, engagement_id, materiality_determination_id, materiality_trigger_key,
+          materiality_seq, materiality_label, materiality_detail, materiality_attention)
+       VALUES ($1, $2, $3, $4,
+               (SELECT COALESCE(max(materiality_seq), 0) + 1 FROM hsdg.audit_planning_attention
+                 WHERE workflow_instance_id = $1),
+               $5, $6, $7)
+       ON CONFLICT (materiality_determination_id, materiality_trigger_key) DO UPDATE
+         SET materiality_label = EXCLUDED.materiality_label,
+             materiality_detail = EXCLUDED.materiality_detail,
+             materiality_attention = EXCLUDED.materiality_attention
+       WHERE (hsdg.audit_planning_attention.materiality_label,
+              hsdg.audit_planning_attention.materiality_detail,
+              hsdg.audit_planning_attention.materiality_attention)
+             IS DISTINCT FROM (EXCLUDED.materiality_label, EXCLUDED.materiality_detail,
+                               EXCLUDED.materiality_attention)`,
+      [
+        workflowInstanceId,
+        engagementId,
+        determination.id,
+        t.key,
+        t.label,
+        t.detail,
+        t.attention ?? 'partner_attention',
+      ],
+    );
+  }
+  if (!keys.length) return;
+
+  const { rows: who } = await client.query<{ me: string | null; partner_id: string | null }>(
+    `SELECT hsdg.ctx_employee_id() AS me, engagement_partner_id AS partner_id
+       FROM hsdg.engagements WHERE id = $1`,
+    [engagementId],
+  );
+  const me = who[0]?.me ?? null;
+  const partnerId = who[0]?.partner_id ?? null;
+  const { rows: surfaced } = await client.query<{
+    id: string;
+    seq: number;
+    label: string;
+    attention: string;
+    notify: boolean;
+  }>(
+    `WITH s AS (
+       SELECT id, partner_notified_at IS NULL AS notify FROM hsdg.audit_planning_attention
+        WHERE materiality_determination_id = $1 AND partner_surfaced_at IS NULL
+          AND materiality_trigger_key = ANY($4::text[]))
+     UPDATE hsdg.audit_planning_attention a
+        SET partner_surfaced_at = now(),
+            partner_status = CASE WHEN $2::uuid IS NOT NULL AND $2::uuid = $3::uuid
+                                  THEN 'acknowledged' ELSE 'surfaced' END,
+            reviewed_by_employee_id = CASE WHEN $2::uuid IS NOT NULL AND $2::uuid = $3::uuid
+                                           THEN $2::uuid ELSE NULL END,
+            reviewed_at = CASE WHEN $2::uuid IS NOT NULL AND $2::uuid = $3::uuid
+                               THEN now() ELSE NULL END,
+            partner_notified_at = COALESCE(a.partner_notified_at, now()),
+            version = a.version + 1
+       FROM s
+      WHERE a.id = s.id
+     RETURNING a.id, a.materiality_seq AS seq, a.materiality_label AS label,
+               a.materiality_attention AS attention, s.notify`,
+    [determination.id, me, partnerId, keys],
+  );
+  const fresh = surfaced.filter((r) => r.notify).sort((a, b) => a.seq - b.seq);
+  if (!fresh.length || !partnerId || partnerId === me) return;
+  const version = materialityVersionLabel(determination.versionNo);
+  const mt = (seq: number) => `MT-${String(seq).padStart(3, '0')}`;
+  const ipa = fresh.filter((f) => f.attention === 'immediate_partner').length;
+  await notifyPlanning(client, [partnerId], {
+    type: NOTIFICATION_TYPE.planningPartnerAttention,
+    title:
+      fresh.length === 1
+        ? `03.3 Materiality ${version}: ${truncate(fresh[0]!.label, 120)}`
+        : `03.3 Materiality ${version}: ${fresh.length} Partner Attention matters${ipa ? ` (${ipa} Immediate)` : ''}`,
+    body: fresh
+      .slice(0, 8)
+      .map((f) => `${mt(f.seq)} ${truncate(f.label, 140)}`)
+      .concat(fresh.length > 8 ? [`… and ${fresh.length - 8} more.`] : [])
+      .join('\n'),
+    engagementId,
+    objectType: 'audit_materiality_determination',
+    objectId: determination.id,
+    // partner_notified_at already makes this once per trigger per version.
+    dedup: `materiality_attention:${fresh[0]!.id}`,
+  });
 }
 
 function truncate(s: string, n: number): string {

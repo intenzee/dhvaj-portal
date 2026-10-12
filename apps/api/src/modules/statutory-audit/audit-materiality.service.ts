@@ -6,19 +6,16 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
-  CANDIDATE_BENCHMARKS,
   FINANCIAL_UNIT_FACTOR,
   FINANCIAL_UNIT_LABEL,
-  MATERIALITY_BENCHMARK_LABEL,
   PRINCIPAL_USER_LABEL,
   QUALITATIVE_CONSIDERATIONS,
   USER_FOCUS_LABEL,
+  materialityBenchmarkLabel,
   materialityVersionLabel,
   type AssessBenchmarkInput,
   type BenchmarkAssessment,
   type BenchmarkCandidate,
-  type CandidateBenchmark,
-  type MaterialityAuthorityRef,
   type MaterialityBaseline,
   type MaterialityContextItem,
   type MaterialityDatasetInfo,
@@ -44,7 +41,6 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
-import { AuditRulesService } from '../catalogue/audit-rules.service';
 import { AuditBusinessUnderstandingService } from './audit-business-understanding.service';
 import { AuditAreaReviewService } from './audit-area-review.service';
 import { flagScopeReassessment } from './audit-scope-approach.service';
@@ -58,6 +54,7 @@ import {
   computeMateriality,
   computeMaterialityCompletion,
   matchesCalculated,
+  methodologyContext,
   partnerAttentionTriggers,
   percentageFactors,
   qualitativePrompts,
@@ -76,17 +73,15 @@ import {
   cleanList,
   displayCode,
 } from './planning-shared';
-import { isEngagementLead, readPriorAuditFile } from './master-facts';
+import { isEngagementLead, periodEndFromFinancialYear, readPriorAuditFile } from './master-facts';
+import { readMaterialityLibrary } from './materiality-methodology-library';
+import { syncMaterialityAttention } from './planning-governance';
 
 /** The Phase 03 checklist row 03.3 rolls its state up into. */
 const MATERIALITY_ITEM_KEY = 'materiality';
 const PCT = 100;
-const AUTHORITY_CODES: [string, string][] = [
-  ['SA_320', 'View SA 320'],
-  ['SA_450', 'View SA 450'],
-  ['IG_MATERIALITY', 'View Materiality Implementation Guide'],
-  ['SA_300', 'View SA 300'],
-];
+/** §25 — anchors into authority_reference_link context '03.3' (labels / provisions live there). */
+const AUTHORITY_ANCHORS = ['view_sa_320', 'view_sa_450', 'view_ig_materiality', 'view_sa_300'];
 
 interface DetRow {
   id: string;
@@ -182,7 +177,6 @@ export class AuditMaterialityService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
-    private readonly rules: AuditRulesService,
     private readonly understanding: AuditBusinessUnderstandingService,
     private readonly areaReview: AuditAreaReviewService,
   ) {}
@@ -401,10 +395,15 @@ export class AuditMaterialityService {
         input.reconfirmSource === true;
       if (benchmarkChanged) {
         if (next.selectedBenchmark && next.selectedBenchmark !== 'other') {
-          const c = ws.candidates.find((x) => x.key === next.selectedBenchmark)!;
+          const c = ws.candidates.find((x) => x.key === next.selectedBenchmark);
+          if (!c) {
+            throw new BadRequestException(
+              'That benchmark is not a candidate for this file under the methodology in force.',
+            );
+          }
           if (c.status !== 'available') {
             throw new BadRequestException(
-              `${MATERIALITY_BENCHMARK_LABEL[c.key]} is not available as a benchmark: ${c.reason}`,
+              `${c.label} is not available as a benchmark: ${c.reason}`,
             );
           }
         }
@@ -588,7 +587,7 @@ export class AuditMaterialityService {
             WHERE workflow_instance_id = $1 AND status = 'complete' AND id <> $2`,
           [workflowInstanceId, row.id],
         );
-        await this.publish(client, ctx, engagementId, workflowInstanceId, next);
+        await this.publish(client, ctx, engagementId, workflowInstanceId, next, ws.candidates);
         await this.rollUp(client, ctx, workflowInstanceId, 'complete');
         // §25 (03.5): a completed Audit Area review affected by the new materiality → Update Required.
         await this.areaReview.markImpacted(client, workflowInstanceId);
@@ -628,7 +627,7 @@ export class AuditMaterialityService {
           methodology: ws.methodology.versionLabel,
         },
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -641,9 +640,6 @@ export class AuditMaterialityService {
     candidateKey: string,
     input: AssessBenchmarkInput,
   ): Promise<MaterialitySummary> {
-    if (!CANDIDATE_BENCHMARKS.includes(candidateKey as CandidateBenchmark)) {
-      throw new NotFoundException('Unknown candidate benchmark.');
-    }
     const rationale = clean(input.rationale);
     if (input.assessment === 'normalised_required' && !rationale) {
       throw new BadRequestException('Explain why a normalised benchmark is required.');
@@ -651,6 +647,11 @@ export class AuditMaterialityService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       const { row } = await this.ensureDraft(client, ctx, engagementId, workflowInstanceId);
+      // Built-in candidates and those the methodology defines for this file (§8).
+      const ws = await this.workspace(client, workflowInstanceId, mapDet(row));
+      if (!ws.candidates.some((c) => c.key === candidateKey)) {
+        throw new NotFoundException('Unknown candidate benchmark.');
+      }
       const res =
         input.version === 0
           ? await client.query(
@@ -675,7 +676,7 @@ export class AuditMaterialityService {
         objectId: row.id,
         after: { candidate: candidateKey, assessment: input.assessment },
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -744,7 +745,7 @@ export class AuditMaterialityService {
         objectId: row.id,
         after: { description, amount: input.amount, adjustmentId },
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -770,7 +771,7 @@ export class AuditMaterialityService {
         objectId: row.id,
         before: res.rows[0] as Record<string, unknown>,
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -863,7 +864,7 @@ export class AuditMaterialityService {
         objectId: row.id,
         after: { scope, thresholdType: input.thresholdType, amount, specificId },
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -889,7 +890,7 @@ export class AuditMaterialityService {
         objectId: row.id,
         before: res.rows[0] as Record<string, unknown>,
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -960,7 +961,7 @@ export class AuditMaterialityService {
         objectId: row.id,
         after: { key, response: input.response, significant: input.significant ?? false },
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -1064,7 +1065,7 @@ export class AuditMaterialityService {
         },
         after: { version: materialityVersionLabel(nextNo), trigger: input.trigger, reason },
       });
-      return this.buildSummary(client, workflowInstanceId);
+      return this.buildSummary(client, workflowInstanceId, engagementId);
     });
   }
 
@@ -1191,9 +1192,10 @@ export class AuditMaterialityService {
     engagementId: string,
     workflowInstanceId: string,
     det: MaterialityDetermination,
+    candidates: readonly BenchmarkCandidate[],
   ): Promise<void> {
     const benchmark = det.selectedBenchmark
-      ? `${det.selectedBenchmark === 'other' ? (det.otherBenchmarkLabel ?? 'Other') : MATERIALITY_BENCHMARK_LABEL[det.selectedBenchmark]} @ ${det.selectedPct ?? '—'}%`
+      ? `${det.selectedBenchmark === 'other' ? (det.otherBenchmarkLabel ?? 'Other') : materialityBenchmarkLabel(det.selectedBenchmark, candidates)} @ ${det.selectedPct ?? '—'}%`
       : null;
     const basis =
       `03.3 Materiality ${materialityVersionLabel(det.versionNo)}. ${det.benchmarkRationale ?? ''}`.trim();
@@ -1325,20 +1327,32 @@ export class AuditMaterialityService {
     const metrics: Workspace['metrics'] = {};
     for (const m of analytics.movements) metrics[m.metricKey] = { cy: m.cy, py: m.py };
 
-    const periodStart = header.periodEnd
-      ? periodStartFor(header.periodEnd)
-      : new Date().toISOString().slice(0, 10);
-    const methodology = resolveMaterialityMethodology(
-      await this.rules.buildResolverOn(client, periodStart),
+    // The audit period: the 03.2.7 period end, else the engagement's financial year.
+    const { rows: fy } = await client.query<{ financial_year: string | null }>(
+      `SELECT e.financial_year FROM hsdg.service_workflow_instances wi
+         JOIN hsdg.engagements e ON e.id = wi.engagement_id
+        WHERE wi.id = $1`,
+      [workflowInstanceId],
     );
+    const periodEnd =
+      header.periodEnd ??
+      (fy[0]?.financial_year ? periodEndFromFinancialYear(fy[0].financial_year) : null);
+    const periodStart = periodEnd
+      ? periodStartFor(periodEnd)
+      : new Date().toISOString().slice(0, 10);
     const facts = await this.readFacts(client, workflowInstanceId);
     facts.relatedPartyFigures = metrics.related_party?.cy != null;
+    // §8 — the rules in force for the period that apply to this file's profile / circumstances.
+    const methodology = resolveMaterialityMethodology(
+      await readMaterialityLibrary(client, { creators: false }),
+      methodologyContext(facts, periodStart),
+    );
 
     const adjustments = det.id ? await this.readAdjustments(client, det.id) : [];
     const assessments: Parameters<typeof buildCandidates>[0]['assessments'] = {};
     if (det.id) {
       const { rows } = await client.query<{
-        candidate_key: CandidateBenchmark;
+        candidate_key: string;
         assessment: BenchmarkAssessment;
         rationale: string | null;
         version: number;
@@ -1387,9 +1401,14 @@ export class AuditMaterialityService {
     };
   }
 
+  /**
+   * The 03.3 summary. A save passes `publishFor` (the engagement): the §19
+   * triggers of the current version then reach the Partner Planning View.
+   */
   private async buildSummary(
     client: PoolClient,
     workflowInstanceId: string,
+    publishFor?: string,
   ): Promise<MaterialitySummary> {
     const row = await this.readCurrentRow(client, workflowInstanceId);
     const det = row ? mapDet(row) : emptyDetermination();
@@ -1406,6 +1425,15 @@ export class AuditMaterialityService {
       specific: ws.specific,
       qualitative: ws.qualitative,
     });
+    if (publishFor && det.id) {
+      await this.publishPartnerAttention(
+        client,
+        publishFor,
+        workflowInstanceId,
+        det,
+        partnerAttention,
+      );
+    }
     const completion = computeMaterialityCompletion({
       det,
       dataset: ws.dataset,
@@ -1441,7 +1469,7 @@ export class AuditMaterialityService {
       partnerAttention,
       revisionItems,
       impactPreview: MATERIALITY_IMPACT_PREVIEW.map((i) => ({ ...i })),
-      authorities: await this.readAuthorities(client),
+      authorityAnchors: AUTHORITY_ANCHORS,
       completion,
     };
   }
@@ -1599,16 +1627,21 @@ export class AuditMaterialityService {
     return out;
   }
 
-  private async readAuthorities(client: PoolClient): Promise<MaterialityAuthorityRef[]> {
-    const { rows } = await client.query<{ code: string; title: string; provision_number: string }>(
-      `SELECT DISTINCT ON (code) code, title, provision_number FROM hsdg.authority_provision
-        WHERE code = ANY($1::text[]) ORDER BY code, effective_from DESC`,
-      [AUTHORITY_CODES.map(([c]) => c)],
+  /** §19 — surface this version's Partner Attention triggers to the EP (03.1 queue). */
+  private async publishPartnerAttention(
+    client: PoolClient,
+    engagementId: string,
+    workflowInstanceId: string,
+    det: MaterialityDetermination,
+    triggers: MaterialitySummary['partnerAttention'],
+  ): Promise<void> {
+    await syncMaterialityAttention(
+      client,
+      engagementId,
+      workflowInstanceId,
+      { id: det.id!, versionNo: det.versionNo },
+      triggers,
     );
-    return AUTHORITY_CODES.map(([code, label]) => {
-      const r = rows.find((x) => x.code === code);
-      return { code, label, title: r?.title ?? null, provisionNumber: r?.provision_number ?? null };
-    });
   }
 
   private async readHistory(

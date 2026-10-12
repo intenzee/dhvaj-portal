@@ -399,7 +399,13 @@ function AttentionCard({ item }: { item: PartnerAttentionItem }): JSX.Element {
             <span className="mr-2 font-mono text-xs text-ink-faint">{item.code}</span>
             <span className="text-ink">{item.title}</span>
             <span className="mt-1 flex flex-wrap gap-1.5">
-              <Badge>{item.kind === 'signal' ? 'Signal' : 'Area of Focus'}</Badge>
+              <Badge>
+                {item.kind === 'signal'
+                  ? 'Signal'
+                  : item.kind === 'materiality'
+                    ? '03.3 Materiality'
+                    : 'Area of Focus'}
+              </Badge>
               {item.raisedByPartner && <Badge tone="info">Raised by EP</Badge>}
               {item.attention && (
                 <Badge tone="danger">{PLANNING_ATTENTION_LABEL[item.attention]}</Badge>

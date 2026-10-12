@@ -1,8 +1,7 @@
 import {
   CANDIDATE_BENCHMARKS,
-  MATERIALITY_BENCHMARK_LABEL,
-  MATERIALITY_RULE_AREA,
-  MATERIALITY_RULE_CRITERION,
+  MATERIALITY_CIRCUMSTANCE_INITIAL_AUDIT,
+  METRIC_BENCHMARK_PREFIX,
   PLANNING_CHANGE_CATEGORY_LABEL,
   QUALITATIVE_CONSIDERATIONS,
   REVISION_TRIGGER_LABEL,
@@ -10,6 +9,7 @@ import {
   type BenchmarkAssessment,
   type BenchmarkCandidate,
   type CandidateBenchmark,
+  type CandidateKey,
   type JudgmentFactor,
   type MaterialityBaseline,
   type MaterialityComputed,
@@ -17,6 +17,7 @@ import {
   type MaterialityDetermination,
   type MaterialityGuidance,
   type MaterialityMethodology,
+  type MaterialityMethodologyRuleDef,
   type MaterialityPrompt,
   type MethodologyStatus,
   type NormalisationAdjustment,
@@ -25,12 +26,14 @@ import {
   type PlanningChangeCategory,
   type PlanningCompletionCheck,
   type QualitativeChallengeItem,
-  type ResolvedRule,
-  type RuleResolver,
   type SensitivityRow,
   type SpecificMaterialityRecord,
   type UserFocusMeasure,
+  isMetricBenchmark,
+  materialityBenchmarkLabel,
+  materialityRuleApplicability,
 } from '@hsdg/contracts';
+import { inForce } from './planning-analytics-engine';
 
 /**
  * 03.3 Materiality — pure calculation / challenge engine (DHVAJ 03.3).
@@ -38,8 +41,8 @@ import {
  * The engine calculates, compares and prompts; it NEVER selects a benchmark or
  * percentage, ranks a "best" benchmark, scores judgment factors or passes/fails
  * a sensitivity check. Every percentage, attention parameter and rounding step
- * comes from the Materiality Methodology Library (Audit Rules Library, area
- * `materiality`) through the injected RuleResolver — none lives in this file.
+ * comes from the Materiality Methodology Library (versioned data, resolved by
+ * `resolveMaterialityMethodology`) — none lives in this file.
  */
 
 const PCT = 100;
@@ -47,51 +50,119 @@ const EPSILON = 0.5; // rupee tolerance when comparing selected vs calculated am
 
 // ── Methodology ──────────────────────────────────────────────────────────────
 
-function toGuidance(rule: ResolvedRule | null): MaterialityGuidance | null {
-  if (!rule) return null;
+/** What a file brings to rule applicability (§8): its 03.2 profile and 02.1 circumstances. */
+export interface MethodologyContext {
+  /** Resolution date (audit period start; today when the period is unknown). */
+  on: string;
+  industryProfile: string | null;
+  /** 02.1 special entity types plus `initial_audit`. */
+  circumstances: string[];
+}
+
+export function methodologyContext(
+  facts: Pick<MaterialityFacts, 'industryProfile' | 'specialEntityTypes' | 'initialAudit'>,
+  on: string,
+): MethodologyContext {
   return {
-    criterion: rule.criterion,
-    lowPct: rule.threshold,
-    highPct: rule.operator === 'between' ? rule.thresholdHigh : null,
-    ruleCode: rule.ruleCode,
-    ruleVersion: rule.version,
-    reference: rule.guidanceReference,
-    provisional: /provisional/i.test(rule.guidanceReference ?? ''),
+    on,
+    industryProfile: facts.industryProfile,
+    circumstances: [
+      ...facts.specialEntityTypes,
+      ...(facts.initialAudit ? [MATERIALITY_CIRCUMSTANCE_INITIAL_AUDIT] : []),
+    ],
   };
 }
 
-/** Resolve every materiality guidance rule in force for the engagement period. */
-export function resolveMaterialityMethodology(resolve: RuleResolver): MaterialityMethodology {
-  const get = (criterion: string) => resolve(MATERIALITY_RULE_AREA, criterion, null);
-  const used: ResolvedRule[] = [];
-  const take = (criterion: string) => {
-    const r = get(criterion);
-    if (r) used.push(r);
-    return r;
+const applies = (r: MaterialityMethodologyRuleDef, ctx: MethodologyContext) =>
+  (!r.industryProfiles.length ||
+    (ctx.industryProfile !== null && r.industryProfiles.includes(ctx.industryProfile))) &&
+  (!r.circumstances.length || r.circumstances.some((c) => ctx.circumstances.includes(c)));
+
+/** A profile-specific rule beats a circumstance-specific one, which beats a general one. */
+const specificity = (r: MaterialityMethodologyRuleDef) =>
+  (r.industryProfiles.length ? 2 : 0) + (r.circumstances.length ? 1 : 0);
+
+/** What a rule governs — one rule per target applies to a file. */
+const targetOf = (r: MaterialityMethodologyRuleDef) =>
+  r.kind === 'om_benchmark'
+    ? `om:${r.benchmarkKey}`
+    : r.kind === 'attention'
+      ? `attention:${r.attentionCriterion}`
+      : r.kind;
+
+function toGuidance(rule: MaterialityMethodologyRuleDef): MaterialityGuidance {
+  return {
+    criterion: rule.kind,
+    name: rule.name,
+    lowPct: rule.lowPct,
+    highPct: rule.highPct,
+    ruleCode: rule.ruleCode,
+    ruleVersion: rule.version,
+    methodologyVersion: rule.methodologyVersion,
+    reference: rule.sourceBasis,
+    considerations: rule.considerations,
+    applicability: materialityRuleApplicability(rule),
+    overrideAttention: rule.overrideAttention,
+    provisional: rule.provisional,
   };
-  const omGuidance: MaterialityMethodology['omGuidance'] = {};
-  for (const key of CANDIDATE_BENCHMARKS) {
-    const g = toGuidance(take(MATERIALITY_RULE_CRITERION.omPct[key]));
-    if (g) omGuidance[key] = g;
+}
+
+/**
+ * The Materiality Methodology Library rules that apply to this file: the
+ * version of each rule in force on `ctx.on`, filtered by applicability, and —
+ * per target (a benchmark, PM, CTT, an attention parameter, rounding) — the
+ * most specific one (ties: lowest rule code). Pure; no rule, no guidance.
+ */
+export function resolveMaterialityMethodology(
+  library: readonly MaterialityMethodologyRuleDef[],
+  ctx: MethodologyContext,
+): MaterialityMethodology {
+  const chosen = new Map<string, MaterialityMethodologyRuleDef>();
+  for (const r of inForce(library, (x) => x.ruleCode, ctx.on)) {
+    if (!applies(r, ctx)) continue;
+    const t = targetOf(r);
+    const cur = chosen.get(t);
+    if (
+      !cur ||
+      specificity(r) > specificity(cur) ||
+      (specificity(r) === specificity(cur) && r.ruleCode < cur.ruleCode)
+    ) {
+      chosen.set(t, r);
+    }
   }
-  const pm = toGuidance(take(MATERIALITY_RULE_CRITERION.pmPct));
-  const ctt = toGuidance(take(MATERIALITY_RULE_CRITERION.cttPct));
-  const py = take(MATERIALITY_RULE_CRITERION.pyChangeAttention);
-  const vol = take(MATERIALITY_RULE_CRITERION.volatilityAttention);
-  const be = take(MATERIALITY_RULE_CRITERION.nearBreakevenMargin);
-  const rounding = take(MATERIALITY_RULE_CRITERION.roundingStep);
+  const used = [...chosen.values()].sort((a, b) => a.ruleCode.localeCompare(b.ruleCode));
+  const omGuidance: MaterialityMethodology['omGuidance'] = {};
+  const metricBenchmarks: MaterialityMethodology['metricBenchmarks'] = [];
+  for (const r of used) {
+    if (r.kind !== 'om_benchmark' || !r.benchmarkKey) continue;
+    omGuidance[r.benchmarkKey] = toGuidance(r);
+    if (isMetricBenchmark(r.benchmarkKey)) {
+      metricBenchmarks.push({
+        key: r.benchmarkKey,
+        metricKey: r.benchmarkKey.slice(METRIC_BENCHMARK_PREFIX.length),
+        label: r.benchmarkLabel ?? r.benchmarkKey,
+      });
+    }
+  }
+  const one = (t: string) => chosen.get(t) ?? null;
+  const pm = one('pm');
+  const ctt = one('ctt');
+  const param = (c: string) => one(`attention:${c}`)?.parameterValue ?? null;
+  const rounding = one('rounding')?.parameterValue ?? null;
+  const versions = [...new Set(used.map((r) => r.methodologyVersion))].sort();
   return {
     versionLabel: used.length
-      ? used.map((r) => `${r.ruleCode}@${r.version}`).join(', ')
+      ? `${versions.join(', ')} · ${used.map((r) => `${r.ruleCode}@${r.version}`).join(', ')}`
       : 'No materiality guidance configured',
     omGuidance,
-    pmGuidance: pm,
-    cttGuidance: ctt,
-    pyChangeAttentionPct: py?.threshold ?? null,
-    volatilityAttentionPct: vol?.threshold ?? null,
-    nearBreakevenMarginPct: be?.threshold ?? null,
-    roundingStep: rounding?.threshold && rounding.threshold > 0 ? rounding.threshold : null,
-    anyProvisional: used.some((r) => /provisional/i.test(r.guidanceReference ?? '')),
+    metricBenchmarks,
+    pmGuidance: pm ? toGuidance(pm) : null,
+    cttGuidance: ctt ? toGuidance(ctt) : null,
+    pyChangeAttentionPct: param('py_change'),
+    volatilityAttentionPct: param('volatility'),
+    nearBreakevenMarginPct: param('near_breakeven'),
+    roundingStep: rounding && rounding > 0 ? rounding : null,
+    anyProvisional: used.some((r) => r.provisional),
   };
 }
 
@@ -185,11 +256,9 @@ export interface CandidateInput {
   userFocus: UserFocusMeasure[];
   principalUsers: string[];
   methodology: MaterialityMethodology;
+  /** Keyed by candidate key (built-in or `metric:<key>`). */
   assessments: Partial<
-    Record<
-      CandidateBenchmark,
-      { assessment: BenchmarkAssessment; rationale: string | null; version: number }
-    >
+    Record<string, { assessment: BenchmarkAssessment; rationale: string | null; version: number }>
   >;
   facts: MaterialityFacts;
 }
@@ -232,10 +301,8 @@ export function buildCandidates(input: CandidateInput): BenchmarkCandidate[] {
     methodology.nearBreakevenMarginPct !== null &&
     Math.abs(margin) <= methodology.nearBreakevenMarginPct;
 
-  const defs: Record<
-    CandidateBenchmark,
-    { formula: string; cy: number | null; py: number | null; missing: string; nm: string }
-  > = {
+  type Def = { formula: string; cy: number | null; py: number | null; missing: string; nm: string };
+  const defs: Record<CandidateBenchmark, Def> = {
     pbt: {
       formula: 'Profit before tax (03.2.7)',
       cy: pbt.cy,
@@ -282,9 +349,30 @@ export function buildCandidates(input: CandidateInput): BenchmarkCandidate[] {
     },
   };
 
+  // §8 — candidates the methodology defines from 03.2 canonical metrics.
+  const all: { key: CandidateKey; label: string; d: Def; methodologyDefined: boolean }[] = [
+    ...CANDIDATE_BENCHMARKS.map((key) => ({
+      key,
+      label: materialityBenchmarkLabel(key),
+      d: defs[key],
+      methodologyDefined: false,
+    })),
+    ...methodology.metricBenchmarks.map((b) => ({
+      key: b.key,
+      label: b.label,
+      methodologyDefined: true,
+      d: {
+        formula: `${b.label} (03.2.7 metric ${b.metricKey})`,
+        cy: v(b.metricKey).cy,
+        py: v(b.metricKey).py,
+        missing: `Enter ${b.label} in 03.2.7.`,
+        nm: `Nil or negative ${b.label.toLowerCase()} — not meaningful (N/M).`,
+      },
+    })),
+  ];
+
   const lenders = input.principalUsers.includes('lenders_banks');
-  return CANDIDATE_BENCHMARKS.map((key) => {
-    const d = defs[key];
+  return all.map(({ key, label, d, methodologyDefined }) => {
     const mv = movementOf(d.cy, d.py);
     const status: BenchmarkCandidate['status'] = !dataset.ready
       ? 'insufficient_data'
@@ -310,6 +398,11 @@ export function buildCandidates(input: CandidateInput): BenchmarkCandidate[] {
       Math.abs(mv.pct) >= methodology.volatilityAttentionPct;
 
     const prompts: string[] = [];
+    if (methodologyDefined && guidance) {
+      prompts.push(
+        `Candidate defined by the DHVAJ methodology (${guidance.ruleCode}) for ${guidance.applicability.toLowerCase()}.`,
+      );
+    }
     if (volatile)
       prompts.push(`Moved ${mv.label} year on year — consider stability as a benchmark.`);
     if ((key === 'pbt' || key === 'normalised_pbt') && nearBreakeven) {
@@ -341,7 +434,8 @@ export function buildCandidates(input: CandidateInput): BenchmarkCandidate[] {
     const a = input.assessments[key];
     return {
       key,
-      label: MATERIALITY_BENCHMARK_LABEL[key],
+      methodologyDefined,
+      label,
       formula: d.formula,
       cy: d.cy,
       py: d.py,
@@ -351,7 +445,8 @@ export function buildCandidates(input: CandidateInput): BenchmarkCandidate[] {
       status,
       reason,
       amountInr,
-      userFocusLinked: input.userFocus.includes(FOCUS_OF[key]),
+      userFocusLinked:
+        !methodologyDefined && input.userFocus.includes(FOCUS_OF[key as CandidateBenchmark]),
       prompts,
       guidance,
       indicativeLowInr:
@@ -438,10 +533,10 @@ export function computeMateriality(input: {
   if (det.selectedBenchmark && det.selectedBenchmark !== 'other' && det.benchmarkAmount !== null) {
     if (live === null) {
       sourceChanged = true;
-      sourceChangeDetail = `${MATERIALITY_BENCHMARK_LABEL[det.selectedBenchmark]} is no longer available in 03.2 (was ${det.benchmarkAmount}).`;
+      sourceChangeDetail = `${materialityBenchmarkLabel(det.selectedBenchmark, candidates)} is no longer available in 03.2 (was ${det.benchmarkAmount}).`;
     } else if (Math.abs(live - det.benchmarkAmount) > 0.005) {
       sourceChanged = true;
-      sourceChangeDetail = `${MATERIALITY_BENCHMARK_LABEL[det.selectedBenchmark]} changed in 03.2 from ${det.benchmarkAmount} to ${live} (dataset units) since it was selected.`;
+      sourceChangeDetail = `${materialityBenchmarkLabel(det.selectedBenchmark, candidates)} changed in 03.2 from ${det.benchmarkAmount} to ${live} (dataset units) since it was selected.`;
     }
   }
 
@@ -905,7 +1000,12 @@ export function partnerAttentionTriggers(input: {
 }): PartnerAttentionTrigger[] {
   const { det, computed, methodology } = input;
   const out: PartnerAttentionTrigger[] = [];
-  const add = (key: string, label: string, detail: string) => out.push({ key, label, detail });
+  const add = (
+    key: string,
+    label: string,
+    detail: string,
+    extra: Omit<PartnerAttentionTrigger, 'key' | 'label' | 'detail'> = {},
+  ) => out.push({ key, label, detail, ...extra });
 
   if (input.adjustments.length || det.selectedBenchmark === 'normalised_pbt') {
     add(
@@ -921,18 +1021,41 @@ export function partnerAttentionTriggers(input: {
       det.otherBenchmarkLabel ?? 'Other benchmark.',
     );
   }
-  const outside = (s: MethodologyStatus, what: string, reason: string | null) => {
-    if (s === 'outside_guidance') {
+  // §8 override rule: permitted with rationale; always Partner Attention, and an
+  // Immediate Partner Attention matter where the methodology rule says so.
+  const outside = (
+    s: MethodologyStatus,
+    what: string,
+    reason: string | null,
+    guidance: MaterialityGuidance | null | undefined,
+  ) => {
+    if (s !== 'outside_guidance' || !guidance) return;
+    const rule = { ruleCode: guidance.ruleCode, ruleVersion: guidance.ruleVersion };
+    const rationale = reason
+      ? `Override rationale: ${reason}`
+      : 'Override rationale not yet recorded.';
+    add(
+      `${what}_outside_guidance`,
+      `Selected ${what.toUpperCase()} outside DHVAJ methodology guidance`,
+      `${rationale} (${guidance.ruleCode} v${guidance.ruleVersion})`,
+      { attention: 'partner_attention', ...rule },
+    );
+    if (guidance.overrideAttention === 'immediate_partner') {
       add(
-        `${what}_outside_guidance`,
-        `Selected ${what.toUpperCase()} outside DHVAJ methodology guidance`,
-        reason ? `Override rationale: ${reason}` : 'Override rationale not yet recorded.',
+        `ipa_override_${what}`,
+        `Manager overrides an Immediate Partner Attention methodology prompt (${what.toUpperCase()})`,
+        `${guidance.name} (${guidance.ruleCode} v${guidance.ruleVersion}) applies to this file — ${guidance.applicability.toLowerCase()}. ${rationale}`,
+        { attention: 'immediate_partner', ...rule },
       );
     }
   };
-  outside(computed.omMethodologyStatus, 'om', det.omOverrideReason);
-  outside(computed.pmMethodologyStatus, 'pm', det.pmOverrideReason);
-  outside(computed.cttMethodologyStatus, 'ctt', det.cttOverrideReason);
+  const omGuidance =
+    det.selectedBenchmark && det.selectedBenchmark !== 'other'
+      ? methodology.omGuidance[det.selectedBenchmark]
+      : null;
+  outside(computed.omMethodologyStatus, 'om', det.omOverrideReason, omGuidance);
+  outside(computed.pmMethodologyStatus, 'pm', det.pmOverrideReason, methodology.pmGuidance);
+  outside(computed.cttMethodologyStatus, 'ctt', det.cttOverrideReason, methodology.cttGuidance);
 
   if (
     det.selectedOm !== null &&
@@ -964,7 +1087,7 @@ export function partnerAttentionTriggers(input: {
     add(
       'loss_breakeven',
       'Loss / near break-even — alternative benchmark judgment is significant',
-      `Benchmark selected: ${MATERIALITY_BENCHMARK_LABEL[det.selectedBenchmark]}.`,
+      `Benchmark selected: ${materialityBenchmarkLabel(det.selectedBenchmark, input.candidates)}.`,
     );
   }
   const qualitativeSpecific = input.specific.filter((s) => s.thresholdType === 'qualitative');
@@ -1334,7 +1457,7 @@ export function composeMaterialityConclusion(input: {
     'Selected benchmark and rationale',
     [
       det.selectedBenchmark &&
-        `${MATERIALITY_BENCHMARK_LABEL[det.selectedBenchmark]}${det.selectedBenchmark === 'other' && det.otherBenchmarkLabel ? ` — ${det.otherBenchmarkLabel}` : ''}: ${computed.liveBenchmarkAmount ?? '—'}${units}`,
+        `${materialityBenchmarkLabel(det.selectedBenchmark, input.candidates)}${det.selectedBenchmark === 'other' && det.otherBenchmarkLabel ? ` — ${det.otherBenchmarkLabel}` : ''}: ${computed.liveBenchmarkAmount ?? '—'}${units}`,
       det.benchmarkRationale,
       assessed.length > 0 &&
         `Candidates assessed: ${assessed.map((c) => `${c.label} (${c.assessment!.replace(/_/g, ' ')})`).join('; ')}`,

@@ -5,9 +5,14 @@
  * benchmark stability, user focus, qualitative factors and sensitivity; the
  * auditor selects and concludes. No amount, benchmark or percentage here is an
  * automatic audit conclusion, and any percentage shown is DHVAJ methodology
- * guidance (versioned, in the Audit Rules Library) — SA 320 prescribes none.
+ * guidance (versioned, in the Materiality Methodology Library) — SA 320
+ * prescribes none.
  */
 import type { DatasetStatus, FinancialUnit } from './statutory-audit-planning-analytics';
+import type {
+  MaterialityOverrideAttention,
+  MetricBenchmarkKey,
+} from './statutory-audit-materiality-library';
 import type { PlanningCompletionCheck } from './statutory-audit-planning-strategy';
 
 // ── 03.3.1 Context — MAT-01 / MAT-02 ─────────────────────────────────────────
@@ -93,6 +98,27 @@ export const MATERIALITY_BENCHMARK_LABEL: Record<MaterialityBenchmark, string> =
   expenditure: 'Total expenditure',
   other: 'Other (approved) benchmark',
 };
+/** A candidate: built-in, or methodology-defined from a 03.2 metric (`metric:<key>`). */
+export type CandidateKey = CandidateBenchmark | MetricBenchmarkKey;
+/** What a determination may select: any candidate or a Manager "Other". */
+export type MaterialityBenchmarkKey = MaterialityBenchmark | MetricBenchmarkKey;
+export const MATERIALITY_BENCHMARK_KEY_PATTERN =
+  /^(pbt|normalised_pbt|revenue|total_assets|net_assets|expenditure|other|metric:[a-z][a-z0-9_]{1,59})$/;
+
+/**
+ * Display label of a benchmark key. A methodology-defined key takes its label
+ * from the candidate list (the library), else the metric key itself.
+ */
+export function materialityBenchmarkLabel(
+  key: string,
+  candidates?: readonly { key: string; label: string }[],
+): string {
+  const builtin = (MATERIALITY_BENCHMARK_LABEL as Record<string, string>)[key];
+  if (builtin) return builtin;
+  return (
+    candidates?.find((c) => c.key === key)?.label ?? key.replace(/^metric:/, '').replace(/_/g, ' ')
+  );
+}
 
 export const BENCHMARK_ASSESSMENT = {
   suitable: 'suitable',
@@ -109,42 +135,43 @@ export const BENCHMARK_ASSESSMENT_LABEL: Record<BenchmarkAssessment, string> = {
   normalised_required: 'Normalised benchmark required',
 };
 
-/** Audit Rules Library area + criteria for the Materiality Methodology Library (§8). */
-export const MATERIALITY_RULE_AREA = 'materiality';
-export const MATERIALITY_RULE_CRITERION = {
-  omPct: {
-    pbt: 'om_pct_pbt',
-    normalised_pbt: 'om_pct_normalised_pbt',
-    revenue: 'om_pct_revenue',
-    total_assets: 'om_pct_total_assets',
-    net_assets: 'om_pct_net_assets',
-    expenditure: 'om_pct_expenditure',
-  } as Record<CandidateBenchmark, string>,
-  pmPct: 'pm_pct_om',
-  cttPct: 'ctt_pct_om',
-  pyChangeAttention: 'py_change_attention',
-  volatilityAttention: 'volatility_attention',
-  nearBreakevenMargin: 'near_breakeven_margin',
-  roundingStep: 'rounding_step',
-} as const;
-
-/** One configured guidance range, resolved for the engagement period. */
+/** One Materiality Methodology Library rule, resolved for this file (§8). */
 export interface MaterialityGuidance {
+  /** om_benchmark / pm / ctt (the rule kind). */
   criterion: string;
+  name: string;
+  /** Optional — a rule may give considerations without any percentage. */
   lowPct: number | null;
   highPct: number | null;
   ruleCode: string;
   ruleVersion: number;
+  methodologyVersion: string;
+  /** Source / technical basis. */
   reference: string | null;
-  /** True while the range is a placeholder awaiting DHVAJ approval. */
+  considerations: string[];
+  /** e.g. `Profile: nbfc` or `All entities`. */
+  applicability: string;
+  /** What a selection outside this guidance raises (the override rule). */
+  overrideAttention: MaterialityOverrideAttention;
+  /** True while the guidance is a placeholder awaiting DHVAJ approval. */
   provisional: boolean;
+}
+
+/** A candidate benchmark the methodology adds from a 03.2 canonical metric. */
+export interface MethodologyBenchmark {
+  key: MetricBenchmarkKey;
+  metricKey: string;
+  label: string;
 }
 
 /** Guidance used by this determination (stored with it, spec §20). */
 export interface MaterialityMethodology {
-  /** e.g. `MAT_OM_PCT_PBT@1, MAT_PM_PCT_OM@1, …` — stored on the determination. */
+  /** e.g. `dhvaj-materiality-2026.1 · MMR-001@1, MMR-007@1, …` — stored on the determination. */
   versionLabel: string;
-  omGuidance: Partial<Record<CandidateBenchmark, MaterialityGuidance>>;
+  /** Keyed by candidate key (built-in or `metric:<key>`). */
+  omGuidance: Partial<Record<string, MaterialityGuidance>>;
+  /** Methodology-defined candidates in force for this file. */
+  metricBenchmarks: MethodologyBenchmark[];
   pmGuidance: MaterialityGuidance | null;
   cttGuidance: MaterialityGuidance | null;
   pyChangeAttentionPct: number | null;
@@ -158,7 +185,9 @@ export interface MaterialityMethodology {
 export type BenchmarkCandidateStatus = 'available' | 'insufficient_data' | 'not_meaningful';
 
 export interface BenchmarkCandidate {
-  key: CandidateBenchmark;
+  key: CandidateKey;
+  /** Added by a methodology rule from a 03.2 metric (not one of the built-in six). */
+  methodologyDefined: boolean;
   label: string;
   formula: string;
   /** Dataset units (03.2.7). */
@@ -255,7 +284,11 @@ export const METHODOLOGY_STATUS_LABEL: Record<MethodologyStatus, string> = {
 export const MAT06_ANSWERS = ['no', 'yes', 'further_assessment'] as const;
 export type Mat06Answer = (typeof MAT06_ANSWERS)[number];
 
-export const SPECIFIC_SCOPE_TYPES = ['class_of_transactions', 'account_balance', 'disclosure'] as const;
+export const SPECIFIC_SCOPE_TYPES = [
+  'class_of_transactions',
+  'account_balance',
+  'disclosure',
+] as const;
 export type SpecificScopeType = (typeof SPECIFIC_SCOPE_TYPES)[number];
 export const SPECIFIC_SCOPE_TYPE_LABEL: Record<SpecificScopeType, string> = {
   class_of_transactions: 'Class of transactions',
@@ -420,7 +453,7 @@ export interface MaterialityBaseline {
   performanceMateriality: number | null;
   clearlyTrivial: number | null;
   specificCount: number;
-  benchmark: MaterialityBenchmark | null;
+  benchmark: MaterialityBenchmarkKey | null;
   selectedPct: number | null;
 }
 
@@ -466,7 +499,7 @@ export interface MaterialityDetermination {
   pySource: string | null;
   pyAuditDifferences: string | null;
   normalisationRationale: string | null;
-  selectedBenchmark: MaterialityBenchmark | null;
+  selectedBenchmark: MaterialityBenchmarkKey | null;
   otherBenchmarkLabel: string | null;
   /** Dataset units. */
   otherBenchmarkAmount: number | null;
@@ -525,7 +558,7 @@ export interface UpdateMaterialityInput {
   pySource?: string | null;
   pyAuditDifferences?: string | null;
   normalisationRationale?: string | null;
-  selectedBenchmark?: MaterialityBenchmark | null;
+  selectedBenchmark?: MaterialityBenchmarkKey | null;
   otherBenchmarkLabel?: string | null;
   otherBenchmarkAmount?: number | null;
   otherBenchmarkSource?: string | null;
@@ -602,18 +635,16 @@ export interface PartnerAttentionTrigger {
   key: string;
   label: string;
   detail: string;
+  /** 03.3: the methodology's override rule can make an item Immediate Partner Attention. */
+  attention?: MaterialityOverrideAttention;
+  /** 03.3: the methodology rule (code + version) behind the trigger, if any. */
+  ruleCode?: string;
+  ruleVersion?: number;
 }
 
 export interface MaterialityImpactConsumer {
   consumer: string;
   use: string;
-}
-
-export interface MaterialityAuthorityRef {
-  code: string;
-  label: string;
-  title: string | null;
-  provisionNumber: string | null;
 }
 
 export interface MaterialityDatasetInfo {
@@ -649,7 +680,8 @@ export interface MaterialitySummary {
   partnerAttention: PartnerAttentionTrigger[];
   revisionItems: RevisionImpactItem[];
   impactPreview: MaterialityImpactConsumer[];
-  authorities: MaterialityAuthorityRef[];
+  /** Anchors into authority_reference_link context '03.3' (§25). */
+  authorityAnchors: string[];
   completion: PlanningCompletionCheck[];
 }
 

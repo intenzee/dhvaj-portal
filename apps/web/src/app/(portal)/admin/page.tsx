@@ -13,8 +13,9 @@ import { RulesLibrarySection } from '@/components/admin/rules-library-section';
 import { PlanningSignalLibrarySection } from '@/components/admin/planning-signal-library-section';
 import { PlanningConsiderationLibrarySection } from '@/components/admin/planning-consideration-library-section';
 import { AnalyticsMethodologySection } from '@/components/admin/analytics-methodology-section';
+import { MaterialityMethodologySection } from '@/components/admin/materiality-methodology-section';
 
-type Tab = 'users' | 'offices' | 'templates' | 'rules' | 'signals' | 'analytics';
+type Tab = 'users' | 'offices' | 'templates' | 'rules' | 'signals' | 'analytics' | 'materiality';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -50,13 +51,17 @@ export default function AdministrationPage(): JSX.Element {
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'analytics' as const, label: 'Analytics Methodology' }]
       : []),
+    // The 03.3 Materiality Methodology Library — guidance only; it never concludes materiality.
+    ...(can(principal, PERMISSION.serviceManage)
+      ? [{ id: 'materiality' as const, label: 'Materiality Methodology' }]
+      : []),
   ];
 
   return (
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library and the Analytics Methodology Library. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library and the Analytics and Materiality Methodology Libraries. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -85,6 +90,8 @@ export default function AdministrationPage(): JSX.Element {
             <RulesLibrarySection />
           ) : tab === 'analytics' ? (
             <AnalyticsMethodologySection />
+          ) : tab === 'materiality' ? (
+            <MaterialityMethodologySection />
           ) : tab === 'signals' ? (
             <div className="space-y-8">
               <PlanningSignalLibrarySection />

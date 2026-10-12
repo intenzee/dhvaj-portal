@@ -109,6 +109,7 @@ interface AttentionRow {
   id: string;
   signal_id: string | null;
   focus_id: string | null;
+  materiality_determination_id: string | null;
   seq: number;
   title: string;
   detail: string | null;
@@ -276,7 +277,8 @@ export class AuditPlanningGovernanceService {
     const { rows } = await client.query<AttentionRow>(
       `${ATTENTION_SELECT} WHERE a.workflow_instance_id = $1 AND a.partner_surfaced_at IS NOT NULL
         ORDER BY (a.partner_status = 'acknowledged'), (a.focus_id IS NOT NULL),
-                 COALESCE(s.seq, f.seq)`,
+                 (a.materiality_determination_id IS NOT NULL),
+                 COALESCE(s.seq, f.seq, a.materiality_seq)`,
       [workflowInstanceId],
     );
     const { rows: ep } = await client.query<{ name: string | null }>(
@@ -350,11 +352,10 @@ export class AuditPlanningGovernanceService {
         if (!res.rowCount) throw staleItem();
         await notifyPlanning(client, [actor.managerId], {
           type: NOTIFICATION_TYPE.planningPartnerAttention,
-          title: `EP challenged ${itemCode(row)} in 03.1`,
+          title: `EP challenged ${itemCode(row)} in ${itemSection(row)}`,
           body: text,
           engagementId,
-          objectType: row.signal_id ? 'audit_planning_signal' : 'audit_area_of_focus',
-          objectId: (row.signal_id ?? row.focus_id)!,
+          ...itemObject(row),
           dedup: `planning_challenge:${attentionId}:${row.version + 1}`,
           except: actor.employeeId,
         });
@@ -393,11 +394,10 @@ export class AuditPlanningGovernanceService {
         if (!res.rowCount) throw staleItem();
         await notifyPlanning(client, [actor.partnerId], {
           type: NOTIFICATION_TYPE.planningPartnerAttention,
-          title: `Manager responded on ${itemCode(row)} in 03.1`,
+          title: `Manager responded on ${itemCode(row)} in ${itemSection(row)}`,
           body: text,
           engagementId,
-          objectType: row.signal_id ? 'audit_planning_signal' : 'audit_area_of_focus',
-          objectId: (row.signal_id ?? row.focus_id)!,
+          ...itemObject(row),
           dedup: `planning_response:${attentionId}:${row.version + 1}`,
           except: actor.employeeId,
         });
@@ -1029,29 +1029,56 @@ function staleItem(): ConflictException {
   return new ConflictException('This item changed since you loaded it; refresh and retry.');
 }
 
-function itemCode(r: Pick<AttentionRow, 'signal_id' | 'seq'>): string {
-  return displayCode(r.signal_id ? 'PS' : 'FA', r.seq)!;
+type ItemRef = Pick<
+  AttentionRow,
+  'signal_id' | 'focus_id' | 'materiality_determination_id' | 'seq'
+>;
+
+function itemCode(r: ItemRef): string {
+  return displayCode(r.signal_id ? 'PS' : r.focus_id ? 'FA' : 'MT', r.seq)!;
+}
+
+/** 03.3 materiality triggers share the 03.1 Partner Planning View queue. */
+function itemSection(r: ItemRef): string {
+  return r.materiality_determination_id ? '03.3 Materiality' : '03.1';
+}
+
+function itemObject(r: ItemRef): { objectType: string; objectId: string } {
+  return r.signal_id
+    ? { objectType: 'audit_planning_signal', objectId: r.signal_id }
+    : r.focus_id
+      ? { objectType: 'audit_area_of_focus', objectId: r.focus_id }
+      : {
+          objectType: 'audit_materiality_determination',
+          objectId: r.materiality_determination_id!,
+        };
 }
 
 const ATTENTION_SELECT = `
-  SELECT a.id, a.signal_id, a.focus_id, COALESCE(s.seq, f.seq) AS seq,
-         COALESCE(s.observation, f.name) AS title,
-         COALESCE(s.why_may_matter, f.why_requires_attention) AS detail,
-         s.attention, s.manager_assessment, a.partner_surfaced_at, a.partner_status,
+  SELECT a.id, a.signal_id, a.focus_id, a.materiality_determination_id,
+         COALESCE(s.seq, f.seq, a.materiality_seq) AS seq,
+         COALESCE(s.observation, f.name,
+                  'v1.' || (md.version_no - 1) || ' — ' || a.materiality_label) AS title,
+         COALESCE(s.why_may_matter, f.why_requires_attention, a.materiality_detail) AS detail,
+         COALESCE(s.attention,
+                  CASE WHEN a.materiality_attention = 'immediate_partner'
+                       THEN 'immediate_partner' END) AS attention,
+         s.manager_assessment, a.partner_surfaced_at, a.partner_status,
          a.raised_by_partner, a.partner_note, a.challenge, a.challenged_at, a.manager_response,
          rb.full_name AS responded_by_name, a.responded_at,
          vb.full_name AS reviewed_by_name, a.reviewed_at, a.version
     FROM hsdg.audit_planning_attention a
     LEFT JOIN hsdg.audit_planning_signal s ON s.id = a.signal_id
     LEFT JOIN hsdg.audit_area_of_focus f ON f.id = a.focus_id
+    LEFT JOIN hsdg.audit_materiality_determination md ON md.id = a.materiality_determination_id
     LEFT JOIN hsdg.employees rb ON rb.id = a.responded_by_employee_id
     LEFT JOIN hsdg.employees vb ON vb.id = a.reviewed_by_employee_id`;
 
 function mapAttention(r: AttentionRow): PartnerAttentionItem {
   return {
     id: r.id,
-    kind: r.signal_id ? 'signal' : 'focus_area',
-    targetId: (r.signal_id ?? r.focus_id)!,
+    kind: r.signal_id ? 'signal' : r.focus_id ? 'focus_area' : 'materiality',
+    targetId: (r.signal_id ?? r.focus_id ?? r.materiality_determination_id)!,
     code: itemCode(r),
     title: r.title,
     detail: r.detail,
