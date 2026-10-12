@@ -18,7 +18,9 @@ describe('03.5 role matrix (§27)', () => {
     expect(ep.partnerReview).toBe(true);
     expect(ep.prepare || ep.complete || ep.respond || ep.manageGrants).toBe(false);
     const acting = areaCapabilities('partner', true, null);
-    expect(acting.prepare && acting.complete && acting.partnerReview && acting.manageGrants).toBe(true);
+    expect(acting.prepare && acting.complete && acting.partnerReview && acting.manageGrants).toBe(
+      true,
+    );
   });
 
   it('a Senior / Article prepares only with a grant and completes only as manager-equivalent', () => {

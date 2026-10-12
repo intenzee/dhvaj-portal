@@ -163,7 +163,15 @@ export class AuditAreaReviewService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
       const access = await resolveAreaAccess(client, engagementId);
-      if (access.capabilities.prepare) await this.ensure(client, ctx, engagementId, wi);
+      const { rowCount } = await client.query(
+        `SELECT 1 FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
+        [wi],
+      );
+      // Idempotent once 03.5 exists; creating the population is a preparer's step (§3, §27).
+      if (!rowCount) {
+        assertAreaCapability(access, 'prepare');
+        await this.ensure(client, ctx, engagementId, wi);
+      }
       return this.buildSummary(client, engagementId, wi, undefined, access);
     });
   }
@@ -829,7 +837,10 @@ export class AuditAreaReviewService {
         [
           reviewId,
           JSON.stringify(
-            completionBasis(ws.facts, applicableLibrary(ws.library, ws.facts.profile, ws.periodEnd)),
+            completionBasis(
+              ws.facts,
+              applicableLibrary(ws.library, ws.facts.profile, ws.periodEnd),
+            ),
           ),
           ctx.employeeId ?? null,
         ],
@@ -1150,7 +1161,9 @@ export class AuditAreaReviewService {
     const name = clean(input.proposedAreaName);
     const reason = clean(input.reason);
     if (!name || !reason) {
-      throw new BadRequestException('Name the Audit Area needed and why the risk assessment needs it.');
+      throw new BadRequestException(
+        'Name the Audit Area needed and why the risk assessment needs it.',
+      );
     }
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
@@ -1187,7 +1200,14 @@ export class AuditAreaReviewService {
            (review_id, engagement_id, kind, body, proposed_area_name, source_module, source_risk_id,
             created_by_employee_id)
          VALUES ($1, $2, 'downstream_request', $3, $4, $5, $6, hsdg.ctx_employee_id()) RETURNING id`,
-        [review.id, engagementId, reason, name, input.riskId ? 'section_04' : '03.6', input.riskId ?? null],
+        [
+          review.id,
+          engagementId,
+          reason,
+          name,
+          input.riskId ? 'section_04' : '03.6',
+          input.riskId ?? null,
+        ],
       );
       const flagged =
         review.status === 'complete'
@@ -1201,7 +1221,12 @@ export class AuditAreaReviewService {
         action: 'statutory_audit.audit_area_requested',
         objectType: 'audit_area_review',
         objectId: review.id,
-        after: { commentId: rows[0]!.id, proposedAreaName: name, reason, riskId: input.riskId ?? null },
+        after: {
+          commentId: rows[0]!.id,
+          proposedAreaName: name,
+          reason,
+          riskId: input.riskId ?? null,
+        },
       });
       await this.notifyPreparers(client, engagementId, review.id, {
         type: flagged
@@ -1279,7 +1304,8 @@ export class AuditAreaReviewService {
          RETURNING employee_id, level`,
         [grantId, engagementId],
       );
-      if (!rows[0]) throw new NotFoundException('That 03.5 authorisation is not on this engagement.');
+      if (!rows[0])
+        throw new NotFoundException('That 03.5 authorisation is not on this engagement.');
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.audit_area_permission_revoked',
         objectType: 'audit_area_review_permission',
@@ -1566,7 +1592,16 @@ export class AuditAreaReviewService {
     );
     if (!ins[0]) return (await this.lockReview(client, wi))!;
     const id = ins[0].id;
-    await this.insertLibraryAreas(client, ctx, engagementId, id, population, 'population', null, facts);
+    await this.insertLibraryAreas(
+      client,
+      ctx,
+      engagementId,
+      id,
+      population,
+      'population',
+      null,
+      facts,
+    );
     await this.rollUp(client, ctx, wi, 'in_progress');
     await linkScopeMap(client, wi);
     await this.audit.recordWith(client, ctx, {
@@ -1657,7 +1692,10 @@ export class AuditAreaReviewService {
       );
     }
     const specByLib = new Map(
-      libs.map((l) => [l.id, facts.specific.filter((x) => specificMatchesArea(x, l)).map((x) => x.key)]),
+      libs.map((l) => [
+        l.id,
+        facts.specific.filter((x) => specificMatchesArea(x, l)).map((x) => x.key),
+      ]),
     );
     const [spAreas, spKeys] = pairs((l) => specByLib.get(l.id)!);
     if (spAreas.length) {
@@ -1681,7 +1719,10 @@ export class AuditAreaReviewService {
       if (linked.some((x) => x.attention !== 'standard') || specByLib.get(lib.id)!.length) {
         enhance.push(areaId);
       }
-      for (const [assertionId, basis] of assertionSuggestions(lib.assertionAttentionRules, linked)) {
+      for (const [assertionId, basis] of assertionSuggestions(
+        lib.assertionAttentionRules,
+        linked,
+      )) {
         sugAreas.push(areaId);
         sugIds.push(assertionId);
         sugBasis.push(basis);

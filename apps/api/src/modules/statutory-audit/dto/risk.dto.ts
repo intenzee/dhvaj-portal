@@ -46,12 +46,18 @@ export class CreateRiskDto {
   @IsIn(Object.values(RISK_ASSERTION))
   assertion?: RiskAssertion;
 
-  @ApiPropertyOptional({ description: '03.5 engagement Audit Area the risk sits in (§24 lineage).' })
+  @ApiPropertyOptional({
+    description: '03.5 engagement Audit Area the risk sits in (§24 lineage).',
+  })
   @IsOptional()
   @IsUUID()
   auditAreaId?: string | null;
 
-  @ApiPropertyOptional({ enum: ASSERTION_IDS, isArray: true, description: 'Canonical SA 315 assertion ids (03.5 §15).' })
+  @ApiPropertyOptional({
+    enum: ASSERTION_IDS,
+    isArray: true,
+    description: 'Canonical SA 315 assertion ids (03.5 §15).',
+  })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(13)
@@ -124,12 +130,18 @@ export class UpdateRiskDto {
   @IsIn(Object.values(RISK_ASSERTION))
   assertion?: RiskAssertion;
 
-  @ApiPropertyOptional({ description: '03.5 engagement Audit Area the risk sits in (§24 lineage).' })
+  @ApiPropertyOptional({
+    description: '03.5 engagement Audit Area the risk sits in (§24 lineage).',
+  })
   @IsOptional()
   @IsUUID()
   auditAreaId?: string | null;
 
-  @ApiPropertyOptional({ enum: ASSERTION_IDS, isArray: true, description: 'Canonical SA 315 assertion ids (03.5 §15).' })
+  @ApiPropertyOptional({
+    enum: ASSERTION_IDS,
+    isArray: true,
+    description: 'Canonical SA 315 assertion ids (03.5 §15).',
+  })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(13)

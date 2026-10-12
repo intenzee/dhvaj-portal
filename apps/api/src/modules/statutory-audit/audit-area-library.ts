@@ -222,7 +222,8 @@ export class AuditAreaLibraryService {
         `SELECT count(*)::int AS n FROM hsdg.audit_area_library WHERE library_version = $1 AND active`,
         [version],
       );
-      if (!rows[0]?.n) throw new ConflictException('A library release needs at least one active area.');
+      if (!rows[0]?.n)
+        throw new ConflictException('A library release needs at least one active area.');
       await client.query(
         `UPDATE hsdg.audit_area_library_release
             SET status = 'released', released_at = now(), released_by_employee_id = hsdg.ctx_employee_id()
@@ -338,7 +339,10 @@ export class AuditAreaLibraryService {
     if (!DATE.test(input.effectiveFrom ?? '')) {
       throw new BadRequestException('Effective from is a date (YYYY-MM-DD).');
     }
-    if (input.effectiveTo && (!DATE.test(input.effectiveTo) || input.effectiveTo < input.effectiveFrom)) {
+    if (
+      input.effectiveTo &&
+      (!DATE.test(input.effectiveTo) || input.effectiveTo < input.effectiveFrom)
+    ) {
       throw new BadRequestException('Effective to is a date on or after effective from.');
     }
     if (!Number.isInteger(input.sortOrder) || input.sortOrder < 0) {
@@ -404,31 +408,29 @@ export class AuditAreaLibraryService {
     return {
       releases,
       selected,
-      rows: areas.map(
-        (r): AuditAreaLibraryAdminRow => ({
-          id: String(r.id),
-          libraryVersion: String(r.library_version),
-          areaCode: String(r.area_code),
-          areaName: String(r.area_name),
-          areaType: r.area_type as AuditAreaLibraryAdminRow['areaType'],
-          category: r.category as AuditAreaLibraryAdminRow['category'],
-          frameworkProfile: r.framework_profile as AuditAreaLibraryAdminRow['frameworkProfile'],
-          industryProfile: String(r.industry_profile),
-          conditionKey: (r.condition_key as AuditAreaLibraryAdminRow['conditionKey']) ?? null,
-          defaultAssertions: arr<AssertionId>(r.default_assertions),
-          nonAssertionWorkstream: r.non_assertion_workstream === true,
-          defaultAttention: r.default_attention as AuditAreaLibraryAdminRow['defaultAttention'],
-          relatedAuthorities: arr(r.related_authorities),
-          signalMappingTags: arr(r.signal_mapping_tags),
-          metricKeys: arr(r.metric_keys),
-          indicatorTags: arr(r.indicator_tags),
-          aliases: arr(r.aliases),
-          effectiveFrom: day(r.effective_from)!,
-          effectiveTo: day(r.effective_to),
-          active: r.active === true,
-          sortOrder: Number(r.sort_order),
-        }),
-      ),
+      rows: areas.map((r): AuditAreaLibraryAdminRow => ({
+        id: String(r.id),
+        libraryVersion: String(r.library_version),
+        areaCode: String(r.area_code),
+        areaName: String(r.area_name),
+        areaType: r.area_type as AuditAreaLibraryAdminRow['areaType'],
+        category: r.category as AuditAreaLibraryAdminRow['category'],
+        frameworkProfile: r.framework_profile as AuditAreaLibraryAdminRow['frameworkProfile'],
+        industryProfile: String(r.industry_profile),
+        conditionKey: (r.condition_key as AuditAreaLibraryAdminRow['conditionKey']) ?? null,
+        defaultAssertions: arr<AssertionId>(r.default_assertions),
+        nonAssertionWorkstream: r.non_assertion_workstream === true,
+        defaultAttention: r.default_attention as AuditAreaLibraryAdminRow['defaultAttention'],
+        relatedAuthorities: arr(r.related_authorities),
+        signalMappingTags: arr(r.signal_mapping_tags),
+        metricKeys: arr(r.metric_keys),
+        indicatorTags: arr(r.indicator_tags),
+        aliases: arr(r.aliases),
+        effectiveFrom: day(r.effective_from)!,
+        effectiveTo: day(r.effective_to),
+        active: r.active === true,
+        sortOrder: Number(r.sort_order),
+      })),
       assertionMaster: await this.assertionMaster(client),
       industryProfiles: await this.industryProfiles(client),
     };
