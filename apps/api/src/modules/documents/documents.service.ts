@@ -38,6 +38,14 @@ import type {
 } from './documents.types';
 
 interface DocumentRow {
+  // Change 6 filing links (DOC_BASE only; absent on the cross-engagement view).
+  compliance_instance_id?: string | null;
+  period_section?: string | null;
+  slot_code?: string | null;
+  filing_period_key?: string | null;
+  filing_financial_year?: string | null;
+  filing_registration_id?: string | null;
+  filing_stream?: string | null;
   id: string;
   engagement_id: string;
   task_id: string | null;
@@ -78,6 +86,31 @@ interface VersionRow {
   uploaded_at: Date;
 }
 
+/** The stream a document is in: its filing's, else its task's service line. */
+const DOC_STREAM_SQL = `COALESCE(
+           (SELECT COALESCE(rv.stream, sv.stream) FROM hsdg.compliance_instances ci
+              LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
+              LEFT JOIN hsdg.engagement_services es ON es.id = ci.engagement_service_id
+              LEFT JOIN hsdg.services sv ON sv.id = es.service_id
+             WHERE ci.id = d.compliance_instance_id),
+           (SELECT sv.stream FROM hsdg.tasks t
+              JOIN hsdg.engagement_services es ON es.id = t.engagement_service_id
+              JOIN hsdg.services sv ON sv.id = es.service_id
+             WHERE t.id = d.task_id))`;
+
+/**
+ * Change 6 — the filing a document belongs to (period, year, registration,
+ * stream), for the Documents tab filters and slot labels.
+ */
+const FILING_CONTEXT = `
+         (SELECT ci.period_key FROM hsdg.compliance_instances ci
+           WHERE ci.id = d.compliance_instance_id) AS filing_period_key,
+         (SELECT ci.financial_year FROM hsdg.compliance_instances ci
+           WHERE ci.id = d.compliance_instance_id) AS filing_financial_year,
+         (SELECT ci.registration_id FROM hsdg.compliance_instances ci
+           WHERE ci.id = d.compliance_instance_id) AS filing_registration_id,
+         ${DOC_STREAM_SQL} AS filing_stream`;
+
 const DOC_BASE = `
   SELECT d.id, d.engagement_id, d.task_id, d.component_instance_id,
          d.doc_requirement_id,
@@ -88,7 +121,9 @@ const DOC_BASE = `
          d.retention_until::text, d.archived_at, d.archived_by_employee_id, d.deleted_at,
          d.edit_locked,
          d.created_by_employee_id, ce.full_name AS created_by_name,
-         d.version, d.created_at, d.updated_at
+         d.version, d.created_at, d.updated_at,
+         d.compliance_instance_id, d.period_section, d.slot_code,
+         ${FILING_CONTEXT}
   FROM hsdg.documents d
   LEFT JOIN hsdg.document_versions cv ON cv.id = d.current_version_id
   LEFT JOIN hsdg.employees ce ON ce.id = d.created_by_employee_id`;
@@ -313,6 +348,12 @@ export class DocumentsService {
       componentInstanceId?: string;
       /** Show soft-deleted documents instead of live ones (managing partner only). */
       deleted?: boolean;
+      stream?: string;
+      financialYear?: string;
+      periodKey?: string;
+      section?: string;
+      registrationId?: string;
+      complianceInstanceId?: string;
     },
   ): Promise<PageResult<DocumentRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
@@ -332,6 +373,37 @@ export class DocumentsService {
       if (filter.status) {
         params.push(filter.status);
         conds.push(`d.status = $${params.length}`);
+      }
+      if (filter.complianceInstanceId) {
+        params.push(filter.complianceInstanceId);
+        conds.push(`d.compliance_instance_id = $${params.length}`);
+      }
+      if (filter.section) {
+        params.push(filter.section);
+        conds.push(`d.period_section = $${params.length}`);
+      }
+      if (filter.stream) {
+        params.push(filter.stream);
+        conds.push(`${DOC_STREAM_SQL} = $${params.length}`);
+      }
+      const ciConds: string[] = [];
+      if (filter.financialYear) {
+        params.push(filter.financialYear);
+        ciConds.push(`ci.financial_year = $${params.length}`);
+      }
+      if (filter.periodKey) {
+        params.push(filter.periodKey);
+        ciConds.push(`ci.period_key = $${params.length}`);
+      }
+      if (filter.registrationId) {
+        params.push(filter.registrationId);
+        ciConds.push(`ci.registration_id = $${params.length}`);
+      }
+      if (ciConds.length > 0) {
+        conds.push(
+          `EXISTS (SELECT 1 FROM hsdg.compliance_instances ci
+                    WHERE ci.id = d.compliance_instance_id AND ${ciConds.join(' AND ')})`,
+        );
       }
       if (filter.documentType) {
         params.push(filter.documentType);
@@ -917,6 +989,13 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+    complianceInstanceId: row.compliance_instance_id ?? null,
+    periodSection: row.period_section ?? null,
+    slotCode: row.slot_code ?? null,
+    periodKey: row.filing_period_key ?? null,
+    financialYear: row.filing_financial_year ?? null,
+    registrationId: row.filing_registration_id ?? null,
+    stream: row.filing_stream ?? null,
   };
 }
 

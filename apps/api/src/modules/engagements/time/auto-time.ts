@@ -57,7 +57,8 @@ type EndAt = 'now' | 'heartbeat' | Date;
 
 function endExpr(endAt: EndAt, param: string): string {
   if (endAt === 'now') return 'now()';
-  if (endAt === 'heartbeat') return 'GREATEST(te.started_at, COALESCE(te.last_heartbeat_at, te.started_at))';
+  if (endAt === 'heartbeat')
+    return 'GREATEST(te.started_at, COALESCE(te.last_heartbeat_at, te.started_at))';
   return `GREATEST(te.started_at, LEAST(now(), ${param}::timestamptz))`;
 }
 
@@ -97,7 +98,13 @@ export function closeTaskEntries(
   kinds: TimeEntryKind[],
   reason: TimeStopReason,
 ): Promise<ClosedEntry[]> {
-  return closeWhere(client, `te.task_id = $1 AND te.entry_kind = ANY($2::text[])`, [taskId, kinds], reason, 'now');
+  return closeWhere(
+    client,
+    `te.task_id = $1 AND te.entry_kind = ANY($2::text[])`,
+    [taskId, kinds],
+    reason,
+    'now',
+  );
 }
 
 /** Close whatever the person has running (manual or auto), e.g. on a task switch. */
@@ -118,7 +125,13 @@ export function closeAutoFor(
   employeeId: string,
   reason: TimeStopReason,
 ): Promise<ClosedEntry[]> {
-  return closeWhere(client, `te.employee_id = $1 AND te.source = 'auto'`, [employeeId], reason, 'now');
+  return closeWhere(
+    client,
+    `te.employee_id = $1 AND te.source = 'auto'`,
+    [employeeId],
+    reason,
+    'now',
+  );
 }
 
 /**
@@ -256,10 +269,20 @@ export async function closeDayEnd(client: PoolClient, cutoff: Date): Promise<Clo
  * Today's office day-end in IST as an absolute instant, or null when it has not
  * been reached yet. IST has no DST, so the offset is fixed at +05:30.
  */
-export function dayEndCutoff(now: Date, hourIst: number = AUTO_TIME.defaultDayEndHourIst): Date | null {
+export function dayEndCutoff(
+  now: Date,
+  hourIst: number = AUTO_TIME.defaultDayEndHourIst,
+): Date | null {
   const istMs = now.getTime() + 330 * 60_000;
   const ist = new Date(istMs);
-  const cutoffIstMs = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), hourIst, 0, 0);
+  const cutoffIstMs = Date.UTC(
+    ist.getUTCFullYear(),
+    ist.getUTCMonth(),
+    ist.getUTCDate(),
+    hourIst,
+    0,
+    0,
+  );
   const cutoff = new Date(cutoffIstMs - 330 * 60_000);
   return now.getTime() >= cutoff.getTime() ? cutoff : null;
 }

@@ -83,4 +83,21 @@ export class TimeSummaryQueryDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsIn(Object.values(TIME_SUMMARY_BY))
   by?: TimeSummaryBy;
+
+  @ApiPropertyOptional({ description: 'Only time on or after this IST date (YYYY-MM-DD).' })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Only time on or before this IST date (YYYY-MM-DD).' })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+
+  @ApiPropertyOptional({ description: 'Only time in this stream (gst, tds, …).' })
+  @IsOptional()
+  @IsIn(['gst', 'tds', 'income_tax', 'roc', 'bookkeeping', 'mis'])
+  stream?: string;
 }

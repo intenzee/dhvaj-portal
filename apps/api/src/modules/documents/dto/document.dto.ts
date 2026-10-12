@@ -13,6 +13,7 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  Matches,
 } from 'class-validator';
 import {
   DOCUMENT_CLASSIFICATIONS,
@@ -200,6 +201,41 @@ export class DocumentListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   componentInstanceId?: string;
+
+  @ApiPropertyOptional({ description: 'Change 6 — only documents in this stream (gst, tds, …).' })
+  @IsOptional()
+  @IsIn(['gst', 'tds', 'income_tax', 'roc', 'bookkeeping', 'mis'])
+  stream?: string;
+
+  @ApiPropertyOptional({ description: "Only documents of filings in this FY, e.g. '2026-27'." })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}$/)
+  financialYear?: string;
+
+  @ApiPropertyOptional({
+    description: "Only documents of filings for this period ('2026-10', '2026-27:Q2' …).",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  periodKey?: string;
+
+  @ApiPropertyOptional({ enum: ['outward', 'inward', 'summary', 'annual'] })
+  @IsOptional()
+  @IsIn(['outward', 'inward', 'summary', 'annual'])
+  section?: string;
+
+  @ApiPropertyOptional({
+    description: 'Only documents of filings on this registration (GSTIN, TAN …).',
+  })
+  @IsOptional()
+  @IsUUID()
+  registrationId?: string;
+
+  @ApiPropertyOptional({ description: 'Only documents of this filing (compliance instance).' })
+  @IsOptional()
+  @IsUUID()
+  complianceInstanceId?: string;
 
   @ApiPropertyOptional({
     description: 'Show soft-deleted documents (managing partner only) instead of live ones.',

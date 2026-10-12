@@ -104,14 +104,19 @@ export class EngagementTimeAutoController {
   @Get(':id/time/summary')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
-    summary: 'Hours by person / stream / month / task, billable split, budget vs actual',
+    summary:
+      'Hours by person / stream / month / task, billable split, budget vs actual (?from=&to=&stream=)',
   })
   summary(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() query: TimeSummaryQueryDto,
   ): Promise<TimeSummary> {
-    return this.time.summary(rlsContextFromPrincipal(principal), id, query.by ?? 'person');
+    return this.time.summary(rlsContextFromPrincipal(principal), id, query.by ?? 'person', {
+      ...(query.from ? { from: query.from } : {}),
+      ...(query.to ? { to: query.to } : {}),
+      ...(query.stream ? { stream: query.stream } : {}),
+    });
   }
 
   @Get(':id/time/adjustments')

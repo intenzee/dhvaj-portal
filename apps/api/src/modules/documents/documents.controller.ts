@@ -135,6 +135,12 @@ export class DocumentsController {
       taskId?: string;
       componentInstanceId?: string;
       deleted?: boolean;
+      stream?: string;
+      financialYear?: string;
+      periodKey?: string;
+      section?: string;
+      registrationId?: string;
+      complianceInstanceId?: string;
     } = {};
     if (query.status) filter.status = query.status;
     if (query.documentType) filter.documentType = query.documentType;
@@ -142,6 +148,12 @@ export class DocumentsController {
     if (query.search) filter.search = query.search;
     if (query.taskId) filter.taskId = query.taskId;
     if (query.componentInstanceId) filter.componentInstanceId = query.componentInstanceId;
+    if (query.stream) filter.stream = query.stream;
+    if (query.financialYear) filter.financialYear = query.financialYear;
+    if (query.periodKey) filter.periodKey = query.periodKey;
+    if (query.section) filter.section = query.section;
+    if (query.registrationId) filter.registrationId = query.registrationId;
+    if (query.complianceInstanceId) filter.complianceInstanceId = query.complianceInstanceId;
     // The deleted view is a managing-partner-only tool for restoring; ignore the
     // flag for everyone else so soft-deleted docs stay hidden.
     if (query.deleted && canDeleteDocuments(principal)) filter.deleted = true;
