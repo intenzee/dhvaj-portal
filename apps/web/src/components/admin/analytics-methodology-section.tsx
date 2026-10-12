@@ -44,7 +44,7 @@ import { ExpandToggle } from '@/components/inline-panel';
 const LIBRARY_KEY = ['planning-analytics-library'];
 const API = '/planning-analytics-library';
 
-const splitList = (s: string): string[] => [
+export const splitList = (s: string): string[] => [
   ...new Set(
     s
       .split(/[\s,]+/)
@@ -52,7 +52,7 @@ const splitList = (s: string): string[] => [
       .filter(Boolean),
   ),
 ];
-const splitLines = (s: string): string[] => [
+export const splitLines = (s: string): string[] => [
   ...new Set(
     s
       .split('\n')
@@ -60,12 +60,12 @@ const splitLines = (s: string): string[] => [
       .filter(Boolean),
   ),
 ];
-const numOrNull = (s: string): number | null => (s.trim() === '' ? null : Number(s));
+export const numOrNull = (s: string): number | null => (s.trim() === '' ? null : Number(s));
 /** Mirrors the API's neutral-wording check (§15) so the admin sees it before saving. */
 const NON_NEUTRAL = /\bmaterial(ity)?\b|misstat|significant risk|audit risk|\brmm\b/i;
 
 /** Group versions (latest first, as the API lists them) by item key. */
-function groupBy<T>(rows: T[] | undefined, keyOf: (r: T) => string): T[][] {
+export function groupBy<T>(rows: T[] | undefined, keyOf: (r: T) => string): T[][] {
   const m = new Map<string, T[]>();
   for (const r of rows ?? []) m.set(keyOf(r), [...(m.get(keyOf(r)) ?? []), r]);
   return [...m.values()];
@@ -144,17 +144,19 @@ export function AnalyticsMethodologySection(): JSX.Element {
 
 // ── shared pieces ────────────────────────────────────────────────────────────
 
-function VersionHistory({
+export function VersionHistory({
   versions,
+  periodLabel = 'Applies to periods ending',
 }: {
   versions: (AnalyticsLibraryVersioning & AnalyticsLibraryAudit)[];
+  periodLabel?: string;
 }): JSX.Element {
   return (
     <table className="w-full text-sm">
       <thead className="text-left text-[11px] uppercase tracking-wide text-ink-faint">
         <tr>
           <th>Version</th>
-          <th>Applies to periods ending</th>
+          <th>{periodLabel}</th>
           <th>Methodology</th>
           <th>Reason</th>
           <th>By</th>
@@ -183,7 +185,7 @@ function VersionHistory({
   );
 }
 
-function LibraryRow({
+export function LibraryRow({
   code,
   title,
   badges,
@@ -222,7 +224,11 @@ function LibraryRow({
 }
 
 /** Effective-from / retire / methodology / reason fields every form ends with. */
-function useVersionFields(base: AnalyticsLibraryVersioning | null) {
+export function useVersionFields(
+  base: AnalyticsLibraryVersioning | null,
+  dateLabel = 'Applies to periods ending on/after',
+  methodologyHint = 'e.g. dhvaj-analytics-2027.1',
+) {
   const [effectiveFrom, setEffectiveFrom] = useState('');
   const [active, setActive] = useState(base?.active ?? true);
   const [methodologyVersion, setMethodologyVersion] = useState(base?.methodologyVersion ?? '');
@@ -241,14 +247,14 @@ function useVersionFields(base: AnalyticsLibraryVersioning | null) {
   const fields = (retireLabel: string | null) => (
     <>
       <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Applies to periods ending on/after" hint={dateError ?? undefined}>
+        <Field label={dateLabel} hint={dateError ?? undefined}>
           <Input
             type="date"
             value={effectiveFrom}
             onChange={(e) => setEffectiveFrom(e.target.value)}
           />
         </Field>
-        <Field label="Methodology version" hint="e.g. dhvaj-analytics-2027.1">
+        <Field label="Methodology version" hint={methodologyHint}>
           <Input
             value={methodologyVersion}
             onChange={(e) => setMethodologyVersion(e.target.value)}
@@ -288,7 +294,7 @@ function useSave<B, R extends { version: number }>(
   });
 }
 
-function CheckList<T extends string>({
+export function CheckList<T extends string>({
   legend,
   options,
   value,

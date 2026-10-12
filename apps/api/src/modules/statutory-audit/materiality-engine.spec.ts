@@ -1,14 +1,14 @@
 import type {
   MaterialityDatasetInfo,
   MaterialityDetermination,
-  ResolvedRule,
-  RuleResolver,
+  MaterialityMethodologyRuleDef,
 } from '@hsdg/contracts';
 import {
   buildCandidates,
   buildSensitivity,
   computeMateriality,
   computeMaterialityCompletion,
+  methodologyContext,
   methodologyStatus,
   partnerAttentionTriggers,
   qualitativePrompts,
@@ -17,51 +17,59 @@ import {
   roundToStep,
   summariseNormalisation,
   type MaterialityFacts,
+  type MethodologyContext,
 } from './materiality-engine';
 
-// Test-only library data (the real ranges live in the Audit Rules Library).
-const LIBRARY: Record<string, [number, number | null]> = {
-  om_pct_pbt: [5, 10],
-  om_pct_normalised_pbt: [5, 10],
-  om_pct_revenue: [0.5, 1],
-  om_pct_total_assets: [1, 2],
-  om_pct_net_assets: [1, 5],
-  om_pct_expenditure: [0.5, 2],
-  pm_pct_om: [50, 75],
-  ctt_pct_om: [3, 5],
-  py_change_attention: [25, null],
-  volatility_attention: [30, null],
-  near_breakeven_margin: [2, null],
-  rounding_step: [1000, null],
+// Test-only library data (the real rules live in the Materiality Methodology Library).
+const rule = (
+  ruleCode: string,
+  over: Partial<MaterialityMethodologyRuleDef>,
+): MaterialityMethodologyRuleDef => ({
+  ruleCode,
+  version: 1,
+  kind: 'om_benchmark',
+  name: ruleCode,
+  benchmarkKey: null,
+  benchmarkLabel: null,
+  attentionCriterion: null,
+  lowPct: null,
+  highPct: null,
+  parameterValue: null,
+  industryProfiles: [],
+  circumstances: [],
+  considerations: [],
+  sourceBasis: 'PROVISIONAL placeholder',
+  provisional: true,
+  overrideAttention: 'partner_attention',
+  effectiveFrom: '2000-01-01',
+  effectiveTo: null,
+  active: true,
+  methodologyVersion: 'test-2026.1',
+  ...over,
+});
+const om = (code: string, key: string, lo: number, hi: number) =>
+  rule(code, { benchmarkKey: key, lowPct: lo, highPct: hi });
+const LIBRARY: MaterialityMethodologyRuleDef[] = [
+  om('MMR-001', 'pbt', 5, 10),
+  om('MMR-002', 'normalised_pbt', 5, 10),
+  om('MMR-003', 'revenue', 0.5, 1),
+  om('MMR-004', 'total_assets', 1, 2),
+  om('MMR-005', 'net_assets', 1, 5),
+  om('MMR-006', 'expenditure', 0.5, 2),
+  rule('MMR-007', { kind: 'pm', lowPct: 50, highPct: 75 }),
+  rule('MMR-008', { kind: 'ctt', lowPct: 3, highPct: 5 }),
+  rule('MMR-009', { kind: 'attention', attentionCriterion: 'py_change', parameterValue: 25 }),
+  rule('MMR-010', { kind: 'attention', attentionCriterion: 'volatility', parameterValue: 30 }),
+  rule('MMR-011', { kind: 'attention', attentionCriterion: 'near_breakeven', parameterValue: 2 }),
+  rule('MMR-012', { kind: 'rounding', parameterValue: 1000 }),
+];
+const GENERIC: MethodologyContext = {
+  on: '2025-04-01',
+  industryProfile: 'generic',
+  circumstances: [],
 };
 
-const resolver =
-  (lib: Record<string, [number, number | null]> = LIBRARY): RuleResolver =>
-  (area, criterion) => {
-    const hit = area === 'materiality' ? lib[criterion] : undefined;
-    if (!hit) return null;
-    return {
-      ruleId: criterion,
-      ruleCode: `MAT_${criterion.toUpperCase()}`,
-      ruleVersionId: `${criterion}-v1`,
-      version: 1,
-      areaKey: area,
-      entityClass: null,
-      criterion,
-      operator: hit[1] === null ? '>=' : 'between',
-      unit: 'percent',
-      threshold: hit[0],
-      thresholdHigh: hit[1],
-      measurementBasis: null,
-      outcome: 'guidance',
-      effectiveFrom: '2000-04-01',
-      authorityProvisionId: null,
-      guidanceReference: 'PROVISIONAL placeholder',
-      bands: [],
-    } as ResolvedRule;
-  };
-
-const methodology = resolveMaterialityMethodology(resolver());
+const methodology = resolveMaterialityMethodology(LIBRARY, GENERIC);
 const CRORE = 10_000_000;
 const dataset: MaterialityDatasetInfo = {
   ready: true,
@@ -174,7 +182,7 @@ const cand = (list: ReturnType<typeof candidatesFor>, key: string) =>
 
 describe('03.3 methodology library', () => {
   it('shows no percentage at all when the DHVAJ library has none (SA 320 prescribes none)', () => {
-    const empty = resolveMaterialityMethodology(() => null);
+    const empty = resolveMaterialityMethodology([], GENERIC);
     expect(empty.omGuidance).toEqual({});
     expect(empty.pmGuidance).toBeNull();
     expect(empty.roundingStep).toBeNull();
@@ -190,7 +198,8 @@ describe('03.3 methodology library', () => {
       ruleVersion: 1,
       provisional: true,
     });
-    expect(methodology.versionLabel).toContain('MAT_OM_PCT_PBT@1');
+    expect(methodology.versionLabel).toContain('MMR-001@1');
+    expect(methodology.versionLabel).toContain('test-2026.1');
     expect(methodology.anyProvisional).toBe(true);
   });
 });
@@ -419,6 +428,180 @@ describe('§19 Partner Attention', () => {
         'revised',
       ]),
     );
+  });
+});
+
+describe('§8 methodology applicability, versions and overrides', () => {
+  const NBFC_LOAN = rule('MMR-013', {
+    benchmarkKey: 'metric:loan_book',
+    benchmarkLabel: 'Loans & advances (loan book)',
+    industryProfiles: ['nbfc'],
+    considerations: ['Users focus on the loan book.'],
+  });
+  const NPO_EXP = rule('MMR-014', {
+    benchmarkKey: 'expenditure',
+    lowPct: 1,
+    highPct: 3,
+    industryProfiles: ['section8'],
+  });
+  const INITIAL_PM = rule('MMR-015', {
+    kind: 'pm',
+    lowPct: 50,
+    highPct: 60,
+    circumstances: ['initial_audit'],
+    overrideAttention: 'immediate_partner',
+  });
+  const LIB = [...LIBRARY, NBFC_LOAN, NPO_EXP, INITIAL_PM];
+
+  it('applies a rule only to files whose profile / circumstance matches; the most specific wins', () => {
+    const generic = resolveMaterialityMethodology(LIB, GENERIC);
+    expect(generic.metricBenchmarks).toEqual([]);
+    expect(generic.omGuidance.expenditure).toMatchObject({ ruleCode: 'MMR-006', lowPct: 0.5 });
+    expect(generic.pmGuidance).toMatchObject({
+      ruleCode: 'MMR-007',
+      applicability: 'All entities',
+    });
+
+    const npo = resolveMaterialityMethodology(LIB, { ...GENERIC, industryProfile: 'section8' });
+    expect(npo.omGuidance.expenditure).toMatchObject({
+      ruleCode: 'MMR-014',
+      lowPct: 1,
+      highPct: 3,
+      applicability: 'Profile: section8',
+    });
+
+    const initial = resolveMaterialityMethodology(
+      LIB,
+      methodologyContext(
+        { industryProfile: 'generic', specialEntityTypes: [], initialAudit: true },
+        '2025-04-01',
+      ),
+    );
+    expect(initial.pmGuidance).toMatchObject({
+      ruleCode: 'MMR-015',
+      highPct: 60,
+      overrideAttention: 'immediate_partner',
+    });
+    expect(initial.versionLabel).toContain('MMR-015@1');
+    expect(initial.versionLabel).not.toContain('MMR-007@1');
+  });
+
+  it('a methodology-defined metric benchmark becomes a candidate — no % when none is configured', () => {
+    const nbfc = resolveMaterialityMethodology(LIB, { ...GENERIC, industryProfile: 'nbfc' });
+    expect(nbfc.metricBenchmarks).toEqual([
+      { key: 'metric:loan_book', metricKey: 'loan_book', label: 'Loans & advances (loan book)' },
+    ]);
+    const c = candidatesFor({
+      methodology: nbfc,
+      metrics: { ...metrics, loan_book: { cy: 300, py: 250 } },
+    });
+    const loan = cand(c, 'metric:loan_book');
+    expect(loan).toMatchObject({
+      label: 'Loans & advances (loan book)',
+      methodologyDefined: true,
+      cy: 300,
+      movementLabel: '+20%',
+      status: 'available',
+      indicativeLowInr: null,
+    });
+    expect(loan.guidance?.considerations).toEqual(['Users focus on the loan book.']);
+    expect(methodologyStatus(2, loan.guidance)).toBe('no_guidance');
+    // The built-in six are still offered and never ranked.
+    expect(c.filter((x) => !x.methodologyDefined)).toHaveLength(6);
+    expect(cand(candidatesFor({ methodology: nbfc }), 'metric:loan_book').status).toBe(
+      'insufficient_data',
+    );
+  });
+
+  it('keeps the version in force on the period date; a retired rule gives no guidance', () => {
+    const v2 = { ...LIBRARY[0]!, version: 2, lowPct: 3, effectiveFrom: '2026-04-01' };
+    const retired = { ...LIBRARY[2]!, version: 2, active: false, effectiveFrom: '2026-04-01' };
+    const lib = [...LIBRARY, v2, retired];
+    const before = resolveMaterialityMethodology(lib, GENERIC);
+    expect(before.omGuidance.pbt).toMatchObject({ ruleVersion: 1, lowPct: 5 });
+    expect(before.omGuidance.revenue).toBeDefined();
+    const after = resolveMaterialityMethodology(lib, { ...GENERIC, on: '2026-04-01' });
+    expect(after.omGuidance.pbt).toMatchObject({ ruleVersion: 2, lowPct: 3 });
+    expect(after.omGuidance.revenue).toBeUndefined();
+  });
+
+  it('an override is permitted but raises Partner Attention; an IPA rule raises the §19 override trigger', () => {
+    const initial = resolveMaterialityMethodology(
+      LIB,
+      methodologyContext(
+        { industryProfile: 'generic', specialEntityTypes: [], initialAudit: true },
+        '2025-04-01',
+      ),
+    );
+    const d = det({
+      selectedBenchmark: 'pbt',
+      selectedPct: 12,
+      selectedOm: 9_840_000,
+      omOverrideReason: 'Lender covenant on PBT',
+      pmPct: 70,
+      selectedPm: 6_888_000,
+    });
+    const candidates = candidatesFor({ methodology: initial });
+    const computed = computeMateriality({
+      det: d,
+      candidates,
+      methodology: initial,
+      unitFactor: CRORE,
+      aggregation: [],
+    });
+    expect(computed.omMethodologyStatus).toBe('outside_guidance');
+    expect(computed.pmMethodologyStatus).toBe('outside_guidance'); // 70% > 60% initial-audit range
+    const triggers = partnerAttentionTriggers({
+      det: d,
+      candidates,
+      computed,
+      methodology: initial,
+      adjustments: [],
+      specific: [],
+      qualitative: [],
+    });
+    const by = (k: string) => triggers.find((t) => t.key === k);
+    expect(by('om_outside_guidance')).toMatchObject({
+      attention: 'partner_attention',
+      ruleCode: 'MMR-001',
+      ruleVersion: 1,
+    });
+    expect(by('om_outside_guidance')?.detail).toContain('Lender covenant on PBT');
+    expect(by('ipa_override_om')).toBeUndefined();
+    expect(by('pm_outside_guidance')).toMatchObject({ ruleCode: 'MMR-015' });
+    expect(by('ipa_override_pm')).toMatchObject({
+      attention: 'immediate_partner',
+      ruleCode: 'MMR-015',
+    });
+    expect(by('ipa_override_pm')?.detail).toContain('initial audit');
+  });
+
+  it('labels a selected metric benchmark from the methodology in triggers and conclusions', () => {
+    const nbfc = resolveMaterialityMethodology(LIB, { ...GENERIC, industryProfile: 'nbfc' });
+    const candidates = candidatesFor({
+      methodology: nbfc,
+      metrics: { ...metrics, pbt: { cy: -2, py: 3 }, loan_book: { cy: 300, py: 250 } },
+    });
+    const d = det({ selectedBenchmark: 'metric:loan_book', selectedPct: 1 });
+    const computed = computeMateriality({
+      det: d,
+      candidates,
+      methodology: nbfc,
+      unitFactor: CRORE,
+      aggregation: [],
+    });
+    expect(computed.liveCalculatedOm).toBe(30_000_000);
+    expect(computed.omMethodologyStatus).toBe('no_guidance');
+    const loss = partnerAttentionTriggers({
+      det: d,
+      candidates,
+      computed,
+      methodology: nbfc,
+      adjustments: [],
+      specific: [],
+      qualitative: [],
+    }).find((t) => t.key === 'loss_breakeven');
+    expect(loss?.detail).toContain('Loans & advances (loan book)');
   });
 });
 

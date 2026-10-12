@@ -133,10 +133,11 @@ export const PARTNER_ATTENTION_STATUS_LABEL: Record<PartnerAttentionStatus, stri
 export interface PartnerAttentionItem {
   /** The governance row id (acknowledge / challenge / respond address it). */
   id: string;
-  kind: 'signal' | 'focus_area';
-  /** The signal / Area of Focus id. */
+  /** `materiality` — a 03.3 §19 trigger on one determination version. */
+  kind: 'signal' | 'focus_area' | 'materiality';
+  /** The signal / Area of Focus / materiality determination (version) id. */
   targetId: string;
-  /** PS-00n / FA-00n. */
+  /** PS-00n / FA-00n / MT-00n. */
   code: string;
   title: string;
   detail: string | null;

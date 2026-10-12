@@ -61,6 +61,8 @@ import { PlanningConsiderationLibraryController } from './planning-consideration
 import { PlanningConsiderationLibraryService } from './planning-consideration-rules';
 import { PlanningAnalyticsLibraryController } from './planning-analytics-library.controller';
 import { PlanningAnalyticsLibraryService } from './planning-analytics-library';
+import { MaterialityMethodologyLibraryController } from './materiality-methodology-library.controller';
+import { MaterialityMethodologyLibraryService } from './materiality-methodology-library';
 import { PlanningSignalLibraryService } from './planning-signal-rules';
 import { AuditPlanningStrategyService } from './audit-planning-strategy.service';
 import { AuditPlanningStrategyController } from './audit-planning-strategy.controller';
@@ -137,6 +139,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     PlanningSignalLibraryController,
     PlanningConsiderationLibraryController,
     PlanningAnalyticsLibraryController,
+    MaterialityMethodologyLibraryController,
     AuditPlanningStrategyController,
     AuditPlanningGovernanceController,
     AuditBusinessUnderstandingController,
@@ -185,6 +188,7 @@ import { ChangeSetInterceptor } from '../../common/context/change-set.intercepto
     PlanningSignalLibraryService,
     PlanningConsiderationLibraryService,
     PlanningAnalyticsLibraryService,
+    MaterialityMethodologyLibraryService,
     AuditPlanningStrategyService,
     AuditPlanningGovernanceService,
     AuditBusinessUnderstandingService,

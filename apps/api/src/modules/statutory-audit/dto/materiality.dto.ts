@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  Matches,
 } from 'class-validator';
 import {
   AGGREGATION_FACTOR_KEYS,
@@ -22,6 +23,7 @@ import {
   MAT07_ANSWERS,
   MAT08_ANSWERS,
   MATERIALITY_BENCHMARKS,
+  MATERIALITY_BENCHMARK_KEY_PATTERN,
   PCT_FACTOR_KEYS,
   PRINCIPAL_USERS,
   QUALITATIVE_RESPONSES,
@@ -34,7 +36,7 @@ import {
   type Mat06Answer,
   type Mat07Answer,
   type Mat08Answer,
-  type MaterialityBenchmark,
+  type MaterialityBenchmarkKey,
   type PrincipalUser,
   type QualitativeResponse,
   type RevisionTrigger,
@@ -81,10 +83,12 @@ export class UpdateMaterialityDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(TEXT) normalisationRationale?:
     string | null;
 
-  @ApiPropertyOptional({ enum: MATERIALITY_BENCHMARKS })
+  @ApiPropertyOptional({
+    description: `One of ${MATERIALITY_BENCHMARKS.join(', ')} or a methodology-defined metric:<key>.`,
+  })
   @IsOptional()
-  @IsIn(MATERIALITY_BENCHMARKS)
-  selectedBenchmark?: MaterialityBenchmark | null;
+  @Matches(MATERIALITY_BENCHMARK_KEY_PATTERN, { message: 'Unknown benchmark.' })
+  selectedBenchmark?: MaterialityBenchmarkKey | null;
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(200) otherBenchmarkLabel?:
     string | null;

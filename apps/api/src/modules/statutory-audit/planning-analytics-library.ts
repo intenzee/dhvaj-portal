@@ -221,11 +221,11 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const METRIC_KEY = /^[a-z][a-z0-9_]{1,59}$/;
 const RULE_KEY = /^[a-z0-9_]{2,80}$/;
 
-const uniq = (xs: readonly string[] | undefined) => [
+export const uniq = (xs: readonly string[] | undefined) => [
   ...new Set((xs ?? []).map((x) => x.trim()).filter(Boolean)),
 ];
 
-function checkDates(input: { effectiveFrom?: string; effectiveTo?: string | null }): void {
+export function checkDates(input: { effectiveFrom?: string; effectiveTo?: string | null }): void {
   if (input.effectiveFrom !== undefined && !DATE.test(input.effectiveFrom)) {
     throw new BadRequestException('effectiveFrom must be YYYY-MM-DD.');
   }
