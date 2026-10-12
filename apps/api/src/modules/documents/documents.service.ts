@@ -167,8 +167,8 @@ export class DocumentsService {
             `INSERT INTO hsdg.documents
                (id, engagement_id, title, document_type, classification, sensitivity,
                 retention_until, created_by_employee_id, task_id, component_instance_id,
-                doc_requirement_id)
-             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8,$9,$10,$11)`,
+                doc_requirement_id, compliance_instance_id, period_section, slot_code)
+             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8,$9,$10,$11,$12,$13,$14)`,
             [
               documentId,
               engagementId,
@@ -181,6 +181,9 @@ export class DocumentsService {
               input.taskId ?? null,
               input.componentInstanceId ?? null,
               input.docRequirementId ?? null,
+              input.complianceInstanceId ?? null,
+              input.periodSection ?? null,
+              input.slotCode ?? null,
             ],
           );
           const versionId = await this.insertVersion(client, {

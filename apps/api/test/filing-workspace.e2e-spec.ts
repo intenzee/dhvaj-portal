@@ -1,0 +1,294 @@
+import type { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { Client } from 'pg';
+import { seedIdentityFixtures } from './seed.helper';
+import { createTestApp } from './create-test-app';
+
+/**
+ * Change 5 / 6 — the filing workspace (GST tab month-section). A junior on the
+ * team works the checklist, uploads into slots and lodges once Ready to file;
+ * only a lead waives; undo is a lead within 24 h; another engagement's partner
+ * sees nothing. workflow_status follows the facts (SQL-derived).
+ */
+describe('Filing workspace (e2e)', () => {
+  let app: INestApplication;
+  let su: Client;
+  let mp: string;
+  let pa: string;
+  let mx: string;
+  let sy: string;
+
+  const http = () => request(app.getHttpServer());
+  const token = async (email: string): Promise<string> => {
+    const res = await http().post('/api/v1/auth/dev-token').send({ email }).expect(201);
+    return res.body.accessToken as string;
+  };
+  const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
+  const unique = (): string => `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const b64 = (s: string) => Buffer.from(s).toString('base64');
+  const employeeId = async (code: string): Promise<string> => {
+    const r = await su.query<{ id: string }>(`SELECT id FROM hsdg.employees WHERE employee_code = $1`, [code]);
+    return r.rows[0]!.id;
+  };
+
+  /** An engagement (EP partner A, manager X, Senior Y on the team) with one 3B filing. */
+  const setup = async (): Promise<{ eng: string; inst: string; task: string; sep: boolean }> => {
+    const entityId = (await http().get('/api/v1/entities?search=Bharat&limit=100').set(bearer(mp)))
+      .body.items[0].id as string;
+    const serviceId = (await http().get('/api/v1/services?search=ITR_FILING&limit=100').set(bearer(mp)))
+      .body.items[0].id as string;
+    const created = await http()
+      .post('/api/v1/engagements')
+      .set(bearer(pa))
+      .send({ entityId, serviceId, financialYear: '2026-27', periodLabel: `FW${unique()}`, status: 'accepted' })
+      .expect(201);
+    const eng = created.body.id as string;
+    await http()
+      .patch(`/api/v1/engagements/${eng}`)
+      .set(bearer(mp))
+      .send({ engagementManagerEmployeeId: await employeeId('EMP005') })
+      .expect(200);
+    await http()
+      .post(`/api/v1/engagements/${eng}/team`)
+      .set(bearer(pa))
+      .send({ employeeId: await employeeId('EMP006'), roleOnEngagement: 'in_charge' })
+      .expect(201);
+
+    const code = `GST_GSTR3B_${unique()}`;
+    const rule = await http()
+      .post('/api/v1/compliance-rules')
+      .set(bearer(mp))
+      .send({ code, name: 'GSTR-3B', dueDateCategory: 'STATUTORY_RULE' })
+      .expect(201);
+    await http()
+      .post(`/api/v1/compliance-rules/${rule.body.id}/versions`)
+      .set(bearer(mp))
+      .send({ effectiveFrom: '2017-04-01', calculationBasis: 'period_end', offsetDays: 20, workingDayAdjustment: 'none' })
+      .expect(201);
+    const gen = await http()
+      .post(`/api/v1/engagements/${eng}/compliance`)
+      .set(bearer(pa))
+      .send({ complianceRuleCode: code, referenceDate: '2026-09-30' })
+      .expect(201);
+    const inst = gen.body.id as string;
+
+    // Shape it as a GST summary filing for September on a GSTIN (the
+    // calendar generator does this on main; here the superuser stands in).
+    const gstin = `19AAAC${unique().slice(-9)}`.slice(0, 15).padEnd(15, 'Z');
+    const reg = await su.query<{ id: string }>(
+      `INSERT INTO hsdg.entity_registrations (entity_id, registration_type, registration_number, state_code)
+       VALUES ($1,'gstin',$2,'19') RETURNING id`,
+      [entityId, gstin],
+    );
+    await su.query(
+      `UPDATE hsdg.compliance_rule_versions SET stream = 'gst', section = 'summary', form_label = 'GSTR-3B'
+        WHERE compliance_rule_id = $1`,
+      [rule.body.id],
+    );
+    await su.query(
+      `UPDATE hsdg.compliance_instances
+          SET registration_id = $2, section = 'summary', financial_year = '2026-27', period_key = '2026-09',
+              period_start = '2026-09-01', period_end = '2026-09-30', statutory_deadline = '2026-10-20'
+        WHERE id = $1`,
+      [inst, reg.rows[0]!.id],
+    );
+    const t = await su.query<{ id: string }>(
+      `UPDATE hsdg.tasks SET assigned_to_employee_id = $2, reviewer_employee_id = $3
+        WHERE source_compliance_instance_id = $1 RETURNING id`,
+      [inst, await employeeId('EMP006'), await employeeId('EMP005')],
+    );
+    return { eng, inst, task: t.rows[0]!.id, sep: true };
+  };
+
+  const ws = (t: string, inst: string) => http().get(`/api/v1/compliance-instances/${inst}`).set(bearer(t));
+  const upload = (t: string, inst: string, slot: string) =>
+    http()
+      .post(`/api/v1/compliance-instances/${inst}/slots/${slot}/documents`)
+      .set(bearer(t))
+      .send({ filename: `${slot}.pdf`, contentType: 'application/pdf', contentBase64: b64(`${slot} bytes`) });
+  const act = (t: string, eng: string, task: string, action: string, body: object = {}) =>
+    http().post(`/api/v1/engagements/${eng}/tasks/${task}/${action}`).set(bearer(t)).send(body);
+
+  const fullFigures = Object.fromEntries(
+    ['output', 'itc', 'cash'].flatMap((p) => ['igst', 'cgst', 'sgst', 'cess'].map((h) => [`${p}_${h}`, 100])),
+  );
+
+  beforeAll(async () => {
+    await seedIdentityFixtures();
+    app = await createTestApp();
+    su = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
+    await su.connect();
+    mp = await token('mp@dhvaj.in');
+    pa = await token('partner.a@dhvaj.in');
+    mx = await token('manager.x@dhvaj.in');
+    sy = await token('senior.y@dhvaj.in');
+  });
+
+  afterAll(async () => {
+    await su?.end();
+    await app?.close();
+  });
+
+  it('seeds the checklist on first open and walks a junior from preparation to lodge', async () => {
+    const { eng, inst, task } = await setup();
+
+    const first = await ws(sy, inst).expect(200);
+    const codes = (first.body.checklist as Array<{ itemCode: string }>).map((c) => c.itemCode);
+    expect(codes).toEqual(['LIABILITY', 'ITC_CONFIRMED', 'INTEREST_FEE', 'CLIENT_APPROVAL', 'PAYMENT', 'REVIEW', 'LODGE']);
+    expect(first.body.instance.workflowStatus).toBe('not_started');
+    expect(first.body.figuresRequiredToLodge).toBe(true);
+    expect(first.body.can).toMatchObject({ lodge: false, waive: false, edit: true });
+
+    // Idempotent: a second open adds nothing.
+    expect((await ws(sy, inst).expect(200)).body.checklist).toHaveLength(7);
+
+    // The junior cannot waive — a required step or the whole filing.
+    const approval = first.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'CLIENT_APPROVAL');
+    await http()
+      .patch(`/api/v1/compliance-instances/${inst}/items/${approval.id}`)
+      .set(bearer(sy))
+      .send({ status: 'not_applicable', naReason: 'n/a', version: approval.version })
+      .expect(403);
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/not-applicable`)
+      .set(bearer(sy))
+      .send({ reason: 'no business' })
+      .expect(403);
+
+    // Not Ready to file → the junior cannot lodge yet.
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge`)
+      .set(bearer(sy))
+      .send({ referenceNo: 'AA1909261234567', filedOn: '2026-10-10', ackDocumentId: inst })
+      .expect(409);
+
+    // Work: start → in_preparation; send for review; manager approves.
+    await act(sy, eng, task, 'start').expect(201);
+    expect((await ws(sy, inst)).body.instance.workflowStatus).toBe('in_preparation');
+    await act(sy, eng, task, 'send-for-review').expect(201);
+    expect((await ws(sy, inst)).body.instance.workflowStatus).toBe('in_review');
+    await act(mx, eng, task, 'start-review').expect(201);
+    await act(mx, eng, task, 'approve').expect(201);
+    // Task approved, but no client approval recorded yet → still in review.
+    const afterApprove = (await ws(sy, inst)).body;
+    expect(afterApprove.instance.workflowStatus).toBe('in_review');
+    expect(afterApprove.checklist.find((c: { itemCode: string }) => c.itemCode === 'REVIEW').status).toBe('done');
+
+    // Uploading the client approval ticks it → Ready to file.
+    const up = await upload(sy, inst, 'CLIENT_APPROVAL').expect(201);
+    expect(up.body.instance.workflowStatus).toBe('ready_to_file');
+    expect(up.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'CLIENT_APPROVAL').status).toBe('done');
+    expect(up.body.can.lodge).toBe(true);
+
+    // Unknown slot → 400.
+    await upload(sy, inst, 'NOT_A_SLOT').expect(400);
+
+    const withAck = (await upload(sy, inst, 'ACK_3B').expect(201)).body;
+    const ack = withAck.slots.find((s: { slotCode: string }) => s.slotCode === 'ACK_3B').documents[0].id as string;
+
+    // Figures are required to lodge a 3B; an ARN is 15 characters.
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge`)
+      .set(bearer(sy))
+      .send({ referenceNo: 'AA1909261234567', filedOn: '2026-10-10', ackDocumentId: ack })
+      .expect(400);
+    await http()
+      .put(`/api/v1/compliance-instances/${inst}/figures`)
+      .set(bearer(sy))
+      .send({ figures: fullFigures })
+      .expect(200);
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge`)
+      .set(bearer(sy))
+      .send({ referenceNo: 'SHORT', filedOn: '2026-10-10', ackDocumentId: ack })
+      .expect(400);
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge`)
+      .set(bearer(sy))
+      .send({ referenceNo: 'AA1909261234567', filedOn: '2026-09-15', ackDocumentId: ack })
+      .expect(400); // before the period ends
+
+    const lodged = await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge`)
+      .set(bearer(sy))
+      .send({ referenceNo: 'aa1909261234567', filedOn: '2026-10-10', ackDocumentId: ack })
+      .expect(201);
+    expect(lodged.body.instance.workflowStatus).toBe('filed');
+    expect(lodged.body.filing).toMatchObject({ referenceKind: 'arn', referenceNo: 'AA1909261234567', isLate: false });
+    expect(lodged.body.instance.isLocked).toBe(true);
+    expect(lodged.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'LODGE').status).toBe('done');
+    expect(lodged.body.can).toMatchObject({ lodge: false, undo: false });
+
+    // Locked: no more figures.
+    await http()
+      .put(`/api/v1/compliance-instances/${inst}/figures`)
+      .set(bearer(sy))
+      .send({ figures: fullFigures, version: lodged.body.figuresVersion })
+      .expect(409);
+
+    // The manager is notified.
+    const n = await su.query(
+      `SELECT 1 FROM hsdg.notifications WHERE type = 'filing_lodged' AND object_id = $1`,
+      [inst],
+    );
+    expect(n.rowCount).toBe(1);
+
+    // A correction note, then undo: junior no, manager yes (within 24 h).
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/corrections`)
+      .set(bearer(sy))
+      .send({ note: 'Invoice 114 corrected in Dec 2026 GSTR-1.' })
+      .expect(201);
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge/undo`)
+      .set(bearer(sy))
+      .send({ reason: 'typo' })
+      .expect(403);
+    const undone = await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge/undo`)
+      .set(bearer(mx))
+      .send({ reason: 'Typo in ARN' })
+      .expect(201);
+    expect(undone.body.instance.workflowStatus).toBe('ready_to_file');
+    expect(undone.body.filing).toBeNull();
+    expect(undone.body.filingHistory[0]).toMatchObject({ undoReason: 'Typo in ARN', undoneByName: 'Manager X' });
+    expect(undone.body.corrections).toHaveLength(1);
+  });
+
+  it('lets only a lead waive the filing, and shows nothing to another engagement', async () => {
+    const { eng, inst } = await setup();
+    const pb = await token('partner.b@dhvaj.in');
+    await ws(pb, inst).expect(404);
+    await http().get(`/api/v1/engagements/${eng}/streams/gst/tree`).set(bearer(pb)).expect(404);
+
+    const na = await http()
+      .post(`/api/v1/compliance-instances/${inst}/not-applicable`)
+      .set(bearer(mx))
+      .send({ reason: 'Registration cancelled' })
+      .expect(201);
+    expect(na.body.instance).toMatchObject({
+      workflowStatus: 'not_applicable',
+      notApplicableReason: 'Registration cancelled',
+    });
+    const lifted = await http()
+      .post(`/api/v1/compliance-instances/${inst}/not-applicable/lift`)
+      .set(bearer(mx))
+      .expect(201);
+    expect(lifted.body.instance.workflowStatus).toBe('not_started');
+  });
+
+  it('builds the GST year tree: twelve months, sections, next action', async () => {
+    const { eng, inst } = await setup();
+    const tree = await http()
+      .get(`/api/v1/engagements/${eng}/streams/gst/tree?fy=2026-27`)
+      .set(bearer(sy))
+      .expect(200);
+    expect(tree.body.financialYear).toBe('2026-27');
+    expect(tree.body.periods).toHaveLength(12);
+    expect(tree.body.periods[0].periodKey).toBe('2026-04');
+    const sep = tree.body.periods.find((p: { periodKey: string }) => p.periodKey === '2026-09');
+    expect(sep.sections.summary[0]).toMatchObject({ instanceId: inst, requiredTotal: 6, requiredDone: 0 });
+    expect(sep.nextAction).toMatch(/^GSTR-3B (due|overdue)/);
+    expect(tree.body.registrations).toHaveLength(1);
+  });
+});

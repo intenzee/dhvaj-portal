@@ -81,6 +81,13 @@ export interface CreateDocumentInput {
   componentInstanceId?: string | null;
   /** Tag the document as satisfying a checklist requirement of that component. */
   docRequirementId?: string | null;
+  /**
+   * Change 6 — file the document in a filing's slot. Set only by the filing
+   * workspace (which checks the instance and slot); not exposed on the DTO.
+   */
+  complianceInstanceId?: string | null;
+  periodSection?: string | null;
+  slotCode?: string | null;
   documentType?: DocumentType;
   classification?: DocumentClassification;
   sensitivity?: DocumentSensitivity;

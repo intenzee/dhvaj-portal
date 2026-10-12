@@ -30,6 +30,7 @@ import { CommercialModule } from './modules/commercial/commercial.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.module';
 import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module';
+import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspace.module';
 
 /**
  * Composition root of the modular monolith.
@@ -102,6 +103,7 @@ import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module'
     CommercialModule,
     NotesModule,
     StatutoryAuditModule,
+    FilingWorkspaceModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.
