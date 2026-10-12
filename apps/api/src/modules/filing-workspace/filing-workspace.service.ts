@@ -105,6 +105,7 @@ interface TaskRow {
   assignee_name: string | null;
   reviewer_employee_id: string | null;
   reviewer_name: string | null;
+  review_started_at: string | null;
   version: number;
 }
 
@@ -970,6 +971,7 @@ export class FilingWorkspaceService {
             assigneeName: task.assignee_name,
             reviewerId: task.reviewer_employee_id,
             reviewerName: task.reviewer_name,
+            reviewStartedAt: task.review_started_at,
             version: task.version,
           }
         : null,
@@ -1107,7 +1109,7 @@ export class FilingWorkspaceService {
   private async loadTask(client: PoolClient, id: string): Promise<TaskRow | null> {
     const { rows } = await client.query<TaskRow>(
       `SELECT t.id, t.title, t.status, t.assigned_to_employee_id, ae.full_name AS assignee_name,
-              t.reviewer_employee_id, re.full_name AS reviewer_name, t.version
+              t.reviewer_employee_id, re.full_name AS reviewer_name, t.review_started_at, t.version
          FROM hsdg.tasks t
          LEFT JOIN hsdg.employees ae ON ae.id = t.assigned_to_employee_id
          LEFT JOIN hsdg.employees re ON re.id = t.reviewer_employee_id
