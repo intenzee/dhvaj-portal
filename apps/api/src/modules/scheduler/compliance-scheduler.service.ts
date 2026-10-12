@@ -1,13 +1,15 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
-import { SYSTEM_ROLE } from '@hsdg/contracts';
+import { FEATURE_FLAG, SYSTEM_ROLE } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AppConfigService } from '../../config/config.module';
 import { NotificationsScanService } from '../notifications/notifications-scan.service';
 import { NotificationOutboxService } from '../notifications/notification-outbox.service';
 import { ComponentInstancesService } from '../components/component-instances.service';
+import { ComplianceCalendarV2Service } from '../compliance/compliance-calendar-v2.service';
+import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 
 /**
  * The background scheduler (spec §17/§18/§24). The compliance engine records two
@@ -31,6 +33,7 @@ export class ComplianceSchedulerService implements OnModuleInit {
   private sweepRunning = false;
   private horizonRunning = false;
   private outboxRunning = false;
+  private calendarRunning = false;
 
   constructor(
     private readonly db: DatabaseService,
@@ -39,6 +42,8 @@ export class ComplianceSchedulerService implements OnModuleInit {
     private readonly scan: NotificationsScanService,
     private readonly outbox: NotificationOutboxService,
     private readonly instances: ComponentInstancesService,
+    private readonly calendar: ComplianceCalendarV2Service,
+    private readonly flags: FeatureFlagsService,
   ) {}
 
   onModuleInit(): void {
@@ -55,10 +60,14 @@ export class ComplianceSchedulerService implements OnModuleInit {
     this.register('notification-outbox-drain', this.config.get('SCHEDULER_OUTBOX_CRON'), () =>
       this.runOutboxDrain(),
     );
+    this.register('compliance-calendar', this.config.get('SCHEDULER_CALENDAR_CRON'), () =>
+      this.runCalendarMaintenance(),
+    );
     this.logger.log(
       `Background scheduler enabled — sweep [${this.config.get('SCHEDULER_SWEEP_CRON')}], ` +
         `horizon roll [${this.config.get('SCHEDULER_HORIZON_CRON')}], ` +
-        `outbox drain [${this.config.get('SCHEDULER_OUTBOX_CRON')}].`,
+        `outbox drain [${this.config.get('SCHEDULER_OUTBOX_CRON')}], ` +
+        `calendar [${this.config.get('SCHEDULER_CALENDAR_CRON')}].`,
     );
   }
 
@@ -177,6 +186,37 @@ export class ComplianceSchedulerService implements OnModuleInit {
       this.logger.error(`Horizon roll failed: ${e.message}`, e.stack);
     } finally {
       this.horizonRunning = false;
+    }
+  }
+
+  /**
+   * Nightly compliance calendar run (calendar v2): new extensions, profile
+   * changes saved by non-leads, AGM dates. Off with ff_calendar_v2.
+   */
+  async runCalendarMaintenance(): Promise<void> {
+    if (!this.flags.isOn(FEATURE_FLAG.calendarV2)) return;
+    if (this.calendarRunning) {
+      this.logger.warn('Calendar run still running from a previous tick; skipping.');
+      return;
+    }
+    this.calendarRunning = true;
+    try {
+      const ctx = await this.resolveOperatorContext();
+      if (!ctx) {
+        this.logger.warn('No active managing partner found; calendar run skipped.');
+        return;
+      }
+      const r = await this.calendar.maintain(ctx);
+      this.logger.log(
+        `Calendar run complete — ${r.extended} extension(s) attached; ${r.engagements} ` +
+          `engagement(s): ${r.totals.created} created, ${r.totals.moved} moved, ` +
+          `${r.totals.flagged} flagged, ${r.totals.notApplicable} not applicable, ${r.failed} failed.`,
+      );
+    } catch (err) {
+      const e = err as Error;
+      this.logger.error(`Calendar run failed: ${e.message}`, e.stack);
+    } finally {
+      this.calendarRunning = false;
     }
   }
 }

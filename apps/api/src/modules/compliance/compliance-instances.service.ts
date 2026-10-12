@@ -18,6 +18,7 @@ import {
   type DueDateCategory,
   type DueDateSource,
   type EscalationLevel,
+  type RuleFrequency,
   type WorkingDayAdjustment,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -36,6 +37,7 @@ import {
   toISODate,
 } from './compliance-calc';
 import { translateComplianceError } from './compliance-rules.service';
+import { legacyPeriodDue, type PeriodRuleVersion } from './compliance-periods';
 import type {
   AddDeadlineLayerInput,
   ApplyExtensionInput,
@@ -112,6 +114,10 @@ interface VersionRow {
   internal_sla_offset_days: number;
   offset_working_days: boolean;
   condition: unknown | null;
+  frequency: RuleFrequency | null;
+  schedule: PeriodRuleVersion['schedule'];
+  period_overrides: PeriodRuleVersion['periodOverrides'];
+  provisional_event_rule: PeriodRuleVersion['provisionalEventRule'];
 }
 
 /**
@@ -331,7 +337,8 @@ export class ComplianceInstancesService {
 
       const verRes = await client.query<VersionRow>(
         `SELECT id, version, calculation_basis, offset_months, offset_days, fixed_month, fixed_day,
-                working_day_adjustment, internal_sla_offset_days, offset_working_days, condition
+                working_day_adjustment, internal_sla_offset_days, offset_working_days, condition,
+                frequency, schedule, period_overrides, provisional_event_rule
          FROM hsdg.compliance_rule_versions
          WHERE compliance_rule_id = $1 AND effective_from <= $2::date
            AND (effective_to IS NULL OR $2::date <= effective_to)
@@ -358,26 +365,67 @@ export class ComplianceInstancesService {
         );
       }
 
-      const referenceDate = resolveReferenceDate(v.calculation_basis, {
-        financialYear,
-        referenceDate: input.referenceDate,
-        eventDate: input.eventDate,
-        fixedMonth: v.fixed_month,
-        fixedDay: v.fixed_day,
-      });
       const holidays = await this.loadHolidays(client);
-      const { statutoryDeadline, internalSlaDate } = computeDeadlines(
+      // Calendar v2 encodings (schedule / month override / provisional event)
+      // go through the period engine; everything else keeps the offset engine.
+      const periodDue = legacyPeriodDue(
         {
-          referenceDate,
+          calculationBasis: v.calculation_basis,
+          frequency: v.frequency,
           offsetMonths: v.offset_months,
           offsetDays: v.offset_days,
+          offsetWorkingDays: v.offset_working_days,
+          fixedMonth: v.fixed_month,
+          fixedDay: v.fixed_day,
           workingDayAdjustment: v.working_day_adjustment,
           internalSlaOffsetDays: v.internal_sla_offset_days,
-          offsetWorkingDays: v.offset_working_days,
+          schedule: v.schedule,
+          periodOverrides: v.period_overrides,
+          periodFilter: null,
+          provisionalEventRule: v.provisional_event_rule,
+          eventType: null,
+          formLabel: null,
+          section: null,
+          isOptional: false,
+          condition: null,
+          variants: null,
         },
+        financialYear,
+        { referenceDate: input.referenceDate, eventDate: input.eventDate },
         holidays,
       );
-      const refIso = toISODate(referenceDate);
+      if (v.calculation_basis === 'schedule' && !periodDue) {
+        throw new BadRequestException(
+          `Compliance rule "${input.complianceRuleCode}" has no due date for that period.`,
+        );
+      }
+      let statutoryDeadline: string;
+      let internalSlaDate: string;
+      let refIso: string;
+      if (periodDue) {
+        ({ statutoryDeadline, internalSlaDate } = periodDue);
+        refIso = periodDue.referenceDate;
+      } else {
+        const referenceDate = resolveReferenceDate(v.calculation_basis, {
+          financialYear,
+          referenceDate: input.referenceDate,
+          eventDate: input.eventDate,
+          fixedMonth: v.fixed_month,
+          fixedDay: v.fixed_day,
+        });
+        ({ statutoryDeadline, internalSlaDate } = computeDeadlines(
+          {
+            referenceDate,
+            offsetMonths: v.offset_months,
+            offsetDays: v.offset_days,
+            workingDayAdjustment: v.working_day_adjustment,
+            internalSlaOffsetDays: v.internal_sla_offset_days,
+            offsetWorkingDays: v.offset_working_days,
+          },
+          holidays,
+        ));
+        refIso = toISODate(referenceDate);
+      }
 
       let instanceId: string;
       try {

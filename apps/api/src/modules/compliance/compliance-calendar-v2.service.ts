@@ -668,6 +668,69 @@ export class ComplianceCalendarV2Service {
     return { buffer, filename: `compliance-calendar_${result.from}_${result.to}.xlsx` };
   }
 
+  // ── Nightly maintenance ─────────────────────────────────────────────────
+
+  /**
+   * The nightly calendar run (scheduler, operator context): attach government
+   * extensions notified since an item was created, then regenerate every open
+   * Compliance engagement — picking up profile changes a non-lead saved, new
+   * rule versions, and AGM dates. One transaction per engagement so one
+   * failure never holds back the rest.
+   */
+  async maintain(ctx: RlsContext): Promise<{
+    extended: number;
+    engagements: number;
+    failed: number;
+    totals: GenerateCalendarResult;
+  }> {
+    const extended = await this.db.withRlsContext(ctx, async (client) => {
+      const res = await client.query(
+        `UPDATE hsdg.compliance_instances ci
+            SET government_extension_id = ge.id, version = ci.version + 1, updated_at = now()
+           FROM hsdg.government_extensions ge
+          WHERE ge.compliance_rule_id = ci.compliance_rule_id
+            AND ge.original_due_date = ci.statutory_deadline
+            AND ci.government_extension_id IS NULL
+            AND ci.statutory_deadline_override IS NULL
+            AND ci.workflow_status NOT IN ('filed', 'not_applicable')
+            AND ge.revised_due_date = (
+              SELECT max(g2.revised_due_date) FROM hsdg.government_extensions g2
+               WHERE g2.compliance_rule_id = ci.compliance_rule_id
+                 AND g2.original_due_date = ci.statutory_deadline)`,
+      );
+      return res.rowCount ?? 0;
+    });
+
+    const ids = await this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await client.query<{ id: string }>(
+        `SELECT e.id FROM hsdg.engagements e
+          WHERE e.kind = 'compliance' AND e.status <> ALL($1::text[])
+            AND EXISTS (SELECT 1 FROM hsdg.compliance_engagement_years y
+                         WHERE y.engagement_id = e.id AND y.status = 'open')
+          ORDER BY e.created_at`,
+        [CLOSED_ENGAGEMENT_STATUSES],
+      );
+      return rows.map((r) => r.id);
+    });
+
+    const totals: GenerateCalendarResult = { created: 0, moved: 0, flagged: 0, notApplicable: 0 };
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        const s = await this.db.withRlsContext(ctx, (client) =>
+          this.generator.generateForEngagement(client, id),
+        );
+        totals.created += s.created;
+        totals.moved += s.moved;
+        totals.flagged += s.flagged;
+        totals.notApplicable += s.notApplicable;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { extended, engagements: ids.length, failed, totals };
+  }
+
   // ── Verify ──────────────────────────────────────────────────────────────
 
   /**
