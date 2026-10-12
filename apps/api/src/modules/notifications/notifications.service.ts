@@ -164,7 +164,7 @@ export class NotificationsService {
       const { rows } = await client.query<NotificationRow>(
         `SELECT id, type, title, body, engagement_id, object_type, object_id, status, read_at, created_at
          FROM hsdg.notifications ${where}
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC, id DESC
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params,
       );
