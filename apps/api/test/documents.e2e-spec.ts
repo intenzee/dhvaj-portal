@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Phase 10 — Documents, through the HTTP API.
@@ -54,7 +55,7 @@ describe('Documents (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `D${unique()}`,
@@ -311,7 +312,7 @@ describe('Documents (e2e)', () => {
       expect(hit).toBeDefined();
       expect(hit!.title).toBe(title);
       expect(hit!.engagementId).toBe(eng);
-      expect(hit!.engagementCode).toMatch(/^ENG\d+$/);
+      expect(hit!.engagementCode).toMatch(/^(SA|CR|AS)\/\d+$/);
       expect(hit!.entityName).toBeTruthy();
     });
 

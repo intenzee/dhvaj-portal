@@ -34,7 +34,6 @@ describe('Statutory Audit — prior-year roll-forward (e2e §12)', () => {
 
   let entityId: string;
   let statAuditId: string;
-  let primaryServiceId: string;
   let currentEngId: string;
   let currentShellId: string;
 
@@ -46,18 +45,13 @@ describe('Statutory Audit — prior-year roll-forward (e2e §12)', () => {
       .set(bearer(pa))
       .send({
         entityId,
-        serviceId: primaryServiceId,
+        serviceId: statAuditId,
         financialYear,
         periodLabel: uniquePeriod(),
         status: 'accepted',
       })
       .expect(201);
     const engId = created.body.id as string;
-    await request(app.getHttpServer())
-      .post(`/api/v1/engagements/${engId}/services`)
-      .set(bearer(pa))
-      .send({ serviceId: statAuditId })
-      .expect(201);
     const shells = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/statutory-audit`)
       .set(bearer(pa))
@@ -73,7 +67,6 @@ describe('Statutory Audit — prior-year roll-forward (e2e §12)', () => {
     pb = await token('partner.b@dhvaj.in');
 
     entityId = await findId('/api/v1/entities?search=Acme&limit=100');
-    primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
 
     await createAuditFile('2023-24'); // prior year

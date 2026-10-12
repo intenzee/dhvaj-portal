@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Due-Date Classification & Service-Component Mapping (spec §2/§3/§6–§15/§19),
@@ -53,7 +54,7 @@ describe('Due-Date Classification & Government Extensions (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear,
         periodLabel: `C${unique()}`,

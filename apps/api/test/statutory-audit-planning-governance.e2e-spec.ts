@@ -100,18 +100,16 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
       typeSlug: 'private_limited',
       officeCode: 'NORTH',
     }).expect(201);
-    const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const e = await post(pa, '/api/v1/engagements', {
       entityId: entity.body.id,
-      serviceId: itr,
+      serviceId: stat,
       financialYear: '2024-25',
       periodLabel: `P${stamp()}`,
       status: 'accepted',
       engagementManagerEmployeeId: ids.get('Manager X'),
     }).expect(201);
     engId = e.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: stat }).expect(201);
     await post(pa, `/api/v1/engagements/${engId}/team`, {
       employeeId: ids.get('Senior Y'),
       roleOnEngagement: 'in_charge',
@@ -666,18 +664,16 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
         typeSlug: 'private_limited',
         officeCode: 'NORTH',
       }).expect(201);
-      const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
       const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
       const e = await post(pa, '/api/v1/engagements', {
         entityId: entity.body.id,
-        serviceId: itr,
+        serviceId: stat,
         financialYear: '2024-25',
         periodLabel: `P${stamp()}`,
         status: 'accepted',
         engagementManagerEmployeeId: ids.get('Manager X'),
       }).expect(201);
       const id = e.body.id as string;
-      await post(pa, `/api/v1/engagements/${id}/services`, { serviceId: stat }).expect(201);
       await post(pa, `/api/v1/engagements/${id}/team`, {
         employeeId: ids.get('Senior Y'),
         roleOnEngagement: 'in_charge',

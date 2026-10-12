@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Phase 11 — Notifications, through the HTTP API.
@@ -74,7 +75,7 @@ describe('Notifications (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(opts.epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `N${unique()}`,

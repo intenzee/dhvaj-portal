@@ -164,18 +164,16 @@ describe('Statutory Audit — 02.8 Track B records (e2e)', () => {
     pb = await token('partner.b@dhvaj.in');
 
     const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
-    const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     engId = (
       await post(pa, '/api/v1/engagements', {
         entityId,
-        serviceId: primaryServiceId,
+        serviceId: statAuditId,
         financialYear: '2024-25',
         periodLabel: uniquePeriod(),
         status: 'accepted',
       }).expect(201)
     ).body.id;
-    await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: statAuditId }).expect(201);
     shellId = (await get(pa, base()).expect(200)).body[0].workflowInstanceId;
     await su((c) =>
       c.query(

@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Reusable, versioned catalogue templates (§18/§25/§27) + the configuration
@@ -142,7 +143,7 @@ describe('Catalogue Templates (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2026-27',
           periodLabel: `T${unique()}`,

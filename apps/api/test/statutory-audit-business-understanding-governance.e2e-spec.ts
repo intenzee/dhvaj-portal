@@ -68,18 +68,16 @@ describe('Statutory Audit — 03.2 governance (e2e)', () => {
   };
 
   const newFile = async (entityId: string, financialYear: string) => {
-    const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const e = await post(pa, '/api/v1/engagements', {
       entityId,
-      serviceId: itr,
+      serviceId: stat,
       financialYear,
       periodLabel: `P${stamp()}`,
       status: 'accepted',
       engagementManagerEmployeeId: ids.get('Manager X'),
     }).expect(201);
     const id = e.body.id as string;
-    await post(pa, `/api/v1/engagements/${id}/services`, { serviceId: stat }).expect(201);
     await post(pa, `/api/v1/engagements/${id}/team`, {
       employeeId: ids.get('Senior Y'),
       roleOnEngagement: 'in_charge',

@@ -61,18 +61,16 @@ describe('Statutory Audit — 01.5 team independence declarations (e2e)', () => 
       typeSlug: 'private_limited',
       officeCode: 'NORTH',
     }).expect(201);
-    const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const eng = await post(pa, '/api/v1/engagements', {
       entityId: entity.body.id,
-      serviceId: itr,
+      serviceId: stat,
       financialYear: '2024-25',
       periodLabel: `P${stamp()}`,
       status: 'accepted',
       engagementManagerEmployeeId: managerId,
     }).expect(201);
     const engId = eng.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: stat }).expect(201);
     const accUrl = `/api/v1/engagements/${engId}/statutory-audit/acceptance`;
     const read = async (t: string) => (await get(t, accUrl)).body[0] as StatutoryAuditAcceptance;
     const shellId = (await read(pa)).workflowInstanceId;

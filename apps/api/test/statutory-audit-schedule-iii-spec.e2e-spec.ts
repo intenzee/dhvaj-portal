@@ -52,17 +52,15 @@ describe('Statutory Audit — 02.3 Schedule III spec (§5–§21)', () => {
   }
 
   const newEngagement = async (entityId: string, financialYear: string): Promise<File> => {
-    const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const eng = await post(pa, '/api/v1/engagements', {
       entityId,
-      serviceId: itr,
+      serviceId: stat,
       financialYear,
       periodLabel: `P${stamp()}`,
       status: 'accepted',
     }).expect(201);
     const engId = eng.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: stat }).expect(201);
     const shells = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/statutory-audit`)
       .set(bearer(pa))

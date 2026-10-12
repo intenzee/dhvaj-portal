@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 import { NotificationOutboxService } from '../src/modules/notifications/notification-outbox.service';
 import type { RlsContext } from '../src/database/rls-context';
 
@@ -55,7 +56,7 @@ describe('Notification delivery outbox (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2026-27',
           periodLabel: `OBX${unique()}`,

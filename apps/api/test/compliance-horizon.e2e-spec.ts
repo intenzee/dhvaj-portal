@@ -3,6 +3,7 @@ import request from 'supertest';
 import { addMonthsUTC, parseISODate, toISODate } from '../src/modules/compliance/compliance-calc';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Rolling recurring-work horizon (spec §18).
@@ -42,7 +43,7 @@ describe('Rolling recurring-work horizon (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `H${unique()}`,

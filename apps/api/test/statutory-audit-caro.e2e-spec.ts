@@ -48,25 +48,19 @@ describe('Statutory Audit — 02.4 CARO 2020 (e2e §9.4)', () => {
     pb = await token('partner.b@dhvaj.in');
 
     const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
-    const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await request(app.getHttpServer())
       .post('/api/v1/engagements')
       .set(bearer(pa))
       .send({
         entityId,
-        serviceId: primaryServiceId,
+        serviceId: statAuditId,
         financialYear: '2024-25',
         periodLabel: uniquePeriod(),
         status: 'accepted',
       })
       .expect(201);
     engId = created.body.id as string;
-    await request(app.getHttpServer())
-      .post(`/api/v1/engagements/${engId}/services`)
-      .set(bearer(pa))
-      .send({ serviceId: statAuditId })
-      .expect(201);
     const shells = await request(app.getHttpServer()).get(base()).set(bearer(pa)).expect(200);
     shellId = shells.body[0].workflowInstanceId as string;
   });

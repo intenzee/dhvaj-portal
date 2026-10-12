@@ -55,10 +55,9 @@ describe('Statutory Audit (e2e §35/§36)', () => {
 
   // ── helpers that build an audit file to a chosen depth ──────────────────────
 
-  /** Create a North-client engagement and add Statutory Audit → provisions the shell. */
+  /** Create a North-client Statutory Audit engagement → provisions the shell. */
   const provisionAuditFile = async (): Promise<{ engId: string; shellId: string }> => {
     const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
-    const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
 
     const created = await request(app.getHttpServer())
@@ -66,19 +65,13 @@ describe('Statutory Audit (e2e §35/§36)', () => {
       .set(bearer(pa))
       .send({
         entityId,
-        serviceId: primaryServiceId,
+        serviceId: statAuditId,
         financialYear: '2024-25',
         periodLabel: uniquePeriod(),
         status: 'accepted',
       })
       .expect(201);
     const engId = created.body.id as string;
-
-    await request(app.getHttpServer())
-      .post(`/api/v1/engagements/${engId}/services`)
-      .set(bearer(pa))
-      .send({ serviceId: statAuditId })
-      .expect(201);
 
     const shells = await request(app.getHttpServer())
       .get(`/api/v1/engagements/${engId}/statutory-audit`)

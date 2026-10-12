@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Phase 7 — Review & Sign-off Engine, through the HTTP API.
@@ -61,7 +62,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(opts.epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2024-25',
         periodLabel: uniquePeriod(),
@@ -512,7 +513,7 @@ describe('Review & Sign-off Engine (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),

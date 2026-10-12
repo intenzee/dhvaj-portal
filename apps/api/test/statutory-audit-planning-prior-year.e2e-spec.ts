@@ -38,17 +38,15 @@ describe('Statutory Audit — Section 03 from last year’s file (e2e)', () => {
     entityId: string,
     financialYear: string,
   ): Promise<{ engId: string; shellId: string; base: string }> => {
-    const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const eng = await post(pa, '/api/v1/engagements', {
       entityId,
-      serviceId: itr,
+      serviceId: stat,
       financialYear,
       periodLabel: `P${stamp()}`,
       status: 'accepted',
     }).expect(201);
     const engId = eng.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: stat }).expect(201);
     const shells = await get(`/api/v1/engagements/${engId}/statutory-audit`);
     const shellId = shells.body[0].workflowInstanceId as string;
     // Section 03 opens once the framework is approved (02.8 AF-02).

@@ -116,7 +116,6 @@ describe('Statutory Audit — 02.3 references, FS workbook, memo, evidence (e2e)
     const http = app.getHttpServer();
 
     const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
-    const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     engId = (
       await request(http)
@@ -124,18 +123,13 @@ describe('Statutory Audit — 02.3 references, FS workbook, memo, evidence (e2e)
         .set(bearer(pa))
         .send({
           entityId,
-          serviceId: primaryServiceId,
+          serviceId: statAuditId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
           status: 'accepted',
         })
         .expect(201)
     ).body.id as string;
-    await request(http)
-      .post(`/api/v1/engagements/${engId}/services`)
-      .set(bearer(pa))
-      .send({ serviceId: statAuditId })
-      .expect(201);
     const base = `/api/v1/engagements/${engId}/statutory-audit`;
     shellId = (await request(http).get(base).set(bearer(pa)).expect(200)).body[0]
       .workflowInstanceId as string;
