@@ -1066,6 +1066,85 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
   },
 ];
 
+/**
+ * Firm-policy rules (spec "Data model": every row in a stream tab is a
+ * compliance_instance, "including Inward reconciliation and Bookkeeping
+ * month-close, as firm-policy rules with internal dates"). They are not on the
+ * Recurring Summary sheet and carry no late fee: the due date is the firm's own
+ * (HSDG_RECURRING), set before the return the work feeds. The days are firm
+ * policy for the partners to confirm (open question 4). Seeded by
+ * 1770900000000_firm_policy_rules.sql, which the generator writes from here.
+ */
+export const FIRM_POLICY_RULES: SeedRule[] = [
+  {
+    code: 'GST_ITC_RECON_M',
+    name: 'Inward reconciliation (monthly)',
+    notes:
+      'Purchases and ITC: books vs GSTR-2B after IMS actions, reversals and RCM identified. ' +
+      'No return of its own; its end state is Reconciled and its figures feed the 3B. ' +
+      '2B is available on the 14th, so done by the 18th, ahead of the 3B on the 20th.',
+    stream: 'gst',
+    category: 'gst',
+    dueDateCategory: 'HSDG_RECURRING',
+    registrationScope: 'gstin',
+    frequency: 'monthly',
+    section: 'inward',
+    basis: 'period_end',
+    offsetDays: 18,
+    condition: eq('gst_scheme', 'regular'),
+    internalSlaOffsetDays: 2,
+    versions: single('Inward reconciliation'),
+  },
+  {
+    code: 'GST_ITC_RECON_Q',
+    name: 'Inward reconciliation (QRMP, quarterly)',
+    notes:
+      'QRMP purchases and ITC for the quarter, reconciled ahead of the quarterly 3B ' +
+      '(22nd / 24th after the quarter).',
+    stream: 'gst',
+    category: 'gst',
+    dueDateCategory: 'HSDG_RECURRING',
+    registrationScope: 'gstin',
+    frequency: 'quarterly',
+    section: 'inward',
+    basis: 'period_end',
+    offsetDays: 18,
+    condition: eq('gst_scheme', 'qrmp'),
+    internalSlaOffsetDays: 2,
+    versions: single('Inward reconciliation (QRMP)'),
+  },
+  {
+    code: 'BK_MONTH_CLOSE',
+    name: 'Bookkeeping month-close',
+    notes:
+      'Data received, bank reconciliation, ledger scrutiny, GST / TDS reconciliation, books ' +
+      'closed — by the 15th of the next month, so the month feeds MIS and the 3B checks.',
+    stream: 'bookkeeping',
+    category: 'other',
+    dueDateCategory: 'HSDG_RECURRING',
+    registrationScope: 'entity',
+    frequency: 'monthly',
+    basis: 'period_end',
+    offsetDays: 15,
+    internalSlaOffsetDays: 3,
+    versions: single('Books closed'),
+  },
+  {
+    code: 'MIS_MONTHLY_PACK',
+    name: 'MIS pack (monthly)',
+    notes: 'MIS pack and variance commentary, sent to the client by the 20th of the next month.',
+    stream: 'mis',
+    category: 'other',
+    dueDateCategory: 'HSDG_RECURRING',
+    registrationScope: 'entity',
+    frequency: 'monthly',
+    basis: 'period_end',
+    offsetDays: 20,
+    internalSlaOffsetDays: 3,
+    versions: single('MIS pack'),
+  },
+];
+
 /** Extensions seeded on the new rules (CBDT, 28 Sep 2026; 3CEB and TP ITR not extended). */
 export const CALENDAR_V2_EXTENSIONS = [
   { ruleCode: 'IT_TAX_AUDIT', original: '2026-09-30', revised: '2026-10-21' },

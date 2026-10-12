@@ -20,7 +20,7 @@ import type { TaskActionContext, WorkTask } from '@/lib/work-types';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { TaskActions } from '@/components/tasks/task-actions';
-import { FilingStatusBadge, daysLeftText, dueTone } from './filing-status';
+import { FilingStatusBadge, daysLeftText, dueTone, filingEnd } from './filing-status';
 
 /** The part of the created client-upload link the page needs. */
 interface UploadLink {
@@ -149,7 +149,7 @@ export function InstanceWorkspace({
       )}
 
       {ws.filing ? (
-        <FiledRecord filing={ws.filing} canUndo={ws.can.undo} busy={write.isPending} run={run} engagementId={inst.engagementId} />
+        <FiledRecord filing={ws.filing} end={filingEnd(inst.stream, inst.section)} canUndo={ws.can.undo} busy={write.isPending} run={run} engagementId={inst.engagementId} />
       ) : (
         ws.can.lodge && (
           <LodgeForm
@@ -229,6 +229,8 @@ function WorkspaceHeader({ ws, ctx }: { ws: Workspace; ctx: TaskActionContext })
           status={inst.workflowStatus}
           isLate={ws.filing?.isLate}
           isOverdue={!filed && inst.daysLeft < 0}
+          stream={inst.stream}
+          section={inst.section}
         />
         {inst.isProvisional && <Badge tone="warn">Provisional dates</Badge>}
         {inst.verify && <Badge tone="warn">Verify rule</Badge>}
@@ -708,8 +710,15 @@ function LodgeForm({
   const [filedBy, setFiledBy] = useState(me ?? '');
   const [uploading, setUploading] = useState(false);
   const ackSlot = ws.slots.find((sl) => sl.slotCode.startsWith('ACK')) ?? null;
+  const end = filingEnd(ws.instance.stream, ws.instance.section);
   const [referenceKind, setReferenceKind] = useState<FilingReferenceKind>(
-    ws.instance.stream === 'roc' ? 'srn' : ws.instance.stream === 'gst' ? 'arn' : 'ack',
+    end.done !== 'Filed'
+      ? 'internal'
+      : ws.instance.stream === 'roc'
+        ? 'srn'
+        : ws.instance.stream === 'gst'
+          ? 'arn'
+          : 'ack',
   );
   const [referenceNo, setReferenceNo] = useState('');
   const [filedOn, setFiledOn] = useState(today());
@@ -758,7 +767,7 @@ function LodgeForm({
   if (!open) {
     return (
       <Button onClick={() => setOpen(true)} aria-expanded={false}>
-        Lodge filing
+        {end.action}
       </Button>
     );
   }
@@ -785,7 +794,7 @@ function LodgeForm({
             ...(num(interestPaid) != null ? { interestPaid: num(interestPaid) } : {}),
             ...(remarks.trim() ? { remarks: remarks.trim() } : {}),
           },
-          'Filing lodged.',
+          end.done === 'Filed' ? 'Filing lodged.' : `${end.done}.`,
         ).then((ok) => ok && setOpen(false));
       }}
     >
@@ -884,12 +893,14 @@ function LodgeForm({
 
 function FiledRecord({
   filing,
+  end,
   canUndo,
   busy,
   run,
   engagementId,
 }: {
   filing: FilingRecordView;
+  end: { done: string };
   canUndo: boolean;
   busy: boolean;
   run: Run;
@@ -898,10 +909,10 @@ function FiledRecord({
   return (
     <section aria-label="Filed" className="space-y-1 rounded-md border border-success-500/30 bg-success-50/50 p-2.5 text-xs">
       <p className="text-sm font-medium text-success-700">
-        Filed {formatDate(filing.filedOn)} · {REFERENCE_LABEL[filing.referenceKind]}{' '}
+        {end.done} {formatDate(filing.filedOn)} · {REFERENCE_LABEL[filing.referenceKind]}{' '}
         <span className="font-mono">{filing.referenceNo}</span>
         {filing.isNil && ' · Nil'}
-        {filing.isLate && <Badge tone="warn" className="ml-2">Filed late</Badge>}
+        {filing.isLate && <Badge tone="warn" className="ml-2">{end.done} late</Badge>}
       </p>
       <p className="text-ink-muted">
         By {filing.filedByName ?? '—'} · recorded {formatDate(filing.recordedAt)}

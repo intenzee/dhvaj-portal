@@ -21,6 +21,9 @@ describe('filing rules', () => {
     expect(defaultReferenceKind('tds')).toBe('token');
     expect(defaultReferenceKind('income_tax')).toBe('ack');
     expect(defaultReferenceKind(null)).toBe('internal');
+    expect(defaultReferenceKind('gst', 'outward')).toBe('arn');
+    expect(defaultReferenceKind('gst', 'inward')).toBe('internal');
+    expect(defaultReferenceKind('bookkeeping')).toBe('internal');
   });
 
   it('checks a GST ARN is 15 upper-case alphanumerics, and normalises it', () => {

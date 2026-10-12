@@ -232,4 +232,117 @@ describe('Firm calendar v2 (e2e)', () => {
       expect(ids).toContain(eng);
     });
   });
+
+  describe('firm-policy items: Inward reconciliation, Bookkeeping, MIS', () => {
+    let firmEng: string;
+
+    beforeAll(async () => {
+      const n = String(Date.now()).slice(-4);
+      const pan = `AAACF${n}Q`;
+      const entity = await http()
+        .post('/api/v1/entities')
+        .set(bearer(pa))
+        .send({
+          legalName: `Firm Policy Traders ${n} Pvt Ltd`,
+          typeSlug: 'private_limited',
+          officeCode: 'NORTH',
+          pan,
+          registrations: [
+            { registrationType: 'gstin', registrationNumber: `19${pan}1Z5`, stateCode: '19' },
+          ],
+        })
+        .expect(201);
+      const res = await http()
+        .post('/api/v1/engagements')
+        .set(bearer(pa))
+        .send({
+          kind: 'compliance',
+          entityId: entity.body.id,
+          status: 'accepted',
+          financialYear: '2026-27',
+          streams: ['gst', 'bookkeeping', 'mis'],
+          years: [{ financialYear: '2026-27' }],
+        })
+        .expect(201);
+      firmEng = res.body.id as string;
+    });
+
+    it('gives a regular GSTIN 12 GSTR-1, 12 GSTR-3B and 12 Inward reconciliations, and 12 month-ends', async () => {
+      const { rows } = await superuser((db) =>
+        db.query<{ code: string; n: number }>(
+          `SELECT r.code, count(*)::int AS n
+             FROM hsdg.compliance_instances ci
+             JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
+            WHERE ci.engagement_id = $1 AND ci.financial_year = '2026-27'
+            GROUP BY r.code`,
+          [firmEng],
+        ),
+      );
+      const n = Object.fromEntries(rows.map((r) => [r.code, r.n]));
+      expect(n).toMatchObject({
+        GST_GSTR1_M: 12,
+        GST_GSTR3B_M: 12,
+        GST_ITC_RECON_M: 12,
+        BK_MONTH_CLOSE: 12,
+        MIS_MONTHLY_PACK: 12,
+      });
+      expect(n.GST_ITC_RECON_Q).toBeUndefined();
+
+      const tree = await http()
+        .get(`/api/v1/engagements/${firmEng}/streams/bookkeeping/tree?fy=2026-27`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(tree.body.periods).toHaveLength(12);
+      const sep = tree.body.periods.find((p: { periodKey: string }) => p.periodKey === '2026-09');
+      expect(sep.items[0]).toMatchObject({
+        ruleCode: 'BK_MONTH_CLOSE',
+        label: 'Books closed',
+        dueDate: '2026-10-15',
+        requiredTotal: 6,
+      });
+    });
+
+    it('closes an Inward reconciliation with an internal reference and no late fee', async () => {
+      const tree = await http()
+        .get(`/api/v1/engagements/${firmEng}/streams/gst/tree?fy=2026-27`)
+        .set(bearer(pa))
+        .expect(200);
+      const sep = tree.body.periods.find((p: { periodKey: string }) => p.periodKey === '2026-09');
+      const inward = sep.sections.inward[0];
+      expect(inward).toMatchObject({ ruleCode: 'GST_ITC_RECON_M', dueDate: '2026-10-18' });
+
+      const ws = await http()
+        .get(`/api/v1/compliance-instances/${inward.instanceId}`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(ws.body.instance.lateCharges).toBeNull();
+      expect(ws.body.checklist.at(-1)).toMatchObject({
+        itemCode: 'LODGE',
+        label: 'Mark reconciled',
+      });
+
+      const up = await http()
+        .post(`/api/v1/compliance-instances/${inward.instanceId}/slots/ITC_RECON/documents`)
+        .set(bearer(pa))
+        .send({
+          filename: 'itc-recon.xlsx',
+          contentType: 'application/pdf',
+          contentBase64: Buffer.from('books vs 2B').toString('base64'),
+        })
+        .expect(201);
+      const doc = up.body.slots.find((s: { slotCode: string }) => s.slotCode === 'ITC_RECON')
+        .documents[0].id as string;
+      const lodged = await http()
+        .post(`/api/v1/compliance-instances/${inward.instanceId}/lodge`)
+        .set(bearer(pa))
+        .send({ referenceNo: 'REC-2026-09', filedOn: '2026-10-12', ackDocumentId: doc })
+        .expect(201);
+      expect(lodged.body.instance.workflowStatus).toBe('filed');
+      expect(lodged.body.filing).toMatchObject({
+        referenceKind: 'internal',
+        referenceNo: 'REC-2026-09',
+        isLate: false,
+      });
+    });
+  });
 });

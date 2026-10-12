@@ -1,7 +1,8 @@
 /**
- * Generates db/migrations/1770100000000_calendar_v2_rules.sql from the typed
- * rule catalogue in apps/api/src/modules/compliance/calendar-v2-rules.ts, so
- * the seeded encodings are exactly the ones the unit tests check.
+ * Generates db/migrations/1770100000000_calendar_v2_rules.sql and
+ * 1770900000000_firm_policy_rules.sql from the typed rule catalogues in
+ * apps/api/src/modules/compliance/calendar-v2-rules.ts, so the seeded encodings
+ * are exactly the ones the unit tests check.
  *
  *   npx ts-node -P apps/api/tsconfig.json scripts/gen-calendar-v2-rules.ts
  *
@@ -13,9 +14,13 @@ import { STREAM_SERVICE_CODE } from '@hsdg/contracts';
 import {
   CALENDAR_V2_EXTENSIONS,
   CALENDAR_V2_RULES,
+  FIRM_POLICY_RULES,
+  type SeedRule,
 } from '../apps/api/src/modules/compliance/calendar-v2-rules';
 
-const OUT = join(__dirname, '..', 'db', 'migrations', '1770100000000_calendar_v2_rules.sql');
+const MIGRATIONS = join(__dirname, '..', 'db', 'migrations');
+const OUT = join(MIGRATIONS, '1770100000000_calendar_v2_rules.sql');
+const FIRM_OUT = join(MIGRATIONS, '1770900000000_firm_policy_rules.sql');
 const RETIRE_FROM = '2026-04-01';
 const RETIRE_MARK = 'calendar-v2 retirement';
 
@@ -25,44 +30,49 @@ function dayBefore(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-const rules = CALENDAR_V2_RULES.map((r) => ({
-  code: r.code,
-  name: r.name,
-  description: r.notes,
-  category: r.category,
-  due_date_category: r.dueDateCategory,
-  service_code: STREAM_SERVICE_CODE[r.stream],
-}));
-
-const versions = CALENDAR_V2_RULES.flatMap((r) =>
-  r.versions.map((v, i) => ({
+const ruleRows = (catalogue: SeedRule[]) =>
+  catalogue.map((r) => ({
     code: r.code,
-    version: i + 1,
-    effective_from: v.effectiveFrom,
-    effective_to: r.versions[i + 1] ? dayBefore(r.versions[i + 1]!.effectiveFrom) : null,
-    calculation_basis: r.basis,
-    offset_months: r.offsetMonths ?? 0,
-    offset_days: r.offsetDays ?? 0,
-    internal_sla_offset_days: r.internalSlaOffsetDays,
-    condition: r.condition ?? null,
-    notes: r.notes,
-    stream: r.stream,
-    registration_scope: r.registrationScope,
-    frequency: r.frequency,
-    form_label: v.formLabel,
-    section: r.section ?? null,
-    schedule: v.schedule ?? r.schedule ?? null,
-    period_overrides: r.periodOverrides ?? null,
-    period_filter: r.periodFilter ?? null,
-    event_type: r.eventType ?? null,
-    provisional_event_rule: r.provisionalEventRule ?? null,
-    variants: r.variants ?? null,
-    is_optional: r.isOptional ?? false,
-    late_fee_note: r.lateFeeNote ?? null,
-    verification: r.verification ?? 'verified',
-    source_ref: v.sourceRef ?? r.sourceRef ?? null,
-  })),
-);
+    name: r.name,
+    description: r.notes,
+    category: r.category,
+    due_date_category: r.dueDateCategory,
+    service_code: STREAM_SERVICE_CODE[r.stream],
+  }));
+
+const versionRows = (catalogue: SeedRule[]) =>
+  catalogue.flatMap((r) =>
+    r.versions.map((v, i) => ({
+      code: r.code,
+      version: i + 1,
+      effective_from: v.effectiveFrom,
+      effective_to: r.versions[i + 1] ? dayBefore(r.versions[i + 1]!.effectiveFrom) : null,
+      calculation_basis: r.basis,
+      offset_months: r.offsetMonths ?? 0,
+      offset_days: r.offsetDays ?? 0,
+      internal_sla_offset_days: r.internalSlaOffsetDays,
+      condition: r.condition ?? null,
+      notes: r.notes,
+      stream: r.stream,
+      registration_scope: r.registrationScope,
+      frequency: r.frequency,
+      form_label: v.formLabel,
+      section: r.section ?? null,
+      schedule: v.schedule ?? r.schedule ?? null,
+      period_overrides: r.periodOverrides ?? null,
+      period_filter: r.periodFilter ?? null,
+      event_type: r.eventType ?? null,
+      provisional_event_rule: r.provisionalEventRule ?? null,
+      variants: r.variants ?? null,
+      is_optional: r.isOptional ?? false,
+      late_fee_note: r.lateFeeNote ?? null,
+      verification: r.verification ?? 'verified',
+      source_ref: v.sourceRef ?? r.sourceRef ?? null,
+    })),
+  );
+
+const rules = ruleRows(CALENDAR_V2_RULES);
+const versions = versionRows(CALENDAR_V2_RULES);
 
 const statementSchedule = CALENDAR_V2_RULES.find((r) => r.code === 'TDS_F140')!.schedule;
 const certificateSchedule = CALENDAR_V2_RULES.find((r) => r.code === 'TDS_F131')!.schedule;
@@ -152,6 +162,40 @@ const retirements = [
 /** One row per line keeps the generated migration reviewable. */
 const json = (rows: readonly unknown[]) =>
   `$json$[\n${rows.map((r) => JSON.stringify(r)).join(',\n')}\n]$json$::jsonb`;
+/** Insert rules (on their stream service) and their versions; re-runnable. */
+const insertRules = (
+  ruleList: ReturnType<typeof ruleRows>,
+  versionList: ReturnType<typeof versionRows>,
+) => `INSERT INTO hsdg.compliance_rules
+  (code, name, description, service_id, category, is_active, due_date_category, due_date_source)
+SELECT x.code, x.name, x.description, s.id, x.category, true, x.due_date_category, 'LAW_RULE'
+FROM jsonb_to_recordset(${json(ruleList)})
+  AS x(code text, name text, description text, category text, due_date_category text, service_code text)
+JOIN hsdg.services s ON s.code = x.service_code
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO hsdg.compliance_rule_versions
+  (compliance_rule_id, version, effective_from, effective_to, calculation_basis, offset_months,
+   offset_days, working_day_adjustment, internal_sla_offset_days, condition, notes, stream,
+   registration_scope, frequency, form_label, section, schedule, period_overrides, period_filter,
+   event_type, provisional_event_rule, variants, is_optional, late_fee_note, verification, source_ref)
+SELECT r.id, v.version, v.effective_from, v.effective_to, v.calculation_basis, v.offset_months,
+       v.offset_days, 'none', v.internal_sla_offset_days, v.condition, v.notes, v.stream,
+       v.registration_scope, v.frequency, v.form_label, v.section, v.schedule, v.period_overrides,
+       CASE WHEN v.period_filter IS NULL THEN NULL
+            ELSE ARRAY(SELECT jsonb_array_elements_text(v.period_filter)) END,
+       v.event_type, v.provisional_event_rule, v.variants, v.is_optional, v.late_fee_note,
+       v.verification, v.source_ref
+FROM jsonb_to_recordset(${json(versionList)})
+  AS v(code text, version int, effective_from date, effective_to date, calculation_basis text,
+       offset_months int, offset_days int, internal_sla_offset_days int, condition jsonb, notes text,
+       stream text, registration_scope text, frequency text, form_label text, section text,
+       schedule jsonb, period_overrides jsonb, period_filter jsonb, event_type text,
+       provisional_event_rule jsonb, variants jsonb, is_optional boolean, late_fee_note text,
+       verification text, source_ref text)
+JOIN hsdg.compliance_rules r ON r.code = v.code
+ON CONFLICT (compliance_rule_id, version) DO NOTHING;`;
+
 const newCodes = `ARRAY[${CALENDAR_V2_RULES.map((r) => `'${r.code}'`).join(',')}]`;
 const retiredCodes = `ARRAY[${retirements.map((r) => `'${r.code}'`).join(',')}]`;
 const RLS_TABLES = [
@@ -182,35 +226,7 @@ const sql = `-- ─────────────────────�
 
 ${rls('NO FORCE')}
 
-INSERT INTO hsdg.compliance_rules
-  (code, name, description, service_id, category, is_active, due_date_category, due_date_source)
-SELECT x.code, x.name, x.description, s.id, x.category, true, x.due_date_category, 'LAW_RULE'
-FROM jsonb_to_recordset(${json(rules)})
-  AS x(code text, name text, description text, category text, due_date_category text, service_code text)
-JOIN hsdg.services s ON s.code = x.service_code
-ON CONFLICT (code) DO NOTHING;
-
-INSERT INTO hsdg.compliance_rule_versions
-  (compliance_rule_id, version, effective_from, effective_to, calculation_basis, offset_months,
-   offset_days, working_day_adjustment, internal_sla_offset_days, condition, notes, stream,
-   registration_scope, frequency, form_label, section, schedule, period_overrides, period_filter,
-   event_type, provisional_event_rule, variants, is_optional, late_fee_note, verification, source_ref)
-SELECT r.id, v.version, v.effective_from, v.effective_to, v.calculation_basis, v.offset_months,
-       v.offset_days, 'none', v.internal_sla_offset_days, v.condition, v.notes, v.stream,
-       v.registration_scope, v.frequency, v.form_label, v.section, v.schedule, v.period_overrides,
-       CASE WHEN v.period_filter IS NULL THEN NULL
-            ELSE ARRAY(SELECT jsonb_array_elements_text(v.period_filter)) END,
-       v.event_type, v.provisional_event_rule, v.variants, v.is_optional, v.late_fee_note,
-       v.verification, v.source_ref
-FROM jsonb_to_recordset(${json(versions)})
-  AS v(code text, version int, effective_from date, effective_to date, calculation_basis text,
-       offset_months int, offset_days int, internal_sla_offset_days int, condition jsonb, notes text,
-       stream text, registration_scope text, frequency text, form_label text, section text,
-       schedule jsonb, period_overrides jsonb, period_filter jsonb, event_type text,
-       provisional_event_rule jsonb, variants jsonb, is_optional boolean, late_fee_note text,
-       verification text, source_ref text)
-JOIN hsdg.compliance_rules r ON r.code = v.code
-ON CONFLICT (compliance_rule_id, version) DO NOTHING;
+${insertRules(rules, versions)}
 
 -- CBDT Circular (28 Sep 2026) on the new rules; 3CEB and the TP ITR are not extended.
 INSERT INTO hsdg.government_extensions
@@ -299,3 +315,154 @@ ${rls('FORCE')}
 
 writeFileSync(OUT, sql);
 console.log(`wrote ${OUT} (${CALENDAR_V2_RULES.length} rules, ${versions.length} versions)`);
+
+// ── Firm-policy rules: Inward reconciliation, Bookkeeping month-close, MIS ──
+
+/** Checklists for the streams that had none (Inward uses FILING_GST_INWARD). */
+const FIRM_TEMPLATES = [
+  {
+    code: 'FILING_BOOKKEEPING',
+    name: 'Bookkeeping — month-close',
+    body: {
+      items: [
+        {
+          code: 'DATA_RECEIVED',
+          label: 'Data received (bank statements, bills, vouchers)',
+          slotCode: 'CLIENT_DATA',
+          required: true,
+          sequence: 1,
+          autoTick: 'document',
+          note: 'Client data; internal date 5th of next month',
+        },
+        {
+          code: 'BANK_RECON',
+          label: 'Bank reconciliation',
+          slotCode: 'BANK_RECON',
+          required: true,
+          sequence: 2,
+          autoTick: 'document',
+        },
+        { code: 'LEDGER_SCRUTINY', label: 'Ledger scrutiny', required: true, sequence: 3 },
+        {
+          code: 'TAX_RECON',
+          label: 'GST / TDS reconciliation with the books',
+          slotCode: 'TAX_RECON',
+          required: true,
+          sequence: 4,
+          autoTick: 'document',
+        },
+        { code: 'REVIEW', label: 'Review', required: true, sequence: 5, autoTick: 'review' },
+        {
+          code: 'LODGE',
+          label: 'Books closed',
+          slotCode: 'TRIAL_BALANCE',
+          required: true,
+          sequence: 6,
+          autoTick: 'lodge',
+        },
+      ],
+    },
+  },
+  {
+    code: 'FILING_MIS',
+    name: 'MIS — monthly pack',
+    body: {
+      items: [
+        {
+          code: 'BOOKS_CLOSED',
+          label: 'Books closed for the month',
+          required: true,
+          sequence: 1,
+          note: 'From the Bookkeeping tab',
+        },
+        {
+          code: 'MIS_PACK',
+          label: 'MIS pack prepared',
+          slotCode: 'MIS_PACK',
+          required: true,
+          sequence: 2,
+          autoTick: 'document',
+        },
+        { code: 'VARIANCE', label: 'Variance commentary written', required: true, sequence: 3 },
+        { code: 'REVIEW', label: 'Review', required: true, sequence: 4, autoTick: 'review' },
+        {
+          code: 'LODGE',
+          label: 'Sent to client',
+          slotCode: 'MIS_SENT',
+          required: true,
+          sequence: 5,
+          autoTick: 'lodge',
+        },
+      ],
+    },
+  },
+];
+
+const firmCodes = `ARRAY[${FIRM_POLICY_RULES.map((r) => `'${r.code}'`).join(',')}]`;
+const templateCodes = `ARRAY[${FIRM_TEMPLATES.map((t) => `'${t.code}'`).join(',')}]`;
+const TEMPLATE_TABLES = ['catalogue_templates', 'catalogue_template_versions'];
+const templateRls = (mode: 'NO FORCE' | 'FORCE') =>
+  TEMPLATE_TABLES.map((t) => `ALTER TABLE hsdg.${t} ${mode} ROW LEVEL SECURITY;`).join('\n');
+
+const firmSql = `-- ─────────────────────────────────────────────────────────────────────────
+-- Firm-policy rules (spec "Data model": every row in a stream tab is a
+-- compliance_instance, including Inward reconciliation and Bookkeeping
+-- month-close). GENERATED by scripts/gen-calendar-v2-rules.ts from
+-- FIRM_POLICY_RULES in apps/api/src/modules/compliance/calendar-v2-rules.ts —
+-- edit the catalogue and re-run the script; do not edit this file by hand.
+--
+--   * ${FIRM_POLICY_RULES.map((r) => r.code).join(', ')}
+--     (HSDG_RECURRING: the firm's own dates, no late fee).
+--   * Checklists FILING_BOOKKEEPING and FILING_MIS; Inward uses the existing
+--     FILING_GST_INWARD.
+-- Existing engagements pick the new items up the next time their calendar is
+-- generated (adding a year, a profile change, or the nightly run).
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Up Migration
+
+${rls('NO FORCE')}
+${templateRls('NO FORCE')}
+
+${insertRules(ruleRows(FIRM_POLICY_RULES), versionRows(FIRM_POLICY_RULES))}
+
+INSERT INTO hsdg.catalogue_templates (template_type, code, name, description)
+SELECT 'checklist', t.code, t.name, 'Filing workspace checklist (firm-policy rules).'
+FROM jsonb_to_recordset(${json(FIRM_TEMPLATES)}) AS t(code text, name text, body jsonb)
+ON CONFLICT (code) DO NOTHING;
+INSERT INTO hsdg.catalogue_template_versions (catalogue_template_id, version, effective_from, body, notes)
+SELECT ct.id, 1, DATE '2017-04-01', t.body, 'Seeded by 1770900000000_firm_policy_rules'
+FROM jsonb_to_recordset(${json(FIRM_TEMPLATES)}) AS t(code text, name text, body jsonb)
+JOIN hsdg.catalogue_templates ct ON ct.code = t.code
+ON CONFLICT DO NOTHING;
+
+${templateRls('FORCE')}
+${rls('FORCE')}
+
+-- Down Migration
+
+${rls('NO FORCE')}
+${templateRls('NO FORCE')}
+
+DELETE FROM hsdg.catalogue_template_versions v USING hsdg.catalogue_templates t
+ WHERE v.catalogue_template_id = t.id AND t.code = ANY(${templateCodes});
+DELETE FROM hsdg.catalogue_templates WHERE code = ANY(${templateCodes});
+
+DELETE FROM hsdg.compliance_instances ci
+ USING hsdg.compliance_rules r
+ WHERE r.id = ci.compliance_rule_id AND r.code = ANY(${firmCodes});
+
+DELETE FROM hsdg.compliance_rule_versions v
+ USING hsdg.compliance_rules r
+ WHERE r.id = v.compliance_rule_id AND r.code = ANY(${firmCodes});
+
+DELETE FROM hsdg.compliance_rules WHERE code = ANY(${firmCodes});
+
+${templateRls('FORCE')}
+${rls('FORCE')}
+`;
+
+writeFileSync(FIRM_OUT, firmSql);
+console.log(
+  `wrote ${FIRM_OUT} (${FIRM_POLICY_RULES.length} rules, ${FIRM_TEMPLATES.length} templates)`,
+);

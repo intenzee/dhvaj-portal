@@ -18,7 +18,7 @@ import { Card, CardBody, CardHeader, CardTitle, EmptyState, Spinner } from '@/co
 import { Select } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 import { WorkList } from '@/components/tasks/work-list';
-import { FILING_STATUS_LABEL } from './filing-status';
+import { filingEnd, filingStatusLabel } from './filing-status';
 import { InstanceWorkspace } from './instance-workspace';
 
 const GST_SECTIONS: { key: PeriodSection; label: string }[] = [
@@ -46,10 +46,11 @@ export function periodParam(stream: Stream, periodKey: string): { key: 'm' | 'p'
   return m ? { key: 'm', value: m } : { key: 'p', value: periodKey };
 }
 
-function Pill({ item, label }: { item: TreeItem; label?: string }): JSX.Element {
+function Pill({ item, stream, label }: { item: TreeItem; stream: Stream; label?: string }): JSX.Element {
+  const done = filingEnd(stream, item.section).done.toLowerCase();
   return (
     <span
-      title={`${item.label}: ${FILING_STATUS_LABEL[item.workflowStatus]}${item.filedOn ? `, filed ${formatDate(item.filedOn)}` : ''}`}
+      title={`${item.label}: ${filingStatusLabel(item.workflowStatus, stream, item.section)}${item.filedOn ? `, ${done} ${formatDate(item.filedOn)}` : ''}`}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${pillTone(item)}`}
     >
       {label ?? item.label}
@@ -196,7 +197,7 @@ export function StreamTab({
                   onClick={() => setAnnualOpen(annualOpen === a.instanceId ? null : a.instanceId)}
                 >
                   <ExpandToggle open={annualOpen === a.instanceId} />
-                  <Pill item={a} label={`${a.label} · ${formatDate(a.dueDate)}`} />
+                  <Pill item={a} stream={stream} label={`${a.label} · ${formatDate(a.dueDate)}`} />
                 </button>
               ))}
             </div>
@@ -247,10 +248,10 @@ export function StreamTab({
                         {sectioned
                           ? GST_SECTIONS.flatMap((s) =>
                               (p.sections[s.key] ?? []).map((i) => (
-                                <Pill key={i.instanceId} item={i} label={`${s.label}: ${i.label}`} />
+                                <Pill key={i.instanceId} item={i} stream={stream} label={`${s.label}: ${i.label}`} />
                               )),
                             )
-                          : p.items.map((i) => <Pill key={i.instanceId} item={i} />)}
+                          : p.items.map((i) => <Pill key={i.instanceId} item={i} stream={stream} />)}
                       </span>
                       {p.nextAction && (
                         <span className="ml-auto text-xs text-ink-muted">Next: {p.nextAction}</span>
