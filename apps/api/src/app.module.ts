@@ -29,6 +29,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { CommercialModule } from './modules/commercial/commercial.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.module';
+import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module';
 
 /**
  * Composition root of the modular monolith.
@@ -79,6 +80,7 @@ import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.
     }),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    FeatureFlagsModule,
     HealthModule,
     AuditModule,
     IdentityModule,

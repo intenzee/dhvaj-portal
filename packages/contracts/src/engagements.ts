@@ -15,6 +15,9 @@ export const ENGAGEMENT_STATUS = {
   declined: 'declined',
   withdrawn: 'withdrawn',
   cancelled: 'cancelled',
+  /** A per-FY Compliance engagement folded into the entity's standing one
+   *  (merged_into_id points at the survivor). Terminal. */
+  merged: 'merged',
 } as const;
 export type EngagementStatus = (typeof ENGAGEMENT_STATUS)[keyof typeof ENGAGEMENT_STATUS];
 export const ENGAGEMENT_STATUSES: EngagementStatus[] = Object.values(ENGAGEMENT_STATUS);
