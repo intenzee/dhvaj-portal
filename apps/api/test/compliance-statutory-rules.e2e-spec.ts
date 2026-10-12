@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Seeded statutory rules (§4/§6–§15, migration 0035). The catalogue now ships
@@ -36,7 +37,7 @@ describe('Seeded statutory compliance rules (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `STR${unique()}`,

@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Phase 8 — Compliance Engine, through the HTTP API.
@@ -51,7 +52,7 @@ describe('Compliance Engine (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear,
         periodLabel: `C${unique()}`,
@@ -601,7 +602,7 @@ describe('Compliance Engine (e2e)', () => {
         cal.body.items as Array<{ id: string; engagementCode: string; entityName: string }>
       ).find((i) => i.id === gen.body.id);
       expect(mine).toBeDefined();
-      expect(mine!.entityName).toBe('Bharat Textiles LLP');
+      expect(mine!.entityName).toMatch(/^E2E client .* \(ENT\d+\)$/);
 
       // An unrelated partner does NOT see it on their calendar (RLS-scoped).
       const pbCal = await request(app.getHttpServer())

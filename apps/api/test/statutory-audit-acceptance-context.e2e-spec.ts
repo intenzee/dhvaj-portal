@@ -52,19 +52,15 @@ describe('Statutory Audit — Section 01 roll-forward and review notes (e2e)', (
       typeSlug: 'private_limited',
       officeCode: 'NORTH',
     }).expect(201);
-    const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const file = async (financialYear: string): Promise<string> => {
       const eng = await post(pa, '/api/v1/engagements', {
         entityId: entity.body.id,
-        serviceId: itr,
+        serviceId: stat,
         financialYear,
         periodLabel: `P${stamp()}`,
         status: 'accepted',
       }).expect(201);
-      await post(pa, `/api/v1/engagements/${eng.body.id}/services`, { serviceId: stat }).expect(
-        201,
-      );
       return eng.body.id as string;
     };
 

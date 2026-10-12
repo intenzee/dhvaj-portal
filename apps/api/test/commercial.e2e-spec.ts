@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Commercial Scope & Billing (spec §31), Notes (§26) and the out-of-scope Task
@@ -46,7 +47,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `C${unique()}`,
@@ -217,7 +218,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
   describe('Registration write-back (§40)', () => {
     it('records a registration-work number into the client Registration Master', async () => {
       const pa = await token('partner.a@dhvaj.in');
-      const entityId = await findEntityId('Bharat');
+      const entityId = await freshClient(await findEntityId('Bharat'));
       const serviceId = await findServiceId('GST_REGISTRATION');
       const engRes = await request(app.getHttpServer())
         .post('/api/v1/engagements')

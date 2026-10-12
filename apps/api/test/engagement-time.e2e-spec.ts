@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Engagement time tracking (ADR-0034) through the HTTP API: a manual stopwatch
@@ -46,7 +47,7 @@ describe('Engagement Time Tracking (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(pa))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2024-25',
         periodLabel: uniquePeriod(),

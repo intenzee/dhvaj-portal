@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Conditional applicability by turnover threshold (§17). A rule version carries a
@@ -36,7 +37,7 @@ describe('Conditional applicability by turnover (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(mp))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `APP${unique()}`,

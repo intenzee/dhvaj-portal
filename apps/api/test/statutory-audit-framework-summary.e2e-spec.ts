@@ -109,17 +109,15 @@ describe('Statutory Audit — 02.8 Framework Summary & Approval (e2e)', () => {
   /** A fresh audit file on its own engagement, Partner A its Engagement Partner (AF-02 is EP-only). */
   const newFile = async (): Promise<{ engId: string; shellId: string }> => {
     const entityId = await findId('/api/v1/entities?search=Bharat&limit=100');
-    const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const created = await post(pa, '/api/v1/engagements', {
       entityId,
-      serviceId: primaryServiceId,
+      serviceId: statAuditId,
       financialYear: '2024-25',
       periodLabel: uniquePeriod(),
       status: 'accepted',
     }).expect(201);
     const eng = created.body.id as string;
-    await post(pa, `/api/v1/engagements/${eng}/services`, { serviceId: statAuditId }).expect(201);
     const wf = (await get(pa, `/api/v1/engagements/${eng}/statutory-audit`).expect(200)).body[0]
       .workflowInstanceId as string;
     await su((c) =>

@@ -3,6 +3,7 @@ import request from 'supertest';
 import { escalationAction, type EscalationLevel } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 import { dateFromToday } from './date.helper';
 
 /**
@@ -47,7 +48,7 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `E${unique()}`,

@@ -61,7 +61,6 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
     const http = app.getHttpServer();
 
     const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
-    const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     engId = (
       await request(http)
@@ -69,18 +68,13 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
         .set(bearer(pa))
         .send({
           entityId,
-          serviceId: primaryServiceId,
+          serviceId: statAuditId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
           status: 'accepted',
         })
         .expect(201)
     ).body.id as string;
-    await request(http)
-      .post(`/api/v1/engagements/${engId}/services`)
-      .set(bearer(pa))
-      .send({ serviceId: statAuditId })
-      .expect(201);
     shellId = (
       await request(http)
         .get(`/api/v1/engagements/${engId}/statutory-audit`)
@@ -363,7 +357,6 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
     // A fresh FY 2024-25 file whose 02.2 concludes Ind AS (net worth ₹600 crore)
     // with first-time adoption.
     const entityId = await findId('/api/v1/entities?search=Acme&limit=100');
-    const primaryServiceId = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const statAuditId = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const eng = (
       await request(http)
@@ -371,18 +364,13 @@ describe('Statutory Audit — 02.2 evidence, memo, references, downstream (e2e)'
         .set(bearer(pa))
         .send({
           entityId,
-          serviceId: primaryServiceId,
+          serviceId: statAuditId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
           status: 'accepted',
         })
         .expect(201)
     ).body.id as string;
-    await request(http)
-      .post(`/api/v1/engagements/${eng}/services`)
-      .set(bearer(pa))
-      .send({ serviceId: statAuditId })
-      .expect(201);
     const wf = (
       await request(http)
         .get(`/api/v1/engagements/${eng}/statutory-audit`)

@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Auto-generated deadline layers (§16/§17 step 8). When a STATUTORY obligation
@@ -36,7 +37,7 @@ describe('Auto-generated deadline layers (e2e)', () => {
       .post('/api/v1/engagements')
       .set(bearer(epToken))
       .send({
-        entityId,
+        entityId: await freshClient(entityId),
         serviceId,
         financialYear: '2026-27',
         periodLabel: `AL${unique()}`,

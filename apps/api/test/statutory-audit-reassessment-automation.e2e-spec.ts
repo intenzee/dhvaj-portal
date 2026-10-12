@@ -84,18 +84,16 @@ describe('Statutory Audit — Reassessment from the file (e2e)', () => {
       typeSlug: 'private_limited',
       officeCode: 'NORTH',
     }).expect(201);
-    const itr = await findId('/api/v1/services?search=ITR_FILING&limit=100');
     const stat = await findId('/api/v1/services?search=STAT_AUDIT&limit=100');
     const eng = await post(pa, '/api/v1/engagements', {
       entityId: entity.body.id,
-      serviceId: itr,
+      serviceId: stat,
       financialYear: '2024-25',
       periodLabel: `P${stamp()}`,
       status: 'accepted',
       plannedEndDate: '2025-09-30',
     }).expect(201);
     const engId = eng.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/services`, { serviceId: stat }).expect(201);
     const base = `/api/v1/engagements/${engId}/statutory-audit`;
     const shellId = (await get(pa, base)).body[0].workflowInstanceId as string;
 

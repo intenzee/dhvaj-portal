@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { freshClient } from './fresh-client.helper';
 
 /**
  * Engagement core through the HTTP API: assignment-based access (independent of
@@ -72,23 +73,23 @@ describe('Engagement Core (e2e)', () => {
       // shared dev DB), so scan for the seeded one by code — search matches
       // engagement_code exactly, making this independent of page/volume.
       const res = await request(app.getHttpServer())
-        .get('/api/v1/engagements?search=ENG00001&limit=100')
+        .get('/api/v1/engagements?search=SA/00001&limit=100')
         .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
-      expect(codes(res.body.items)).toContain('ENG00001');
+      expect(codes(res.body.items)).toContain('SA/00001');
     });
 
     it('gives a cross-office team member the engagement + client + roster', async () => {
       // Senior Y (South office) is on the North Acme engagement's team.
       const sy = await token('senior.y@dhvaj.in');
       const list = await request(app.getHttpServer())
-        .get('/api/v1/engagements?search=ENG00001&limit=100')
+        .get('/api/v1/engagements?search=SA/00001&limit=100')
         .set(bearer(sy))
         .expect(200);
-      expect(codes(list.body.items)).toContain('ENG00001');
+      expect(codes(list.body.items)).toContain('SA/00001');
 
       const eng = list.body.items.find(
-        (e: { engagementCode: string }) => e.engagementCode === 'ENG00001',
+        (e: { engagementCode: string }) => e.engagementCode === 'SA/00001',
       );
       const detail = await request(app.getHttpServer())
         .get(`/api/v1/engagements/${eng.id}`)
@@ -102,10 +103,10 @@ describe('Engagement Core (e2e)', () => {
 
     it('does NOT show an unassigned partner another partner’s engagement (404 by id)', async () => {
       const list = await request(app.getHttpServer())
-        .get('/api/v1/engagements?search=ENG00001&limit=100')
+        .get('/api/v1/engagements?search=SA/00001&limit=100')
         .set(bearer(mp));
       const acme = list.body.items.find(
-        (e: { engagementCode: string }) => e.engagementCode === 'ENG00001',
+        (e: { engagementCode: string }) => e.engagementCode === 'SA/00001',
       );
       await request(app.getHttpServer())
         .get(`/api/v1/engagements/${acme.id}`)
@@ -115,10 +116,10 @@ describe('Engagement Core (e2e)', () => {
 
     it('supports ?mine=true', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/v1/engagements?mine=true&search=ENG00001&limit=100')
+        .get('/api/v1/engagements?mine=true&search=SA/00001&limit=100')
         .set(bearer(await token('partner.a@dhvaj.in')))
         .expect(200);
-      expect(codes(res.body.items)).toContain('ENG00001');
+      expect(codes(res.body.items)).toContain('SA/00001');
     });
 
     it('forbids the platform admin (no engagement.read) from listing engagements (403)', async () => {
@@ -141,14 +142,14 @@ describe('Engagement Core (e2e)', () => {
         .set(bearer(pa))
         .set('x-correlation-id', correlationId)
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
           status: 'accepted',
         })
         .expect(201);
-      expect(created.body.engagementCode).toMatch(/^ENG\d{5}$/);
+      expect(created.body.engagementCode).toMatch(/^(SA|CR|AS)\/\d{5}$/);
       expect(created.body.engagementPartnerName).toBe('Partner A');
       expect(created.body.acceptedAt).toBeTruthy();
 
@@ -184,7 +185,7 @@ describe('Engagement Core (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/v1/engagements')
         .set(bearer(await token('senior.y@dhvaj.in')))
-        .send({ entityId, serviceId, financialYear: '2022-23' })
+        .send({ entityId: await freshClient(entityId), serviceId, financialYear: '2022-23' })
         .expect(403);
     });
 
@@ -196,7 +197,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -231,7 +232,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -264,7 +265,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -290,7 +291,12 @@ describe('Engagement Core (e2e)', () => {
       const created = await request(app.getHttpServer())
         .post('/api/v1/engagements')
         .set(bearer(pa))
-        .send({ entityId, serviceId, financialYear: '2022-23', periodLabel: uniquePeriod() })
+        .send({
+          entityId: await freshClient(entityId),
+          serviceId,
+          financialYear: '2022-23',
+          periodLabel: uniquePeriod(),
+        })
         .expect(201);
       await request(app.getHttpServer())
         .patch(`/api/v1/engagements/${created.body.id}`)
@@ -309,7 +315,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(mp)) // firm-wide, so RLS is not the gate — the grade trigger is
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -326,7 +332,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(mp))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -342,7 +348,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(await token('manager.x@dhvaj.in')))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -363,7 +369,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -387,7 +393,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(pa))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -426,7 +432,7 @@ describe('Engagement Core (e2e)', () => {
         .post('/api/v1/engagements')
         .set(bearer(actorToken))
         .send({
-          entityId,
+          entityId: await freshClient(entityId),
           serviceId,
           financialYear: '2024-25',
           periodLabel: uniquePeriod(),
@@ -449,7 +455,12 @@ describe('Engagement Core (e2e)', () => {
         const created = await request(app.getHttpServer())
           .post('/api/v1/engagements')
           .set(bearer(mgr))
-          .send({ entityId, serviceId, financialYear: '2024-25', periodLabel: uniquePeriod() })
+          .send({
+            entityId: await freshClient(entityId),
+            serviceId,
+            financialYear: '2024-25',
+            periodLabel: uniquePeriod(),
+          })
           .expect(201);
         expect(created.body.status).toBe('prospect');
         expect(created.body.engagementPartnerId).toBeNull();
@@ -601,7 +612,12 @@ describe('Engagement Core (e2e)', () => {
         const created = await request(app.getHttpServer())
           .post('/api/v1/engagements')
           .set(bearer(pa))
-          .send({ entityId, serviceId, financialYear: '2024-25', periodLabel: uniquePeriod() })
+          .send({
+            entityId: await freshClient(entityId),
+            serviceId,
+            financialYear: '2024-25',
+            periodLabel: uniquePeriod(),
+          })
           .expect(201);
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${created.body.id}/start`)
@@ -617,7 +633,12 @@ describe('Engagement Core (e2e)', () => {
         const created = await request(app.getHttpServer())
           .post('/api/v1/engagements')
           .set(bearer(pa))
-          .send({ entityId, serviceId, financialYear: '2024-25', periodLabel: uniquePeriod() })
+          .send({
+            entityId: await freshClient(entityId),
+            serviceId,
+            financialYear: '2024-25',
+            periodLabel: uniquePeriod(),
+          })
           .expect(201);
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${created.body.id}/submit-for-acceptance`)

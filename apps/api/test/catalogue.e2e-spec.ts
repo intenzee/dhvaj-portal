@@ -78,12 +78,14 @@ describe('Service Catalogue (e2e)', () => {
         .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       const codes = (res.body.items as Array<{ code: string }>).map((s) => s.code);
-      // The filter returns the GST line (which the §8 catalogue expansion grows),
-      // so assert its intent: the core GST services are present and nothing from
-      // another line leaks in — not a frozen exact list.
-      expect(codes).toEqual(expect.arrayContaining(['GST_ANNUAL', 'GST_MONTHLY']));
+      // The filter returns the GST line's active services. The legacy GST
+      // services are folded into the GST stream service (inactive), so assert
+      // the intent: the stream service is present, the folded ones are not, and
+      // nothing from another line leaks in — not a frozen exact list.
+      expect(codes).toContain('STREAM_GST');
+      expect(codes).not.toContain('GST_MONTHLY');
       expect(codes).not.toContain('STAT_AUDIT');
-      expect(codes.every((c) => c.startsWith('GST'))).toBe(true);
+      expect(codes.every((c) => c.startsWith('GST') || c === 'STREAM_GST')).toBe(true);
     });
 
     it('rejects an unknown query param (400)', async () => {

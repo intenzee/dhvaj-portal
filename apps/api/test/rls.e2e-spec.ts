@@ -244,7 +244,7 @@ describe('RLS (database-level, independent of the application)', () => {
         partnerA,
         `SELECT engagement_code FROM hsdg.engagements`,
       );
-      expect(rows.map((r) => r.engagement_code)).toContain('ENG00001'); // Acme audit
+      expect(rows.map((r) => r.engagement_code)).toContain('SA/00001'); // Acme audit
     });
 
     it('gives a cross-office team member access to the engagement, its client, and co-workers', async () => {
@@ -257,7 +257,7 @@ describe('RLS (database-level, independent of the application)', () => {
         seniorY,
         `SELECT engagement_code FROM hsdg.engagements`,
       );
-      expect(engagements.map((r) => r.engagement_code)).toContain('ENG00001');
+      expect(engagements.map((r) => r.engagement_code)).toContain('SA/00001');
 
       // The North client Acme — normally invisible to a South user — is visible via the engagement.
       const clients = await underEmp<{ legal_name: string }>(
@@ -287,7 +287,7 @@ describe('RLS (database-level, independent of the application)', () => {
         partnerB,
         `SELECT engagement_code FROM hsdg.engagements`,
       );
-      expect(rows.map((r) => r.engagement_code)).not.toContain('ENG00001');
+      expect(rows.map((r) => r.engagement_code)).not.toContain('SA/00001');
     });
 
     it('grants the Managing Partner every engagement (firm-wide)', async () => {
@@ -304,7 +304,7 @@ describe('RLS (database-level, independent of the application)', () => {
       // EP, false for an unassigned partner and for a non-existent id.
       const acme = await underContext<{ id: string }>(
         { role: 'managing_partner' },
-        `SELECT id FROM hsdg.engagements WHERE engagement_code = 'ENG00001'`,
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = 'SA/00001'`,
       );
       const acmeId = acme[0]!.id;
       const partnerA = await emp('EMP003'); // the Acme EP
@@ -387,7 +387,7 @@ describe('RLS (database-level, independent of the application)', () => {
     const acmeEngagementId = async (): Promise<string> => {
       const rows = await underContext<{ id: string }>(
         { role: 'managing_partner' },
-        `SELECT id FROM hsdg.engagements WHERE engagement_code = 'ENG00001'`,
+        `SELECT id FROM hsdg.engagements WHERE engagement_code = 'SA/00001'`,
       );
       return rows[0]!.id;
     };
@@ -456,7 +456,7 @@ describe('RLS (database-level, independent of the application)', () => {
     });
 
     it('denies an unassigned partner the workflow state and lifecycle history of an engagement they are not on', async () => {
-      const partnerB = await emp('EMP004'); // not on Acme (ENG00001)
+      const partnerB = await emp('EMP004'); // not on Acme (SA/00001)
       const acmeId = await acmeEngagementId();
       const rows = await underEmpFor(
         'partner',
@@ -585,7 +585,7 @@ describe('RLS (database-level, independent of the application)', () => {
     });
 
     it('scopes reviews to engagement membership (unassigned partner blind; team member sees)', async () => {
-      const acmeId = await engId('ENG00001'); // Acme audit, North
+      const acmeId = await engId('SA/00001'); // Acme audit, North
       const mpEmp = await emp('EMP001');
       const partnerB = await emp('EMP004'); // unassigned to Acme
       const seniorY = await emp('EMP006'); // on Acme's team (South resource)
@@ -649,7 +649,7 @@ describe('RLS (database-level, independent of the application)', () => {
     });
 
     it('enforces escalate-only review plans at the database layer (weakening rejected)', async () => {
-      const acmeId = await engId('ENG00001'); // STAT_AUDIT ⇒ requires full_ep_review
+      const acmeId = await engId('SA/00001'); // STAT_AUDIT ⇒ requires full_ep_review
       const managerReview = await reviewModelId('manager_review'); // weaker (rank 10)
       await app.query('BEGIN');
       try {
@@ -758,7 +758,7 @@ describe('RLS (database-level, independent of the application)', () => {
     });
 
     it('scopes compliance instances to engagement membership (unassigned blind; member sees)', async () => {
-      const acmeId = await engId('ENG00001');
+      const acmeId = await engId('SA/00001');
       const mpEmp = await emp('EMP001');
       const partnerB = await emp('EMP004'); // unassigned to Acme
       const seniorY = await emp('EMP006'); // on Acme's team
@@ -840,7 +840,7 @@ describe('RLS (database-level, independent of the application)', () => {
     });
 
     it('scopes tasks to membership, and lets the ASSIGNEE (not just a lead) update their task', async () => {
-      const acmeId = await engId('ENG00001');
+      const acmeId = await engId('SA/00001');
       const mpEmp = await emp('EMP001');
       const partnerB = await emp('EMP004'); // unassigned to Acme
       const seniorY = await emp('EMP006'); // on Acme's team
@@ -951,7 +951,7 @@ describe('RLS (database-level, independent of the application)', () => {
     });
 
     it('scopes documents to engagement membership (unassigned blind; member sees the metadata AND the storage reference only via RLS)', async () => {
-      const acmeId = await engId('ENG00001');
+      const acmeId = await engId('SA/00001');
       const mpEmp = await emp('EMP001');
       const partnerB = await emp('EMP004'); // unassigned to Acme
       const seniorY = await emp('EMP006'); // on Acme's team
