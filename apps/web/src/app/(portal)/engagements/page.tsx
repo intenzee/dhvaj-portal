@@ -7,12 +7,17 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
+  ENGAGEMENT_KINDS,
   ENGAGEMENT_STATUS,
   ENGAGEMENT_STATUSES,
+  FEATURE_FLAG,
   PERMISSION,
+  type EngagementKind,
   type Paginated,
   type EngagementStatus,
 } from '@hsdg/contracts';
+import { useFeatureFlags } from '@/lib/feature-flags';
+import { KIND_LABEL } from '@/lib/engagement-kinds';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { apiFetch } from '@/lib/api';
@@ -36,11 +41,23 @@ const COMMON_STATUSES: EngagementStatus[] = [
 ];
 const OTHER_STATUSES = ENGAGEMENT_STATUSES.filter((s) => !COMMON_STATUSES.includes(s));
 
+const codeColumn: ColumnDef<EngagementRow, unknown> = {
+  header: 'Code',
+  cell: ({ row }) => (
+    <span className="font-medium text-primary-700">{row.original.engagementCode}</span>
+  ),
+};
+const kindColumn: ColumnDef<EngagementRow, unknown> = {
+  header: 'Kind',
+  cell: ({ row }) => (
+    <Badge tone={row.original.kind === 'assignment' ? 'neutral' : 'info'}>
+      {KIND_LABEL[row.original.kind]}
+    </Badge>
+  ),
+};
+
 const columns: ColumnDef<EngagementRow, unknown>[] = [
-  {
-    header: 'Code',
-    cell: ({ row }) => <span className="font-medium text-primary-700">{row.original.engagementCode}</span>,
-  },
+  codeColumn,
   { header: 'Client', accessorKey: 'entityName' },
   {
     header: 'Service',
@@ -53,7 +70,11 @@ const columns: ColumnDef<EngagementRow, unknown>[] = [
       </span>
     ),
   },
-  { header: 'Partner', cell: ({ row }) => row.original.engagementPartnerName ?? <span className="text-ink-faint">—</span> },
+  {
+    header: 'Partner',
+    cell: ({ row }) =>
+      row.original.engagementPartnerName ?? <span className="text-ink-faint">—</span>,
+  },
   { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
   {
     header: 'Signals',
@@ -79,6 +100,12 @@ function EngagementsInner(): JSX.Element {
   const [status, setStatus] = useState<EngagementStatus | ''>(
     (params.get('status') as EngagementStatus | null) ?? '',
   );
+  const { isOn } = useFeatureFlags();
+  const kindsOn = isOn(FEATURE_FLAG.engagementKinds);
+  const initialKind = params.get('kind');
+  const [kind, setKind] = useState<EngagementKind | ''>(
+    ENGAGEMENT_KINDS.includes(initialKind as EngagementKind) ? (initialKind as EngagementKind) : '',
+  );
   const [offset, setOffset] = useState(0);
 
   // Reset to the first page whenever the filter changes.
@@ -86,12 +113,25 @@ function EngagementsInner(): JSX.Element {
     setStatus(s);
     setOffset(0);
   };
+  const setKindFiltered = (k: EngagementKind | ''): void => {
+    setKind(k);
+    setOffset(0);
+    const next = new URLSearchParams(params.toString());
+    if (k) next.set('kind', k);
+    else next.delete('kind');
+    router.replace(`/engagements${next.toString() ? `?${next.toString()}` : ''}`, {
+      scroll: false,
+    });
+  };
+  const activeKind = kindsOn ? kind : '';
 
   const q = useQuery({
-    queryKey: ['engagements', status, offset],
+    queryKey: ['engagements', status, activeKind, offset],
     queryFn: () =>
       apiFetch<Paginated<EngagementRow>>(
-        `/engagements?limit=${PAGE_SIZE}&offset=${offset}${status ? `&status=${status}` : ''}`,
+        `/engagements?limit=${PAGE_SIZE}&offset=${offset}${status ? `&status=${status}` : ''}${
+          activeKind ? `&kind=${activeKind}` : ''
+        }`,
       ),
   });
 
@@ -102,15 +142,29 @@ function EngagementsInner(): JSX.Element {
         subtitle="Each engagement is one job for one client. You see the ones you are assigned to — click a row to open it."
         actions={
           can(principal, PERMISSION.engagementManage) && (
-          <Link
-            href="/engagements/new"
-            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-700"
-          >
-            <Plus className="h-4 w-4" /> New engagement
-          </Link>
+            <Link
+              href="/engagements/new"
+              className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-700"
+            >
+              <Plus className="h-4 w-4" /> New engagement
+            </Link>
           )
         }
       />
+
+      {kindsOn && (
+        <div className="mb-2 flex flex-wrap items-center gap-2" aria-label="Engagement kind">
+          <FilterChip label="All kinds" active={kind === ''} onClick={() => setKindFiltered('')} />
+          {ENGAGEMENT_KINDS.map((k) => (
+            <FilterChip
+              key={k}
+              label={KIND_LABEL[k]}
+              active={kind === k}
+              onClick={() => setKindFiltered(k)}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <FilterChip label="All" active={status === ''} onClick={() => setStatusFiltered('')} />
@@ -143,10 +197,14 @@ function EngagementsInner(): JSX.Element {
       </div>
 
       <Card className="p-0">
-        {q.isLoading && <div className="p-4"><Spinner /></div>}
+        {q.isLoading && (
+          <div className="p-4">
+            <Spinner />
+          </div>
+        )}
         {q.data && (
           <DataTable
-            columns={columns}
+            columns={kindsOn ? [codeColumn, kindColumn, ...columns.slice(1)] : columns}
             data={q.data.items}
             empty="No engagements match this view."
             onRowClick={(row) => router.push(`/engagements/${row.id}`)}

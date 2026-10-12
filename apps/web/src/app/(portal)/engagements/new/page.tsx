@@ -1,21 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronLeft, ChevronRight, Play, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Play, X } from 'lucide-react';
 import {
   BILLING_MODELS,
   ENGAGEMENT_CONFIDENTIALITIES,
   ENGAGEMENT_PRIORITIES,
   ENGAGEMENT_STATUS,
   ENGAGEMENT_TYPES,
+  FEATURE_FLAG,
   type Paginated,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
-import type { EntityRow } from '@/lib/types';
+import { useFeatureFlags } from '@/lib/feature-flags';
+import { NewEngagementWizard } from '@/components/engagement-kinds/new-engagement-wizard';
+import { EntityPicker, type Picked } from '@/components/entity-picker';
 import { PageHeader, Card, CardBody, Button, Spinner, Badge } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
 
@@ -28,7 +31,6 @@ interface ServiceOption {
 interface CreatedEngagement {
   id: string;
 }
-type Picked = { id: string; label: string };
 
 /** Sensible default Indian FY, e.g. "2026-27" (year rolls over in April). */
 function currentFinancialYear(): string {
@@ -39,12 +41,20 @@ function currentFinancialYear(): string {
 
 const STEPS = ['Client', 'Details', 'Services', 'Review'] as const;
 
+/** With engagement kinds on, creation starts from the kind (spec Change 1);
+ *  otherwise the original service-first stepper. */
+export default function NewEngagementPage(): JSX.Element {
+  const { isOn, isLoading } = useFeatureFlags();
+  if (isLoading) return <Spinner />;
+  return isOn(FEATURE_FLAG.engagementKinds) ? <NewEngagementWizard /> : <LegacyNewEngagement />;
+}
+
 /**
  * Guided engagement creation (spec §4/§41): a stepper that walks Client (with
  * optional group coverage) → Details → Services (one or more) → Review, creates
  * the engagement with all of it in one go, then offers to activate.
  */
-export default function NewEngagementPage(): JSX.Element {
+function LegacyNewEngagement(): JSX.Element {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -154,9 +164,7 @@ export default function NewEngagementPage(): JSX.Element {
             >
               {i < step ? <Check className="h-4 w-4" /> : i + 1}
             </span>
-            <span
-              className={`text-sm ${i === step ? 'font-semibold text-ink' : 'text-ink-muted'}`}
-            >
+            <span className={`text-sm ${i === step ? 'font-semibold text-ink' : 'text-ink-muted'}`}>
               {label}
             </span>
             {i < STEPS.length - 1 && <span className="h-px flex-1 bg-line-strong" />}
@@ -194,7 +202,9 @@ export default function NewEngagementPage(): JSX.Element {
                   <EntityPicker
                     value={null}
                     onChange={(v) => v && setCovered((p) => [...p, v])}
-                    exclude={new Set([entity?.id, ...covered.map((c) => c.id)].filter(Boolean) as string[])}
+                    exclude={
+                      new Set([entity?.id, ...covered.map((c) => c.id)].filter(Boolean) as string[])
+                    }
                     placeholder="Add a covered entity…"
                   />
                 </div>
@@ -232,7 +242,10 @@ export default function NewEngagementPage(): JSX.Element {
               </Field>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                 <Field label="Type">
-                  <Select value={engagementType} onChange={(e) => setEngagementType(e.target.value)}>
+                  <Select
+                    value={engagementType}
+                    onChange={(e) => setEngagementType(e.target.value)}
+                  >
                     {ENGAGEMENT_TYPES.map((t) => (
                       <option key={t} value={t}>
                         {humanize(t)}
@@ -420,93 +433,6 @@ function Row({ label, value }: { label: string; value: string }): JSX.Element {
     <div className="flex justify-between gap-4">
       <span className="text-ink-faint">{label}</span>
       <span className="text-right font-medium text-ink">{value}</span>
-    </div>
-  );
-}
-
-/** Search-and-select a client entity. */
-function EntityPicker({
-  value,
-  onChange,
-  exclude,
-  placeholder = 'Search clients by name or PAN…',
-}: {
-  value: Picked | null;
-  onChange: (v: Picked | null) => void;
-  exclude: Set<string>;
-  placeholder?: string;
-}): JSX.Element {
-  const [term, setTerm] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(term.trim()), 250);
-    return () => clearTimeout(t);
-  }, [term]);
-
-  const q = useQuery({
-    queryKey: ['entities', 'pick', debounced],
-    queryFn: () =>
-      apiFetch<Paginated<EntityRow>>(`/entities?search=${encodeURIComponent(debounced)}&limit=6`),
-    enabled: debounced.length >= 2,
-  });
-
-  if (value) {
-    return (
-      <div className="flex items-center justify-between rounded-lg border border-line-strong px-3 py-2 text-sm">
-        <span className="font-medium text-ink">{value.label}</span>
-        <button className="text-xs text-primary-600 hover:underline" onClick={() => onChange(null)}>
-          Change
-        </button>
-      </div>
-    );
-  }
-
-  const results = (q.data?.items ?? []).filter((e) => !exclude.has(e.id));
-
-  return (
-    <div className="relative">
-      <div className="flex items-center gap-2 rounded-lg border border-line-strong px-3 py-2">
-        <Search className="h-4 w-4 text-ink-faint" />
-        <input
-          value={term}
-          onChange={(e) => {
-            setTerm(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          placeholder={placeholder}
-          className="flex-1 bg-transparent text-sm text-ink placeholder:text-ink-faint focus:outline-none"
-        />
-      </div>
-      {open && debounced.length >= 2 && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-line-strong bg-surface py-1 shadow-pop">
-          {q.isFetching && <div className="px-3 py-2 text-sm text-ink-faint">Searching…</div>}
-          {q.isSuccess && results.length === 0 && (
-            <div className="px-3 py-2 text-sm text-ink-faint">No clients found.</div>
-          )}
-          {results.map((e) => (
-            <button
-              key={e.id}
-              onClick={() => {
-                onChange({ id: e.id, label: e.legalName });
-                setTerm('');
-                setOpen(false);
-              }}
-              className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-surface-raised"
-            >
-              <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-faint" />
-              <span>
-                <span className="block text-sm font-medium text-ink">{e.legalName}</span>
-                <span className="block text-xs text-ink-faint">
-                  {e.entityCode} · {e.typeName}
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
