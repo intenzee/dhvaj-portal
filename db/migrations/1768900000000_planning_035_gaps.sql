@@ -424,7 +424,7 @@ BEGIN
                                            WHERE library_version = 'dhvaj-gc-2026.2' OR status = 'draft'
                                               OR based_on IS NOT NULL)) THEN
     RAISE EXCEPTION 'Engagement 03.5 areas use an Audit Area Library version added after 2026.1; '
-                    'migrate those reviews back before reverting 1768800000000.';
+                    'migrate those reviews back before reverting 1768900000000.';
   END IF;
 END $$;
 DROP TRIGGER IF EXISTS audit_area_library_guard ON hsdg.audit_area_library;
