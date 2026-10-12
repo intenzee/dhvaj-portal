@@ -23,7 +23,9 @@ import { approveFrameworkForTest } from './framework-approval.helper';
  *       limitations reach the attention queue;
  *   S5 §31 the Methodology Admin library drives the 03.4 decision lists;
  *   S6 §25 a revision flags the affected modules' completed planning rows;
- *   S7 hand-offs to 03.8 / 03.9 / 03.11 and the §32 authority links.
+ *   S7 hand-offs to 03.8 / 03.9 / 03.11 and the §32 authority links;
+ *   S8 a Section 05 control result flags only that cycle's map items;
+ *   S9 §30 a Platform Admin has no professional or client-data access by role.
  */
 describe('Statutory Audit — 03.4 scope & approach governance (e2e)', () => {
   let app: INestApplication;
@@ -445,5 +447,12 @@ describe('Statutory Audit — 03.4 scope & approach governance (e2e)', () => {
       reassessmentReason: 'Revenue cut-off control exception (C-07).',
     });
     expect(s.mapItems.find((m) => m.id === custom.id)!.reassessmentRequired).toBe(false);
+  });
+  it('S9 — a Platform Admin gets no client data or 03.4 authority by role alone', async () => {
+    const ad = await token('admin@dhvaj.in');
+    await get(ad, scope).expect(403);
+    await get(ad, `${scope}/handoff`).expect(403);
+    await post(ad, `${scope}/partner-actions`, { action: 'challenge', note: 'x' }).expect(403);
+    await post(ad, `${scope}/revisions`, { trigger: 'other', reason: 'x' }).expect(403);
   });
 });
