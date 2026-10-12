@@ -43,6 +43,15 @@ export interface DocumentScope {
   componentInstanceId?: string;
 }
 
+/**
+ * Change 6 — list-only filters (they narrow what is shown, never where an
+ * upload goes): stream, financialYear, periodKey, section, registrationId,
+ * complianceInstanceId.
+ */
+export type DocumentListFilters = Partial<
+  Record<'stream' | 'financialYear' | 'periodKey' | 'section' | 'registrationId' | 'complianceInstanceId', string>
+>;
+
 /** One version in a document's history (subset of the API detail response). */
 interface DocVersion {
   id: string;
@@ -80,10 +89,13 @@ export function DocumentsPanel({
   engagementId,
   scope,
   scopeLabel,
+  filters,
   className,
 }: {
   engagementId: string;
   scope?: DocumentScope;
+  /** Narrow the list (Documents tab filters). */
+  filters?: DocumentListFilters;
   /** Shown in the upload dialog so the user knows where the file will be filed. */
   scopeLabel?: string;
   className?: string;
@@ -113,6 +125,7 @@ export function DocumentsPanel({
       taskId: taskId ?? null,
       componentInstanceId: componentInstanceId ?? null,
       deleted: showDeleted,
+      ...filters,
     },
   ];
 
@@ -123,6 +136,7 @@ export function DocumentsPanel({
       if (taskId) params.set('taskId', taskId);
       if (componentInstanceId) params.set('componentInstanceId', componentInstanceId);
       if (showDeleted) params.set('deleted', 'true');
+      for (const [k, v] of Object.entries(filters ?? {})) if (v) params.set(k, v);
       return apiFetch<Paginated<DocumentRow>>(
         `/engagements/${engagementId}/documents?${params.toString()}`,
       );

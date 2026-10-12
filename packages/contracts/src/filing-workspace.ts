@@ -151,6 +151,7 @@ export interface WorkspaceTask {
   assigneeName: string | null;
   reviewerId: string | null;
   reviewerName: string | null;
+  reviewStartedAt?: string | null;
   version: number;
 }
 

@@ -70,6 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   }, [queryClient]);
 
   const logout = useCallback(() => {
+    // Change 3: signing out closes the automatic clock (signed_out). The token
+    // is read synchronously, so the request carries it even though it is
+    // cleared on the next line; failures never block signing out.
+    void apiFetch('/time/sign-out', { method: 'POST' }).catch(() => undefined);
     setToken(null);
     setPrincipal(null);
     queryClient.clear();
