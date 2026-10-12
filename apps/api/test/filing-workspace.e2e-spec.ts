@@ -409,6 +409,30 @@ describe('Filing workspace (e2e)', () => {
     await feed(pb).expect(404);
   });
 
+  it('lays out the engagement tabs: kind, years, GST in scope with its lead, Overview widgets', async () => {
+    const { eng, inst } = await setup();
+    const tabs = (await http().get(`/api/v1/engagements/${eng}/tabs`).set(bearer(sy)).expect(200))
+      .body as {
+      kind: string;
+      financialYears: string[];
+      streams: Array<{ stream: string; financialYears: string[] }>;
+      overview: {
+        dueNext30: Array<{ instanceId: string; periodLabel: string }>;
+        overdue: Array<{ instanceId: string }>;
+        hoursThisMonth: number;
+        unbilledAmount: number | null;
+      };
+    };
+    expect(tabs.financialYears).toContain('2026-27');
+    const gst = tabs.streams.find((s) => s.stream === 'gst');
+    expect(gst?.financialYears).toContain('2026-27');
+    const all = [...tabs.overview.dueNext30, ...tabs.overview.overdue].map((d) => d.instanceId);
+    expect(all).toContain(inst);
+    expect(typeof tabs.overview.hoursThisMonth).toBe('number');
+    const pb = await token('partner.b@dhvaj.in');
+    await http().get(`/api/v1/engagements/${eng}/tabs`).set(bearer(pb)).expect(404);
+  });
+
   it('lets only a lead waive the filing, and shows nothing to another engagement', async () => {
     const { eng, inst } = await setup();
     const pb = await token('partner.b@dhvaj.in');

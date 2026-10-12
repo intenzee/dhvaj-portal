@@ -15,6 +15,8 @@ import { EngagementTimeAutoController, TimeClockController } from './time/time-a
 import { TimeCloserScheduler } from './time/time-closer.scheduler';
 import { ActivityService } from './activity/activity.service';
 import { EngagementActivityController } from './activity/activity.controller';
+import { EngagementTabsService } from './tabs/engagement-tabs.service';
+import { EngagementTabsController } from './tabs/engagement-tabs.controller';
 
 /**
  * Engagement core: the central transactional object. Assignment-based access
@@ -33,6 +35,7 @@ import { EngagementActivityController } from './activity/activity.controller';
     TimeClockController,
     EngagementTimeAutoController,
     EngagementActivityController,
+    EngagementTabsController,
   ],
   providers: [
     EngagementsService,
@@ -43,6 +46,7 @@ import { EngagementActivityController } from './activity/activity.controller';
     TimeAutoService,
     TimeCloserScheduler,
     ActivityService,
+    EngagementTabsService,
   ],
   exports: [
     EngagementsService,
