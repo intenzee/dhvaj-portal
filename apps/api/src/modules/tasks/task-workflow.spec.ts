@@ -215,7 +215,9 @@ describe('task workflow — Change 3 state table', () => {
     ).toBe(TASK_STATUS.todo);
     expect(
       code(() =>
-        planTransition(input({ action: TASK_ACTION.reopen, status: TASK_STATUS.todo, actor: lead })),
+        planTransition(
+          input({ action: TASK_ACTION.reopen, status: TASK_STATUS.todo, actor: lead }),
+        ),
       ),
     ).toBe('invalid_state');
   });

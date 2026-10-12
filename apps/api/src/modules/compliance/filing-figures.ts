@@ -73,7 +73,12 @@ const SCHEMAS: Record<FigureForm, FigureField[]> = {
   gst_annual: [
     { key: 'turnover', label: 'Aggregate turnover', kind: 'amount', required: false },
     { key: 'tax_paid', label: 'Total tax paid', kind: 'amount', required: false },
-    { key: 'additional_liability', label: 'Additional liability (DRC-03)', kind: 'amount', required: false },
+    {
+      key: 'additional_liability',
+      label: 'Additional liability (DRC-03)',
+      kind: 'amount',
+      required: false,
+    },
   ],
   tds: [
     { key: 'deductee_count', label: 'Deductees', kind: 'integer', required: false },
@@ -92,7 +97,8 @@ const SCHEMAS: Record<FigureForm, FigureField[]> = {
 /** Forms whose figures must be entered to lodge (spec p.24). */
 const FIGURES_REQUIRED: ReadonlySet<FigureForm> = new Set(['gstr3b', 'pmt06', 'cmp08']);
 
-const norm = (s: string | null | undefined): string => (s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const norm = (s: string | null | undefined): string =>
+  (s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 /** Which figure schema a filing uses, from its rule code / form label / section. */
 export function figureForm(input: {
@@ -102,7 +108,12 @@ export function figureForm(input: {
   section: string | null;
 }): FigureForm {
   const id = `${norm(input.formLabel)}|${norm(input.ruleCode)}`;
-  if (input.stream === 'gst' || id.includes('GSTR') || id.includes('PMT06') || id.includes('CMP08')) {
+  if (
+    input.stream === 'gst' ||
+    id.includes('GSTR') ||
+    id.includes('PMT06') ||
+    id.includes('CMP08')
+  ) {
     if (id.includes('PMT06')) return 'pmt06';
     if (id.includes('CMP08')) return 'cmp08';
     if (id.includes('GSTR3B') || input.section === 'summary') return 'gstr3b';
@@ -218,7 +229,11 @@ export interface CrossCheckInput {
 /** Spec p.23 — cross-checks shown as warnings, never hard blocks. */
 export function gstCrossChecks(i: CrossCheckInput): CrossCheckWarning[] {
   const w: CrossCheckWarning[] = [];
-  if (i.summary?.filedOn && i.outward && (!i.outward.filedOn || i.summary.filedOn < i.outward.filedOn)) {
+  if (
+    i.summary?.filedOn &&
+    i.outward &&
+    (!i.outward.filedOn || i.summary.filedOn < i.outward.filedOn)
+  ) {
     w.push({
       code: 'gstr3b_before_gstr1',
       message: 'GSTR-3B was filed before GSTR-1 for the same period.',
@@ -241,7 +256,10 @@ export function gstCrossChecks(i: CrossCheckInput): CrossCheckWarning[] {
     });
   }
   if (i.outward?.exportsReported && !i.lutFiled) {
-    w.push({ code: 'lut_missing', message: 'Exports are reported but no LUT is filed for this year.' });
+    w.push({
+      code: 'lut_missing',
+      message: 'Exports are reported but no LUT is filed for this year.',
+    });
   }
   return w;
 }

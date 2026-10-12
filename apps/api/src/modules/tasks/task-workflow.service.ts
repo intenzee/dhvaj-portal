@@ -115,7 +115,8 @@ export class TaskWorkflowService {
   ): Promise<TaskRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
       const row = await this.loadTask(client, taskId, engagementId);
-      if (row.status === status) return (await this.tasks.selectTask(client, taskId, engagementId))!;
+      if (row.status === status)
+        return (await this.tasks.selectTask(client, taskId, engagementId))!;
       const action = actionForStatus(row.status, status);
       if (action) {
         const res = await this.transitionWith(client, ctx, engagementId, taskId, action, {
@@ -127,7 +128,9 @@ export class TaskWorkflowService {
       }
       // A plain change (→ blocked without a client request, paused → todo …).
       if (!row.is_lead && row.assigned_to_employee_id !== ctx.employeeId) {
-        throw new ForbiddenException('Only the assignee or an engagement lead may update this task.');
+        throw new ForbiddenException(
+          'Only the assignee or an engagement lead may update this task.',
+        );
       }
       if (row.status === TASK_STATUS.inProgress) {
         await closeTaskEntries(client, taskId, ['work'], TIME_STOP_REASON.paused);
@@ -200,8 +203,7 @@ export class TaskWorkflowService {
     let alreadyRunning = false;
     if (plan.open && autoTime && me) {
       const state = await clockState(client, me);
-      alreadyRunning =
-        state.running?.taskId === taskId && state.running.entryKind === plan.open;
+      alreadyRunning = state.running?.taskId === taskId && state.running.entryKind === plan.open;
       if (!alreadyRunning && state.running) {
         const closed = await closeRunningFor(client, me, TIME_STOP_REASON.taskSwitched);
         await settleTasksAfterClose(
@@ -230,7 +232,10 @@ export class TaskWorkflowService {
       }
     };
     if (reviewerId !== row.reviewer_employee_id) add('reviewer_employee_id = ?', reviewerId);
-    if (plan.review === 'sent') add('sent_for_review_at = now()'), add('review_started_at = NULL');
+    if (plan.review === 'sent') {
+      add('sent_for_review_at = now()');
+      add('review_started_at = NULL');
+    }
     if (plan.review === 'started') add('review_started_at = now()');
     if (plan.review === 'cleared') add('review_started_at = NULL');
     if (plan.completion === 'set') {
@@ -287,7 +292,11 @@ export class TaskWorkflowService {
         objectId: taskId,
       });
     }
-    if (plan.notify === 'assignee' && row.assigned_to_employee_id && row.assigned_to_employee_id !== me) {
+    if (
+      plan.notify === 'assignee' &&
+      row.assigned_to_employee_id &&
+      row.assigned_to_employee_id !== me
+    ) {
       await this.notifications.emitWith(client, ctx, {
         type: NOTIFICATION_TYPE.taskReturned,
         recipientEmployeeIds: [row.assigned_to_employee_id],
@@ -339,7 +348,9 @@ export class TaskWorkflowService {
     );
     const row = rows[0];
     if (!row) throw new NotFoundException('Task not found.');
-    if (['completed', 'closed', 'cancelled', 'declined', 'withdrawn'].includes(row.engagement_status)) {
+    if (
+      ['completed', 'closed', 'cancelled', 'declined', 'withdrawn'].includes(row.engagement_status)
+    ) {
       throw new ConflictException('This engagement is closed; its tasks can no longer change.');
     }
     return row;
@@ -358,7 +369,9 @@ export class TaskWorkflowService {
       [engagementId, employeeId],
     );
     if (!rows[0]) {
-      throw new BadRequestException('The reviewer must be on the engagement (EP, manager or team).');
+      throw new BadRequestException(
+        'The reviewer must be on the engagement (EP, manager or team).',
+      );
     }
   }
 
@@ -401,7 +414,9 @@ export class TaskWorkflowService {
           throw new ConflictException('Task was modified by someone else. Refresh and retry.');
         }
       }
-      throw new ForbiddenException('Only the assignee, the reviewer or an engagement lead may move this task.');
+      throw new ForbiddenException(
+        'Only the assignee, the reviewer or an engagement lead may move this task.',
+      );
     }
   }
 }

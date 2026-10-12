@@ -280,10 +280,7 @@ export function actionForStatus(from: TaskStatus, to: TaskStatus): TaskAction | 
 }
 
 /** System closures (idle / day-end / sign-out) pause the task the clock ran for. */
-export function statusAfterSystemClose(
-  status: TaskStatus,
-  kind: TimeEntryKind,
-): TaskStatus | null {
+export function statusAfterSystemClose(status: TaskStatus, kind: TimeEntryKind): TaskStatus | null {
   if (kind === TIME_ENTRY_KIND.work && status === S.inProgress) return S.paused;
   return null;
 }
