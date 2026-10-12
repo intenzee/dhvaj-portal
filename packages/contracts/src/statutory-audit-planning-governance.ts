@@ -198,6 +198,15 @@ export const PLANNING_EVIDENCE_TARGET = {
   financialDataset: 'financial_dataset',
   analyticsException: 'analytics_exception',
   planningExpectation: 'planning_expectation',
+  /**
+   * 03.3 records (§21): the determination (benchmark normalisation, unusual
+   * user focus, covenant / regulatory measures), a normalisation adjustment
+   * line, a specific materiality record, a qualitative consideration.
+   */
+  materialityDetermination: 'materiality_determination',
+  materialityAdjustment: 'materiality_adjustment',
+  materialitySpecific: 'materiality_specific',
+  materialityQualitative: 'materiality_qualitative',
 } as const;
 export type PlanningEvidenceTarget =
   (typeof PLANNING_EVIDENCE_TARGET)[keyof typeof PLANNING_EVIDENCE_TARGET];

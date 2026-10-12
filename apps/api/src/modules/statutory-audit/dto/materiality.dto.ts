@@ -17,6 +17,8 @@ import {
 import {
   AGGREGATION_FACTOR_KEYS,
   BENCHMARK_ASSESSMENTS,
+  MATERIALITY_CHALLENGE_KINDS,
+  MATERIALITY_CHALLENGE_TARGETS,
   MAT04_ANSWERS,
   MAT06_ANSWERS,
   MAT07_ANSWERS,
@@ -30,6 +32,8 @@ import {
   SPECIFIC_THRESHOLD_TYPES,
   USER_FOCUS_MEASURES,
   type BenchmarkAssessment,
+  type MaterialityChallengeKind,
+  type MaterialityChallengeTarget,
   type Mat04Answer,
   type Mat06Answer,
   type Mat07Answer,
@@ -308,6 +312,74 @@ export class UpdateRevisionItemDto {
   status?: 'open' | 'resolved';
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(TEXT) resolution?: string | null;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+// ── §23 Engagement Partner review + §20 reassessment ────────────────────────
+
+export class CreateMaterialityChallengeDto {
+  @ApiProperty({ enum: MATERIALITY_CHALLENGE_TARGETS })
+  @IsIn(MATERIALITY_CHALLENGE_TARGETS)
+  targetType!: MaterialityChallengeTarget;
+
+  @ApiPropertyOptional({
+    description: 'Candidate benchmark, SM-00n record, consideration … (free text).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  targetRef?: string | null;
+
+  @ApiProperty({ enum: MATERIALITY_CHALLENGE_KINDS })
+  @IsIn(MATERIALITY_CHALLENGE_KINDS)
+  kind!: MaterialityChallengeKind;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(4000)
+  body!: string;
+}
+
+export class RespondMaterialityChallengeDto {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(4000)
+  response!: string;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+export class CloseMaterialityChallengeDto {
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+export class RequireMaterialityReassessmentDto {
+  @ApiProperty({ description: 'Why the completed determination must be reassessed.' })
+  @IsString()
+  @MaxLength(4000)
+  reason!: string;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+export class ResolveMaterialityReassessmentDto {
+  @ApiProperty({ description: 'Why the version in force still stands (no revision needed).' })
+  @IsString()
+  @MaxLength(4000)
+  resolution!: string;
 
   @ApiProperty()
   @IsInt()

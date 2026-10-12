@@ -15,6 +15,11 @@ import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { AuditMaterialityService } from './audit-materiality.service';
 import {
   AssessBenchmarkDto,
+  CloseMaterialityChallengeDto,
+  CreateMaterialityChallengeDto,
+  RequireMaterialityReassessmentDto,
+  ResolveMaterialityReassessmentDto,
+  RespondMaterialityChallengeDto,
   NormalisationAdjustmentDto,
   SaveQualitativeDto,
   SpecificMaterialityDto,
@@ -22,16 +27,29 @@ import {
   UpdateMaterialityDto,
   UpdateRevisionItemDto,
 } from './dto/materiality.dto';
+import {
+  PlanningCapabilityRequired,
+  PlanningGovernanceGuard,
+  PlanningLockExempt,
+  PlanningScope,
+} from './planning-governance.guard';
 import { Section03LockGuard } from './section-03-lock.guard';
 
 /**
- * Statutory Audit — 03.3 Materiality. Reads gated by `engagement.read`,
- * mutations by `engagement.manage`; RLS does the real gating (members read;
- * EP/manager leads mutate).
+ * Statutory Audit — 03.3 Materiality. §23 on every write
+ * (PlanningGovernanceGuard): Article / Senior prepare the source data, user
+ * context, prior-year figures and the normalisation schedule; the Engagement
+ * Manager assesses benchmarks, determines OM / PM / specific / clearly trivial
+ * and completes; the Engagement Partner views, challenges, revises and may
+ * require reassessment. Field-level checks live in the service; RLS is the
+ * backstop. 03.3 keeps its own versioning (03.3.11 revision during the audit),
+ * so the 03.12 approval lock on 03.1 does not freeze it.
  */
 @ApiTags('engagements')
 @Controller('engagements')
-@UseGuards(Section03LockGuard)
+@UseGuards(Section03LockGuard, PlanningGovernanceGuard)
+@PlanningScope('03.3')
+@PlanningLockExempt()
 export class AuditMaterialityController {
   constructor(private readonly materiality: AuditMaterialityService) {}
 
@@ -47,7 +65,8 @@ export class AuditMaterialityController {
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('addFacts', 'assess')
   @ApiOperation({ summary: 'Update the current draft determination (MAT-01…MAT-08)' })
   update(
     @CurrentPrincipal() principal: Principal,
@@ -60,6 +79,7 @@ export class AuditMaterialityController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/conclusion-draft')
   @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired()
   @ApiOperation({
     summary: 'Draft the materiality conclusion from structured judgments (not persisted)',
   })
@@ -73,6 +93,7 @@ export class AuditMaterialityController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/benchmarks/:candidateKey')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Assess a candidate benchmark (03.3.2)' })
   assessBenchmark(
     @CurrentPrincipal() principal: Principal,
@@ -91,7 +112,8 @@ export class AuditMaterialityController {
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/adjustments')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('addFacts')
   @ApiOperation({ summary: 'Add a normalisation adjustment line (03.3.3)' })
   addAdjustment(
     @CurrentPrincipal() principal: Principal,
@@ -103,7 +125,8 @@ export class AuditMaterialityController {
   }
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/adjustments/:adjustmentId')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('addFacts')
   @ApiOperation({ summary: 'Edit a normalisation adjustment line' })
   updateAdjustment(
     @CurrentPrincipal() principal: Principal,
@@ -122,7 +145,8 @@ export class AuditMaterialityController {
   }
 
   @Delete(':id/statutory-audit/:workflowInstanceId/materiality/adjustments/:adjustmentId')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @PlanningCapabilityRequired('addFacts')
   @ApiOperation({ summary: 'Remove a line from the draft normalisation schedule' })
   deleteAdjustment(
     @CurrentPrincipal() principal: Principal,
@@ -140,6 +164,7 @@ export class AuditMaterialityController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/specific')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Add a specific materiality record (MAT-06)' })
   addSpecific(
     @CurrentPrincipal() principal: Principal,
@@ -152,6 +177,7 @@ export class AuditMaterialityController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/specific/:specificId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Edit a specific materiality record' })
   updateSpecific(
     @CurrentPrincipal() principal: Principal,
@@ -171,6 +197,7 @@ export class AuditMaterialityController {
 
   @Delete(':id/statutory-audit/:workflowInstanceId/materiality/specific/:specificId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Remove a specific materiality record from the draft' })
   deleteSpecific(
     @CurrentPrincipal() principal: Principal,
@@ -183,6 +210,7 @@ export class AuditMaterialityController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/qualitative/:key')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Answer a qualitative materiality consideration (03.3.9)' })
   saveQualitative(
     @CurrentPrincipal() principal: Principal,
@@ -196,6 +224,7 @@ export class AuditMaterialityController {
 
   @Post(':id/statutory-audit/:workflowInstanceId/materiality/revisions')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess', 'reopen')
   @ApiOperation({ summary: 'Start a revision (03.3.11) — creates the next version as a draft' })
   startRevision(
     @CurrentPrincipal() principal: Principal,
@@ -208,6 +237,7 @@ export class AuditMaterialityController {
 
   @Post(':id/statutory-audit/materiality-revision-items/:itemId')
   @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
   @ApiOperation({ summary: 'Assign / resolve an affected-work item flagged by a revision' })
   updateRevisionItem(
     @CurrentPrincipal() principal: Principal,
@@ -216,5 +246,84 @@ export class AuditMaterialityController {
     @Body() dto: UpdateRevisionItemDto,
   ): Promise<RevisionImpactItem> {
     return this.materiality.updateRevisionItem(rlsContextFromPrincipal(principal), id, itemId, dto);
+  }
+
+  // ── §20 / §23 reassessment of a completed version ─────────────────────────
+
+  @Post(':id/statutory-audit/:workflowInstanceId/materiality/require-reassessment')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('partnerReview')
+  @ApiOperation({ summary: 'Engagement Partner requires reassessment of the completed 03.3' })
+  requireReassessment(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wi: string,
+    @Body() dto: RequireMaterialityReassessmentDto,
+  ): Promise<MaterialitySummary> {
+    return this.materiality.requireReassessment(rlsContextFromPrincipal(principal), id, wi, dto);
+  }
+
+  @Post(':id/statutory-audit/:workflowInstanceId/materiality/resolve-reassessment')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('assess')
+  @ApiOperation({ summary: 'Manager: reassessed — the version in force stands (reasoned)' })
+  resolveReassessment(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wi: string,
+    @Body() dto: ResolveMaterialityReassessmentDto,
+  ): Promise<MaterialitySummary> {
+    return this.materiality.resolveReassessment(rlsContextFromPrincipal(principal), id, wi, dto);
+  }
+
+  // ── §23 Engagement Partner comments / challenges ───────────────────────────
+
+  @Post(':id/statutory-audit/:workflowInstanceId/materiality/challenges')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('partnerReview')
+  @ApiOperation({ summary: 'Engagement Partner comment or challenge on 03.3' })
+  createChallenge(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('workflowInstanceId', new ParseUUIDPipe()) wi: string,
+    @Body() dto: CreateMaterialityChallengeDto,
+  ): Promise<MaterialitySummary> {
+    return this.materiality.createChallenge(rlsContextFromPrincipal(principal), id, wi, dto);
+  }
+
+  @Post(':id/statutory-audit/materiality-challenges/:challengeId/respond')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('respondToChallenge')
+  @ApiOperation({ summary: 'Engagement Manager response to a 03.3 challenge' })
+  respondChallenge(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('challengeId', new ParseUUIDPipe()) challengeId: string,
+    @Body() dto: RespondMaterialityChallengeDto,
+  ): Promise<MaterialitySummary> {
+    return this.materiality.respondChallenge(
+      rlsContextFromPrincipal(principal),
+      id,
+      challengeId,
+      dto,
+    );
+  }
+
+  @Post(':id/statutory-audit/materiality-challenges/:challengeId/close')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @PlanningCapabilityRequired('partnerReview')
+  @ApiOperation({ summary: 'Engagement Partner closes a 03.3 comment / answered challenge' })
+  closeChallenge(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('challengeId', new ParseUUIDPipe()) challengeId: string,
+    @Body() dto: CloseMaterialityChallengeDto,
+  ): Promise<MaterialitySummary> {
+    return this.materiality.closeChallenge(
+      rlsContextFromPrincipal(principal),
+      id,
+      challengeId,
+      dto,
+    );
   }
 }
