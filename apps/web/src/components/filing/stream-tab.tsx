@@ -76,10 +76,13 @@ export function StreamTab({
   stream,
   ctx,
   defaultFy,
+  team = [],
 }: {
   engagementId: string;
   stream: Stream;
   ctx: TaskActionContext;
+  /** For "filed by" on the lodge form. */
+  team?: { employeeId: string; employeeName: string }[];
   /** The page's selected year, used until the stream's own selector is set. */
   defaultFy?: string | null;
 }): JSX.Element {
@@ -199,7 +202,7 @@ export function StreamTab({
             </div>
             {annualOpen && (
               <div className="rounded-lg border border-primary-600/30 border-l-4 border-l-primary-600 p-3">
-                <InstanceWorkspace instanceId={annualOpen} ctx={ctx} />
+                <InstanceWorkspace instanceId={annualOpen} ctx={ctx} team={team} />
               </div>
             )}
           </CardBody>
@@ -271,6 +274,7 @@ export function StreamTab({
                                         instanceId={i.instanceId}
                                         ctx={ctx}
                                         correctionTargets={targetsFor(p)}
+                                        team={team}
                                       />
                                     </div>
                                   ))
@@ -286,6 +290,7 @@ export function StreamTab({
                                   instanceId={i.instanceId}
                                   ctx={ctx}
                                   correctionTargets={targetsFor(p)}
+                                        team={team}
                                 />
                               </div>
                             ))}
