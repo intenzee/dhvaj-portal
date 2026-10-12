@@ -1195,6 +1195,18 @@ export class AuditAreaReviewService {
           `${dup[0].area_name} is already a retained Audit Area — link the risk to it instead.`,
         );
       }
+      // One open request per area name — a second risk joins the existing one.
+      const { rows: pending } = await client.query<{ proposed_area_name: string }>(
+        `SELECT proposed_area_name FROM hsdg.audit_area_review_comment
+          WHERE review_id = $1 AND kind = 'downstream_request' AND status = 'open'
+            AND lower(proposed_area_name) = lower($2)`,
+        [review.id, name],
+      );
+      if (pending[0]) {
+        throw new ConflictException(
+          `"${pending[0].proposed_area_name}" is already requested and awaiting the Manager's answer.`,
+        );
+      }
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO hsdg.audit_area_review_comment
            (review_id, engagement_id, kind, body, proposed_area_name, source_module, source_risk_id,
