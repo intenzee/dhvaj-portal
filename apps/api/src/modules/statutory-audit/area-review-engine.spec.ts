@@ -108,6 +108,7 @@ const stored = (over: Partial<StoredArea> = {}): StoredArea => ({
   reviewFlag: null,
   reviewFlagSource: null,
   inconsistencyResolution: null,
+  scopeMapItemId: null,
   version: 1,
   assertions: [
     {
@@ -168,6 +169,22 @@ const failing = (s: ReturnType<typeof state>) =>
     .map((v) => v.id);
 
 describe('03.5 audit areas & assertions engine', () => {
+  it('VAL-11: every included 03.4 Approach Map area is carried into 03.5', () => {
+    const s = state([]);
+    expect(validations({ ...s, unconvertedMap: null }).find((v) => v.id === 'VAL-11')!.met).toBe(
+      true,
+    );
+    expect(validations({ ...s, unconvertedMap: [] }).find((v) => v.id === 'VAL-11')!.met).toBe(
+      true,
+    );
+    const open = validations({
+      ...s,
+      unconvertedMap: [{ code: 'AM-004', name: 'Consolidation' }],
+    }).find((v) => v.id === 'VAL-11')!;
+    expect(open.met).toBe(false);
+    expect(open.detail).toContain('AM-004 Consolidation');
+  });
+
   it('AT-01: selects the complete applicable library — CFS adds Consolidation, initial audit adds Opening Balances', () => {
     const rows = [
       lib(),

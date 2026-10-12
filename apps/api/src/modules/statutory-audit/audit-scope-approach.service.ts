@@ -1,23 +1,34 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
   CUSTOM_DECISION_OPTIONS,
-  DECISION_DEFS,
   FINANCIAL_UNIT_FACTOR,
   IMPLICATION_RESPONSES,
+  NOTIFICATION_TYPE,
+  PARTNER_ACTION_LABEL,
+  PLANNING_ACTOR_ROLE_LABEL,
   PLANNING_CHANGE_CATEGORY_LABEL,
+  SCOPE_HANDOFF_ITEMS,
+  SCOPE_METHODOLOGY_KINDS,
   SCOPE_METHODOLOGY_VERSION,
   SCOPE_REVISION_TRIGGER_LABEL,
+  SCOPE_TEAM_MAP_FIELDS,
+  SCOPE_TEAM_RECORD_FIELDS,
+  SCOPE_TEAM_SERVICE_ORG_FIELDS,
+  SCOPE_TEAM_UNIT_FIELDS,
   SPECIALIST_AREA_LABEL,
   SPECIALIST_DECISIONS,
   materialityVersionLabel,
   scopeVersionLabel,
+  type ConvertScopeMapAreaInput,
   type FlagScopeReassessmentInput,
+  type LinkScopeMapAreaInput,
   type NewSpecialistInput,
   type PartnerScopeActionInput,
   type PlanningAttention,
@@ -25,6 +36,7 @@ import {
   type RespondPartnerActionInput,
   type SaveScopeConsiderationInput,
   type SaveScopeDecisionInput,
+  type ScopeAccess,
   type ScopeApproachRecord,
   type ScopeApproachSummary,
   type ScopeAuthorityRef,
@@ -33,12 +45,14 @@ import {
   type ScopeDecisionKind,
   type ScopeDependency,
   type ScopeDependencyInput,
+  type ScopeHandoff,
   type ScopeIntelligenceItem,
   type ScopeLimitation,
   type ScopeLimitationInput,
   type ScopeMapItem,
   type ScopeMapItemInput,
   type ScopeMaterialityRef,
+  type ScopeObFact,
   type ScopePartnerAction,
   type ScopeRevision,
   type ScopeServiceOrg,
@@ -51,7 +65,19 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { AuditAreaReviewService } from './audit-area-review.service';
 import { AuditBusinessUnderstandingService } from './audit-business-understanding.service';
+import { readFrameworkRecordInputsOn } from './framework-summary-inputs';
+import { s197Applies } from './framework-summary-records';
+import { readPriorAuditFile } from './master-facts';
+import { flagPlanningItems, itemsForModules } from './planning-downstream';
+import {
+  assertPlanningCapability,
+  notifyPlanning,
+  resolvePlanningActor,
+  syncScopeAttention,
+  type PlanningActor,
+} from './planning-governance';
 import {
   assertShell,
   assertSignalsInShell,
@@ -77,24 +103,17 @@ import {
   scopeCompletion,
   specificFor,
   suggestedConfirmationAreas,
+  suggestUnitSignals,
+  unitFinPrompt,
   type ScopeFacts,
   type ScopeState,
 } from './scope-approach-engine';
-import { isEngagementLead } from './master-facts';
+import { SCOPE_ITEM_KEYS, flagScopeReassessment } from './scope-hooks';
+import { linkScopeMap, readLinkedAreas } from './scope-map-link';
+import { readScopeDecisionDefs, type ScopeDecisionDefs } from './scope-methodology-library';
 
-/** Phase 03 checklist rows 03.4 rolls its state up into. */
-const SCOPE_ITEM_KEYS = ['audit_approach', 'overall_audit_plan'];
-const AUTHORITY_CODES: [string, string][] = [
-  ['SA_300', 'View SA 300'],
-  ['SA_330', 'View SA 330'],
-  ['SA_402', 'View SA 402'],
-  ['SA_501', 'View SA 501'],
-  ['SA_505', 'View SA 505'],
-  ['SA_510', 'View SA 510'],
-  ['SA_610', 'View SA 610'],
-  ['SA_620', 'View SA 620'],
-  ['IG_SA_300', 'Planning Implementation Guide'],
-];
+/** §32 — anchors into authority_reference_link context '03.4' (labels / provisions live there). */
+const SCOPE_AUTHORITY_CONTEXT = '03.4';
 
 type Row = Record<string, unknown>;
 const s = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
@@ -108,64 +127,24 @@ interface Workspace {
   materiality: ScopeMaterialityRef | null;
   state: ScopeState;
   signalCodes: Map<string, string>;
+  defs: ScopeDecisionDefs;
 }
 
 /**
- * Flag 03.4 for reassessment (§24/§27). Used by 03.3 when a materiality
- * revision is completed and by the reassessment endpoint (Section 05, Manager).
- * Never changes a decision: completed strategy → Reassessment Required; the
- * affected Approach Map items are flagged individually.
+ * §30 — fields outside the team's list are the Manager's. Throws when a
+ * preparer (Article / Senior, or the EP not acting as Manager) sends one.
  */
-export async function flagScopeReassessment(
-  client: PoolClient,
-  workflowInstanceId: string,
-  source: FlagScopeReassessmentInput['source'],
-  reason: string,
-  cycleKey?: string | null,
-): Promise<boolean> {
-  const { rows } = await client.query<{ id: string; status: string }>(
-    `SELECT id, status FROM hsdg.audit_scope_approach WHERE workflow_instance_id = $1`,
-    [workflowInstanceId],
-  );
-  const rec = rows[0];
-  if (!rec) return false;
-  if (source === 'materiality_revision') {
-    await client.query(
-      `UPDATE hsdg.audit_scope_map_item
-          SET reassessment_required = true, reassessment_reason = $2, version = version + 1
-        WHERE scope_id = $1 AND included AND (metric_key IS NOT NULL OR manual_amount IS NOT NULL)`,
-      [rec.id, reason],
-    );
-  } else if (source === 'section_05' && cycleKey) {
-    const cycleAreas: Record<string, string[]> = {
-      revenue: ['revenue', 'trade_receivables'],
-      procurement: ['trade_payables'],
-      payroll: ['employee_cost'],
-      inventory: ['inventory'],
-      treasury: ['cash_bank', 'total_borrowings', 'investments'],
-      financial_close: ['financial_close'],
-    };
-    await client.query(
-      `UPDATE hsdg.audit_scope_map_item
-          SET reassessment_required = true, reassessment_reason = $2, version = version + 1
-        WHERE scope_id = $1 AND included
-          AND (controls_strategy = 'reliance_contemplated' OR area_key = ANY($3::text[]))`,
-      [rec.id, reason, cycleAreas[cycleKey] ?? []],
+function assertTeamFields(actor: PlanningActor, input: object, allowed: readonly string[]): void {
+  if (actor.capabilities.assess) return;
+  assertPlanningCapability(actor, 'addFacts', '03.4');
+  const extra = Object.entries(input)
+    .filter(([k, v]) => k !== 'version' && v !== undefined && !allowed.includes(k))
+    .map(([k]) => k);
+  if (extra.length) {
+    throw new ForbiddenException(
+      `Only the Engagement Manager concludes ${extra.join(', ')} in 03.4 — the engagement team prepares facts and drafts. (You are: ${PLANNING_ACTOR_ROLE_LABEL[actor.role]}.)`,
     );
   }
-  await client.query(
-    `UPDATE hsdg.audit_scope_approach
-        SET status = CASE WHEN status = 'complete' THEN 'reassessment_required' ELSE status END,
-            reassessment_reason = $2, reassessment_source = $3, version = version + 1
-      WHERE id = $1`,
-    [rec.id, reason, source],
-  );
-  await client.query(
-    `UPDATE hsdg.audit_planning_items SET state = 'needs_attention', version = version + 1
-      WHERE workflow_instance_id = $1 AND item_key = ANY($2::text[]) AND state = 'complete'`,
-    [workflowInstanceId, SCOPE_ITEM_KEYS],
-  );
-  return true;
 }
 
 /**
@@ -180,6 +159,7 @@ export class AuditScopeApproachService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly understanding: AuditBusinessUnderstandingService,
+    private readonly areaReview: AuditAreaReviewService,
   ) {}
 
   // ── Summary / conclusion ──────────────────────────────────────────────────
@@ -191,12 +171,15 @@ export class AuditScopeApproachService {
   ): Promise<ScopeApproachSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
-      // First open by a lead builds the population and approach map from
-      // Section 02 / 03.1–03.3 straight away (as 03.5 populates on first entry).
-      if (!(await this.readRecord(client, wi)) && (await isEngagementLead(client, engagementId))) {
-        await this.ensure(client, ctx, engagementId, wi);
+      // First open by anyone who prepares 03.4 builds the population and approach
+      // map from Section 02 / 03.1–03.3 straight away (as 03.5 populates on first entry).
+      if (!(await this.readRecord(client, wi))) {
+        const actor = await resolvePlanningActor(client, engagementId);
+        if (actor.capabilities.addFacts || actor.capabilities.assess) {
+          await this.ensure(client, ctx, engagementId, wi);
+        }
       }
-      return this.buildSummary(client, wi);
+      return this.buildSummary(client, wi, false);
     });
   }
 
@@ -222,6 +205,11 @@ export class AuditScopeApproachService {
   ): Promise<ScopeApproachSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
+      assertTeamFields(
+        await resolvePlanningActor(client, engagementId),
+        input,
+        SCOPE_TEAM_RECORD_FIELDS,
+      );
       const { id, created } = await this.ensure(client, ctx, engagementId, wi);
       const cur = (await this.readRecord(client, wi))!;
       if (!(created && input.version === 0) && input.version !== cur.version) {
@@ -287,6 +275,7 @@ export class AuditScopeApproachService {
       }
 
       const completing = input.ap02 === 'yes_complete';
+      const { methodology } = await readScopeDecisionDefs(client);
       let materialityVersionNo = cur.materialityVersionNo;
       if (completing) {
         const ws = await this.workspace(client, wi, next);
@@ -348,10 +337,16 @@ export class AuditScopeApproachService {
           completing ? 'complete' : 'draft',
           materialityVersionNo,
           ctx.employeeId ?? null,
-          SCOPE_METHODOLOGY_VERSION,
+          methodology.version,
         ],
       );
       await this.rollUp(client, ctx, wi, completing ? 'complete' : 'in_progress');
+      // §6 — a completed strategy is what 03.8 / 03.9 / 03.11 plan from: their
+      // completed checklist rows need a look when the hand-off carries anything.
+      if (completing) {
+        const ws = await this.workspace(client, wi);
+        await flagPlanningItems(client, wi, handoffItems(buildHandoff(ws.state)));
+      }
       await this.audit.recordWith(client, ctx, {
         action: completing
           ? 'statutory_audit.scope_approach_completed'
@@ -375,6 +370,7 @@ export class AuditScopeApproachService {
         await this.sync(client, engagementId, wi, id);
         await this.touched(client, ctx, wi, id);
       }
+      await linkScopeMap(client, wi);
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.scope_approach_generated',
         objectType: 'audit_scope_approach',
@@ -394,6 +390,11 @@ export class AuditScopeApproachService {
     input: ScopeUnitInput,
   ): Promise<ScopeApproachSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
+      assertTeamFields(
+        await resolvePlanningActor(client, engagementId),
+        input,
+        SCOPE_TEAM_UNIT_FIELDS,
+      );
       const scopeId = await this.editable(client, ctx, engagementId, wi);
       await assertSignalsInShell(client, wi, input.signalIds ?? []);
       await this.assertFocusInShell(client, wi, input.focusIds ?? []);
@@ -433,6 +434,13 @@ export class AuditScopeApproachService {
         finAmount: v('finAmount', 'fin_amount'),
         finSource: v('finSource', 'fin_source', txt),
         finNotAvailable: v('finNotAvailable', 'fin_not_available'),
+        employees: v<number | null>('employees', 'employees', (x) =>
+          x === null ? null : Number(x),
+        ),
+        transactionVolume: v<number | null>('transactionVolume', 'transaction_volume', (x) =>
+          x === null ? null : Number(x),
+        ),
+        volumeNote: v('volumeNote', 'volume_note', txt),
         relevance: v('relevance', 'relevance', (x) => cleanList(x as string[])),
         relevanceOther: v('relevanceOther', 'relevance_other', txt),
         qualitativeNote: v('qualitativeNote', 'qualitative_note', txt),
@@ -453,7 +461,8 @@ export class AuditScopeApproachService {
            relevance_other = $10, qualitative_note = $11, signal_ids = $12, focus_ids = $13,
            specific_materiality = $14, auditor = $15,
            auditor_strategy = CASE WHEN $15 = 'dhvaj' THEN NULL ELSE $16 END,
-           scope_conclusion = $17, rationale = $18, version = version + 1
+           scope_conclusion = $17, rationale = $18, employees = $19, transaction_volume = $20,
+           volume_note = $21, version = version + 1
          WHERE id = $1`,
         [
           id,
@@ -474,6 +483,9 @@ export class AuditScopeApproachService {
           next.auditorStrategy,
           next.scopeConclusion,
           next.rationale,
+          next.employees,
+          next.transactionVolume,
+          next.volumeNote,
         ],
       );
       // §7: significance not yet available → information requirement / dependency.
@@ -518,10 +530,13 @@ export class AuditScopeApproachService {
     itemKey: string | null,
     input: SaveScopeDecisionInput,
   ): Promise<ScopeApproachSummary> {
-    if (!(kind in DECISION_DEFS)) throw new BadRequestException('Unknown decision kind.');
+    if (!SCOPE_METHODOLOGY_KINDS.includes(kind as ScopeDecisionKind)) {
+      throw new BadRequestException('Unknown decision kind.');
+    }
     const k = kind as ScopeDecisionKind;
     return this.db.withRlsContext(ctx, async (client) => {
       const scopeId = await this.editable(client, ctx, engagementId, wi);
+      const { defs, retired } = await readScopeDecisionDefs(client);
       let key = itemKey;
       let label: string | null = null;
       if (!key) {
@@ -537,13 +552,18 @@ export class AuditScopeApproachService {
         );
         key = `custom_${Number(rows[0]!.n) + 1}`;
       }
-      const std = DECISION_DEFS[k].find((d) => d.key === key);
       const { rows: existing } = await client.query<Row>(
         `SELECT * FROM hsdg.audit_scope_decision WHERE scope_id = $1 AND kind = $2 AND item_key = $3`,
         [scopeId, k, key],
       );
       const e = existing[0];
-      if (!std && !e && itemKey) throw new NotFoundException('Decision item not found.');
+      // A retired library item stays answerable only where a decision was already saved on it.
+      const std =
+        defs[k].find((d) => d.key === key) ??
+        (e && !e.is_custom ? retired.get(`${k}:${key}`) : undefined);
+      if (!std && !(e?.is_custom === true) && itemKey) {
+        throw new NotFoundException('Decision item not found.');
+      }
       if ((e ? Number(e.version) : 0) !== input.version) {
         throw new ConflictException('This decision changed; refresh and retry.');
       }
@@ -564,7 +584,7 @@ export class AuditScopeApproachService {
          ON CONFLICT (scope_id, kind, item_key) DO UPDATE
            SET status = EXCLUDED.status, roll_forward = EXCLUDED.roll_forward, note = EXCLUDED.note,
                version = hsdg.audit_scope_decision.version + 1`,
-        [scopeId, engagementId, k, key, label, !std, status, rollForward, note],
+        [scopeId, engagementId, k, key, label, !itemKey, status, rollForward, note],
       );
       await this.touched(client, ctx, wi, scopeId);
       await this.audit.recordWith(client, ctx, {
@@ -588,6 +608,11 @@ export class AuditScopeApproachService {
     input: ServiceOrgInput,
   ): Promise<ScopeApproachSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
+      assertTeamFields(
+        await resolvePlanningActor(client, engagementId),
+        input,
+        SCOPE_TEAM_SERVICE_ORG_FIELDS,
+      );
       const scopeId = await this.editable(client, ctx, engagementId, wi);
       let id = orgId;
       if (!id) {
@@ -941,6 +966,11 @@ export class AuditScopeApproachService {
     input: ScopeMapItemInput,
   ): Promise<ScopeApproachSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
+      assertTeamFields(
+        await resolvePlanningActor(client, engagementId),
+        input,
+        SCOPE_TEAM_MAP_FIELDS,
+      );
       const scopeId = await this.editable(client, ctx, engagementId, wi);
       await assertSignalsInShell(client, wi, input.signalIds ?? []);
       await this.assertFocusInShell(client, wi, input.focusIds ?? []);
@@ -1015,6 +1045,9 @@ export class AuditScopeApproachService {
         ],
       );
       await this.touched(client, ctx, wi, scopeId);
+      if (!itemId || input.name !== undefined || input.included !== undefined) {
+        await linkScopeMap(client, wi);
+      }
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.scope_map_item_saved',
         objectType: 'audit_scope_map_item',
@@ -1060,27 +1093,40 @@ export class AuditScopeApproachService {
           [signalId],
         );
       }
+      const rec = (await this.readRecord(client, wi))!;
+      const agree = input.action === 'agree';
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO hsdg.audit_scope_partner_action
-           (scope_id, engagement_id, action, note, signal_id, status, created_by_employee_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+           (scope_id, engagement_id, action, note, signal_id, status, response,
+            created_by_employee_id, scope_version_no)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
         [
           scopeId,
           engagementId,
           input.action,
           note,
           signalId,
-          input.action === 'agree' ? 'addressed' : 'open',
+          agree ? 'addressed' : 'open',
+          agree ? 'Agreed' : null,
           ctx.employeeId ?? null,
+          rec.versionNo,
         ],
       );
-      if (input.action === 'agree') {
-        await client.query(
-          `UPDATE hsdg.audit_scope_partner_action SET response = 'Agreed' WHERE id = $1`,
-          [rows[0]!.id],
-        );
-      }
       if (signalId) await this.sync(client, engagementId, wi, scopeId);
+      // §26 — the Manager answers a challenge / request; an Agree is for the record only.
+      if (!agree) {
+        const actor = await resolvePlanningActor(client, engagementId);
+        await notifyPlanning(client, [actor.managerId ?? actor.partnerId], {
+          type: NOTIFICATION_TYPE.planningScopePartnerAction,
+          title: `Engagement Partner — ${PARTNER_ACTION_LABEL[input.action]} on 03.4 Scope & Approach ${rec.versionLabel}`,
+          body: note ?? '',
+          engagementId,
+          objectType: 'audit_scope_partner_action',
+          objectId: rows[0]!.id,
+          dedup: `scope_partner_action:${rows[0]!.id}`,
+          except: ctx.employeeId ?? null,
+        });
+      }
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.scope_partner_action',
         objectType: 'audit_scope_partner_action',
@@ -1102,14 +1148,32 @@ export class AuditScopeApproachService {
       await assertShell(client, engagementId, wi);
       const response = clean(input.response);
       if (!response) throw new BadRequestException('A response is required.');
-      const { rowCount } = await client.query(
-        `UPDATE hsdg.audit_scope_partner_action a SET status = 'addressed', response = $3, version = a.version + 1
+      const { rows: done } = await client.query<{
+        created_by_employee_id: string | null;
+        action: ScopePartnerAction['action'];
+      }>(
+        `UPDATE hsdg.audit_scope_partner_action a
+            SET status = 'addressed', response = $3, responded_by_employee_id = $5,
+                responded_at = now(), version = a.version + 1
            FROM hsdg.audit_scope_approach r
-          WHERE a.id = $1 AND a.scope_id = r.id AND r.workflow_instance_id = $2 AND a.version = $4`,
-        [actionId, wi, response, input.version],
+          WHERE a.id = $1 AND a.scope_id = r.id AND r.workflow_instance_id = $2 AND a.version = $4
+            AND a.status = 'open'
+          RETURNING a.created_by_employee_id, a.action`,
+        [actionId, wi, response, input.version, ctx.employeeId ?? null],
       );
-      if (!rowCount)
+      if (!done[0]) {
         throw new ConflictException('Partner action not found or changed; refresh and retry.');
+      }
+      await notifyPlanning(client, [done[0].created_by_employee_id], {
+        type: NOTIFICATION_TYPE.planningScopePartnerAction,
+        title: `Engagement Manager answered your 03.4 ${PARTNER_ACTION_LABEL[done[0].action]}`,
+        body: response,
+        engagementId,
+        objectType: 'audit_scope_partner_action',
+        objectId: actionId,
+        dedup: `scope_partner_response:${actionId}`,
+        except: ctx.employeeId ?? null,
+      });
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.scope_partner_action_addressed',
         objectType: 'audit_scope_partner_action',
@@ -1134,7 +1198,7 @@ export class AuditScopeApproachService {
       await assertShell(client, engagementId, wi);
       // A double-submit must not snapshot the same baseline into two revisions.
       await this.lockRecord(client, wi);
-      const summary = await this.buildSummary(client, wi);
+      const summary = await this.buildSummary(client, wi, false);
       const r = summary.record;
       if (!r.id || r.status === 'draft') {
         throw new ConflictException(
@@ -1152,6 +1216,7 @@ export class AuditScopeApproachService {
         mapItems: summary.mapItems,
       };
       const nextNo = r.versionNo + 1;
+      const affected = cleanList(input.affectedModules);
       await client.query(
         `INSERT INTO hsdg.audit_scope_revision
            (scope_id, engagement_id, from_version_no, to_version_no, trigger, reason,
@@ -1164,7 +1229,7 @@ export class AuditScopeApproachService {
           nextNo,
           input.trigger,
           reason,
-          cleanList(input.affectedModules),
+          affected,
           JSON.stringify(baseline),
           ctx.employeeId ?? null,
         ],
@@ -1176,12 +1241,24 @@ export class AuditScopeApproachService {
         [r.id, nextNo, input.trigger, reason],
       );
       await this.rollUp(client, ctx, wi, 'in_progress');
+      // §27 — the modules the revision affects need attention on the Phase 03 checklist.
+      const flagged = await flagPlanningItems(
+        client,
+        wi,
+        itemsForModules(affected.filter((m) => m !== '03.4')),
+      );
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.scope_revision_started',
         objectType: 'audit_scope_approach',
         objectId: r.id,
         before: { version: r.versionLabel, status: r.status },
-        after: { version: scopeVersionLabel(nextNo), trigger: input.trigger, reason },
+        after: {
+          version: scopeVersionLabel(nextNo),
+          trigger: input.trigger,
+          reason,
+          affectedModules: affected,
+          flaggedItems: flagged,
+        },
       });
       return this.buildSummary(client, wi);
     });
@@ -1197,7 +1274,9 @@ export class AuditScopeApproachService {
     if (!reason) throw new BadRequestException('A reassessment needs a reason.');
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, wi);
-      const done = await flagScopeReassessment(client, wi, input.source, reason, input.cycleKey);
+      const done = await flagScopeReassessment(client, wi, input.source, reason, {
+        cycleKey: input.cycleKey ?? null,
+      });
       if (!done) throw new ConflictException('03.4 has not been started on this audit file.');
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.scope_reassessment_flagged',
@@ -1206,6 +1285,110 @@ export class AuditScopeApproachService {
         after: { source: input.source, reason, cycleKey: input.cycleKey ?? null },
       });
       return this.buildSummary(client, wi);
+    });
+  }
+
+  // ── §23 Approach Map → 03.5 ─────────────────────────────────────────────
+
+  /** Link a map area to an existing 03.5 area by hand (null unlinks; automatic matching then leaves it alone). */
+  async linkMapArea(
+    ctx: RlsContext,
+    engagementId: string,
+    wi: string,
+    itemId: string,
+    input: LinkScopeMapAreaInput,
+  ): Promise<ScopeApproachSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const item = await this.mapItemForLink(client, ctx, engagementId, wi, itemId, input.version);
+      let areaName: string | null = null;
+      if (input.areaId) {
+        const { rows } = await client.query<{
+          area_name: string;
+          scope_map_item_id: string | null;
+        }>(
+          `SELECT a.area_name, a.scope_map_item_id FROM hsdg.audit_engagement_area a
+             JOIN hsdg.audit_area_review r ON r.id = a.review_id
+            WHERE a.id = $1 AND r.workflow_instance_id = $2`,
+          [input.areaId, wi],
+        );
+        const area = rows[0];
+        if (!area) throw new BadRequestException('The 03.5 area must belong to this audit file.');
+        if (area.scope_map_item_id && area.scope_map_item_id !== itemId) {
+          throw new ConflictException(
+            `${area.area_name} already carries another Approach Map area — unlink it there first.`,
+          );
+        }
+        areaName = area.area_name;
+      }
+      await client.query(
+        `UPDATE hsdg.audit_engagement_area SET scope_map_item_id = NULL
+          WHERE scope_map_item_id = $1 AND id IS DISTINCT FROM $2::uuid`,
+        [itemId, input.areaId],
+      );
+      if (input.areaId) {
+        await client.query(
+          `UPDATE hsdg.audit_engagement_area SET scope_map_item_id = $2 WHERE id = $1`,
+          [input.areaId, itemId],
+        );
+      }
+      await client.query(
+        `UPDATE hsdg.audit_scope_map_item SET area_link_manual = true, version = version + 1 WHERE id = $1`,
+        [itemId],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.scope_map_area_linked',
+        objectType: 'audit_scope_map_item',
+        objectId: itemId,
+        before: { area: item.linkedAreaId },
+        after: { area: input.areaId, areaName },
+      });
+      return this.buildSummary(client, wi);
+    });
+  }
+
+  /** Create a 03.5 custom area from a map area nothing in the library matches. */
+  async convertMapArea(
+    ctx: RlsContext,
+    engagementId: string,
+    wi: string,
+    itemId: string,
+    input: ConvertScopeMapAreaInput,
+  ): Promise<ScopeApproachSummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const item = await this.mapItemForLink(client, ctx, engagementId, wi, itemId, input.version);
+      if (!item.included) {
+        throw new BadRequestException('Only an included map area is carried into 03.5.');
+      }
+      if (item.linkedAreaId) {
+        throw new ConflictException(`${item.code} is already carried by a 03.5 area.`);
+      }
+      const areaId = await this.areaReview.addFromScopeMap(client, ctx, engagementId, wi, {
+        id: item.id,
+        code: item.code,
+        name: item.name,
+        signalIds: item.signalIds,
+      });
+      await client.query(
+        `UPDATE hsdg.audit_scope_map_item SET area_link_manual = true, version = version + 1 WHERE id = $1`,
+        [itemId],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.scope_map_area_converted',
+        objectType: 'audit_scope_map_item',
+        objectId: itemId,
+        after: { area: areaId, name: item.name },
+      });
+      return this.buildSummary(client, wi);
+    });
+  }
+
+  // ── §6 / §17 / §19 hand-off to 03.8 / 03.9 / 03.11 ───────────────────────
+
+  async getHandoff(ctx: RlsContext, engagementId: string, wi: string): Promise<ScopeHandoff> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, wi);
+      if (!(await this.readRecord(client, wi))) return emptyHandoff();
+      return buildHandoff((await this.workspace(client, wi)).state);
     });
   }
 
@@ -1260,6 +1443,48 @@ export class AuditScopeApproachService {
       [wi],
     );
     return seen[0]?.id ?? null;
+  }
+
+  /**
+   * A map item for a 03.5 link / convert. Carrying the map into 03.5 is allowed
+   * on a completed strategy too — it changes 03.5, never the approved 03.4 decisions.
+   */
+  private async mapItemForLink(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    wi: string,
+    itemId: string,
+    version: number,
+  ): Promise<{
+    id: string;
+    code: string;
+    name: string;
+    included: boolean;
+    signalIds: string[];
+    linkedAreaId: string | null;
+  }> {
+    await assertShell(client, engagementId, wi);
+    const { id: scopeId } = await this.ensure(client, ctx, engagementId, wi);
+    const { rows } = await client.query<Row>(
+      `SELECT m.id, m.seq, m.name, m.included, m.signal_ids, m.version,
+              (SELECT a.id FROM hsdg.audit_engagement_area a WHERE a.scope_map_item_id = m.id) AS area_id
+         FROM hsdg.audit_scope_map_item m WHERE m.id = $1 AND m.scope_id = $2`,
+      [itemId, scopeId],
+    );
+    const m = rows[0];
+    if (!m) throw new NotFoundException('Map item not found.');
+    if (Number(m.version) !== version) {
+      throw new ConflictException('This map item changed; refresh and retry.');
+    }
+    return {
+      id: String(m.id),
+      code: displayCode('AM', Number(m.seq))!,
+      name: String(m.name),
+      included: m.included === true,
+      signalIds: arr(m.signal_ids),
+      linkedAreaId: s(m.area_id),
+    };
   }
 
   /** ensure + draft check for child mutations. */
@@ -1363,11 +1588,12 @@ export class AuditScopeApproachService {
       await client.query(
         `INSERT INTO hsdg.audit_scope_unit
            (scope_id, engagement_id, seq, unit_key, is_auto, source_label, name, unit_type, auditor,
-            relevance, fin_metric, fin_amount, fin_source)
+            relevance, fin_metric, fin_amount, fin_source, location)
          VALUES ($1, $2, (SELECT COALESCE(MAX(seq),0)+1 FROM hsdg.audit_scope_unit WHERE scope_id = $1),
-                 $3, true, $4, $5, $6, $7, $8, $9, $10, $11)
+                 $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (scope_id, unit_key) DO UPDATE
            SET source_label = EXCLUDED.source_label, no_longer_generated = false,
+               location = COALESCE(hsdg.audit_scope_unit.location, EXCLUDED.location),
                fin_amount = CASE WHEN hsdg.audit_scope_unit.fin_source = '03.2 financial dataset'
                                  THEN EXCLUDED.fin_amount ELSE hsdg.audit_scope_unit.fin_amount END`,
         [
@@ -1382,6 +1608,7 @@ export class AuditScopeApproachService {
           u.finMetric,
           u.finAmount,
           u.finSource,
+          u.location ?? null,
         ],
       );
     }
@@ -1582,6 +1809,19 @@ export class AuditScopeApproachService {
     );
     const ans = (sec: string, key: string) =>
       sections.find((x) => x.section_key === sec)?.answers?.[key];
+    // 02.6 group-audit records: branches (own units) and the component matrix.
+    const { rows: branches } = await client.query<Row>(
+      `SELECT id, branch_name, location, country, firm_name FROM hsdg.audit_group_branch
+        WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL ORDER BY sort_order, branch_name`,
+      [wi],
+    );
+    const { rows: components } = await client.query<Row>(
+      `SELECT component_name AS name, auditor_type, significance FROM hsdg.audit_group_component
+        WHERE workflow_instance_id = $1 AND withdrawn_at IS NULL AND included <> 'no'
+        ORDER BY sort_order, component_name`,
+      [wi],
+    );
+    const s197 = s197Applies(await readFrameworkRecordInputsOn(client, wi));
     const { rows: rev } = await client.query<{ n: string }>(
       `SELECT count(*) AS n FROM hsdg.audit_analytics_exception
         WHERE workflow_instance_id = $1 AND NOT no_longer_flagged AND suggested_attention <> 'standard'
@@ -1596,7 +1836,20 @@ export class AuditScopeApproachService {
       sa402: profile?.sa402_flag === true,
       frameworkConclusions: Object.fromEntries(areas.map((a) => [a.area_key, a.conclusion])),
       investees,
-      hasBranches: consFacts.hasBranches === true,
+      hasBranches: consFacts.hasBranches === true || branches.length > 0,
+      branches: branches.map((b) => ({
+        id: String(b.id),
+        name: String(b.branch_name),
+        location: s(b.location),
+        country: s(b.country),
+        firmName: s(b.firm_name),
+      })),
+      components: components.map((c) => ({
+        name: String(c.name),
+        auditorType: s(c.auditor_type),
+        significance: s(c.significance),
+      })),
+      s197,
       metrics,
       unitFactor,
       overallMateriality: materiality?.overallMateriality ?? null,
@@ -1632,6 +1885,7 @@ export class AuditScopeApproachService {
     override?: ScopeApproachRecord,
   ): Promise<Workspace> {
     const { facts, materiality } = await this.readFacts(client, wi);
+    const defs = await readScopeDecisionDefs(client);
     const record = override ?? (await this.readRecord(client, wi)) ?? emptyRecord();
     const scopeId = record.id;
     const signalCodes = new Map(facts.signals.map((x) => [x.id, x.code]));
@@ -1654,6 +1908,14 @@ export class AuditScopeApproachService {
       finAmount: n(u.fin_amount),
       finSource: s(u.fin_source),
       finNotAvailable: u.fin_not_available === true,
+      employees: n(u.employees),
+      transactionVolume: n(u.transaction_volume),
+      volumeNote: s(u.volume_note),
+      finPrompt: unitFinPrompt({
+        unitType: u.unit_type as ScopeUnit['unitType'],
+        finAmount: n(u.fin_amount),
+        finNotAvailable: u.fin_not_available === true,
+      }),
       materialityContext: materialityContext(n(u.fin_amount), om),
       relevance: arr(u.relevance) as ScopeUnit['relevance'],
       relevanceOther: s(u.relevance_other),
@@ -1666,6 +1928,15 @@ export class AuditScopeApproachService {
       scopeConclusion: (u.scope_conclusion ?? null) as ScopeUnit['scopeConclusion'],
       rationale: s(u.rationale),
       noLongerGenerated: u.no_longer_generated === true,
+      suggestedSignals: suggestUnitSignals(
+        {
+          name: String(u.name),
+          unitType: u.unit_type as ScopeUnit['unitType'],
+          signalIds: arr(u.signal_ids),
+          location: s(u.location),
+        },
+        facts.signals,
+      ),
       version: Number(u.version),
     }));
 
@@ -1673,14 +1944,15 @@ export class AuditScopeApproachService {
       `SELECT * FROM hsdg.audit_scope_decision WHERE scope_id = $1 ORDER BY created_at`,
     );
     const decisions: ScopeDecision[] = [];
-    for (const kind of Object.keys(DECISION_DEFS) as ScopeDecisionKind[]) {
+    for (const kind of SCOPE_METHODOLOGY_KINDS) {
       const rowsOfKind = saved.filter((x) => x.kind === kind);
       const mk = (
         itemKey: string,
         label: string,
         isCustom: boolean,
         options: string[],
-        hint: string | null,
+        def: { hint?: string; itemCode?: string; guidance?: string | null } | null,
+        retired = false,
       ): ScopeDecision => {
         const r = rowsOfKind.find((x) => x.item_key === itemKey);
         return {
@@ -1689,16 +1961,26 @@ export class AuditScopeApproachService {
           label,
           isCustom,
           options,
-          hint,
+          hint: def?.hint ?? null,
           status: s(r?.status),
           rollForward: (r?.roll_forward ?? null) as ScopeDecision['rollForward'],
           prompt: null,
           note: s(r?.note),
+          itemCode: def?.itemCode ?? null,
+          guidance: def?.guidance ?? null,
+          retired,
           version: r ? Number(r.version) : 0,
         };
       };
-      for (const d of DECISION_DEFS[kind])
-        decisions.push(mk(d.key, d.label, false, d.options, d.hint ?? null));
+      const live = defs.defs[kind];
+      for (const d of live) decisions.push(mk(d.key, d.label, false, d.options, d));
+      // A retired library item stays visible where a decision was saved on it.
+      for (const r of rowsOfKind.filter(
+        (x) => x.is_custom !== true && !live.some((d) => d.key === x.item_key),
+      )) {
+        const d = defs.retired.get(`${kind}:${String(r.item_key)}`);
+        if (d && r.status !== null) decisions.push(mk(d.key, d.label, false, d.options, d, true));
+      }
       for (const r of rowsOfKind.filter((x) => x.is_custom === true)) {
         decisions.push(
           mk(
@@ -1800,6 +2082,7 @@ export class AuditScopeApproachService {
       version: Number(l.version),
     }));
 
+    const linked = scopeId ? await readLinkedAreas(client, wi) : new Map();
     const mapItems: ScopeMapItem[] = (
       await q(`SELECT * FROM hsdg.audit_scope_map_item WHERE scope_id = $1 ORDER BY seq`)
     ).map((m) => {
@@ -1837,14 +2120,17 @@ export class AuditScopeApproachService {
         exclusionReason: s(m.exclusion_reason),
         reassessmentRequired: m.reassessment_required === true,
         reassessmentReason: s(m.reassessment_reason),
+        linkedArea: linked.get(String(m.id)) ?? null,
         version: Number(m.version),
       };
     });
 
     const partnerActions: ScopePartnerAction[] = (
       await q(
-        `SELECT a.*, e.full_name AS created_by_name FROM hsdg.audit_scope_partner_action a
+        `SELECT a.*, e.full_name AS created_by_name, rb.full_name AS responded_by_name
+           FROM hsdg.audit_scope_partner_action a
            LEFT JOIN hsdg.employees e ON e.id = a.created_by_employee_id
+           LEFT JOIN hsdg.employees rb ON rb.id = a.responded_by_employee_id
           WHERE a.scope_id = $1 ORDER BY a.created_at DESC`,
       )
     ).map((a) => ({
@@ -1857,6 +2143,10 @@ export class AuditScopeApproachService {
       response: s(a.response),
       createdByName: s(a.created_by_name),
       createdAt: iso(a.created_at)!,
+      respondedByName: s(a.responded_by_name),
+      respondedAt: iso(a.responded_at),
+      scopeVersionLabel:
+        a.scope_version_no == null ? null : scopeVersionLabel(Number(a.scope_version_no)),
       version: Number(a.version),
     }));
 
@@ -1865,6 +2155,7 @@ export class AuditScopeApproachService {
       facts,
       materiality,
       signalCodes,
+      defs,
       state: {
         record,
         triggers,
@@ -1880,12 +2171,39 @@ export class AuditScopeApproachService {
     };
   }
 
-  private async buildSummary(client: PoolClient, wi: string): Promise<ScopeApproachSummary> {
+  /**
+   * The 03.4 summary. After a write (`synced`), the Partner Attention triggers
+   * are mirrored into the Partner Planning View queue (§26) first.
+   */
+  private async buildSummary(
+    client: PoolClient,
+    wi: string,
+    synced = true,
+  ): Promise<ScopeApproachSummary> {
     const ws = await this.workspace(client, wi);
     const { state, facts, materiality } = ws;
     const consistency = consistencyChecks(state);
     const pa = partnerAttention(state);
+    const { rows: wf } = await client.query<{ engagement_id: string }>(
+      `SELECT engagement_id FROM hsdg.service_workflow_instances WHERE id = $1`,
+      [wi],
+    );
+    const engagementId = wf[0]!.engagement_id;
+    if (synced && state.record.id) {
+      await syncScopeAttention(
+        client,
+        engagementId,
+        wi,
+        { id: state.record.id, versionNo: state.record.versionNo },
+        pa,
+      );
+    }
+    const actor = await resolvePlanningActor(client, engagementId);
     const liveConsiderations = state.considerations.filter((c) => !c.noLongerTriggered);
+    const { rows: review } = await client.query(
+      `SELECT 1 FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
+      [wi],
+    );
     return {
       record: state.record,
       intelligence: await this.intelligence(client, wi, ws),
@@ -1924,7 +2242,85 @@ export class AuditScopeApproachService {
       revisions: state.record.id ? await this.readRevisions(client, state.record.id) : [],
       authorities: await this.readAuthorities(client),
       completion: scopeCompletion(state, consistency),
+      access: scopeAccess(actor),
+      evidenceCounts: await this.readEvidenceCounts(client, wi),
+      obFacts: await this.readObFacts(client, wi, facts),
+      methodology: ws.defs.methodology,
+      areaLink: {
+        available: review.length > 0,
+        unconverted: state.mapItems.filter((m) => m.included && !m.linkedArea).length,
+      },
     };
+  }
+
+  /** §28 — evidence links per 03.4 record id. */
+  private async readEvidenceCounts(
+    client: PoolClient,
+    wi: string,
+  ): Promise<Record<string, number>> {
+    const { rows } = await client.query<{ target_id: string; n: string }>(
+      `SELECT target_id, count(*) AS n FROM hsdg.audit_planning_evidence
+        WHERE workflow_instance_id = $1 AND removed_at IS NULL
+          AND target_type IN ('scope_approach','scope_unit','scope_service_org','scope_dependency',
+                              'scope_limitation','scope_map_item')
+        GROUP BY target_id`,
+      [wi],
+    );
+    return Object.fromEntries(rows.map((r) => [r.target_id, Number(r.n)]));
+  }
+
+  /**
+   * §15 — opening-balance facts already recorded elsewhere on the file. Read
+   * only: a correction is made at the source; each fact may suggest an OB input.
+   */
+  private async readObFacts(
+    client: PoolClient,
+    wi: string,
+    facts: ScopeFacts,
+  ): Promise<ScopeObFact[]> {
+    // Only OB-01 (initial audits) shows them — skip the reads on a continuing audit.
+    if (!facts.initialAudit) return [];
+    const out: ScopeObFact[] = [];
+    out.push({
+      key: 'initial_audit',
+      label: 'Initial audit',
+      value: 'Yes — SA 510 opening-balance procedures apply',
+      source: '02.1 Entity profile',
+    });
+    const prior = await readPriorAuditFile(client, wi);
+    if (prior) {
+      out.push({
+        key: 'prior_file',
+        label: 'Prior-year audit file',
+        value: `On the portal — FY ${prior.financialYear}`,
+        source: 'Engagement history',
+        impliesInput: { key: 'prior_fs', value: 'available' },
+      });
+    }
+    const { rows: matters } = await client.query<{ seq: number; description: string }>(
+      `SELECT seq, description FROM hsdg.audit_prior_year_matter
+        WHERE workflow_instance_id = $1 AND matter_type = 'modified_opinion' ORDER BY seq`,
+      [wi],
+    );
+    if (matters.length) {
+      out.push({
+        key: 'prior_report_modified',
+        label: 'Prior-year report modified',
+        value: matters.map((m) => m.description).join('; '),
+        source: '03.1 Prior-year matters',
+        impliesInput: { key: 'prior_report_modified', value: 'yes' },
+      });
+    }
+    if (facts.changeCategories.includes('accounting_policies')) {
+      out.push({
+        key: 'accounting_policy_change',
+        label: 'Accounting-policy change',
+        value: 'Recorded as a significant current-year change',
+        source: '03.1 PI-01',
+        impliesInput: null,
+      });
+    }
+    return out;
   }
 
   /** 03.4.1 — read-only Scope Intelligence (corrections route to the source). */
@@ -1981,7 +2377,13 @@ export class AuditScopeApproachService {
     add(
       'Branches / components / locations',
       [
-        f.hasBranches ? 'Branches audited by branch auditor' : null,
+        f.branches.length
+          ? `${f.branches.length} branch(es) — ${f.branches
+              .map((b) => [b.name, b.location ?? b.country].filter(Boolean).join(', '))
+              .join('; ')}`
+          : f.hasBranches
+            ? 'Branches audited by branch auditor (not yet captured individually on 02.6)'
+            : null,
         f.investees.length ? `${f.investees.length} component(s)` : null,
       ]
         .filter(Boolean)
@@ -1995,7 +2397,11 @@ export class AuditScopeApproachService {
           .filter((i) => i.auditedByOtherAuditor)
           .map((i) => i.name)
           .join(', '),
-        f.hasBranches ? 'branch auditor(s)' : '',
+        f.branches.some((b) => b.firmName)
+          ? `branch auditor(s): ${[...new Set(f.branches.map((b) => b.firmName).filter(Boolean))].join(', ')}`
+          : f.hasBranches
+            ? 'branch auditor(s)'
+            : '',
       ]
         .filter(Boolean)
         .join('; ') || 'None recorded',
@@ -2020,6 +2426,9 @@ export class AuditScopeApproachService {
       'Audit trail / s197 / other statutory',
       [
         fw('rule_11') ? `Rule 11 (audit trail): ${yn(fw('rule_11'))}` : null,
+        f.s197 === null
+          ? null
+          : `Section 197(16) remuneration reporting: ${f.s197 ? 'Applicable' : 'Not applicable'}`,
         fw('other_regulatory') ? `Other regulatory: ${yn(fw('other_regulatory'))}` : null,
       ]
         .filter(Boolean)
@@ -2084,17 +2493,117 @@ export class AuditScopeApproachService {
     });
   }
 
+  /** §32 — the 03.4 authority links (labels / provisions are maintained centrally). */
   private async readAuthorities(client: PoolClient): Promise<ScopeAuthorityRef[]> {
-    const { rows } = await client.query<{ code: string; title: string; provision_number: string }>(
-      `SELECT DISTINCT ON (code) code, title, provision_number FROM hsdg.authority_provision
-        WHERE code = ANY($1::text[]) ORDER BY code, effective_from DESC`,
-      [AUTHORITY_CODES.map(([c]) => c)],
+    const { rows } = await client.query<{
+      anchor: string;
+      label: string;
+      provision_code: string;
+      title: string | null;
+      provision_number: string | null;
+    }>(
+      `SELECT l.anchor, l.label, l.provision_code, p.title, p.provision_number
+         FROM hsdg.authority_reference_link l
+         LEFT JOIN LATERAL (
+           SELECT title, provision_number FROM hsdg.authority_provision
+            WHERE code = l.provision_code ORDER BY effective_from DESC LIMIT 1
+         ) p ON true
+        WHERE l.context_key = $1
+        ORDER BY l.sort_order, l.anchor`,
+      [SCOPE_AUTHORITY_CONTEXT],
     );
-    return AUTHORITY_CODES.map(([code, label]) => {
-      const r = rows.find((x) => x.code === code);
-      return { code, label, title: r?.title ?? null, provisionNumber: r?.provision_number ?? null };
-    });
+    return rows.map((r) => ({
+      anchor: r.anchor,
+      code: r.provision_code,
+      label: r.label,
+      title: r.title,
+      provisionNumber: r.provision_number,
+    }));
   }
+}
+
+/** §30 — what the acting user may do in 03.4. */
+function scopeAccess(actor: PlanningActor): ScopeAccess {
+  const c = actor.capabilities;
+  return {
+    role: actor.role,
+    roleLabel: PLANNING_ACTOR_ROLE_LABEL[actor.role],
+    actingAsManager: actor.actingAsManager,
+    prepare: c.addFacts || c.assess,
+    conclude: c.assess,
+    partnerReview: c.partnerReview,
+    respond: c.respondToChallenge,
+  };
+}
+
+function emptyHandoff(): ScopeHandoff {
+  return {
+    available: false,
+    versionLabel: null,
+    status: null,
+    specialists: [],
+    components: [],
+    timing: [],
+    dependencies: [],
+  };
+}
+
+/** Pure — what 03.8 / 03.9 / 03.11 read from 03.4 (§6, §12, §17, §19, §21). */
+export function buildHandoff(st: ScopeState): ScopeHandoff {
+  return {
+    available: st.record.id !== null,
+    versionLabel: st.record.versionLabel,
+    status: st.record.status,
+    specialists: st.considerations
+      .filter(
+        (c) =>
+          c.kind === 'specialist' &&
+          !c.noLongerTriggered &&
+          (c.response === 'likely_required' || c.response === 'evaluate_further'),
+      )
+      .map((c) => ({
+        observation: c.observation,
+        decision: c.response!,
+        note: c.note,
+        signalCode: c.signalCode,
+      })),
+    components: st.units
+      .filter((u) => u.auditor !== 'dhvaj' && !u.noLongerGenerated)
+      .map((u) => ({
+        code: u.code,
+        name: u.name,
+        auditor: u.auditor,
+        auditorStrategy: u.auditorStrategy,
+        scopeConclusion: u.scopeConclusion,
+      })),
+    timing: st.decisions
+      .filter((d) => d.kind === 'timing' && d.status !== null)
+      .map((d) => ({
+        label: d.label,
+        status: d.status,
+        rollForward: d.rollForward,
+        prompt: d.prompt,
+      })),
+    dependencies: st.dependencies
+      .filter((d) => d.status !== 'resolved')
+      .map((d) => ({
+        code: d.code,
+        description: d.description,
+        neededBy: d.neededBy,
+        status: d.status,
+        ownerName: d.ownerName,
+        ownerParty: d.ownerParty,
+      })),
+  };
+}
+
+/** The Phase 03 checklist rows a hand-off carries something into. */
+export function handoffItems(h: ScopeHandoff): string[] {
+  const out: string[] = [];
+  if (h.specialists.length) out.push(SCOPE_HANDOFF_ITEMS[0]);
+  if (h.components.length) out.push(SCOPE_HANDOFF_ITEMS[1]);
+  if (h.timing.length || h.dependencies.length) out.push(SCOPE_HANDOFF_ITEMS[2]);
+  return out;
 }
 
 function sanitizeObInputs(v: Record<string, string>): Record<string, string> {

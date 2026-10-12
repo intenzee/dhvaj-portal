@@ -133,11 +133,14 @@ export const PARTNER_ATTENTION_STATUS_LABEL: Record<PartnerAttentionStatus, stri
 export interface PartnerAttentionItem {
   /** The governance row id (acknowledge / challenge / respond address it). */
   id: string;
-  /** `materiality` — a 03.3 §19 trigger on one determination version. */
-  kind: 'signal' | 'focus_area' | 'materiality';
-  /** The signal / Area of Focus / materiality determination (version) id. */
+  /**
+   * `materiality` — a 03.3 §19 trigger on one determination version;
+   * `scope` — a 03.4 §21/§22/§26 trigger on the scope & approach record.
+   */
+  kind: 'signal' | 'focus_area' | 'materiality' | 'scope';
+  /** The signal / Area of Focus / materiality determination (version) / 03.4 record id. */
   targetId: string;
-  /** PS-00n / FA-00n / MT-00n. */
+  /** PS-00n / FA-00n / MT-00n / SC-00n. */
   code: string;
   title: string;
   detail: string | null;
@@ -208,6 +211,17 @@ export const PLANNING_EVIDENCE_TARGET = {
   materialityAdjustment: 'materiality_adjustment',
   materialitySpecific: 'materiality_specific',
   materialityQualitative: 'materiality_qualitative',
+  /**
+   * 03.4 records (§28): the scope & approach record (SC / AP / EC / OB / IA /
+   * DT), a population unit, a service-organisation card, a scope dependency,
+   * a potential scope limitation, an Approach Map area.
+   */
+  scopeApproach: 'scope_approach',
+  scopeUnit: 'scope_unit',
+  scopeServiceOrg: 'scope_service_org',
+  scopeDependency: 'scope_dependency',
+  scopeLimitation: 'scope_limitation',
+  scopeMapItem: 'scope_map_item',
 } as const;
 export type PlanningEvidenceTarget =
   (typeof PLANNING_EVIDENCE_TARGET)[keyof typeof PLANNING_EVIDENCE_TARGET];

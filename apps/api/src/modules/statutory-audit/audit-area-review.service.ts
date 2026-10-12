@@ -76,6 +76,7 @@ import {
   displayCode,
 } from './planning-shared';
 import { readPriorAuditFile } from './master-facts';
+import { linkScopeMap, readScopeStrategies, readUnconvertedMapAreas } from './scope-map-link';
 
 /** Phase 03 checklist row 03.5 rolls its state up into. */
 const AREA_ITEM_KEY = 'areas_and_assertions';
@@ -357,6 +358,56 @@ export class AuditAreaReviewService {
       });
       return this.buildSummary(client, wi);
     });
+  }
+
+  /**
+   * 03.4 §23 — carry a 03.4 Approach Map area that matches no library area into
+   * 03.5 as a custom area (origin `scope_map`). Runs in the caller's (03.4)
+   * transaction; 03.5 must be open for changes.
+   */
+  async addFromScopeMap(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    wi: string,
+    item: { id: string; code: string; name: string; signalIds: string[] },
+  ): Promise<string> {
+    const { rows: rev } = await client.query(
+      `SELECT 1 FROM hsdg.audit_area_review WHERE workflow_instance_id = $1`,
+      [wi],
+    );
+    if (!rev.length) {
+      throw new ConflictException(
+        'Open 03.5 Audit Areas & Assertions first — the area population is created there.',
+      );
+    }
+    const reviewId = await this.editable(client, ctx, engagementId, wi);
+    const reason = `Carried from the 03.4 Preliminary Audit Approach Map (${item.code}).`;
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO hsdg.audit_engagement_area
+         (review_id, engagement_id, seq, source, origin, area_name, area_type, addition_reason,
+          scope_map_item_id, created_by_employee_id, updated_by_employee_id)
+       VALUES ($1, $2, (SELECT COALESCE(MAX(seq),0)+1 FROM hsdg.audit_engagement_area WHERE review_id = $1),
+               'custom', 'scope_map', $3, 'cross_cutting', $4, $5, $6, $6) RETURNING id`,
+      [reviewId, engagementId, item.name, reason, item.id, ctx.employeeId ?? null],
+    );
+    const areaId = rows[0]!.id;
+    for (const sid of item.signalIds) {
+      await client.query(
+        `INSERT INTO hsdg.audit_area_signal_link (area_id, engagement_id, signal_id, origin)
+         VALUES ($1, $2, $3, 'manual') ON CONFLICT DO NOTHING`,
+        [areaId, engagementId, sid],
+      );
+    }
+    await this.applySuggestions(client, await this.workspace(client, wi), areaId);
+    await this.touched(client, ctx, wi, reviewId);
+    await this.audit.recordWith(client, ctx, {
+      action: 'statutory_audit.audit_area_added',
+      objectType: 'audit_engagement_area',
+      objectId: areaId,
+      after: { source: 'custom', origin: 'scope_map', name: item.name, mapItem: item.code },
+    });
+    return areaId;
   }
 
   // ── Area detail: attention, amount, owner, resolutions ───────────────────
@@ -1016,6 +1067,8 @@ export class AuditAreaReviewService {
       reviewId,
     ]);
     await this.rollUp(client, ctx, wi, 'in_progress');
+    // A new / restored area may be the one a 03.4 map area was waiting for.
+    await linkScopeMap(client, wi);
   }
 
   private async rollUp(
@@ -1125,6 +1178,7 @@ export class AuditAreaReviewService {
       await this.insertLibraryArea(client, ctx, engagementId, id, lib, 'population', null, facts);
     }
     await this.rollUp(client, ctx, wi, 'in_progress');
+    await linkScopeMap(client, wi);
     await this.audit.recordWith(client, ctx, {
       action: 'statutory_audit.audit_area_population_created',
       objectType: 'audit_area_review',
@@ -1426,6 +1480,7 @@ export class AuditAreaReviewService {
         reviewFlag: s(r.review_flag),
         reviewFlagSource: s(r.review_flag_source),
         inconsistencyResolution: s(r.inconsistency_resolution),
+        scopeMapItemId: s(r.scope_map_item_id),
         version: Number(r.version),
         assertions: asr
           .filter((x) => String(x.area_id) === id)
@@ -1600,6 +1655,14 @@ export class AuditAreaReviewService {
       d.downstreamWork = downstreamWorkCount();
       return d;
     });
+    // 03.4 §23 — the preliminary strategy carried in from the Approach Map.
+    const strategies = await readScopeStrategies(
+      client,
+      stored.flatMap((a) => (a.scopeMapItemId ? [a.scopeMapItemId] : [])),
+    );
+    for (const [i, a] of stored.entries()) {
+      if (a.scopeMapItemId) areas[i]!.scopeStrategy = strategies.get(a.scopeMapItemId) ?? null;
+    }
     const resolutions = new Map<string, string>();
     if (rec) {
       const { rows } = await client.query<{ signal_id: string; note: string }>(
@@ -1636,7 +1699,13 @@ export class AuditAreaReviewService {
     const specific = specificMatters(ws.facts, ws.areas);
     const signals = signalRefs(ws.facts, ws.areas, ws.resolutions);
     const checks = rec
-      ? validations({ profile: ws.facts.profile, areas: ws.areas, specific, signals })
+      ? validations({
+          profile: ws.facts.profile,
+          areas: ws.areas,
+          specific,
+          signals,
+          unconvertedMap: await readUnconvertedMapAreas(client, wi),
+        })
       : [];
     const current = await this.currentLibraryVersion(client);
     const initial =

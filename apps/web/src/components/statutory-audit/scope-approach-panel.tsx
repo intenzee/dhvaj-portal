@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BookOpen, Info, Plus, RefreshCw, RotateCcw, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Info, Link2, Plus, RefreshCw, RotateCcw, Sparkles } from 'lucide-react';
 import {
   AP01_LABEL,
   AP01_OPTIONS,
@@ -76,7 +76,10 @@ import {
   UNIT_AUDITORS,
   UNIT_RELEVANCE,
   UNIT_RELEVANCE_LABEL,
+  SCOPE_UNIT_SIGNAL_REASON_LABEL,
   type AreaOfFocusRecord,
+  type AuditAreaReviewSummary,
+  type PlanningCapability,
   type PartnerScopeAction,
   type PlanningSignalRecord,
   type ScopeApproachSummary,
@@ -99,6 +102,11 @@ import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Input, Select, Textarea } from '@/components/form';
 import { CompletionChecklist } from './planning-strategy-sections';
 import { SectionLauncher } from './section-launcher';
+import { FrameworkReferences } from './framework-references';
+import { PlanningEvidence } from './planning-evidence';
+import { PlanningGovernanceProvider, type PlanningGovernance } from './planning-governance';
+import { PlanningSourceLink } from './planning-source-link';
+import { openAuditPhase } from './audit-file-nav';
 
 /**
  * 03.4 Audit Scope & Approach (DHVAJ 03.4). "This is the population you are
@@ -132,7 +140,10 @@ type Post = (path: string, body: unknown, done: string) => void;
 
 interface TabProps {
   s: ScopeApproachSummary;
+  /** §30 — the Engagement Manager concludes (scope conclusions, AP-01, OB / SO / IA / DT / SL, AP-02). */
   canEdit: boolean;
+  /** §30 — the engagement team (and the Manager) record facts, indicators and draft strategy. */
+  canPrepare: boolean;
   save: Save;
   post: Post;
   pending: boolean;
@@ -142,17 +153,17 @@ export function ScopeApproachPanel({
   engagementId,
   workflowInstanceId,
   team,
-  editable,
-  canRevise,
+  sectionOpen,
+  approved,
   onChanged,
 }: {
   engagementId: string;
   workflowInstanceId: string;
   team: TeamMember[];
-  /** Planning is editable (lead, not yet approved). */
-  editable: boolean;
-  /** Lead rights: the approved strategy may be revised after planning approval (§27). */
-  canRevise: boolean;
+  /** Section 03 is unlocked (02.8 §14); 03.4 then gates by the §30 role itself. */
+  sectionOpen: boolean;
+  /** 03.12 Planning approval is recorded — only a revision draft stays open (§27). */
+  approved: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const qc = useQueryClient();
@@ -192,11 +203,27 @@ export function ScopeApproachPanel({
   const s = summary.data;
   if (!s) return <p className="text-sm text-ink-muted">03.4 is unavailable.</p>;
   const r = s.record;
-  const canEdit = r.status === 'draft' && (editable || (canRevise && r.versionNo > 1));
+  const a = s.access;
+  // A draft is open until Planning is approved (03.12); a revision draft stays open after it.
+  const draftOpen = sectionOpen && r.status === 'draft' && (!approved || r.versionNo > 1);
+  const canEdit = draftOpen && a.conclude;
+  const canPrepare = draftOpen && a.prepare;
+  const canRevise = sectionOpen && a.conclude;
+  const capability: Partial<Record<PlanningCapability, boolean>> = {
+    addFacts: a.prepare,
+    proposeSignals: a.prepare,
+    assess: a.conclude,
+    focusAreas: a.conclude,
+    partnerReview: a.partnerReview,
+    respondToChallenge: a.respond,
+  };
+  const has = (c: PlanningCapability) => sectionOpen && !!capability[c];
+  const refresh = () => void qc.invalidateQueries({ queryKey: qk });
+  const gov: PlanningGovernance = { view: null, engagementId, base, can: has, has, refresh };
   const outstanding = s.completion.filter((c) => !c.met).length;
   const failing = s.consistency.filter((c) => !c.met).length;
   const k = `${r.id ?? 'new'}-${r.version}`;
-  const common: TabProps = { s, canEdit, save, post, pending: mutation.isPending };
+  const common: TabProps = { s, canEdit, canPrepare, save, post, pending: mutation.isPending };
   const sig = signals.data ?? [];
   const foc = focus.data ?? [];
 
@@ -208,35 +235,35 @@ export function ScopeApproachPanel({
         ['special', 'Special considerations'],
         ['dependencies', 'Dependencies & limitations'],
         ['map', 'Approach map'],
-        ['partner', 'Partner view'],
+        ['partner', s.partnerActions.some((x) => x.status === 'open') ? `Partner view (${s.partnerActions.filter((x) => x.status === 'open').length} open)` : 'Partner view'],
         ['revision', r.versionNo > 1 ? `Revision (${r.versionLabel})` : 'Revision & history'],
         ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
       ];
 
   return (
+    <PlanningGovernanceProvider value={gov}>
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={r.status === 'complete' ? 'success' : r.status === 'reassessment_required' ? 'danger' : 'info'}>
             {r.versionLabel} · {r.id ? SCOPE_STATUS_LABEL[r.status] : 'Not started'}
           </Badge>
+          <Badge tone="neutral">{a.roleLabel}</Badge>
           {s.partnerAttention.length > 0 && <Badge tone="warn">{s.partnerAttention.length} Partner Attention</Badge>}
           {failing > 0 && <Badge tone="danger">{failing} consistency issue(s)</Badge>}
           {r.ap01 && <span className="text-xs text-ink-muted">AP-01: {AP01_LABEL[r.ap01]}</span>}
+          <span className="text-[11px] text-ink-faint" title={s.methodology.source === 'library' ? 'Decision lists from the 03.4 Methodology Library' : 'Built-in decision lists'}>
+            Methodology {s.methodology.version}
+          </span>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {s.authorities.map((a) => (
-            <span
-              key={a.code}
-              title={a.title ? `${a.provisionNumber} — ${a.title}` : 'Not in the Authority Library'}
-              className="inline-flex items-center gap-1 rounded bg-surface-raised px-1.5 py-0.5 text-[11px] text-ink-muted"
-            >
-              <BookOpen className="h-3 w-3" />
-              {a.label}
-            </span>
-          ))}
-        </div>
+        <FrameworkReferences contextKey="03.4" anchors={s.authorities.map((x) => x.anchor)} />
       </div>
+      {canPrepare && !canEdit && (
+        <Card className="flex items-start gap-2 p-3 text-sm text-ink-muted">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          You are preparing 03.4 as {a.roleLabel}: record facts, unit indicators, service-organisation facts, dependencies and the draft strategy. Scope conclusions, AP-01 / AP-02 and include / exclude decisions are the Engagement Manager&apos;s.
+        </Card>
+      )}
 
       {r.status === 'reassessment_required' && (
         <Card className="flex flex-wrap items-center justify-between gap-2 border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">
@@ -279,13 +306,20 @@ export function ScopeApproachPanel({
         {tab === 'evidence' && <EvidenceTab key={k} {...common} />}
         {tab === 'special' && <SpecialTab key={k} {...common} signals={sig} />}
         {tab === 'dependencies' && <DependenciesTab key={k} {...common} team={team} />}
-        {tab === 'map' && <MapTab key={k} {...common} signals={sig} focus={foc} />}
-        {tab === 'partner' && <PartnerTab key={k} {...common} canAct={canRevise} />}
+        {tab === 'map' && <MapTab key={k} {...common} signals={sig} focus={foc} base={base} areasKey={['engagement', engagementId, 'audit-areas', workflowInstanceId]} />}
+        {tab === 'partner' && <PartnerTab key={k} {...common} canReview={sectionOpen && a.partnerReview} canRespond={sectionOpen && a.respond} />}
         {tab === 'revision' && <RevisionTab key={k} {...common} canRevise={canRevise} />}
         {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
       </SectionLauncher>
     </div>
+    </PlanningGovernanceProvider>
   );
+}
+
+/** §28 — "+ Evidence" on a 03.4 record (SharePoint-backed engagement files). */
+function Evidence({ s, type, id }: { s: ScopeApproachSummary; type: 'scope_approach' | 'scope_unit' | 'scope_service_org' | 'scope_dependency' | 'scope_limitation' | 'scope_map_item'; id: string | null }): JSX.Element | null {
+  if (!id) return null;
+  return <PlanningEvidence targetType={type} targetId={id} count={s.evidenceCounts[id] ?? 0} />;
 }
 
 // ── small building blocks ────────────────────────────────────────────────────
@@ -404,7 +438,7 @@ function Note({ children }: { children: React.ReactNode }): JSX.Element {
 
 // ── 03.4.1 / 03.4.2 Scope intelligence + FS scope ───────────────────────────
 
-function IntelligenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element {
+function IntelligenceTab({ s, canEdit, canPrepare, save, post, pending }: TabProps): JSX.Element {
   const r = s.record;
   const [sc01Other, setSc01Other] = useState(r.sc01Other ?? '');
   const [sc02Note, setSc02Note] = useState(r.sc02Note ?? '');
@@ -431,7 +465,7 @@ function IntelligenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Ele
       <Card className="space-y-2 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-sm font-medium text-ink">Scope Intelligence (read-only)</div>
-          {canEdit && (
+          {canPrepare && (
             <Button variant="ghost" disabled={pending} onClick={() => post('/generate', {}, 'Refreshed from Section 02 / 03.1–03.3.')}>
               <RefreshCw className="mr-1.5 h-4 w-4" />
               Refresh from sources
@@ -452,6 +486,7 @@ function IntelligenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Ele
         <p className="text-[11px] text-ink-faint">Facts are not re-keyed here — corrections are made in the source section and 03.4 refreshes.</p>
       </Card>
       <Question code="SC-01 — Financial statements covered" text={`Prefilled from 02.6: ${FS_COVERED_LABEL[s.triggers.suggestedFsCovered ?? 'standalone']}.`}>
+        <PlanningSourceLink link="framework:02.6" />
         <Options options={FS_COVERED} labels={FS_COVERED_LABEL} value={r.sc01} disabled={!canEdit || pending} onChange={(v) => save({ sc01: v }, 'SC-01 saved.')} />
         {r.sc01 === 'other' && (
           <div className="flex gap-2">
@@ -476,6 +511,14 @@ function IntelligenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Ele
           </div>
         )}
         {!canEdit && r.sc02 && <Badge tone={r.sc02 === 'yes' ? 'success' : 'warn'}>{SC02_LABEL[r.sc02]}</Badge>}
+        {r.sc02 && r.sc02 !== 'yes' && (
+          <Note>Corrections are made where the fact is owned — open Section 02, correct it there, then refresh 03.4.</Note>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <PlanningSourceLink link="framework:02.8" />
+          <PlanningSourceLink link="framework:02.1" />
+          <PlanningSourceLink link="framework:02.6" />
+        </div>
       </Question>
     </div>
   );
@@ -486,6 +529,7 @@ function IntelligenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Ele
 function PopulationTab({
   s,
   canEdit,
+  canPrepare,
   post,
   pending,
   signals,
@@ -499,9 +543,9 @@ function PopulationTab({
         Units are generated from Section 02 / 03.2 facts — no Trial Balance import. Materiality is shown as context only: no unit is excluded because a balance is below OM. SC-03 explains why a unit matters; it is not a risk assessment.
       </Note>
       {s.units.map((u) => (
-        <UnitCard key={`${u.id}-${u.version}`} u={u} canEdit={canEdit} post={post} pending={pending} signals={signals} focus={focus} />
+        <UnitCard key={`${u.id}-${u.version}`} s={s} u={u} canEdit={canEdit} canPrepare={canPrepare} post={post} pending={pending} signals={signals} focus={focus} />
       ))}
-      {canEdit && (
+      {canPrepare && (
         <Card className="flex flex-wrap items-center gap-2 p-3">
           <Input className="max-w-xs" placeholder="Add a unit (plant, warehouse, office, branch…)" value={name} onChange={(e) => setName(e.target.value)} />
           <Select className="max-w-[12rem]" value={type} onChange={(e) => setType(e.target.value as ScopeUnit['unitType'])}>
@@ -522,15 +566,19 @@ function PopulationTab({
 }
 
 function UnitCard({
+  s,
   u,
   canEdit,
+  canPrepare,
   post,
   pending,
   signals,
   focus,
 }: {
+  s: ScopeApproachSummary;
   u: ScopeUnit;
   canEdit: boolean;
+  canPrepare: boolean;
   post: Post;
   pending: boolean;
   signals: PlanningSignalRecord[];
@@ -542,6 +590,9 @@ function UnitCard({
     finAmount: u.finAmount?.toString() ?? '',
     finSource: u.finSource ?? '',
     finNotAvailable: u.finNotAvailable,
+    employees: u.employees?.toString() ?? '',
+    transactionVolume: u.transactionVolume?.toString() ?? '',
+    volumeNote: u.volumeNote ?? '',
     relevance: u.relevance,
     relevanceOther: u.relevanceOther ?? '',
     qualitativeNote: u.qualitativeNote ?? '',
@@ -554,7 +605,37 @@ function UnitCard({
     rationale: u.rationale ?? '',
   });
   const set = <K extends keyof typeof f>(key: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [key]: v }));
-  const dis = !canEdit;
+  /** Facts / indicators (team); the scope conclusion block is the Manager's. */
+  const dis = !canPrepare;
+  const disM = !canEdit;
+  const suggested = u.suggestedSignals.filter((x) => !f.signalIds.includes(x.id));
+  const saveUnit = () => {
+    const facts = {
+      location: f.location,
+      finMetric: f.finMetric,
+      finAmount: numOrNull(f.finAmount),
+      finSource: f.finSource,
+      finNotAvailable: f.finNotAvailable,
+      employees: numOrNull(f.employees),
+      transactionVolume: numOrNull(f.transactionVolume),
+      volumeNote: f.volumeNote,
+      relevance: f.relevance,
+      relevanceOther: f.relevanceOther,
+      qualitativeNote: f.qualitativeNote,
+      signalIds: f.signalIds,
+      focusIds: f.focusIds,
+    };
+    const conclusion = canEdit
+      ? {
+          specificMateriality: f.specificMateriality,
+          auditor: f.auditor,
+          auditorStrategy: f.auditor === 'dhvaj' ? null : f.auditorStrategy,
+          scopeConclusion: f.scopeConclusion,
+          rationale: f.rationale,
+        }
+      : {};
+    post(`/units/${u.id}`, { ...facts, ...conclusion, version: u.version }, `${u.code} saved.`);
+  };
   return (
     <Card className={`space-y-2 p-3 ${u.noLongerGenerated ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -576,6 +657,12 @@ function UnitCard({
         <Input disabled={dis} type="number" placeholder="Amount (₹)" value={f.finAmount} onChange={(e) => set('finAmount', e.target.value)} />
         <Input disabled={dis} placeholder="Source of the amount" value={f.finSource} onChange={(e) => set('finSource', e.target.value)} />
       </div>
+      {u.finPrompt && <p className="text-xs text-warn-700">{u.finPrompt}</p>}
+      <div className="grid gap-2 sm:grid-cols-4">
+        <Input disabled={dis} type="number" min={0} placeholder="Employees" value={f.employees} onChange={(e) => set('employees', e.target.value)} />
+        <Input disabled={dis} type="number" min={0} placeholder="Transaction volume" value={f.transactionVolume} onChange={(e) => set('transactionVolume', e.target.value)} />
+        <Input className="sm:col-span-2" disabled={dis} placeholder="What the volume counts (e.g. invoices / month)" value={f.volumeNote} onChange={(e) => set('volumeNote', e.target.value)} />
+      </div>
       <label className="inline-flex items-center gap-1.5 text-xs text-ink">
         <input type="checkbox" disabled={dis} checked={f.finNotAvailable} onChange={(e) => set('finNotAvailable', e.target.checked)} />
         Financial significance not yet available (creates an information dependency)
@@ -590,6 +677,24 @@ function UnitCard({
           <div>
             <div className="text-[11px] text-ink-muted">Planning Signals</div>
             <LinkPicker disabled={dis} items={signals.map((x) => ({ id: x.id, code: x.signalCode, text: x.observation }))} value={f.signalIds} onChange={(v) => set('signalIds', v)} />
+            {suggested.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                <div className="text-[11px] text-ink-muted">Suggested for this unit</div>
+                {suggested.map((x) => (
+                  <div key={x.id} className="flex items-start gap-1.5 text-[11px]">
+                    <span className="text-ink">
+                      <span className="font-mono text-ink-faint">{x.code}</span> {x.observation.slice(0, 70)}{' '}
+                      <span className="text-ink-faint">({SCOPE_UNIT_SIGNAL_REASON_LABEL[x.reason]})</span>
+                    </span>
+                    {!dis && (
+                      <button type="button" className="shrink-0 text-primary-700 hover:underline" onClick={() => set('signalIds', [...f.signalIds, x.id])}>
+                        Link
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <div className="text-[11px] text-ink-muted">Areas of Focus</div>
@@ -598,7 +703,7 @@ function UnitCard({
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-3">
-        <Select disabled={dis} value={f.auditor} onChange={(e) => set('auditor', e.target.value as ScopeUnit['auditor'])}>
+        <Select disabled={disM} value={f.auditor} onChange={(e) => set('auditor', e.target.value as ScopeUnit['auditor'])}>
           {UNIT_AUDITORS.map((a) => (
             <option key={a} value={a}>
               Auditor: {UNIT_AUDITOR_LABEL[a]}
@@ -606,7 +711,7 @@ function UnitCard({
           ))}
         </Select>
         {f.auditor !== 'dhvaj' && (
-          <Select disabled={dis} value={f.auditorStrategy ?? ''} onChange={(e) => set('auditorStrategy', (e.target.value || null) as ScopeUnit['auditorStrategy'])}>
+          <Select disabled={disM} value={f.auditorStrategy ?? ''} onChange={(e) => set('auditorStrategy', (e.target.value || null) as ScopeUnit['auditorStrategy'])}>
             <option value="">— Strategic conclusion (→ 03.9) —</option>
             {OTHER_AUDITOR_STRATEGIES.map((a) => (
               <option key={a} value={a}>
@@ -616,42 +721,30 @@ function UnitCard({
           </Select>
         )}
         <label className="inline-flex items-center gap-1.5 text-xs text-ink">
-          <input type="checkbox" disabled={dis} checked={f.specificMateriality} onChange={(e) => set('specificMateriality', e.target.checked)} />
+          <input type="checkbox" disabled={disM} checked={f.specificMateriality} onChange={(e) => set('specificMateriality', e.target.checked)} />
           Specific materiality relevant
         </label>
       </div>
       <div className="space-y-1">
         <div className="text-xs font-medium text-ink">Manager scope conclusion</div>
-        <Options options={SCOPE_CONCLUSIONS} labels={SCOPE_CONCLUSION_LABEL} value={f.scopeConclusion} disabled={dis} onChange={(v) => set('scopeConclusion', v)} />
-        <Textarea rows={2} disabled={dis} placeholder="Rationale (required for exclusions / limited work where relevance exists)" value={f.rationale} onChange={(e) => set('rationale', e.target.value)} />
+        <Options options={SCOPE_CONCLUSIONS} labels={SCOPE_CONCLUSION_LABEL} value={f.scopeConclusion} disabled={disM} onChange={(v) => set('scopeConclusion', v)} />
+        <Textarea rows={2} disabled={disM} placeholder="Rationale (required for exclusions / limited work where relevance exists)" value={f.rationale} onChange={(e) => set('rationale', e.target.value)} />
       </div>
-      {canEdit && (
-        <Button
-          variant="secondary"
-          disabled={pending}
-          onClick={() =>
-            post(
-              `/units/${u.id}`,
-              {
-                ...f,
-                finAmount: numOrNull(f.finAmount),
-                auditorStrategy: f.auditor === 'dhvaj' ? null : f.auditorStrategy,
-                version: u.version,
-              },
-              `${u.code} saved.`,
-            )
-          }
-        >
-          Save unit
-        </Button>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {canPrepare && (
+          <Button variant="secondary" disabled={pending} onClick={saveUnit}>
+            Save unit
+          </Button>
+        )}
+        <Evidence s={s} type="scope_unit" id={u.id} />
+      </div>
     </Card>
   );
 }
 
 // ── 03.4.4 – 03.4.6 Approach, controls, timing ──────────────────────────────
 
-function ApproachTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element {
+function ApproachTab({ s, canEdit, canPrepare, save, post, pending }: TabProps): JSX.Element {
   const r = s.record;
   const [rationale, setRationale] = useState(r.ap01Rationale ?? '');
   const [icfr, setIcfr] = useState(r.icfrNote ?? '');
@@ -679,8 +772,8 @@ function ApproachTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element
       {s.triggers.icfrApplicable && (
         <Question code="ICFR workstream" text="ICFR reporting is applicable (02.5). Confirm the separate statutory ICFR workstream is addressed — ICFR reporting is not the same as controls reliance for the financial statement audit.">
           <div className="flex gap-2">
-            <Input disabled={!canEdit} placeholder="How the ICFR workstream is addressed" value={icfr} onChange={(e) => setIcfr(e.target.value)} />
-            {canEdit && (
+            <Input disabled={!canPrepare} placeholder="How the ICFR workstream is addressed" value={icfr} onChange={(e) => setIcfr(e.target.value)} />
+            {canPrepare && (
               <Button variant="secondary" disabled={pending} onClick={() => save({ icfrNote: icfr }, 'ICFR confirmation saved.')}>
                 Save
               </Button>
@@ -688,8 +781,8 @@ function ApproachTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element
           </div>
         </Question>
       )}
-      <DecisionTable title="03.4.5 Controls reliance strategy (by major cycle)" note={CONTROLS_RELIANCE_NOTE} kind="controls_cycle" s={s} canEdit={canEdit} post={post} pending={pending} />
-      <DecisionTable title="03.4.6 Interim / year-end strategy" note={TIMING_NOTE} kind="timing" s={s} canEdit={canEdit} post={post} pending={pending} rollForward />
+      <DecisionTable title="03.4.5 Controls reliance strategy (by major cycle)" note={CONTROLS_RELIANCE_NOTE} kind="controls_cycle" s={s} canEdit={canPrepare} post={post} pending={pending} />
+      <DecisionTable title="03.4.6 Interim / year-end strategy" note={TIMING_NOTE} kind="timing" s={s} canEdit={canPrepare} post={post} pending={pending} rollForward />
     </div>
   );
 }
@@ -755,8 +848,13 @@ function DecisionRow({
   return (
     <div className="grid gap-2 border-t border-line pt-2 text-xs sm:grid-cols-12">
       <div className="sm:col-span-3">
-        <div className="text-ink">{d.label}</div>
+        <div className="flex flex-wrap items-center gap-1.5 text-ink">
+          {d.label}
+          {d.itemCode && <span className="font-mono text-[10px] text-ink-faint">{d.itemCode}</span>}
+          {d.retired && <Badge tone="neutral">Retired from the methodology</Badge>}
+        </div>
         {d.hint && <div className="text-ink-faint">{d.hint}</div>}
+        {d.guidance && <div className="mt-0.5 text-ink-muted">{d.guidance}</div>}
       </div>
       <div className="sm:col-span-5">
         <Options options={d.options} labels={DECISION_STATUS_LABEL} value={d.status} disabled={!canEdit || pending} onChange={(v) => send({ status: v })} />
@@ -786,7 +884,7 @@ function DecisionRow({
 
 // ── 03.4.7 Evidence strategy / EC-01 / physical / DT-01 ─────────────────────
 
-function EvidenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element {
+function EvidenceTab({ s, canEdit, canPrepare, save, post, pending }: TabProps): JSX.Element {
   const r = s.record;
   const [ecNote, setEcNote] = useState(r.ec01Note ?? '');
   const [areas, setAreas] = useState(r.ec01Areas);
@@ -797,17 +895,17 @@ function EvidenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element
   const dis = !canEdit || pending;
   return (
     <div className="space-y-3">
-      <DecisionTable title="Evidence channels (strategic expectations — not a procedure checklist)" kind="evidence_channel" s={s} canEdit={canEdit} post={post} pending={pending} allowCustom={false} />
+      <DecisionTable title="Evidence channels (strategic expectations — not a procedure checklist)" kind="evidence_channel" s={s} canEdit={canPrepare} post={post} pending={pending} allowCustom={false} />
       <Question code="EC-01 — External confirmations (SA 505)" text="Are external confirmations expected to be an important source of audit evidence? Populations, selections, control over requests and alternatives belong to 03.7 / execution.">
         <Options options={EC01_ANSWERS} labels={EC01_LABEL} value={r.ec01} disabled={dis} onChange={(v) => save({ ec01: v, ec01Areas: areas, ec01Note: ecNote }, 'EC-01 saved.')} />
         {s.suggestedConfirmationAreas.length > 0 && (
           <p className="text-xs text-ink-muted">Suggested from known facts: {s.suggestedConfirmationAreas.map((a) => CONFIRMATION_AREA_LABEL[a]).join(', ')}.</p>
         )}
-        <Checks options={CONFIRMATION_AREAS} labels={CONFIRMATION_AREA_LABEL} value={areas} onChange={setAreas} disabled={!canEdit} />
+        <Checks options={CONFIRMATION_AREAS} labels={CONFIRMATION_AREA_LABEL} value={areas} onChange={setAreas} disabled={!canPrepare} />
         <div className="flex gap-2">
           <Input disabled={!canEdit} placeholder="Note" value={ecNote} onChange={(e) => setEcNote(e.target.value)} />
-          {canEdit && (
-            <Button variant="secondary" disabled={pending} onClick={() => save({ ec01Areas: areas, ec01Note: ecNote }, 'Saved.')}>
+          {canPrepare && (
+            <Button variant="secondary" disabled={pending} onClick={() => save(canEdit ? { ec01Areas: areas, ec01Note: ecNote } : { ec01Areas: areas }, 'Saved.')}>
               Save
             </Button>
           )}
@@ -822,15 +920,15 @@ function EvidenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element
           <Note>Must be owned before completion — add an owned Scope Dependency for inventory.</Note>
         )}
         <div className="grid gap-2 sm:grid-cols-2">
-          <Input disabled={!canEdit} placeholder="Locations requiring scope assessment" value={invLoc} onChange={(e) => setInvLoc(e.target.value)} />
+          <Input disabled={!canPrepare} placeholder="Locations requiring scope assessment" value={invLoc} onChange={(e) => setInvLoc(e.target.value)} />
           <Input disabled={!canEdit} placeholder="Note" value={invNote} onChange={(e) => setInvNote(e.target.value)} />
         </div>
         <div className="text-xs font-medium text-ink">Cash / securities / other physical assets — observation / inspection expected?</div>
         <Options options={EC01_ANSWERS} labels={EC01_LABEL} value={r.physicalOther} disabled={dis} onChange={(v) => save({ physicalOther: v, physicalOtherNote: physNote }, 'Saved.')} />
         <div className="flex gap-2">
           <Input disabled={!canEdit} placeholder="Note on other physical assets" value={physNote} onChange={(e) => setPhysNote(e.target.value)} />
-          {canEdit && (
-            <Button variant="secondary" disabled={pending} onClick={() => save({ inventoryLocations: invLoc, inventoryNote: invNote, physicalOtherNote: physNote }, 'Saved.')}>
+          {canPrepare && (
+            <Button variant="secondary" disabled={pending} onClick={() => save(canEdit ? { inventoryLocations: invLoc, inventoryNote: invNote, physicalOtherNote: physNote } : { inventoryLocations: invLoc }, 'Saved.')}>
               Save notes
             </Button>
           )}
@@ -847,14 +945,14 @@ function EvidenceTab({ s, canEdit, save, post, pending }: TabProps): JSX.Element
           )}
         </div>
       </Question>
-      {r.dt01 && r.dt01 !== 'no' && <DecisionTable title="Potential technology uses" kind="technology_use" s={s} canEdit={canEdit} post={post} pending={pending} />}
+      {r.dt01 && r.dt01 !== 'no' && <DecisionTable title="Potential technology uses" kind="technology_use" s={s} canEdit={canPrepare} post={post} pending={pending} />}
     </div>
   );
 }
 
 // ── 03.4.8 Triggered special considerations ─────────────────────────────────
 
-function SpecialTab({ s, canEdit, save, post, pending, signals }: TabProps & { signals: PlanningSignalRecord[] }): JSX.Element {
+function SpecialTab({ s, canEdit, canPrepare, save, post, pending, signals }: TabProps & { signals: PlanningSignalRecord[] }): JSX.Element {
   const r = s.record;
   const t = s.triggers;
   const [ob, setOb] = useState<Record<string, string>>(r.obInputs);
@@ -873,11 +971,32 @@ function SpecialTab({ s, canEdit, save, post, pending, signals }: TabProps & { s
     <div className="space-y-3">
       {t.initialAudit && (
         <Question code="OB-01 — Initial audit / opening balances (SA 510)" text="Activated automatically because 02.1 records an initial audit. Initial audit with no opening-balance strategy blocks completion. Detailed SA 510 procedures are generated later in the Audit Programme.">
+          {s.obFacts.length > 0 && (
+            <div className="space-y-1 rounded bg-surface-raised p-2 text-xs">
+              <div className="text-[11px] font-medium text-ink-muted">Already recorded elsewhere (read-only, linked)</div>
+              {s.obFacts.map((x) => {
+                const imp = x.impliesInput;
+                const applied = !!imp && ob[imp.key] === imp.value;
+                return (
+                  <div key={x.key} className="flex flex-wrap items-center gap-2">
+                    <span className="text-ink">{x.label}:</span>
+                    <span className="text-ink-muted">{x.value}</span>
+                    <span className="font-mono text-[10px] text-ink-faint">{x.source}</span>
+                    {imp && canPrepare && !applied && (
+                      <button type="button" className="text-primary-700 hover:underline" onClick={() => setOb({ ...ob, [imp.key]: imp.value })}>
+                        Use ({imp.value.replace(/_/g, ' ')})
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="grid gap-2 sm:grid-cols-2">
             {OB_INPUTS.map((i) => (
               <label key={i.key} className="flex items-center justify-between gap-2 text-xs text-ink">
                 {i.label}
-                <Select className="max-w-[10rem]" disabled={!canEdit} value={ob[i.key] ?? ''} onChange={(e) => setOb({ ...ob, [i.key]: e.target.value })}>
+                <Select className="max-w-[10rem]" disabled={!canPrepare} value={ob[i.key] ?? ''} onChange={(e) => setOb({ ...ob, [i.key]: e.target.value })}>
                   <option value="">—</option>
                   {i.options.map((o) => (
                     <option key={o} value={o}>
@@ -891,8 +1010,8 @@ function SpecialTab({ s, canEdit, save, post, pending, signals }: TabProps & { s
           <Options options={OB01_OPTIONS} labels={OB01_LABEL} value={r.ob01} disabled={dis} onChange={(v) => save({ ob01: v, obInputs: ob, ob01Note: obNote }, 'OB-01 saved.')} />
           <div className="flex gap-2">
             <Input disabled={!canEdit} placeholder="Note (accounting policy changes, prior report modification…)" value={obNote} onChange={(e) => setObNote(e.target.value)} />
-            {canEdit && (
-              <Button variant="secondary" disabled={pending} onClick={() => save({ obInputs: ob, ob01Note: obNote }, 'Saved.')}>
+            {canPrepare && (
+              <Button variant="secondary" disabled={pending} onClick={() => save(canEdit ? { obInputs: ob, ob01Note: obNote } : { obInputs: ob }, 'Saved.')}>
                 Save
               </Button>
             )}
@@ -904,9 +1023,9 @@ function SpecialTab({ s, canEdit, save, post, pending, signals }: TabProps & { s
         <div className="text-sm font-medium text-ink">Service organisations (SO-01, SA 402)</div>
         {!t.serviceOrganisation && s.serviceOrgs.length === 0 && <p className="text-xs text-ink-faint">No financially relevant service organisation identified in 02 / 03.2.</p>}
         {s.serviceOrgs.map((o) => (
-          <ServiceOrgCard key={`${o.id}-${o.version}`} o={o} canEdit={canEdit} post={post} pending={pending} />
+          <ServiceOrgCard key={`${o.id}-${o.version}`} s={s} o={o} canEdit={canEdit} canPrepare={canPrepare} post={post} pending={pending} />
         ))}
-        {canEdit && (
+        {canPrepare && (
           <div className="flex gap-2 border-t border-line pt-2">
             <Input className="max-w-xs" placeholder="Service provider" value={provider} onChange={(e) => setProvider(e.target.value)} />
             <Button variant="ghost" disabled={!provider.trim() || pending} onClick={() => post('/service-orgs', { provider }, 'Service organisation card added.')}>
@@ -991,7 +1110,7 @@ function SpecialTab({ s, canEdit, save, post, pending, signals }: TabProps & { s
   );
 }
 
-function ServiceOrgCard({ o, canEdit, post, pending }: { o: ScopeServiceOrg; canEdit: boolean; post: Post; pending: boolean }): JSX.Element {
+function ServiceOrgCard({ s, o, canEdit, canPrepare, post, pending }: { s: ScopeApproachSummary; o: ScopeServiceOrg; canEdit: boolean; canPrepare: boolean; post: Post; pending: boolean }): JSX.Element {
   const [f, setF] = useState({
     provider: o.provider,
     process: o.process ?? '',
@@ -1002,7 +1121,7 @@ function ServiceOrgCard({ o, canEdit, post, pending }: { o: ScopeServiceOrg; can
     so01: o.so01,
     note: o.note ?? '',
   });
-  const dis = !canEdit;
+  const dis = !canPrepare;
   return (
     <div className="space-y-2 border-t border-line pt-2 text-xs">
       <div className="grid gap-2 sm:grid-cols-3">
@@ -1027,18 +1146,26 @@ function ServiceOrgCard({ o, canEdit, post, pending }: { o: ScopeServiceOrg; can
           ))}
         </Select>
       </div>
-      <Options options={SO01_OPTIONS} labels={SO01_LABEL} value={f.so01} disabled={dis} onChange={(v) => setF({ ...f, so01: v })} />
-      {canEdit && (
-        <Button
-          variant="secondary"
-          disabled={pending}
-          onClick={() =>
-            post(`/service-orgs/${o.id}`, { ...f, affectedAreas: f.affectedAreas.split(',').map((x) => x.trim()).filter(Boolean), version: o.version }, `${o.code} saved.`)
-          }
-        >
-          Save {o.code}
-        </Button>
-      )}
+      <Options options={SO01_OPTIONS} labels={SO01_LABEL} value={f.so01} disabled={!canEdit} onChange={(v) => setF({ ...f, so01: v })} />
+      <div className="flex flex-wrap items-center gap-2">
+        {canPrepare && (
+          <Button
+            variant="secondary"
+            disabled={pending}
+            onClick={() => {
+              const { so01, ...facts } = f;
+              post(
+                `/service-orgs/${o.id}`,
+                { ...facts, ...(canEdit ? { so01 } : {}), affectedAreas: f.affectedAreas.split(',').map((x) => x.trim()).filter(Boolean), version: o.version },
+                `${o.code} saved.`,
+              );
+            }}
+          >
+            Save {o.code}
+          </Button>
+        )}
+        <Evidence s={s} type="scope_service_org" id={o.id} />
+      </div>
     </div>
   );
 }
@@ -1075,7 +1202,7 @@ function ConsiderationRow({ c, canEdit, post, pending }: { c: ScopeConsideration
 
 // ── 03.4.9 Dependencies + SL-01 ─────────────────────────────────────────────
 
-function DependenciesTab({ s, canEdit, save, post, pending, team }: TabProps & { team: TeamMember[] }): JSX.Element {
+function DependenciesTab({ s, canEdit, canPrepare, save, post, pending, team }: TabProps & { team: TeamMember[] }): JSX.Element {
   const r = s.record;
   const [desc, setDesc] = useState('');
   const [impact, setImpact] = useState<ScopeDependency['impact']>('information');
@@ -1087,9 +1214,9 @@ function DependenciesTab({ s, canEdit, save, post, pending, team }: TabProps & {
         <p className="text-xs text-ink-muted">Management accounts, inventory date, ERP access, component auditor, assurance report, predecessor access, legal / valuation report… Significant impacts are Partner Attention. Actual dates are set in 03.11.</p>
         {s.dependencies.length === 0 && <p className="text-xs text-ink-faint">No dependencies.</p>}
         {s.dependencies.map((d) => (
-          <DependencyRow key={`${d.id}-${d.version}`} d={d} s={s} team={team} canEdit={canEdit} post={post} pending={pending} />
+          <DependencyRow key={`${d.id}-${d.version}`} d={d} s={s} team={team} canEdit={canPrepare} post={post} pending={pending} />
         ))}
-        {canEdit && (
+        {canPrepare && (
           <div className="grid gap-2 border-t border-line pt-2 sm:grid-cols-4">
             <Input className="sm:col-span-2" placeholder="Dependency" value={desc} onChange={(e) => setDesc(e.target.value)} />
             <Select value={impact} onChange={(e) => setImpact(e.target.value as ScopeDependency['impact'])}>
@@ -1110,7 +1237,7 @@ function DependenciesTab({ s, canEdit, save, post, pending, team }: TabProps & {
         <Options options={SL01_ANSWERS} labels={SL01_LABEL} value={r.sl01} disabled={!canEdit || pending} onChange={(v) => save({ sl01: v }, 'SL-01 saved.')} />
         <Note>{SCOPE_LIMITATION_NOTE}</Note>
         {s.limitations.map((l) => (
-          <LimitationRow key={`${l.id}-${l.version}`} l={l} team={team} canEdit={canEdit} post={post} pending={pending} />
+          <LimitationRow key={`${l.id}-${l.version}`} s={s} l={l} team={team} canEdit={canEdit} post={post} pending={pending} />
         ))}
         {canEdit && (r.sl01 === 'yes' || r.sl01 === 'uncertain' || s.limitations.length > 0) && (
           <div className="flex gap-2 border-t border-line pt-2">
@@ -1195,26 +1322,29 @@ function DependencyRow({ d, s, team, canEdit, post, pending }: { d: ScopeDepende
         </Select>
         <Input disabled={dis} placeholder="Resolution" value={f.resolution} onChange={(e) => setF({ ...f, resolution: e.target.value })} />
       </div>
-      {canEdit && (
-        <Button
-          variant="secondary"
-          disabled={pending}
-          onClick={() =>
-            post(
-              `/dependencies/${d.id}`,
-              { ...f, unitId: f.unitId || null, ownerEmployeeId: f.ownerEmployeeId || null, neededBy: f.neededBy || null, version: d.version },
-              `${d.code} saved.`,
-            )
-          }
-        >
-          Save {d.code}
-        </Button>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {canEdit && (
+          <Button
+            variant="secondary"
+            disabled={pending}
+            onClick={() =>
+              post(
+                `/dependencies/${d.id}`,
+                { ...f, unitId: f.unitId || null, ownerEmployeeId: f.ownerEmployeeId || null, neededBy: f.neededBy || null, version: d.version },
+                `${d.code} saved.`,
+              )
+            }
+          >
+            Save {d.code}
+          </Button>
+        )}
+        <Evidence s={s} type="scope_dependency" id={d.id} />
+      </div>
     </div>
   );
 }
 
-function LimitationRow({ l, team, canEdit, post, pending }: { l: ScopeLimitation; team: TeamMember[]; canEdit: boolean; post: Post; pending: boolean }): JSX.Element {
+function LimitationRow({ s, l, team, canEdit, post, pending }: { s: ScopeApproachSummary; l: ScopeLimitation; team: TeamMember[]; canEdit: boolean; post: Post; pending: boolean }): JSX.Element {
   const [f, setF] = useState({
     affected: l.affected ?? '',
     managementPosition: l.managementPosition ?? '',
@@ -1247,29 +1377,68 @@ function LimitationRow({ l, team, canEdit, post, pending }: { l: ScopeLimitation
         <Textarea rows={2} disabled={dis} placeholder="Possible alternative evidence (preliminary)" value={f.alternativeEvidence} onChange={(e) => setF({ ...f, alternativeEvidence: e.target.value })} />
         <Input disabled={dis} placeholder="Resolution" value={f.resolution} onChange={(e) => setF({ ...f, resolution: e.target.value })} />
       </div>
-      {canEdit && (
-        <div className="flex gap-2">
-          <Button variant="secondary" disabled={pending} onClick={() => send()}>
-            Save
-          </Button>
-          {l.status === 'open' && (
-            <Button variant="ghost" disabled={pending || !f.resolution.trim()} onClick={() => send('resolved')}>
-              Resolve
+      <div className="flex flex-wrap items-center gap-2">
+        {canEdit && (
+          <>
+            <Button variant="secondary" disabled={pending} onClick={() => send()}>
+              Save
             </Button>
-          )}
-        </div>
-      )}
+            {l.status === 'open' && (
+              <Button variant="ghost" disabled={pending || !f.resolution.trim()} onClick={() => send('resolved')}>
+                Resolve
+              </Button>
+            )}
+          </>
+        )}
+        <Evidence s={s} type="scope_limitation" id={l.id} />
+      </div>
     </div>
   );
 }
 
 // ── 03.4.10 Preliminary Audit Approach Map ─────────────────────────────────
 
-function MapTab({ s, canEdit, post, pending, signals, focus }: TabProps & { signals: PlanningSignalRecord[]; focus: AreaOfFocusRecord[] }): JSX.Element {
+function MapTab({
+  s,
+  canEdit,
+  canPrepare,
+  post,
+  pending,
+  signals,
+  focus,
+  base,
+  areasKey,
+}: TabProps & { signals: PlanningSignalRecord[]; focus: AreaOfFocusRecord[]; base: string; areasKey: string[] }): JSX.Element {
   const [name, setName] = useState('');
+  const qc = useQueryClient();
+  // §23 — the 03.5 areas a map area may be linked to (shared with the 03.5 panel's cache).
+  const areas = useQuery({
+    queryKey: areasKey,
+    queryFn: () => apiFetch<AuditAreaReviewSummary>(`${base}/audit-areas`),
+    enabled: s.areaLink.available,
+  });
+  const linkPost: Post = (path, body, done) => {
+    post(path, body, done);
+    void qc.invalidateQueries({ queryKey: areasKey });
+  };
+  const free = (areas.data?.areas ?? []).filter((a) => a.disposition === 'retained');
   return (
     <div className="space-y-3">
       <Note>{MAP_DESTINATION_NOTE}</Note>
+      <Card className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs">
+        {s.areaLink.available ? (
+          <span className={s.areaLink.unconverted ? 'text-warn-700' : 'text-ink-muted'}>
+            {s.areaLink.unconverted
+              ? `${s.areaLink.unconverted} included map area(s) not yet carried into 03.5 — link each to a 03.5 area or convert it into a custom area (03.5 VAL-11).`
+              : 'Every included map area is carried into 03.5 Audit Areas & Assertions.'}
+          </span>
+        ) : (
+          <span className="text-ink-muted">03.5 Audit Areas & Assertions has not been populated yet — map areas link automatically once it is.</span>
+        )}
+        <button type="button" className="inline-flex items-center gap-1 text-primary-700 hover:underline" onClick={() => openAuditPhase('planning', 'planning-areas_and_assertions')}>
+          Open 03.5 <ArrowRight className="h-3 w-3" />
+        </button>
+      </Card>
       {s.materiality && (
         <p className="text-xs text-ink-muted">
           Materiality in use ({s.materiality.versionLabel}): OM {inr(s.materiality.overallMateriality)} · PM {inr(s.materiality.performanceMateriality)}
@@ -1277,9 +1446,21 @@ function MapTab({ s, canEdit, post, pending, signals, focus }: TabProps & { sign
         </p>
       )}
       {s.mapItems.map((m) => (
-        <MapRow key={`${m.id}-${m.version}`} m={m} canEdit={canEdit} post={post} pending={pending} signals={signals} focus={focus} />
+        <MapRow
+          key={`${m.id}-${m.version}`}
+          s={s}
+          m={m}
+          canEdit={canEdit}
+          canPrepare={canPrepare}
+          post={post}
+          linkPost={linkPost}
+          areas={free.filter((a) => !a.scopeStrategy || a.scopeStrategy.mapItemId === m.id)}
+          pending={pending}
+          signals={signals}
+          focus={focus}
+        />
       ))}
-      {canEdit && (
+      {canPrepare && (
         <Card className="flex gap-2 p-3">
           <Input className="max-w-xs" placeholder="Add a preliminary area" value={name} onChange={(e) => setName(e.target.value)} />
           <Button disabled={!name.trim() || pending} onClick={() => post('/map', { name }, 'Area added.')}>
@@ -1293,16 +1474,26 @@ function MapTab({ s, canEdit, post, pending, signals, focus }: TabProps & { sign
 }
 
 function MapRow({
+  s,
   m,
   canEdit,
+  canPrepare,
   post,
+  linkPost,
+  areas,
   pending,
   signals,
   focus,
 }: {
+  s: ScopeApproachSummary;
   m: ScopeMapItem;
   canEdit: boolean;
+  canPrepare: boolean;
   post: Post;
+  /** Link / convert also refresh the 03.5 cache. */
+  linkPost: Post;
+  /** Retained 03.5 areas this map area may be linked to. */
+  areas: AuditAreaReviewSummary['areas'];
   pending: boolean;
   signals: PlanningSignalRecord[];
   focus: AreaOfFocusRecord[];
@@ -1320,19 +1511,23 @@ function MapRow({
     included: m.included,
     exclusionReason: m.exclusionReason ?? '',
   });
-  const dis = !canEdit;
-  const send = (extra: Record<string, unknown> = {}) =>
+  const [areaId, setAreaId] = useState(m.linkedArea?.id ?? '');
+  /** Draft strategy (team); include / exclude / reassessed are the Manager's. */
+  const dis = !canPrepare;
+  const send = (extra: Record<string, unknown> = {}) => {
+    const { included, exclusionReason, ...draft } = f;
     post(
       `/map/${m.id}`,
       {
-        ...f,
+        ...draft,
+        ...(canEdit ? { included, exclusionReason: included ? null : exclusionReason } : {}),
         manualAmount: m.metricKey ? undefined : numOrNull(f.manualAmount),
-        exclusionReason: f.included ? null : f.exclusionReason,
         version: m.version,
         ...extra,
       },
       `${m.code} saved.`,
     );
+  };
   return (
     <Card className={`space-y-2 p-3 ${m.included ? '' : 'opacity-70'}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1348,6 +1543,46 @@ function MapRow({
         </span>
       </div>
       {m.reassessmentRequired && <p className="text-xs text-danger-700">{m.reassessmentReason}</p>}
+      {m.included && s.areaLink.available && (
+        <div className="flex flex-wrap items-center gap-2 rounded bg-surface-raised px-2 py-1.5 text-xs">
+          <Link2 className="h-3.5 w-3.5 text-ink-faint" />
+          {m.linkedArea ? (
+            <span className="text-ink">
+              → 03.5 {m.linkedArea.areaCode ? <span className="font-mono">{m.linkedArea.areaCode} </span> : null}
+              {m.linkedArea.name}
+              {m.linkedArea.origin === 'scope_map' && <span className="text-ink-faint"> (converted from this map area)</span>}
+            </span>
+          ) : (
+            <span className="text-warn-700">Not carried into 03.5 yet</span>
+          )}
+          {canEdit && (
+            <>
+              <Select className="max-w-[16rem]" value={areaId} onChange={(e) => setAreaId(e.target.value)}>
+                <option value="">— Not linked —</option>
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.areaCode ? `${a.areaCode} · ` : ''}
+                    {a.areaName}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={pending || areaId === (m.linkedArea?.id ?? '')}
+                onClick={() => linkPost(`/map/${m.id}/link`, { areaId: areaId || null, version: m.version }, areaId ? `${m.code} linked to 03.5.` : `${m.code} unlinked — it will not be re-linked automatically.`)}
+              >
+                {areaId ? 'Link' : 'Unlink'}
+              </Button>
+              {!m.linkedArea && (
+                <Button size="sm" variant="ghost" disabled={pending} onClick={() => linkPost(`/map/${m.id}/convert`, { version: m.version }, `${m.code} converted into a 03.5 custom area.`)}>
+                  Convert to 03.5 area
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {m.specificMateriality.length > 0 && <p className="text-xs text-warn-700">Specific materiality: {m.specificMateriality.join('; ')}</p>}
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="space-y-1">
@@ -1378,30 +1613,35 @@ function MapRow({
           <Input disabled={dis} placeholder={m.reassessmentRequired ? 'What was reconsidered (required to clear)' : 'Note'} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
         </div>
       </div>
-      {canEdit && (
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {canPrepare && (
           <Button variant="secondary" disabled={pending} onClick={() => send()}>
             Save {m.code}
           </Button>
-          {m.reassessmentRequired && (
-            <Button variant="ghost" disabled={pending || !f.note.trim()} onClick={() => send({ reassessed: true })}>
-              Mark reassessed
-            </Button>
-          )}
-          <label className="inline-flex items-center gap-1.5 text-xs text-ink">
-            <input type="checkbox" checked={!f.included} onChange={(e) => setF({ ...f, included: !e.target.checked })} />
-            Remove from map
-          </label>
-          {!f.included && <Input className="max-w-sm" placeholder="Reason (required)" value={f.exclusionReason} onChange={(e) => setF({ ...f, exclusionReason: e.target.value })} />}
-        </div>
-      )}
+        )}
+        {canEdit && m.reassessmentRequired && (
+          <Button variant="ghost" disabled={pending || !f.note.trim()} onClick={() => send({ reassessed: true })}>
+            Mark reassessed
+          </Button>
+        )}
+        {canEdit && (
+          <>
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink">
+              <input type="checkbox" checked={!f.included} onChange={(e) => setF({ ...f, included: !e.target.checked })} />
+              Remove from map
+            </label>
+            {!f.included && <Input className="max-w-sm" placeholder="Reason (required)" value={f.exclusionReason} onChange={(e) => setF({ ...f, exclusionReason: e.target.value })} />}
+          </>
+        )}
+        <Evidence s={s} type="scope_map_item" id={m.id} />
+      </div>
     </Card>
   );
 }
 
 // ── §26 Partner Planning View ──────────────────────────────────────────────
 
-function PartnerTab({ s, post, pending, canAct }: TabProps & { canAct: boolean }): JSX.Element {
+function PartnerTab({ s, post, pending, canReview, canRespond }: TabProps & { canReview: boolean; canRespond: boolean }): JSX.Element {
   const [action, setAction] = useState<PartnerScopeAction>('challenge');
   const [note, setNote] = useState('');
   const r = s.record;
@@ -1446,9 +1686,9 @@ function PartnerTab({ s, post, pending, canAct }: TabProps & { canAct: boolean }
             ))}
           </ul>
         )}
-        <p className="text-[11px] text-ink-faint">No separate EP approval in 03.4 — formal planning approval is 03.12. Partner actions feed 03.12.</p>
+        <p className="text-[11px] text-ink-faint">No separate EP approval in 03.4 — formal planning approval is 03.12. Partner actions feed 03.12: an open challenge or request blocks Planning approval until the Manager answers it.</p>
       </Card>
-      {canAct && (
+      {canReview && (
         <Card className="space-y-2 p-3">
           <div className="text-sm font-medium text-ink">Partner action</div>
           <Options options={PARTNER_ACTIONS} labels={PARTNER_ACTION_LABEL} value={action} disabled={pending} onChange={setAction} />
@@ -1459,13 +1699,13 @@ function PartnerTab({ s, post, pending, canAct }: TabProps & { canAct: boolean }
         </Card>
       )}
       {s.partnerActions.map((a) => (
-        <PartnerActionRow key={`${a.id}-${a.version}`} a={a} canAct={canAct} post={post} pending={pending} />
+        <PartnerActionRow key={`${a.id}-${a.version}`} a={a} canRespond={canRespond} post={post} pending={pending} />
       ))}
     </div>
   );
 }
 
-function PartnerActionRow({ a, canAct, post, pending }: { a: ScopeApproachSummary['partnerActions'][number]; canAct: boolean; post: Post; pending: boolean }): JSX.Element {
+function PartnerActionRow({ a, canRespond, post, pending }: { a: ScopeApproachSummary['partnerActions'][number]; canRespond: boolean; post: Post; pending: boolean }): JSX.Element {
   const [response, setResponse] = useState('');
   return (
     <Card className="space-y-1 p-3 text-xs">
@@ -1474,12 +1714,17 @@ function PartnerActionRow({ a, canAct, post, pending }: { a: ScopeApproachSummar
         {a.signalCode && <Badge tone="info">{a.signalCode}</Badge>}
         <span className="text-ink-muted">
           {a.createdByName ?? ''} · {new Date(a.createdAt).toLocaleDateString('en-IN')}
+          {a.scopeVersionLabel ? ` · on ${a.scopeVersionLabel}` : ''}
         </span>
         <Badge tone={a.status === 'open' ? 'danger' : 'neutral'}>{a.status === 'open' ? 'Open' : 'Addressed'}</Badge>
       </div>
       {a.note && <p className="text-ink">{a.note}</p>}
-      {a.response && <p className="text-ink-muted">Response: {a.response}</p>}
-      {a.status === 'open' && canAct && (
+      {a.response && (
+        <p className="text-ink-muted">
+          Response{a.respondedByName ? ` (${a.respondedByName}${a.respondedAt ? `, ${new Date(a.respondedAt).toLocaleDateString('en-IN')}` : ''})` : ''}: {a.response}
+        </p>
+      )}
+      {a.status === 'open' && canRespond && (
         <div className="flex gap-2">
           <Input placeholder="Manager response" value={response} onChange={(e) => setResponse(e.target.value)} />
           <Button variant="secondary" disabled={!response.trim() || pending} onClick={() => post(`/partner-actions/${a.id}`, { response, version: a.version }, 'Response recorded.')}>
@@ -1606,6 +1851,13 @@ function ConclusionTab({ s, canEdit, save, pending, base }: TabProps & { base: s
         <p className="text-[11px] text-ink-faint">The structured decisions remain authoritative. No standalone Word scope memo — the Audit Planning Memorandum is generated in 03.12.</p>
       </Card>
       <CompletionChecklist checks={s.completion} />
+      {r.id && (
+        <Card className="space-y-1 p-3">
+          <div className="text-sm font-medium text-ink">Supporting evidence (§28)</div>
+          <p className="text-xs text-ink-muted">Scope memos, client confirmations of the population, assurance reports — stored in the engagement workspace (SharePoint) with version history.</p>
+          <Evidence s={s} type="scope_approach" id={r.id} />
+        </Card>
+      )}
       <Question code="AP-02 — Manager conclusion" text="Does the proposed scope and overall audit approach appropriately respond to the engagement characteristics, information presently available, materiality and planning considerations?">
         {r.ap02 && <Badge tone={r.ap02 === 'yes_complete' ? 'success' : 'warn'}>{r.ap02 === 'yes_complete' ? 'Yes — Complete' : 'No — Further Work Required'}</Badge>}
         {canEdit && (
