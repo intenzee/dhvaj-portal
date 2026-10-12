@@ -67,6 +67,17 @@ describe('03.4 hand-off cards (03.8 / 03.9 / 03.11)', () => {
     expect(apiFetch).toHaveBeenCalledWith('/engagements/e1/statutory-audit/w1/scope-approach/handoff');
   });
 
+  it('03.9 says plainly when 03.4 has not decided a unit yet', async () => {
+    apiFetch.mockResolvedValue({
+      ...HANDOFF,
+      components: [{ ...HANDOFF.components[0]!, scopeConclusion: null }],
+    });
+    render(wrap(<ScopeHandoffCard {...props} itemKey="component_planning" />));
+    expect(
+      await screen.findByText('Strategy and scope conclusion not yet decided in 03.4'),
+    ).toBeInTheDocument();
+  });
+
   it('03.11 shows the timing pattern and the open dependencies', async () => {
     render(wrap(<ScopeHandoffCard {...props} itemKey="timeline_milestones" />));
     expect(await screen.findByText('Inventory')).toBeInTheDocument();

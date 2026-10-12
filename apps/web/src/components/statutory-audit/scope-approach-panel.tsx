@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Info, Link2, Plus, RefreshCw, RotateCcw, Sparkles } from 'lucide-react';
 import {
@@ -565,6 +565,23 @@ function PopulationTab({
   );
 }
 
+function UnitField({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <label className={`block space-y-0.5 ${className ?? ''}`}>
+      <span className="block text-[11px] text-ink-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 function UnitCard({
   s,
   u,
@@ -651,17 +668,32 @@ function UnitCard({
           {u.scopeConclusion && <Badge tone={u.scopeConclusion === 'in_scope' ? 'success' : 'info'}>{SCOPE_CONCLUSION_LABEL[u.scopeConclusion]}</Badge>}
         </div>
       </div>
-      <div className="grid gap-2 sm:grid-cols-4">
-        <Input disabled={dis} placeholder="Location / jurisdiction" value={f.location} onChange={(e) => set('location', e.target.value)} />
-        <Input disabled={dis} placeholder="Financial indicator (e.g. Inventory)" value={f.finMetric} onChange={(e) => set('finMetric', e.target.value)} />
-        <Input disabled={dis} type="number" placeholder="Amount (₹)" value={f.finAmount} onChange={(e) => set('finAmount', e.target.value)} />
-        <Input disabled={dis} placeholder="Source of the amount" value={f.finSource} onChange={(e) => set('finSource', e.target.value)} />
+      {/* The panel is a narrow column at every viewport — two labelled fields a row. */}
+      <div className="grid grid-cols-2 gap-2">
+        <UnitField label="Location / jurisdiction">
+          <Input disabled={dis} value={f.location} onChange={(e) => set('location', e.target.value)} />
+        </UnitField>
+        <UnitField label="Financial indicator">
+          <Input disabled={dis} placeholder="e.g. Inventory" value={f.finMetric} onChange={(e) => set('finMetric', e.target.value)} />
+        </UnitField>
+        <UnitField label="Amount (₹)">
+          <Input disabled={dis} type="number" value={f.finAmount} onChange={(e) => set('finAmount', e.target.value)} />
+        </UnitField>
+        <UnitField label="Source of the amount">
+          <Input disabled={dis} value={f.finSource} onChange={(e) => set('finSource', e.target.value)} />
+        </UnitField>
       </div>
       {u.finPrompt && <p className="text-xs text-warn-700">{u.finPrompt}</p>}
-      <div className="grid gap-2 sm:grid-cols-4">
-        <Input disabled={dis} type="number" min={0} placeholder="Employees" value={f.employees} onChange={(e) => set('employees', e.target.value)} />
-        <Input disabled={dis} type="number" min={0} placeholder="Transaction volume" value={f.transactionVolume} onChange={(e) => set('transactionVolume', e.target.value)} />
-        <Input className="sm:col-span-2" disabled={dis} placeholder="What the volume counts (e.g. invoices / month)" value={f.volumeNote} onChange={(e) => set('volumeNote', e.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <UnitField label="Employees">
+          <Input disabled={dis} type="number" min={0} value={f.employees} onChange={(e) => set('employees', e.target.value)} />
+        </UnitField>
+        <UnitField label="Transaction volume">
+          <Input disabled={dis} type="number" min={0} value={f.transactionVolume} onChange={(e) => set('transactionVolume', e.target.value)} />
+        </UnitField>
+        <UnitField label="What the volume counts" className="col-span-2">
+          <Input disabled={dis} placeholder="e.g. invoices / month" value={f.volumeNote} onChange={(e) => set('volumeNote', e.target.value)} />
+        </UnitField>
       </div>
       <label className="inline-flex items-center gap-1.5 text-xs text-ink">
         <input type="checkbox" disabled={dis} checked={f.finNotAvailable} onChange={(e) => set('finNotAvailable', e.target.checked)} />
@@ -1512,6 +1544,13 @@ function MapRow({
     exclusionReason: m.exclusionReason ?? '',
   });
   const [areaId, setAreaId] = useState(m.linkedArea?.id ?? '');
+  /** Picker unchanged on a linked item → Unlink; a new pick → Link / Relink. */
+  const linked = m.linkedArea?.id ?? '';
+  useEffect(() => setAreaId(linked), [linked]);
+  const linkTarget =
+    areaId === linked
+      ? { label: linked ? 'Unlink' : 'Link', areaId: null, enabled: !!linked }
+      : { label: !areaId ? 'Unlink' : linked ? 'Relink' : 'Link', areaId: areaId || null, enabled: true };
   /** Draft strategy (team); include / exclude / reassessed are the Manager's. */
   const dis = !canPrepare;
   const send = (extra: Record<string, unknown> = {}) => {
@@ -1569,10 +1608,10 @@ function MapRow({
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={pending || areaId === (m.linkedArea?.id ?? '')}
-                onClick={() => linkPost(`/map/${m.id}/link`, { areaId: areaId || null, version: m.version }, areaId ? `${m.code} linked to 03.5.` : `${m.code} unlinked — it will not be re-linked automatically.`)}
+                disabled={pending || !linkTarget.enabled}
+                onClick={() => linkPost(`/map/${m.id}/link`, { areaId: linkTarget.areaId, version: m.version }, linkTarget.areaId ? `${m.code} linked to 03.5.` : `${m.code} unlinked — it will not be re-linked automatically.`)}
               >
-                {areaId ? 'Link' : 'Unlink'}
+                {linkTarget.label}
               </Button>
               {!m.linkedArea && (
                 <Button size="sm" variant="ghost" disabled={pending} onClick={() => linkPost(`/map/${m.id}/convert`, { version: m.version }, `${m.code} converted into a 03.5 custom area.`)}>
