@@ -67,7 +67,13 @@ export function ScopeHandoffCard({
         ? h.components.map((x) => ({
             key: x.code,
             main: `${x.code} ${x.name} — ${label(UNIT_AUDITOR_LABEL, x.auditor)}`,
-            detail: `${label(OTHER_AUDITOR_STRATEGY_LABEL, x.auditorStrategy)} · scope: ${label(SCOPE_CONCLUSION_LABEL, x.scopeConclusion)}`,
+            detail:
+              [
+                x.auditorStrategy && label(OTHER_AUDITOR_STRATEGY_LABEL, x.auditorStrategy),
+                x.scopeConclusion && `scope: ${label(SCOPE_CONCLUSION_LABEL, x.scopeConclusion)}`,
+              ]
+                .filter(Boolean)
+                .join(' · ') || 'Strategy and scope conclusion not yet decided in 03.4',
           }))
         : [
             ...h.timing.map((x) => ({
