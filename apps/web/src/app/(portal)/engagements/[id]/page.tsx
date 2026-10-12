@@ -380,6 +380,7 @@ export default function EngagementDetailPage(): JSX.Element {
       {tab === 'overview' && (
         <div className="space-y-4">
           {layout !== 'legacy' && tabs && <OverviewWidgets engagementId={e.id} tabs={tabs} />}
+          {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} />}
           <Card>
             <CardHeader>
               <CardTitle>Overview</CardTitle>
@@ -460,6 +461,7 @@ export default function EngagementDetailPage(): JSX.Element {
             stream={tab as Stream}
             ctx={ctx}
             defaultFy={pageFy}
+            team={leadsTeam}
           />
         )}
 
@@ -797,6 +799,7 @@ export default function EngagementDetailPage(): JSX.Element {
               <TimePanel
                 engagementId={e.id}
                 isLead={ctx.isLead}
+                me={me}
                 streams={(tabs?.streams ?? []).map((s) => ({
                   stream: s.stream,
                   engagementServiceId: s.engagementServiceId,

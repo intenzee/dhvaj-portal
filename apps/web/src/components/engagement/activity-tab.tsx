@@ -11,9 +11,11 @@ import {
   type ActivityItem,
   type ActivityKind,
   type ActivityPage,
+  type EngagementTimeReport,
   type OtherTimeCategory,
   type Stream,
   type TimeAdjustmentRecord,
+  type TimeEntryRecord,
   type TimeSummary,
   type TimeSummaryBy,
 } from '@hsdg/contracts';
@@ -97,11 +99,11 @@ export function ActivityTab({
   /** The Time view to show beside the timeline (auto-time summary or the legacy timer). */
   timeView: JSX.Element;
 }): JSX.Element {
-  const [view, setView] = useState<'timeline' | 'time'>('timeline');
+  const [view, setView] = useState<'timeline' | 'time' | 'notes'>('timeline');
   return (
     <div className="space-y-3">
       <div role="tablist" aria-label="Activity view" className="inline-flex rounded-lg border border-line p-0.5">
-        {(['timeline', 'time'] as const).map((v) => (
+        {(['timeline', 'time', 'notes'] as const).map((v) => (
           <button
             key={v}
             type="button"
@@ -110,14 +112,14 @@ export function ActivityTab({
             onClick={() => setView(v)}
             className={`rounded-md px-3 py-1 text-sm ${view === v ? 'bg-primary-600 text-white' : 'text-ink-muted hover:text-ink'}`}
           >
-            {v === 'timeline' ? 'Timeline' : 'Time'}
+            {v === 'timeline' ? 'Timeline' : v === 'time' ? 'Time' : 'Notes'}
           </button>
         ))}
       </div>
-      {view === 'timeline' ? (
-        <Timeline engagementId={engagementId} team={team} isLead={isLead} />
-      ) : (
-        timeView
+      {view === 'timeline' && <Timeline engagementId={engagementId} team={team} isLead={isLead} />}
+      {view === 'time' && timeView}
+      {view === 'notes' && (
+        <Timeline key="notes" engagementId={engagementId} team={team} isLead={isLead} notesOnly />
       )}
     </div>
   );
@@ -127,14 +129,17 @@ function Timeline({
   engagementId,
   team,
   isLead,
+  notesOnly = false,
 }: {
   engagementId: string;
   team: TeamMember[];
   isLead: boolean;
+  /** The Notes view: comments only, pinned first. */
+  notesOnly?: boolean;
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(notesOnly ? 'comments' : 'all');
   const [stream, setStream] = useState('');
   const [person, setPerson] = useState('');
   const [comment, setComment] = useState('');
@@ -149,7 +154,8 @@ function Timeline({
       ),
     getNextPageParam: (last) => last.nextCursor,
   });
-  const items = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const all = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const items = notesOnly ? [...all.filter((a) => a.isPinned), ...all.filter((a) => !a.isPinned)] : all;
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'activity'] });
   const add = useMutation({
@@ -179,8 +185,8 @@ function Timeline({
   return (
     <Card>
       <CardHeader className="flex flex-wrap items-center gap-2">
-        <CardTitle className="mr-auto">Timeline</CardTitle>
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Show">
+        <CardTitle className="mr-auto">{notesOnly ? 'Notes' : 'Timeline'}</CardTitle>
+        <div className={notesOnly ? 'hidden' : 'flex flex-wrap gap-1'} role="group" aria-label="Show">
           {ACTIVITY_FILTERS.map((f) => (
             <button
               key={f.key}
@@ -300,10 +306,13 @@ function hrs(seconds: number): number {
 export function TimePanel({
   engagementId,
   isLead,
+  me = null,
   streams,
 }: {
   engagementId: string;
   isLead: boolean;
+  /** The caller's employee id (their own recent entries can be corrected). */
+  me?: string | null;
   /** Streams offered when adding other time (service line ids, when known). */
   streams: { stream: string; engagementServiceId: string | null }[];
 }): JSX.Element {
@@ -453,6 +462,8 @@ export function TimePanel({
 
       <OtherTimeForm engagementId={engagementId} streams={streams} />
 
+      {me && <MyEntries engagementId={engagementId} me={me} />}
+
       {isLead && (
         <Card>
           <CardHeader>
@@ -598,6 +609,121 @@ function OtherTimeForm({
           </form>
         </CardBody>
       )}
+    </Card>
+  );
+}
+
+/** Entries the caller may still correct: theirs, finished, original, within the window. Pure — tested. */
+export function adjustableEntries(entries: TimeEntryRecord[], me: string, now: number): TimeEntryRecord[] {
+  const cutoff = now - ADJUST_WINDOW_DAYS * 24 * 3600 * 1000;
+  return entries.filter(
+    (e) =>
+      e.employeeId === me && !e.isRunning && !!e.endedAt && !e.adjustsEntryId && Date.parse(e.startedAt) >= cutoff,
+  );
+}
+
+const ADJUST_WINDOW_DAYS = 3;
+
+/** ISO → the value of an <input type="datetime-local"> in IST. */
+function localValue(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 330 * 60_000);
+  return d.toISOString().slice(0, 16);
+}
+
+/** <input type="datetime-local"> in IST → ISO. */
+function fromLocal(v: string): string {
+  return new Date(`${v}:00+05:30`).toISOString();
+}
+
+/**
+ * Change 3 — "a person may adjust their own entries for 3 days with a reason".
+ * The adjustment is a new row pointing at the original; over 30 minutes of
+ * change it waits for the manager.
+ */
+function MyEntries({ engagementId, me }: { engagementId: string; me: string }): JSX.Element | null {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [reason, setReason] = useState('');
+  const report = useQuery({
+    queryKey: ['time', 'report', engagementId],
+    queryFn: () => apiFetch<EngagementTimeReport>(`/engagements/${engagementId}/time`),
+  });
+  const adjust = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/time/${id}/adjust`, {
+        method: 'POST',
+        body: { startedAt: fromLocal(start), endedAt: fromLocal(end), reason: reason.trim() },
+      }),
+    onSuccess: () => {
+      toast('Correction recorded.');
+      setEditing(null);
+      setReason('');
+      void qc.invalidateQueries({ queryKey: ['time'] });
+    },
+    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not record the correction.', 'error'),
+  });
+  const mine = adjustableEntries(report.data?.entries ?? [], me, Date.now());
+  if (mine.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>My recent entries</CardTitle>
+      </CardHeader>
+      <CardBody>
+        <p className="mb-2 text-xs text-ink-muted">
+          You can correct your own time for {ADJUST_WINDOW_DAYS} days. Changes over 30 minutes go to the manager.
+        </p>
+        <ul className="divide-y divide-line text-sm">
+          {mine.map((e) => (
+            <li key={e.id} className="py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  {e.taskTitle ?? (e.category ? humanize(e.category) : 'Time')} · {formatDate(e.startedAt)} ·{' '}
+                  {formatDuration(e.durationSeconds)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-expanded={editing === e.id}
+                  onClick={() => {
+                    if (editing === e.id) return setEditing(null);
+                    setEditing(e.id);
+                    setStart(localValue(e.startedAt));
+                    setEnd(localValue(e.endedAt!));
+                    setReason('');
+                  }}
+                >
+                  {editing === e.id ? '−' : '+'} Adjust
+                </Button>
+              </div>
+              {editing === e.id && (
+                <form
+                  className="mt-2 grid gap-2 sm:grid-cols-[auto_auto_1fr_auto]"
+                  onSubmit={(ev) => {
+                    ev.preventDefault();
+                    if (reason.trim() && start && end) adjust.mutate(e.id);
+                  }}
+                >
+                  <Input type="datetime-local" aria-label="Start" value={start} onChange={(ev) => setStart(ev.target.value)} />
+                  <Input type="datetime-local" aria-label="End" value={end} onChange={(ev) => setEnd(ev.target.value)} />
+                  <Input
+                    aria-label="Reason"
+                    placeholder="Why (e.g. forgot to pause over lunch)"
+                    value={reason}
+                    onChange={(ev) => setReason(ev.target.value)}
+                  />
+                  <Button size="sm" type="submit" disabled={adjust.isPending || !reason.trim()}>
+                    Save
+                  </Button>
+                </form>
+              )}
+            </li>
+          ))}
+        </ul>
+      </CardBody>
     </Card>
   );
 }

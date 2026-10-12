@@ -56,9 +56,12 @@ export function InstanceWorkspace({
   instanceId,
   ctx,
   correctionTargets = [],
+  team = [],
 }: {
   instanceId: string;
   ctx: TaskActionContext;
+  /** People who may be recorded as having filed it (defaults to me). */
+  team?: { employeeId: string; employeeName: string }[];
   /** Later filings a correction can point to (e.g. the next months' 3B). */
   correctionTargets?: { id: string; label: string }[];
 }): JSX.Element {
@@ -148,7 +151,16 @@ export function InstanceWorkspace({
       {ws.filing ? (
         <FiledRecord filing={ws.filing} canUndo={ws.can.undo} busy={write.isPending} run={run} engagementId={inst.engagementId} />
       ) : (
-        ws.can.lodge && <LodgeForm ws={ws} busy={write.isPending} run={run} />
+        ws.can.lodge && (
+          <LodgeForm
+            ws={ws}
+            busy={write.isPending}
+            run={run}
+            team={team}
+            me={ctx.me}
+            onUploaded={(next) => qc.setQueryData(workspaceKey(instanceId), next)}
+          />
+        )
       )}
       {ws.filingHistory.filter((f) => f.undoneAt).length > 0 && (
         <details className="text-xs text-ink-muted">
@@ -668,8 +680,34 @@ function Figures({
   );
 }
 
-function LodgeForm({ ws, busy, run }: { ws: Workspace; busy: boolean; run: Run }): JSX.Element {
+/** Client-side check of the reference (GST ARN: 15 upper-case letters/digits). Pure — tested. */
+export function referenceError(kind: FilingReferenceKind, no: string): string | null {
+  const v = no.trim();
+  if (!v) return 'Enter the reference number.';
+  if (kind === 'arn' && !/^[A-Z0-9]{15}$/.test(v)) return 'An ARN is 15 upper-case letters and digits.';
+  return null;
+}
+
+function LodgeForm({
+  ws,
+  busy,
+  run,
+  team,
+  me,
+  onUploaded,
+}: {
+  ws: Workspace;
+  busy: boolean;
+  run: Run;
+  team: { employeeId: string; employeeName: string }[];
+  me: string | null;
+  onUploaded: (ws: Workspace) => void;
+}): JSX.Element {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
+  const [filedBy, setFiledBy] = useState(me ?? '');
+  const [uploading, setUploading] = useState(false);
+  const ackSlot = ws.slots.find((sl) => sl.slotCode.startsWith('ACK')) ?? null;
   const [referenceKind, setReferenceKind] = useState<FilingReferenceKind>(
     ws.instance.stream === 'roc' ? 'srn' : ws.instance.stream === 'gst' ? 'arn' : 'ack',
   );
@@ -692,6 +730,31 @@ function LodgeForm({ ws, busy, run }: { ws: Workspace; busy: boolean; run: Run }
     if (!docs.some((d) => d.id === ackDocumentId)) setAckDocumentId(docs[0]?.id ?? '');
   }, [docs, ackDocumentId]);
 
+  async function uploadAck(file: File) {
+    if (!ackSlot) return;
+    setUploading(true);
+    try {
+      const before = new Set(ackSlot.documents.map((d) => d.id));
+      const next = await apiFetch<Workspace>(
+        `/compliance-instances/${ws.instance.id}/slots/${encodeURIComponent(ackSlot.slotCode)}/documents`,
+        {
+          method: 'POST',
+          body: { filename: file.name, contentType: file.type || undefined, contentBase64: await blobToBase64(file) },
+        },
+      );
+      onUploaded(next);
+      const added = next.slots
+        .find((sl) => sl.slotCode === ackSlot.slotCode)
+        ?.documents.find((d) => !before.has(d.id));
+      if (added) setAckDocumentId(added.id);
+      toast('Acknowledgement uploaded.');
+    } catch (err) {
+      toast(errText(err, 'Upload failed.'), 'error');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   if (!open) {
     return (
       <Button onClick={() => setOpen(true)} aria-expanded={false}>
@@ -700,6 +763,8 @@ function LodgeForm({ ws, busy, run }: { ws: Workspace; busy: boolean; run: Run }
     );
   }
   const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
+  const refErr = referenceNo ? referenceError(referenceKind, referenceNo) : null;
+  const people = team;
   return (
     <form
       aria-label="Lodge filing"
@@ -714,6 +779,7 @@ function LodgeForm({ ws, busy, run }: { ws: Workspace; busy: boolean; run: Run }
             filedOn,
             isNil,
             ackDocumentId,
+            ...(filedBy && filedBy !== me ? { filedByEmployeeId: filedBy } : {}),
             ...(ws.figureSchema.length ? { figures: figurePayload(ws.figureSchema, figureState(ws.figureSchema, ws.figures)) } : {}),
             ...(num(lateFeePaid) != null ? { lateFeePaid: num(lateFeePaid) } : {}),
             ...(num(interestPaid) != null ? { interestPaid: num(interestPaid) } : {}),
@@ -735,12 +801,40 @@ function LodgeForm({ ws, busy, run }: { ws: Workspace; busy: boolean; run: Run }
           </Select>
         </Field>
         <Field label="Reference no." required>
-          <Input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} required />
+          <Input
+            value={referenceNo}
+            onChange={(e) =>
+              setReferenceNo(referenceKind === 'arn' ? e.target.value.toUpperCase() : e.target.value)
+            }
+            maxLength={referenceKind === 'arn' ? 15 : 60}
+            aria-invalid={!!refErr}
+            required
+          />
+          {refErr && <span className="mt-1 block text-xs text-danger-700">{refErr}</span>}
         </Field>
         <Field label="Filed on" required>
-          <Input type="date" value={filedOn} max={today()} onChange={(e) => setFiledOn(e.target.value)} required />
+          <Input
+            type="date"
+            value={filedOn}
+            min={ws.instance.periodEnd ?? undefined}
+            max={today()}
+            onChange={(e) => setFiledOn(e.target.value)}
+            required
+          />
         </Field>
-        <Field label="Acknowledgement" required hint={docs.length ? undefined : 'Upload the acknowledgement first.'}>
+        {people.length > 0 && (
+          <Field label="Filed by">
+            <Select value={filedBy} onChange={(e) => setFiledBy(e.target.value)}>
+              {!people.some((m) => m.employeeId === me) && <option value={me ?? ''}>Me</option>}
+              {people.map((m) => (
+                <option key={m.employeeId} value={m.employeeId}>
+                  {m.employeeId === me ? `${m.employeeName} (me)` : m.employeeName}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        <Field label="Acknowledgement" required hint={docs.length ? undefined : 'Upload the acknowledgement.'}>
           <Select value={ackDocumentId} onChange={(e) => setAckDocumentId(e.target.value)} required>
             {docs.length === 0 && <option value="">No documents yet</option>}
             {docs.map((d) => (
@@ -749,6 +843,19 @@ function LodgeForm({ ws, busy, run }: { ws: Workspace; busy: boolean; run: Run }
               </option>
             ))}
           </Select>
+          {ackSlot && (
+            <input
+              type="file"
+              className="mt-1 block text-xs"
+              aria-label="Upload acknowledgement"
+              disabled={uploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadAck(f);
+                e.target.value = '';
+              }}
+            />
+          )}
         </Field>
         <Field label="Late fee paid">
           <Input inputMode="decimal" value={lateFeePaid} onChange={(e) => setLateFeePaid(e.target.value)} />
@@ -764,7 +871,7 @@ function LodgeForm({ ws, busy, run }: { ws: Workspace; busy: boolean; run: Run }
         <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} />
       </Field>
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={busy || !referenceNo.trim() || !ackDocumentId}>
+        <Button type="submit" size="sm" disabled={busy || uploading || !!refErr || !referenceNo.trim() || !ackDocumentId}>
           Lodge
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
