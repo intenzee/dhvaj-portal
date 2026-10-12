@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type InstanceWorkspace, type StreamTree } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -57,7 +67,9 @@ export class FilingWorkspaceController {
 
   @Get(':id')
   @RequirePermissions(PERMISSION.engagementRead)
-  @ApiOperation({ summary: 'A filing’s workspace: checklist, slots, figures, task, filing, corrections' })
+  @ApiOperation({
+    summary: 'A filing’s workspace: checklist, slots, figures, task, filing, corrections',
+  })
   get(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -90,7 +102,9 @@ export class FilingWorkspaceController {
 
   @Post(':id/slots/:slot/request')
   @RequirePermissions(PERMISSION.engagementRead)
-  @ApiOperation({ summary: 'Request a slot’s document from the client (dependency + secure upload link)' })
+  @ApiOperation({
+    summary: 'Request a slot’s document from the client (dependency + secure upload link)',
+  })
   requestSlot(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -128,7 +142,8 @@ export class FilingWorkspaceController {
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
     summary: 'Record the filing (reference no., date, Nil, figures, acknowledgement)',
-    description: '409 unless Ready to file — a lead may lodge earlier. Closes the task and its clock.',
+    description:
+      '409 unless Ready to file — a lead may lodge earlier. Closes the task and its clock.',
   })
   lodge(
     @CurrentPrincipal() principal: Principal,

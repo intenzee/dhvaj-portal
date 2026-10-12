@@ -47,7 +47,11 @@ export function checkReference(
 }
 
 /** Filing date: not after today, not before the period ends. */
-export function checkFiledOn(filedOn: string, today: string, periodEnd: string | null): string | null {
+export function checkFiledOn(
+  filedOn: string,
+  today: string,
+  periodEnd: string | null,
+): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(filedOn) || Number.isNaN(Date.parse(filedOn))) {
     return 'The filing date must be a date (YYYY-MM-DD).';
   }
@@ -64,10 +68,14 @@ export function undoAllowed(input: {
   now: Date;
 }): { ok: true } | { ok: false; why: string } {
   if (input.isPartner) return { ok: true };
-  if (!input.isLead) return { ok: false, why: 'Only the engagement manager or partner can undo a lodge.' };
+  if (!input.isLead)
+    return { ok: false, why: 'Only the engagement manager or partner can undo a lodge.' };
   const hours = (input.now.getTime() - input.recordedAt.getTime()) / 3_600_000;
   if (hours > LODGE_UNDO_LEAD_HOURS) {
-    return { ok: false, why: `After ${LODGE_UNDO_LEAD_HOURS} hours only a partner can undo a lodge.` };
+    return {
+      ok: false,
+      why: `After ${LODGE_UNDO_LEAD_HOURS} hours only a partner can undo a lodge.`,
+    };
   }
   return { ok: true };
 }
@@ -81,7 +89,8 @@ export function lockState(input: {
   section: string | null;
   summaryFiledLabel: string | null;
 }): { isLocked: boolean; reason: string | null } {
-  if (input.workflowStatus === 'filed') return { isLocked: true, reason: 'Filed — undo the lodge to change it.' };
+  if (input.workflowStatus === 'filed')
+    return { isLocked: true, reason: 'Filed — undo the lodge to change it.' };
   if (input.workflowStatus === 'not_applicable') {
     return { isLocked: true, reason: 'Marked not applicable.' };
   }
@@ -104,8 +113,7 @@ export function canFlags(input: {
 }): { lodge: boolean; undo: boolean; waive: boolean; edit: boolean } {
   const open = !input.hasLiveFiling && input.workflowStatus !== 'not_applicable';
   return {
-    lodge:
-      open && (input.isLead || (input.isAssignee && input.workflowStatus === 'ready_to_file')),
+    lodge: open && (input.isLead || (input.isAssignee && input.workflowStatus === 'ready_to_file')),
     undo:
       input.hasLiveFiling &&
       !!input.liveRecordedAt &&
@@ -208,6 +216,8 @@ export function indicativeLateCharges(input: {
   if (days <= 0) return null;
   const lateFee = days * (input.isNil ? 20 : 50);
   const interest =
-    input.taxPayable !== null ? Math.round(((input.taxPayable * 0.18 * days) / 365) * 100) / 100 : null;
+    input.taxPayable !== null
+      ? Math.round(((input.taxPayable * 0.18 * days) / 365) * 100) / 100
+      : null;
   return { daysLate: days, lateFee, interest };
 }

@@ -185,13 +185,15 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
   }
 
   private async operatorContext(): Promise<RlsContext | null> {
-    return this.db.withRlsContext({ userId: '', role: SYSTEM_ROLE, officeId: '' }, async (client) => {
-      const { rows } = await client.query<{
-        user_id: string;
-        office_id: string;
-        employee_id: string | null;
-      }>(
-        `SELECT u.id AS user_id, u.primary_office_id AS office_id, emp.id AS employee_id
+    return this.db.withRlsContext(
+      { userId: '', role: SYSTEM_ROLE, officeId: '' },
+      async (client) => {
+        const { rows } = await client.query<{
+          user_id: string;
+          office_id: string;
+          employee_id: string | null;
+        }>(
+          `SELECT u.id AS user_id, u.primary_office_id AS office_id, emp.id AS employee_id
            FROM hsdg.users u
            JOIN hsdg.user_roles ur ON ur.user_id = u.id
            JOIN hsdg.roles r ON r.id = ur.role_id
@@ -199,15 +201,16 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
           WHERE r.slug = 'managing_partner' AND u.is_active = true
           ORDER BY u.created_at
           LIMIT 1`,
-      );
-      const row = rows[0];
-      if (!row) return null;
-      return {
-        userId: row.user_id,
-        role: 'managing_partner',
-        officeId: row.office_id,
-        ...(row.employee_id ? { employeeId: row.employee_id } : {}),
-      };
-    });
+        );
+        const row = rows[0];
+        if (!row) return null;
+        return {
+          userId: row.user_id,
+          role: 'managing_partner',
+          officeId: row.office_id,
+          ...(row.employee_id ? { employeeId: row.employee_id } : {}),
+        };
+      },
+    );
   }
 }

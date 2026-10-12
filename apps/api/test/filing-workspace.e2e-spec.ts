@@ -28,20 +28,36 @@ describe('Filing workspace (e2e)', () => {
   const unique = (): string => `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const b64 = (s: string) => Buffer.from(s).toString('base64');
   const employeeId = async (code: string): Promise<string> => {
-    const r = await su.query<{ id: string }>(`SELECT id FROM hsdg.employees WHERE employee_code = $1`, [code]);
+    const r = await su.query<{ id: string }>(
+      `SELECT id FROM hsdg.employees WHERE employee_code = $1`,
+      [code],
+    );
     return r.rows[0]!.id;
   };
 
   /** An engagement (EP partner A, manager X, Senior Y on the team) with one 3B filing. */
-  const setup = async (): Promise<{ eng: string; inst: string; task: string; reg: string; entityId: string }> => {
+  const setup = async (): Promise<{
+    eng: string;
+    inst: string;
+    task: string;
+    reg: string;
+    entityId: string;
+  }> => {
     const entityId = (await http().get('/api/v1/entities?search=Bharat&limit=100').set(bearer(mp)))
       .body.items[0].id as string;
-    const serviceId = (await http().get('/api/v1/services?search=ITR_FILING&limit=100').set(bearer(mp)))
-      .body.items[0].id as string;
+    const serviceId = (
+      await http().get('/api/v1/services?search=ITR_FILING&limit=100').set(bearer(mp))
+    ).body.items[0].id as string;
     const created = await http()
       .post('/api/v1/engagements')
       .set(bearer(pa))
-      .send({ entityId, serviceId, financialYear: '2026-27', periodLabel: `FW${unique()}`, status: 'accepted' })
+      .send({
+        entityId,
+        serviceId,
+        financialYear: '2026-27',
+        periodLabel: `FW${unique()}`,
+        status: 'accepted',
+      })
       .expect(201);
     const eng = created.body.id as string;
     await http()
@@ -64,7 +80,12 @@ describe('Filing workspace (e2e)', () => {
     await http()
       .post(`/api/v1/compliance-rules/${rule.body.id}/versions`)
       .set(bearer(mp))
-      .send({ effectiveFrom: '2017-04-01', calculationBasis: 'period_end', offsetDays: 20, workingDayAdjustment: 'none' })
+      .send({
+        effectiveFrom: '2017-04-01',
+        calculationBasis: 'period_end',
+        offsetDays: 20,
+        workingDayAdjustment: 'none',
+      })
       .expect(201);
     const gen = await http()
       .post(`/api/v1/engagements/${eng}/compliance`)
@@ -101,17 +122,24 @@ describe('Filing workspace (e2e)', () => {
     return { eng, inst, task: t.rows[0]!.id, reg: reg.rows[0]!.id, entityId };
   };
 
-  const ws = (t: string, inst: string) => http().get(`/api/v1/compliance-instances/${inst}`).set(bearer(t));
+  const ws = (t: string, inst: string) =>
+    http().get(`/api/v1/compliance-instances/${inst}`).set(bearer(t));
   const upload = (t: string, inst: string, slot: string) =>
     http()
       .post(`/api/v1/compliance-instances/${inst}/slots/${slot}/documents`)
       .set(bearer(t))
-      .send({ filename: `${slot}.pdf`, contentType: 'application/pdf', contentBase64: b64(`${slot} bytes`) });
+      .send({
+        filename: `${slot}.pdf`,
+        contentType: 'application/pdf',
+        contentBase64: b64(`${slot} bytes`),
+      });
   const act = (t: string, eng: string, task: string, action: string, body: object = {}) =>
     http().post(`/api/v1/engagements/${eng}/tasks/${task}/${action}`).set(bearer(t)).send(body);
 
   const fullFigures = Object.fromEntries(
-    ['output', 'itc', 'cash'].flatMap((p) => ['igst', 'cgst', 'sgst', 'cess'].map((h) => [`${p}_${h}`, 100])),
+    ['output', 'itc', 'cash'].flatMap((p) =>
+      ['igst', 'cgst', 'sgst', 'cess'].map((h) => [`${p}_${h}`, 100]),
+    ),
   );
 
   beforeAll(async () => {
@@ -135,7 +163,15 @@ describe('Filing workspace (e2e)', () => {
 
     const first = await ws(sy, inst).expect(200);
     const codes = (first.body.checklist as Array<{ itemCode: string }>).map((c) => c.itemCode);
-    expect(codes).toEqual(['LIABILITY', 'ITC_CONFIRMED', 'INTEREST_FEE', 'CLIENT_APPROVAL', 'PAYMENT', 'REVIEW', 'LODGE']);
+    expect(codes).toEqual([
+      'LIABILITY',
+      'ITC_CONFIRMED',
+      'INTEREST_FEE',
+      'CLIENT_APPROVAL',
+      'PAYMENT',
+      'REVIEW',
+      'LODGE',
+    ]);
     expect(first.body.instance.workflowStatus).toBe('not_started');
     // A member from another office still sees the GSTIN it files for.
     expect(first.body.instance.registrationNumber).toMatch(/^19AAAC/);
@@ -146,7 +182,9 @@ describe('Filing workspace (e2e)', () => {
     expect((await ws(sy, inst).expect(200)).body.checklist).toHaveLength(7);
 
     // The junior cannot waive — a required step or the whole filing.
-    const approval = first.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'CLIENT_APPROVAL');
+    const approval = first.body.checklist.find(
+      (c: { itemCode: string }) => c.itemCode === 'CLIENT_APPROVAL',
+    );
     await http()
       .patch(`/api/v1/compliance-instances/${inst}/items/${approval.id}`)
       .set(bearer(sy))
@@ -175,19 +213,24 @@ describe('Filing workspace (e2e)', () => {
     // Task approved, but no client approval recorded yet → still in review.
     const afterApprove = (await ws(sy, inst)).body;
     expect(afterApprove.instance.workflowStatus).toBe('in_review');
-    expect(afterApprove.checklist.find((c: { itemCode: string }) => c.itemCode === 'REVIEW').status).toBe('done');
+    expect(
+      afterApprove.checklist.find((c: { itemCode: string }) => c.itemCode === 'REVIEW').status,
+    ).toBe('done');
 
     // Uploading the client approval ticks it → Ready to file.
     const up = await upload(sy, inst, 'CLIENT_APPROVAL').expect(201);
     expect(up.body.instance.workflowStatus).toBe('ready_to_file');
-    expect(up.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'CLIENT_APPROVAL').status).toBe('done');
+    expect(
+      up.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'CLIENT_APPROVAL').status,
+    ).toBe('done');
     expect(up.body.can.lodge).toBe(true);
 
     // Unknown slot → 400.
     await upload(sy, inst, 'NOT_A_SLOT').expect(400);
 
     const withAck = (await upload(sy, inst, 'ACK_3B').expect(201)).body;
-    const ack = withAck.slots.find((s: { slotCode: string }) => s.slotCode === 'ACK_3B').documents[0].id as string;
+    const ack = withAck.slots.find((s: { slotCode: string }) => s.slotCode === 'ACK_3B')
+      .documents[0].id as string;
 
     // Figures are required to lodge a 3B; an ARN is 15 characters.
     await http()
@@ -217,9 +260,15 @@ describe('Filing workspace (e2e)', () => {
       .send({ referenceNo: 'aa1909261234567', filedOn: '2026-10-10', ackDocumentId: ack })
       .expect(201);
     expect(lodged.body.instance.workflowStatus).toBe('filed');
-    expect(lodged.body.filing).toMatchObject({ referenceKind: 'arn', referenceNo: 'AA1909261234567', isLate: false });
+    expect(lodged.body.filing).toMatchObject({
+      referenceKind: 'arn',
+      referenceNo: 'AA1909261234567',
+      isLate: false,
+    });
     expect(lodged.body.instance.isLocked).toBe(true);
-    expect(lodged.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'LODGE').status).toBe('done');
+    expect(
+      lodged.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'LODGE').status,
+    ).toBe('done');
     expect(lodged.body.can).toMatchObject({ lodge: false, undo: false });
 
     // Locked: no more figures.
@@ -254,8 +303,110 @@ describe('Filing workspace (e2e)', () => {
       .expect(201);
     expect(undone.body.instance.workflowStatus).toBe('ready_to_file');
     expect(undone.body.filing).toBeNull();
-    expect(undone.body.filingHistory[0]).toMatchObject({ undoReason: 'Typo in ARN', undoneByName: 'Manager X' });
+    expect(undone.body.filingHistory[0]).toMatchObject({
+      undoReason: 'Typo in ARN',
+      undoneByName: 'Manager X',
+    });
     expect(undone.body.corrections).toHaveLength(1);
+  });
+
+  it('feeds Activity → Timeline: filings with ARN, task moves, documents, pinned comments; members only', async () => {
+    const { eng, inst, task } = await setup();
+    await ws(sy, inst).expect(200);
+    await act(sy, eng, task, 'start').expect(201);
+    await act(sy, eng, task, 'send-for-review').expect(201);
+    await act(mx, eng, task, 'start-review').expect(201);
+    await act(mx, eng, task, 'approve').expect(201);
+    await upload(sy, inst, 'CLIENT_APPROVAL').expect(201);
+    const withAck = (await upload(sy, inst, 'ACK_3B').expect(201)).body;
+    const ack = withAck.slots.find((s: { slotCode: string }) => s.slotCode === 'ACK_3B')
+      .documents[0].id as string;
+    await http()
+      .put(`/api/v1/compliance-instances/${inst}/figures`)
+      .set(bearer(sy))
+      .send({ figures: fullFigures })
+      .expect(200);
+    await http()
+      .post(`/api/v1/compliance-instances/${inst}/lodge`)
+      .set(bearer(sy))
+      .send({ referenceNo: 'AA1909261234567', filedOn: '2026-10-10', ackDocumentId: ack })
+      .expect(201);
+    await http()
+      .post(`/api/v1/engagements/${eng}/notes`)
+      .set(bearer(mx))
+      .send({ body: 'Client prefers WhatsApp for approvals.', isPinned: true })
+      .expect(201);
+    await http()
+      .post(`/api/v1/engagements/${eng}/notes`)
+      .set(bearer(sy))
+      .send({ body: 'Called the accountant.' })
+      .expect(201);
+
+    const feed = (t: string, qs = '') =>
+      http().get(`/api/v1/engagements/${eng}/activity${qs}`).set(bearer(t));
+    type Item = {
+      id: string;
+      kind: string;
+      occurredAt: string;
+      title: string;
+      meta: Record<string, unknown>;
+    };
+    const all = (await feed(sy).expect(200)).body as { items: Item[]; nextCursor: string | null };
+    const kinds = new Set(all.items.map((i) => i.kind));
+    for (const k of ['task_event', 'document_uploaded', 'filing_lodged', 'comment'])
+      expect(kinds).toContain(k);
+    // Newest first.
+    const times = all.items.map((i) => i.occurredAt);
+    expect([...times].sort().reverse()).toEqual(times);
+
+    const filing = all.items.find((i) => i.kind === 'filing_lodged')!;
+    expect(filing.title).toBe('GSTR-3B Sep 2026 filed — ARN AA1909261234567');
+    expect(filing).toMatchObject({
+      stream: 'gst',
+      complianceInstanceId: inst,
+      actorName: 'Senior Y',
+    });
+    const move = all.items.find((i) => i.kind === 'task_event' && i.meta.to === 'in_review')!;
+    expect(move.title).toMatch(/In progress → In review$/);
+
+    // Filters: stream, person, pinned comments.
+    const gst = (await feed(sy, '?stream=gst').expect(200)).body.items as Array<{ stream: string }>;
+    expect(gst.length).toBeGreaterThan(0);
+    expect(gst.every((i) => i.stream === 'gst')).toBe(true);
+    expect((await feed(sy, '?stream=roc').expect(200)).body.items).toHaveLength(0);
+    const mxId = await employeeId('EMP005');
+    const byMx = (await feed(sy, `?person=${mxId}`).expect(200)).body.items as Array<{
+      actorId: string;
+    }>;
+    expect(byMx.length).toBeGreaterThan(0);
+    expect(byMx.every((i) => i.actorId === mxId)).toBe(true);
+    const pinned = (await feed(sy, '?pinned=true').expect(200)).body.items as Array<{
+      title: string;
+      isPinned: boolean;
+    }>;
+    expect(pinned).toEqual([
+      expect.objectContaining({ title: 'Client prefers WhatsApp for approvals.', isPinned: true }),
+    ]);
+    await feed(sy, '?kind=bogus').expect(400);
+    await feed(sy, '?cursor=not-a-cursor').expect(400);
+
+    // Keyset paging: two at a time covers the same feed, no repeats.
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const qs: string = `?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const pg = (await feed(sy, qs).expect(200)).body as {
+        items: Array<{ id: string }>;
+        nextCursor: string | null;
+      };
+      seen.push(...pg.items.map((i) => i.id));
+      cursor = pg.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual(all.items.map((i) => i.id));
+
+    // Another engagement's partner sees nothing.
+    const pb = await token('partner.b@dhvaj.in');
+    await feed(pb).expect(404);
   });
 
   it('lets only a lead waive the filing, and shows nothing to another engagement', async () => {
@@ -290,14 +441,20 @@ describe('Filing workspace (e2e)', () => {
     expect(tree.body.periods).toHaveLength(12);
     expect(tree.body.periods[0].periodKey).toBe('2026-04');
     const sep = tree.body.periods.find((p: { periodKey: string }) => p.periodKey === '2026-09');
-    expect(sep.sections.summary[0]).toMatchObject({ instanceId: inst, requiredTotal: 6, requiredDone: 0 });
+    expect(sep.sections.summary[0]).toMatchObject({
+      instanceId: inst,
+      requiredTotal: 6,
+      requiredDone: 0,
+    });
     expect(sep.nextAction).toMatch(/^GSTR-3B (due|overdue)/);
     expect(tree.body.registrations).toHaveLength(1);
   });
 
   it('sends one monthly data request per opted-in GSTIN, filed against last month’s Outward', async () => {
     const { inst, reg, entityId } = await setup();
-    await su.query(`UPDATE hsdg.compliance_instances SET section = 'outward' WHERE id = $1`, [inst]);
+    await su.query(`UPDATE hsdg.compliance_instances SET section = 'outward' WHERE id = $1`, [
+      inst,
+    ]);
     await su.query(
       `INSERT INTO hsdg.registration_compliance_profiles (entity_id, registration_id, scope, effective_from, gst_scheme, attributes)
        VALUES ($1,$2,'gstin','2026-04-01','regular','{"monthlyDataRequest": true}')`,
@@ -307,11 +464,17 @@ describe('Filing workspace (e2e)', () => {
     const first = await job.run(new Date('2026-10-01T04:00:00Z'));
     expect(first).toMatchObject({ periodKey: '2026-09' });
     expect(first!.requested).toBeGreaterThanOrEqual(1);
-    const dep = await su.query<{ escalation_date: string; slot_code: string | null; period_section: string }>(
+    const dep = await su.query<{
+      escalation_date: string;
+      slot_code: string | null;
+      period_section: string;
+    }>(
       `SELECT escalation_date::text, slot_code, period_section FROM hsdg.client_dependencies WHERE compliance_instance_id = $1`,
       [inst],
     );
-    expect(dep.rows).toEqual([{ escalation_date: '2026-10-05', slot_code: null, period_section: 'outward' }]);
+    expect(dep.rows).toEqual([
+      { escalation_date: '2026-10-05', slot_code: null, period_section: 'outward' },
+    ]);
     // The same day again asks nothing new.
     const again = await job.run(new Date('2026-10-01T06:00:00Z'));
     expect(again!.requested).toBe(0);
