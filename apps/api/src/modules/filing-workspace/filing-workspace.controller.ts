@@ -8,6 +8,7 @@ import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
 import {
   CorrectionDto,
+  FileDocumentDto,
   LodgeDto,
   PatchChecklistItemDto,
   ReasonDto,
@@ -109,6 +110,18 @@ export class FilingWorkspaceController {
     @Body() dto: SlotUploadDto,
   ): Promise<InstanceWorkspace> {
     return this.workspace.uploadToSlot(rlsContextFromPrincipal(principal), id, slot, dto);
+  }
+
+  @Post(':id/documents/:docId/slot')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'File a received document into a slot (lead, or its uploader)' })
+  fileDocument(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
+    @Body() dto: FileDocumentDto,
+  ): Promise<InstanceWorkspace> {
+    return this.workspace.fileDocument(rlsContextFromPrincipal(principal), id, docId, dto.slotCode);
   }
 
   @Post(':id/lodge')

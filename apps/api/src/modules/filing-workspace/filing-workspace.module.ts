@@ -5,6 +5,7 @@ import { TasksModule } from '../tasks/tasks.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
+import { MonthlyDataRequestScheduler } from './monthly-data-request.scheduler';
 import { EngagementStreamsController, FilingWorkspaceController } from './filing-workspace.controller';
 
 /**
@@ -15,7 +16,7 @@ import { EngagementStreamsController, FilingWorkspaceController } from './filing
 @Module({
   imports: [AuditModule, NotificationsModule, TasksModule, DocumentsModule],
   controllers: [EngagementStreamsController, FilingWorkspaceController],
-  providers: [FilingWorkspaceService, StreamTreeService],
-  exports: [FilingWorkspaceService],
+  providers: [FilingWorkspaceService, StreamTreeService, MonthlyDataRequestScheduler],
+  exports: [FilingWorkspaceService, MonthlyDataRequestScheduler],
 })
 export class FilingWorkspaceModule {}
