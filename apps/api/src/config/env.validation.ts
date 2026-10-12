@@ -230,6 +230,10 @@ export const envSchema = z.object({
   SCHEDULER_HORIZON_CRON: z.string().default('30 1 * * *'),
   // The outbox drain runs frequently so external delivery latency stays low.
   SCHEDULER_OUTBOX_CRON: z.string().default('*/5 * * * *'),
+  // Change 3 automatic time: close idle (no heartbeat for 15 min) and day-end
+  // entries. Runs every 5 minutes; the office day ends at this hour, IST.
+  SCHEDULER_TIME_CLOSER_CRON: z.string().default('*/5 * * * *'),
+  TIME_DAY_END_HOUR_IST: z.coerce.number().int().min(12).max(23).default(20),
   // Bearer secret for GET /internal/cron — the HTTP trigger serverless hosts
   // (Vercel Cron) use in place of the in-process scheduler. Unset = disabled.
   CRON_SECRET: z.string().min(16).optional(),

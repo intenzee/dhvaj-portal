@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { AppConfigService } from '../../config/config.module';
 import { Public } from '../auth/auth.decorators';
 import { ComplianceSchedulerService } from './compliance-scheduler.service';
+import { TimeCloserScheduler } from '../engagements/time/time-closer.scheduler';
 
 /**
  * HTTP trigger for the background jobs on hosts with no long-running process
@@ -18,6 +19,7 @@ export class CronController {
   constructor(
     private readonly config: AppConfigService,
     private readonly scheduler: ComplianceSchedulerService,
+    private readonly timeCloser: TimeCloserScheduler,
   ) {}
 
   @Get()
@@ -32,6 +34,7 @@ export class CronController {
     await this.scheduler.runSweep();
     await this.scheduler.runHorizonRoll();
     await this.scheduler.runOutboxDrain();
+    await this.timeCloser.run();
     return { status: 'ok' };
   }
 }
