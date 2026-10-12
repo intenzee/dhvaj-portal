@@ -227,7 +227,10 @@ export interface TanProfileAttributes {
   propertyOrRentDeductor?: boolean;
 }
 export interface PanProfileAttributes {
+  /** Accounts audited under any law (ITR due 31 Oct). Default: company, or under tax audit. */
   auditCase?: boolean;
+  /** s.44AB tax audit (Form 3CA/3CB-3CD). Default: turnover over ₹1 crore. */
+  taxAudit?: boolean;
   tpTransactions?: boolean;
   advanceTaxLiable?: boolean;
   trustOrInstitution?: boolean;
@@ -331,3 +334,187 @@ export interface ComplianceEngagementYear {
  *   event       'EVT:<compliance_event id>'
  */
 export type PeriodKey = string;
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Human label for a period_key: 'Oct 2026', 'Q3 2026-27', 'FY 2026-27 · DIN 01234567'. */
+export function periodKeyLabel(periodKey: string | null | undefined): string {
+  if (!periodKey) return '—';
+  if (periodKey.startsWith('EVT:')) return 'Event';
+  const month = /^(\d{4})-(\d{2})$/.exec(periodKey);
+  if (month) return `${MONTHS[Number(month[2]) - 1]} ${month[1]}`;
+  const [fy, part, din] = periodKey.split(':');
+  if (part === 'DIN') return `FY ${fy} · DIN ${din}`;
+  if (part) return `${part} ${fy}`;
+  return `FY ${fy}`;
+}
+
+// ── Calendar v2 (spec Change 4) ─────────────────────────────────────────────
+
+/** Sheet colours: red ≤ 7 days or overdue, amber ≤ 30, grey when filed / not applicable. */
+export type DueBand = 'red' | 'amber' | 'none' | 'grey';
+
+/** One row of the firm calendar (GET /compliance/calendar). */
+export interface ComplianceCalendarRow {
+  id: string;
+  engagementId: string;
+  engagementCode: string;
+  entityId: string;
+  entityName: string;
+  officeCode: string;
+  stream: Stream | null;
+  ruleCode: string;
+  ruleName: string;
+  formLabel: string | null;
+  registrationId: string | null;
+  registrationType: string | null;
+  registrationNumber: string | null;
+  financialYear: string | null;
+  periodKey: string | null;
+  periodLabel: string;
+  /** Operative statutory date (override → extension → computed). */
+  dueDate: string;
+  /** The computed date when an extension / override moved it. */
+  originalDueDate: string | null;
+  extensionReference: string | null;
+  internalDate: string;
+  workflowStatus: FilingStatus;
+  daysLeft: number;
+  band: DueBand;
+  isProvisional: boolean;
+  isOptional: boolean;
+  /** Rule marked "Verify" on the sheet and not yet confirmed by a partner. */
+  needsVerification: boolean;
+  profileChanged: boolean;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  partnerName: string | null;
+  managerName: string | null;
+}
+
+export interface ComplianceCalendarResponse {
+  items: ComplianceCalendarRow[];
+  total: number;
+  from: string;
+  to: string;
+}
+
+/** A client registration a stream can run on (via hsdg.entity_compliance_registrations). */
+export interface EntityRegistrationOption {
+  id: string;
+  registrationType: string;
+  registrationNumber: string;
+  stateCode: string | null;
+  status: string;
+  isPrincipal: boolean;
+}
+
+/** One effective-dated compliance profile row. */
+export interface ComplianceProfileRecord {
+  id: string;
+  entityId: string;
+  registrationId: string | null;
+  scope: ProfileScope;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  gstScheme: GstScheme | null;
+  qrmpCategory: QrmpCategory | null;
+  attributes: Record<string, unknown>;
+  version: number;
+  updatedAt: string;
+}
+
+export interface EntityComplianceProfiles {
+  entityId: string;
+  registrations: EntityRegistrationOption[];
+  profiles: ComplianceProfileRecord[];
+}
+
+export interface SaveComplianceProfileInput {
+  scope: ProfileScope;
+  /** Required for every scope but 'pan'. */
+  registrationId?: string | null;
+  effectiveFrom: string;
+  gstScheme?: GstScheme | null;
+  qrmpCategory?: QrmpCategory | null;
+  attributes?: Record<string, unknown>;
+}
+
+export interface SaveComplianceProfileResult {
+  profile: ComplianceProfileRecord;
+  /** Instances regenerated in the client's open Compliance engagements. */
+  regenerated: { engagementId: string; created: number; moved: number; flagged: number; notApplicable: number }[];
+}
+
+/** Event types a manager can record (REG-01, DIR-12, the AGM, …). */
+export const COMPLIANCE_EVENT_TYPE = {
+  agm: 'agm',
+  incorporation: 'incorporation',
+  firstFyEnd: 'first_fy_end',
+  firstAuditorAppointment: 'first_auditor_appointment',
+  directorChange: 'director_change',
+  allotment: 'allotment',
+  registeredOfficeChange: 'registered_office_change',
+  resolution: 'resolution',
+  chargeCreation: 'charge_creation',
+  capitalAlteration: 'capital_alteration',
+  gstLiability: 'gst_liability',
+  gstCancellation: 'gst_cancellation',
+  firstDeductionMonthEnd: 'first_deduction_month_end',
+  tdsMonthEnd: 'tds_month_end',
+} as const;
+export type ComplianceEventType = (typeof COMPLIANCE_EVENT_TYPE)[keyof typeof COMPLIANCE_EVENT_TYPE];
+export const COMPLIANCE_EVENT_TYPES: ComplianceEventType[] = Object.values(COMPLIANCE_EVENT_TYPE);
+
+export const COMPLIANCE_EVENT_TYPE_LABEL: Record<ComplianceEventType, string> = {
+  agm: 'AGM held',
+  incorporation: 'Incorporation',
+  first_fy_end: 'End of first financial year',
+  first_auditor_appointment: 'First auditor appointed',
+  director_change: 'Director appointed / ceased',
+  allotment: 'Shares allotted',
+  registered_office_change: 'Registered office changed',
+  resolution: 'Resolution passed (MGT-14)',
+  charge_creation: 'Charge created / modified',
+  capital_alteration: 'Share capital altered',
+  gst_liability: 'Became liable to GST registration',
+  gst_cancellation: 'GST registration cancelled',
+  first_deduction_month_end: 'First TDS deduction (month end)',
+  tds_month_end: 'Property / rent TDS deducted (month end)',
+};
+
+export interface ComplianceEventRecord {
+  id: string;
+  engagementId: string;
+  registrationId: string | null;
+  eventType: string;
+  financialYear: string | null;
+  eventDate: string;
+  notes: string | null;
+  recordedByName: string | null;
+  createdAt: string;
+}
+
+export interface RecordComplianceEventInput {
+  eventType: ComplianceEventType;
+  eventDate: string;
+  registrationId?: string | null;
+  /** Defaults to the FY of the event date (the previous FY for an AGM). */
+  financialYear?: string;
+  notes?: string;
+}
+
+export interface RecordComplianceEventResult {
+  event: ComplianceEventRecord;
+  /** Event-triggered instances created (DIR-12, PAS-3, …). */
+  created: number;
+  /** AGM-linked items moved from the provisional date. */
+  moved: number;
+}
+
+export interface GenerateCalendarResult {
+  created: number;
+  moved: number;
+  flagged: number;
+  notApplicable: number;
+}

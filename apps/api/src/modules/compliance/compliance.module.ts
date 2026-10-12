@@ -12,6 +12,14 @@ import {
   ComplianceInstancesController,
 } from './compliance-instances.controller';
 import { GovernmentExtensionsController } from './government-extensions.controller';
+import { ComplianceGeneratorService } from './compliance-generator.service';
+import { ComplianceCalendarV2Service } from './compliance-calendar-v2.service';
+import {
+  ComplianceRuleVerifyController,
+  EngagementCalendarV2Controller,
+  EntityComplianceProfilesController,
+  FirmCalendarV2Controller,
+} from './compliance-calendar-v2.controller';
 
 /**
  * Compliance engine (Phase 8, ADR-0013). Configurable, effective-dated,
@@ -23,13 +31,28 @@ import { GovernmentExtensionsController } from './government-extensions.controll
 @Module({
   imports: [AuditModule],
   controllers: [
+    ComplianceRuleVerifyController,
     ComplianceRulesController,
     ComplianceHolidaysController,
     ComplianceInstancesController,
     ComplianceCalendarController,
     GovernmentExtensionsController,
+    EngagementCalendarV2Controller,
+    EntityComplianceProfilesController,
+    FirmCalendarV2Controller,
   ],
-  providers: [ComplianceRulesService, ComplianceInstancesService, GovernmentExtensionsService],
-  exports: [ComplianceRulesService, ComplianceInstancesService, GovernmentExtensionsService],
+  providers: [
+    ComplianceRulesService,
+    ComplianceInstancesService,
+    GovernmentExtensionsService,
+    ComplianceGeneratorService,
+    ComplianceCalendarV2Service,
+  ],
+  exports: [
+    ComplianceRulesService,
+    ComplianceInstancesService,
+    GovernmentExtensionsService,
+    ComplianceGeneratorService,
+  ],
 })
 export class ComplianceModule {}
