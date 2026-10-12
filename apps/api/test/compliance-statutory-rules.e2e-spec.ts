@@ -89,9 +89,10 @@ describe('Seeded statutory compliance rules (e2e)', () => {
     const gstr9 = await generate(pa, eng, 'GSTR9_ANNUAL').expect(201);
     expect(gstr9.body.statutoryDeadline).toBe('2027-12-31'); // +9 months
 
-    // ITR: +4 months = 2027-07-31 (a Saturday) → next working day 2027-08-02.
+    // ITR: +4 months = 2027-07-31. From 1 Apr 2026 (calendar v2) a statutory
+    // date is never moved off a weekend — only the internal SLA is.
     const itr = await generate(pa, eng, 'ITR_FILING_DUE').expect(201);
-    expect(itr.body.statutoryDeadline).toBe('2027-08-02');
+    expect(itr.body.statutoryDeadline).toBe('2027-07-31');
   });
 
   it('keeps the internal SLA on or before the statutory date (two distinct clocks §5)', async () => {
@@ -108,9 +109,10 @@ describe('Seeded statutory compliance rules (e2e)', () => {
     const tcs = await generate(pa, eng, 'TCS_COLLECTION_MONTHLY', '2026-04-30').expect(201);
     expect(tcs.body.statutoryDeadline).toBe('2026-05-07');
 
-    // FY-anchored, no referenceDate: DIR-3 KYC = fy_end + 6 = 30 Sep 2027.
+    // FY-anchored, no referenceDate: DIR-3 KYC is due 30 Jun after the FY
+    // (calendar v2 schedule, triennial from 1 Apr 2026).
     const kyc = await generate(pa, eng, 'DIR3_KYC_ANNUAL').expect(201);
-    expect(kyc.body.statutoryDeadline).toBe('2027-09-30');
+    expect(kyc.body.statutoryDeadline).toBe('2027-06-30');
 
     // GSTR-9C = fy_end + 9 = 31 Dec 2027; LUT = fy_end + 0 = 31 Mar 2027.
     expect((await generate(pa, eng, 'GSTR9C_ANNUAL').expect(201)).body.statutoryDeadline).toBe(

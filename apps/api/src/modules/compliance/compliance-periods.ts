@@ -409,3 +409,34 @@ export function dueBand(
   if (daysLeft <= 30) return { band: 'amber', daysLeft };
   return { band: 'none', daysLeft };
 }
+
+/**
+ * Single-instance generation (POST /engagements/:id/compliance) on a version
+ * the plain offset engine cannot express — a schedule, a one-month override or
+ * a provisional event date. The period is the one containing the caller's
+ * reference / event date, else the year (FY end). Null when the version needs
+ * no period engine (the caller keeps the classic path).
+ */
+export function legacyPeriodDue(
+  version: PeriodRuleVersion,
+  financialYear: string,
+  anchor: { referenceDate?: string | null; eventDate?: string | null },
+  holidays: ReadonlySet<string>,
+): PeriodDue | null {
+  const needsPeriods =
+    version.calculationBasis === CALCULATION_BASIS.schedule ||
+    (version.periodOverrides !== null && Object.keys(version.periodOverrides).length > 0) ||
+    version.provisionalEventRule !== null;
+  if (!needsPeriods) return null;
+  const date =
+    anchor.referenceDate ?? anchor.eventDate ?? `${financialYearEndYear(financialYear)}-03-31`;
+  const frequency =
+    version.frequency && version.frequency !== 'event' && version.frequency !== 'on_demand'
+      ? version.frequency === 'triennial'
+        ? 'annual'
+        : version.frequency
+      : 'annual';
+  const period = periodContaining(frequency, date);
+  if (!period) return null;
+  return dueForPeriod(version, period, holidays, anchor.eventDate ?? null);
+}

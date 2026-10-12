@@ -283,7 +283,14 @@ export class EngagementComponentsService {
     return this.db.withRlsContext(ctx, async (client) => {
       const line = await this.resolveServiceLine(client, engagementId, input.engagementServiceId);
       const component = await this.resolveComponent(client, input.serviceComponentCode);
-      if (component.service_id !== line.service_id) {
+      // A folded legacy service's components now live on its stream service
+      // (same rule as hsdg.enforce_engagement_component_service).
+      const folded = await client.query<{ folded_into_service_id: string | null }>(
+        `SELECT folded_into_service_id FROM hsdg.services WHERE id = $1`,
+        [line.service_id],
+      );
+      const owners = [line.service_id, folded.rows[0]?.folded_into_service_id].filter(Boolean);
+      if (!owners.includes(component.service_id)) {
         throw new BadRequestException(
           `Component "${component.code}" does not belong to the selected service.`,
         );

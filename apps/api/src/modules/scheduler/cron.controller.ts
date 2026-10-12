@@ -32,6 +32,7 @@ export class CronController {
     await this.scheduler.runSweep();
     await this.scheduler.runHorizonRoll();
     await this.scheduler.runOutboxDrain();
+    await this.scheduler.runCalendarMaintenance();
     return { status: 'ok' };
   }
 }

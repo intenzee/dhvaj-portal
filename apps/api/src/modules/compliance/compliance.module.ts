@@ -53,6 +53,7 @@ import {
     ComplianceInstancesService,
     GovernmentExtensionsService,
     ComplianceGeneratorService,
+    ComplianceCalendarV2Service,
   ],
 })
 export class ComplianceModule {}

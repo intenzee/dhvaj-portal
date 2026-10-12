@@ -6,6 +6,7 @@ import {
   dueForPeriod,
   financialYearOf,
   isTriennialDue,
+  legacyPeriodDue,
   passesPeriodFilter,
   periodContaining,
   periodsForFrequency,
@@ -269,6 +270,33 @@ describe('compliance-periods', () => {
         if (r.basis === 'event_date' && r.frequency !== 'annual') expect(r.eventType).toBeTruthy();
         expect(r.versions.length).toBeGreaterThan(0);
       }
+    });
+  });
+
+  describe('legacyPeriodDue (single-instance generation)', () => {
+    it('a schedule rule uses the period containing the reference date', () => {
+      const v = seedVersion(rule('TDS_F140'), '2026-12-31');
+      expect(
+        legacyPeriodDue(v, '2026-27', { referenceDate: '2026-12-31' }, NO_HOLIDAYS)!
+          .statutoryDeadline,
+      ).toBe('2027-01-31');
+      // No date: the year's last period (Q4 → 31 May).
+      expect(legacyPeriodDue(v, '2026-27', {}, NO_HOLIDAYS)!.statutoryDeadline).toBe('2027-05-31');
+    });
+
+    it('a month override applies (TDS challan for March → 30 Apr)', () => {
+      const v = seedVersion(rule('TDS_CHALLAN'), '2027-03-31');
+      expect(
+        legacyPeriodDue(v, '2026-27', { referenceDate: '2027-03-31' }, NO_HOLIDAYS)!
+          .statutoryDeadline,
+      ).toBe('2027-04-30');
+    });
+
+    it('a plain offset rule stays on the classic path', () => {
+      const v = seedVersion(rule('GST_GSTR3B_M'), '2026-10-31');
+      expect(
+        legacyPeriodDue(v, '2026-27', { referenceDate: '2026-10-31' }, NO_HOLIDAYS),
+      ).toBeNull();
     });
   });
 });
