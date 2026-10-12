@@ -158,7 +158,8 @@ export class FirmCalendarV2Controller {
     return this.calendar.calendar(rlsContextFromPrincipal(principal), query);
   }
 
-  @Get('calendar/export')
+  // `calendar.xlsx` is the spec's path; `calendar/export` stays for existing callers.
+  @Get(['calendar.xlsx', 'calendar/export'])
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'The firm calendar as an Excel workbook (same filters)' })
   async export(

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
+import type { Stream } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
@@ -29,7 +30,7 @@ export const OTHER_SERVICE_LINE_CODE = 'OTHER';
 
 const SERVICE_SELECT = `
   SELECT s.id, s.code, s.name, s.description, s.default_recurrence, s.is_active, s.version,
-         s.approval_reference,
+         s.approval_reference, s.stream, s.folded_into_service_id,
          s.service_line_id, sl.code AS line_code, sl.name AS line_name,
          s.required_review_model_id, rm.slug AS review_slug, rm.rank AS review_rank,
          s.workflow_family_id, wf.slug AS workflow_slug
@@ -47,6 +48,8 @@ interface ServiceRow {
   is_active: boolean;
   version: number;
   approval_reference: string | null;
+  stream: Stream | null;
+  folded_into_service_id: string | null;
   service_line_id: string;
   line_code: string;
   line_name: string;
@@ -215,6 +218,10 @@ export class CatalogueService {
     if (filter.search) {
       params.push(`%${filter.search}%`);
       conditions.push(`(s.name ILIKE $${params.length} OR s.code ILIKE $${params.length})`);
+    }
+    if (filter.stream) {
+      params.push(filter.stream);
+      conditions.push(`s.stream = $${params.length}`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const limitParam = `$${params.length + 1}`;
@@ -542,6 +549,10 @@ function mapService(row: ServiceRow): ServiceSummary {
     isActive: row.is_active,
     version: row.version,
     approvalReference: row.approval_reference,
+    stream: row.stream,
+    foldedIntoServiceId: row.folded_into_service_id,
+    engagementKind:
+      row.code === 'STAT_AUDIT' ? 'statutory_audit' : row.stream ? 'compliance' : 'assignment',
   };
 }
 

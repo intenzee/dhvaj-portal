@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { STREAMS, type Stream } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
 
 const toBool = ({ value }: { value: unknown }): unknown =>
@@ -23,4 +24,9 @@ export class ServiceListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ enum: STREAMS, description: 'Compliance stream filter (spec Change 2).' })
+  @IsOptional()
+  @IsIn(STREAMS)
+  stream?: Stream;
 }
