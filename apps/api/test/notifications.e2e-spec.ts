@@ -62,6 +62,14 @@ describe('Notifications (e2e)', () => {
       .expect(200);
     return res.body.items as MyNotification[];
   };
+  /** Every unread notification, not just the first page. */
+  const unreadTotal = async (t: string): Promise<number> => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/notifications?limit=1&unreadOnly=true')
+      .set(bearer(t))
+      .expect(200);
+    return res.body.total as number;
+  };
 
   /** Create → optionally assign a manager → start, leaving the engagement ACTIVE. */
   const setupActive = async (opts: {
@@ -327,20 +335,19 @@ describe('Notifications (e2e)', () => {
         .expect(201);
       expect(first.body.clientDependencyReminder).toBeGreaterThanOrEqual(1);
 
-      const notes = await myNotifications(pa, '&unreadOnly=true');
-      const reminder = notes.find(
-        (n) => n.type === 'client_dependency_reminder' && n.engagementId === eng.id,
-      );
+      // The sweep reminds on every past-due dependency in the database, so
+      // look among reminders only — the full inbox can run past one page.
+      const notes = await myNotifications(pa, '&unreadOnly=true&type=client_dependency_reminder');
+      const reminder = notes.find((n) => n.engagementId === eng.id);
       expect(reminder).toBeDefined();
 
       // Running it again does not duplicate (dedup_key) — this dependency no longer counts.
-      const before = (await myNotifications(pa, '&unreadOnly=true')).length;
+      const before = await unreadTotal(pa);
       await request(app.getHttpServer())
         .post('/api/v1/notifications/scan')
         .set(bearer(mp))
         .expect(201);
-      const afterCount = (await myNotifications(pa, '&unreadOnly=true')).length;
-      expect(afterCount).toBe(before);
+      expect(await unreadTotal(pa)).toBe(before);
     });
   });
 });
