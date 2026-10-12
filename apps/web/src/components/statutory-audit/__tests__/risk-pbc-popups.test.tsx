@@ -20,6 +20,8 @@ const risk = {
   description: 'Revenue recognised before delivery',
   source: 'fraud',
   fsArea: 'Revenue',
+  auditAreaId: null,
+  assertionIds: [],
   assertion: 'cut_off',
   rating: 'significant',
   isSignificant: true,
@@ -70,6 +72,7 @@ describe('Risk register inline panels', () => {
         significantRisksWithoutResponse: 0,
         pack: { checks: [], ready: false, attention: 0, draftMemo: null },
         risks: [risk],
+        areaOptions: [],
       },
     ]);
   });
