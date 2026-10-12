@@ -3,6 +3,7 @@ import request from 'supertest';
 import { Client } from 'pg';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
+import { MonthlyDataRequestScheduler } from '../src/modules/filing-workspace/monthly-data-request.scheduler';
 
 /**
  * Change 5 / 6 — the filing workspace (GST tab month-section). A junior on the
@@ -32,7 +33,7 @@ describe('Filing workspace (e2e)', () => {
   };
 
   /** An engagement (EP partner A, manager X, Senior Y on the team) with one 3B filing. */
-  const setup = async (): Promise<{ eng: string; inst: string; task: string; sep: boolean }> => {
+  const setup = async (): Promise<{ eng: string; inst: string; task: string; reg: string; entityId: string }> => {
     const entityId = (await http().get('/api/v1/entities?search=Bharat&limit=100').set(bearer(mp)))
       .body.items[0].id as string;
     const serviceId = (await http().get('/api/v1/services?search=ITR_FILING&limit=100').set(bearer(mp)))
@@ -97,7 +98,7 @@ describe('Filing workspace (e2e)', () => {
         WHERE source_compliance_instance_id = $1 RETURNING id`,
       [inst, await employeeId('EMP006'), await employeeId('EMP005')],
     );
-    return { eng, inst, task: t.rows[0]!.id, sep: true };
+    return { eng, inst, task: t.rows[0]!.id, reg: reg.rows[0]!.id, entityId };
   };
 
   const ws = (t: string, inst: string) => http().get(`/api/v1/compliance-instances/${inst}`).set(bearer(t));
@@ -292,5 +293,29 @@ describe('Filing workspace (e2e)', () => {
     expect(sep.sections.summary[0]).toMatchObject({ instanceId: inst, requiredTotal: 6, requiredDone: 0 });
     expect(sep.nextAction).toMatch(/^GSTR-3B (due|overdue)/);
     expect(tree.body.registrations).toHaveLength(1);
+  });
+
+  it('sends one monthly data request per opted-in GSTIN, filed against last month’s Outward', async () => {
+    const { inst, reg, entityId } = await setup();
+    await su.query(`UPDATE hsdg.compliance_instances SET section = 'outward' WHERE id = $1`, [inst]);
+    await su.query(
+      `INSERT INTO hsdg.registration_compliance_profiles (entity_id, registration_id, scope, effective_from, gst_scheme, attributes)
+       VALUES ($1,$2,'gstin','2026-04-01','regular','{"monthlyDataRequest": true}')`,
+      [entityId, reg],
+    );
+    const job = app.get(MonthlyDataRequestScheduler);
+    const first = await job.run(new Date('2026-10-01T04:00:00Z'));
+    expect(first).toMatchObject({ periodKey: '2026-09' });
+    expect(first!.requested).toBeGreaterThanOrEqual(1);
+    const dep = await su.query<{ escalation_date: string; slot_code: string | null; period_section: string }>(
+      `SELECT escalation_date::text, slot_code, period_section FROM hsdg.client_dependencies WHERE compliance_instance_id = $1`,
+      [inst],
+    );
+    expect(dep.rows).toEqual([{ escalation_date: '2026-10-05', slot_code: null, period_section: 'outward' }]);
+    // The same day again asks nothing new.
+    const again = await job.run(new Date('2026-10-01T06:00:00Z'));
+    expect(again!.requested).toBe(0);
+    // The open request shows the filing as awaiting data.
+    expect((await ws(sy, inst)).body.instance.workflowStatus).toBe('awaiting_data');
   });
 });

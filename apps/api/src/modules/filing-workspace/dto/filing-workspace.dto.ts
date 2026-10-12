@@ -178,6 +178,12 @@ export class LodgeDto {
   remarks?: string;
 }
 
+export class FileDocumentDto {
+  @ApiProperty({ example: 'SALES_REGISTER' })
+  @Matches(/^[A-Z0-9_]{2,40}$/)
+  slotCode!: string;
+}
+
 export class ReasonDto {
   @ApiProperty()
   @IsString()

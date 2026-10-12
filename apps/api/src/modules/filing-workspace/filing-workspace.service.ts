@@ -65,6 +65,8 @@ import type {
 /** The prefix on compliance_instances.notes that records a waiver reason. */
 const NA_NOTE_PREFIX = 'Not applicable: ';
 const PARTNER_ROLES = new Set(['partner', 'managing_partner']);
+/** The read-only group for documents filed against the filing but no slot. */
+export const UNSORTED_SLOT = 'UNSORTED';
 
 interface InstanceRow {
   id: string;
@@ -424,6 +426,37 @@ export class FilingWorkspaceService {
       slotCode: slot,
     });
     return this.get(ctx, id);
+  }
+
+  /**
+   * POST /compliance-instances/:id/documents/:docId/slot — file a received
+   * document (e.g. from the monthly request) into a slot; ticks its step.
+   */
+  async fileDocument(
+    ctx: RlsContext,
+    id: string,
+    documentId: string,
+    slotCode: string,
+  ): Promise<InstanceWorkspace> {
+    return this.write(ctx, id, async (client, inst) => {
+      this.requireUnlocked(client, inst, await this.summaryFiledLabel(client, inst));
+      await this.slotLabel(client, id, slotCode);
+      const res = await client.query(
+        `UPDATE hsdg.documents SET slot_code = $1, version = version + 1
+          WHERE id = $2 AND compliance_instance_id = $3 AND status = 'active' AND deleted_at IS NULL`,
+        [slotCode, documentId, id],
+      );
+      if ((res.rowCount ?? 0) === 0) {
+        throw new NotFoundException('Document not found on this filing, or you cannot re-file it.');
+      }
+      await syncAutoTicks(client, id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'filing.document_filed',
+        objectType: 'document',
+        objectId: documentId,
+        after: { complianceInstanceId: id, slotCode },
+      });
+    });
   }
 
   /** POST /compliance-instances/:id/lodge — record the filing. */
@@ -796,6 +829,24 @@ export class FilingWorkspaceService {
       }
     }
     for (const d of docs.rows) if (d.slot_code) addSlot(d.slot_code, humanSlot(d.slot_code), false);
+    // Uploads with no slot (the monthly data request covers several) wait here to be filed.
+    const unsorted = docs.rows.filter((d) => !d.slot_code);
+    if (unsorted.length > 0) {
+      slots.push({
+        slotCode: UNSORTED_SLOT,
+        label: 'Received — not yet filed to a slot',
+        required: false,
+        documents: unsorted.map((d) => ({
+          id: d.id,
+          title: d.title,
+          filename: d.filename,
+          uploadedAt: d.created_at.toISOString(),
+          uploadedByName: d.uploaded_by_name,
+          fromClient: d.from_client,
+        })),
+        openRequest: null,
+      });
+    }
 
     const views = filings.rows.map((r) => this.filingView(r, inst.due));
     const live = views.find((v) => !v.undoneAt) ?? null;
