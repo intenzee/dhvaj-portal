@@ -61,6 +61,7 @@ import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
 import { TeamSection } from '@/components/actions/team-section';
 import { ServicesSection } from '@/components/actions/services-section';
+import { ScopePerYearEditor } from '@/components/engagement-kinds/scope-per-year-editor';
 import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
 import { ComponentWorkSection } from '@/components/actions/component-work-section';
 import { DocumentsSection } from '@/components/actions/documents-section';
@@ -374,7 +375,9 @@ export default function EngagementDetailPage(): JSX.Element {
           </button>
         ))}
       </div>
-      <p className="mb-4 mt-2 text-xs text-ink-muted">{visibleTabs.find((t) => t.key === tab)?.hint}</p>
+      <p className="mb-4 mt-2 text-xs text-ink-muted">
+        {visibleTabs.find((t) => t.key === tab)?.hint}
+      </p>
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
       {tab === 'overview' && (
@@ -434,7 +437,16 @@ export default function EngagementDetailPage(): JSX.Element {
       {/* ── Services (multi-service + components + work) ──────────────────── */}
       {tab === 'services' && (
         <div>
-          {layout === 'compliance' && tabs && <ScopeByYearCard tabs={tabs} />}
+          {layout === 'compliance' &&
+            (e.kind === 'compliance' ? (
+              <ScopePerYearEditor
+                engagementId={e.id}
+                entityId={e.entityId}
+                canManage={engagementAbilities(principal, e).canManage}
+              />
+            ) : (
+              tabs && <ScopeByYearCard tabs={tabs} />
+            ))}
           <ServicesSection engagementId={e.id} services={e.services} />
           <ComponentWorkSection engagementId={e.id} />
           {layout === 'compliance' && (
