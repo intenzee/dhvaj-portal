@@ -41,6 +41,7 @@ import {
   type PlanningSignalAssessment,
   type ReopenPlanningIntelligenceInput,
   type RespondPartnerAttentionInput,
+  materialityVersionLabel,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -79,6 +80,18 @@ const EVIDENCE_TARGET_SQL: Record<PlanningEvidenceTarget, string> = {
                          WHERE id = $1 AND workflow_instance_id = $2`,
   planning_expectation: `SELECT 1 FROM hsdg.audit_planning_expectation
                           WHERE id = $1 AND workflow_instance_id = $2`,
+  // 03.3 (DHVAJ 03.3 §21): the determination and its version-owned records.
+  materiality_determination: `SELECT d.status, d.version_no FROM hsdg.audit_materiality_determination d
+                               WHERE d.id = $1 AND d.workflow_instance_id = $2`,
+  materiality_adjustment: `SELECT d.status, d.version_no FROM hsdg.audit_materiality_adjustment x
+                             JOIN hsdg.audit_materiality_determination d ON d.id = x.determination_id
+                            WHERE x.id = $1 AND d.workflow_instance_id = $2`,
+  materiality_specific: `SELECT d.status, d.version_no FROM hsdg.audit_materiality_specific x
+                           JOIN hsdg.audit_materiality_determination d ON d.id = x.determination_id
+                          WHERE x.id = $1 AND d.workflow_instance_id = $2`,
+  materiality_qualitative: `SELECT d.status, d.version_no FROM hsdg.audit_materiality_qualitative x
+                              JOIN hsdg.audit_materiality_determination d ON d.id = x.determination_id
+                             WHERE x.id = $1 AND d.workflow_instance_id = $2`,
 };
 
 /** Evidence on these is frozen with 03.2 once it is complete (reopen for a controlled revision). */
@@ -89,21 +102,48 @@ const UNDERSTANDING_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>([
   'planning_expectation',
 ]);
 
-async function understandingFrozen(
+/** 03.3 records belong to one determination version; only a draft version takes evidence changes. */
+const MATERIALITY_EVIDENCE_TARGETS = new Set<PlanningEvidenceTarget>([
+  'materiality_determination',
+  'materiality_adjustment',
+  'materiality_specific',
+  'materiality_qualitative',
+]);
+
+const UNDERSTANDING_FROZEN =
+  '03.2 is complete — reopen it for a controlled revision to change its evidence.';
+
+/**
+ * Why evidence on this record cannot change now, or null. 03.1 / 03.2 records
+ * freeze with the 03.12 Planning approval (and 03.2 once it is complete);
+ * 03.3 records keep their own versioning — a completed version is never
+ * changed, a revision draft (03.3.11) is open even after Planning approval.
+ */
+async function evidenceFrozenReason(
   client: PoolClient,
   workflowInstanceId: string,
   targetType: PlanningEvidenceTarget,
-): Promise<boolean> {
-  if (!UNDERSTANDING_EVIDENCE_TARGETS.has(targetType)) return false;
+  targetId: string,
+): Promise<string | null> {
+  if (MATERIALITY_EVIDENCE_TARGETS.has(targetType)) {
+    const { rows } = await client.query<{ status: string; version_no: number }>(
+      EVIDENCE_TARGET_SQL[targetType],
+      [targetId, workflowInstanceId],
+    );
+    const r = rows[0];
+    return r && r.status !== 'draft'
+      ? `Materiality ${materialityVersionLabel(r.version_no)} is ${r.status === 'complete' ? 'complete' : 'superseded'} — its evidence is part of that version. Start a revision (03.3.11) to change it.`
+      : null;
+  }
+  const lock = await readPlanningLock(client, workflowInstanceId);
+  if (lock.locked) return lock.lockReason;
+  if (!UNDERSTANDING_EVIDENCE_TARGETS.has(targetType)) return null;
   const { rows } = await client.query<{ status: string }>(
     `SELECT status FROM hsdg.audit_business_understanding WHERE workflow_instance_id = $1`,
     [workflowInstanceId],
   );
-  return rows[0]?.status === 'complete';
+  return rows[0]?.status === 'complete' ? UNDERSTANDING_FROZEN : null;
 }
-
-const UNDERSTANDING_FROZEN =
-  '03.2 is complete — reopen it for a controlled revision to change its evidence.';
 
 interface AttentionRow {
   id: string;
@@ -755,9 +795,13 @@ export class AuditPlanningGovernanceService {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
       const row = await this.loadEvidence(client, workflowInstanceId, evidenceId);
-      if (await understandingFrozen(client, workflowInstanceId, row.target_type)) {
-        throw new ConflictException(UNDERSTANDING_FROZEN);
-      }
+      const frozen = await evidenceFrozenReason(
+        client,
+        workflowInstanceId,
+        row.target_type,
+        row.target_id,
+      );
+      if (frozen) throw new ConflictException(frozen);
       const actor = await resolvePlanningActor(client, engagementId);
       if (!mayRemove(actor, row.linked_by_employee_id)) {
         throw new ForbiddenException(
@@ -824,8 +868,9 @@ export class AuditPlanningGovernanceService {
       workflowInstanceId,
     ]);
     if (!rows[0]) throw new NotFoundException('That planning record is not on this audit file.');
-    if (write && (await understandingFrozen(client, workflowInstanceId, targetType))) {
-      throw new ConflictException(UNDERSTANDING_FROZEN);
+    if (write) {
+      const frozen = await evidenceFrozenReason(client, workflowInstanceId, targetType, targetId);
+      if (frozen) throw new ConflictException(frozen);
     }
   }
 
@@ -904,9 +949,7 @@ export class AuditPlanningGovernanceService {
       [workflowInstanceId, targetType, targetId],
     );
     const actor = await resolvePlanningActor(client, engagementId);
-    const lock = await readPlanningLock(client, workflowInstanceId);
-    const open =
-      !lock.locked && !(await understandingFrozen(client, workflowInstanceId, targetType));
+    const open = !(await evidenceFrozenReason(client, workflowInstanceId, targetType, targetId));
     return {
       targetType,
       targetId,

@@ -1,12 +1,19 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
   FINANCIAL_UNIT_FACTOR,
+  MATERIALITY_CHALLENGE_KINDS,
+  MATERIALITY_CHALLENGE_TARGET_LABEL,
+  MATERIALITY_CHALLENGE_TARGETS,
+  MATERIALITY_TEAM_FIELDS,
+  NOTIFICATION_TYPE,
+  PLANNING_ACTOR_ROLE_LABEL,
   FINANCIAL_UNIT_LABEL,
   PRINCIPAL_USER_LABEL,
   QUALITATIVE_CONSIDERATIONS,
@@ -14,6 +21,16 @@ import {
   materialityBenchmarkLabel,
   materialityVersionLabel,
   type AssessBenchmarkInput,
+  type CloseMaterialityChallengeInput,
+  type CreateMaterialityChallengeInput,
+  type MaterialityChallengeRecord,
+  type MaterialityGovernance,
+  type MaterialityReassessment,
+  type MaterialityReassessmentSource,
+  type PlanningCompletionCheck,
+  type RequireMaterialityReassessmentInput,
+  type ResolveMaterialityReassessmentInput,
+  type RespondMaterialityChallengeInput,
   type BenchmarkAssessment,
   type BenchmarkCandidate,
   type MaterialityBaseline,
@@ -75,7 +92,13 @@ import {
 } from './planning-shared';
 import { isEngagementLead, periodEndFromFinancialYear, readPriorAuditFile } from './master-facts';
 import { readMaterialityLibrary } from './materiality-methodology-library';
-import { syncMaterialityAttention } from './planning-governance';
+import {
+  notifyPlanning,
+  readPlanningLock,
+  resolvePlanningActor,
+  syncMaterialityAttention,
+  type PlanningActor,
+} from './planning-governance';
 
 /** The Phase 03 checklist row 03.3 rolls its state up into. */
 const MATERIALITY_ITEM_KEY = 'materiality';
@@ -139,6 +162,14 @@ interface DetRow {
   mat08: MaterialityDetermination['mat08'];
   completed_by_name: string | null;
   completed_at: Date | null;
+  reassessment_source: MaterialityReassessmentSource | null;
+  reassessment_reason: string | null;
+  reassessment_flagged_at: Date | null;
+  reassessment_flagged_by_employee_id: string | null;
+  reassessment_resolution: string | null;
+  reassessment_resolved_at: Date | null;
+  reassessment_resolved_by_employee_id: string | null;
+  reassessed_benchmark_amount: string | null;
   version: number;
 }
 
@@ -179,7 +210,12 @@ export class AuditMaterialityService {
     private readonly audit: AuditService,
     private readonly understanding: AuditBusinessUnderstandingService,
     private readonly areaReview: AuditAreaReviewService,
-  ) {}
+  ) {
+    // §20 — a 03.2 figure change re-checks a completed determination.
+    understanding.onFiguresChanged((client, ctx, engagementId, workflowInstanceId) =>
+      this.afterSourceChange(client, ctx, engagementId, workflowInstanceId),
+    );
+  }
 
   // ── Summary ────────────────────────────────────────────────────────────────
 
@@ -316,6 +352,7 @@ export class AuditMaterialityService {
   ): Promise<MaterialitySummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
+      assertMaterialityFields(await resolvePlanningActor(client, engagementId), input);
       const { row, created } = await this.ensureDraft(
         client,
         ctx,
@@ -497,6 +534,13 @@ export class AuditMaterialityService {
               revisionItems.find((i) => i.itemKey === p.itemKey)?.ownerEmployeeId ?? null,
           })),
         });
+        checks.push(
+          ...governanceCompletion(
+            await this.readChallenges(client, workflowInstanceId),
+            ws.adjustments,
+            await this.readEvidenceCounts(client, workflowInstanceId),
+          ),
+        );
         const problems = checks.filter((c) => !c.met).map((c) => c.detail ?? c.label);
         if (problems.length) {
           throw new ConflictException(`03.3 cannot be completed yet: ${problems.join(' ')}`);
@@ -1054,6 +1098,18 @@ export class AuditMaterialityService {
            FROM hsdg.audit_materiality_qualitative WHERE determination_id = $1`,
         [current.id, newId],
       );
+      await this.carryEvidence(client, current.id, newId);
+      // An open reassessment flag is taken over by the revision (§20).
+      if (current.reassessment_flagged_at && !current.reassessment_resolved_at) {
+        await client.query(
+          `UPDATE hsdg.audit_materiality_determination
+              SET reassessment_resolution = $2, reassessment_resolved_at = now(),
+                  reassessment_resolved_by_employee_id = hsdg.ctx_employee_id(),
+                  version = version + 1
+            WHERE id = $1`,
+          [current.id, `Taken over by revision ${materialityVersionLabel(nextNo)}: ${reason}`],
+        );
+      }
       await this.rollUp(client, ctx, workflowInstanceId, 'in_progress');
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.materiality_revision_started',
@@ -1113,7 +1169,525 @@ export class AuditMaterialityService {
     });
   }
 
+  // ── §20 / §23 reassessment of a completed version ──────────────────────────
+
+  /**
+   * §20 — 03.2 figures moved. A COMPLETED determination whose benchmark no
+   * longer matches its source is flagged for reassessment: the approved OM is
+   * never changed, the checklist row needs attention and the Manager is told.
+   * Runs inside the 03.2 write's transaction (any team member's context).
+   */
+  async afterSourceChange(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<void> {
+    const row = await this.readCurrentRow(client, workflowInstanceId);
+    if (
+      !row ||
+      row.status !== 'complete' ||
+      !row.selected_benchmark ||
+      row.selected_benchmark === 'other' ||
+      row.benchmark_amount === null
+    ) {
+      return;
+    }
+    const det = mapDet(row);
+    const ws = await this.workspace(client, workflowInstanceId, det);
+    const live = selectedBenchmarkAmount(det, ws.candidates);
+    const ref = num(row.reassessed_benchmark_amount) ?? num(row.benchmark_amount)!;
+    if (live !== null && Math.abs(live - ref) <= 0.005) return;
+    const label = materialityBenchmarkLabel(det.selectedBenchmark!, ws.candidates);
+    const units = ws.dataset.unitLabel ?? 'dataset units';
+    const amt = (n: number) => n.toLocaleString('en-IN');
+    const reason =
+      (live === null
+        ? `${label} is no longer available in 03.2 (was ${amt(ref)}, ${units})`
+        : `${label} changed in 03.2 from ${amt(ref)} to ${amt(live)} (${units})`) +
+      ` after materiality ${det.versionLabel} was completed. The approved amounts are unchanged — revise materiality (03.3.11) or record why ${det.versionLabel} still stands.`;
+    const open = !!row.reassessment_flagged_at && !row.reassessment_resolved_at;
+    if (!open) {
+      await this.flagReassessment(
+        client,
+        ctx,
+        engagementId,
+        workflowInstanceId,
+        row,
+        'source_change',
+        reason,
+      );
+      return;
+    }
+    // Already flagged: keep one flag, with the latest figures in its reason.
+    const merged =
+      row.reassessment_source === 'source_change'
+        ? reason
+        : `${(row.reassessment_reason ?? '').split(' Also: ')[0]} Also: ${reason}`;
+    if (merged === row.reassessment_reason) return;
+    await client.query(
+      `UPDATE hsdg.audit_materiality_determination
+          SET reassessment_reason = $2, version = version + 1 WHERE id = $1`,
+      [row.id, merged],
+    );
+    await this.audit.recordWith(client, ctx, {
+      action: 'statutory_audit.materiality_reassessment_updated',
+      objectType: 'audit_materiality_determination',
+      objectId: row.id,
+      after: { reason: merged },
+    });
+  }
+
+  /** §23 — the Engagement Partner sends the completed version back for reassessment. */
+  async requireReassessment(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    input: RequireMaterialityReassessmentInput,
+  ): Promise<MaterialitySummary> {
+    const reason = clean(input.reason);
+    if (!reason) throw new BadRequestException('Say why materiality must be reassessed.');
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const row = await this.readCurrentRow(client, workflowInstanceId);
+      if (!row || row.status !== 'complete') {
+        throw new ConflictException(
+          'Only a completed determination can be sent back for reassessment — challenge the draft instead.',
+        );
+      }
+      if (row.version !== input.version) {
+        throw new ConflictException('Materiality changed since you loaded it; refresh and retry.');
+      }
+      if (row.reassessment_flagged_at && !row.reassessment_resolved_at) {
+        throw new ConflictException('A reassessment is already pending on this version.');
+      }
+      await this.flagReassessment(
+        client,
+        ctx,
+        engagementId,
+        workflowInstanceId,
+        row,
+        'partner',
+        reason,
+      );
+      return this.buildSummary(client, workflowInstanceId, engagementId);
+    });
+  }
+
+  /**
+   * The Manager reassessed and the version in force still stands ("no
+   * change", with the reason). A change instead goes through a revision,
+   * which takes the flag over.
+   */
+  async resolveReassessment(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    input: ResolveMaterialityReassessmentInput,
+  ): Promise<MaterialitySummary> {
+    const resolution = clean(input.resolution);
+    if (!resolution) {
+      throw new BadRequestException(
+        'Record why the version in force still stands — or start a revision (03.3.11).',
+      );
+    }
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const row = await this.readCurrentRow(client, workflowInstanceId);
+      if (
+        !row ||
+        row.status !== 'complete' ||
+        !row.reassessment_flagged_at ||
+        row.reassessment_resolved_at
+      ) {
+        throw new ConflictException('No reassessment is pending on the version in force.');
+      }
+      if (row.version !== input.version) {
+        throw new ConflictException('Materiality changed since you loaded it; refresh and retry.');
+      }
+      // The live benchmark the Manager reassessed against: the next 03.2 change compares with it.
+      let live: number | null = null;
+      if (row.selected_benchmark && row.selected_benchmark !== 'other') {
+        const det = mapDet(row);
+        const ws = await this.workspace(client, workflowInstanceId, det);
+        live = selectedBenchmarkAmount(det, ws.candidates);
+      }
+      await client.query(
+        `UPDATE hsdg.audit_materiality_determination
+            SET reassessment_resolution = $2, reassessment_resolved_at = now(),
+                reassessment_resolved_by_employee_id = hsdg.ctx_employee_id(),
+                reassessed_benchmark_amount = COALESCE($3, reassessed_benchmark_amount),
+                version = version + 1
+          WHERE id = $1`,
+        [row.id, resolution, live],
+      );
+      await this.rollUp(client, ctx, workflowInstanceId, 'complete');
+      const actor = await resolvePlanningActor(client, engagementId);
+      await notifyPlanning(client, [actor.partnerId], {
+        type: NOTIFICATION_TYPE.planningMaterialityReassessment,
+        title: `Materiality ${materialityVersionLabel(row.version_no)} reassessed — no change`,
+        body: resolution,
+        engagementId,
+        objectType: 'audit_materiality_determination',
+        objectId: row.id,
+        dedup: `m033-reassess-resolved:${row.id}:${row.version}`,
+        except: ctx.employeeId ?? null,
+      });
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.materiality_reassessment_resolved',
+        objectType: 'audit_materiality_determination',
+        objectId: row.id,
+        before: { reason: row.reassessment_reason, source: row.reassessment_source },
+        after: { resolution, reassessedBenchmarkAmount: live },
+      });
+      return this.buildSummary(client, workflowInstanceId, engagementId);
+    });
+  }
+
+  // ── §23 Engagement Partner comments / challenges ───────────────────────────
+
+  async createChallenge(
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    input: CreateMaterialityChallengeInput,
+  ): Promise<MaterialitySummary> {
+    const body = clean(input.body);
+    if (!body) throw new BadRequestException('Write the comment or challenge.');
+    if (!MATERIALITY_CHALLENGE_TARGETS.includes(input.targetType)) {
+      throw new BadRequestException('Unknown 03.3 area.');
+    }
+    if (!MATERIALITY_CHALLENGE_KINDS.includes(input.kind)) {
+      throw new BadRequestException('Choose comment or challenge.');
+    }
+    const targetRef = clean(input.targetRef);
+    return this.db.withRlsContext(ctx, async (client) => {
+      await assertShell(client, engagementId, workflowInstanceId);
+      const current = await this.readCurrentRow(client, workflowInstanceId);
+      const { rows } = await client.query<{ id: string; seq: number }>(
+        `INSERT INTO hsdg.audit_materiality_challenge
+           (workflow_instance_id, engagement_id, seq, determination_version_no, target_type,
+            target_ref, kind, body, raised_by_employee_id)
+         SELECT $1, $2, COALESCE(MAX(seq), 0) + 1, $3, $4, $5, $6, $7, hsdg.ctx_employee_id()
+           FROM hsdg.audit_materiality_challenge WHERE workflow_instance_id = $1
+         RETURNING id, seq`,
+        [
+          workflowInstanceId,
+          engagementId,
+          current?.version_no ?? 1,
+          input.targetType,
+          targetRef,
+          input.kind,
+          body,
+        ],
+      );
+      const created = rows[0]!;
+      const target = challengeTargetLabel(input.targetType, targetRef);
+      const actor = await resolvePlanningActor(client, engagementId);
+      await notifyPlanning(client, [actor.managerId], {
+        type: NOTIFICATION_TYPE.planningMaterialityChallenge,
+        title: `Engagement Partner ${input.kind} on 03.3 — ${target}`,
+        body,
+        engagementId,
+        objectType: 'audit_materiality_challenge',
+        objectId: created.id,
+        dedup: `m033-challenge:${created.id}`,
+        except: ctx.employeeId ?? null,
+      });
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.materiality_challenge_raised',
+        objectType: 'audit_materiality_challenge',
+        objectId: created.id,
+        after: { code: displayCode('PC', created.seq), target, kind: input.kind },
+      });
+      return this.buildSummary(client, workflowInstanceId, engagementId);
+    });
+  }
+
+  /** The Engagement Manager answers (a completed version stays in force — revise to act on it). */
+  async respondChallenge(
+    ctx: RlsContext,
+    engagementId: string,
+    challengeId: string,
+    input: RespondMaterialityChallengeInput,
+  ): Promise<MaterialitySummary> {
+    const response = clean(input.response);
+    if (!response) throw new BadRequestException('Write the response.');
+    return this.db.withRlsContext(ctx, async (client) => {
+      const c = await this.loadChallenge(client, engagementId, challengeId);
+      if (c.status === 'closed') throw new ConflictException('This challenge is already closed.');
+      const res = await client.query(
+        `UPDATE hsdg.audit_materiality_challenge
+            SET response = $3, responded_by_employee_id = hsdg.ctx_employee_id(),
+                responded_at = now(), status = 'responded', version = version + 1
+          WHERE id = $1 AND version = $2`,
+        [challengeId, input.version, response],
+      );
+      if ((res.rowCount ?? 0) === 0) {
+        throw new ConflictException(
+          'This challenge changed since you loaded it; refresh and retry.',
+        );
+      }
+      const actor = await resolvePlanningActor(client, engagementId);
+      await notifyPlanning(client, [actor.partnerId], {
+        type: NOTIFICATION_TYPE.planningMaterialityChallenge,
+        title: `Manager responded to ${displayCode('PC', c.seq)} on 03.3`,
+        body: response,
+        engagementId,
+        objectType: 'audit_materiality_challenge',
+        objectId: challengeId,
+        dedup: `m033-challenge-response:${challengeId}:${c.version}`,
+        except: ctx.employeeId ?? null,
+      });
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.materiality_challenge_responded',
+        objectType: 'audit_materiality_challenge',
+        objectId: challengeId,
+        after: { response },
+      });
+      return this.buildSummary(client, c.workflow_instance_id, engagementId);
+    });
+  }
+
+  /** The Engagement Partner closes a comment, or a challenge once answered. */
+  async closeChallenge(
+    ctx: RlsContext,
+    engagementId: string,
+    challengeId: string,
+    input: CloseMaterialityChallengeInput,
+  ): Promise<MaterialitySummary> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const c = await this.loadChallenge(client, engagementId, challengeId);
+      if (c.status === 'closed') throw new ConflictException('This challenge is already closed.');
+      if (c.kind === 'challenge' && !c.response) {
+        throw new ConflictException(
+          'The Engagement Manager has not responded to this challenge yet.',
+        );
+      }
+      const res = await client.query(
+        `UPDATE hsdg.audit_materiality_challenge
+            SET status = 'closed', closed_by_employee_id = hsdg.ctx_employee_id(),
+                closed_at = now(), version = version + 1
+          WHERE id = $1 AND version = $2`,
+        [challengeId, input.version],
+      );
+      if ((res.rowCount ?? 0) === 0) {
+        throw new ConflictException(
+          'This challenge changed since you loaded it; refresh and retry.',
+        );
+      }
+      await this.audit.recordWith(client, ctx, {
+        action: 'statutory_audit.materiality_challenge_closed',
+        objectType: 'audit_materiality_challenge',
+        objectId: challengeId,
+      });
+      return this.buildSummary(client, c.workflow_instance_id, engagementId);
+    });
+  }
+
   // ── internals ──────────────────────────────────────────────────────────────
+
+  /** Raise the reassessment flag on the completed version, roll it up and tell the Manager. */
+  private async flagReassessment(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+    row: DetRow,
+    source: MaterialityReassessmentSource,
+    reason: string,
+  ): Promise<void> {
+    await client.query(
+      `UPDATE hsdg.audit_materiality_determination
+          SET reassessment_source = $2, reassessment_reason = $3, reassessment_flagged_at = now(),
+              reassessment_flagged_by_employee_id = hsdg.ctx_employee_id(),
+              reassessment_resolution = NULL, reassessment_resolved_at = NULL,
+              reassessment_resolved_by_employee_id = NULL, version = version + 1
+        WHERE id = $1 AND status = 'complete'`,
+      [row.id, source, reason],
+    );
+    await this.rollUp(client, ctx, workflowInstanceId, 'needs_attention');
+    const actor = await resolvePlanningActor(client, engagementId);
+    const label = materialityVersionLabel(row.version_no);
+    await notifyPlanning(client, [actor.managerId ?? actor.partnerId], {
+      type: NOTIFICATION_TYPE.planningMaterialityReassessment,
+      title:
+        source === 'partner'
+          ? `Engagement Partner requires reassessment of materiality ${label}`
+          : `Materiality ${label} needs reassessment — 03.2 figures changed`,
+      body: reason,
+      engagementId,
+      objectType: 'audit_materiality_determination',
+      objectId: row.id,
+      dedup: `m033-reassess:${row.id}:${row.version}`,
+      except: ctx.employeeId ?? null,
+    });
+    await this.audit.recordWith(client, ctx, {
+      action: 'statutory_audit.materiality_reassessment_required',
+      objectType: 'audit_materiality_determination',
+      objectId: row.id,
+      after: { source, reason, version: label },
+    });
+  }
+
+  /** §21 — a revision carries the evidence of every record it copies (the old version keeps its own). */
+  private async carryEvidence(client: PoolClient, fromId: string, toId: string): Promise<void> {
+    await client.query(
+      `INSERT INTO hsdg.audit_planning_evidence
+         (workflow_instance_id, engagement_id, target_type, target_id, document_id,
+          linked_by_employee_id, linked_at)
+       SELECT ev.workflow_instance_id, ev.engagement_id, ev.target_type, m.new_id, ev.document_id,
+              ev.linked_by_employee_id, ev.linked_at
+         FROM hsdg.audit_planning_evidence ev
+         JOIN (
+           SELECT 'materiality_determination'::text AS t, $1::uuid AS old_id, $2::uuid AS new_id
+           UNION ALL
+           SELECT 'materiality_adjustment', o.id, n.id
+             FROM hsdg.audit_materiality_adjustment o
+             JOIN hsdg.audit_materiality_adjustment n ON n.determination_id = $2 AND n.seq = o.seq
+            WHERE o.determination_id = $1
+           UNION ALL
+           SELECT 'materiality_specific', o.id, n.id
+             FROM hsdg.audit_materiality_specific o
+             JOIN hsdg.audit_materiality_specific n ON n.determination_id = $2 AND n.seq = o.seq
+            WHERE o.determination_id = $1
+           UNION ALL
+           SELECT 'materiality_qualitative', o.id, n.id
+             FROM hsdg.audit_materiality_qualitative o
+             JOIN hsdg.audit_materiality_qualitative n
+               ON n.determination_id = $2 AND n.consideration_key = o.consideration_key
+            WHERE o.determination_id = $1
+         ) m ON m.t = ev.target_type AND m.old_id = ev.target_id
+        WHERE ev.removed_at IS NULL
+       ON CONFLICT DO NOTHING`,
+      [fromId, toId],
+    );
+  }
+
+  /** §20 / §21 / §23 block of the summary. */
+  private async readGovernance(
+    client: PoolClient,
+    workflowInstanceId: string,
+    row: DetRow | null,
+  ): Promise<MaterialityGovernance> {
+    const { rows: wf } = await client.query<{ engagement_id: string }>(
+      `SELECT engagement_id FROM hsdg.service_workflow_instances WHERE id = $1`,
+      [workflowInstanceId],
+    );
+    const actor = await resolvePlanningActor(client, wf[0]!.engagement_id);
+    const lock = await readPlanningLock(client, workflowInstanceId);
+    return {
+      access: {
+        role: actor.role,
+        roleLabel: PLANNING_ACTOR_ROLE_LABEL[actor.role],
+        actingAsManager: actor.actingAsManager,
+        capabilities: actor.capabilities,
+        planningApproved: lock.approved,
+      },
+      challenges: await this.readChallenges(client, workflowInstanceId),
+      reassessment: await this.readReassessment(client, row),
+      evidenceCounts: await this.readEvidenceCounts(client, workflowInstanceId),
+    };
+  }
+
+  private async readReassessment(
+    client: PoolClient,
+    row: DetRow | null,
+  ): Promise<MaterialityReassessment | null> {
+    if (!row?.reassessment_flagged_at || !row.reassessment_source) return null;
+    const ids = [
+      row.reassessment_flagged_by_employee_id,
+      row.reassessment_resolved_by_employee_id,
+    ].filter((x): x is string => !!x);
+    const names = new Map<string, string>();
+    if (ids.length) {
+      const { rows } = await client.query<{ id: string; full_name: string }>(
+        `SELECT id, full_name FROM hsdg.employees WHERE id = ANY($1::uuid[])`,
+        [ids],
+      );
+      for (const r of rows) names.set(r.id, r.full_name);
+    }
+    const name = (id: string | null) => (id ? (names.get(id) ?? null) : null);
+    return {
+      open: !row.reassessment_resolved_at,
+      source: row.reassessment_source,
+      reason: row.reassessment_reason ?? '',
+      flaggedAt: row.reassessment_flagged_at.toISOString(),
+      flaggedByName: name(row.reassessment_flagged_by_employee_id),
+      resolution: row.reassessment_resolution,
+      resolvedAt: row.reassessment_resolved_at ? row.reassessment_resolved_at.toISOString() : null,
+      resolvedByName: name(row.reassessment_resolved_by_employee_id),
+    };
+  }
+
+  private async readChallenges(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<MaterialityChallengeRecord[]> {
+    const { rows } = await client.query<
+      ChallengeRow & {
+        raised_by_name: string | null;
+        responded_by_name: string | null;
+        raised_at: Date;
+        responded_at: Date | null;
+        determination_version_no: number;
+      }
+    >(
+      `SELECT c.*, rb.full_name AS raised_by_name, rs.full_name AS responded_by_name
+         FROM hsdg.audit_materiality_challenge c
+         LEFT JOIN hsdg.employees rb ON rb.id = c.raised_by_employee_id
+         LEFT JOIN hsdg.employees rs ON rs.id = c.responded_by_employee_id
+        WHERE c.workflow_instance_id = $1
+        ORDER BY c.seq DESC`,
+      [workflowInstanceId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      code: displayCode('PC', r.seq)!,
+      targetType: r.target_type,
+      targetRef: r.target_ref,
+      targetLabel: challengeTargetLabel(r.target_type, r.target_ref),
+      versionLabel: materialityVersionLabel(r.determination_version_no),
+      kind: r.kind,
+      body: r.body,
+      raisedByName: r.raised_by_name,
+      raisedAt: r.raised_at.toISOString(),
+      response: r.response,
+      respondedByName: r.responded_by_name,
+      respondedAt: r.responded_at ? r.responded_at.toISOString() : null,
+      status: r.status,
+      version: r.version,
+    }));
+  }
+
+  private async loadChallenge(
+    client: PoolClient,
+    engagementId: string,
+    challengeId: string,
+  ): Promise<ChallengeRow> {
+    const { rows } = await client.query<ChallengeRow>(
+      `SELECT * FROM hsdg.audit_materiality_challenge WHERE id = $1 AND engagement_id = $2`,
+      [challengeId, engagementId],
+    );
+    if (!rows[0]) throw new NotFoundException('Challenge not found.');
+    return rows[0];
+  }
+
+  /** Live evidence files per 03.3 record id. */
+  private async readEvidenceCounts(
+    client: PoolClient,
+    workflowInstanceId: string,
+  ): Promise<Record<string, number>> {
+    const { rows } = await client.query<{ target_id: string; n: string }>(
+      `SELECT target_id, count(*) AS n FROM hsdg.audit_planning_evidence
+        WHERE workflow_instance_id = $1 AND removed_at IS NULL
+          AND target_type IN ('materiality_determination','materiality_adjustment',
+                              'materiality_specific','materiality_qualitative')
+        GROUP BY target_id`,
+      [workflowInstanceId],
+    );
+    return Object.fromEntries(rows.map((r) => [r.target_id, Number(r.n)]));
+  }
 
   /** Highest version — the current draft, or the completed version in force. */
   private async readCurrentRow(
@@ -1174,7 +1748,7 @@ export class AuditMaterialityService {
     client: PoolClient,
     ctx: RlsContext,
     workflowInstanceId: string,
-    state: 'in_progress' | 'complete',
+    state: 'in_progress' | 'complete' | 'needs_attention',
   ): Promise<void> {
     await client.query(
       `UPDATE hsdg.audit_planning_items
@@ -1434,16 +2008,20 @@ export class AuditMaterialityService {
         partnerAttention,
       );
     }
-    const completion = computeMaterialityCompletion({
-      det,
-      dataset: ws.dataset,
-      candidates: ws.candidates,
-      computed,
-      adjustments: ws.adjustments,
-      specific: ws.specific,
-      qualitative: ws.qualitative,
-      revisionItems,
-    });
+    const governance = await this.readGovernance(client, workflowInstanceId, row);
+    const completion = [
+      ...computeMaterialityCompletion({
+        det,
+        dataset: ws.dataset,
+        candidates: ws.candidates,
+        computed,
+        adjustments: ws.adjustments,
+        specific: ws.specific,
+        qualitative: ws.qualitative,
+        revisionItems,
+      }),
+      ...governanceCompletion(governance.challenges, ws.adjustments, governance.evidenceCounts),
+    ];
     return {
       determination: det,
       baseline,
@@ -1471,6 +2049,7 @@ export class AuditMaterialityService {
       impactPreview: MATERIALITY_IMPACT_PREVIEW.map((i) => ({ ...i })),
       authorityAnchors: AUTHORITY_ANCHORS,
       completion,
+      governance,
     };
   }
 
@@ -1739,6 +2318,7 @@ export class AuditMaterialityService {
     const rows = determinationId
       ? (
           await client.query<{
+            id: string;
             consideration_key: string;
             response: QualitativeChallengeItem['response'];
             note: string | null;
@@ -1749,7 +2329,7 @@ export class AuditMaterialityService {
             significant: boolean;
             version: number;
           }>(
-            `SELECT q.consideration_key, q.response, q.note, q.signal_id, s.seq AS signal_seq,
+            `SELECT q.id, q.consideration_key, q.response, q.note, q.signal_id, s.seq AS signal_seq,
                     q.focus_id, f.seq AS focus_seq, q.significant, q.version
                FROM hsdg.audit_materiality_qualitative q
                LEFT JOIN hsdg.audit_planning_signal s ON s.id = q.signal_id
@@ -1762,6 +2342,7 @@ export class AuditMaterialityService {
     return QUALITATIVE_CONSIDERATIONS.map(({ key, label }) => {
       const r = rows.find((x) => x.consideration_key === key);
       return {
+        id: r?.id ?? null,
         key,
         label,
         prompt: prompts[key] ?? null,
@@ -1816,6 +2397,79 @@ export class AuditMaterialityService {
 }
 
 // ── pure helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * §23 — the engagement team prepares (user context, prior-year figures, the
+ * normalisation rationale draft); every other field is the Engagement
+ * Manager's materiality judgment.
+ */
+const TEAM_FIELDS = new Set<string>(MATERIALITY_TEAM_FIELDS);
+
+function assertMaterialityFields(actor: PlanningActor, input: UpdateMaterialityInput): void {
+  if (actor.capabilities.assess) return;
+  const judgments = Object.entries(input).filter(
+    ([k, v]) => k !== 'version' && v !== undefined && !TEAM_FIELDS.has(k),
+  );
+  if (judgments.length) {
+    throw new ForbiddenException(
+      `Only the Engagement Manager selects the benchmark, determines OM / PM / specific / clearly trivial and completes 03.3 — the engagement team prepares the context, prior-year figures and normalisation schedule. (You are: ${PLANNING_ACTOR_ROLE_LABEL[actor.role]}.)`,
+    );
+  }
+}
+
+interface ChallengeRow {
+  id: string;
+  workflow_instance_id: string;
+  seq: number;
+  target_type: MaterialityChallengeRecord['targetType'];
+  target_ref: string | null;
+  kind: MaterialityChallengeRecord['kind'];
+  body: string;
+  response: string | null;
+  status: MaterialityChallengeRecord['status'];
+  version: number;
+}
+
+function challengeTargetLabel(
+  targetType: MaterialityChallengeRecord['targetType'],
+  targetRef: string | null,
+): string {
+  const area = MATERIALITY_CHALLENGE_TARGET_LABEL[targetType];
+  return targetRef ? `${area} — ${targetRef}` : area;
+}
+
+/** §22 / §23 checks the engine does not see: EP challenges and normalisation evidence. */
+function governanceCompletion(
+  challenges: readonly MaterialityChallengeRecord[],
+  adjustments: readonly NormalisationAdjustment[],
+  evidenceCounts: Record<string, number>,
+): PlanningCompletionCheck[] {
+  const open = challenges.filter((c) => c.kind === 'challenge' && c.status === 'open');
+  const checks: PlanningCompletionCheck[] = [
+    {
+      key: 'challenges',
+      label: 'Engagement Partner challenges answered',
+      met: open.length === 0,
+      detail: open.length
+        ? `${open.map((c) => c.code).join(', ')} await${open.length === 1 ? 's' : ''} the Manager's response.`
+        : null,
+    },
+  ];
+  if (adjustments.length) {
+    const unsupported = adjustments.filter(
+      (a) => !a.evidence && !((evidenceCounts[a.id] ?? 0) > 0),
+    );
+    checks.push({
+      key: 'normalisation_evidence',
+      label: 'Normalisation adjustments supported by evidence',
+      met: unsupported.length === 0,
+      detail: unsupported.length
+        ? `Add or link the evidence (or cite the source) for ${unsupported.map((a) => a.code).join(', ')}.`
+        : null,
+    });
+  }
+  return checks;
+}
 
 /** Audit period start for methodology resolution: the day after the prior period end. */
 function periodStartFor(periodEnd: string): string {

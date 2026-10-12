@@ -54,6 +54,7 @@ export * from './statutory-audit-analytics-library';
 export * from './statutory-audit-understanding-governance';
 export * from './statutory-audit-materiality';
 export * from './statutory-audit-materiality-library';
+export * from './statutory-audit-materiality-governance';
 export * from './statutory-audit-scope-approach';
 export * from './statutory-audit-areas-assertions';
 export * from './statutory-audit-risk';

@@ -14,6 +14,7 @@ import type {
   MetricBenchmarkKey,
 } from './statutory-audit-materiality-library';
 import type { PlanningCompletionCheck } from './statutory-audit-planning-strategy';
+import type { MaterialityGovernance } from './statutory-audit-materiality-governance';
 
 // ── 03.3.1 Context — MAT-01 / MAT-02 ─────────────────────────────────────────
 
@@ -363,6 +364,8 @@ export const QUALITATIVE_RESPONSE_LABEL: Record<QualitativeResponse, string> = {
 };
 
 export interface QualitativeChallengeItem {
+  /** The saved row (evidence target); null / absent until first answered. */
+  id?: string | null;
   key: string;
   label: string;
   /** System prompt from engagement facts, if any. */
@@ -683,6 +686,8 @@ export interface MaterialitySummary {
   /** Anchors into authority_reference_link context '03.3' (§25). */
   authorityAnchors: string[];
   completion: PlanningCompletionCheck[];
+  /** §20 / §21 / §23 — role access, EP challenges, reassessment, evidence counts. */
+  governance: MaterialityGovernance;
 }
 
 /** Mandatory UI disclosure (§7). */
