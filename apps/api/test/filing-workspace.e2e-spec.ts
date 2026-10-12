@@ -404,6 +404,31 @@ describe('Filing workspace (e2e)', () => {
     } while (cursor);
     expect(seen).toEqual(all.items.map((i) => i.id));
 
+    // Documents tab filters: by filing section / year / stream, with slot links.
+    const docs = (
+      await http()
+        .get(`/api/v1/engagements/${eng}/documents?section=summary&financialYear=2026-27&stream=gst`)
+        .set(bearer(sy))
+        .expect(200)
+    ).body.items as Array<{ slotCode: string; complianceInstanceId: string; periodKey: string }>;
+    expect(docs.map((d) => d.slotCode).sort()).toEqual(['ACK_3B', 'CLIENT_APPROVAL']);
+    expect(docs[0]).toMatchObject({ complianceInstanceId: inst, periodKey: '2026-09' });
+    const none = await http()
+      .get(`/api/v1/engagements/${eng}/documents?stream=roc`)
+      .set(bearer(sy))
+      .expect(200);
+    expect(none.body.items).toHaveLength(0);
+    // Time summary takes a date range (bill from time).
+    const future = await http()
+      .get(`/api/v1/engagements/${eng}/time/summary?by=stream&from=2099-01-01`)
+      .set(bearer(sy))
+      .expect(200);
+    expect(future.body.rows).toHaveLength(0);
+    await http()
+      .get(`/api/v1/engagements/${eng}/time/summary?from=12-10-2026`)
+      .set(bearer(sy))
+      .expect(400);
+
     // Another engagement's partner sees nothing.
     const pb = await token('partner.b@dhvaj.in');
     await feed(pb).expect(404);

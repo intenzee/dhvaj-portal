@@ -51,6 +51,15 @@ export interface DocumentRecord {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** Change 6 — the filing (compliance instance) this document belongs to, and its slot. */
+  complianceInstanceId?: string | null;
+  periodSection?: string | null;
+  slotCode?: string | null;
+  /** The filing's period / year / registration and the document's stream. */
+  periodKey?: string | null;
+  financialYear?: string | null;
+  registrationId?: string | null;
+  stream?: string | null;
 }
 
 export interface DocumentDetail extends DocumentRecord {

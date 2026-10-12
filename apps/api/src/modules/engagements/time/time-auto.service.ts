@@ -97,7 +97,11 @@ export class TimeAutoService {
   }
 
   /** POST /engagements/:id/time/other — a closed block not tied to a task. */
-  async addOther(ctx: RlsContext, engagementId: string, input: OtherTimeInput): Promise<{ id: string }> {
+  async addOther(
+    ctx: RlsContext,
+    engagementId: string,
+    input: OtherTimeInput,
+  ): Promise<{ id: string }> {
     const me = requireEmployee(ctx);
     const ago = daysAgo(input.date);
     if (ago < 0) throw new BadRequestException('Time cannot be logged for a future date.');
@@ -107,8 +111,7 @@ export class TimeAutoService {
       );
     }
     const { startedAt, endedAt } = otherTimeWindow(input.date, input.minutes);
-    const billable =
-      input.isBillable ?? !NON_BILLABLE_TIME_CATEGORIES.includes(input.category);
+    const billable = input.isBillable ?? !NON_BILLABLE_TIME_CATEGORIES.includes(input.category);
     return this.db.withRlsContext(ctx, async (client) => {
       await this.requireVisible(client, engagementId);
       if (input.engagementServiceId) {
@@ -158,7 +161,11 @@ export class TimeAutoService {
    * pointing at it. Moves of up to 30 minutes apply at once; larger ones wait
    * for a lead's approval.
    */
-  async adjust(ctx: RlsContext, entryId: string, input: AdjustInput): Promise<TimeAdjustmentRecord> {
+  async adjust(
+    ctx: RlsContext,
+    entryId: string,
+    input: AdjustInput,
+  ): Promise<TimeAdjustmentRecord> {
     const me = requireEmployee(ctx);
     const start = new Date(input.startedAt);
     const end = new Date(input.endedAt);
@@ -300,7 +307,8 @@ export class TimeAutoService {
       );
       const a = rows[0];
       if (!a) throw new NotFoundException('Time correction not found.');
-      if (!a.is_lead) throw new ForbiddenException('Only an engagement lead approves time corrections.');
+      if (!a.is_lead)
+        throw new ForbiddenException('Only an engagement lead approves time corrections.');
       if (a.employee_id === me) {
         throw new ForbiddenException('A correction to your own time needs another lead.');
       }
@@ -337,7 +345,12 @@ export class TimeAutoService {
   }
 
   /** GET /engagements/:id/time/summary?by= — Activity → Time. */
-  async summary(ctx: RlsContext, engagementId: string, by: TimeSummaryBy): Promise<TimeSummary> {
+  async summary(
+    ctx: RlsContext,
+    engagementId: string,
+    by: TimeSummaryBy,
+    range: { from?: string; to?: string; stream?: string } = {},
+  ): Promise<TimeSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.requireVisible(client, engagementId);
       const group = SUMMARY_GROUP[by];
@@ -358,9 +371,12 @@ export class TimeAutoService {
            LEFT JOIN hsdg.services sv ON sv.id = es.service_id
            LEFT JOIN hsdg.tasks t ON t.id = te.task_id
           WHERE te.engagement_id = $1 AND te.ended_at IS NOT NULL
+            AND ($2::date IS NULL OR (te.started_at AT TIME ZONE 'Asia/Kolkata')::date >= $2::date)
+            AND ($3::date IS NULL OR (te.started_at AT TIME ZONE 'Asia/Kolkata')::date <= $3::date)
+            AND ($4::text IS NULL OR sv.stream = $4)
           GROUP BY 1, 2
           ORDER BY ${by === 'month' ? '1 DESC' : '3 DESC'}`,
-        [engagementId],
+        [engagementId, range.from ?? null, range.to ?? null, range.stream ?? null],
       );
       const out: TimeSummaryRow[] = rows.map((r) => {
         const total = Number(r.total);
@@ -409,15 +425,17 @@ export class TimeAutoService {
       return {
         by,
         rows: out,
-        totals: { totalSeconds, billableSeconds, nonBillableSeconds: totalSeconds - billableSeconds },
-        budget: budget.rows.map(
-          (b): TimeBudgetRow => ({
-            financialYear: b.financial_year,
-            stream: b.stream,
-            budgetHours: b.budget_hours === null ? null : Number(b.budget_hours),
-            actualHours: Math.round((Number(b.actual_seconds) / 3600) * 100) / 100,
-          }),
-        ),
+        totals: {
+          totalSeconds,
+          billableSeconds,
+          nonBillableSeconds: totalSeconds - billableSeconds,
+        },
+        budget: budget.rows.map((b): TimeBudgetRow => ({
+          financialYear: b.financial_year,
+          stream: b.stream,
+          budgetHours: b.budget_hours === null ? null : Number(b.budget_hours),
+          actualHours: Math.round((Number(b.actual_seconds) / 3600) * 100) / 100,
+        })),
         pendingAdjustments: Number(pending.rows[0]?.n ?? 0),
       };
     });
@@ -538,4 +556,3 @@ const SUMMARY_GROUP: Record<TimeSummaryBy, { key: string; label: string; none: s
     none: 'Other time',
   },
 };
-
