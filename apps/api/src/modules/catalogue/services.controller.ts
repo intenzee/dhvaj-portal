@@ -31,7 +31,8 @@ export class ServicesController {
   @RequirePermissions(PERMISSION.serviceRead)
   @ApiOperation({
     summary: 'List catalogue services (paginated)',
-    description: 'Firm-wide config. Filter by service line, active flag, or free-text search.',
+    description:
+      'Firm-wide config. Filter by service line, compliance stream, active flag, or free-text search.',
   })
   async list(
     @CurrentPrincipal() principal: Principal,
@@ -41,6 +42,7 @@ export class ServicesController {
     if (query.serviceLine) filter.serviceLineCode = query.serviceLine;
     if (query.active !== undefined) filter.active = query.active;
     if (query.search) filter.search = query.search;
+    if (query.stream) filter.stream = query.stream;
     const result = await this.catalogue.listServices(
       rlsContextFromPrincipal(principal),
       filter,

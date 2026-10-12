@@ -1,4 +1,4 @@
-import type { Recurrence, TemplateType } from '@hsdg/contracts';
+import type { EngagementKind, Recurrence, Stream, TemplateType } from '@hsdg/contracts';
 
 export interface ReviewModelRecord {
   id: string;
@@ -53,6 +53,12 @@ export interface ServiceSummary {
   version: number;
   /** Authorised-approval reference recorded for OTHER-line services (spec §17). */
   approvalReference: string | null;
+  /** The compliance stream the service belongs to (spec Change 2), if any. */
+  stream: Stream | null;
+  /** For a service folded into a stream: the STREAM_* service that replaced it. */
+  foldedIntoServiceId: string | null;
+  /** Which engagement kind may carry it (spec Change 1). */
+  engagementKind: EngagementKind;
 }
 
 /** Full service view: the summary plus the workflow family's states. */
@@ -64,6 +70,7 @@ export interface ServiceFilter {
   serviceLineCode?: string;
   active?: boolean;
   search?: string;
+  stream?: Stream;
 }
 
 export interface CreateServiceInput {

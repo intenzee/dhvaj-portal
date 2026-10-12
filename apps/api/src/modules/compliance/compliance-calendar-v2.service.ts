@@ -58,6 +58,13 @@ export const CALENDAR_ROW_CAP = 5000;
 
 const EFFECTIVE_DUE = `COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)`;
 
+/**
+ * A filing's stream. Rules written before the restructure carry none, so a
+ * legacy instance moved into a Compliance engagement takes the stream of its
+ * service line, or of the stream that service was folded into.
+ */
+const FILING_STREAM = `COALESCE(v.stream, rs.stream, rf.stream)`;
+
 interface CalendarSqlRow {
   id: string;
   engagement_id: string;
@@ -72,6 +79,7 @@ interface CalendarSqlRow {
   registration_id: string | null;
   financial_year: string | null;
   period_key: string | null;
+  reference_month: string;
   due_date: string;
   computed_due: string;
   extension_reference: string | null;
@@ -531,8 +539,7 @@ export class ComplianceCalendarV2Service {
     return this.db.withRlsContext(ctx, async (client) => {
       const params: unknown[] = [from, to];
       const where: string[] = [
-        `ci.period_key IS NOT NULL`,
-        `v.stream IS NOT NULL`,
+        `${FILING_STREAM} IS NOT NULL`,
         `eng.kind = 'compliance'`,
         `eng.status <> 'merged'`,
       ];
@@ -550,7 +557,7 @@ export class ComplianceCalendarV2Service {
       if (query.status?.length) add((p) => `ci.workflow_status = ANY(${p}::text[])`, query.status);
       // Not-applicable rows are noise on the calendar unless asked for.
       else where.push(`ci.workflow_status <> 'not_applicable'`);
-      if (query.stream?.length) add((p) => `v.stream = ANY(${p}::text[])`, query.stream);
+      if (query.stream?.length) add((p) => `${FILING_STREAM} = ANY(${p}::text[])`, query.stream);
       if (query.partnerId) add((p) => `eng.engagement_partner_id = ${p}`, query.partnerId);
       if (query.managerId) add((p) => `eng.engagement_manager_id = ${p}`, query.managerId);
       if (query.officeCode) add((p) => `o.code = ${p}`, query.officeCode);
@@ -567,9 +574,10 @@ export class ComplianceCalendarV2Service {
 
       const { rows } = await client.query<CalendarSqlRow>(
         `SELECT ci.id, ci.engagement_id, eng.engagement_code, eng.entity_id,
-                ent.legal_name AS entity_name, o.code AS office_code, v.stream,
+                ent.legal_name AS entity_name, o.code AS office_code, ${FILING_STREAM} AS stream,
                 cr.code AS rule_code, cr.name AS rule_name, v.form_label, ci.registration_id,
                 ci.financial_year, ci.period_key,
+                to_char(ci.reference_date, 'YYYY-MM') AS reference_month,
                 ${EFFECTIVE_DUE}::text AS due_date, ci.statutory_deadline::text AS computed_due,
                 ge.notification_reference AS extension_reference,
                 COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS internal_date,
@@ -585,6 +593,8 @@ export class ComplianceCalendarV2Service {
            FROM hsdg.compliance_instances ci
            JOIN hsdg.compliance_rule_versions v ON v.id = ci.compliance_rule_version_id
            JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+           LEFT JOIN hsdg.services rs ON rs.id = cr.service_id
+           LEFT JOIN hsdg.services rf ON rf.id = rs.folded_into_service_id
            JOIN hsdg.engagements eng ON eng.id = ci.engagement_id
            JOIN hsdg.entities ent ON ent.id = eng.entity_id
            JOIN hsdg.offices o ON o.id = eng.office_id
@@ -632,7 +642,8 @@ export class ComplianceCalendarV2Service {
           registrationNumber: reg?.registration_number ?? null,
           financialYear: r.financial_year,
           periodKey: r.period_key,
-          periodLabel: periodKeyLabel(r.period_key),
+          // A legacy filing has no period key; its reference month stands in.
+          periodLabel: periodKeyLabel(r.period_key ?? r.reference_month),
           dueDate: r.due_date,
           originalDueDate: r.computed_due !== r.due_date ? r.computed_due : null,
           extensionReference: r.extension_reference,
