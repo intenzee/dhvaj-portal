@@ -1286,6 +1286,8 @@ export class ComplianceInstancesService {
         opts.version,
       );
       if (!updated) return this.notPermittedOrStale(before, opts.version);
+      // The workspace and the firm calendar read workflow_status: Filed / Not applicable.
+      await client.query(`SELECT hsdg.refresh_instance_workflow_status($1)`, [instanceId]);
 
       await this.audit.recordWith(client, ctx, {
         action: opts.auditAction,
