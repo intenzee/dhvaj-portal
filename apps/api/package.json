@@ -20,7 +20,9 @@
     "migrate": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL --ignore-pattern '(.*\\.md|\\..*)'",
     "migrate:up": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL --ignore-pattern '(.*\\.md|\\..*)' up",
     "migrate:down": "node-pg-migrate -j sql -m ../../db/migrations -d DATABASE_MIGRATE_URL --ignore-pattern '(.*\\.md|\\..*)' down",
-    "migrate:create": "node-pg-migrate -j sql -m ../../db/migrations create"
+    "migrate:create": "node-pg-migrate -j sql -m ../../db/migrations create",
+    "m365:check": "node --env-file-if-exists=.env -r ts-node/register/transpile-only src/scripts/m365-check.ts",
+    "storage:migrate-sharepoint": "node --env-file-if-exists=.env -r ts-node/register/transpile-only src/scripts/migrate-storage-to-sharepoint.ts"
   },
   "dependencies": {
     "@hsdg/contracts": "*",
