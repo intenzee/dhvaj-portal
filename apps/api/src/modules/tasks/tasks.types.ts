@@ -1,4 +1,9 @@
-import type { ClientDependencyStatus, TaskPriority, TaskStatus } from '@hsdg/contracts';
+import type {
+  ClientDependencyStatus,
+  TaskPriority,
+  TaskStatus,
+  WorkType,
+} from '@hsdg/contracts';
 
 /** A blocker link shown on a task's detail. */
 export interface TaskDependencyRef {
@@ -35,6 +40,18 @@ export interface TaskRecord {
   outOfScopeApprovedAt: string | null;
   outOfScopeApprovedById: string | null;
   outOfScopeApprovedByName: string | null;
+  /** Change 3 — the stream (engagement service) the task belongs to. */
+  engagementServiceId: string | null;
+  /** The stream key of that service (gst, tds, …) when it is a stream service. */
+  stream: string | null;
+  reviewerId: string | null;
+  reviewerName: string | null;
+  workType: WorkType | null;
+  /** The filing this task produces (generated from a compliance instance). */
+  complianceInstanceId: string | null;
+  sentForReviewAt: string | null;
+  /** When the reviewer opened the current review (their clock is running). */
+  reviewStartedAt: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -93,6 +110,10 @@ export interface CreateTaskInput {
   isOutOfScope?: boolean;
   /** §31 — mark the work billable to the client. */
   isBillable?: boolean;
+  engagementServiceId?: string;
+  reviewerEmployeeId?: string;
+  workType?: WorkType;
+  complianceInstanceId?: string;
 }
 
 /** §31 — a lead's decision on an out-of-scope request. */
@@ -108,12 +129,27 @@ export interface UpdateTaskInput {
   assignedToEmployeeId?: string | null;
   priority?: TaskPriority;
   dueDate?: string | null;
+  engagementServiceId?: string | null;
+  reviewerEmployeeId?: string | null;
+  workType?: WorkType | null;
   version?: number;
 }
 
 export interface UpdateTaskStatusInput {
   status: TaskStatus;
   version?: number;
+}
+
+/** Filters for the engagement task list (Services → All work, stream "Other work"). */
+export interface TaskListFilter {
+  status?: TaskStatus;
+  assignedToEmployeeId?: string;
+  engagementServiceId?: string;
+  stream?: string;
+  workType?: WorkType;
+  complianceInstanceId?: string;
+  /** Only live tasks (not done / cancelled). */
+  openOnly?: boolean;
 }
 
 export interface CreateClientDependencyInput {
