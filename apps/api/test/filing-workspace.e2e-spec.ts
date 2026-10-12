@@ -136,6 +136,8 @@ describe('Filing workspace (e2e)', () => {
     const codes = (first.body.checklist as Array<{ itemCode: string }>).map((c) => c.itemCode);
     expect(codes).toEqual(['LIABILITY', 'ITC_CONFIRMED', 'INTEREST_FEE', 'CLIENT_APPROVAL', 'PAYMENT', 'REVIEW', 'LODGE']);
     expect(first.body.instance.workflowStatus).toBe('not_started');
+    // A member from another office still sees the GSTIN it files for.
+    expect(first.body.instance.registrationNumber).toMatch(/^19AAAC/);
     expect(first.body.figuresRequiredToLodge).toBe(true);
     expect(first.body.can).toMatchObject({ lodge: false, waive: false, edit: true });
 
