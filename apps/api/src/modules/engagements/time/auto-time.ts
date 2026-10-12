@@ -110,6 +110,18 @@ export function closeRunningFor(
 }
 
 /**
+ * Close only the person's running AUTO entry (sign-out). A manual stopwatch
+ * keeps ADR-0034 behaviour: it never stops on its own.
+ */
+export function closeAutoFor(
+  client: PoolClient,
+  employeeId: string,
+  reason: TimeStopReason,
+): Promise<ClosedEntry[]> {
+  return closeWhere(client, `te.employee_id = $1 AND te.source = 'auto'`, [employeeId], reason, 'now');
+}
+
+/**
  * After a closure the system made (switch / idle / day-end / sign-out), keep the
  * task consistent with its clock: a work task that was In progress pauses; a
  * review whose clock stopped is no longer "being reviewed". Writes task_events
@@ -250,6 +262,33 @@ export function dayEndCutoff(now: Date, hourIst: number = AUTO_TIME.defaultDayEn
   const cutoffIstMs = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), hourIst, 0, 0);
   const cutoff = new Date(cutoffIstMs - 330 * 60_000);
   return now.getTime() >= cutoff.getTime() ? cutoff : null;
+}
+
+export const DAY_MS = 86_400_000;
+const IST_OFFSET_MS = 330 * 60_000;
+
+/** Today's date in IST as YYYY-MM-DD. */
+export function istToday(now: Date = new Date()): string {
+  return new Date(now.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Where an "other time" block sits on the clock: ending now when logged for
+ * today, else ending 18:00 IST on that day. Exported for unit tests.
+ */
+export function otherTimeWindow(
+  date: string,
+  minutes: number,
+  now: Date = new Date(),
+): { startedAt: Date; endedAt: Date } {
+  const endedAt =
+    date === istToday(now) ? now : new Date(Date.parse(`${date}T18:00:00Z`) - IST_OFFSET_MS);
+  return { startedAt: new Date(endedAt.getTime() - minutes * 60_000), endedAt };
+}
+
+/** Days between an IST date and today (0 = today; negative = future). */
+export function daysAgo(date: string, now: Date = new Date()): number {
+  return Math.round((Date.parse(istToday(now)) - Date.parse(date)) / DAY_MS);
 }
 
 /** The caller's clock: what is running, and what they can resume after being away. */

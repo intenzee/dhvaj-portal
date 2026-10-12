@@ -10,6 +10,9 @@ import { EngagementReviewsService } from './reviews/engagement-reviews.service';
 import { EngagementReviewsController } from './reviews/engagement-reviews.controller';
 import { TimeTrackingService } from './time/time-tracking.service';
 import { TimeTrackingController } from './time/time-tracking.controller';
+import { TimeAutoService } from './time/time-auto.service';
+import { EngagementTimeAutoController, TimeClockController } from './time/time-auto.controller';
+import { TimeCloserScheduler } from './time/time-closer.scheduler';
 
 /**
  * Engagement core: the central transactional object. Assignment-based access
@@ -21,13 +24,21 @@ import { TimeTrackingController } from './time/time-tracking.controller';
  */
 @Module({
   imports: [AuditModule, NotificationsModule, StatutoryAuditModule],
-  controllers: [EngagementsController, EngagementReviewsController, TimeTrackingController],
+  controllers: [
+    EngagementsController,
+    EngagementReviewsController,
+    TimeTrackingController,
+    TimeClockController,
+    EngagementTimeAutoController,
+  ],
   providers: [
     EngagementsService,
     EngagementLifecycleService,
     EngagementWorkflowService,
     EngagementReviewsService,
     TimeTrackingService,
+    TimeAutoService,
+    TimeCloserScheduler,
   ],
   exports: [
     EngagementsService,
@@ -35,6 +46,8 @@ import { TimeTrackingController } from './time/time-tracking.controller';
     EngagementWorkflowService,
     EngagementReviewsService,
     TimeTrackingService,
+    TimeAutoService,
+    TimeCloserScheduler,
   ],
 })
 export class EngagementsModule {}
