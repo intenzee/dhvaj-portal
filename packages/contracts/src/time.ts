@@ -10,14 +10,24 @@
  * one thing at a time). Enforced in the database by a partial unique index.
  */
 
-/** Why a running entry was stopped. */
+import type {
+  OtherTimeCategory,
+  TimeEntryKind,
+  TimeSource,
+  TimeStopReason,
+} from './time-auto';
+
+/**
+ * Why a running entry was stopped — the manual-timer subset of TIME_STOP_REASON
+ * (time-auto.ts holds the full Change 3 vocabulary).
+ */
 export const STOPPED_REASON = {
   /** The person clicked Stop. */
   manual: 'manual',
   /** The engagement reached a terminal state; the safety net force-stopped it. */
   engagementClosed: 'engagement_closed',
 } as const;
-export type StoppedReason = (typeof STOPPED_REASON)[keyof typeof STOPPED_REASON];
+export type StoppedReason = TimeStopReason;
 
 /** One time entry (a single start→stop session, or a still-running one). */
 export interface TimeEntryRecord {
@@ -33,6 +43,20 @@ export interface TimeEntryRecord {
   isRunning: boolean;
   note: string | null;
   stoppedReason: StoppedReason | null;
+  /** Change 3: the task this clock ran for (null for manual / other time). */
+  taskId: string | null;
+  taskTitle: string | null;
+  engagementServiceId: string | null;
+  entryKind: TimeEntryKind;
+  source: TimeSource;
+  category: OtherTimeCategory | null;
+  isBillable: boolean;
+  /** Set on an adjustment row: the entry it corrects. */
+  adjustsEntryId: string | null;
+  adjustmentReason: string | null;
+  adjustmentStatus: 'pending' | 'approved' | 'rejected' | null;
+  /** True when an approved adjustment replaced this entry in reports. */
+  isSuperseded: boolean;
   version: number;
 }
 

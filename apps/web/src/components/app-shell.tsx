@@ -28,6 +28,7 @@ import { Spinner } from './ui';
 import { GlobalSearch } from './global-search';
 import { ThemeToggle } from './theme-toggle';
 import { RunningTimerBanner } from './time/running-timer-banner';
+import { AwayResumeBanner } from './time/away-resume-banner';
 import { HelpPanel } from './help/help-panel';
 
 /** "New …" quick-create actions, shown only to users who may create that thing. */
@@ -187,6 +188,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
 
           <div className="ml-auto flex items-center gap-1.5">
             <RunningTimerBanner />
+            <AwayResumeBanner />
             <ThemeToggle />
             <NotificationBell />
             <button

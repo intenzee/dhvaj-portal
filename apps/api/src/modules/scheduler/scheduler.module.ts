@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { FilingWorkspaceModule } from '../filing-workspace/filing-workspace.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ComponentsModule } from '../components/components.module';
 import { ComplianceModule } from '../compliance/compliance.module';
+import { EngagementsModule } from '../engagements/engagements.module';
 import { ComplianceSchedulerService } from './compliance-scheduler.service';
 import { CronController } from './cron.controller';
 
@@ -12,7 +14,13 @@ import { CronController } from './cron.controller';
  * in the composition root (AppModule).
  */
 @Module({
-  imports: [NotificationsModule, ComponentsModule, ComplianceModule],
+  imports: [
+    NotificationsModule,
+    ComponentsModule,
+    ComplianceModule,
+    EngagementsModule,
+    FilingWorkspaceModule,
+  ],
   controllers: [CronController],
   providers: [ComplianceSchedulerService],
   exports: [ComplianceSchedulerService],

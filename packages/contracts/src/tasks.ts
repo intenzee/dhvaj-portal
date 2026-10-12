@@ -9,7 +9,12 @@
 export const TASK_STATUS = {
   todo: 'todo',
   inProgress: 'in_progress',
+  /** Work stopped for now (Pause, a switch to another task, idle or day-end). */
+  paused: 'paused',
+  /** Waiting on client. */
   blocked: 'blocked',
+  /** Sent for review; the reviewer's clock runs once they Start review. */
+  inReview: 'in_review',
   done: 'done',
   cancelled: 'cancelled',
 } as const;
@@ -19,7 +24,9 @@ export const TASK_STATUSES: TaskStatus[] = Object.values(TASK_STATUS);
 export const OPEN_TASK_STATUSES: TaskStatus[] = [
   TASK_STATUS.todo,
   TASK_STATUS.inProgress,
+  TASK_STATUS.paused,
   TASK_STATUS.blocked,
+  TASK_STATUS.inReview,
 ];
 
 export const TASK_PRIORITY = {

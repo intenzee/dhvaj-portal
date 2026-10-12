@@ -51,6 +51,15 @@ export interface DocumentRecord {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** Change 6 — the filing (compliance instance) this document belongs to, and its slot. */
+  complianceInstanceId?: string | null;
+  periodSection?: string | null;
+  slotCode?: string | null;
+  /** The filing's period / year / registration and the document's stream. */
+  periodKey?: string | null;
+  financialYear?: string | null;
+  registrationId?: string | null;
+  stream?: string | null;
 }
 
 export interface DocumentDetail extends DocumentRecord {
@@ -81,6 +90,13 @@ export interface CreateDocumentInput {
   componentInstanceId?: string | null;
   /** Tag the document as satisfying a checklist requirement of that component. */
   docRequirementId?: string | null;
+  /**
+   * Change 6 — file the document in a filing's slot. Set only by the filing
+   * workspace (which checks the instance and slot); not exposed on the DTO.
+   */
+  complianceInstanceId?: string | null;
+  periodSection?: string | null;
+  slotCode?: string | null;
   documentType?: DocumentType;
   classification?: DocumentClassification;
   sensitivity?: DocumentSensitivity;

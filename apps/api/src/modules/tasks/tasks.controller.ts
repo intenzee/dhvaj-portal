@@ -10,17 +10,19 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type Paginated } from '@hsdg/contracts';
+import { PERMISSION, TASK_ACTIONS, type Paginated, type TaskAction } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { TasksService } from './tasks.service';
-import type { TaskDetail, TaskRecord } from './tasks.types';
+import { TaskWorkflowService, type TransitionResult } from './task-workflow.service';
+import type { TaskDetail, TaskListFilter, TaskRecord } from './tasks.types';
 import {
   AddDependencyDto,
   ApproveOutOfScopeDto,
   CreateTaskDto,
   TaskListQueryDto,
+  TaskTransitionDto,
   UpdateTaskDto,
   UpdateTaskStatusDto,
 } from './dto/task.dto';
@@ -33,21 +35,32 @@ import {
 @ApiTags('engagement-tasks')
 @Controller('engagements')
 export class TasksController {
-  constructor(private readonly tasks: TasksService) {}
+  constructor(
+    private readonly tasks: TasksService,
+    private readonly workflow: TaskWorkflowService,
+  ) {}
 
   @Get(':id/tasks')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
-    summary: 'List engagement tasks (paginated); filter ?status=&assignedToEmployeeId=',
+    summary:
+      'List engagement tasks (paginated); filter ?status=&assignedToEmployeeId=&engagementServiceId=' +
+      '&stream=&workType=&complianceInstanceId=&open=',
   })
   list(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() query: TaskListQueryDto,
   ): Promise<Paginated<TaskRecord>> {
-    const filter: { status?: TaskListQueryDto['status']; assignedToEmployeeId?: string } = {};
-    if (query.status) filter.status = query.status;
-    if (query.assignedToEmployeeId) filter.assignedToEmployeeId = query.assignedToEmployeeId;
+    const filter: TaskListFilter = {
+      status: query.status,
+      assignedToEmployeeId: query.assignedToEmployeeId,
+      engagementServiceId: query.engagementServiceId,
+      stream: query.stream,
+      workType: query.workType,
+      complianceInstanceId: query.complianceInstanceId,
+      openOnly: query.open === true,
+    };
     return this.tasks
       .list(rlsContextFromPrincipal(principal), id, query, filter)
       .then((result) => paginate(result, query));
@@ -90,9 +103,10 @@ export class TasksController {
   @Post(':id/tasks/:taskId/status')
   @RequirePermissions(PERMISSION.taskUpdate)
   @ApiOperation({
-    summary: 'Progress a task’s status (audited)',
+    summary: 'Progress a task’s status (audited; legacy — prefer the transition routes)',
     description:
-      'The assignee or an engagement lead. A task cannot be marked done while it still has an ' +
+      'The assignee or an engagement lead. Mapped onto the matching transition, so the clock ' +
+      'follows exactly as with the buttons. A task cannot be marked done while it still has an ' +
       'unfinished blocker.',
   })
   updateStatus(
@@ -101,7 +115,34 @@ export class TasksController {
     @Param('taskId', new ParseUUIDPipe()) taskId: string,
     @Body() dto: UpdateTaskStatusDto,
   ): Promise<TaskRecord> {
-    return this.tasks.updateStatus(rlsContextFromPrincipal(principal), id, taskId, dto);
+    return this.workflow.setStatus(
+      rlsContextFromPrincipal(principal),
+      id,
+      taskId,
+      dto.status,
+      dto.version,
+    );
+  }
+
+  @Post(`:id/tasks/:taskId/:action(${TASK_ACTIONS.join('|')})`)
+  @RequirePermissions(PERMISSION.taskUpdate)
+  @ApiOperation({
+    summary: 'Move a task: start · pause · block · send-for-review · start-review · approve · return',
+    description:
+      'Change 3. Opens and closes time in the same transaction (Compliance engagements with ' +
+      'ff_auto_time): start opens a work entry and closes whatever the caller had running; pause, ' +
+      'block, send-for-review close it; start-review opens a review entry for the reviewer; ' +
+      'approve / return close it. block needs `reason` (raises a client request); return needs ' +
+      '`reason` (the review points). Also complete (no reviewer, or a lead), cancel, reopen (lead).',
+  })
+  transition(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('taskId', new ParseUUIDPipe()) taskId: string,
+    @Param('action') action: TaskAction,
+    @Body() dto: TaskTransitionDto,
+  ): Promise<TransitionResult> {
+    return this.workflow.transition(rlsContextFromPrincipal(principal), id, taskId, action, dto);
   }
 
   @Post(':id/tasks/:taskId/approve-out-of-scope')

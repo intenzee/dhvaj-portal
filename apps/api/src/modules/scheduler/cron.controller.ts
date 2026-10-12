@@ -4,6 +4,9 @@ import { timingSafeEqual } from 'node:crypto';
 import { AppConfigService } from '../../config/config.module';
 import { Public } from '../auth/auth.decorators';
 import { ComplianceSchedulerService } from './compliance-scheduler.service';
+import { TimeCloserScheduler } from '../engagements/time/time-closer.scheduler';
+import { MonthlyDataRequestScheduler } from '../filing-workspace/monthly-data-request.scheduler';
+import { istToday } from '../engagements/time/auto-time';
 
 /**
  * HTTP trigger for the background jobs on hosts with no long-running process
@@ -18,6 +21,8 @@ export class CronController {
   constructor(
     private readonly config: AppConfigService,
     private readonly scheduler: ComplianceSchedulerService,
+    private readonly timeCloser: TimeCloserScheduler,
+    private readonly monthlyRequest: MonthlyDataRequestScheduler,
   ) {}
 
   @Get()
@@ -31,8 +36,11 @@ export class CronController {
     }
     await this.scheduler.runSweep();
     await this.scheduler.runHorizonRoll();
+    // The monthly GST data request goes out on the 1st (IST), before the drain.
+    if (istToday(new Date()).endsWith('-01')) await this.monthlyRequest.run();
     await this.scheduler.runOutboxDrain();
     await this.scheduler.runCalendarMaintenance();
+    await this.timeCloser.run();
     return { status: 'ok' };
   }
 }

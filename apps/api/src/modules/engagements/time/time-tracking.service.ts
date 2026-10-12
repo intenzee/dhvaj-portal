@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  ENGAGEMENT_KIND,
+  FEATURE_FLAG,
   STOPPED_REASON,
   type ActiveTimer,
   type EngagementTimePersonRow,
@@ -14,10 +16,14 @@ import {
   type FirmTimeRow,
   type StoppedReason,
   type TimeEntryRecord,
+  type OtherTimeCategory,
+  type TimeEntryKind,
+  type TimeSource,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../../database/database.service';
 import type { RlsContext } from '../../../database/rls-context';
 import { translatePgError as mapPgError } from '../../../common/errors/pg-error.util';
+import { FeatureFlagsService } from '../../../common/feature-flags/feature-flags.service';
 import { AuditService } from '../../audit/audit.service';
 
 interface TimeEntryRow {
@@ -30,6 +36,17 @@ interface TimeEntryRow {
   duration_seconds: number | null;
   note: string | null;
   stopped_reason: StoppedReason | null;
+  task_id: string | null;
+  task_title: string | null;
+  engagement_service_id: string | null;
+  entry_kind: TimeEntryKind;
+  source: TimeSource;
+  category: OtherTimeCategory | null;
+  is_billable: boolean;
+  adjusts_entry_id: string | null;
+  adjustment_reason: string | null;
+  adjustment_status: 'pending' | 'approved' | 'rejected' | null;
+  is_superseded: boolean;
   version: number;
 }
 
@@ -45,6 +62,17 @@ function mapEntry(r: TimeEntryRow): TimeEntryRecord {
     isRunning: r.ended_at === null,
     note: r.note,
     stoppedReason: r.stopped_reason,
+    taskId: r.task_id,
+    taskTitle: r.task_title,
+    engagementServiceId: r.engagement_service_id,
+    entryKind: r.entry_kind,
+    source: r.source,
+    category: r.category,
+    isBillable: r.is_billable,
+    adjustsEntryId: r.adjusts_entry_id,
+    adjustmentReason: r.adjustment_reason,
+    adjustmentStatus: r.adjustment_status,
+    isSuperseded: r.is_superseded,
     version: r.version,
   };
 }
@@ -59,7 +87,13 @@ function mapEntry(r: TimeEntryRow): TimeEntryRecord {
  */
 const ENTRY_SELECT = `te.id, te.engagement_id, te.employee_id,
         COALESCE(emp.full_name, 'Team member') AS employee_name,
-        te.started_at, te.ended_at, te.duration_seconds, te.note, te.stopped_reason, te.version`;
+        te.started_at, te.ended_at, te.duration_seconds, te.note, te.stopped_reason,
+        te.task_id, (SELECT t.title FROM hsdg.tasks t WHERE t.id = te.task_id) AS task_title,
+        te.engagement_service_id, te.entry_kind, te.source, te.category, te.is_billable,
+        te.adjusts_entry_id, te.adjustment_reason, te.adjustment_status,
+        EXISTS (SELECT 1 FROM hsdg.engagement_time_entries a
+                 WHERE a.adjusts_entry_id = te.id AND a.adjustment_status = 'approved') AS is_superseded,
+        te.version`;
 
 /**
  * The engagement time-tracking engine (ADR-0034): a manual stopwatch per person
@@ -75,6 +109,7 @@ export class TimeTrackingService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly flags: FeatureFlagsService,
   ) {}
 
   /** Start the caller's timer on an engagement they belong to. */
@@ -91,10 +126,20 @@ export class TimeTrackingService {
     return this.db.withRlsContext(ctx, async (client) => {
       // The engagement must be visible to the caller (RLS); a clean 404 rather
       // than leaking existence via a later insert failure.
-      const visible = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [
-        engagementId,
-      ]);
+      const visible = await client.query<{ kind: string }>(
+        `SELECT kind FROM hsdg.engagements WHERE id = $1`,
+        [engagementId],
+      );
       if (visible.rowCount === 0) throw new NotFoundException('Engagement not found.');
+      // Change 3: on Compliance engagements the clock follows the task.
+      if (
+        visible.rows[0]!.kind === ENGAGEMENT_KIND.compliance &&
+        this.flags.isOn(FEATURE_FLAG.autoTime)
+      ) {
+        throw new ConflictException(
+          'Time on Compliance engagements follows the task — use Start work on a task, or Add other time.',
+        );
+      }
 
       // Friendly guard for the one-timer invariant: name the running engagement.
       const running = await client.query<{ engagement_code: string }>(
@@ -269,7 +314,7 @@ export class TimeTrackingService {
                 COALESCE(SUM(te.duration_seconds), 0)::text AS total_seconds,
                 count(*)::text AS entry_count,
                 bool_or(te.ended_at IS NULL) AS has_running
-         FROM hsdg.engagement_time_entries te
+         FROM hsdg.effective_time_entries te
          LEFT JOIN hsdg.employees emp ON emp.id = te.employee_id
          WHERE te.engagement_id = $1
          GROUP BY te.employee_id, emp.full_name
@@ -310,7 +355,7 @@ export class TimeTrackingService {
                 count(*)::text AS entry_count,
                 count(DISTINCT te.engagement_id)::text AS engagement_count,
                 bool_or(te.ended_at IS NULL) AS has_running
-         FROM hsdg.engagement_time_entries te
+         FROM hsdg.effective_time_entries te
          LEFT JOIN hsdg.employees emp ON emp.id = te.employee_id
          LEFT JOIN hsdg.grades g ON g.id = emp.grade_id
          LEFT JOIN hsdg.offices o ON o.id = emp.primary_office_id
