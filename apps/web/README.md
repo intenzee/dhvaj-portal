@@ -43,3 +43,13 @@ npm run lint --workspace @hsdg/web
 npm run test --workspace @hsdg/web     # Jest + React Testing Library (jsdom)
 npm run build --workspace @hsdg/web
 ```
+
+Browser flows (Playwright, `e2e/`) run against a live API with the dev
+identities seeded and dev sign-in on. They start `npm run dev` unless
+`PW_BASE_URL` points at a running web app:
+
+```bash
+npx playwright install chromium                     # once
+npm run e2e --workspace @hsdg/web                   # web :3000, API :3001
+PW_BASE_URL=http://localhost:3100 PW_API_URL=http://localhost:3101/api/v1 npm run e2e --workspace @hsdg/web
+```
