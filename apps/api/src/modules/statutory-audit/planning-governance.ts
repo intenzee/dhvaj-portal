@@ -6,6 +6,7 @@ import {
   PLANNING_ACTOR_ROLE_LABEL,
   PLANNING_ATTENTION_LABEL,
   materialityVersionLabel,
+  scopeVersionLabel,
   planningVersionLabel,
   type PartnerAttentionTrigger,
   type PlanningActorRole,
@@ -395,7 +396,7 @@ export async function syncPlanningAttention(
     `UPDATE hsdg.audit_planning_attention a
         SET partner_surfaced_at = NULL, partner_status = NULL, version = a.version + 1
       WHERE a.workflow_instance_id = $1 AND a.partner_surfaced_at IS NOT NULL
-        AND a.materiality_determination_id IS NULL
+        AND a.materiality_determination_id IS NULL AND a.scope_id IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM hsdg.audit_planning_signal s
            WHERE s.id = a.signal_id AND s.attention = 'immediate_partner' AND s.status <> 'closed'
@@ -601,6 +602,110 @@ export async function syncMaterialityAttention(
     objectId: determination.id,
     // partner_notified_at already makes this once per trigger per version.
     dedup: `materiality_attention:${fresh[0]!.id}`,
+  });
+}
+
+/**
+ * 03.4 §21 / §22 / §26 — put the 03.4 Partner Attention triggers (potential
+ * scope limitations, significant dependencies, OB-01 evidence limitation,
+ * open other-auditor strategy, set-aside IPA considerations, Reassessment
+ * Required) in the EP's Partner Planning View queue — one row per trigger,
+ * kept while it is raised; the EP is notified once per trigger (their own
+ * changes are acknowledged on the spot). The EP's own open challenges are not
+ * queued back to them. Idempotent; the actor is the RLS context's employee.
+ */
+export async function syncScopeAttention(
+  client: PoolClient,
+  engagementId: string,
+  workflowInstanceId: string,
+  scope: { id: string; versionNo: number },
+  triggers: readonly { key: string; label: string; detail: string | null }[],
+  /** additive — raise these triggers without retiring the others (a hook outside 03.4). */
+  opts: { additive?: boolean } = {},
+): Promise<void> {
+  // A Reassessment Required is raised afresh for each 03.4 version (notified once per version).
+  const queued = triggers
+    .filter((t) => !t.key.startsWith('partner:'))
+    .map((t) => (t.key === 'reassessment' ? { ...t, key: `reassessment:${scope.versionNo}` } : t));
+  const keys = queued.map((t) => t.key);
+  if (!opts.additive)
+    await client.query(
+      `UPDATE hsdg.audit_planning_attention
+        SET partner_surfaced_at = NULL, partner_status = NULL, version = version + 1
+      WHERE workflow_instance_id = $1 AND scope_id IS NOT NULL AND partner_surfaced_at IS NOT NULL
+        AND (scope_id <> $2 OR NOT (scope_trigger_key = ANY($3::text[])))`,
+      [workflowInstanceId, scope.id, keys],
+    );
+  for (const t of queued) {
+    await client.query(
+      `INSERT INTO hsdg.audit_planning_attention
+         (workflow_instance_id, engagement_id, scope_id, scope_trigger_key, scope_seq, scope_label,
+          scope_detail)
+       VALUES ($1, $2, $3, $4,
+               (SELECT COALESCE(max(scope_seq), 0) + 1 FROM hsdg.audit_planning_attention
+                 WHERE workflow_instance_id = $1),
+               $5, $6)
+       ON CONFLICT (scope_id, scope_trigger_key) DO UPDATE
+         SET scope_label = EXCLUDED.scope_label, scope_detail = EXCLUDED.scope_detail
+       WHERE (hsdg.audit_planning_attention.scope_label, hsdg.audit_planning_attention.scope_detail)
+             IS DISTINCT FROM (EXCLUDED.scope_label, EXCLUDED.scope_detail)`,
+      [workflowInstanceId, engagementId, scope.id, t.key, t.label, t.detail],
+    );
+  }
+  if (!keys.length) return;
+
+  const { rows: who } = await client.query<{ me: string | null; partner_id: string | null }>(
+    `SELECT hsdg.ctx_employee_id() AS me, engagement_partner_id AS partner_id
+       FROM hsdg.engagements WHERE id = $1`,
+    [engagementId],
+  );
+  const me = who[0]?.me ?? null;
+  const partnerId = who[0]?.partner_id ?? null;
+  const { rows: surfaced } = await client.query<{
+    id: string;
+    seq: number;
+    label: string;
+    notify: boolean;
+  }>(
+    `WITH s AS (
+       SELECT id, partner_notified_at IS NULL AS notify FROM hsdg.audit_planning_attention
+        WHERE scope_id = $1 AND partner_surfaced_at IS NULL
+          AND scope_trigger_key = ANY($4::text[]))
+     UPDATE hsdg.audit_planning_attention a
+        SET partner_surfaced_at = now(),
+            partner_status = CASE WHEN $2::uuid IS NOT NULL AND $2::uuid = $3::uuid
+                                  THEN 'acknowledged' ELSE 'surfaced' END,
+            reviewed_by_employee_id = CASE WHEN $2::uuid IS NOT NULL AND $2::uuid = $3::uuid
+                                           THEN $2::uuid ELSE NULL END,
+            reviewed_at = CASE WHEN $2::uuid IS NOT NULL AND $2::uuid = $3::uuid
+                               THEN now() ELSE NULL END,
+            partner_notified_at = COALESCE(a.partner_notified_at, now()),
+            version = a.version + 1
+       FROM s
+      WHERE a.id = s.id
+     RETURNING a.id, a.scope_seq AS seq, a.scope_label AS label, s.notify`,
+    [scope.id, me, partnerId, keys],
+  );
+  const fresh = surfaced.filter((r) => r.notify).sort((a, b) => a.seq - b.seq);
+  if (!fresh.length || !partnerId || partnerId === me) return;
+  const version = scopeVersionLabel(scope.versionNo);
+  const sc = (seq: number) => `SC-${String(seq).padStart(3, '0')}`;
+  await notifyPlanning(client, [partnerId], {
+    type: NOTIFICATION_TYPE.planningPartnerAttention,
+    title:
+      fresh.length === 1
+        ? `03.4 Scope & Approach ${version}: ${truncate(fresh[0]!.label, 120)}`
+        : `03.4 Scope & Approach ${version}: ${fresh.length} Partner Attention matters`,
+    body: fresh
+      .slice(0, 8)
+      .map((f) => `${sc(f.seq)} ${truncate(f.label, 140)}`)
+      .concat(fresh.length > 8 ? [`… and ${fresh.length - 8} more.`] : [])
+      .join('\n'),
+    engagementId,
+    objectType: 'audit_scope_approach',
+    objectId: scope.id,
+    // partner_notified_at already makes this once per trigger.
+    dedup: `scope_attention:${fresh[0]!.id}`,
   });
 }
 

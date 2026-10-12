@@ -60,7 +60,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { AuditBusinessUnderstandingService } from './audit-business-understanding.service';
 import { AuditAreaReviewService } from './audit-area-review.service';
-import { flagScopeReassessment } from './audit-scope-approach.service';
+import { flagScopeForMaterialityRevision } from './scope-hooks';
 import {
   MATERIALITY_IMPACT_PREVIEW,
   QUALITATIVE_KEYS,
@@ -637,11 +637,21 @@ export class AuditMaterialityService {
         await this.areaReview.markImpacted(client, workflowInstanceId);
         if (next.versionNo > 1) {
           // §24 (03.4): a materiality revision flags affected scope / map items — never silently.
-          await flagScopeReassessment(
+          const { header, analytics } = await this.understanding.readFinancialBasis(
             client,
             workflowInstanceId,
-            'materiality_revision',
+          );
+          const factor = header.units ? FINANCIAL_UNIT_FACTOR[header.units] : null;
+          const cy = new Map(analytics.movements.map((m) => [m.metricKey, m.cy]));
+          await flagScopeForMaterialityRevision(
+            client,
+            workflowInstanceId,
             `Materiality revised to ${materialityVersionLabel(next.versionNo)} (OM ₹${(next.selectedOm ?? 0).toLocaleString('en-IN')}): ${next.revisionReason ?? ''}`.trim(),
+            ({ metricKey, manualAmount }) => {
+              if (!metricKey) return manualAmount;
+              const v = cy.get(metricKey) ?? null;
+              return v !== null && factor ? v * factor : null;
+            },
           );
         }
       } else {

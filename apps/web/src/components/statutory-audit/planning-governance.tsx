@@ -404,7 +404,9 @@ function AttentionCard({ item }: { item: PartnerAttentionItem }): JSX.Element {
                   ? 'Signal'
                   : item.kind === 'materiality'
                     ? '03.3 Materiality'
-                    : 'Area of Focus'}
+                    : item.kind === 'scope'
+                      ? '03.4 Scope & Approach'
+                      : 'Area of Focus'}
               </Badge>
               {item.raisedByPartner && <Badge tone="info">Raised by EP</Badge>}
               {item.attention && (

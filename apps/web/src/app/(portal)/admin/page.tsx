@@ -14,10 +14,19 @@ import { PlanningSignalLibrarySection } from '@/components/admin/planning-signal
 import { PlanningConsiderationLibrarySection } from '@/components/admin/planning-consideration-library-section';
 import { AnalyticsMethodologySection } from '@/components/admin/analytics-methodology-section';
 import { MaterialityMethodologySection } from '@/components/admin/materiality-methodology-section';
+import { ScopeMethodologySection } from '@/components/admin/scope-methodology-section';
 import { AuditAreaLibrarySection } from '@/components/admin/audit-area-library-section';
 
 type Tab =
-  'users' | 'offices' | 'templates' | 'rules' | 'signals' | 'analytics' | 'materiality' | 'areas';
+  | 'users'
+  | 'offices'
+  | 'templates'
+  | 'rules'
+  | 'signals'
+  | 'analytics'
+  | 'materiality'
+  | 'scope'
+  | 'areas';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -57,6 +66,10 @@ export default function AdministrationPage(): JSX.Element {
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'materiality' as const, label: 'Materiality Methodology' }]
       : []),
+    // The 03.4 Scope & Approach Methodology Library — decision lists only; it never concludes scope.
+    ...(can(principal, PERMISSION.serviceManage)
+      ? [{ id: 'scope' as const, label: 'Scope Methodology' }]
+      : []),
     // The 03.5 Audit Area Library — versioned methodology; releases are immutable.
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'areas' as const, label: 'Audit Area Library' }]
@@ -67,7 +80,7 @@ export default function AdministrationPage(): JSX.Element {
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library and the Analytics and Materiality Methodology Libraries and the Audit Area Library. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries and the Audit Area Library. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -98,6 +111,8 @@ export default function AdministrationPage(): JSX.Element {
             <AnalyticsMethodologySection />
           ) : tab === 'materiality' ? (
             <MaterialityMethodologySection />
+          ) : tab === 'scope' ? (
+            <ScopeMethodologySection />
           ) : tab === 'areas' ? (
             <AuditAreaLibrarySection />
           ) : tab === 'signals' ? (
