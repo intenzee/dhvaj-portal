@@ -292,6 +292,11 @@ describe('Statutory Audit — 03.5 audit areas & assertions (e2e)', () => {
     });
     expect(s.openReviewItems).toBeGreaterThanOrEqual(1);
     expect(s.validations.find((v) => v.id === 'VAL-09')).toMatchObject({ met: false });
+    // A second open request for the same area is refused (case-insensitive).
+    await post(sy, `${areasUrl}/requests`, {
+      proposedAreaName: 'derivatives',
+      reason: 'Another risk',
+    }).expect(409);
     expect(await notes('manager.x@dhvaj.in', 'planning_areas_review')).not.toHaveLength(0);
 
     // Only the Manager answers; the EP and the team cannot.

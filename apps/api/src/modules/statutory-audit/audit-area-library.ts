@@ -117,8 +117,13 @@ export class AuditAreaLibraryService {
           [version, base, note],
         );
       } catch (e) {
-        if ((e as { code?: string }).code === '23505') {
-          throw new ConflictException(`Library version ${version} already exists.`);
+        const err = e as { code?: string; constraint?: string };
+        if (err.code === '23505') {
+          throw new ConflictException(
+            err.constraint === 'audit_area_library_release_one_draft'
+              ? 'Another draft was just opened — publish it before starting another.'
+              : `Library version ${version} already exists.`,
+          );
         }
         throw e;
       }
@@ -260,7 +265,7 @@ export class AuditAreaLibraryService {
 
   private async assertDraft(client: PoolClient, version: string): Promise<void> {
     const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM hsdg.audit_area_library_release WHERE library_version = $1`,
+      `SELECT status FROM hsdg.audit_area_library_release WHERE library_version = $1 FOR UPDATE`,
       [version],
     );
     if (!rows[0]) throw new NotFoundException(`Library version ${version} not found.`);
