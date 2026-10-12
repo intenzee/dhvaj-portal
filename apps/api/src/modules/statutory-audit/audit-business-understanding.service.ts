@@ -114,6 +114,14 @@ import { mergePriorSections, priorYearValues } from './planning-prior-year';
 /** The Phase 03 checklist row 03.2 rolls its state up into. */
 const UNDERSTANDING_ITEM_KEY = 'engagement_understanding';
 
+/** A consumer of the 03.2 figures that re-checks its own conclusion when they move. */
+export type FiguresChangedListener = (
+  client: PoolClient,
+  ctx: RlsContext,
+  engagementId: string,
+  workflowInstanceId: string,
+) => Promise<void>;
+
 /** PI-01 change categories surfaced as read-only context per section (never re-asked). */
 const SECTION_CHANGE_CONTEXT: Partial<
   Record<UnderstandingSectionKey, PlanningChangeCategory[] | 'all'>
@@ -364,6 +372,18 @@ export class AuditBusinessUnderstandingService {
     private readonly audit: AuditService,
     private readonly strategy: AuditPlanningStrategyService,
   ) {}
+
+  private readonly figuresListeners: FiguresChangedListener[] = [];
+
+  /**
+   * Run `listener` in the same transaction after every 03.2 figure change
+   * (values, dataset header, profile, analytics refresh). 03.3 uses it to flag a
+   * completed materiality for reassessment (DHVAJ 03.3 §20) without 03.2
+   * depending on 03.3.
+   */
+  onFiguresChanged(listener: FiguresChangedListener): void {
+    this.figuresListeners.push(listener);
+  }
 
   // ── Summary / record ───────────────────────────────────────────────────────
 
@@ -1592,6 +1612,9 @@ export class AuditBusinessUnderstandingService {
         impacted,
         impactedSignals,
       );
+    }
+    for (const listener of this.figuresListeners) {
+      await listener(client, ctx, engagementId, workflowInstanceId);
     }
   }
 
