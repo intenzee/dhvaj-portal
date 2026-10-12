@@ -180,6 +180,8 @@ export class AuditPlanningGovernanceController {
   @Post('planning-evidence/add')
   @RequirePermissions(PERMISSION.engagementRead)
   @PlanningCapabilityRequired('addFacts')
+  // The service applies each record's own freeze (03.12 lock; 03.2 / 03.3 versions).
+  @PlanningLockExempt()
   @ApiOperation({ summary: 'Add File — stored in the engagement workspace and linked here' })
   addEvidence(
     @CurrentPrincipal() principal: Principal,
@@ -193,6 +195,8 @@ export class AuditPlanningGovernanceController {
   @Post('planning-evidence/link')
   @RequirePermissions(PERMISSION.engagementRead)
   @PlanningCapabilityRequired('addFacts')
+  // The service applies each record's own freeze (03.12 lock; 03.2 / 03.3 versions).
+  @PlanningLockExempt()
   @ApiOperation({ summary: 'Link Existing File — an engagement document, never copied' })
   linkEvidence(
     @CurrentPrincipal() principal: Principal,
@@ -206,6 +210,8 @@ export class AuditPlanningGovernanceController {
   @Post('planning-evidence/:evidenceId/unlink')
   @RequirePermissions(PERMISSION.engagementRead)
   @PlanningCapabilityRequired('addFacts')
+  // The service applies each record's own freeze (03.12 lock; 03.2 / 03.3 versions).
+  @PlanningLockExempt()
   @ApiOperation({ summary: 'Remove a file from the 03.1 record (the document stays)' })
   unlinkEvidence(
     @CurrentPrincipal() principal: Principal,

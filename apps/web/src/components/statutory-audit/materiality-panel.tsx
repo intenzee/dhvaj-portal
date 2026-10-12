@@ -2,12 +2,15 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BookOpen, Info, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookOpen, Info, MessageSquare, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import {
   BENCHMARK_ASSESSMENT_LABEL,
   BENCHMARK_ASSESSMENTS,
   CLEARLY_TRIVIAL_WARNING,
   MATERIALITY_BENCHMARK_LABEL,
+  MATERIALITY_CHALLENGE_TARGET_LABEL,
+  MATERIALITY_CHALLENGE_TARGETS,
+  MATERIALITY_REASSESSMENT_SOURCE_LABEL,
   MATERIALITY_GUIDANCE_DISCLOSURE,
   METHODOLOGY_STATUS_LABEL,
   PRINCIPAL_USER_LABEL,
@@ -25,9 +28,12 @@ import {
   type BenchmarkCandidate,
   type JudgmentFactor,
   type MaterialityBenchmark,
+  type MaterialityChallengeRecord,
+  type MaterialityChallengeTarget,
   type MaterialityGuidance,
   type MaterialitySummary,
   type MethodologyStatus,
+  type PlanningCapability,
   type PlanningSignalRecord,
   type PrincipalUser,
   type QualitativeChallengeItem,
@@ -44,6 +50,8 @@ import { useToast } from '@/lib/toast';
 import type { TeamMember } from '@/lib/types';
 import { Badge, Button, Card, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { PlanningEvidence } from './planning-evidence';
+import { PlanningGovernanceProvider, type PlanningGovernance } from './planning-governance';
 import { CompletionChecklist } from './planning-strategy-sections';
 import { SectionLauncher } from './section-launcher';
 
@@ -67,7 +75,8 @@ type Tab =
   | 'qualitative'
   | 'sensitivity'
   | 'revision'
-  | 'conclusion';
+  | 'conclusion'
+  | 'review';
 
 const inr = (n: number | null | undefined) =>
   n === null || n === undefined ? '—' : `₹${Math.round(n).toLocaleString('en-IN')}`;
@@ -94,16 +103,13 @@ export function MaterialityPanel({
   workflowInstanceId,
   team,
   editable,
-  canRevise,
   onChanged,
 }: {
   engagementId: string;
   workflowInstanceId: string;
   team: TeamMember[];
-  /** Planning is editable (lead, not yet approved). */
+  /** Section 03 is open (02.8 §14) — 03.3 then gates by the caller's §23 role. */
   editable: boolean;
-  /** Lead rights: materiality may be revised during the audit even after planning approval. */
-  canRevise: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const qc = useQueryClient();
@@ -148,9 +154,19 @@ export function MaterialityPanel({
   const s = summary.data;
   if (!s) return <p className="text-sm text-ink-muted">03.3 is unavailable.</p>;
   const d = s.determination;
-  // A revision draft stays editable after planning approval (03.3.11).
-  const canEdit = d.status === 'draft' && (editable || (canRevise && d.versionNo > 1));
+  const g = s.governance;
+  const a = g.access;
+  /** The §23 capability alone (EP review, revise, respond). */
+  const has = (c: PlanningCapability) => editable && !!a.capabilities[c];
+  // A draft is open until Planning is approved (03.12); a revision draft stays open after it (03.3.11).
+  const draftOpen = d.status === 'draft' && editable && (!a.planningApproved || d.versionNo > 1);
+  /** Article / Senior prepare source data, context and the normalisation schedule. */
+  const canPrepare = draftOpen && a.capabilities.addFacts;
+  /** The Engagement Manager determines materiality and completes 03.3. */
+  const canEdit = draftOpen && a.capabilities.assess;
+  const gov: PlanningGovernance = { view: null, engagementId, base, can: has, has, refresh };
   const outstanding = s.completion.filter((c) => !c.met).length;
+  const openChallenges = g.challenges.filter((c) => c.status !== 'closed').length;
   const k = `${d.id ?? 'new'}-${d.version}`;
   const common = { s, canEdit, save, pending: update.isPending };
 
@@ -165,9 +181,11 @@ export function MaterialityPanel({
         ['sensitivity', 'Sensitivity'],
         ['revision', d.versionNo > 1 ? `Revision (${d.versionLabel})` : 'Revision & history'],
         ['conclusion', outstanding ? `Conclusion (${outstanding} to do)` : 'Conclusion'],
+        ['review', `Partner review${openChallenges ? ` (${openChallenges})` : ''}`],
       ];
 
   return (
+    <PlanningGovernanceProvider value={gov}>
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -177,6 +195,8 @@ export function MaterialityPanel({
           {s.partnerAttention.length > 0 && (
             <Badge tone="warn">{s.partnerAttention.length} Partner Attention</Badge>
           )}
+          <Badge tone="neutral">{a.roleLabel}</Badge>
+          {g.reassessment?.open && <Badge tone="warn">Reassessment required</Badge>}
           {s.methodology.anyProvisional && (
             <Badge tone="neutral">Methodology guidance: provisional</Badge>
           )}
@@ -207,13 +227,26 @@ export function MaterialityPanel({
             {d.completedByName ? ` (${d.completedByName})` : ''}. It is never overwritten — a change
             needs a revision (03.3.11).
           </span>
-          <Button variant="secondary" onClick={() => setTab('revision')}>
-            <RotateCcw className="mr-1.5 h-4 w-4" />
-            Revise materiality
-          </Button>
+          {(has('assess') || has('reopen')) && (
+            <Button variant="secondary" onClick={() => setTab('revision')}>
+              <RotateCcw className="mr-1.5 h-4 w-4" />
+              Revise materiality
+            </Button>
+          )}
         </Card>
       )}
-      {s.computed.sourceChanged && (
+      {d.status === 'complete' && (
+        <ReassessmentBlock
+          key={`reassess-${d.version}`}
+          s={s}
+          base={base}
+          mayRequire={has('partnerReview')}
+          mayResolve={has('assess')}
+          onRevise={() => setTab('revision')}
+          onChanged={refresh}
+        />
+      )}
+      {d.status === 'draft' && s.computed.sourceChanged && (
         <Card className="flex flex-wrap items-center justify-between gap-2 border-warn-200 bg-warn-50 p-3 text-sm text-warn-800">
           <span className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -234,8 +267,10 @@ export function MaterialityPanel({
       )}
 
       <SectionLauncher sections={sections} open={tab} onToggle={setTab} context="03.3 Materiality">
-        {tab === 'context' && <ContextTab key={k} {...common} />}
-        {tab === 'benchmarks' && <BenchmarksTab key={k} {...common} base={base} onChanged={refresh} />}
+        {tab === 'context' && <ContextTab key={k} {...common} canEdit={canPrepare} />}
+        {tab === 'benchmarks' && (
+          <BenchmarksTab key={k} {...common} canPrepare={canPrepare} base={base} onChanged={refresh} />
+        )}
         {tab === 'overall' && <OverallTab key={k} {...common} />}
         {tab === 'performance' && <PerformanceTab key={k} {...common} />}
         {tab === 'specific' && <SpecificTab key={k} {...common} base={base} onChanged={refresh} />}
@@ -255,7 +290,8 @@ export function MaterialityPanel({
           <RevisionTab
             key={k}
             {...common}
-            editable={canRevise}
+            editable={has('assess') || has('reopen')}
+            itemsEditable={has('assess')}
             engagementId={engagementId}
             base={base}
             team={team}
@@ -263,8 +299,20 @@ export function MaterialityPanel({
           />
         )}
         {tab === 'conclusion' && <ConclusionTab key={k} {...common} base={base} />}
+        {tab === 'review' && (
+          <ReviewTab
+            key={k}
+            s={s}
+            base={base}
+            engagementId={engagementId}
+            mayChallenge={has('partnerReview')}
+            mayRespond={has('respondToChallenge')}
+            onChanged={refresh}
+          />
+        )}
       </SectionLauncher>
     </div>
+    </PlanningGovernanceProvider>
   );
 }
 
@@ -386,6 +434,20 @@ function ContextTab({ s, canEdit, save, pending }: TabProps): JSX.Element {
           <Textarea rows={2} disabled={!canEdit} value={py.diffs} onChange={(e) => setPy({ ...py, diffs: e.target.value })} />
         </Field>
       </Card>
+      {d.id && (
+        <Card className="space-y-1 p-3">
+          <div className="text-sm font-medium text-ink">Supporting evidence</div>
+          <p className="text-xs text-ink-muted">
+            Unusual user focus, covenant / regulatory measures and other materiality judgments — stored in
+            SharePoint with version history (no separate Word memo).
+          </p>
+          <PlanningEvidence
+            targetType="materiality_determination"
+            targetId={d.id}
+            count={s.governance.evidenceCounts[d.id] ?? 0}
+          />
+        </Card>
+      )}
       {canEdit && (
         <Button
           disabled={pending}
@@ -419,11 +481,12 @@ function ContextTab({ s, canEdit, save, pending }: TabProps): JSX.Element {
 function BenchmarksTab({
   s,
   canEdit,
+  canPrepare,
   save,
   pending,
   base,
   onChanged,
-}: TabProps & { base: string; onChanged: () => void }): JSX.Element {
+}: TabProps & { canPrepare: boolean; base: string; onChanged: () => void }): JSX.Element {
   const d = s.determination;
   const units = s.dataset.unitLabel ?? '';
   const [rationale, setRationale] = useState(d.normalisationRationale ?? '');
@@ -445,7 +508,7 @@ function BenchmarksTab({
           Only through a controlled adjustment schedule — the reported 03.2 figure is never overwritten. Using a
           normalised benchmark is automatically flagged for Partner Attention.
         </p>
-        <AdjustmentSchedule s={s} base={base} canEdit={canEdit} onChanged={onChanged} />
+        <AdjustmentSchedule s={s} base={base} canEdit={canPrepare} onChanged={onChanged} />
         <div className="text-sm text-ink">
           Reported PBT {s.normalisation.reportedPbt ?? '—'} + adjustments {s.normalisation.adjustmentsTotal} ={' '}
           <span className="font-medium">normalised PBT {s.normalisation.normalisedPbt ?? '—'}</span> {units}
@@ -453,9 +516,9 @@ function BenchmarksTab({
         {(s.adjustments.length > 0 || d.normalisationRationale) && (
           <>
             <Field label="Why is the adjusted measure more representative for users? (mandatory)">
-              <Textarea rows={2} disabled={!canEdit} value={rationale} onChange={(e) => setRationale(e.target.value)} />
+              <Textarea rows={2} disabled={!canPrepare} value={rationale} onChange={(e) => setRationale(e.target.value)} />
             </Field>
-            {canEdit && (
+            {canPrepare && (
               <Button variant="secondary" disabled={pending} onClick={() => save({ normalisationRationale: rationale }, 'Normalisation rationale saved.')}>
                 Save rationale
               </Button>
@@ -639,7 +702,14 @@ function AdjustmentSchedule({
                 <td className="py-1 pr-2">{a.amount > 0 ? `+${a.amount}` : a.amount}</td>
                 <td className="py-1 pr-2">{a.reason ?? <span className="text-danger-600">Reason needed</span>}</td>
                 <td className="py-1 pr-2">{a.recurring ? 'Recurring' : 'Non-recurring'}</td>
-                <td className="py-1 pr-2">{a.evidence ?? '—'}</td>
+                <td className="py-1 pr-2">
+                  {a.evidence && <div>{a.evidence}</div>}
+                  <PlanningEvidence
+                    targetType="materiality_adjustment"
+                    targetId={a.id}
+                    count={s.governance.evidenceCounts[a.id] ?? 0}
+                  />
+                </td>
                 <td className="py-1">
                   {canEdit && (
                     <button type="button" className="text-ink-faint hover:text-danger-600" onClick={() => remove.mutate(a.id)} title="Remove from draft">
@@ -657,7 +727,7 @@ function AdjustmentSchedule({
           <Input className="sm:col-span-2" placeholder="Description" value={row.description} onChange={(e) => setRow({ ...row, description: e.target.value })} />
           <Input type="number" placeholder="± amount" value={row.amount} onChange={(e) => setRow({ ...row, amount: e.target.value })} />
           <Input placeholder="Reason" value={row.reason} onChange={(e) => setRow({ ...row, reason: e.target.value })} />
-          <Input placeholder="Evidence (SharePoint link / ref)" value={row.evidence} onChange={(e) => setRow({ ...row, evidence: e.target.value })} />
+          <Input placeholder="Source reference (attach files after adding)" value={row.evidence} onChange={(e) => setRow({ ...row, evidence: e.target.value })} />
           <label className="inline-flex items-center gap-1.5 text-xs text-ink">
             <input type="checkbox" checked={row.recurring} onChange={(e) => setRow({ ...row, recurring: e.target.checked })} />
             Recurring
@@ -1022,6 +1092,11 @@ function SpecificTab({
                 {r.thresholdType === 'monetary' ? `${inr(r.amount)}${r.specificPm ? ` (specific PM ${inr(r.specificPm)})` : ''}` : 'Qualitative / no fixed monetary threshold'}
                 <div className="text-ink-muted">{r.reason}</div>
                 {r.affectedAreas.length > 0 && <div className="text-ink-faint">Affected areas: {r.affectedAreas.join(', ')}</div>}
+                <PlanningEvidence
+                  targetType="materiality_specific"
+                  targetId={r.id}
+                  count={s.governance.evidenceCounts[r.id] ?? 0}
+                />
               </div>
               {canEdit && (
                 <button type="button" className="text-ink-faint hover:text-danger-600" onClick={() => remove.mutate(r.id)}>
@@ -1133,7 +1208,16 @@ function QualitativeTab({
         rather than re-writing it.
       </p>
       {s.qualitative.map((q) => (
-        <QualitativeRow key={`${q.key}-${q.version}`} q={q} base={base} canEdit={canEdit} signals={signals} focus={focus} onChanged={onChanged} />
+        <QualitativeRow
+          key={`${q.key}-${q.version}`}
+          q={q}
+          base={base}
+          canEdit={canEdit}
+          signals={signals}
+          focus={focus}
+          evidenceCount={q.id ? (s.governance.evidenceCounts[q.id] ?? 0) : 0}
+          onChanged={onChanged}
+        />
       ))}
     </div>
   );
@@ -1145,6 +1229,7 @@ function QualitativeRow({
   canEdit,
   signals,
   focus,
+  evidenceCount,
   onChanged,
 }: {
   q: QualitativeChallengeItem;
@@ -1152,6 +1237,7 @@ function QualitativeRow({
   canEdit: boolean;
   signals: PlanningSignalRecord[];
   focus: AreaOfFocusRecord[];
+  evidenceCount: number;
   onChanged: () => void;
 }): JSX.Element {
   const toast = useToast();
@@ -1223,6 +1309,9 @@ function QualitativeRow({
           Save
         </Button>
       )}
+      {q.id && (
+        <PlanningEvidence targetType="materiality_qualitative" targetId={q.id} count={evidenceCount} />
+      )}
     </Card>
   );
 }
@@ -1284,11 +1373,21 @@ function SensitivityTab({ s, canEdit, save, pending }: TabProps): JSX.Element {
 function RevisionTab({
   s,
   editable,
+  itemsEditable,
   base,
   engagementId,
   team,
   onChanged,
-}: TabProps & { editable: boolean; base: string; engagementId: string; team: TeamMember[]; onChanged: () => void }): JSX.Element {
+}: TabProps & {
+  /** May start a revision (Manager, or the EP — §23 "revise"). */
+  editable: boolean;
+  /** May assign / resolve affected work (Manager). */
+  itemsEditable: boolean;
+  base: string;
+  engagementId: string;
+  team: TeamMember[];
+  onChanged: () => void;
+}): JSX.Element {
   const toast = useToast();
   const d = s.determination;
   const [trigger, setTrigger] = useState<RevisionTrigger>('actual_results');
@@ -1391,7 +1490,7 @@ function RevisionTab({
           <div className="text-xs font-medium text-ink">Affected work (system impact analysis)</div>
           {s.revisionItems.length === 0 && <p className="text-xs text-ink-faint">No affected work yet — change the amounts to see the impact.</p>}
           {s.revisionItems.map((i) => (
-            <RevisionItemRow key={`${i.id}-${i.version}`} item={i} engagementId={engagementId} team={team} editable={editable} onChanged={onChanged} />
+            <RevisionItemRow key={`${i.id}-${i.version}`} item={i} engagementId={engagementId} team={team} editable={itemsEditable} onChanged={onChanged} />
           ))}
         </Card>
       )}
@@ -1539,5 +1638,372 @@ function ConclusionTab({ s, canEdit, save, pending, base }: TabProps & { base: s
         )}
       </Question>
     </div>
+  );
+}
+
+// ── §20 / §23 reassessment of the completed version ─────────────────────────
+
+function ReassessmentBlock({
+  s,
+  base,
+  mayRequire,
+  mayResolve,
+  onRevise,
+  onChanged,
+}: {
+  s: MaterialitySummary;
+  base: string;
+  /** Engagement Partner — may send the completed version back. */
+  mayRequire: boolean;
+  /** Engagement Manager — may record "reassessed, no change". */
+  mayResolve: boolean;
+  onRevise: () => void;
+  onChanged: () => void;
+}): JSX.Element | null {
+  const toast = useToast();
+  const d = s.determination;
+  const r = s.governance.reassessment;
+  const [requiring, setRequiring] = useState(false);
+  const [reason, setReason] = useState('');
+  const [resolving, setResolving] = useState(false);
+  const [resolution, setResolution] = useState('');
+  const require = useMutation({
+    mutationFn: () =>
+      apiFetch<MaterialitySummary>(`${base}/materiality/require-reassessment`, {
+        method: 'POST',
+        body: { reason, version: d.version },
+      }),
+    onSuccess: () => {
+      toast('Reassessment required — the Engagement Manager has been notified.');
+      setRequiring(false);
+      setReason('');
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not require reassessment.')),
+  });
+  const resolve = useMutation({
+    mutationFn: () =>
+      apiFetch<MaterialitySummary>(`${base}/materiality/resolve-reassessment`, {
+        method: 'POST',
+        body: { resolution, version: d.version },
+      }),
+    onSuccess: () => {
+      toast(`Reassessed — ${d.versionLabel} stands.`);
+      setResolving(false);
+      setResolution('');
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not record the reassessment.')),
+  });
+
+  if (r?.open) {
+    return (
+      <Card className="space-y-2 border-warn/40 bg-warn/5 p-3 text-sm" data-testid="materiality-reassessment">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+          <div className="min-w-0 space-y-1">
+            <div className="font-medium text-ink">
+              Reassessment required — {MATERIALITY_REASSESSMENT_SOURCE_LABEL[r.source]}
+            </div>
+            <p className="whitespace-pre-wrap text-ink-muted">{r.reason}</p>
+            <p className="text-[11px] text-ink-faint">
+              {r.flaggedByName ?? '—'}, {new Date(r.flaggedAt).toLocaleDateString()} · {d.versionLabel} stays in force
+              until revised.
+            </p>
+          </div>
+        </div>
+        {mayResolve && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={onRevise}>
+              <RotateCcw className="mr-1.5 h-4 w-4" />
+              Start revision
+            </Button>
+            {!resolving && (
+              <Button variant="ghost" onClick={() => setResolving(true)}>
+                Reassessed — no change
+              </Button>
+            )}
+          </div>
+        )}
+        {mayResolve && resolving && (
+          <div className="space-y-2">
+            <Field label={`Why ${d.versionLabel} still stands`} required>
+              <Textarea rows={2} value={resolution} onChange={(e) => setResolution(e.target.value)} />
+            </Field>
+            <div className="flex gap-2">
+              <Button disabled={resolve.isPending || !resolution.trim()} onClick={() => resolve.mutate()}>
+                Record reassessment
+              </Button>
+              <Button variant="ghost" onClick={() => setResolving(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      {r && !r.open && (
+        <Card className="p-3 text-xs text-ink-muted">
+          <span className="font-medium text-ink">Reassessed — no change</span> ({r.resolvedByName ?? '—'}
+          {r.resolvedAt ? `, ${new Date(r.resolvedAt).toLocaleDateString()}` : ''}): {r.resolution}
+          <span className="text-ink-faint"> · Raised for: {MATERIALITY_REASSESSMENT_SOURCE_LABEL[r.source]}</span>
+        </Card>
+      )}
+      {mayRequire && !requiring && (
+        <div>
+          <Button variant="ghost" onClick={() => setRequiring(true)}>
+            <AlertTriangle className="mr-1.5 h-4 w-4" />
+            Require reassessment
+          </Button>
+        </div>
+      )}
+      {mayRequire && requiring && (
+        <Card className="space-y-2 p-3">
+          <Field label="Why materiality must be reassessed" required>
+            <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>
+          <div className="flex gap-2">
+            <Button disabled={require.isPending || !reason.trim()} onClick={() => require.mutate()}>
+              Require reassessment
+            </Button>
+            <Button variant="ghost" onClick={() => setRequiring(false)}>
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      )}
+    </>
+  );
+}
+
+// ── §23 Partner review: comments and challenges ─────────────────────────────
+
+function ReviewTab({
+  s,
+  base,
+  engagementId,
+  mayChallenge,
+  mayRespond,
+  onChanged,
+}: {
+  s: MaterialitySummary;
+  base: string;
+  engagementId: string;
+  mayChallenge: boolean;
+  mayRespond: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const challenges = s.governance.challenges;
+  return (
+    <div className="space-y-2">
+      <h4 className="flex items-center gap-1.5 text-sm font-medium text-ink">
+        <MessageSquare className="h-4 w-4 text-ink-faint" /> Engagement Partner comments &amp; challenges
+      </h4>
+      <p className="text-xs text-ink-muted">
+        The Engagement Partner reviews 03.3 and may comment on or challenge any part of it. An open challenge stops 03.3
+        being completed until the Engagement Manager responds; the Partner then closes it.
+      </p>
+      {challenges.length === 0 && (
+        <p className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-sm text-ink-muted">
+          No Partner comments yet.
+        </p>
+      )}
+      {challenges.map((c) => (
+        <MaterialityChallengeCard
+          key={`${c.id}-${c.version}`}
+          engagementId={engagementId}
+          challenge={c}
+          mayClose={mayChallenge}
+          mayRespond={mayRespond}
+          onChanged={onChanged}
+        />
+      ))}
+      {mayChallenge && <RaiseMaterialityChallenge s={s} base={base} onChanged={onChanged} />}
+    </div>
+  );
+}
+
+function RaiseMaterialityChallenge({
+  s,
+  base,
+  onChanged,
+}: {
+  s: MaterialitySummary;
+  base: string;
+  onChanged: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const [targetType, setTargetType] = useState<MaterialityChallengeTarget>('overall');
+  const [targetRef, setTargetRef] = useState('');
+  const [kind, setKind] = useState<'comment' | 'challenge'>('challenge');
+  const [body, setBody] = useState('');
+  const refs: Array<{ value: string; label: string }> =
+    targetType === 'benchmarks'
+      ? s.candidates.map((c) => ({ value: c.label, label: c.label }))
+      : targetType === 'normalisation'
+        ? s.adjustments.map((a) => ({ value: a.code, label: `${a.code} — ${a.description.slice(0, 60)}` }))
+        : targetType === 'specific'
+          ? s.specific.map((r) => ({ value: r.code, label: `${r.code} — ${r.scope.slice(0, 60)}` }))
+          : targetType === 'qualitative'
+            ? s.qualitative.map((q) => ({ value: q.label, label: q.label }))
+            : [];
+  const raise = useMutation({
+    mutationFn: () =>
+      apiFetch<MaterialitySummary>(`${base}/materiality/challenges`, {
+        method: 'POST',
+        body: { targetType, targetRef: targetRef || null, kind, body },
+      }),
+    onSuccess: (r) => {
+      toast(`${r.governance.challenges[0]?.code ?? 'Comment'} raised — the Engagement Manager has been notified.`);
+      setBody('');
+      setTargetRef('');
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not raise the comment.')),
+  });
+  return (
+    <Card className="space-y-3 p-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="About">
+          <Select
+            value={targetType}
+            onChange={(e) => {
+              setTargetType(e.target.value as MaterialityChallengeTarget);
+              setTargetRef('');
+            }}
+          >
+            {MATERIALITY_CHALLENGE_TARGETS.map((t) => (
+              <option key={t} value={t}>
+                {MATERIALITY_CHALLENGE_TARGET_LABEL[t]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {refs.length > 0 && (
+          <Field label="Which one">
+            <Select value={targetRef} onChange={(e) => setTargetRef(e.target.value)}>
+              <option value="">— The whole area —</option>
+              {refs.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        <Field label="Type">
+          <Select value={kind} onChange={(e) => setKind(e.target.value as 'comment' | 'challenge')}>
+            <option value="challenge">Challenge — needs a response</option>
+            <option value="comment">Comment</option>
+          </Select>
+        </Field>
+      </div>
+      <Field label="Comment" required>
+        <Textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} />
+      </Field>
+      <Button onClick={() => raise.mutate()} disabled={raise.isPending || !body.trim()}>
+        Raise {kind}
+      </Button>
+    </Card>
+  );
+}
+
+function MaterialityChallengeCard({
+  engagementId,
+  challenge: c,
+  mayClose,
+  mayRespond,
+  onChanged,
+}: {
+  engagementId: string;
+  challenge: MaterialityChallengeRecord;
+  mayClose: boolean;
+  mayRespond: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const [response, setResponse] = useState(c.response ?? '');
+  const url = `/engagements/${engagementId}/statutory-audit/materiality-challenges/${c.id}`;
+  const respond = useMutation({
+    mutationFn: () =>
+      apiFetch<MaterialitySummary>(`${url}/respond`, { method: 'POST', body: { response, version: c.version } }),
+    onSuccess: () => {
+      toast(`Response to ${c.code} recorded.`);
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not record the response.')),
+  });
+  const close = useMutation({
+    mutationFn: () => apiFetch<MaterialitySummary>(`${url}/close`, { method: 'POST', body: { version: c.version } }),
+    onSuccess: () => {
+      toast(`${c.code} closed.`);
+      onChanged();
+    },
+    onError: (e) => toast(errMsg(e, 'Could not close it.')),
+  });
+  const tone = c.status === 'closed' ? 'neutral' : c.status === 'responded' ? 'info' : 'warn';
+  return (
+    <Card className="space-y-2 p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="mr-2 font-mono text-xs text-ink-faint">{c.code}</span>
+          <span className="text-xs text-ink-muted">
+            {c.targetLabel} · {c.versionLabel}
+          </span>
+          <p className="mt-1 whitespace-pre-wrap text-ink">{c.body}</p>
+          <p className="text-[11px] text-ink-faint">
+            {c.raisedByName ?? '—'}, {new Date(c.raisedAt).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="flex gap-1.5">
+          <Badge tone={c.kind === 'challenge' ? 'warn' : 'neutral'}>{c.kind === 'challenge' ? 'Challenge' : 'Comment'}</Badge>
+          <Badge tone={tone}>{c.status === 'open' ? 'Open' : c.status === 'responded' ? 'Responded' : 'Closed'}</Badge>
+        </div>
+      </div>
+      {c.response && (
+        <div className="rounded-md bg-surface-raised p-2 text-xs text-ink">
+          <span className="font-medium">Response</span> ({c.respondedByName ?? '—'}
+          {c.respondedAt ? `, ${new Date(c.respondedAt).toLocaleDateString()}` : ''}): {c.response}
+        </div>
+      )}
+      {c.status !== 'closed' && (mayRespond || mayClose) && (
+        <div className="space-y-2">
+          {mayRespond && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[16rem] flex-1">
+                <Textarea
+                  rows={2}
+                  aria-label={`Response to ${c.code}`}
+                  placeholder="Manager's response"
+                  value={response}
+                  onChange={(e) => setResponse(e.target.value)}
+                />
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => respond.mutate()}
+                disabled={respond.isPending || !response.trim() || response === c.response}
+              >
+                {c.response ? 'Update response' : 'Respond'}
+              </Button>
+            </div>
+          )}
+          {mayClose && (
+            <Button
+              variant="ghost"
+              onClick={() => close.mutate()}
+              disabled={close.isPending || (c.kind === 'challenge' && !c.response)}
+              title={c.kind === 'challenge' && !c.response ? 'A challenge is closed once the Manager has responded.' : undefined}
+            >
+              Close {c.kind}
+            </Button>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
