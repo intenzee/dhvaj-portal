@@ -28,7 +28,6 @@ import {
   setEventContext,
   settleTasksAfterClose,
 } from '../engagements/time/auto-time';
-import { refreshWorkflowStatus } from '../compliance/compliance-workflow-status';
 import { TasksService, mapTaskError } from './tasks.service';
 import {
   actionForStatus,
@@ -72,6 +71,9 @@ interface TaskCtxRow {
  * transaction: the task's status, the time entries it opens and closes, the
  * task_events row (trigger), any client dependency, the notification and the
  * audit record commit together or not at all.
+ *
+ * The filing a task produces follows the task by itself (SQL trigger
+ * tasks_refresh_filing → derive_instance_workflow_status).
  *
  * Automatic time runs only when ff_auto_time is on AND the engagement is a
  * Compliance engagement; audit staff keep the manual timer until audit time is
@@ -131,7 +133,6 @@ export class TaskWorkflowService {
         await closeTaskEntries(client, taskId, ['work'], TIME_STOP_REASON.paused);
       }
       await this.updateTask(client, taskId, engagementId, version, [`status = $1`], [status], null);
-      await this.afterChange(client, ctx, engagementId, taskId, row, status);
       return (await this.tasks.selectTask(client, taskId, engagementId))!;
     });
   }
@@ -305,7 +306,6 @@ export class TaskWorkflowService {
       before: { status: row.status },
       after: { status: plan.toStatus, reason: eventReason },
     });
-    await this.afterChange(client, ctx, engagementId, taskId, row, plan.toStatus);
 
     const task = (await this.tasks.selectTask(client, taskId, engagementId))!;
     const clock = me ? await clockState(client, me) : { running: null, resumable: null };
@@ -316,20 +316,6 @@ export class TaskWorkflowService {
 
   private autoTimeOn(row: TaskCtxRow): boolean {
     return this.flags.isOn(FEATURE_FLAG.autoTime) && row.engagement_kind === 'compliance';
-  }
-
-  /** The filing a task produces follows the task (In preparation / In review / Ready). */
-  private async afterChange(
-    client: PoolClient,
-    _ctx: RlsContext,
-    _engagementId: string,
-    _taskId: string,
-    row: TaskCtxRow,
-    _to: TaskStatus,
-  ): Promise<void> {
-    if (row.source_compliance_instance_id) {
-      await refreshWorkflowStatus(client, row.source_compliance_instance_id);
-    }
   }
 
   private async loadTask(
