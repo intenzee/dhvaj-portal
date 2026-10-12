@@ -231,8 +231,8 @@ export function PlanningGovernanceStrip(): JSX.Element | null {
       {downstreamFlags.length > 0 && (
         <div className="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm">
           <p className="flex items-start gap-1.5 font-medium text-ink">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" />A 03.1 change
-            needs downstream planning reassessed
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" />An upstream
+            planning change needs downstream planning reassessed
           </p>
           <ul className="mt-1 space-y-0.5 text-xs text-ink-muted">
             {downstreamFlags.map((f) => (
