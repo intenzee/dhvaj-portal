@@ -127,6 +127,20 @@ describe('Firm calendar v2 (e2e)', () => {
       );
     });
 
+    it('generates each filing with its checklist', async () => {
+      const { rows } = await superuser((db) =>
+        db.query<{ seeded: number; total: number }>(
+          `SELECT count(*) FILTER (WHERE EXISTS (SELECT 1 FROM hsdg.instance_checklist_items it
+                                                   WHERE it.compliance_instance_id = ci.id))::int AS seeded,
+                  count(*)::int AS total
+             FROM hsdg.compliance_instances ci WHERE ci.engagement_id = $1`,
+          [eng],
+        ),
+      );
+      expect(rows[0]!.total).toBeGreaterThan(0);
+      expect(rows[0]!.seeded).toBeGreaterThan(rows[0]!.total / 2);
+    });
+
     it('rejects an unknown stream', async () => {
       await http().get(`/api/v1/compliance/calendar?stream=vat`).set(bearer(pa)).expect(400);
     });

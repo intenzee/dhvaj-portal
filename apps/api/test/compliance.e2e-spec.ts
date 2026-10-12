@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { Client } from 'pg';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
@@ -330,6 +331,18 @@ describe('Compliance Engine (e2e)', () => {
         .expect(201);
       expect(done.body.status).toBe('completed');
       expect(done.body.isStatutoryOverdue).toBe(false);
+      // The workspace and firm calendar see it as Filed.
+      const db = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
+      await db.connect();
+      try {
+        const { rows } = await db.query<{ workflow_status: string }>(
+          `SELECT workflow_status FROM hsdg.compliance_instances WHERE id = $1`,
+          [gen.body.id],
+        );
+        expect(rows[0]!.workflow_status).toBe('filed');
+      } finally {
+        await db.end();
+      }
       // A completed obligation cannot be completed again.
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/compliance/${gen.body.id}/complete`)

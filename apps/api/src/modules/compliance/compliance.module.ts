@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, type OnModuleInit } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { ComplianceRulesService } from './compliance-rules.service';
 import { ComplianceInstancesService } from './compliance-instances.service';
@@ -14,6 +14,7 @@ import {
 import { GovernmentExtensionsController } from './government-extensions.controller';
 import { ComplianceGeneratorService } from './compliance-generator.service';
 import { ComplianceCalendarV2Service } from './compliance-calendar-v2.service';
+import { seedChecklistForInstance } from './compliance-checklist';
 import {
   ComplianceRuleVerifyController,
   EngagementCalendarV2Controller,
@@ -56,4 +57,13 @@ import {
     ComplianceCalendarV2Service,
   ],
 })
-export class ComplianceModule {}
+export class ComplianceModule implements OnModuleInit {
+  constructor(private readonly generator: ComplianceGeneratorService) {}
+
+  /** Every generated filing starts with its checklist (Change 5), in the same transaction. */
+  onModuleInit(): void {
+    this.generator.onInstancesCreated(async (client, ids) => {
+      for (const id of ids) await seedChecklistForInstance(client, id);
+    });
+  }
+}
