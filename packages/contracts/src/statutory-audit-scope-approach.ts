@@ -8,6 +8,7 @@
  * procedures, and never re-keys facts owned by Section 02 / 03.1–03.3.
  */
 import type { PartnerAttentionTrigger } from './statutory-audit-materiality';
+import type { PlanningActorRole } from './statutory-audit-planning-governance';
 import type { PlanningAttention } from './statutory-audit-planning-signal';
 import type { PlanningCompletionCheck } from './statutory-audit-planning-strategy';
 
@@ -156,6 +157,13 @@ export interface ScopeUnit {
   finAmount: number | null;
   finSource: string | null;
   finNotAvailable: boolean;
+  /** §7 — number of employees at the unit (team-recorded indicator). */
+  employees: number | null;
+  /** §7 — transaction-volume indicator (e.g. invoices / vouchers a year). */
+  transactionVolume: number | null;
+  volumeNote: string | null;
+  /** §7 — why the financial indicator still needs recording (component / branch financials). */
+  finPrompt: string | null;
   /** "2.4× OM" / "Below OM — not excluded on that basis" — context only. */
   materialityContext: string | null;
   relevance: UnitRelevance[];
@@ -169,8 +177,23 @@ export interface ScopeUnit {
   scopeConclusion: ScopeConclusion | null;
   rationale: string | null;
   noLongerGenerated: boolean;
+  /** §7 — regulatory / fraud / location-specific signals the portal suggests linking (not yet linked). */
+  suggestedSignals: ScopeUnitSignalSuggestion[];
   version: number;
 }
+
+export interface ScopeUnitSignalSuggestion {
+  id: string;
+  code: string;
+  observation: string;
+  /** Why it is suggested for this unit. */
+  reason: 'regulatory' | 'fraud' | 'names_unit';
+}
+export const SCOPE_UNIT_SIGNAL_REASON_LABEL: Record<ScopeUnitSignalSuggestion['reason'], string> = {
+  regulatory: 'Regulatory signal',
+  fraud: 'Fraud signal',
+  names_unit: 'Mentions this unit',
+};
 
 export interface ScopeUnitInput {
   name?: string;
@@ -180,6 +203,9 @@ export interface ScopeUnitInput {
   finAmount?: number | null;
   finSource?: string | null;
   finNotAvailable?: boolean;
+  employees?: number | null;
+  transactionVolume?: number | null;
+  volumeNote?: string | null;
   relevance?: UnitRelevance[];
   relevanceOther?: string | null;
   qualitativeNote?: string | null;
@@ -229,6 +255,10 @@ export interface DecisionItemDef {
   options: string[];
   /** Destination / prompt shown with the item. */
   hint?: string;
+  /** §31 — the Methodology Library item (code + version) the item came from. */
+  itemCode?: string;
+  itemVersion?: number;
+  guidance?: string | null;
 }
 
 export const DECISION_STATUS_LABEL: Record<string, string> = {
@@ -336,6 +366,12 @@ export interface ScopeDecision {
   /** System prompt (e.g. roll-forward suggested because reliance is contemplated). */
   prompt: string | null;
   note: string | null;
+  /** §31 — Methodology Library item code (SMI-…) the item comes from; null for custom items. */
+  itemCode: string | null;
+  /** §31 — library guidance shown with the item. */
+  guidance: string | null;
+  /** §31 — the library retired the item; shown only because a decision was saved on it. */
+  retired: boolean;
   version: number;
 }
 
@@ -753,6 +789,26 @@ export interface ScopeMapItem {
   exclusionReason: string | null;
   reassessmentRequired: boolean;
   reassessmentReason: string | null;
+  /** §23 — the 03.5 engagement area this map area is carried into (null: not yet). */
+  linkedArea: ScopeLinkedArea | null;
+  version: number;
+}
+/** A 03.5 engagement area as 03.4 shows it. */
+export interface ScopeLinkedArea {
+  id: string;
+  /** Library area code (e.g. REV) — null for a custom / converted area. */
+  areaCode: string | null;
+  name: string;
+  origin: string;
+  disposition: 'retained' | 'removed';
+}
+/** §23 — link a map area to an existing 03.5 area (null unlinks). */
+export interface LinkScopeMapAreaInput {
+  areaId: string | null;
+  version: number;
+}
+/** §23 — create a 03.5 custom area from a map area that matches nothing in the library. */
+export interface ConvertScopeMapAreaInput {
   version: number;
 }
 export interface ScopeMapItemInput {
@@ -801,6 +857,10 @@ export interface ScopePartnerAction {
   response: string | null;
   createdByName: string | null;
   createdAt: string;
+  respondedByName: string | null;
+  respondedAt: string | null;
+  /** The 03.4 version the action was taken on (v1.0, v1.1 …). */
+  scopeVersionLabel: string | null;
   version: number;
 }
 export interface PartnerScopeActionInput {
@@ -860,6 +920,12 @@ export interface StartScopeRevisionInput {
   affectedModules?: string[];
 }
 export type ScopeReassessmentSource = 'materiality_revision' | 'section_05' | 'manager' | 'other';
+export const SCOPE_REASSESSMENT_SOURCE_LABEL = labels<ScopeReassessmentSource>({
+  materiality_revision: 'Materiality revised (03.3)',
+  section_05: 'Section 05 control results',
+  manager: 'Engagement Manager',
+  other: 'Planning change (03.1)',
+});
 export interface FlagScopeReassessmentInput {
   source: ScopeReassessmentSource;
   reason: string;
@@ -995,6 +1061,8 @@ export interface ScopeLandingCards {
 }
 
 export interface ScopeAuthorityRef {
+  /** authority_reference_link anchor ('03.4' context). */
+  anchor: string;
   code: string;
   label: string;
   title: string | null;
@@ -1022,4 +1090,208 @@ export interface ScopeApproachSummary {
   revisions: ScopeRevision[];
   authorities: ScopeAuthorityRef[];
   completion: PlanningCompletionCheck[];
+  /** §30 — what the acting user may do in 03.4. */
+  access: ScopeAccess;
+  /** §28 — evidence links per 03.4 record id. */
+  evidenceCounts: Record<string, number>;
+  /** §15 — opening-balance facts already recorded elsewhere (read-only, linked). */
+  obFacts: ScopeObFact[];
+  /** §31 — the methodology lists in force for this file. */
+  methodology: ScopeMethodologyRef;
+  /** §23 — Approach Map → 03.5 status. */
+  areaLink: ScopeAreaLinkStatus;
+}
+
+// ── §30 role split ───────────────────────────────────────────────────────────
+
+/**
+ * What the acting user may do in 03.4. Article / Senior prepare (facts,
+ * indicators, decisions and map strategy as a draft); the Engagement Manager
+ * concludes and completes; the Engagement Partner reviews (§26).
+ */
+export interface ScopeAccess {
+  role: PlanningActorRole;
+  roleLabel: string;
+  actingAsManager: boolean;
+  /** Record facts / prepare drafts (engagement team, Manager, EP). */
+  prepare: boolean;
+  /** Conclude scope, AP-01, OB / SO / IA / DT / SL, include / exclude, AP-02 (Manager). */
+  conclude: boolean;
+  /** Agree / challenge / request / add a Partner signal (EP). */
+  partnerReview: boolean;
+  /** Answer a Partner challenge / request (Manager). */
+  respond: boolean;
+}
+
+/** UpdateScopeApproachInput fields the engagement team may set (everything else is the Manager's). */
+export const SCOPE_TEAM_RECORD_FIELDS = [
+  'obInputs',
+  'inventoryLocations',
+  'ec01Areas',
+  'icfrNote',
+] as const;
+/** ScopeUnitInput fields the engagement team may set (scope conclusions are the Manager's). */
+export const SCOPE_TEAM_UNIT_FIELDS = [
+  'name',
+  'unitType',
+  'location',
+  'finMetric',
+  'finAmount',
+  'finSource',
+  'finNotAvailable',
+  'employees',
+  'transactionVolume',
+  'volumeNote',
+  'relevance',
+  'relevanceOther',
+  'qualitativeNote',
+  'signalIds',
+  'focusIds',
+] as const;
+/** ServiceOrgInput fields the engagement team may set (SO-01 is the Manager's). */
+export const SCOPE_TEAM_SERVICE_ORG_FIELDS = [
+  'provider',
+  'process',
+  'affectedAreas',
+  'assuranceReport',
+  'reportDetail',
+  'cuec',
+  'note',
+] as const;
+/** ScopeMapItemInput fields the engagement team may set (include / exclude / reassessed are the Manager's). */
+export const SCOPE_TEAM_MAP_FIELDS = [
+  'name',
+  'manualAmount',
+  'materialityNote',
+  'signalIds',
+  'focusIds',
+  'controlsStrategy',
+  'timing',
+  'evidenceChannels',
+  'specialConsiderations',
+  'note',
+] as const;
+
+// ── §15 linked opening-balance facts ─────────────────────────────────────────
+
+export interface ScopeObFact {
+  key: string;
+  label: string;
+  value: string;
+  /** Where the fact is recorded (corrections go there). */
+  source: string;
+  /** Suggested OB_INPUTS answer this fact implies, if any. */
+  impliesInput?: { key: string; value: string } | null;
+}
+
+// ── §23 Approach Map → 03.5 ──────────────────────────────────────────────────
+
+export interface ScopeAreaLinkStatus {
+  /** 03.5 has been populated on this file. */
+  available: boolean;
+  /** Included map areas with no 03.5 area. */
+  unconverted: number;
+}
+
+// ── §31 methodology library ──────────────────────────────────────────────────
+
+export interface ScopeMethodologyRef {
+  /** e.g. dhvaj-scope-2026.1. */
+  version: string;
+  /** 'library' when the lists came from the Methodology Library; 'built_in' only if it is empty. */
+  source: 'library' | 'built_in';
+}
+
+/** Every status word a library item may offer (03.4 renders and validates these). */
+export const SCOPE_METHODOLOGY_STATUSES = Object.keys(DECISION_STATUS_LABEL);
+export const SCOPE_METHODOLOGY_KINDS: ScopeDecisionKind[] = [
+  'controls_cycle',
+  'timing',
+  'evidence_channel',
+  'technology_use',
+];
+export const SCOPE_METHODOLOGY_KIND_LABEL: Record<ScopeDecisionKind, string> = {
+  controls_cycle: 'Controls cycle',
+  timing: 'Timing area',
+  evidence_channel: 'Evidence channel',
+  technology_use: 'Technology use',
+};
+
+export interface ScopeMethodologyItemRecord {
+  id: string;
+  itemCode: string;
+  version: number;
+  kind: ScopeDecisionKind;
+  itemKey: string;
+  label: string;
+  options: string[];
+  hint: string | null;
+  guidance: string | null;
+  sortOrder: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  active: boolean;
+  methodologyVersion: string;
+  changeNote: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface ScopeMethodologyLibrary {
+  items: ScopeMethodologyItemRecord[];
+}
+
+export interface CreateScopeMethodologyItemVersionInput {
+  /** SMI-00n; an unused code adds a new item. */
+  itemCode: string;
+  kind: ScopeDecisionKind;
+  itemKey: string;
+  label: string;
+  options: string[];
+  hint?: string | null;
+  guidance?: string | null;
+  sortOrder?: number;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+  active?: boolean;
+  methodologyVersion?: string;
+  changeNote: string;
+}
+
+// ── §6 / §17 / §19 hand-off to 03.8 / 03.9 / 03.11 ───────────────────────────
+
+/** The Phase 03 checklist rows that read 03.4 decisions (§6). */
+export const SCOPE_HANDOFF_ITEMS = [
+  'specialist_planning',
+  'component_planning',
+  'timeline_milestones',
+] as const;
+export type ScopeHandoffItem = (typeof SCOPE_HANDOFF_ITEMS)[number];
+
+export interface ScopeHandoff {
+  /** 03.4 exists on this file. */
+  available: boolean;
+  versionLabel: string | null;
+  status: ScopeApproachStatus | null;
+  /** 03.8 — specialists Likely Required / Evaluate Further (§17). */
+  specialists: { observation: string; decision: string; note: string | null; signalCode: string | null }[];
+  /** 03.9 — other / component / branch / joint auditor units and the strategy (§12). */
+  components: {
+    code: string;
+    name: string;
+    auditor: UnitAuditor;
+    auditorStrategy: OtherAuditorStrategy | null;
+    scopeConclusion: ScopeConclusion | null;
+  }[];
+  /** 03.11 — the strategic timing pattern (§19). */
+  timing: { label: string; status: string | null; rollForward: RollForward | null; prompt: string | null }[];
+  /** 03.11 — open dependencies and when they are needed (§21). */
+  dependencies: {
+    code: string;
+    description: string;
+    neededBy: NeededBy | null;
+    status: DependencyStatus;
+    ownerName: string | null;
+    ownerParty: DependencyOwnerParty;
+  }[];
 }

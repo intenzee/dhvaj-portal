@@ -96,6 +96,7 @@ import { componentAuditorFeedOn } from './consolidation-group-read';
 import { componentsFromDetail } from './consolidation-read';
 import { isEngagementLead, readPriorAuditFile, type PriorAuditFile } from './master-facts';
 import { inSequence } from '../../database/in-sequence';
+import { onControlResult } from './scope-hooks';
 
 /** 02.6 perimeter relationships whose entities are components of the CFS. */
 const CFS_COMPONENT_RELATIONSHIPS = new Set(['subsidiary', 'associate', 'joint_venture']);
@@ -638,6 +639,28 @@ export class AuditIcfrControlsService {
         if ((err as { code?: string }).code === '23505')
           throw new ConflictException('That control reference is already used in this file.');
         throw err;
+      }
+      // 03.4 §24 — a result that does not support planned reliance flags the scope strategy.
+      if (
+        input.design !== undefined ||
+        input.implementation !== undefined ||
+        input.operatingEffectiveness !== undefined ||
+        input.purposeFsAudit !== undefined
+      ) {
+        await onControlResult(client, workflowInstanceId, {
+          ref: c.control_ref,
+          purposeFsAudit: fsAudit,
+          process: input.process?.trim() || c.process,
+          processAreaId:
+            input.processAreaId !== undefined ? input.processAreaId : c.process_area_id,
+          design: input.design !== undefined ? input.design : c.design,
+          implementation:
+            input.implementation !== undefined ? input.implementation : c.implementation,
+          operatingEffectiveness:
+            input.operatingEffectiveness !== undefined
+              ? input.operatingEffectiveness
+              : c.operating_effectiveness,
+        });
       }
       await this.audit.recordWith(client, ctx, {
         action: 'statutory_audit.icfr_control_updated',

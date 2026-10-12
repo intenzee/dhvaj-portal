@@ -183,14 +183,14 @@ CREATE POLICY audit_planning_items_update ON hsdg.audit_planning_items
   FOR UPDATE USING (
     hsdg.is_engagement_lead(engagement_id)
     OR (hsdg.is_engagement_member(engagement_id)
-        AND item_key IN ('engagement_understanding','materiality'))
+        AND item_key IN ('engagement_understanding','materiality','audit_approach','overall_audit_plan'))
     OR (item_key = 'areas_and_assertions'
         AND hsdg.has_area_review_grant(engagement_id, 'prepare'))
   )
   WITH CHECK (
     hsdg.is_engagement_lead(engagement_id)
     OR (hsdg.is_engagement_member(engagement_id)
-        AND item_key IN ('engagement_understanding','materiality'))
+        AND item_key IN ('engagement_understanding','materiality','audit_approach','overall_audit_plan'))
     OR (item_key = 'areas_and_assertions'
         AND hsdg.has_area_review_grant(engagement_id, 'prepare'))
   );
@@ -204,6 +204,8 @@ ALTER TABLE hsdg.audit_planning_evidence
      'understanding_section','financial_dataset','analytics_exception','planning_expectation',
      'materiality_determination','materiality_adjustment','materiality_specific',
      'materiality_qualitative',
+     'scope_approach','scope_unit','scope_service_org','scope_dependency','scope_limitation',
+     'scope_map_item',
      'audit_area','area_assertion'));
 
 -- ── notifications ─────────────────────────────────────────────────────────
@@ -221,6 +223,7 @@ ALTER TABLE hsdg.notifications ADD CONSTRAINT notifications_type_check CHECK (ty
    'planning_signal_alert','planning_partner_attention','planning_strategy_reopened',
    'planning_understanding_reassessment','planning_understanding_challenge',
    'planning_materiality_reassessment','planning_materiality_challenge',
+   'planning_scope_reassessment','planning_scope_partner_action',
    'planning_areas_review','planning_areas_update_required'));
 
 -- ── §24 structural lineage: area → risk → procedure ───────────────────────
@@ -476,7 +479,8 @@ ALTER TABLE hsdg.notifications ADD CONSTRAINT notifications_type_check CHECK (ty
    'framework_reopened','framework_work_impacted',
    'planning_signal_alert','planning_partner_attention','planning_strategy_reopened',
    'planning_understanding_reassessment','planning_understanding_challenge',
-   'planning_materiality_reassessment','planning_materiality_challenge'));
+   'planning_materiality_reassessment','planning_materiality_challenge',
+   'planning_scope_reassessment','planning_scope_partner_action'));
 
 DELETE FROM hsdg.audit_planning_evidence WHERE target_type IN ('audit_area','area_assertion');
 ALTER TABLE hsdg.audit_planning_evidence
@@ -486,19 +490,21 @@ ALTER TABLE hsdg.audit_planning_evidence
     ('signal','change','prior_year','acceptance','discussion',
      'understanding_section','financial_dataset','analytics_exception','planning_expectation',
      'materiality_determination','materiality_adjustment','materiality_specific',
-     'materiality_qualitative'));
+     'materiality_qualitative',
+     'scope_approach','scope_unit','scope_service_org','scope_dependency','scope_limitation',
+     'scope_map_item'));
 
 DROP POLICY audit_planning_items_update ON hsdg.audit_planning_items;
 CREATE POLICY audit_planning_items_update ON hsdg.audit_planning_items
   FOR UPDATE USING (
     hsdg.is_engagement_lead(engagement_id)
     OR (hsdg.is_engagement_member(engagement_id)
-        AND item_key IN ('engagement_understanding','materiality'))
+        AND item_key IN ('engagement_understanding','materiality','audit_approach','overall_audit_plan'))
   )
   WITH CHECK (
     hsdg.is_engagement_lead(engagement_id)
     OR (hsdg.is_engagement_member(engagement_id)
-        AND item_key IN ('engagement_understanding','materiality'))
+        AND item_key IN ('engagement_understanding','materiality','audit_approach','overall_audit_plan'))
   );
 
 DROP INDEX IF EXISTS hsdg.audit_area_review_comment_open_idx;

@@ -272,6 +272,8 @@ export interface StoredArea {
   reviewFlag: string | null;
   reviewFlagSource: string | null;
   inconsistencyResolution: string | null;
+  /** The 03.4 Approach Map area this area carries (03.4 §23). */
+  scopeMapItemId: string | null;
   version: number;
   assertions: StoredAssertion[];
   signalLinks: { signalId: string; origin: 'auto' | 'manual'; active: boolean }[];
@@ -577,6 +579,7 @@ export function deriveArea(a: StoredArea, c: DeriveContext): EngagementAuditArea
     downstreamWork: 0,
     downstreamDetail: { risks: 0, procedures: 0, workAreas: 0 },
     evidenceCount: 0,
+    scopeStrategy: null,
     version: a.version,
   };
 }
@@ -641,6 +644,8 @@ export interface ValidationState {
   signals: AreaSignalRef[];
   /** Open blocking review items — 03.5 stays Requires Review until answered. */
   openItems?: OpenReviewItem[];
+  /** Included 03.4 map areas no 03.5 area carries (null — no 03.4 on this file). */
+  unconvertedMap?: { code: string; name: string }[] | null;
 }
 
 export function validations(s: ValidationState): AreaValidation[] {
@@ -770,6 +775,15 @@ export function validations(s: ValidationState): AreaValidation[] {
       broken,
       (b) => `"Covered under another Audit Area" does not point to a retained area: ${names(b)}.`,
     ),
+    {
+      id: 'VAL-11',
+      label: AREA_VALIDATION_LABEL['VAL-11'],
+      met: !s.unconvertedMap?.length,
+      detail: s.unconvertedMap?.length
+        ? `03.4 Approach Map areas not yet carried into 03.5 — link or convert them in 03.4: ${s.unconvertedMap.map((m) => `${m.code} ${m.name}`).join(', ')}.`
+        : null,
+      areaIds: [],
+    },
   ];
 }
 

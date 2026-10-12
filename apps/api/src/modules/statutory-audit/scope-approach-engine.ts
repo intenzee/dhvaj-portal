@@ -26,6 +26,7 @@ import {
   type ScopeServiceOrg,
   type ScopeTriggers,
   type ScopeUnit,
+  type ScopeUnitSignalSuggestion,
   type ScopeUnitType,
   type SpecialConsiderationTag,
   type StrategyConsideration,
@@ -58,6 +59,22 @@ export interface ScopeInvesteeFact {
   auditedByOtherAuditor: boolean;
 }
 
+/** 02.6 §143(8) branch (audit_group_branch, not withdrawn). */
+export interface ScopeBranchFact {
+  id: string;
+  name: string;
+  location: string | null;
+  country: string | null;
+  firmName: string | null;
+}
+
+/** 02.6 group-audit component matrix row (audit_group_component, not withdrawn). */
+export interface ScopeComponentFact {
+  name: string;
+  auditorType: string | null;
+  significance: string | null;
+}
+
 export interface ScopeFacts {
   entityName: string | null;
   initialAudit: boolean;
@@ -67,6 +84,12 @@ export interface ScopeFacts {
   frameworkConclusions: Record<string, string>;
   investees: ScopeInvesteeFact[];
   hasBranches: boolean;
+  /** Individual branches captured in 02.6 (empty → one placeholder branch unit when hasBranches). */
+  branches: ScopeBranchFact[];
+  /** 02.6 group-audit component matrix (auditor type / significance per component). */
+  components: ScopeComponentFact[];
+  /** 02.7 Section 197(16) reporting applies (null — not concluded). */
+  s197: boolean | null;
   /** 03.2 canonical metrics — dataset units. */
   metrics: Record<string, { cy: number | null; py: number | null }>;
   /** Dataset units → rupees; null when not convertible / not ready. */
@@ -145,6 +168,8 @@ export interface GeneratedUnit {
   finMetric: string | null;
   finAmount: number | null;
   finSource: string | null;
+  /** Prefilled location (02.6 branch location / country). */
+  location?: string | null;
 }
 
 const slug = (s: string) =>
@@ -170,26 +195,47 @@ export function generatePopulation(f: ScopeFacts): GeneratedUnit[] {
   });
   if (fw(f, 'cfs')) {
     for (const i of f.investees) {
+      const matrix = f.components.find((c) => lc(c.name.trim()) === lc(i.name.trim()));
+      const other = i.auditedByOtherAuditor || matrix?.auditorType === 'other_auditor';
       out.push({
         unitKey: `investee:${slug(i.name)}`,
         name: i.name,
         unitType: 'component',
-        auditor: i.auditedByOtherAuditor ? 'component_auditor' : 'dhvaj',
-        sourceLabel: `02.6${i.relationship ? ` — ${i.relationship.replace(/_/g, ' ')}` : ''}`,
-        relevance: ['group_reporting'],
+        auditor: other ? 'component_auditor' : 'dhvaj',
+        sourceLabel: `02.6${i.relationship ? ` — ${i.relationship.replace(/_/g, ' ')}` : ''}${matrix?.significance === 'significant' ? ' · significant component' : ''}`,
+        relevance:
+          matrix?.significance === 'significant'
+            ? ['group_reporting', 'financial_significance']
+            : ['group_reporting'],
         finMetric: null,
         finAmount: null,
         finSource: null,
       });
     }
   }
-  if (f.hasBranches) {
+  if (f.branches.length) {
+    // §6: one unit per 02.6 branch, keyed by the branch record (renames keep the unit).
+    for (const b of f.branches) {
+      out.push({
+        unitKey: `branch:${b.id}`,
+        name: b.name,
+        unitType: 'branch',
+        auditor: b.firmName ? 'branch_auditor' : 'dhvaj',
+        sourceLabel: `02.6 — §143(8) branch${b.firmName ? ` (${b.firmName})` : ''}`,
+        relevance: [],
+        finMetric: null,
+        finAmount: null,
+        finSource: null,
+        location: [b.location, b.country].filter(Boolean).join(', ') || null,
+      });
+    }
+  } else if (f.hasBranches) {
     out.push({
       unitKey: 'branches',
       name: 'Branch(es) audited by branch auditor',
       unitType: 'branch',
       auditor: 'branch_auditor',
-      sourceLabel: '02.6 — §143(8) branches',
+      sourceLabel: '02.6 — §143(8) branches (no branch captured individually yet)',
       relevance: [],
       finMetric: null,
       finAmount: null,
@@ -224,6 +270,72 @@ export function materialityContext(amount: number | null, om: number | null): st
     ? `${x.toFixed(1)}× OM`
     : `Below OM (${(x * 100).toFixed(0)}% of OM) — not excluded on that basis`;
 }
+
+/**
+ * §7 — why a unit still needs a financial indicator. Components and branches
+ * carry no amount in 02.6 / 03.2; the team records one from the component /
+ * branch financials (or marks it not available, which raises a dependency).
+ */
+export function unitFinPrompt(
+  u: Pick<ScopeUnit, 'unitType' | 'finAmount' | 'finNotAvailable'>,
+): string | null {
+  if (u.finAmount !== null || u.finNotAvailable) return null;
+  if (u.unitType === 'component')
+    return 'Record the component’s revenue / total assets from its financial statements (or mark not available).';
+  if (u.unitType === 'branch')
+    return 'Record the branch’s share of revenue / assets from the branch returns (or mark not available).';
+  if (u.unitType === 'plant' || u.unitType === 'warehouse')
+    return 'Record the inventory / asset value held here (or mark not available).';
+  return null;
+}
+
+const REGULATORY_SIGNAL =
+  /regulat|licen[cs]|rbi|sebi|irda|gst|customs|excise|fema|statut|compliance|penalt|notice/i;
+const FRAUD_SIGNAL = /fraud|misappropriat|theft|collusion|override|whistle|forensic|irregular/i;
+
+/**
+ * §7 — Planning Signals the portal suggests linking to a unit (never linked
+ * automatically): a signal that names the unit, or — for the reporting
+ * entity and other units in scope — a regulatory / fraud signal.
+ */
+export function suggestUnitSignals(
+  u: Pick<ScopeUnit, 'name' | 'unitType' | 'signalIds' | 'location'>,
+  signals: ScopeSignalFact[],
+): ScopeUnitSignalSuggestion[] {
+  const out: ScopeUnitSignalSuggestion[] = [];
+  const words = [u.name, u.location ?? '']
+    .flatMap((x) => lc(x).split(/[^a-z0-9]+/))
+    .filter((w) => w.length > 3 && !GENERIC_UNIT_WORDS.has(w));
+  for (const sig of signals) {
+    if (u.signalIds.includes(sig.id)) continue;
+    const text = `${sig.observation} ${sig.potentialImplications ?? ''} ${sig.ruleKey ?? ''}`;
+    const hay = lc(text);
+    const names = u.unitType !== 'entity' && words.some((w) => hay.includes(w));
+    let reason: ScopeUnitSignalSuggestion['reason'] | null = names ? 'names_unit' : null;
+    if (!reason && (u.unitType === 'entity' || names)) {
+      if (FRAUD_SIGNAL.test(text)) reason = 'fraud';
+      else if (REGULATORY_SIGNAL.test(text)) reason = 'regulatory';
+    }
+    if (reason) out.push({ id: sig.id, code: sig.code, observation: sig.observation, reason });
+  }
+  return out;
+}
+const GENERIC_UNIT_WORDS = new Set([
+  'branch',
+  'branches',
+  'plant',
+  'warehouse',
+  'office',
+  'limited',
+  'private',
+  'company',
+  'india',
+  'unit',
+  'service',
+  'provider',
+  'audited',
+  'auditor',
+]);
 
 // ── Preliminary Audit Approach Map (§23) ────────────────────────────────────
 
@@ -945,4 +1057,161 @@ export function composeScopeConclusion(s: ScopeState, pa: PartnerAttentionTrigge
   );
   if (pa.length) lines.push(`Partner Attention: ${pa.map((p) => p.label).join('; ')}.`);
   return lines.join('\n\n');
+}
+
+// ── §23 Approach Map → 03.5 ─────────────────────────────────────────────────
+
+/** A 03.5 engagement area as the matcher sees it. */
+export interface MatchableArea {
+  id: string;
+  areaCode: string | null;
+  name: string;
+  aliases: string[];
+  metricKeys: string[];
+  disposition: 'retained' | 'removed';
+  scopeMapItemId: string | null;
+}
+
+/** Map areas 03.4 always generates that have no 03.2 metric of their own. */
+const SPECIAL_AREA_CODES: Record<string, string[]> = {
+  revenue: ['REV'],
+  employee_cost: ['EMPEXP'],
+  related_party: ['RPT'],
+  consolidation: ['CONSOL'],
+  opening_balances: ['OB'],
+  financial_close: ['PRESDISC', 'JE'],
+  inventory: ['INV'],
+  trade_receivables: ['AR'],
+  trade_payables: ['AP'],
+  cash_bank: ['CASH'],
+  total_borrowings: ['BORR'],
+  ppe: ['PPE'],
+  investments: ['INVEST'],
+};
+
+const norm = (x: string) =>
+  lc(x)
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
+ * §23 — the 03.5 area a map area is carried into: the same 03.2 metric, the
+ * library code 03.4 maps its standard areas to, or the same name / alias.
+ * Retained areas win over removed ones; an area already carrying another map
+ * area is never reused. Null → nothing matches (the Manager converts it).
+ */
+export function matchScopeArea(
+  item: Pick<ScopeMapItem, 'id' | 'areaKey' | 'metricKey' | 'name'>,
+  areas: MatchableArea[],
+): MatchableArea | null {
+  const free = areas
+    .filter((a) => a.scopeMapItemId === null || a.scopeMapItemId === item.id)
+    .sort((a, b) => Number(a.disposition === 'removed') - Number(b.disposition === 'removed'));
+  if (item.metricKey) {
+    const byMetric = free.find((a) => a.metricKeys.includes(item.metricKey!));
+    if (byMetric) return byMetric;
+  }
+  const codes = item.areaKey ? (SPECIAL_AREA_CODES[item.areaKey] ?? []) : [];
+  for (const code of codes) {
+    const byCode = free.find((a) => a.areaCode === code);
+    if (byCode) return byCode;
+  }
+  const name = norm(item.name);
+  return free.find((a) => norm(a.name) === name || a.aliases.some((x) => norm(x) === name)) ?? null;
+}
+
+// ── §24 materiality revision → affected map areas ───────────────────────────
+
+export interface MaterialityLevels {
+  om: number | null;
+  pm: number | null;
+  /** Specific-materiality scope labels with their amounts. */
+  specific: { scope: string; amount: number | null }[];
+}
+
+/**
+ * §24 — the map areas a materiality revision actually affects: an area whose
+ * amount moves across OM or PM, an area a new / changed / removed specific
+ * materiality touches, or every area with an amount when the previous levels
+ * are unknown. An area with no amount is never flagged by a revision.
+ */
+export function materialityAffectedItems(
+  items: Pick<ScopeMapItem, 'id' | 'name' | 'amount' | 'included'>[],
+  before: MaterialityLevels | null,
+  after: MaterialityLevels,
+): { id: string; reason: string }[] {
+  const out: { id: string; reason: string }[] = [];
+  const side = (amount: number, level: number | null) =>
+    level === null || level <= 0 ? null : amount >= level ? 'above' : 'below';
+  const changedSpecific = (() => {
+    if (!before) return [];
+    const key = (x: { scope: string; amount: number | null }) => `${lc(x.scope)}|${x.amount ?? ''}`;
+    const b = new Set(before.specific.map(key));
+    const a = new Set(after.specific.map(key));
+    return [
+      ...after.specific.filter((x) => !b.has(key(x))),
+      ...before.specific.filter((x) => !a.has(key(x))),
+    ].map((x) => x.scope);
+  })();
+  for (const m of items) {
+    if (!m.included) continue;
+    const words = lc(m.name)
+      .split(/[^a-z]+/)
+      .filter((w) => w.length > 3);
+    const specific = changedSpecific.find((sc) => words.some((w) => lc(sc).includes(w)));
+    if (specific) {
+      out.push({ id: m.id, reason: `Specific materiality changed — ${specific}.` });
+      continue;
+    }
+    if (m.amount === null) continue;
+    if (!before) {
+      out.push({ id: m.id, reason: 'Materiality revised — reconsider against the new levels.' });
+      continue;
+    }
+    const crossed: string[] = [];
+    const cross = (label: string, was: number | null, now: number | null) => {
+      const s0 = side(m.amount!, was);
+      const s1 = side(m.amount!, now);
+      if (s0 !== s1) crossed.push(s1 ? `${s1} ${label}` : `without a ${label} to compare`);
+    };
+    cross('overall materiality', before.om, after.om);
+    cross('performance materiality', before.pm, after.pm);
+    if (crossed.length)
+      out.push({
+        id: m.id,
+        reason: `${inr(m.amount)} now sits ${crossed.join(' and ')} as revised.`,
+      });
+  }
+  return out;
+}
+
+// ── §24 Section 05 control results → controls cycle ─────────────────────────
+
+const CYCLE_PATTERNS: [string, RegExp][] = [
+  ['revenue', /revenue|sales|billing|order.to.cash|receivabl|collection/i],
+  ['procurement', /procure|purchas|payabl|vendor|supplier|procure.to.pay|expenditure/i],
+  ['payroll', /payroll|employee|salar|wage|hr\b|human resource/i],
+  ['inventory', /inventor|stock|warehouse|production|costing/i],
+  ['treasury', /treasury|cash|bank|borrow|loan|invest|fund/i],
+  ['financial_close', /close|reporting|journal|consolidat|general ledger|gl\b|period.end/i],
+];
+
+/** The 03.4 controls cycle a Section 05 process belongs to, or null. */
+export function cycleForProcess(process: string): string | null {
+  for (const [cycle, re] of CYCLE_PATTERNS) if (re.test(process)) return cycle;
+  return null;
+}
+
+/** A Section 05 control result that does not support planned reliance. */
+export function controlResultUnsupported(r: {
+  design: string | null;
+  implementation: string | null;
+  operatingEffectiveness: string | null;
+}): boolean {
+  return (
+    r.design === 'deficiency' ||
+    r.implementation === 'not_implemented' ||
+    r.operatingEffectiveness === 'exception_identified'
+  );
 }

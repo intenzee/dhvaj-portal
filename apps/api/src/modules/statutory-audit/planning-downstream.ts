@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import type { PlanningDestination, PlanningDownstreamFlag } from '@hsdg/contracts';
 import type { AuditAreaReviewService } from './audit-area-review.service';
-import { flagScopeReassessment } from './audit-scope-approach.service';
+import { flagScopeReassessment } from './scope-hooks';
 
 /**
  * §19 dynamic planning — a 03.1 change flags the downstream planning work it
@@ -39,6 +39,13 @@ export function itemsForDestinations(destinations: readonly string[]): string[] 
   return [
     ...new Set(destinations.flatMap((d) => DESTINATION_ITEMS[d as PlanningDestination] ?? [])),
   ];
+}
+
+/** Pure: the checklist rows of a set of modules (e.g. a 03.4 revision's affected modules). */
+export function itemsForModules(modules: readonly string[]): string[] {
+  return Object.entries(ITEM_MODULE)
+    .filter(([, m]) => modules.includes(m))
+    .map(([k]) => k);
 }
 
 export function moduleForItem(itemKey: string): string {
