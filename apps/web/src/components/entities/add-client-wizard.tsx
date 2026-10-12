@@ -221,7 +221,7 @@ export function AddClientWizard(): JSX.Element {
   const industries = useQuery({ queryKey: ['industries'], queryFn: () => apiFetch<Industry[]>('/industries') });
   const clients = useQuery({
     queryKey: ['clients', 'all'],
-    queryFn: () => apiFetch<{ items: ClientRow[] }>('/clients?limit=200'),
+    queryFn: () => apiFetch<{ items: ClientRow[] }>('/clients?limit=100'),
   });
 
   // Entity types available for the chosen entry kind (§3/§7).

@@ -9,11 +9,13 @@ import type {
   ComplianceStatus,
   EngagementConfidentiality,
   EngagementCoveredEntity,
+  EngagementKind,
   EngagementPriority,
   EngagementServiceLine,
   EngagementStatus,
   EngagementType,
   RoleSlug,
+  Stream,
   TaskPriority,
   TaskStatus,
 } from '@hsdg/contracts';
@@ -21,6 +23,7 @@ import type {
 export interface EngagementRow {
   id: string;
   engagementCode: string;
+  kind: EngagementKind;
   entityId: string;
   entityName: string;
   serviceCode: string;
@@ -539,6 +542,11 @@ export interface ServiceRow {
   serviceLineName: string;
   requiredReviewModelSlug: string;
   isActive: boolean;
+  /** Compliance stream (spec Change 2); null outside the six streams. */
+  stream?: Stream | null;
+  /** The STREAM_* service a folded service was replaced by. */
+  foldedIntoServiceId?: string | null;
+  engagementKind?: EngagementKind;
 }
 
 // ── Administration (Phase 13) ───────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
+  FEATURE_FLAG,
   PERMISSION,
   escalationAction,
   type EscalationLevel,
@@ -23,6 +24,8 @@ import { DataTable } from '@/components/data-table';
 import { RollHorizonButton } from '@/components/compliance/roll-horizon-button';
 import { EscalationLegend } from '@/components/compliance/escalation-legend';
 import { cn } from '@/lib/cn';
+import { useFeatureFlags } from '@/lib/feature-flags';
+import { FirmCalendar } from '@/components/compliance/firm-calendar';
 
 type Filter = 'all' | 'overdue' | 'due-soon';
 /** Which slice of the calendar is shown: the obligation rows, or the §16 event fan-out. */
@@ -121,9 +124,7 @@ const eventColumns: ColumnDef<ComplianceEventRow, unknown>[] = [
     cell: ({ row }) => (
       <span className={row.original.isOverdue ? 'font-medium text-rose-600' : ''}>
         {formatDate(row.original.dueDate)}
-        <span className="ml-1 text-xs text-ink-faint">
-          ({deadlineLabel(row.original.dueDate)})
-        </span>
+        <span className="ml-1 text-xs text-ink-faint">({deadlineLabel(row.original.dueDate)})</span>
       </span>
     ),
   },
@@ -338,6 +339,10 @@ function ComplianceInner(): JSX.Element {
 }
 
 export default function CompliancePage(): JSX.Element {
+  const { isOn, isLoading } = useFeatureFlags();
+  if (isLoading) return <Spinner />;
+  // Calendar v2 (spec Change 4) replaces the obligation list with the firm calendar.
+  if (isOn(FEATURE_FLAG.calendarV2)) return <FirmCalendar />;
   return (
     <Suspense fallback={<Spinner />}>
       <ComplianceInner />

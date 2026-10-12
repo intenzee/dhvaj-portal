@@ -28,7 +28,7 @@ export function TeamSection({
 
   const employees = useQuery({
     queryKey: ['employees', 'all'],
-    queryFn: () => apiFetch<Paginated<EmployeeRow>>('/employees?limit=200'),
+    queryFn: () => apiFetch<Paginated<EmployeeRow>>('/employees?limit=100'),
     enabled: open,
   });
 

@@ -24,6 +24,9 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The parsed error envelope, for the structured fields a rule attaches
+     *  (e.g. `rule`, `findings`, `engagementId`). */
+    readonly body?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -81,7 +84,11 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       const m = (data as { message?: unknown }).message;
       if (typeof m === 'string' && m.length > 0) message = m;
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(
+      res.status,
+      message,
+      data && typeof data === 'object' ? (data as Record<string, unknown>) : undefined,
+    );
   }
   return data as T;
 }
