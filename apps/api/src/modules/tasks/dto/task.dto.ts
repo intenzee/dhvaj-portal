@@ -16,8 +16,10 @@ import {
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
+  WORK_TYPES,
   type TaskPriority,
   type TaskStatus,
+  type WorkType,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
 
@@ -63,6 +65,26 @@ export class CreateTaskDto {
   @Transform(toBool)
   @IsBoolean()
   isBillable?: boolean;
+
+  @ApiPropertyOptional({ description: 'Change 3 — the stream (engagement service) this work is in.' })
+  @IsOptional()
+  @IsUUID()
+  engagementServiceId?: string;
+
+  @ApiPropertyOptional({ description: 'Reviewer — must be on the engagement.' })
+  @IsOptional()
+  @IsUUID()
+  reviewerEmployeeId?: string;
+
+  @ApiPropertyOptional({ enum: WORK_TYPES })
+  @IsOptional()
+  @IsIn(WORK_TYPES)
+  workType?: WorkType;
+
+  @ApiPropertyOptional({ description: 'The filing (compliance instance) this task produces.' })
+  @IsOptional()
+  @IsUUID()
+  complianceInstanceId?: string;
 }
 
 /** §31 — a lead's approval of an out-of-scope request. */
@@ -112,6 +134,24 @@ export class UpdateTaskDto {
   @IsDateString()
   dueDate?: string | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  engagementServiceId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  reviewerEmployeeId?: string | null;
+
+  @ApiPropertyOptional({ enum: WORK_TYPES, nullable: true })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsIn(WORK_TYPES)
+  workType?: WorkType | null;
+
   @ApiPropertyOptional({
     description: 'Expected version for optimistic concurrency (stale ⇒ 409).',
   })
@@ -153,6 +193,65 @@ export class TaskListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   assignedToEmployeeId?: string;
+
+  @ApiPropertyOptional({ description: 'Only tasks in this stream (engagement service).' })
+  @IsOptional()
+  @IsUUID()
+  engagementServiceId?: string;
+
+  @ApiPropertyOptional({ description: 'Only tasks in this stream (gst, tds, income_tax, …).' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  stream?: string;
+
+  @ApiPropertyOptional({ enum: WORK_TYPES })
+  @IsOptional()
+  @IsIn(WORK_TYPES)
+  workType?: WorkType;
+
+  @ApiPropertyOptional({ description: 'Only the task(s) producing this filing.' })
+  @IsOptional()
+  @IsUUID()
+  complianceInstanceId?: string;
+
+  @ApiPropertyOptional({ description: 'Only live tasks (not done / cancelled).' })
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  open?: boolean;
+}
+
+/** Body for the Change 3 task transitions. */
+export class TaskTransitionDto {
+  @ApiPropertyOptional({
+    description:
+      'Return: the review points (required). Waiting on client: what is needed (required). ' +
+      'Otherwise an optional note.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  reason?: string;
+
+  @ApiPropertyOptional({ description: 'Waiting on client: when to escalate the request.' })
+  @IsOptional()
+  @IsDateString()
+  escalationDate?: string;
+
+  @ApiPropertyOptional({
+    description: 'Send for review: the reviewer (defaults to the manager, else the partner).',
+  })
+  @IsOptional()
+  @IsUUID()
+  reviewerEmployeeId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version?: number;
 }
 
 export class MyTasksQueryDto extends PaginationQueryDto {
