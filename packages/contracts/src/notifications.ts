@@ -56,6 +56,14 @@ export const NOTIFICATION_TYPE = {
   planningScopeReassessment: 'planning_scope_reassessment',
   /** 03.4 §26 — the Engagement Partner challenged / requested on 03.4, or the Manager answered. */
   planningScopePartnerAction: 'planning_scope_partner_action',
+  /** Change 3 — a task was sent for review (reviewer). */
+  taskReviewRequested: 'task_review_requested',
+  /** Change 3 — the reviewer returned a task with points (assignee). */
+  taskReturned: 'task_returned',
+  /** Change 5 — a filing was lodged with its ARN (engagement manager). */
+  filingLodged: 'filing_lodged',
+  /** Change 3 — a time adjustment over 30 minutes awaits approval (leads). */
+  timeAdjustmentPending: 'time_adjustment_pending',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);

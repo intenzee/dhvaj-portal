@@ -233,6 +233,15 @@ export const envSchema = z.object({
   // Nightly compliance calendar run (calendar v2): attach new government
   // extensions and regenerate every open Compliance engagement.
   SCHEDULER_CALENDAR_CRON: z.string().default('0 2 * * *'),
+  // Change 3 automatic time: close idle (no heartbeat for 15 min) and day-end
+  // entries. Runs every 5 minutes; the office day ends at this hour, IST.
+  SCHEDULER_TIME_CLOSER_CRON: z.string().default('*/5 * * * *'),
+  TIME_DAY_END_HOUR_IST: z.coerce.number().int().min(12).max(23).default(20),
+  // Change 6 monthly GST data request: on the 1st (09:00 IST) each GSTIN with
+  // the request switched on gets one upload link for last month's registers.
+  SCHEDULER_GST_DATA_REQUEST_CRON: z.string().default('30 3 1 * *'),
+  // Browser-facing base URL of the web app (links sent to clients).
+  WEB_PUBLIC_URL: z.string().url().default('http://localhost:3000'),
   // Bearer secret for GET /internal/cron — the HTTP trigger serverless hosts
   // (Vercel Cron) use in place of the in-process scheduler. Unset = disabled.
   CRON_SECRET: z.string().min(16).optional(),

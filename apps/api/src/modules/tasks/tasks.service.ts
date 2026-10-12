@@ -8,9 +8,9 @@ import {
 import type { PoolClient } from 'pg';
 import {
   NOTIFICATION_TYPE,
-  TASK_STATUS,
   type TaskPriority,
   type TaskStatus,
+  type WorkType,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -24,9 +24,9 @@ import type {
   MyTaskRecord,
   TaskDetail,
   TaskDependencyRef,
+  TaskListFilter,
   TaskRecord,
   UpdateTaskInput,
-  UpdateTaskStatusInput,
 } from './tasks.types';
 
 interface TaskRow {
@@ -51,6 +51,14 @@ interface TaskRow {
   out_of_scope_approved_at: Date | null;
   out_of_scope_approved_by_employee_id: string | null;
   out_of_scope_approved_by_name: string | null;
+  engagement_service_id: string | null;
+  stream: string | null;
+  reviewer_employee_id: string | null;
+  reviewer_name: string | null;
+  work_type: WorkType | null;
+  source_compliance_instance_id: string | null;
+  sent_for_review_at: Date | null;
+  review_started_at: Date | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -71,12 +79,17 @@ const TASK_BASE = `
          t.is_out_of_scope, t.is_billable,
          t.out_of_scope_approved_at, t.out_of_scope_approved_by_employee_id,
          obe.full_name AS out_of_scope_approved_by_name,
+         t.engagement_service_id, tsv.stream, t.reviewer_employee_id, re.full_name AS reviewer_name,
+         t.work_type, t.source_compliance_instance_id, t.sent_for_review_at, t.review_started_at,
          t.version, t.created_at, t.updated_at
   FROM hsdg.tasks t
   LEFT JOIN hsdg.employees ae ON ae.id = t.assigned_to_employee_id
   LEFT JOIN hsdg.employees ce ON ce.id = t.created_by_employee_id
   LEFT JOIN hsdg.employees cbe ON cbe.id = t.completed_by_employee_id
-  LEFT JOIN hsdg.employees obe ON obe.id = t.out_of_scope_approved_by_employee_id`;
+  LEFT JOIN hsdg.employees obe ON obe.id = t.out_of_scope_approved_by_employee_id
+  LEFT JOIN hsdg.employees re ON re.id = t.reviewer_employee_id
+  LEFT JOIN hsdg.engagement_services tes ON tes.id = t.engagement_service_id
+  LEFT JOIN hsdg.services tsv ON tsv.id = tes.service_id`;
 
 /**
  * Engagement tasks (Phase 9). Members read; leads create/assign/remove; the
@@ -98,13 +111,19 @@ export class TasksService {
       if (input.assignedToEmployeeId) {
         await this.requireMember(client, engagementId, input.assignedToEmployeeId);
       }
+      if (input.reviewerEmployeeId) {
+        await this.requireMember(client, engagementId, input.reviewerEmployeeId);
+      }
+      const links = await this.resolveWorkLinks(client, engagementId, input);
       let id: string;
       try {
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO hsdg.tasks
              (engagement_id, title, description, assigned_to_employee_id, created_by_employee_id,
-              priority, due_date, is_out_of_scope, is_billable)
-           VALUES ($1,$2,$3,$4,$5,COALESCE($6,'normal'),$7,COALESCE($8,false),COALESCE($9,false))
+              priority, due_date, is_out_of_scope, is_billable,
+              engagement_service_id, reviewer_employee_id, work_type, source_compliance_instance_id)
+           VALUES ($1,$2,$3,$4,$5,COALESCE($6,'normal'),$7,COALESCE($8,false),COALESCE($9,false),
+                   $10,$11,$12,$13)
            RETURNING id`,
           [
             engagementId,
@@ -116,6 +135,10 @@ export class TasksService {
             input.dueDate ?? null,
             input.isOutOfScope ?? null,
             input.isBillable ?? null,
+            links.engagementServiceId,
+            input.reviewerEmployeeId ?? null,
+            input.workType ?? (input.complianceInstanceId ? 'filing' : null),
+            input.complianceInstanceId ?? null,
           ],
         );
         id = rows[0]!.id;
@@ -145,7 +168,7 @@ export class TasksService {
     ctx: RlsContext,
     engagementId: string,
     page: PageParams,
-    filter: { status?: TaskStatus; assignedToEmployeeId?: string },
+    filter: TaskListFilter,
   ): Promise<PageResult<TaskRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.requireEngagement(client, engagementId);
@@ -159,6 +182,23 @@ export class TasksService {
         params.push(filter.assignedToEmployeeId);
         conds.push(`t.assigned_to_employee_id = $${params.length}`);
       }
+      if (filter.engagementServiceId) {
+        params.push(filter.engagementServiceId);
+        conds.push(`t.engagement_service_id = $${params.length}`);
+      }
+      if (filter.stream) {
+        params.push(filter.stream);
+        conds.push(`tsv.stream = $${params.length}`);
+      }
+      if (filter.workType) {
+        params.push(filter.workType);
+        conds.push(`t.work_type = $${params.length}`);
+      }
+      if (filter.complianceInstanceId) {
+        params.push(filter.complianceInstanceId);
+        conds.push(`t.source_compliance_instance_id = $${params.length}`);
+      }
+      if (filter.openOnly) conds.push(`t.status NOT IN ('done', 'cancelled')`);
       const where = `WHERE ${conds.join(' AND ')}`;
       params.push(page.limit, page.offset);
       const { rows } = await client.query<TaskRow>(
@@ -168,7 +208,10 @@ export class TasksService {
         params,
       );
       const totalRes = await client.query<{ total: string }>(
-        `SELECT count(*) AS total FROM hsdg.tasks t ${where}`,
+        `SELECT count(*) AS total FROM hsdg.tasks t
+           LEFT JOIN hsdg.engagement_services tes ON tes.id = t.engagement_service_id
+           LEFT JOIN hsdg.services tsv ON tsv.id = tes.service_id
+         ${where}`,
         params.slice(0, params.length - 2),
       );
       return { items: rows.map(mapTask), total: Number(totalRes.rows[0]?.total ?? 0) };
@@ -224,6 +267,14 @@ export class TasksService {
       if (input.assignedToEmployeeId) {
         await this.requireMember(client, engagementId, input.assignedToEmployeeId);
       }
+      if (input.reviewerEmployeeId) {
+        await this.requireMember(client, engagementId, input.reviewerEmployeeId);
+      }
+      if (input.engagementServiceId) {
+        await this.resolveWorkLinks(client, engagementId, {
+          engagementServiceId: input.engagementServiceId,
+        });
+      }
       const sets: string[] = [];
       const params: unknown[] = [];
       const set = (col: string, val: unknown): void => {
@@ -236,6 +287,11 @@ export class TasksService {
         set('assigned_to_employee_id', input.assignedToEmployeeId);
       if (input.priority !== undefined) set('priority', input.priority);
       if (input.dueDate !== undefined) set('due_date', input.dueDate);
+      if (input.engagementServiceId !== undefined)
+        set('engagement_service_id', input.engagementServiceId);
+      if (input.reviewerEmployeeId !== undefined)
+        set('reviewer_employee_id', input.reviewerEmployeeId);
+      if (input.workType !== undefined) set('work_type', input.workType);
       if (sets.length === 0) return before;
 
       await this.versionedUpdate(client, taskId, engagementId, sets, params, input.version, false);
@@ -301,45 +357,6 @@ export class TasksService {
         objectId: taskId,
         before: { isBillable: before.isBillable },
         after: { isBillable: after!.isBillable, approvedAt: after!.outOfScopeApprovedAt },
-      });
-      return after!;
-    });
-  }
-
-  /** Progress a task's status — the assignee (or a lead) via RLS. */
-  async updateStatus(
-    ctx: RlsContext,
-    engagementId: string,
-    taskId: string,
-    input: UpdateTaskStatusInput,
-  ): Promise<TaskRecord> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectTask(client, taskId, engagementId);
-      if (!before) throw new NotFoundException('Task not found.');
-      if (input.status === TASK_STATUS.done && before.blockedByOpenCount > 0) {
-        throw new BadRequestException(
-          `Cannot complete: ${before.blockedByOpenCount} blocking task(s) are not done.`,
-        );
-      }
-
-      const sets = [`status = $1`];
-      const params: unknown[] = [input.status];
-      if (input.status === TASK_STATUS.done) {
-        sets.push('completed_at = now()');
-        sets.push(`completed_by_employee_id = $${params.push(ctx.employeeId ?? null)}`);
-      } else {
-        // Leaving 'done' clears the completion stamp (the CHECK requires it only for 'done').
-        sets.push('completed_at = NULL', 'completed_by_employee_id = NULL');
-      }
-
-      await this.versionedUpdate(client, taskId, engagementId, sets, params, input.version, true);
-      const after = await this.selectTask(client, taskId, engagementId);
-      await this.audit.recordWith(client, ctx, {
-        action: 'task.status_changed',
-        objectType: 'task',
-        objectId: taskId,
-        before: { status: before.status },
-        after: { status: input.status },
       });
       return after!;
     });
@@ -470,6 +487,35 @@ export class TasksService {
 
   // ── internals ──────────────────────────────────────────────────────────
 
+  /**
+   * Validate a task's stream / filing links against its engagement. A task linked
+   * to a filing inherits the filing's stream when none is given.
+   */
+  private async resolveWorkLinks(
+    client: PoolClient,
+    engagementId: string,
+    input: { engagementServiceId?: string | null; complianceInstanceId?: string | null },
+  ): Promise<{ engagementServiceId: string | null }> {
+    let engagementServiceId = input.engagementServiceId ?? null;
+    if (engagementServiceId) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM hsdg.engagement_services WHERE id = $1 AND engagement_id = $2`,
+        [engagementServiceId, engagementId],
+      );
+      if (!rows[0]) throw new BadRequestException('That stream is not on this engagement.');
+    }
+    if (input.complianceInstanceId) {
+      const { rows } = await client.query<{ engagement_service_id: string | null }>(
+        `SELECT engagement_service_id FROM hsdg.compliance_instances
+          WHERE id = $1 AND engagement_id = $2`,
+        [input.complianceInstanceId, engagementId],
+      );
+      if (!rows[0]) throw new BadRequestException('That filing is not on this engagement.');
+      engagementServiceId ??= rows[0].engagement_service_id;
+    }
+    return { engagementServiceId };
+  }
+
   private async requireEngagement(client: PoolClient, engagementId: string): Promise<void> {
     const eng = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [engagementId]);
     if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
@@ -571,7 +617,8 @@ export class TasksService {
     );
   }
 
-  private async selectTask(
+  /** One task on the given client (same transaction). Used by the workflow service. */
+  async selectTask(
     client: PoolClient,
     taskId: string,
     engagementId: string,
@@ -609,6 +656,14 @@ function mapTask(row: TaskRow): TaskRecord {
       : null,
     outOfScopeApprovedById: row.out_of_scope_approved_by_employee_id,
     outOfScopeApprovedByName: row.out_of_scope_approved_by_name,
+    engagementServiceId: row.engagement_service_id,
+    stream: row.stream,
+    reviewerId: row.reviewer_employee_id,
+    reviewerName: row.reviewer_name,
+    workType: row.work_type,
+    complianceInstanceId: row.source_compliance_instance_id,
+    sentForReviewAt: row.sent_for_review_at ? row.sent_for_review_at.toISOString() : null,
+    reviewStartedAt: row.review_started_at ? row.review_started_at.toISOString() : null,
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -618,7 +673,10 @@ function mapTask(row: TaskRow): TaskRecord {
 /** Map PostgreSQL violations to clean HTTP errors (tasks domain). */
 export function mapTaskError(err: unknown): Error {
   return mapPgError(err, {
-    unique: [{ match: 'task_dependencies_unique', message: 'That dependency already exists.' }],
+    unique: [
+      { match: 'task_dependencies_unique', message: 'That dependency already exists.' },
+      { match: 'tasks_one_per_source_instance', message: 'That filing already has a task.' },
+    ],
     uniqueDefault: 'A duplicate value violates a unique constraint.',
     foreignKey: 'A referenced record does not exist.',
     check: (message) =>

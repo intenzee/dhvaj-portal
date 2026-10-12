@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksService } from './tasks.service';
+import { TaskWorkflowService } from './task-workflow.service';
 import { ClientDependenciesService } from './client-dependencies.service';
 import { TasksController } from './tasks.controller';
 import { ClientDependenciesController } from './client-dependencies.controller';
@@ -16,7 +17,7 @@ import { WorkController } from './work.controller';
 @Module({
   imports: [AuditModule, NotificationsModule],
   controllers: [TasksController, ClientDependenciesController, WorkController],
-  providers: [TasksService, ClientDependenciesService],
-  exports: [TasksService, ClientDependenciesService],
+  providers: [TasksService, TaskWorkflowService, ClientDependenciesService],
+  exports: [TasksService, TaskWorkflowService, ClientDependenciesService],
 })
 export class TasksModule {}
