@@ -200,15 +200,18 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       expect(scan.body.statutoryDeadlineOverdue).toBeGreaterThanOrEqual(1);
 
       // The engagement partner (lead) is notified the statutory date has passed.
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/notifications?limit=100')
-        .set(bearer(pa))
-        .expect(200);
-      expect(
-        (res.body.items as Array<{ type: string; engagementId: string }>).some(
-          (n) => n.type === 'statutory_deadline_overdue' && n.engagementId === eng,
-        ),
-      ).toBe(true);
+      // The sweep covers every overdue filing in the database, so read every
+      // page of this type rather than the first page of the inbox.
+      const found: Array<{ engagementId: string }> = [];
+      for (let offset = 0; ; offset += 100) {
+        const res = await request(app.getHttpServer())
+          .get(`/api/v1/notifications?type=statutory_deadline_overdue&limit=100&offset=${offset}`)
+          .set(bearer(pa))
+          .expect(200);
+        found.push(...(res.body.items as Array<{ engagementId: string }>));
+        if (offset + 100 >= (res.body.total as number)) break;
+      }
+      expect(found.some((n) => n.engagementId === eng)).toBe(true);
     });
 
     it('forbids a non-operator from running the sweep (403)', async () => {
