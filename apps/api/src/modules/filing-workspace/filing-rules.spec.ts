@@ -24,7 +24,9 @@ describe('filing rules', () => {
   });
 
   it('checks a GST ARN is 15 upper-case alphanumerics, and normalises it', () => {
-    expect(checkReference('arn', ' aa19 0926 1234567 ', 'gst')).toEqual({ value: 'AA1909261234567' });
+    expect(checkReference('arn', ' aa19 0926 1234567 ', 'gst')).toEqual({
+      value: 'AA1909261234567',
+    });
     expect(checkReference('arn', 'AA19092612345', 'gst')).toHaveProperty('error');
     expect(checkReference('arn', 'AA19092612345-7', 'gst')).toHaveProperty('error');
     expect(checkReference('srn', 'F12345678', 'roc')).toEqual({ value: 'F12345678' });
@@ -40,20 +42,57 @@ describe('filing rules', () => {
 
   it('lets a lead undo within 24 hours, a partner any time', () => {
     const recordedAt = new Date('2026-10-10T10:00:00Z');
-    expect(undoAllowed({ isLead: true, isPartner: false, recordedAt, now: new Date('2026-10-11T09:00:00Z') }).ok).toBe(true);
-    expect(undoAllowed({ isLead: true, isPartner: false, recordedAt, now: new Date('2026-10-11T11:00:00Z') }).ok).toBe(false);
-    expect(undoAllowed({ isLead: false, isPartner: true, recordedAt, now: new Date('2026-12-01T00:00:00Z') }).ok).toBe(true);
-    expect(undoAllowed({ isLead: false, isPartner: false, recordedAt, now: recordedAt }).ok).toBe(false);
+    expect(
+      undoAllowed({
+        isLead: true,
+        isPartner: false,
+        recordedAt,
+        now: new Date('2026-10-11T09:00:00Z'),
+      }).ok,
+    ).toBe(true);
+    expect(
+      undoAllowed({
+        isLead: true,
+        isPartner: false,
+        recordedAt,
+        now: new Date('2026-10-11T11:00:00Z'),
+      }).ok,
+    ).toBe(false);
+    expect(
+      undoAllowed({
+        isLead: false,
+        isPartner: true,
+        recordedAt,
+        now: new Date('2026-12-01T00:00:00Z'),
+      }).ok,
+    ).toBe(true);
+    expect(undoAllowed({ isLead: false, isPartner: false, recordedAt, now: recordedAt }).ok).toBe(
+      false,
+    );
   });
 
   it('locks filed / waived filings, and Outward + Inward once the month’s 3B is filed', () => {
-    expect(lockState({ workflowStatus: 'filed', section: 'summary', summaryFiledLabel: null }).isLocked).toBe(true);
-    expect(lockState({ workflowStatus: 'not_applicable', section: null, summaryFiledLabel: null }).isLocked).toBe(true);
-    expect(lockState({ workflowStatus: 'in_preparation', section: 'outward', summaryFiledLabel: 'GSTR-3B Oct 2026' })).toEqual({
+    expect(
+      lockState({ workflowStatus: 'filed', section: 'summary', summaryFiledLabel: null }).isLocked,
+    ).toBe(true);
+    expect(
+      lockState({ workflowStatus: 'not_applicable', section: null, summaryFiledLabel: null })
+        .isLocked,
+    ).toBe(true);
+    expect(
+      lockState({
+        workflowStatus: 'in_preparation',
+        section: 'outward',
+        summaryFiledLabel: 'GSTR-3B Oct 2026',
+      }),
+    ).toEqual({
       isLocked: true,
       reason: 'GSTR-3B Oct 2026 is filed for this period.',
     });
-    expect(lockState({ workflowStatus: 'in_preparation', section: 'summary', summaryFiledLabel: 'x' }).isLocked).toBe(false);
+    expect(
+      lockState({ workflowStatus: 'in_preparation', section: 'summary', summaryFiledLabel: 'x' })
+        .isLocked,
+    ).toBe(false);
   });
 
   it('lets the assignee lodge only when Ready to file; a lead any time; only a lead waives', () => {
@@ -70,10 +109,20 @@ describe('filing rules', () => {
     };
     expect(canFlags(base)).toEqual({ lodge: false, undo: false, waive: false, edit: true });
     expect(canFlags({ ...base, workflowStatus: 'ready_to_file' }).lodge).toBe(true);
-    expect(canFlags({ ...base, isAssignee: false, isLead: true })).toMatchObject({ lodge: true, waive: true });
+    expect(canFlags({ ...base, isAssignee: false, isLead: true })).toMatchObject({
+      lodge: true,
+      waive: true,
+    });
     expect(canFlags({ ...base, isLead: true, workflowStatus: 'not_applicable' }).lodge).toBe(false);
     expect(
-      canFlags({ ...base, isLead: true, hasLiveFiling: true, liveRecordedAt: new Date(), workflowStatus: 'filed', isLocked: true }),
+      canFlags({
+        ...base,
+        isLead: true,
+        hasLiveFiling: true,
+        liveRecordedAt: new Date(),
+        workflowStatus: 'filed',
+        isLocked: true,
+      }),
     ).toEqual({ lodge: false, undo: true, waive: false, edit: false });
   });
 
@@ -103,23 +152,51 @@ describe('filing rules', () => {
 
   it('writes the next action line', () => {
     const base = { label: 'GSTR-3B', today: '2026-10-16', workflowStatus: 'in_preparation' };
-    expect(nextActionText({ ...base, dueDate: '2026-10-20', pendingLabel: 'ITC reconciliation' })).toBe(
-      'GSTR-3B due in 4 days — ITC reconciliation pending',
+    expect(
+      nextActionText({ ...base, dueDate: '2026-10-20', pendingLabel: 'ITC reconciliation' }),
+    ).toBe('GSTR-3B due in 4 days — ITC reconciliation pending');
+    expect(nextActionText({ ...base, dueDate: '2026-10-15', pendingLabel: null })).toBe(
+      'GSTR-3B overdue by 1 day',
     );
-    expect(nextActionText({ ...base, dueDate: '2026-10-15', pendingLabel: null })).toBe('GSTR-3B overdue by 1 day');
-    expect(nextActionText({ ...base, dueDate: '2026-10-16', pendingLabel: null, workflowStatus: 'ready_to_file' })).toBe(
-      'GSTR-3B due today — ready to file',
-    );
+    expect(
+      nextActionText({
+        ...base,
+        dueDate: '2026-10-16',
+        pendingLabel: null,
+        workflowStatus: 'ready_to_file',
+      }),
+    ).toBe('GSTR-3B due today — ready to file');
   });
 
   it('estimates GST late fee and interest only once past due', () => {
-    expect(indicativeLateCharges({ dueDate: '2026-10-20', asOf: '2026-10-20', isNil: false, taxPayable: 1000 })).toBeNull();
-    expect(indicativeLateCharges({ dueDate: '2026-10-20', asOf: '2026-10-30', isNil: false, taxPayable: 36500 })).toEqual({
+    expect(
+      indicativeLateCharges({
+        dueDate: '2026-10-20',
+        asOf: '2026-10-20',
+        isNil: false,
+        taxPayable: 1000,
+      }),
+    ).toBeNull();
+    expect(
+      indicativeLateCharges({
+        dueDate: '2026-10-20',
+        asOf: '2026-10-30',
+        isNil: false,
+        taxPayable: 36500,
+      }),
+    ).toEqual({
       daysLate: 10,
       lateFee: 500,
       interest: 180,
     });
-    expect(indicativeLateCharges({ dueDate: '2026-10-20', asOf: '2026-10-22', isNil: true, taxPayable: null })).toEqual({
+    expect(
+      indicativeLateCharges({
+        dueDate: '2026-10-20',
+        asOf: '2026-10-22',
+        isNil: true,
+        taxPayable: null,
+      }),
+    ).toEqual({
       daysLate: 2,
       lateFee: 40,
       interest: null,

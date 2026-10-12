@@ -199,8 +199,7 @@ export class StreamTreeService {
       const qrmp =
         stream === 'gst' &&
         (!!reg?.qrmpCategory || rows.some((r) => /:Q[1-4]$/.test(r.period_key ?? '')));
-      const periods: TreePeriod[] =
-        stream === 'gst' ? this.gstMonths(financialYear, qrmp) : [];
+      const periods: TreePeriod[] = stream === 'gst' ? this.gstMonths(financialYear, qrmp) : [];
       const byKey = new Map(periods.map((p) => [p.periodKey, p]));
       const pending = new Map<string, TreeRow[]>();
 

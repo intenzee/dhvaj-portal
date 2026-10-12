@@ -123,7 +123,10 @@ export class SlotUploadDto {
 }
 
 export class LodgeDto {
-  @ApiPropertyOptional({ enum: FILING_REFERENCE_KINDS, description: 'Defaults by stream (GST → ARN).' })
+  @ApiPropertyOptional({
+    enum: FILING_REFERENCE_KINDS,
+    description: 'Defaults by stream (GST → ARN).',
+  })
   @IsOptional()
   @IsIn(FILING_REFERENCE_KINDS)
   referenceKind?: FilingReferenceKind;

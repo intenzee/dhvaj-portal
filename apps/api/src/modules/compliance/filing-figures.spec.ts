@@ -9,8 +9,12 @@ import {
 import { applicableItems, templateCandidates } from './compliance-checklist';
 
 describe('figureForm', () => {
-  const f = (ruleCode: string, formLabel: string | null, stream: string | null, section: string | null) =>
-    figureForm({ ruleCode, formLabel, stream, section });
+  const f = (
+    ruleCode: string,
+    formLabel: string | null,
+    stream: string | null,
+    section: string | null,
+  ) => figureForm({ ruleCode, formLabel, stream, section });
 
   it('maps GST returns by form label and section', () => {
     expect(f('GST_GSTR3B_MONTHLY', 'GSTR-3B', 'gst', 'summary')).toBe('gstr3b');
@@ -79,8 +83,15 @@ describe('gstCrossChecks', () => {
 
   it('flags outward tax mismatch over ₹1 and ITC over 2B', () => {
     const w = gstCrossChecks({
-      outward: { filedOn: '2026-10-11', figures: { tax_igst: 100, tax_cgst: 50 }, exportsReported: false },
-      summary: { filedOn: '2026-10-20', figures: { output_igst: 100, output_cgst: 55, itc_igst: 500 } },
+      outward: {
+        filedOn: '2026-10-11',
+        figures: { tax_igst: 100, tax_cgst: 50 },
+        exportsReported: false,
+      },
+      summary: {
+        filedOn: '2026-10-20',
+        figures: { output_igst: 100, output_cgst: 55, itc_igst: 500 },
+      },
       inward: { figures: { itc_2b: 400 } },
       lutFiled: true,
     });
@@ -113,7 +124,11 @@ describe('checklist templates', () => {
       'FILING_GST',
       'FILING_GENERIC',
     ]);
-    expect(templateCandidates('roc-aoc4', 'roc', null)).toEqual(['FILING_ROC_AOC4', 'FILING_ROC', 'FILING_GENERIC']);
+    expect(templateCandidates('roc-aoc4', 'roc', null)).toEqual([
+      'FILING_ROC_AOC4',
+      'FILING_ROC',
+      'FILING_GENERIC',
+    ]);
   });
 
   it('drops items whose profile attribute is not true', () => {
@@ -122,9 +137,8 @@ describe('checklist templates', () => {
       { code: 'EINV', label: 'E-invoice report', onlyIf: 'eInvoicing' },
       { code: 'EXP', label: 'Shipping bills', onlyIf: 'exporter' },
     ];
-    expect(applicableItems(items, { eInvoicing: true, exporter: false }).map((i) => i.code)).toEqual([
-      'SALES',
-      'EINV',
-    ]);
+    expect(
+      applicableItems(items, { eInvoicing: true, exporter: false }).map((i) => i.code),
+    ).toEqual(['SALES', 'EINV']);
   });
 });

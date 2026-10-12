@@ -175,7 +175,8 @@ const num = (v: string | null): number | null => (v === null ? null : Number(v))
 function mapPgError(err: unknown): unknown {
   if (err instanceof HttpException) return err;
   const e = err as { code?: string; constraint?: string };
-  if (e.code === '42501') return new ForbiddenException('You do not have access to change this filing.');
+  if (e.code === '42501')
+    return new ForbiddenException('You do not have access to change this filing.');
   if (e.code === '23505') {
     if (e.constraint === 'filing_records_one_live') {
       return new ConflictException('This filing is already lodged.');
@@ -240,7 +241,10 @@ export class FilingWorkspaceService {
       if (!item) throw new NotFoundException('Checklist item not found.');
       this.requireUnlocked(client, inst, await this.summaryFiledLabel(client, inst));
       if (item.status === dto.status) return;
-      if (dto.status !== 'not_applicable' && (item.auto_tick === 'review' || item.auto_tick === 'lodge')) {
+      if (
+        dto.status !== 'not_applicable' &&
+        (item.auto_tick === 'review' || item.auto_tick === 'lodge')
+      ) {
         throw new ConflictException(
           item.auto_tick === 'review'
             ? 'This step ticks itself when the reviewer approves the task.'
@@ -248,12 +252,17 @@ export class FilingWorkspaceService {
         );
       }
       if (dto.status === 'done' && item.auto_tick === 'document') {
-        throw new ConflictException('Upload the document to its slot — this step then ticks itself.');
+        throw new ConflictException(
+          'Upload the document to its slot — this step then ticks itself.',
+        );
       }
       if (dto.status === 'not_applicable') {
-        if (!dto.naReason?.trim()) throw new BadRequestException('Give a reason for Not applicable.');
+        if (!dto.naReason?.trim())
+          throw new BadRequestException('Give a reason for Not applicable.');
         if (item.required && !inst.is_lead) {
-          throw new ForbiddenException('Only the engagement manager or partner can waive a required step.');
+          throw new ForbiddenException(
+            'Only the engagement manager or partner can waive a required step.',
+          );
         }
         if (item.auto_tick === 'lodge') {
           throw new ConflictException('Mark the whole filing Not applicable instead.');
@@ -353,7 +362,8 @@ export class FilingWorkspaceService {
             AND status IN ('pending','partially_received')`,
         [id, slot],
       );
-      if (open.rows[0]) throw new ConflictException('This document is already requested from the client.');
+      if (open.rows[0])
+        throw new ConflictException('This document is already requested from the client.');
       const task = await this.loadTask(client, id);
       const requested =
         dto.requestedInfo?.trim() ||
@@ -415,7 +425,8 @@ export class FilingWorkspaceService {
       return { inst: i, label: await this.slotLabel(client, id, slot) };
     });
     await this.documents.create(ctx, inst.engagement_id, {
-      title: dto.title?.trim() || `${label} — ${inst.rule_name} ${periodLabel(inst.period_key)}`.trim(),
+      title:
+        dto.title?.trim() || `${label} — ${inst.rule_name} ${periodLabel(inst.period_key)}`.trim(),
       filename: dto.filename,
       contentBase64: dto.contentBase64,
       ...(dto.contentType ? { contentType: dto.contentType } : {}),
@@ -467,9 +478,12 @@ export class FilingWorkspaceService {
       const task = await this.loadTask(client, id);
       const isAssignee = task?.assigned_to_employee_id === me;
       if (!inst.is_lead && !isAssignee) {
-        throw new ForbiddenException('Only the preparer or the engagement manager can lodge this filing.');
+        throw new ForbiddenException(
+          'Only the preparer or the engagement manager can lodge this filing.',
+        );
       }
-      if (inst.workflow_status === 'filed') throw new ConflictException('This filing is already lodged.');
+      if (inst.workflow_status === 'filed')
+        throw new ConflictException('This filing is already lodged.');
       if (inst.workflow_status === 'not_applicable') {
         throw new ConflictException('This filing is marked Not applicable — lift that first.');
       }
@@ -524,8 +538,10 @@ export class FilingWorkspaceService {
           filedBy,
           dto.isNil ?? false,
           JSON.stringify(figures),
-          dto.lateFeePaid ?? (typeof figures.late_fee_paid === 'number' ? figures.late_fee_paid : null),
-          dto.interestPaid ?? (typeof figures.interest_paid === 'number' ? figures.interest_paid : null),
+          dto.lateFeePaid ??
+            (typeof figures.late_fee_paid === 'number' ? figures.late_fee_paid : null),
+          dto.interestPaid ??
+            (typeof figures.interest_paid === 'number' ? figures.interest_paid : null),
           dto.ackDocumentId,
           dto.remarks?.trim() || null,
           me,
@@ -618,9 +634,12 @@ export class FilingWorkspaceService {
   async markNotApplicable(ctx: RlsContext, id: string, reason: string): Promise<InstanceWorkspace> {
     return this.write(ctx, id, async (client, inst) => {
       if (!inst.is_lead) {
-        throw new ForbiddenException('Only the engagement manager or partner can mark a filing Not applicable.');
+        throw new ForbiddenException(
+          'Only the engagement manager or partner can mark a filing Not applicable.',
+        );
       }
-      if (inst.workflow_status === 'filed') throw new ConflictException('A lodged filing cannot be waived.');
+      if (inst.workflow_status === 'filed')
+        throw new ConflictException('A lodged filing cannot be waived.');
       if (inst.workflow_status === 'not_applicable') return;
       await client.query(
         `UPDATE hsdg.compliance_instances
@@ -641,7 +660,8 @@ export class FilingWorkspaceService {
   /** POST /compliance-instances/:id/not-applicable/lift — back to its derived status. */
   async liftNotApplicable(ctx: RlsContext, id: string): Promise<InstanceWorkspace> {
     return this.write(ctx, id, async (client, inst) => {
-      if (!inst.is_lead) throw new ForbiddenException('Only the engagement manager or partner can do this.');
+      if (!inst.is_lead)
+        throw new ForbiddenException('Only the engagement manager or partner can do this.');
       if (inst.workflow_status !== 'not_applicable') return;
       await client.query(
         `UPDATE hsdg.compliance_instances
@@ -672,7 +692,13 @@ export class FilingWorkspaceService {
                    AND COALESCE(ci.period_start, ci.statutory_deadline) >= COALESCE($4::date, '-infinity'::date)
                    AND ci.id <> $5) AS ok
              FROM hsdg.compliance_instances ci WHERE ci.id = $1`,
-          [dto.correctedInInstanceId, inst.engagement_id, inst.registration_id, inst.period_start, id],
+          [
+            dto.correctedInInstanceId,
+            inst.engagement_id,
+            inst.registration_id,
+            inst.period_start,
+            id,
+          ],
         );
         if (!later.rows[0]?.ok) {
           throw new BadRequestException(
@@ -684,7 +710,13 @@ export class FilingWorkspaceService {
         `INSERT INTO hsdg.filing_corrections
            (compliance_instance_id, engagement_id, corrected_in_instance_id, note, created_by_employee_id)
          VALUES ($1,$2,$3,$4,$5)`,
-        [id, inst.engagement_id, dto.correctedInInstanceId ?? null, dto.note.trim(), ctx.employeeId ?? null],
+        [
+          id,
+          inst.engagement_id,
+          dto.correctedInInstanceId ?? null,
+          dto.note.trim(),
+          ctx.employeeId ?? null,
+        ],
       );
       await this.audit.recordWith(client, ctx, {
         action: 'filing.correction_added',
@@ -705,25 +737,25 @@ export class FilingWorkspaceService {
     // One client runs one query at a time; keep these sequential.
     const task = await this.loadTask(client, id);
     const items = await client.query<ItemRow>(
-        `SELECT it.id, it.item_code, it.label, it.slot_code, it.required, it.sequence, it.auto_tick,
+      `SELECT it.id, it.item_code, it.label, it.slot_code, it.required, it.sequence, it.auto_tick,
                 it.note, it.status, e.full_name AS done_by_name, it.done_at, it.na_reason,
                 it.document_id, it.client_dependency_id, it.version
            FROM hsdg.instance_checklist_items it
            LEFT JOIN hsdg.employees e ON e.id = it.done_by_employee_id
           WHERE it.compliance_instance_id = $1
           ORDER BY it.sequence, it.item_code`,
-        [id],
-      );
+      [id],
+    );
     const docs = await client.query<{
-        id: string;
-        title: string;
-        slot_code: string | null;
-        filename: string | null;
-        created_at: Date;
-        uploaded_by_name: string | null;
-        from_client: boolean;
-      }>(
-        `SELECT d.id, d.title, d.slot_code, cv.filename, d.created_at,
+      id: string;
+      title: string;
+      slot_code: string | null;
+      filename: string | null;
+      created_at: Date;
+      uploaded_by_name: string | null;
+      from_client: boolean;
+    }>(
+      `SELECT d.id, d.title, d.slot_code, cv.filename, d.created_at,
                 ce.full_name AS uploaded_by_name,
                 (d.client_dependency_id IS NOT NULL AND d.created_by_employee_id IS NULL) AS from_client
            FROM hsdg.documents d
@@ -731,17 +763,22 @@ export class FilingWorkspaceService {
            LEFT JOIN hsdg.employees ce ON ce.id = d.created_by_employee_id
           WHERE d.compliance_instance_id = $1 AND d.status = 'active' AND d.deleted_at IS NULL
           ORDER BY d.created_at DESC`,
-        [id],
-      );
-    const requests = await client.query<{ id: string; slot_code: string | null; created_at: Date; escalation_date: string | null }>(
-        `SELECT id, slot_code, created_at, escalation_date::text
+      [id],
+    );
+    const requests = await client.query<{
+      id: string;
+      slot_code: string | null;
+      created_at: Date;
+      escalation_date: string | null;
+    }>(
+      `SELECT id, slot_code, created_at, escalation_date::text
            FROM hsdg.client_dependencies
           WHERE compliance_instance_id = $1 AND status IN ('pending','partially_received')`,
-        [id],
-      );
+      [id],
+    );
     const figures = await this.loadFigures(client, id);
     const filings = await client.query<FilingRow>(
-        `SELECT fr.id, fr.reference_kind, fr.reference_no, fr.filed_on::text, fr.filed_by_employee_id,
+      `SELECT fr.id, fr.reference_kind, fr.reference_no, fr.filed_on::text, fr.filed_by_employee_id,
                 fe.full_name AS filed_by_name, fr.is_nil, fr.figures, fr.late_fee_paid::text,
                 fr.interest_paid::text, fr.ack_document_id, fr.remarks, fr.created_at, fr.undone_at,
                 ue.full_name AS undone_by_name, fr.undo_reason
@@ -750,18 +787,18 @@ export class FilingWorkspaceService {
            LEFT JOIN hsdg.employees ue ON ue.id = fr.undone_by_employee_id
           WHERE fr.compliance_instance_id = $1
           ORDER BY fr.created_at DESC`,
-        [id],
-      );
+      [id],
+    );
     const corrections = await client.query<{
-        id: string;
-        corrected_in_instance_id: string | null;
-        corrected_rule: string | null;
-        corrected_period: string | null;
-        note: string;
-        created_by_name: string | null;
-        created_at: Date;
-      }>(
-        `SELECT fc.id, fc.corrected_in_instance_id, COALESCE(rv.form_label, cr.name) AS corrected_rule,
+      id: string;
+      corrected_in_instance_id: string | null;
+      corrected_rule: string | null;
+      corrected_period: string | null;
+      note: string;
+      created_by_name: string | null;
+      created_at: Date;
+    }>(
+      `SELECT fc.id, fc.corrected_in_instance_id, COALESCE(rv.form_label, cr.name) AS corrected_rule,
                 ci.period_key AS corrected_period, fc.note, e.full_name AS created_by_name, fc.created_at
            FROM hsdg.filing_corrections fc
            LEFT JOIN hsdg.compliance_instances ci ON ci.id = fc.corrected_in_instance_id
@@ -770,8 +807,8 @@ export class FilingWorkspaceService {
            LEFT JOIN hsdg.employees e ON e.id = fc.created_by_employee_id
           WHERE fc.compliance_instance_id = $1
           ORDER BY fc.created_at`,
-        [id],
-      );
+      [id],
+    );
     const summaryFiled = await this.summaryFiledLabel(client, inst);
 
     const checklist: ChecklistItem[] = items.rows.map((r) => ({
@@ -884,7 +921,12 @@ export class FilingWorkspaceService {
     const outputTax = sumPrefix(figures.figures, 'output_');
     const lateCharges =
       inst.stream === 'gst' && !live && inst.workflow_status !== 'not_applicable'
-        ? indicativeLateCharges({ dueDate: inst.due, asOf: today, isNil: false, taxPayable: outputTax })
+        ? indicativeLateCharges({
+            dueDate: inst.due,
+            asOf: today,
+            isNil: false,
+            taxPayable: outputTax,
+          })
         : null;
 
     return {
@@ -914,7 +956,9 @@ export class FilingWorkspaceService {
         lateCharges,
         notApplicableReason:
           inst.workflow_status === 'not_applicable'
-            ? (inst.notes?.startsWith(NA_NOTE_PREFIX) ? inst.notes.slice(NA_NOTE_PREFIX.length) : inst.notes)
+            ? inst.notes?.startsWith(NA_NOTE_PREFIX)
+              ? inst.notes.slice(NA_NOTE_PREFIX.length)
+              : inst.notes
             : null,
       },
       task: task
@@ -937,18 +981,16 @@ export class FilingWorkspaceService {
       figuresRequiredToLodge: figuresRequiredToLodge(form),
       filing: live,
       filingHistory: views,
-      corrections: corrections.rows.map(
-        (c): FilingCorrectionView => ({
-          id: c.id,
-          correctedInInstanceId: c.corrected_in_instance_id,
-          correctedInLabel: c.corrected_rule
-            ? `${c.corrected_rule} ${periodLabel(c.corrected_period)}`.trim()
-            : null,
-          note: c.note,
-          createdByName: c.created_by_name,
-          createdAt: c.created_at.toISOString(),
-        }),
-      ),
+      corrections: corrections.rows.map((c): FilingCorrectionView => ({
+        id: c.id,
+        correctedInInstanceId: c.corrected_in_instance_id,
+        correctedInLabel: c.corrected_rule
+          ? `${c.corrected_rule} ${periodLabel(c.corrected_period)}`.trim()
+          : null,
+        note: c.note,
+        createdByName: c.created_by_name,
+        createdAt: c.created_at.toISOString(),
+      })),
       warnings,
       can,
     };
@@ -985,7 +1027,10 @@ export class FilingWorkspaceService {
     const pick = (s: PeriodSection) => {
       const r = rows.find((x) => x.section === s);
       if (!r) return null;
-      const figures = r.id === inst.id ? (live?.figures as Figures | undefined) ?? ownFigures : r.filed_figures ?? r.figures;
+      const figures =
+        r.id === inst.id
+          ? ((live?.figures as Figures | undefined) ?? ownFigures)
+          : (r.filed_figures ?? r.figures);
       return { filedOn: r.filed_on, figures: figures ?? null, exportsReported: r.exports_reported };
     };
     const lut = await client.query(
@@ -1040,7 +1085,8 @@ export class FilingWorkspaceService {
     try {
       return await this.db.withRlsContext(ctx, async (client) => {
         const inst = await this.loadInstance(client, id);
-        if (!inst.is_member) throw new ForbiddenException('Only the engagement team can change this filing.');
+        if (!inst.is_member)
+          throw new ForbiddenException('Only the engagement team can change this filing.');
         this.requireOpenEngagement(inst);
         await seedChecklistForInstance(client, id);
         await work(client, inst);
@@ -1073,7 +1119,10 @@ export class FilingWorkspaceService {
     return rows[0] ?? null;
   }
 
-  private async loadFigures(client: PoolClient, id: string): Promise<{ figures: Figures; version: number }> {
+  private async loadFigures(
+    client: PoolClient,
+    id: string,
+  ): Promise<{ figures: Figures; version: number }> {
     const { rows } = await client.query<{ figures: Figures; version: number }>(
       `SELECT figures, version FROM hsdg.instance_figures WHERE compliance_instance_id = $1`,
       [id],
@@ -1101,7 +1150,11 @@ export class FilingWorkspaceService {
     return r ? `${r.label} ${periodLabel(r.period_key)}`.trim() : null;
   }
 
-  private requireUnlocked(_client: PoolClient, inst: InstanceRow, summaryFiled: string | null): void {
+  private requireUnlocked(
+    _client: PoolClient,
+    inst: InstanceRow,
+    summaryFiled: string | null,
+  ): void {
     const lock = lockState({
       workflowStatus: inst.workflow_status,
       section: inst.section,
@@ -1116,7 +1169,11 @@ export class FilingWorkspaceService {
     }
   }
 
-  private async requireMember(client: PoolClient, engagementId: string, employeeId: string): Promise<void> {
+  private async requireMember(
+    client: PoolClient,
+    engagementId: string,
+    employeeId: string,
+  ): Promise<void> {
     const { rows } = await client.query(
       `SELECT 1 FROM hsdg.engagements e
         WHERE e.id = $1 AND (e.engagement_partner_id = $2 OR e.engagement_manager_id = $2)
