@@ -344,5 +344,102 @@ describe('Firm calendar v2 (e2e)', () => {
         isLate: false,
       });
     });
+
+    it('ending a stream takes its open items off the calendar and its tab; re-adding brings them back', async () => {
+      const misItems = async () =>
+        (
+          await http()
+            .get(`/api/v1/engagements/${firmEng}/streams/mis/tree?fy=2026-27`)
+            .set(bearer(pa))
+            .expect(200)
+        ).body.periods.flatMap((p: { items: unknown[] }) => p.items) as Array<{
+          instanceId: string;
+          workflowStatus: string;
+        }>;
+      const tabStreams = async () =>
+        (await http().get(`/api/v1/engagements/${firmEng}/tabs`).set(bearer(pa)).expect(200)).body
+          .streams as Array<{ stream: string; financialYears: string[] }>;
+      const years = async () =>
+        (await http().get(`/api/v1/engagements/${firmEng}/years`).set(bearer(pa)).expect(200))
+          .body[0] as { version: number };
+
+      // September's MIS pack is assigned before the stream is ended.
+      const items = await misItems();
+      expect(items).toHaveLength(12);
+      const assigned = items[5]!.instanceId;
+      const emps = await http().get('/api/v1/employees?limit=100').set(bearer(pa)).expect(200);
+      const managerX = (emps.body.items as Array<{ id: string; employeeCode: string }>).find(
+        (e) => e.employeeCode === 'EMP005',
+      )!.id;
+      await http()
+        .post(`/api/v1/engagements/${firmEng}/team`)
+        .set(bearer(pa))
+        .send({ employeeId: managerX, roleOnEngagement: 'in_charge' })
+        .expect(201);
+      await http()
+        .post(`/api/v1/engagements/${firmEng}/tasks`)
+        .set(bearer(pa))
+        .send({
+          title: 'MIS pack · 2026-09',
+          assignedToEmployeeId: managerX,
+          complianceInstanceId: assigned,
+        })
+        .expect(201);
+
+      const ended = await http()
+        .patch(`/api/v1/engagements/${firmEng}/years/2026-27/streams`)
+        .set(bearer(pa))
+        .send({ end: ['mis'], version: (await years()).version })
+        .expect(200);
+      expect(ended.body.streams).not.toContain('mis');
+      const after = await superuser((db) =>
+        db.query<{ id: string; workflow_status: string; flagged: boolean }>(
+          `SELECT ci.id, ci.workflow_status, ci.profile_changed_at IS NOT NULL AS flagged
+             FROM hsdg.compliance_instances ci
+             JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
+            WHERE ci.engagement_id = $1 AND r.code = 'MIS_MONTHLY_PACK'`,
+          [firmEng],
+        ),
+      );
+      const kept = after.rows.find((r) => r.id === assigned)!;
+      expect(kept).toMatchObject({ workflow_status: 'not_started', flagged: true });
+      expect(
+        after.rows
+          .filter((r) => r.id !== assigned)
+          .every((r) => r.workflow_status === 'not_applicable'),
+      ).toBe(true);
+      // The assigned item keeps the tab; once it too is marked not applicable, the tab goes.
+      expect((await tabStreams()).find((s) => s.stream === 'mis')?.financialYears).toEqual([
+        '2026-27',
+      ]);
+      await superuser((db) =>
+        db.query(
+          `UPDATE hsdg.compliance_instances SET workflow_status = 'not_applicable' WHERE id = $1`,
+          [assigned],
+        ),
+      );
+      expect((await tabStreams()).find((s) => s.stream === 'mis')?.financialYears ?? []).toEqual(
+        [],
+      );
+      await superuser((db) =>
+        db.query(
+          `UPDATE hsdg.compliance_instances SET workflow_status = 'not_started' WHERE id = $1`,
+          [assigned],
+        ),
+      );
+
+      // Re-adding the stream brings the items it took off back as not started.
+      await http()
+        .patch(`/api/v1/engagements/${firmEng}/years/2026-27/streams`)
+        .set(bearer(pa))
+        .send({ add: ['mis'], version: (await years()).version })
+        .expect(200);
+      const back = await misItems();
+      expect(back).toHaveLength(12);
+      expect(back.every((i) => i.workflowStatus === 'not_started')).toBe(true);
+      expect((await tabStreams()).find((s) => s.stream === 'mis')?.financialYears).toEqual([
+        '2026-27',
+      ]);
+    });
   });
 });

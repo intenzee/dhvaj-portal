@@ -796,6 +796,8 @@ export class EngagementKindsService {
         findings,
         input.acknowledgedIndependenceRules,
       );
+      const ended = before.streams.filter((s) => end.has(s));
+      await this.generator.endStreams(client, engagementId, fy, ended);
       if (before.status === 'open') await this.generate(client, engagementId, [fy]);
       const after = await this.yearOrThrow(client, engagementId, fy, kc);
       await this.audit.recordWith(client, ctx, {
@@ -803,7 +805,7 @@ export class EngagementKindsService {
         objectType: 'engagement',
         objectId: engagementId,
         before: { streams: before.streams },
-        after: { streams: after.streams, added: add, ended: [...end] },
+        after: { streams: after.streams, added: add, ended },
       });
       return after;
     });
