@@ -18,7 +18,6 @@ import {
 import { SpreadsheetEditor } from '@/components/document-editor/spreadsheet-editor';
 import { WordEditor } from '@/components/document-editor/word-editor';
 import { TextEditor } from '@/components/document-editor/text-editor';
-import { OnlyOfficeEditor } from '@/components/document-editor/onlyoffice-editor';
 import { M365Editor } from '@/components/document-editor/m365-editor';
 import { isM365Enabled } from '@/lib/m365';
 import type { EditorHandle } from '@/components/document-editor/types';
@@ -101,21 +100,19 @@ export function DocumentPreview({
   }, []);
   const downloadPath = `/engagements/${engagementId}/documents/${doc.id}/download`;
 
-  // Editor precedence for Office/PDF files: Microsoft 365 (SharePoint Online,
-  // when enabled) → OnlyOffice → built-in viewers. Each falls through to the
-  // next if disabled or unreachable.
-  const [m365Failed, setM365Failed] = useState(false);
-  const [ooFailed, setOoFailed] = useState(false);
+  // Office/PDF files open in Microsoft 365 (SharePoint Online) — the firm's only
+  // embedded editor. If it is switched off or unreachable, the built-in viewers
+  // show the file and say why Microsoft 365 is not open.
+  const [m365Failed, setM365Failed] = useState<string | null>(null);
   const guessName = doc.currentFilename ?? doc.title;
   const officeKind = ['excel', 'word', 'pdf', 'csv'].includes(detectKind(null, guessName));
-  const useM365 = officeKind && isM365Enabled && !m365Failed;
-  const useOnlyOffice = officeKind && !useM365 && !ooFailed;
-  // Either embedded editor fetches/holds the bytes itself and saves out-of-band.
-  const liveEditor = useM365 || useOnlyOffice;
+  const useM365 = officeKind && isM365Enabled && m365Failed === null;
+  // The Microsoft 365 editor holds the bytes itself and saves out-of-band.
+  const liveEditor = useM365;
 
   useEffect(() => {
-    // When an embedded editor (Microsoft 365 or OnlyOffice) handles the file, it
-    // holds the bytes itself — we skip the local blob download entirely.
+    // When Microsoft 365 handles the file it holds the bytes itself — we skip the
+    // local blob download entirely.
     if (liveEditor) {
       setState({ loading: false });
       return;
@@ -142,9 +139,8 @@ export function DocumentPreview({
 
   const requestClose = useCallback(() => {
     if (!liveEditor && mode === 'edit' && dirty && !window.confirm('Discard unsaved changes?')) return;
-    // Embedded editors save out-of-band (OnlyOffice force-saves on teardown; the
-    // Microsoft 365 editor syncs its live copy back on close) — nudge the list to
-    // pick up any new version.
+    // The Microsoft 365 editor syncs its live copy back on close — nudge the list
+    // to pick up any new version.
     if (liveEditor && onSaved) {
       onSaved();
       window.setTimeout(onSaved, 2500);
@@ -221,7 +217,6 @@ export function DocumentPreview({
             <div className="truncate text-sm font-semibold text-ink">
               {doc.title}
               {useM365 && <span className="ml-2 text-xs font-normal text-primary-600">Microsoft 365 editor</span>}
-              {useOnlyOffice && <span className="ml-2 text-xs font-normal text-primary-600">Live editor — saves on close</span>}
               {!liveEditor && mode === 'edit' && (
                 <span className="ml-2 text-xs font-normal text-primary-600">Editing{dirty ? ' • unsaved' : ''}</span>
               )}
@@ -276,17 +271,18 @@ export function DocumentPreview({
             <M365Editor
               engagementId={engagementId}
               docId={doc.id}
-              onUnsupported={() => setM365Failed(true)}
+              onUnsupported={(reason) =>
+                setM365Failed(reason ?? 'The Microsoft 365 editor is unavailable.')
+              }
               onSaved={onSaved}
             />
           )}
-          {useOnlyOffice && (
-            <OnlyOfficeEditor
-              engagementId={engagementId}
-              docId={doc.id}
-              onUnsupported={() => setOoFailed(true)}
-              onClose={requestClose}
-            />
+          {officeKind && !useM365 && (
+            <p role="status" className="border-b border-line bg-warning-50 px-5 py-2 text-xs text-warning-700">
+              {isM365Enabled
+                ? `Microsoft 365 could not open this file (${m365Failed?.replace(/\.$/, '')}) — showing the portal viewer.`
+                : 'Microsoft 365 is not switched on for this portal — showing the portal viewer.'}
+            </p>
           )}
           {!liveEditor && state.loading && (
             <div className="flex h-full items-center justify-center">

@@ -4,9 +4,9 @@ import { apiFetch } from '@/lib/api';
  * Microsoft 365 (SharePoint Online) editing — client helpers.
  *
  * Gated by NEXT_PUBLIC_M365_ENABLED so the whole path stays inert until the
- * SharePoint site is provisioned and the flag is flipped. When off, the document
- * preview falls back to OnlyOffice (and then the built-in editors) exactly as
- * before.
+ * SharePoint site is provisioned and the flag is flipped. Microsoft 365 is the
+ * only embedded Office editor; when off, the document preview shows the file in
+ * the built-in viewers.
  */
 export const isM365Enabled = process.env.NEXT_PUBLIC_M365_ENABLED === 'true';
 
