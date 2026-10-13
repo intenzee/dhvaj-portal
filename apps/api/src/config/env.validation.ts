@@ -86,12 +86,11 @@ export const envSchema = z.object({
     .default(10 * 1024 * 1024),
 
   // ── OnlyOffice Document Server (in-app Office editing) ────────────────────
-  // Embeds the OnlyOffice editor for Excel/Word/PDF with full desktop fidelity.
-  // Off in production unless explicitly enabled; on by default in dev so the
-  // feature works out of the box once `npm run oo:up` is running.
+  // Retired: the portal opens Office files in Microsoft 365 only (M365_* below),
+  // and the web no longer embeds OnlyOffice. Off unless explicitly enabled.
   ONLYOFFICE_ENABLED: z
     .enum(['true', 'false'])
-    .default('true')
+    .default('false')
     .transform((v) => v === 'true'),
   // Browser-facing base URL of the Document Server (used to load its editor
   // script) — must be reachable from the user's browser.
@@ -114,8 +113,8 @@ export const envSchema = z.object({
   // link") sharing link to just one file (via Microsoft Graph) so it opens in
   // real Office 365 for the web with NO per-user Microsoft sign-in — the portal
   // is the single gatekeeper. PostgreSQL stays the record of truth for metadata
-  // (see the `documents/m365` bridge). OnlyOffice remains the automatic fallback
-  // when this is off/unavailable. The same connection settings back
+  // (see the `documents/m365` bridge). When this is off/unavailable the portal
+  // shows files in its built-in viewers. The same connection settings back
   // STORAGE_PROVIDER=sharepoint, which keeps every stored version in the site.
   //
   // OFF by default: the feature is inert until the SharePoint site + Entra app

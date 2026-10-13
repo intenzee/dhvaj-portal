@@ -24,7 +24,7 @@ import { Spinner, Button } from '@/components/ui';
  * the focus sync picks up edits made there when the user comes back.
  *
  * If Microsoft 365 editing is disabled or unavailable, it calls
- * {@link onUnsupported} so the host can fall back to OnlyOffice / built-ins.
+ * {@link onUnsupported} so the host can fall back to the built-in viewers.
  */
 export function M365Editor({
   engagementId,
