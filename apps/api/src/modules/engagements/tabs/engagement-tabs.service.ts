@@ -72,7 +72,8 @@ export class EngagementTabsService {
            LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
            LEFT JOIN hsdg.engagement_services es ON es.id = ci.engagement_service_id
            LEFT JOIN hsdg.services sv ON sv.id = es.service_id
-          WHERE ci.engagement_id = $1 AND ci.financial_year IS NOT NULL`,
+          WHERE ci.engagement_id = $1 AND ci.financial_year IS NOT NULL
+            AND ci.workflow_status <> 'not_applicable'`,
         [engagementId],
       );
       const byYear = new Map<string, Set<Stream>>();
@@ -86,7 +87,9 @@ export class EngagementTabsService {
         for (const s of y.streams) add(y.fy, s);
       }
       // Filings count too: a stream with work on it keeps its tab even when the
-      // year's scope does not list it (legacy filings moved into the engagement).
+      // year's scope does not list it (legacy filings moved into the engagement,
+      // or work started before the stream was ended). Items taken off the
+      // calendar (not applicable) do not.
       for (const r of instYears.rows) add(r.fy, r.stream);
       const financialYears = [...byYear.keys()].sort().reverse();
       const currentFy = fyOf(today);

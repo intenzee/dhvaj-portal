@@ -434,10 +434,17 @@ function YearEditor({
                 >
                   Discard
                 </Button>
-                {on.length === 0 && (
+                {on.length === 0 ? (
                   <span className="text-xs text-ink-faint">
                     A year keeps at least one stream — close the year instead.
                   </span>
+                ) : (
+                  ended.length > 0 && (
+                    <span className="text-xs text-ink-faint">
+                      Ending takes the stream’s unassigned, not-started items off the calendar; work
+                      already assigned or started stays, flagged to check.
+                    </span>
+                  )
                 )}
               </div>
             )}

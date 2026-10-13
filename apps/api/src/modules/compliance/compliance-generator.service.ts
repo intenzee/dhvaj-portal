@@ -48,6 +48,8 @@ import {
 
 /** Marks a not_applicable set by the generator (vs. a person's decision). */
 export const GENERATOR_NA_NOTE = 'calendar: no longer applies under the client profile';
+/** Marks a not_applicable set when a stream is taken out of a year's scope. */
+export const STREAM_ENDED_NOTE = 'calendar: stream taken out of scope for the year';
 
 const PERIODIC: ReadonlySet<RuleFrequency> = new Set([
   'monthly',
@@ -589,7 +591,9 @@ export class ComplianceGeneratorService {
         continue;
       }
       if (x.workflow_status === 'filed') continue;
-      const generatorNa = x.workflow_status === 'not_applicable' && x.notes === GENERATOR_NA_NOTE;
+      const generatorNa =
+        x.workflow_status === 'not_applicable' &&
+        (x.notes === GENERATOR_NA_NOTE || x.notes === STREAM_ENDED_NOTE);
       if (x.workflow_status === 'not_applicable' && !generatorNa) continue;
       const changed =
         x.statutory_deadline !== d.statutoryDeadline ||
@@ -800,6 +804,42 @@ export class ComplianceGeneratorService {
       ruleIds: new Set(),
     });
     return summary.createdIds;
+  }
+
+  /**
+   * Streams taken out of a year's scope: their not-started, unassigned items
+   * come off the calendar (not_applicable, and back again if the stream is
+   * re-added); items assigned or worked on stay and are flagged "Profile
+   * changed — check" for the lead to decide.
+   */
+  async endStreams(
+    client: PoolClient,
+    engagementId: string,
+    financialYear: string,
+    streams: readonly Stream[],
+  ): Promise<{ notApplicable: number; flagged: number }> {
+    if (streams.length === 0) return { notApplicable: 0, flagged: 0 };
+    const inStreams = `ci.engagement_id = $1 AND ci.financial_year = $2
+          AND ci.compliance_rule_version_id IN (
+            SELECT v.id FROM hsdg.compliance_rule_versions v WHERE v.stream = ANY($3::text[]))`;
+    const retired = await client.query(
+      `UPDATE hsdg.compliance_instances ci
+          SET workflow_status = 'not_applicable', notes = $4,
+              version = ci.version + 1, updated_at = now()
+        WHERE ${inStreams} AND ci.workflow_status = 'not_started'
+          AND NOT EXISTS (SELECT 1 FROM hsdg.tasks tk
+                           WHERE tk.source_compliance_instance_id = ci.id
+                             AND tk.status <> 'cancelled')`,
+      [engagementId, financialYear, streams, STREAM_ENDED_NOTE],
+    );
+    const flagged = await client.query(
+      `UPDATE hsdg.compliance_instances ci
+          SET profile_changed_at = now(), version = ci.version + 1, updated_at = now()
+        WHERE ${inStreams} AND ci.workflow_status NOT IN ('filed', 'not_applicable')
+          AND ci.profile_changed_at IS NULL`,
+      [engagementId, financialYear, streams],
+    );
+    return { notApplicable: retired.rowCount ?? 0, flagged: flagged.rowCount ?? 0 };
   }
 }
 
