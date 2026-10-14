@@ -3,6 +3,8 @@ import type { PoolClient } from 'pg';
 import {
   STREAM_REGISTRATION_TYPES,
   qrmpCategoryForGstin,
+  defaultCompanySubtype,
+  resolveCinFacts,
   type CalculationBasis,
   type CinProfileAttributes,
   type GstinProfileAttributes,
@@ -55,6 +57,7 @@ const PERIODIC: ReadonlySet<RuleFrequency> = new Set([
   'monthly',
   'quarterly',
   'half_yearly',
+  'calendar_half_yearly',
   'annual',
   'triennial',
 ]);
@@ -129,6 +132,7 @@ interface ExistingRow {
   period_key: string;
   financial_year: string | null;
   workflow_status: string;
+  reference_date: string;
   statutory_deadline: string;
   internal_sla_date: string;
   compliance_rule_version_id: string;
@@ -162,6 +166,8 @@ interface Desired {
 /** The engagement + entity facts that feed rule conditions. */
 export interface EntityFacts {
   turnover: number;
+  /** The client's turnover is on record (G12 needs a real figure, not the 0 default). */
+  turnoverKnown?: boolean;
   entityCategory: string | null;
   entityTypeSlug: string | null;
 }
@@ -219,17 +225,24 @@ export function buildRuleContext(
   }
   if (scope === 'cin' || scope === 'din') {
     const c = attrs as CinProfileAttributes;
-    const defaultSubtype =
-      facts.entityTypeSlug === 'opc'
-        ? 'opc'
-        : facts.entityTypeSlug === 'public_limited'
-          ? 'unlisted_public'
-          : 'private';
+    const defaultSubtype = defaultCompanySubtype(facts.entityTypeSlug);
+    const f = resolveCinFacts(c, {
+      subtype: defaultSubtype,
+      turnover: facts.turnoverKnown === false ? null : facts.turnover,
+    });
     Object.assign(ctx, {
-      company_subtype: c.companySubtype ?? defaultSubtype,
+      // G12: a private company within the small-company limits is small.
+      company_subtype: f.companySubtype ?? defaultSubtype,
       msme_dues_45: c.msmeDuesOver45Days ?? false,
-      deposits: c.depositsOrExemptedLoans ?? false,
-      auditor_appointed_at_agm: c.auditorAppointedAtAgm ?? false,
+      // G7: null when unknown, so DPT-3 stays; only false drops it.
+      deposits: c.depositsOrExemptedLoans ?? null,
+      xbrl_required: f.xbrlRequired,
+      has_subsidiaries: f.hasSubsidiaries,
+      mgt8_required: f.mgt8Required,
+      csr_applicable: f.csrApplicable,
+      secretarial_audit_required: f.secretarialAuditRequired,
+      paid_up_capital: f.paidUpCapital,
+      authorised_capital: f.authorisedCapital,
     });
   }
   return ctx;
@@ -266,6 +279,30 @@ function toVersion(v: VersionRow): PeriodRuleVersion {
     condition: v.condition,
     variants: v.variants,
   };
+}
+
+/**
+ * The periods a rule can run on in one year: its own frequency's, plus those
+ * of any frequency a variant switches to. desiredFor keeps the ones matching
+ * the frequency in force for the target.
+ */
+function rulePeriods(
+  versions: readonly VersionRow[],
+  financialYear: string,
+): Array<Period & { frequency: RuleFrequency | null }> {
+  const frequencies = new Set<RuleFrequency | null>();
+  for (const v of versions) {
+    frequencies.add(v.frequency);
+    for (const variant of v.variants ?? []) {
+      const f = variant.set?.['frequency'];
+      if (typeof f === 'string' && PERIODIC.has(f as RuleFrequency)) {
+        frequencies.add(f as RuleFrequency);
+      }
+    }
+  }
+  return [...frequencies].flatMap((f) =>
+    periodsForFrequency(f, financialYear).map((p) => ({ ...p, frequency: f })),
+  );
 }
 
 /** The profile in force on `date` for (scope, registration), if any. */
@@ -335,6 +372,7 @@ export class ComplianceGeneratorService {
     }
     const facts: EntityFacts = {
       turnover: Number(e.annual_turnover ?? 0),
+      turnoverKnown: e.annual_turnover !== null,
       entityCategory: e.category,
       entityTypeSlug: e.slug,
     };
@@ -410,7 +448,8 @@ export class ComplianceGeneratorService {
       () =>
         client.query<ExistingRow>(
           `SELECT id, compliance_rule_id, registration_id, period_key, financial_year, workflow_status,
-                statutory_deadline::text, internal_sla_date::text, compliance_rule_version_id,
+                reference_date::text, statutory_deadline::text, internal_sla_date::text,
+                compliance_rule_version_id,
                 is_provisional, compliance_event_id, notes, profile_changed_at, form_label
            FROM hsdg.compliance_instances
           WHERE engagement_id = $1 AND period_key IS NOT NULL AND period_key NOT LIKE 'EVT:%'`,
@@ -445,7 +484,7 @@ export class ComplianceGeneratorService {
             profiles.rows,
             year.financial_year,
           )) {
-            for (const period of periodsForFrequency(versions[0]!.frequency, year.financial_year)) {
+            for (const period of rulePeriods(versions, year.financial_year)) {
               const d = this.desiredFor({
                 ruleId,
                 versions,
@@ -511,7 +550,7 @@ export class ComplianceGeneratorService {
       periodSuffix: string | null;
       scope: RegistrationScope;
     };
-    period: Period;
+    period: Period & { frequency: RuleFrequency | null };
     facts: EntityFacts;
     profiles: readonly ProfileRow[];
     events: readonly EventRow[];
@@ -535,6 +574,9 @@ export class ComplianceGeneratorService {
       panProfile,
     );
     const version = applyVariants(toVersion(row), ctx);
+    // A variant may run the rule on other periods (a small company's board
+    // meetings on calendar halves); only periods of its own frequency apply.
+    if (a.period.frequency !== version.frequency) return null;
     if (!passesPeriodFilter(version.periodFilter, a.period)) return null;
     if (!conditionHolds(version.condition, ctx)) return null;
 
@@ -624,6 +666,34 @@ export class ComplianceGeneratorService {
       }
     }
 
+    // A period that replaces another on the same date (a small company's Jul–Dec
+    // board meeting ends 31 Dec, as Q3 did) takes over the row it replaces:
+    // one row per rule and reference date (compliance_instances_unique).
+    const pending = toInsert.splice(0);
+    for (const d of pending) {
+      const x = existing.find(
+        (e) =>
+          e.compliance_rule_id === d.ruleId &&
+          e.reference_date === d.referenceDate &&
+          !seen.has(keyOf(e.compliance_rule_id, e.registration_id, e.period_key)),
+      );
+      if (!x) {
+        toInsert.push(d);
+        continue;
+      }
+      seen.add(keyOf(x.compliance_rule_id, x.registration_id, x.period_key));
+      // A meeting already held on that date answers for the new period too.
+      if (x.workflow_status === 'filed') continue;
+      const generatorNa =
+        x.workflow_status === 'not_applicable' &&
+        (x.notes === GENERATOR_NA_NOTE || x.notes === STREAM_ENDED_NOTE);
+      toMove.push({ id: x.id, d, reopen: generatorNa });
+      if (x.form_label !== d.formLabel) toRelabel.push({ id: x.id, formLabel: d.formLabel });
+      if (x.workflow_status !== 'not_started' && !generatorNa && !x.profile_changed_at) {
+        toFlag.push(x.id);
+      }
+    }
+
     const toRetire: string[] = [];
     for (const x of existing) {
       if (!x.financial_year || !scope.years.has(x.financial_year)) continue;
@@ -674,6 +744,11 @@ export class ComplianceGeneratorService {
       await client.query(
         `UPDATE hsdg.compliance_instances ci
             SET compliance_rule_version_id = m."versionId",
+                registration_id = m."registrationId",
+                financial_year = m."financialYear",
+                period_key = m."periodKey",
+                period_start = m."periodStart",
+                period_end = m."periodEnd",
                 reference_date = m."referenceDate",
                 statutory_deadline = m."statutoryDeadline",
                 internal_sla_date = m."internalSlaDate",
@@ -693,7 +768,9 @@ export class ComplianceGeneratorService {
                 version = ci.version + 1,
                 updated_at = now()
            FROM jsonb_to_recordset($1::jsonb) AS m(
-                id uuid, reopen boolean, "versionId" uuid, "referenceDate" date,
+                id uuid, reopen boolean, "versionId" uuid, "registrationId" uuid,
+                "financialYear" text, "periodKey" text, "periodStart" date, "periodEnd" date,
+                "referenceDate" date,
                 "statutoryDeadline" date, "internalSlaDate" date, "isProvisional" boolean,
                 "isOptional" boolean, section text, "complianceEventId" uuid)
           WHERE ci.id = m.id`,

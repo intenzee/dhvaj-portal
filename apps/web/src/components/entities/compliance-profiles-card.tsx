@@ -2,9 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { History, Pencil } from 'lucide-react';
+import { History, Minus, Pencil, Plus } from 'lucide-react';
 import {
   COMPANY_SUBTYPES,
+  defaultCompanySubtype,
+  dscLapses,
+  resolveCinFacts,
+  type CinProfileAttributes,
+  type CompanyDirector,
   GST_SCHEMES,
   GST_SCHEME_LABEL,
   PROFILE_SCOPES,
@@ -46,13 +51,34 @@ const FLAGS: Record<ProfileScope, Array<[key: string, label: string]>> = {
     ['advanceTaxLiable', 'Liable to advance tax'],
     ['trustOrInstitution', 'Trust / institution'],
   ],
+  // ADT-1 now follows the AGM as recorded (auditorAppointedAtAgm is retired).
   cin: [
     ['msmeDuesOver45Days', 'MSME dues over 45 days (MSME-1)'],
-    ['depositsOrExemptedLoans', 'Deposits / exempted loans (DPT-3)'],
-    ['auditorAppointedAtAgm', 'Auditor appointed at the AGM (ADT-1)'],
+    ['hasSubsidiaries', 'Has subsidiaries (consolidated AOC-4)'],
+    ['csrApplicable', 'CSR applies (s.135)'],
+    ['secretarialAuditRequired', 'Secretarial audit (MR-3)'],
   ],
   llpin: [],
 };
+
+/**
+ * CIN facts that are yes / no / not stated: unstated keeps DPT-3 (a nil filing
+ * out of caution, G7), and XBRL / MGT-8 follow the capital and turnover.
+ */
+const CIN_TRISTATE: Array<[key: string, label: string, unset: string]> = [
+  ['depositsOrExemptedLoans', 'Deposits / exempted loans (DPT-3)', 'Not known — DPT-3 kept'],
+  ['xbrlRequired', 'AOC-4 in XBRL', 'By capital / turnover'],
+  ['mgt8Required', 'MGT-8 by a CS in practice', 'By capital / turnover'],
+];
+
+/** Rupee figures on a CIN profile (G12 small-company test, XBRL / MGT-8, ROC fee slab). */
+const CIN_AMOUNTS: Array<[key: string, label: string]> = [
+  ['paidUpCapital', 'Paid-up capital (₹)'],
+  ['authorisedCapital', 'Authorised capital (₹)'],
+  ['turnover', 'Turnover, last FY (₹)'],
+];
+
+const rupees = (n: number): string => `₹${n.toLocaleString('en-IN')}`;
 
 interface Slot {
   key: string;
@@ -127,7 +153,15 @@ export function ComplianceProfilesCard({ entityId }: { entityId: string }): JSX.
           editing === s.key ? (
             <ProfileForm key={s.key} entityId={entityId} slot={s} onDone={() => setEditing(null)} />
           ) : (
-            <ProfileRow key={s.key} slot={s} onEdit={() => setEditing(s.key)} />
+            <ProfileRow
+              key={s.key}
+              slot={s}
+              entity={{
+                slug: q.data?.entityTypeSlug ?? null,
+                turnover: q.data?.annualTurnover ?? null,
+              }}
+              onEdit={() => setEditing(s.key)}
+            />
           ),
         )}
       </CardBody>
@@ -141,7 +175,15 @@ function slotTitle(s: Slot): string {
   return `${r.registrationType.toUpperCase()} ${r.registrationNumber}${r.stateCode ? ` · ${r.stateCode}` : ''}`;
 }
 
-function ProfileRow({ slot, onEdit }: { slot: Slot; onEdit: () => void }): JSX.Element {
+function ProfileRow({
+  slot,
+  entity,
+  onEdit,
+}: {
+  slot: Slot;
+  entity: { slug: string | null; turnover: number | null };
+  onEdit: () => void;
+}): JSX.Element {
   const [showHistory, setShowHistory] = useState(false);
   const p = slot.current;
   const flags = FLAGS[slot.scope].filter(([k]) => p?.attributes[k] === true);
@@ -185,10 +227,18 @@ function ProfileRow({ slot, onEdit }: { slot: Slot; onEdit: () => void }): JSX.E
           {flags.map(([k, label]) => (
             <Badge key={k}>{label}</Badge>
           ))}
-          {!p.gstScheme && flags.length === 0 && typeof turnover !== 'number' && !subtype && (
-            <span className="text-xs text-ink-faint">Nothing flagged.</span>
-          )}
+          {slot.scope !== 'cin' &&
+            !p.gstScheme &&
+            flags.length === 0 &&
+            typeof turnover !== 'number' &&
+            !subtype && <span className="text-xs text-ink-faint">Nothing flagged.</span>}
         </div>
+      )}
+      {slot.scope === 'cin' && (
+        <CinFactsSummary
+          attributes={(p?.attributes ?? {}) as CinProfileAttributes}
+          entity={entity}
+        />
       )}
       {showHistory && (
         <ul className="mt-2 space-y-0.5 text-xs text-ink-muted">
@@ -202,6 +252,67 @@ function ProfileRow({ slot, onEdit }: { slot: Slot; onEdit: () => void }): JSX.E
       )}
     </div>
   );
+}
+
+/** What the ROC rules read from a CIN profile, with each default and its source (G12, P1-7). */
+function CinFactsSummary({
+  attributes: a,
+  entity,
+}: {
+  attributes: CinProfileAttributes;
+  entity: { slug: string | null; turnover: number | null };
+}): JSX.Element {
+  const entitySubtype = defaultCompanySubtype(entity.slug);
+  const f = resolveCinFacts(a, { subtype: entitySubtype, turnover: entity.turnover });
+  const figuresMissing =
+    !a.companySubtype &&
+    entitySubtype === 'private' &&
+    (typeof f.paidUpCapital !== 'number' || typeof f.turnover !== 'number');
+  const lapsing = dscLapses(a.directors ?? [], addDays(today(), 30), today());
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        {f.subtypeDerived && <Badge tone="warn">Small company — within the limits · Verify</Badge>}
+        {a.depositsOrExemptedLoans === true && <Badge>Deposits / exempted loans</Badge>}
+        {a.depositsOrExemptedLoans === false && <Badge>No deposits — no DPT-3</Badge>}
+        {a.depositsOrExemptedLoans === undefined && (
+          <Badge tone="warn">Deposits not known — DPT-3 kept</Badge>
+        )}
+        {f.xbrlRequired && <Badge>{f.xbrlDerived ? 'XBRL (by figures) · Verify' : 'XBRL'}</Badge>}
+        {f.mgt8Required && <Badge>{f.mgt8Derived ? 'MGT-8 (by figures) · Verify' : 'MGT-8'}</Badge>}
+        {CIN_AMOUNTS.map(([k, label]) => {
+          const v = (a as Record<string, unknown>)[k];
+          return typeof v === 'number' ? (
+            <Badge key={k}>
+              {label.replace(' (₹)', '')} {rupees(v)}
+            </Badge>
+          ) : null;
+        })}
+        {(a.directors?.length ?? 0) > 0 && (
+          <Badge>
+            {a.directors!.length} director{a.directors!.length === 1 ? '' : 's'}
+          </Badge>
+        )}
+        {lapsing.map((l) => (
+          <Badge key={l.din} tone={l.expired ? 'danger' : 'warn'}>
+            DSC of {l.name} {l.expired ? 'expired' : 'expires'} {formatDate(l.dscExpiresOn)}
+          </Badge>
+        ))}
+      </div>
+      {figuresMissing && (
+        <p className="text-xs text-warning-700">
+          Add the paid-up capital and turnover to test small-company status (MGT-7A, board meetings
+          on calendar halves).
+        </p>
+      )}
+    </div>
+  );
+}
+
+function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function ProfileForm({
@@ -238,7 +349,8 @@ function ProfileForm({
           ...(isGst
             ? { gstScheme: scheme, qrmpCategory: scheme === 'qrmp' && category ? category : null }
             : {}),
-          attributes: attrs,
+          // auditorAppointedAtAgm is retired: ADT-1 follows the AGM as recorded.
+          attributes: { ...attrs, auditorAppointedAtAgm: undefined },
         },
       }),
     onSuccess: (res) => {
@@ -320,6 +432,34 @@ function ProfileForm({
           </Field>
         )}
       </div>
+      {slot.scope === 'cin' && (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {CIN_AMOUNTS.map(([k, label]) => (
+            <Field key={k} label={label}>
+              <Input
+                type="number"
+                min={0}
+                value={typeof attrs[k] === 'number' ? String(attrs[k]) : ''}
+                onChange={(e) => set(k, e.target.value === '' ? undefined : Number(e.target.value))}
+              />
+            </Field>
+          ))}
+          {CIN_TRISTATE.map(([k, label, unset]) => (
+            <Field key={k} label={label}>
+              <Select
+                value={attrs[k] === true ? 'yes' : attrs[k] === false ? 'no' : ''}
+                onChange={(e) =>
+                  set(k, e.target.value === '' ? undefined : e.target.value === 'yes')
+                }
+              >
+                <option value="">{unset}</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </Select>
+            </Field>
+          ))}
+        </div>
+      )}
       {FLAGS[slot.scope].length > 0 && (
         <div className="grid gap-1.5 sm:grid-cols-2">
           {FLAGS[slot.scope].map(([k, label]) => (
@@ -335,6 +475,12 @@ function ProfileForm({
           ))}
         </div>
       )}
+      {slot.scope === 'cin' && (
+        <DirectorsEditor
+          directors={(attrs.directors as CompanyDirector[] | undefined) ?? []}
+          onChange={(d) => set('directors', d.length ? d : undefined)}
+        />
+      )}
       <div className="flex gap-2">
         <Button size="sm" disabled={save.isPending || !effectiveFrom} onClick={() => save.mutate()}>
           Save from {effectiveFrom ? formatDate(effectiveFrom) : '…'}
@@ -343,6 +489,72 @@ function ProfileForm({
           Cancel
         </Button>
       </div>
+    </div>
+  );
+}
+
+const EMPTY_DIRECTOR: CompanyDirector = { din: '', name: '', kycCycleStartFy: '' };
+
+/** Directors inline (+ / −): DIN, KYC cycle and DSC expiry (P2-5). */
+function DirectorsEditor({
+  directors,
+  onChange,
+}: {
+  directors: CompanyDirector[];
+  onChange: (d: CompanyDirector[]) => void;
+}): JSX.Element {
+  const update = (i: number, patch: Partial<CompanyDirector>) =>
+    onChange(
+      directors.map((d, j) => {
+        if (j !== i) return d;
+        const next = { ...d, ...patch };
+        if (!next.dscExpiresOn) delete next.dscExpiresOn;
+        return next;
+      }),
+    );
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium text-ink-muted">Directors (DIR-3 KYC, DSC expiry)</p>
+      {directors.map((d, i) => (
+        <div key={i} className="grid items-end gap-2 sm:grid-cols-[8rem_1fr_7rem_10rem_auto]">
+          <Field label="DIN">
+            <Input
+              value={d.din}
+              inputMode="numeric"
+              maxLength={8}
+              onChange={(e) => update(i, { din: e.target.value.trim() })}
+            />
+          </Field>
+          <Field label="Name">
+            <Input value={d.name} onChange={(e) => update(i, { name: e.target.value })} />
+          </Field>
+          <Field label="KYC cycle FY">
+            <Input
+              value={d.kycCycleStartFy}
+              placeholder="2025-26"
+              onChange={(e) => update(i, { kycCycleStartFy: e.target.value.trim() })}
+            />
+          </Field>
+          <Field label="DSC expires on">
+            <Input
+              type="date"
+              value={d.dscExpiresOn ?? ''}
+              onChange={(e) => update(i, { dscExpiresOn: e.target.value || undefined })}
+            />
+          </Field>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`Remove director ${d.name || i + 1}`}
+            onClick={() => onChange(directors.filter((_, j) => j !== i))}
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ))}
+      <Button size="sm" variant="ghost" onClick={() => onChange([...directors, EMPTY_DIRECTOR])}>
+        <Plus className="h-3.5 w-3.5" /> Add director
+      </Button>
     </div>
   );
 }

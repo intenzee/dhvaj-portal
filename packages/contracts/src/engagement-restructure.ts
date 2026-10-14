@@ -130,6 +130,8 @@ export const RULE_FREQUENCY = {
   monthly: 'monthly',
   quarterly: 'quarterly',
   halfYearly: 'half_yearly',
+  /** Halves of the calendar year, Jul–Dec and Jan–Jun (s.173(5) board meetings of a small company / OPC). */
+  calendarHalfYearly: 'calendar_half_yearly',
   annual: 'annual',
   /** Once every three financial years (DIR-3 KYC per DIN). */
   triennial: 'triennial',
@@ -240,12 +242,33 @@ export interface CompanyDirector {
   name: string;
   /** FY in which the director's current three-year KYC cycle starts ('2025-26'). */
   kycCycleStartFy: string;
+  /** The director's DSC expires on this date (YYYY-MM-DD); due ROC items warn before it lapses. */
+  dscExpiresOn?: string;
 }
 export interface CinProfileAttributes {
   companySubtype?: CompanySubtype;
   msmeDuesOver45Days?: boolean;
+  /** DPT-3: unknown keeps the item (many firms file nil); only false drops it. */
   depositsOrExemptedLoans?: boolean;
+  /** Retired (spec G5): ADT-1 now follows the AGM event's "auditor appointed" flag. Still read
+   *  so old profiles validate; the card no longer offers it. */
   auditorAppointedAtAgm?: boolean;
+  /** AOC-4 filed in XBRL. Default from the thresholds in roc-mca.ts when capital / turnover are known. */
+  xbrlRequired?: boolean;
+  /** Consolidated statements (AOC-4 CFS) are filed with the AOC-4. */
+  hasSubsidiaries?: boolean;
+  /** MGT-8 certificate by a CS in practice on the annual return. */
+  mgt8Required?: boolean;
+  /** CSR annual report on the AOC-4 (s.135). */
+  csrApplicable?: boolean;
+  /** Secretarial audit report MR-3 on the AOC-4 (s.204). */
+  secretarialAuditRequired?: boolean;
+  /** Paid-up share capital in rupees (small-company test, XBRL / MGT-8 thresholds). */
+  paidUpCapital?: number;
+  /** Authorised (nominal) share capital in rupees (ROC normal-fee table). */
+  authorisedCapital?: number;
+  /** Turnover of the last FY in rupees; else the client's annual turnover. */
+  turnover?: number;
   directors?: CompanyDirector[];
 }
 export type LlpinProfileAttributes = Record<string, never>;
@@ -329,6 +352,7 @@ export interface ComplianceEngagementYear {
  *   month       'YYYY-MM'            (calendar month, e.g. '2026-10')
  *   quarter     'YYYY-YY:Q1'..':Q4'  (FY quarter)
  *   half-year   'YYYY-YY:H1' / ':H2'
+ *   cal. half   'YYYY-YY:CH2' (Jul–Dec of the FY start year) / ':CH1' (Jan–Jun after it)
  *   year        'YYYY-YY'
  *   triennial   'YYYY-YY:DIN:<din>'  (per director)
  *   event       'EVT:<compliance_event id>'
@@ -336,6 +360,12 @@ export interface ComplianceEngagementYear {
 export type PeriodKey = string;
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** 'Jul–Dec 2026' for '2026-27' CH2; 'Jan–Jun 2027' for CH1. */
+export function calendarHalfLabel(financialYear: string, half: 'CH1' | 'CH2'): string {
+  const start = Number(financialYear.slice(0, 4));
+  return half === 'CH2' ? `Jul–Dec ${start}` : `Jan–Jun ${start + 1}`;
+}
 
 /** Human label for a period_key: 'Oct 2026', 'Q3 2026-27', 'FY 2026-27 · DIN 01234567'. */
 export function periodKeyLabel(periodKey: string | null | undefined): string {
@@ -345,6 +375,7 @@ export function periodKeyLabel(periodKey: string | null | undefined): string {
   if (month) return `${MONTHS[Number(month[2]) - 1]} ${month[1]}`;
   const [fy, part, din] = periodKey.split(':');
   if (part === 'DIN') return `FY ${fy} · DIN ${din}`;
+  if (fy && (part === 'CH1' || part === 'CH2')) return calendarHalfLabel(fy, part);
   if (part) return `${part} ${fy}`;
   return `FY ${fy}`;
 }
@@ -426,6 +457,10 @@ export interface ComplianceProfileRecord {
 
 export interface EntityComplianceProfiles {
   entityId: string;
+  /** The client's entity type ('private_limited', 'opc', …): the CIN sub-type defaults from it. */
+  entityTypeSlug?: string | null;
+  /** The client's annual turnover in rupees, when on record (G12 small-company test). */
+  annualTurnover?: number | null;
   registrations: EntityRegistrationOption[];
   profiles: ComplianceProfileRecord[];
 }

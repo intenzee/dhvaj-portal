@@ -10,14 +10,19 @@ import type { PoolClient } from 'pg';
 import {
   NOTIFICATION_TYPE,
   TASK_ACTION,
+  dscWarningText,
+  rocLateCharges,
+  type CinProfileAttributes,
   type ChecklistAutoTick,
   type ChecklistItem,
+  type ChecklistTickedBy,
   type CrossCheckWarning,
   type FilingCorrectionView,
   type FilingRecordView,
   type FilingReferenceKind,
   type FilingStatus,
   type InstanceWorkspace,
+  type LateChargeEstimate,
   type PeriodSection,
   type Stream,
   type WorkspaceSlot,
@@ -117,7 +122,9 @@ interface ItemRow {
   required: boolean;
   sequence: number;
   auto_tick: ChecklistAutoTick | null;
+  ticked_by: ChecklistTickedBy | null;
   note: string | null;
+  done_note: string | null;
   status: ChecklistItem['status'];
   done_by_name: string | null;
   done_at: Date | null;
@@ -234,7 +241,7 @@ export class FilingWorkspaceService {
   ): Promise<InstanceWorkspace> {
     return this.write(ctx, id, async (client, inst) => {
       const { rows } = await client.query<ItemRow>(
-        `SELECT id, item_code, label, slot_code, required, auto_tick, status, version
+        `SELECT id, item_code, label, slot_code, required, auto_tick, ticked_by, status, version
            FROM hsdg.instance_checklist_items WHERE id = $1 AND compliance_instance_id = $2`,
         [itemId, id],
       );
@@ -257,6 +264,18 @@ export class FilingWorkspaceService {
           'Upload the document to its slot — this step then ticks itself.',
         );
       }
+      if (dto.status === 'done' && item.auto_tick === 'event') {
+        throw new ConflictException('Record the meeting — this step then ticks itself.');
+      }
+      // The firm's certification (§5 CERT): a partner ticks or reopens it, with the UDIN.
+      if (item.ticked_by === 'partner' && (dto.status === 'done' || item.status === 'done')) {
+        if (!this.isPartner(ctx, inst)) {
+          throw new ForbiddenException('Only a partner can tick this step.');
+        }
+        if (dto.status === 'done' && !dto.note?.trim()) {
+          throw new BadRequestException('Give the UDIN in the note.');
+        }
+      }
       if (dto.status === 'not_applicable') {
         if (!dto.naReason?.trim())
           throw new BadRequestException('Give a reason for Not applicable.');
@@ -275,9 +294,17 @@ export class FilingWorkspaceService {
                 done_at = CASE WHEN $1 = 'done' THEN now() END,
                 done_by_employee_id = CASE WHEN $1 = 'done' THEN $2::uuid END,
                 na_reason = CASE WHEN $1 = 'not_applicable' THEN $3 END,
+                done_note = CASE WHEN $1 = 'done' THEN $6 END,
                 version = version + 1
           WHERE id = $4 AND version = $5`,
-        [dto.status, ctx.employeeId ?? null, dto.naReason?.trim() ?? null, itemId, dto.version],
+        [
+          dto.status,
+          ctx.employeeId ?? null,
+          dto.naReason?.trim() ?? null,
+          itemId,
+          dto.version,
+          dto.note?.trim() || null,
+        ],
       );
       if ((res.rowCount ?? 0) === 0) {
         throw new ConflictException('Someone else changed this step — reload and try again.');
@@ -287,7 +314,12 @@ export class FilingWorkspaceService {
         objectType: 'compliance_instance',
         objectId: id,
         before: { item: item.item_code, status: item.status },
-        after: { item: item.item_code, status: dto.status, reason: dto.naReason ?? null },
+        after: {
+          item: item.item_code,
+          status: dto.status,
+          reason: dto.naReason ?? null,
+          note: dto.note?.trim() || null,
+        },
       });
     });
   }
@@ -739,7 +771,7 @@ export class FilingWorkspaceService {
     const task = await this.loadTask(client, id);
     const items = await client.query<ItemRow>(
       `SELECT it.id, it.item_code, it.label, it.slot_code, it.required, it.sequence, it.auto_tick,
-                it.note, it.status, e.full_name AS done_by_name, it.done_at, it.na_reason,
+                it.ticked_by, it.note, it.done_note, it.status, e.full_name AS done_by_name, it.done_at, it.na_reason,
                 it.document_id, it.client_dependency_id, it.version
            FROM hsdg.instance_checklist_items it
            LEFT JOIN hsdg.employees e ON e.id = it.done_by_employee_id
@@ -820,7 +852,9 @@ export class FilingWorkspaceService {
       required: r.required,
       sequence: r.sequence,
       autoTick: r.auto_tick,
+      tickedBy: r.ticked_by,
       note: r.note,
+      doneNote: r.done_note,
       status: r.status,
       doneByName: r.done_by_name,
       doneAt: r.done_at ? r.done_at.toISOString() : null,
@@ -920,19 +954,37 @@ export class FilingWorkspaceService {
     }
 
     const outputTax = sumPrefix(figures.figures, 'output_');
-    // Late fee and interest attach to returns; Inward reconciliation files nothing.
-    const lateCharges =
-      inst.stream === 'gst' &&
-      inst.section !== 'inward' &&
-      !live &&
-      inst.workflow_status !== 'not_applicable'
-        ? indicativeLateCharges({
-            dueDate: inst.due,
-            asOf: today,
-            isNil: false,
-            taxPayable: outputTax,
-          })
+    const cin = inst.stream === 'roc' ? await this.cinProfile(client, inst) : null;
+    let lateCharges: LateChargeEstimate | null = null;
+    if (inst.workflow_status !== 'not_applicable') {
+      if (inst.stream === 'gst') {
+        // Late fee and interest attach to returns; Inward reconciliation files nothing.
+        const est =
+          inst.section !== 'inward' && !live
+            ? indicativeLateCharges({
+                dueDate: inst.due,
+                asOf: today,
+                isNil: false,
+                taxPayable: outputTax,
+              })
+            : null;
+        lateCharges = est && { ...est, basis: 'gst' };
+      } else if (inst.stream === 'roc' && !inst.is_provisional) {
+        // ROC: the additional fee runs to the filing date (P1-8, P2-4).
+        lateCharges = rocLateCharges({
+          ruleCode: inst.rule_code,
+          dueDate: inst.due,
+          asOf: live?.filedOn ?? today,
+          authorisedCapital: cin?.authorisedCapital ?? null,
+        });
+      }
+    }
+    // P2-5: a director's DSC that lapses before an open ROC item is due.
+    const dsc =
+      cin?.directors && !live && !['filed', 'not_applicable'].includes(inst.workflow_status)
+        ? dscWarningText(cin.directors, inst.due, today)
         : null;
+    if (dsc) warnings.push({ code: 'dsc_expiring', message: `${dsc} — renew before filing.` });
 
     return {
       instance: {
@@ -1210,6 +1262,21 @@ export class FilingWorkspaceService {
       stream: inst.stream,
       section: inst.section,
     });
+  }
+
+  /** The CIN profile in force for a ROC item's registration (none for an LLPIN). */
+  private async cinProfile(
+    client: PoolClient,
+    inst: InstanceRow,
+  ): Promise<CinProfileAttributes | null> {
+    if (!inst.registration_id) return null;
+    const { rows } = await client.query<{ attributes: CinProfileAttributes }>(
+      `SELECT p.attributes FROM hsdg.registration_compliance_profiles p
+        WHERE p.registration_id = $1 AND p.scope = 'cin' AND p.effective_from <= CURRENT_DATE
+        ORDER BY p.effective_from DESC LIMIT 1`,
+      [inst.registration_id],
+    );
+    return rows[0]?.attributes ?? null;
   }
 
   private isPartner(ctx: RlsContext, inst: InstanceRow): boolean {
