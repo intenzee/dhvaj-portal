@@ -23,6 +23,7 @@ import { Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { TaskActions } from '@/components/tasks/task-actions';
 import { FilingStatusBadge, boardMeetingsText, daysLeftText, dueTone, filingEnd } from './filing-status';
+import { ClientChase } from './client-chase';
 
 /** The part of the created client-upload link the page needs. */
 interface UploadLink {
@@ -153,6 +154,7 @@ export function InstanceWorkspace({
         run={run}
         onUploaded={(next) => qc.setQueryData(workspaceKey(instanceId), next)}
       />
+      <ClientChase instance={inst} />
       <ClientRequests ws={ws} editable={editable} isLead={ctx.isLead} busy={write.isPending} run={run} />
       {ws.figureSchema.length > 0 && (
         <Figures ws={ws} editable={editable} busy={write.isPending} run={run} />

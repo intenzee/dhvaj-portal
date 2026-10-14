@@ -20,7 +20,7 @@ import {
 import { FEATURE_FLAG, PERMISSION, type PermissionSlug } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
-import { isNavActive, visibleNavSections } from '@/lib/nav';
+import { activeNavHref, visibleNavSections } from '@/lib/nav';
 import { roleLabel, initials, can, type Principal } from '@/lib/principal';
 import { useTrackOnboardingVisit } from '@/lib/onboarding';
 import { apiFetch } from '@/lib/api';
@@ -246,7 +246,12 @@ function SidebarContent({
   const sections = visibleNavSections(principal, {
     workLinks: isOn(FEATURE_FLAG.workLinks),
     todayView: isOn(FEATURE_FLAG.todayView),
+    filingRuns: isOn(FEATURE_FLAG.filingRuns),
   });
+  const activeHref = activeNavHref(
+    sections.flatMap((s) => s.items),
+    pathname,
+  );
   return (
     <>
       <Link
@@ -278,7 +283,7 @@ function SidebarContent({
                 </div>
               ))}
             {section.items.map((item) => {
-              const active = isNavActive(item, pathname);
+              const active = item.href === activeHref;
               const Icon = item.icon;
               return (
                 <Link
