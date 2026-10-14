@@ -442,4 +442,72 @@ describe('Firm calendar v2 (e2e)', () => {
       ]);
     });
   });
+
+  describe('ROC by client type', () => {
+    type TreeItem = { instanceId: string; ruleCode: string; label: string; dueDate: string };
+    const rocItems = async (type: string, prefix: string, reg: object): Promise<TreeItem[]> => {
+      const n = String(Date.now()).slice(-4);
+      const entity = await http()
+        .post('/api/v1/entities')
+        .set(bearer(pa))
+        .send({
+          legalName: `ROC ${type} ${n}`,
+          typeSlug: type,
+          officeCode: 'NORTH',
+          pan: `${prefix}${n}R`,
+          registrations: [reg],
+        })
+        .expect(201);
+      const eng = await http()
+        .post('/api/v1/engagements')
+        .set(bearer(pa))
+        .send({
+          kind: 'compliance',
+          entityId: entity.body.id,
+          status: 'accepted',
+          financialYear: '2026-27',
+          streams: ['roc'],
+          years: [{ financialYear: '2026-27' }],
+        })
+        .expect(201);
+      const tree = await http()
+        .get(`/api/v1/engagements/${eng.body.id}/streams/roc/tree?fy=2026-27`)
+        .set(bearer(pa))
+        .expect(200);
+      return [
+        ...tree.body.annual,
+        ...tree.body.periods.flatMap(
+          (p: { items: TreeItem[]; sections: Record<string, TreeItem[]> }) => [
+            ...p.items,
+            ...Object.values(p.sections).flat(),
+          ],
+        ),
+      ];
+    };
+
+    it('an OPC files its annual return on MGT-7A', async () => {
+      const n = String(Date.now()).slice(-4);
+      const items = await rocItems('opc', 'AAACO', {
+        registrationType: 'cin',
+        registrationNumber: `U74999WB2021OPC${n}02`,
+      });
+      const ret = items.find((i) => i.ruleCode === 'ROC_MGT7')!;
+      expect(ret).toMatchObject({ label: 'MGT-7A', dueDate: '2027-11-29' });
+      const ws = await http()
+        .get(`/api/v1/compliance-instances/${ret.instanceId}`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(ws.body.instance.formLabel).toBe('MGT-7A');
+    });
+
+    it('an LLP files Form 11 by 30 May and Form 8 by 30 Oct', async () => {
+      const n = String(Date.now()).slice(-4);
+      const items = await rocItems('llp', 'AAAFL', {
+        registrationType: 'llpin',
+        registrationNumber: `AAB-${n}`,
+      });
+      expect(items.find((i) => i.ruleCode === 'LLP_FORM11')?.dueDate).toBe('2027-05-30');
+      expect(items.find((i) => i.ruleCode === 'LLP_FORM8')?.dueDate).toBe('2027-10-30');
+    });
+  });
 });

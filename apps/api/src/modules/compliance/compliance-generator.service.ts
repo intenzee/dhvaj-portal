@@ -136,6 +136,7 @@ interface ExistingRow {
   compliance_event_id: string | null;
   notes: string | null;
   profile_changed_at: Date | null;
+  form_label: string | null;
 }
 
 interface Desired {
@@ -154,6 +155,8 @@ interface Desired {
   isProvisional: boolean;
   isOptional: boolean;
   complianceEventId: string | null;
+  /** The form a variant files it on (MGT-7A for an OPC); null = the version's form. */
+  formLabel: string | null;
 }
 
 /** The engagement + entity facts that feed rule conditions. */
@@ -408,7 +411,7 @@ export class ComplianceGeneratorService {
         client.query<ExistingRow>(
           `SELECT id, compliance_rule_id, registration_id, period_key, financial_year, workflow_status,
                 statutory_deadline::text, internal_sla_date::text, compliance_rule_version_id,
-                is_provisional, compliance_event_id, notes, profile_changed_at
+                is_provisional, compliance_event_id, notes, profile_changed_at, form_label
            FROM hsdg.compliance_instances
           WHERE engagement_id = $1 AND period_key IS NOT NULL AND period_key NOT LIKE 'EVT:%'`,
           [engagementId],
@@ -562,6 +565,7 @@ export class ComplianceGeneratorService {
       isProvisional: due.isProvisional,
       isOptional: version.isOptional,
       complianceEventId: event?.id ?? null,
+      formLabel: version.formLabel !== row.form_label ? version.formLabel : null,
     };
   }
 
@@ -580,6 +584,7 @@ export class ComplianceGeneratorService {
     const toInsert: Desired[] = [];
     const toMove: Array<{ id: string; d: Desired; reopen: boolean }> = [];
     const toFlag: string[] = [];
+    const toRelabel: Array<{ id: string; formLabel: string | null }> = [];
     const seen = new Set<string>();
 
     for (const d of desired) {
@@ -590,6 +595,8 @@ export class ComplianceGeneratorService {
         toInsert.push(d);
         continue;
       }
+      // The form's name follows the client's facts at any stage, filed included.
+      if (x.form_label !== d.formLabel) toRelabel.push({ id: x.id, formLabel: d.formLabel });
       if (x.workflow_status === 'filed') continue;
       const generatorNa =
         x.workflow_status === 'not_applicable' &&
@@ -639,11 +646,11 @@ export class ComplianceGeneratorService {
            (engagement_id, compliance_rule_id, compliance_rule_version_id, registration_id,
             engagement_service_id, financial_year, period_key, period_start, period_end, section,
             reference_date, statutory_deadline, internal_sla_date, is_provisional, is_optional,
-            compliance_event_id, government_extension_id)
+            compliance_event_id, form_label, government_extension_id)
          SELECT $1, d."ruleId", d."versionId", d."registrationId", d."engagementServiceId",
                 d."financialYear", d."periodKey", d."periodStart", d."periodEnd", d.section,
                 d."referenceDate", d."statutoryDeadline", d."internalSlaDate", d."isProvisional",
-                d."isOptional", d."complianceEventId",
+                d."isOptional", d."complianceEventId", d."formLabel",
                 (SELECT ge.id FROM hsdg.government_extensions ge
                   WHERE ge.compliance_rule_id = d."ruleId"
                     AND ge.original_due_date = d."statutoryDeadline"
@@ -653,7 +660,7 @@ export class ComplianceGeneratorService {
                 "financialYear" text, "periodKey" text, "periodStart" date, "periodEnd" date,
                 section text, "referenceDate" date, "statutoryDeadline" date,
                 "internalSlaDate" date, "isProvisional" boolean, "isOptional" boolean,
-                "complianceEventId" uuid)
+                "complianceEventId" uuid, "formLabel" text)
          ON CONFLICT (engagement_id, compliance_rule_id, registration_id, period_key)
             WHERE period_key IS NOT NULL DO NOTHING
          RETURNING id`,
@@ -691,6 +698,16 @@ export class ComplianceGeneratorService {
                 "isOptional" boolean, section text, "complianceEventId" uuid)
           WHERE ci.id = m.id`,
         [JSON.stringify(toMove.map((m) => ({ id: m.id, reopen: m.reopen, ...m.d })))],
+      );
+    }
+
+    if (toRelabel.length > 0) {
+      await client.query(
+        `UPDATE hsdg.compliance_instances ci
+            SET form_label = r."formLabel", version = ci.version + 1, updated_at = now()
+           FROM jsonb_to_recordset($1::jsonb) AS r(id uuid, "formLabel" text)
+          WHERE ci.id = r.id`,
+        [JSON.stringify(toRelabel)],
       );
     }
 
@@ -797,6 +814,7 @@ export class ComplianceGeneratorService {
         isProvisional: false,
         isOptional: v.is_optional,
         complianceEventId: event.id,
+        formLabel: null,
       });
     }
     const summary = await this.reconcile(client, engagementId, desired, [], {

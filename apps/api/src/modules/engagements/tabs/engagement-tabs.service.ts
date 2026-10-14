@@ -128,7 +128,7 @@ export class EngagementTabsService {
       });
 
       const due = await client.query<DueRow>(
-        `SELECT ci.id, COALESCE(rv.stream, sv.stream) AS stream, COALESCE(rv.form_label, cr.name) AS label,
+        `SELECT ci.id, COALESCE(rv.stream, sv.stream) AS stream, COALESCE(ci.form_label, rv.form_label, cr.name) AS label,
                 ci.period_key, ci.section, x.due::text AS due, (x.due - $2::date) AS days_left,
                 ci.workflow_status, r.registration_number
            FROM hsdg.compliance_instances ci
