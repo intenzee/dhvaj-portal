@@ -45,9 +45,11 @@ describe('event details (spec §6.2)', () => {
   });
 
   it('an AGM extension is 1–3 whole months', () => {
-    expect(validateEventDetails('agm_extension', { months: 3, approvalRef: ' GNL-1/22 ' })).toEqual({
-      details: { months: 3, approvalRef: 'GNL-1/22' },
-    });
+    expect(validateEventDetails('agm_extension', { months: 3, approvalRef: ' GNL-1/22 ' })).toEqual(
+      {
+        details: { months: 3, approvalRef: 'GNL-1/22' },
+      },
+    );
     expect(validateEventDetails('agm_extension', { months: 4 })).toHaveProperty('error');
     expect(validateEventDetails('agm_extension', { months: 1.5 })).toHaveProperty('error');
     expect(validateEventDetails('agm_extension', {})).toHaveProperty('error');
@@ -55,14 +57,18 @@ describe('event details (spec §6.2)', () => {
 
   it('a director change needs an 8-digit DIN and appointed / ceased', () => {
     expect(
-      validateEventDetails('director_change', { din: '01234567', change: 'appointed', name: ' A ' }),
+      validateEventDetails('director_change', {
+        din: '01234567',
+        change: 'appointed',
+        name: ' A ',
+      }),
     ).toEqual({ details: { din: '01234567', change: 'appointed', name: 'A' } });
     expect(validateEventDetails('director_change', { din: '1234', change: 'appointed' })).toEqual({
       error: expect.stringContaining('DIN'),
     });
-    expect(validateEventDetails('director_change', { din: '01234567', change: 'left' })).toHaveProperty(
-      'error',
-    );
+    expect(
+      validateEventDetails('director_change', { din: '01234567', change: 'left' }),
+    ).toHaveProperty('error');
   });
 
   it('a charge amount cannot be negative; other events take no details', () => {
@@ -77,9 +83,9 @@ describe('event details (spec §6.2)', () => {
 
 describe('event context for the rules', () => {
   it('prefixes each scalar detail with the event type, snake_case', () => {
-    expect(
-      eventContext({ event_type: 'agm', details: { auditorAppointed: true } }),
-    ).toEqual({ agm_auditor_appointed: true });
+    expect(eventContext({ event_type: 'agm', details: { auditorAppointed: true } })).toEqual({
+      agm_auditor_appointed: true,
+    });
     expect(
       eventContext({ event_type: 'allotment', details: { privatePlacement: false, x: { a: 1 } } }),
     ).toEqual({ allotment_private_placement: false });
@@ -180,21 +186,37 @@ describe('DIR-12 keeps the directors list current', () => {
 
   it('adds an appointed director (KYC cycle from the year of appointment) and removes a ceased one', () => {
     expect(
-      applyDirectorChange([asha], { din: '22222222', name: 'Ravi', change: 'appointed' }, false, fb),
+      applyDirectorChange(
+        [asha],
+        { din: '22222222', name: 'Ravi', change: 'appointed' },
+        false,
+        fb,
+      ),
     ).toEqual([asha, { din: '22222222', name: 'Ravi', kycCycleStartFy: '2026-27' }]);
-    expect(applyDirectorChange([asha], { din: '11111111', change: 'ceased' }, false, fb)).toEqual([]);
+    expect(applyDirectorChange([asha], { din: '11111111', change: 'ceased' }, false, fb)).toEqual(
+      [],
+    );
   });
 
   it('undo reverses it, restoring the director as last recorded', () => {
-    const added = applyDirectorChange([asha], { din: '22222222', name: 'R', change: 'appointed' }, false, fb);
-    expect(applyDirectorChange(added, { din: '22222222', change: 'appointed' }, true, fb)).toEqual([asha]);
+    const added = applyDirectorChange(
+      [asha],
+      { din: '22222222', name: 'R', change: 'appointed' },
+      false,
+      fb,
+    );
+    expect(applyDirectorChange(added, { din: '22222222', change: 'appointed' }, true, fb)).toEqual([
+      asha,
+    ]);
     expect(
       applyDirectorChange([], { din: '11111111', change: 'ceased' }, true, { ...fb, known: asha }),
     ).toEqual([asha]);
   });
 
   it('an appointment needs the director’s name', () => {
-    expect(validateEventDetails('director_change', { din: '22222222', change: 'appointed' })).toEqual({
+    expect(
+      validateEventDetails('director_change', { din: '22222222', change: 'appointed' }),
+    ).toEqual({
       error: expect.stringContaining('name'),
     });
     expect(validateEventDetails('director_change', { din: '22222222', change: 'ceased' })).toEqual({
@@ -212,9 +234,9 @@ describe('checklist onlyIf reads event details', () => {
   ];
 
   it('key=value matches a text detail; a bare key needs true', () => {
-    expect(
-      applicableItems(items, { director_change_change: 'ceased' }).map((i) => i.code),
-    ).toEqual(['RESIGNATION', 'ALWAYS']);
+    expect(applicableItems(items, { director_change_change: 'ceased' }).map((i) => i.code)).toEqual(
+      ['RESIGNATION', 'ALWAYS'],
+    );
     expect(
       applicableItems(items, { allotment_private_placement: true }).map((i) => i.code),
     ).toEqual(['PAS4', 'ALWAYS']);
@@ -223,14 +245,18 @@ describe('checklist onlyIf reads event details', () => {
 
 describe('meetings close as meetings (P1-2)', () => {
   it('a board meeting held on 15 May records against Apr–Jun (E7)', () => {
-    expect(checkFiledOn('2026-05-15', '2026-10-14', '2026-06-30', { periodStart: '2026-04-01' })).toBeNull();
-    expect(checkFiledOn('2026-05-15', '2026-10-14', '2026-06-30')).toMatch(/before the period ends/);
+    expect(
+      checkFiledOn('2026-05-15', '2026-10-14', '2026-06-30', { periodStart: '2026-04-01' }),
+    ).toBeNull();
+    expect(checkFiledOn('2026-05-15', '2026-10-14', '2026-06-30')).toMatch(
+      /before the period ends/,
+    );
   });
 
   it('but not before the period starts, nor in the future', () => {
-    expect(checkFiledOn('2026-03-31', '2026-10-14', '2026-06-30', { periodStart: '2026-04-01' })).toMatch(
-      /before the period starts/,
-    );
+    expect(
+      checkFiledOn('2026-03-31', '2026-10-14', '2026-06-30', { periodStart: '2026-04-01' }),
+    ).toMatch(/before the period starts/);
     expect(checkFiledOn('2026-10-20', '2026-10-14', null, { periodStart: null })).toMatch(/future/);
   });
 
@@ -252,7 +278,15 @@ describe('generator summaries merge', () => {
       flaggedIds: [],
       notApplicableIds: [],
     };
-    const b = { ...a, created: 0, createdIds: [], moved: 0, movedItems: [], flagged: 1, flaggedIds: ['f'] };
+    const b = {
+      ...a,
+      created: 0,
+      createdIds: [],
+      moved: 0,
+      movedItems: [],
+      flagged: 1,
+      flaggedIds: ['f'],
+    };
     expect(mergeSummaries(a, b)).toMatchObject({
       created: 1,
       moved: 1,

@@ -532,7 +532,13 @@ export class ComplianceCalendarV2Service {
         objectType: 'engagement',
         objectId: engagementId,
         before: { eventId, eventDate: before.event_date, details: before.details },
-        after: { eventId, eventDate, financialYear, details: checked.details, reason: input.reason },
+        after: {
+          eventId,
+          eventDate,
+          financialYear,
+          details: checked.details,
+          reason: input.reason,
+        },
       });
       return { event: mapEvent(after), created: summary.created, moved: summary.moved, changes };
     });
@@ -569,7 +575,14 @@ export class ComplianceCalendarV2Service {
     );
     const after = await this.loadEvent(client, engagementId, eventId);
     if (before.event_type === 'director_change' && before.registration_id) {
-      await this.applyDirectorEvent(client, ctx, eng.entity_id, before.registration_id, before, true);
+      await this.applyDirectorEvent(
+        client,
+        ctx,
+        eng.entity_id,
+        before.registration_id,
+        before,
+        true,
+      );
     }
     const summary = await this.applyEvent(client, engagementId, toEventRow(after), {
       voided: true,
@@ -600,8 +613,7 @@ export class ComplianceCalendarV2Service {
       if (!e) throw new NotFoundException('Engagement not found.');
       const regs = (await this.registrations(client, e.entity_id)).filter(
         (r) =>
-          (r.registrationType === 'cin' || r.registrationType === 'llpin') &&
-          r.status === 'active',
+          (r.registrationType === 'cin' || r.registrationType === 'llpin') && r.status === 'active',
       );
       const held = await client.query<{
         registration_id: string;

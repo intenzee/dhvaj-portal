@@ -133,7 +133,8 @@ export class LodgeDto {
 
   @ApiPropertyOptional({
     example: 'AA191026123456Z',
-    description: 'Required for a filing; a meeting (AGM, board meeting) defaults to an internal one.',
+    description:
+      'Required for a filing; a meeting (AGM, board meeting) defaults to an internal one.',
   })
   @IsOptional()
   @IsString()
@@ -181,7 +182,9 @@ export class LodgeDto {
   @Min(0)
   interestPaid?: number;
 
-  @ApiPropertyOptional({ description: 'ROC: the normal filing fee paid (the additional fee is lateFeePaid).' })
+  @ApiPropertyOptional({
+    description: 'ROC: the normal filing fee paid (the additional fee is lateFeePaid).',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
