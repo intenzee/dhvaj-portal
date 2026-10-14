@@ -40,6 +40,7 @@ interface FilingReviewRow extends EngagementCols, WorkLinkSqlRow {
   preparer_name: string | null;
   due_date: string | null;
   review_started: boolean;
+  version: number;
 }
 
 interface ReviewPointRow extends EngagementCols {
@@ -98,7 +99,7 @@ export class WorkReviewsService {
       `SELECT t.id, t.title, t.engagement_id, eng.engagement_code, eng.kind AS engagement_kind,
               ent.legal_name AS entity_name,
               t.assigned_to_employee_id AS preparer_id, ae.full_name AS preparer_name,
-              t.due_date::text, (t.review_started_at IS NOT NULL) AS review_started,
+              t.due_date::text, (t.review_started_at IS NOT NULL) AS review_started, t.version,
               COALESCE(t.sent_for_review_at, t.updated_at) AS waiting_since,
               ${DAYS_WAITING('COALESCE(t.sent_for_review_at, t.updated_at)')} AS days_waiting,
               ${WORK_LINK_COLUMNS}
@@ -125,6 +126,7 @@ export class WorkReviewsService {
         internalDate: filing?.internalDate ?? r.due_date,
         statutoryDate: filing?.statutoryDate ?? null,
         reviewStarted: r.review_started,
+        taskVersion: r.version,
         filing,
         link: workLinkOf(
           { engagementId: r.engagement_id, engagementKind: r.engagement_kind, taskId: r.id },

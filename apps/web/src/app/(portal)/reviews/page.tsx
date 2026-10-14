@@ -10,6 +10,7 @@ import type { EngagementRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge } from '@/components/ui';
 import { DataTable } from '@/components/data-table';
 import { cn } from '@/lib/cn';
+import { FoldedRoute } from '@/components/work/folded-route';
 
 type Filter = 'all' | 'review' | 'signoff';
 
@@ -104,8 +105,10 @@ function ReviewsInner(): JSX.Element {
 
 export default function ReviewsPage(): JSX.Element {
   return (
-    <Suspense fallback={<Spinner />}>
-      <ReviewsInner />
-    </Suspense>
+    <FoldedRoute from="/reviews">
+      <Suspense fallback={<Spinner />}>
+        <ReviewsInner />
+      </Suspense>
+    </FoldedRoute>
   );
 }
