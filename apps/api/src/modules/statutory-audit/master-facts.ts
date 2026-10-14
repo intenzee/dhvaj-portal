@@ -1014,6 +1014,17 @@ export async function isEngagementLead(client: PoolClient, engagementId: string)
   return rows[0]?.lead === true;
 }
 
+export async function isEngagementMember(
+  client: PoolClient,
+  engagementId: string,
+): Promise<boolean> {
+  const { rows } = await client.query<{ member: boolean }>(
+    `SELECT hsdg.is_engagement_member($1) AS member`,
+    [engagementId],
+  );
+  return rows[0]?.member === true;
+}
+
 // ── 02.5 / 02.7 sources beyond the entity master ─────────────────────────────
 
 /** One AOC-4 / MGT-7 obligation tracked on the compliance calendar. */
