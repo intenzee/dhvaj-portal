@@ -207,6 +207,8 @@ describe('calendar export sheet', () => {
     assigneeName: 'A Manager',
     partnerName: null,
     managerName: null,
+    section: null,
+    link: { engagementId: 'e', engagementKind: 'compliance', instanceId: 'i' },
     ...over,
   });
 

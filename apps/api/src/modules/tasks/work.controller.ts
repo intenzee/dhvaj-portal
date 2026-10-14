@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -30,13 +30,19 @@ export class WorkController {
     summary: 'Tasks assigned to me across all engagements (paginated)',
     description:
       'Filter ?status=, ?overdueOnly=true (internally-overdue work) and ?section=gst,income_tax ' +
-      "(a stream via the task's engagement service; statutory_audit / assignment via the engagement).",
+      "(a stream via the task's engagement service; statutory_audit / assignment via the engagement). " +
+      '?scope=team lists every task on engagements I manage or am the partner on (engagement.manage). ' +
+      "Each row carries `link` (a WorkItemRef) and, for a filing's task, `filing`.",
   })
   myTasks(
     @CurrentPrincipal() principal: Principal,
     @Query() query: MyTasksQueryDto,
   ): Promise<Paginated<MyTaskRecord>> {
+    if (query.scope === 'team' && !principal.permissions.includes(PERMISSION.engagementManage)) {
+      throw new ForbiddenException('The team view is for engagement leads (engagement.manage).');
+    }
     const filter: Parameters<TasksService['myTasks']>[2] = {};
+    if (query.scope) filter.scope = query.scope;
     if (query.status) filter.status = query.status;
     if (query.overdueOnly !== undefined) filter.overdueOnly = query.overdueOnly;
     if (query.section?.length) filter.sections = query.section;
@@ -49,7 +55,9 @@ export class WorkController {
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
     summary: 'Open client dependencies across all engagements I can see (paginated)',
-    description: 'Filter ?overdueOnly=true (past escalation date — a client delay).',
+    description:
+      'Filter ?overdueOnly=true (past escalation date — a client delay). Each row carries ' +
+      '`link` (a WorkItemRef: the filing with requestId, else the engagement).',
   })
   clientDependencies(
     @CurrentPrincipal() principal: Principal,

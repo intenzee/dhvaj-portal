@@ -8,6 +8,7 @@
  * compliance_engagement_years. Every row in a stream tab is a compliance
  * instance carrying a FILING_STATUS and, for GST, a PERIOD_SECTION.
  */
+import type { WorkItemRef } from './work-links';
 
 /** What kind of engagement this is (engagements.kind). */
 export const ENGAGEMENT_KIND = {
@@ -423,6 +424,10 @@ export interface ComplianceCalendarRow {
   assigneeName: string | null;
   partnerName: string | null;
   managerName: string | null;
+  /** The filing's part of its period (GST: outward / inward / summary / annual). */
+  section: PeriodSection | null;
+  /** Where the row opens (WF-102): the filing in its stream tab. */
+  link: WorkItemRef;
 }
 
 export interface ComplianceCalendarResponse {
