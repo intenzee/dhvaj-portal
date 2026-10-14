@@ -49,6 +49,8 @@ export function M365Editor({
   const [lastSync, setLastSync] = useState<string | null>(null);
   // Bumped after a sync so the inline view shows the saved file.
   const [viewKey, setViewKey] = useState(0);
+  // Until Microsoft's viewer has loaded in the frame.
+  const [viewLoading, setViewLoading] = useState(true);
   const syncing = useRef<Promise<boolean> | null>(null);
   // The Word / Excel / PowerPoint window, while it is open.
   const editorWindow = useRef<Window | null>(null);
@@ -95,6 +97,7 @@ export function M365Editor({
           if (res.synced) {
             setLastSync(new Date().toLocaleTimeString());
             setViewKey((k) => k + 1);
+            setViewLoading(true);
             if (!quiet) toast(`Saved as version ${res.versionNo ?? ''}`.trim());
             onSavedRef.current?.();
           }
@@ -245,13 +248,21 @@ export function M365Editor({
         </div>
       )}
       {session?.editorUrl && (
-        <iframe
-          key={viewKey}
-          title="Microsoft 365 viewer"
-          src={m365EmbedUrl(session.editorUrl)}
-          className="min-h-0 w-full flex-1 border-0"
-          allow="clipboard-read; clipboard-write"
-        />
+        <div className="relative min-h-0 w-full flex-1">
+          {viewLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-surface-raised">
+              <Spinner label="Loading the document…" />
+            </div>
+          )}
+          <iframe
+            key={viewKey}
+            title="Microsoft 365 viewer"
+            src={m365EmbedUrl(session.editorUrl)}
+            onLoad={() => setViewLoading(false)}
+            className="h-full w-full border-0"
+            allow="clipboard-read; clipboard-write"
+          />
+        </div>
       )}
     </div>
   );
