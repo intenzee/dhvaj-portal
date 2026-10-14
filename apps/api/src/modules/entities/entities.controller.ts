@@ -56,6 +56,7 @@ export class EntitiesController {
     if (query.type) filter.typeSlug = query.type;
     if (query.office) filter.officeCode = query.office;
     if (query.search) filter.search = query.search;
+    if (query.section?.length) filter.section = query.section;
     const result = await this.entities.listEntities(
       rlsContextFromPrincipal(principal),
       filter,

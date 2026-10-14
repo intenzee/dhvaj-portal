@@ -1,4 +1,5 @@
 import type {
+  WorkSection,
   AccountingFramework,
   AddressType,
   ContactType,
@@ -435,4 +436,6 @@ export interface EntityFilter {
   typeSlug?: string;
   officeCode?: string;
   search?: string;
+  /** Any-of: a live engagement in one of these sections. */
+  section?: WorkSection[];
 }

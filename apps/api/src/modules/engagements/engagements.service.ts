@@ -20,6 +20,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StatutoryAuditWorkflowService } from '../statutory-audit/statutory-audit-workflow.service';
 import { EngagementKindsService } from './engagement-kinds.service';
+import { engagementInSectionsSql } from '../../common/sections';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
 export { translatePgError } from './engagement-pg-error';
@@ -113,6 +114,10 @@ export class EngagementsService {
                       WHERE m.merged_into_id = eng.id
                         AND m.engagement_code ILIKE $${params.length}))`,
       );
+    }
+    if (filter.section?.length) {
+      params.push(filter.section);
+      conditions.push(engagementInSectionsSql('eng', `$${params.length}`));
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const limitParam = `$${params.length + 1}`;
