@@ -45,6 +45,7 @@ const filing: FilingReviewItem = {
   internalDate: '2026-10-17',
   statutoryDate: '2026-10-20',
   reviewStarted: false,
+  reviewStartedAt: null,
   taskVersion: 3,
   filing: null,
   link: { engagementId: 'eng-1', engagementKind: 'compliance', taskId: 't1', stream: 'gst' },

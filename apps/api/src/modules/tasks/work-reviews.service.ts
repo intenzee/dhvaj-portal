@@ -40,6 +40,7 @@ interface FilingReviewRow extends EngagementCols, WorkLinkSqlRow {
   preparer_name: string | null;
   due_date: string | null;
   review_started: boolean;
+  review_started_at: Date | null;
   version: number;
 }
 
@@ -75,17 +76,21 @@ export class WorkReviewsService {
   async queue(ctx: RlsContext): Promise<WorkReviewQueue> {
     return this.db.withRlsContext(ctx, async (client) => {
       if (!ctx.employeeId) return { items: [], total: 0 };
-      const me = ctx.employeeId;
-      const [filings, points, signOffs] = [
-        await this.filingReviews(client, me),
-        await this.reviewPoints(client, me),
-        await this.signOffs(client, me),
-      ];
-      const items: WorkReviewItem[] = [...filings, ...points, ...signOffs].sort(
-        (a, b) => a.waitingSince.localeCompare(b.waitingSince) || a.id.localeCompare(b.id),
-      );
+      const items = await this.itemsWith(client, ctx.employeeId);
       return { items, total: items.length };
     });
+  }
+
+  /** The queue inside a caller's RLS transaction (Today reuses it — WF-201). */
+  async itemsWith(client: PoolClient, me: string): Promise<WorkReviewItem[]> {
+    const [filings, points, signOffs] = [
+      await this.filingReviews(client, me),
+      await this.reviewPoints(client, me),
+      await this.signOffs(client, me),
+    ];
+    return [...filings, ...points, ...signOffs].sort(
+      (a, b) => a.waitingSince.localeCompare(b.waitingSince) || a.id.localeCompare(b.id),
+    );
   }
 
   /** How many items are waiting (the sidebar badge) — same rules, counts only. */
@@ -99,7 +104,8 @@ export class WorkReviewsService {
       `SELECT t.id, t.title, t.engagement_id, eng.engagement_code, eng.kind AS engagement_kind,
               ent.legal_name AS entity_name,
               t.assigned_to_employee_id AS preparer_id, ae.full_name AS preparer_name,
-              t.due_date::text, (t.review_started_at IS NOT NULL) AS review_started, t.version,
+              t.due_date::text, (t.review_started_at IS NOT NULL) AS review_started,
+              t.review_started_at, t.version,
               COALESCE(t.sent_for_review_at, t.updated_at) AS waiting_since,
               ${DAYS_WAITING('COALESCE(t.sent_for_review_at, t.updated_at)')} AS days_waiting,
               ${WORK_LINK_COLUMNS}
@@ -126,6 +132,7 @@ export class WorkReviewsService {
         internalDate: filing?.internalDate ?? r.due_date,
         statutoryDate: filing?.statutoryDate ?? null,
         reviewStarted: r.review_started,
+        reviewStartedAt: r.review_started_at?.toISOString() ?? null,
         taskVersion: r.version,
         filing,
         link: workLinkOf(

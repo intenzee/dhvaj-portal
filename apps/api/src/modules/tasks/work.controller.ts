@@ -1,14 +1,22 @@
-import { Controller, ForbiddenException, Get, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, NotFoundException, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type Paginated, type WorkReviewQueue } from '@hsdg/contracts';
+import {
+  FEATURE_FLAG,
+  PERMISSION,
+  type Paginated,
+  type TodayView,
+  type WorkReviewQueue,
+} from '@hsdg/contracts';
+import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { TasksService } from './tasks.service';
 import { ClientDependenciesService } from './client-dependencies.service';
 import { WorkReviewsService } from './work-reviews.service';
+import { WorkTodayService } from './work-today.service';
 import type { ClientDependencyWithContext, MyTaskRecord } from './tasks.types';
-import { MyTasksQueryDto } from './dto/task.dto';
+import { MyTasksQueryDto, TodayQueryDto } from './dto/task.dto';
 import { MyClientDependenciesQueryDto } from './dto/client-dependency.dto';
 
 /**
@@ -24,7 +32,30 @@ export class WorkController {
     private readonly tasks: TasksService,
     private readonly deps: ClientDependenciesService,
     private readonly reviews: WorkReviewsService,
+    private readonly todayView: WorkTodayService,
+    private readonly flags: FeatureFlagsService,
   ) {}
+
+  @Get('today')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: "Today: the caller's day in four groups (WF-201)",
+    description:
+      'prepare (my todo / in_progress / paused tasks), review (the GET /work/reviews queue), ' +
+      'waiting (my blocked tasks + open client requests I am responsible for), due_soon (open ' +
+      'filings I prepare, review or lead due internally within 7 days or past, with or without ' +
+      'a task, less those listed above). Each group is overdue first, then by internal date. ' +
+      '?engagementId= narrows every group to one engagement. Behind ff_today_view.',
+  })
+  today(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: TodayQueryDto,
+  ): Promise<TodayView> {
+    if (!this.flags.isOnFor(FEATURE_FLAG.todayView, principal.officeCode)) {
+      throw new NotFoundException('Today is not switched on for your office yet.');
+    }
+    return this.todayView.today(rlsContextFromPrincipal(principal), query.engagementId);
+  }
 
   @Get('tasks')
   @RequirePermissions(PERMISSION.engagementRead)
