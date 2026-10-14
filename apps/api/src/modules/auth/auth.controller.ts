@@ -60,6 +60,25 @@ export class AuthController {
     return { accessToken: token, tokenType: 'Bearer', expiresIn };
   }
 
+  @Post('renew')
+  @RequirePermissions()
+  @ApiOperation({
+    summary: 'Renew a development access token (non-production only)',
+    description:
+      'Swaps a still-valid dev token for a fresh one with a full lifetime, so a signed-in session does not lapse while it is in use. Hidden wherever dev-token is.',
+  })
+  async renew(
+    @CurrentPrincipal() principal: Principal,
+  ): Promise<{ accessToken: string; tokenType: 'Bearer'; expiresIn: number }> {
+    const devEnabled = this.config.get('AUTH_PROVIDER') === 'dev' || this.config.devFallbackEnabled;
+    if (this.config.isProduction || !devEnabled) throw new NotFoundException();
+    const { token, expiresIn } = await this.devProvider.issue(
+      principal.email,
+      principal.mfaSatisfied,
+    );
+    return { accessToken: token, tokenType: 'Bearer', expiresIn };
+  }
+
   @Get('me')
   @RequirePermissions()
   @ApiOperation({
