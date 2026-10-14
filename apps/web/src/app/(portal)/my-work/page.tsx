@@ -31,6 +31,7 @@ import { CompletionBar } from '@/components/completion';
 import { cn } from '@/lib/cn';
 import { sortMyTasks, todayIst, useMyTaskColumns } from '@/components/work/my-task-columns';
 import { ReviewQueueTab, reviewFilterOf } from '@/components/work/review-queue-tab';
+import { SectionChips, useUrlSections, withSections } from '@/components/section-filter';
 
 type Tab = 'tasks' | 'client-dependencies' | 'to-review' | 'new-uploads';
 type TaskScope = 'mine' | 'team';
@@ -163,10 +164,14 @@ function MyWorkInner(): JSX.Element {
   // document-upload notifications move to their own "New client uploads" tab.
   const uploadsTab: Tab = workLinks ? 'new-uploads' : 'to-review';
 
+  // The section a Home panel's "View all" carried (?section=roc), as on /tasks.
+  const [sections, setSections] = useUrlSections();
   const tasks = useQuery({
-    queryKey: teamScope ? ['work', 'tasks', 'team'] : ['work', 'tasks'],
+    queryKey: teamScope ? ['work', 'tasks', sections, 'team'] : ['work', 'tasks', sections],
     queryFn: () =>
-      apiFetch<Paginated<MyTask>>(`/work/tasks?limit=100${teamScope ? '&scope=team' : ''}`),
+      apiFetch<Paginated<MyTask>>(
+        withSections(`/work/tasks?limit=100${teamScope ? '&scope=team' : ''}`, sections),
+      ),
     enabled: tab === 'tasks',
   });
   const deps = useQuery({
@@ -220,6 +225,9 @@ function MyWorkInner(): JSX.Element {
 
       {tab === 'tasks' && (
         <>
+          <div className="mb-3">
+            <SectionChips value={sections} onChange={setSections} />
+          </div>
           {canTeam && (
             <div className="mb-3 flex items-center gap-2" role="group" aria-label="Whose tasks">
               {(

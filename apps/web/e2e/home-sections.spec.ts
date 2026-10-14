@@ -141,10 +141,14 @@ test('home calendar and tasks, section by section', async ({ browser }) => {
   await tasks.getByLabel('Section').selectOption('roc');
   await expect(tasks.getByText(rocTask)).toBeVisible();
   await expect(tasks.getByText(gstTask)).toHaveCount(0);
-  await expect(tasks.getByRole('link', { name: /View all/ })).toHaveAttribute(
-    'href',
-    '/tasks?section=roc',
-  );
+  // ff_work_links: "View all" opens My Work's tasks, still on ROC.
+  const viewAll = tasks.getByRole('link', { name: /View all/ });
+  await expect(viewAll).toHaveAttribute('href', '/my-work?tab=tasks&section=roc');
+  await viewAll.click();
+  await page.waitForURL(/\/my-work\?tab=tasks&section=roc/);
+  await expect(page.getByRole('button', { name: 'ROC / MCA', pressed: true })).toBeVisible();
+  await expect(page.getByText(rocTask)).toBeVisible();
+  await expect(page.getByText(gstTask)).toHaveCount(0);
 
   // The Tasks page keeps its sections in the URL; chips add sections.
   await page.goto('/tasks?section=gst');
