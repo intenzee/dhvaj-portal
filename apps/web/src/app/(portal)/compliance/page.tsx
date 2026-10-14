@@ -9,6 +9,8 @@ import {
   FEATURE_FLAG,
   PERMISSION,
   escalationAction,
+  isStreamSection,
+  parseWorkSections,
   type EscalationLevel,
   type Paginated,
 } from '@hsdg/contracts';
@@ -338,11 +340,29 @@ function ComplianceInner(): JSX.Element {
   );
 }
 
+/** `?stream=gst&month=2026-10` (the home calendar's link) seeds the firm calendar. */
+function FirmCalendarFromUrl(): JSX.Element {
+  const params = useSearchParams();
+  const month = params.get('month');
+  return (
+    <FirmCalendar
+      initialStreams={parseWorkSections(params.get('stream')).filter(isStreamSection)}
+      initialMonth={month && /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : null}
+    />
+  );
+}
+
 export default function CompliancePage(): JSX.Element {
   const { isOn, isLoading } = useFeatureFlags();
   if (isLoading) return <Spinner />;
   // Calendar v2 (spec Change 4) replaces the obligation list with the firm calendar.
-  if (isOn(FEATURE_FLAG.calendarV2)) return <FirmCalendar />;
+  if (isOn(FEATURE_FLAG.calendarV2)) {
+    return (
+      <Suspense fallback={<Spinner />}>
+        <FirmCalendarFromUrl />
+      </Suspense>
+    );
+  }
   return (
     <Suspense fallback={<Spinner />}>
       <ComplianceInner />

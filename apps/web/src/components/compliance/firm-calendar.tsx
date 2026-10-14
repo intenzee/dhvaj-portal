@@ -66,7 +66,7 @@ export function daysLeftLabel(
   return `${row.daysLeft} day${row.daysLeft === 1 ? '' : 's'}`;
 }
 
-function rowHref(r: ComplianceCalendarRow): string {
+export function rowHref(r: ComplianceCalendarRow): string {
   return r.stream
     ? `/engagements/${r.engagementId}?tab=${r.stream}`
     : `/engagements/${r.engagementId}`;
@@ -78,15 +78,26 @@ function rowHref(r: ComplianceCalendarRow): string {
  * sheet's colours, a "Verify" badge on rules a partner has not confirmed, and
  * an .xlsx export in the source workbook's layout.
  */
-export function FirmCalendar(): JSX.Element {
+export function FirmCalendar({
+  initialStreams = [],
+  initialMonth = null,
+}: {
+  /** Streams to start filtered by (the home calendar's "View calendar" link). */
+  initialStreams?: Stream[];
+  /** A `yyyy-mm` to open the month grid on; the window then starts there. */
+  initialMonth?: string | null;
+} = {}): JSX.Element {
   const { principal } = useAuth();
   const toast = useToast();
-  const initial = useMemo(() => defaultWindow(new Date()), []);
+  const initial = useMemo(
+    () => defaultWindow(initialMonth ? parseIso(`${initialMonth}-01`) : new Date()),
+    [initialMonth],
+  );
 
-  const [view, setView] = useState<View>('list');
+  const [view, setView] = useState<View>(initialMonth ? 'month' : 'list');
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
-  const [streams, setStreams] = useState<Stream[]>([]);
+  const [streams, setStreams] = useState<Stream[]>(initialStreams);
   const [statuses, setStatuses] = useState<FilingStatus[]>([]);
   const [partnerId, setPartnerId] = useState('');
   const [managerId, setManagerId] = useState('');

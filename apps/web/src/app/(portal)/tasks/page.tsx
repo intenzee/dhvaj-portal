@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { Paginated } from '@hsdg/contracts';
+import { WORK_SECTION_LABEL, type Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import type { MyTask } from '@/lib/types';
@@ -12,6 +12,7 @@ import { PageHeader, Spinner } from '@/components/ui';
 import { PriorityBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { TaskStatusControl } from '@/components/actions/task-status-control';
+import { SectionChips, useUrlSections, withSections } from '@/components/section-filter';
 import { cn } from '@/lib/cn';
 
 const columns: ColumnDef<MyTask, unknown>[] = [
@@ -21,6 +22,12 @@ const columns: ColumnDef<MyTask, unknown>[] = [
     cell: ({ row }) => (
       <span className="text-ink-muted">
         {row.original.engagementCode} · {row.original.entityName}
+        {row.original.stream && (
+          <span className="ml-2 rounded bg-surface-sunken px-1.5 py-0.5 text-[11px] font-medium text-ink-faint">
+            {(WORK_SECTION_LABEL as Record<string, string>)[row.original.stream] ??
+              row.original.stream}
+          </span>
+        )}
       </span>
     ),
   },
@@ -40,12 +47,21 @@ const columns: ColumnDef<MyTask, unknown>[] = [
 ];
 
 export default function TasksPage(): JSX.Element {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <TasksInner />
+    </Suspense>
+  );
+}
+
+function TasksInner(): JSX.Element {
   const router = useRouter();
   const [openOnly, setOpenOnly] = useState(true);
+  const [sections, setSections] = useUrlSections();
 
   const q = useQuery({
-    queryKey: ['tasks', 'mine', openOnly],
-    queryFn: () => apiFetch<Paginated<MyTask>>(`/work/tasks?limit=100${openOnly ? '' : ''}`),
+    queryKey: ['tasks', 'mine', sections],
+    queryFn: () => apiFetch<Paginated<MyTask>>(withSections('/work/tasks?limit=100', sections)),
   });
 
   const rows = (q.data?.items ?? []).filter((t) =>
@@ -56,26 +72,29 @@ export default function TasksPage(): JSX.Element {
     <div>
       <PageHeader title="Tasks" subtitle="Tasks assigned to you across every engagement." />
 
-      <div className="mb-4 flex gap-2">
-        {(
-          [
-            [true, 'Open'],
-            [false, 'All'],
-          ] as const
-        ).map(([val, label]) => (
-          <button
-            key={label}
-            onClick={() => setOpenOnly(val)}
-            className={cn(
-              'rounded-full border px-3 py-1 text-xs font-medium transition',
-              openOnly === val
-                ? 'border-primary-600 bg-primary-600 text-white'
-                : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-raised',
-            )}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="flex gap-2">
+          {(
+            [
+              [true, 'Open'],
+              [false, 'All'],
+            ] as const
+          ).map(([val, label]) => (
+            <button
+              key={label}
+              onClick={() => setOpenOnly(val)}
+              className={cn(
+                'rounded-full border px-3 py-1 text-xs font-medium transition',
+                openOnly === val
+                  ? 'border-primary-600 bg-primary-600 text-white'
+                  : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-raised',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <SectionChips value={sections} onChange={setSections} />
       </div>
 
       {q.isLoading && <Spinner />}

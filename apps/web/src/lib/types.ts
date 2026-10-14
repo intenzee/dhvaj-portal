@@ -93,6 +93,8 @@ export interface MyTask {
   version: number;
   engagementCode: string;
   entityName: string;
+  /** The stream of the task's engagement service (gst, …); null otherwise. */
+  stream?: string | null;
 }
 
 export interface MyClientDependency {

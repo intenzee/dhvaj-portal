@@ -10,6 +10,7 @@ import {
   NOTIFICATION_TYPE,
   type TaskPriority,
   type TaskStatus,
+  type WorkSection,
   type WorkType,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -439,7 +440,7 @@ export class TasksService {
   async myTasks(
     ctx: RlsContext,
     page: PageParams,
-    filter: { status?: TaskStatus; overdueOnly?: boolean },
+    filter: { status?: TaskStatus; overdueOnly?: boolean; sections?: WorkSection[] },
   ): Promise<PageResult<MyTaskRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       if (!ctx.employeeId) return { items: [], total: 0 };
@@ -453,6 +454,17 @@ export class TasksService {
         conds.push(
           `t.status NOT IN ('done','cancelled') AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE`,
         );
+      }
+      if (filter.sections?.length) {
+        // A task's stream is its engagement service's; Statutory Audit and
+        // Assignments are the engagement's kind ('compliance' is no section).
+        params.push(filter.sections);
+        const p = `$${params.length}::text[]`;
+        conds.push(`(EXISTS (SELECT 1 FROM hsdg.engagement_services ses
+                              JOIN hsdg.services ss ON ss.id = ses.service_id
+                             WHERE ses.id = t.engagement_service_id AND ss.stream = ANY(${p}))
+                     OR EXISTS (SELECT 1 FROM hsdg.engagements seng
+                                 WHERE seng.id = t.engagement_id AND seng.kind = ANY(${p})))`);
       }
       const where = `WHERE ${conds.join(' AND ')}`;
       params.push(page.limit, page.offset);

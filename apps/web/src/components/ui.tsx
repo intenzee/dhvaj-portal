@@ -46,7 +46,7 @@ export function Panel({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <Card className={cn('flex flex-col', className)}>
+    <Card role="region" aria-label={title} className={cn('flex flex-col', className)}>
       <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
         <h3 className="text-[15px] font-semibold text-ink">{title}</h3>
         {action ??
