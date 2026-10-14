@@ -317,6 +317,8 @@ export const FEATURE_FLAG = {
   gstTab: 'ff_gst_tab',
   complianceTabs: 'ff_compliance_tabs',
   autoTime: 'ff_auto_time',
+  /** Staff Workflow Phase 1: rows open the exact work, review queue, trimmed sidebar. */
+  workLinks: 'ff_work_links',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);
