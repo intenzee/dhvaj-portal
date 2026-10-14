@@ -17,8 +17,9 @@ import {
   PanelLeftOpen,
   type LucideIcon,
 } from 'lucide-react';
-import { PERMISSION, type PermissionSlug } from '@hsdg/contracts';
+import { FEATURE_FLAG, PERMISSION, type PermissionSlug } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { isNavActive, visibleNavSections } from '@/lib/nav';
 import { roleLabel, initials, can, type Principal } from '@/lib/principal';
 import { useTrackOnboardingVisit } from '@/lib/onboarding';
@@ -240,7 +241,8 @@ function SidebarContent({
   pathname: string;
   collapsed: boolean;
 }): JSX.Element {
-  const sections = visibleNavSections(principal);
+  const { isOn } = useFeatureFlags();
+  const sections = visibleNavSections(principal, { workLinks: isOn(FEATURE_FLAG.workLinks) });
   return (
     <>
       <Link
