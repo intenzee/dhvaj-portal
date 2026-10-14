@@ -16,6 +16,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { AuditService } from '../audit/audit.service';
+import { engagementInSectionsSql } from '../../common/sections';
 import type {
   AddressInput,
   BusinessActivityInput,
@@ -116,6 +117,16 @@ interface DetailRow extends SummaryRow {
 
 const num = (v: string | null): number | null => (v === null ? null : Number(v));
 
+/** Engagements that no longer put a client in a section (merged ones live on in their target). */
+const CLOSED_ENGAGEMENT_STATUSES = [
+  'completed',
+  'closed',
+  'declined',
+  'withdrawn',
+  'cancelled',
+  'merged',
+];
+
 @Injectable()
 export class EntitiesService {
   constructor(
@@ -169,6 +180,15 @@ export class EntitiesService {
       params.push(`%${filter.search}%`);
       conditions.push(
         `(e.legal_name ILIKE $${params.length} OR e.entity_code ILIKE $${params.length} OR e.pan ILIKE $${params.length})`,
+      );
+    }
+    if (filter.section?.length) {
+      // A client is in a section while it has a live engagement there.
+      params.push(filter.section, CLOSED_ENGAGEMENT_STATUSES);
+      conditions.push(
+        `EXISTS (SELECT 1 FROM hsdg.engagements eng
+                  WHERE eng.entity_id = e.id AND eng.status <> ALL($${params.length}::text[])
+                    AND ${engagementInSectionsSql('eng', `$${params.length - 1}`)})`,
       );
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -15,6 +15,8 @@ import { PageHeader, Spinner, Card, Button } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { Pagination } from '@/components/pagination';
+import { SectionChips, useUrlSections } from '@/components/section-filter';
+import { entityListPath } from '@/lib/list-paths';
 
 const PAGE_SIZE = 25;
 
@@ -27,23 +29,26 @@ const columns: ColumnDef<EntityRow, unknown>[] = [
   { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
 ];
 
-export default function EntitiesPage(): JSX.Element {
+function EntitiesInner(): JSX.Element {
   const router = useRouter();
   const { principal } = useAuth();
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
+  const [sections, setSectionsUrl] = useUrlSections();
 
   const onSearch = (v: string): void => {
     setSearch(v);
     setOffset(0);
   };
+  const setSections = (next: typeof sections): void => {
+    setSectionsUrl(next);
+    setOffset(0);
+  };
 
   const q = useQuery({
-    queryKey: ['entities', search, offset],
+    queryKey: ['entities', search, sections, offset],
     queryFn: () =>
-      apiFetch<Paginated<EntityRow>>(
-        `/entities?limit=${PAGE_SIZE}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
-      ),
+      apiFetch<Paginated<EntityRow>>(entityListPath({ limit: PAGE_SIZE, offset, search, sections })),
   });
 
   return (
@@ -62,6 +67,7 @@ export default function EntitiesPage(): JSX.Element {
         }
       />
 
+      <SectionChips value={sections} onChange={setSections} className="mb-3" />
       <div className="mb-4">
         <input
           value={search}
@@ -77,7 +83,7 @@ export default function EntitiesPage(): JSX.Element {
           <DataTable
             columns={columns}
             data={q.data.items}
-            empty="No entities match your search."
+            empty={sections.length ? 'No clients in this section match.' : 'No entities match your search.'}
             onRowClick={(row) => router.push(`/entities/${row.id}`)}
           />
         )}
@@ -92,5 +98,13 @@ export default function EntitiesPage(): JSX.Element {
         />
       )}
     </div>
+  );
+}
+
+export default function EntitiesPage(): JSX.Element {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <EntitiesInner />
+    </Suspense>
   );
 }

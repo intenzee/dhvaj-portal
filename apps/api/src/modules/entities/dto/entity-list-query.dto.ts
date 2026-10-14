@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
-import { ENTITY_STATUSES, type EntityStatus } from '@hsdg/contracts';
+import { ENTITY_STATUSES, type EntityStatus, type WorkSection } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
+import { SectionQuery } from '../../../common/sections';
 
 /** Pagination + filters for GET /entities (all params whitelisted). */
 export class EntityListQueryDto extends PaginationQueryDto {
@@ -24,4 +25,8 @@ export class EntityListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  /** Clients with a live engagement in any of these sections (GST, Statutory Audit, …). */
+  @SectionQuery()
+  section?: WorkSection[];
 }

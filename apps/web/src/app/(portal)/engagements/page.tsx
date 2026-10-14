@@ -27,6 +27,8 @@ import { PageHeader, Spinner, Card, Badge } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { Pagination } from '@/components/pagination';
+import { SectionChips, useUrlSections } from '@/components/section-filter';
+import { engagementListPath } from '@/lib/list-paths';
 import { cn } from '@/lib/cn';
 
 const PAGE_SIZE = 25;
@@ -107,8 +109,15 @@ function EngagementsInner(): JSX.Element {
     ENGAGEMENT_KINDS.includes(initialKind as EngagementKind) ? (initialKind as EngagementKind) : '',
   );
   const [offset, setOffset] = useState(0);
+  const [sections, setSectionsUrl] = useUrlSections();
+  // The home panel's View all opens this page on my engagements only.
+  const mine = params.get('mine') === 'true';
 
   // Reset to the first page whenever the filter changes.
+  const setSections = (next: typeof sections): void => {
+    setSectionsUrl(next);
+    setOffset(0);
+  };
   const setStatusFiltered = (s: EngagementStatus | ''): void => {
     setStatus(s);
     setOffset(0);
@@ -126,12 +135,10 @@ function EngagementsInner(): JSX.Element {
   const activeKind = kindsOn ? kind : '';
 
   const q = useQuery({
-    queryKey: ['engagements', status, activeKind, offset],
+    queryKey: ['engagements', status, activeKind, mine, sections, offset],
     queryFn: () =>
       apiFetch<Paginated<EngagementRow>>(
-        `/engagements?limit=${PAGE_SIZE}&offset=${offset}${status ? `&status=${status}` : ''}${
-          activeKind ? `&kind=${activeKind}` : ''
-        }`,
+        engagementListPath({ limit: PAGE_SIZE, offset, status, kind: activeKind, mine, sections }),
       ),
   });
 
@@ -166,7 +173,23 @@ function EngagementsInner(): JSX.Element {
         </div>
       )}
 
+      <SectionChips value={sections} onChange={setSections} className="mb-2" />
+
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        {mine && (
+          <FilterChip
+            label="Mine only ✕"
+            active
+            onClick={() => {
+              const next = new URLSearchParams(params.toString());
+              next.delete('mine');
+              setOffset(0);
+              router.replace(`/engagements${next.toString() ? `?${next.toString()}` : ''}`, {
+                scroll: false,
+              });
+            }}
+          />
+        )}
         <FilterChip label="All" active={status === ''} onClick={() => setStatusFiltered('')} />
         {COMMON_STATUSES.map((s) => (
           <FilterChip
