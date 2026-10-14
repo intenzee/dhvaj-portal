@@ -157,6 +157,12 @@ describe('compliance-periods', () => {
       const v = applyVariants(seedVersion(rule('ROC_MGT7'), '2027-03-31'), opc);
       expect(v.formLabel).toBe('MGT-7A');
     });
+    it('LLP Form 11 within 60 days of the FY end (30 May); Form 8 six months + 30 days (30 Oct)', () => {
+      expect(due('LLP_FORM11', '2025-26', '2025-26')!.statutoryDeadline).toBe('2026-05-30');
+      expect(due('LLP_FORM8', '2025-26', '2025-26')!.statutoryDeadline).toBe('2026-10-30');
+      expect(due('LLP_FORM11', '2026-27', '2026-27')!.statutoryDeadline).toBe('2027-05-30');
+      expect(due('LLP_FORM8', '2026-27', '2026-27')!.statutoryDeadline).toBe('2027-10-30');
+    });
     it('annual returns sit under their FY even when due in the next one', () => {
       expect(due('GST_GSTR9', '2026-27', '2026-27')!.statutoryDeadline).toBe('2027-12-31');
       expect(due('IT_ITR_AUDIT', '2025-26', '2025-26')!.statutoryDeadline).toBe('2026-10-31');

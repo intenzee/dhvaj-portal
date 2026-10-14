@@ -149,7 +149,7 @@ interface FilingRow {
 const INSTANCE_SQL = `
   SELECT ci.id, ci.engagement_id, ci.registration_id, r.registration_number,
          ci.compliance_rule_id, cr.code AS rule_code, cr.name AS rule_name,
-         rv.form_label, rv.verification, rv.late_fee_note,
+         COALESCE(ci.form_label, rv.form_label) AS form_label, rv.verification, rv.late_fee_note,
          COALESCE(rv.stream, sv.stream) AS stream, ci.section, ci.financial_year, ci.period_key,
          ci.period_start::text, ci.period_end::text,
          COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)::text AS due,
@@ -799,7 +799,7 @@ export class FilingWorkspaceService {
       created_by_name: string | null;
       created_at: Date;
     }>(
-      `SELECT fc.id, fc.corrected_in_instance_id, COALESCE(rv.form_label, cr.name) AS corrected_rule,
+      `SELECT fc.id, fc.corrected_in_instance_id, COALESCE(ci.form_label, rv.form_label, cr.name) AS corrected_rule,
                 ci.period_key AS corrected_period, fc.note, e.full_name AS created_by_name, fc.created_at
            FROM hsdg.filing_corrections fc
            LEFT JOIN hsdg.compliance_instances ci ON ci.id = fc.corrected_in_instance_id
@@ -1141,7 +1141,7 @@ export class FilingWorkspaceService {
     if (inst.section !== 'outward' && inst.section !== 'inward') return null;
     if (!inst.registration_id || !inst.period_start || !inst.period_end) return null;
     const { rows } = await client.query<{ label: string; period_key: string | null }>(
-      `SELECT COALESCE(rv.form_label, cr.name) AS label, ci.period_key
+      `SELECT COALESCE(ci.form_label, rv.form_label, cr.name) AS label, ci.period_key
          FROM hsdg.compliance_instances ci
          JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
          LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id

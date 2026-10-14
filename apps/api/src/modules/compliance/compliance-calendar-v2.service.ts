@@ -575,7 +575,7 @@ export class ComplianceCalendarV2Service {
       const { rows } = await client.query<CalendarSqlRow>(
         `SELECT ci.id, ci.engagement_id, eng.engagement_code, eng.entity_id,
                 ent.legal_name AS entity_name, o.code AS office_code, ${FILING_STREAM} AS stream,
-                cr.code AS rule_code, cr.name AS rule_name, v.form_label, ci.registration_id,
+                cr.code AS rule_code, cr.name AS rule_name, COALESCE(ci.form_label, v.form_label) AS form_label, ci.registration_id,
                 ci.financial_year, ci.period_key,
                 to_char(ci.reference_date, 'YYYY-MM') AS reference_month,
                 ${EFFECTIVE_DUE}::text AS due_date, ci.statutory_deadline::text AS computed_due,

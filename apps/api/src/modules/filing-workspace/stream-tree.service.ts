@@ -142,7 +142,7 @@ export class StreamTreeService {
 
       const select = (): Promise<{ rows: TreeRow[] }> =>
         client.query<TreeRow>(
-          `SELECT ci.id, cr.code AS rule_code, COALESCE(rv.form_label, cr.name) AS label, ci.section,
+          `SELECT ci.id, cr.code AS rule_code, COALESCE(ci.form_label, rv.form_label, cr.name) AS label, ci.section,
                   ci.period_key, ci.financial_year,
                   COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)::text AS due,
                   ci.workflow_status, fr.filed_on::text, ci.is_provisional, rv.verification,
