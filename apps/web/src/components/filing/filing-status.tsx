@@ -1,5 +1,6 @@
-import { isMeetingRule, type FilingStatus } from '@hsdg/contracts';
+import { isMeetingRule, type ChecklistItem, type FilingStatus } from '@hsdg/contracts';
 import { Badge } from '@/components/ui';
+import { formatDate } from '@/lib/format';
 
 export const FILING_STATUS_LABEL: Record<FilingStatus, string> = {
   not_started: 'Not started',
@@ -91,4 +92,17 @@ export function daysLeftText(daysLeft: number): string {
   if (daysLeft === 0) return 'due today';
   if (daysLeft < 0) return `${-daysLeft} day${daysLeft === -1 ? '' : 's'} overdue`;
   return `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
+}
+
+/**
+ * MGT-7's "Meetings" line (spec §5.4): "Board meetings FY 2025-26: held 12 May
+ * 2025, 14 Aug 2025 — 2 of 4 recorded". Pure — tested.
+ */
+export function boardMeetingsText(bm: NonNullable<ChecklistItem['boardMeetings']>): string {
+  const fy = bm.financialYear ? ` FY ${bm.financialYear}` : '';
+  if (bm.total === 0) return `No board meetings tracked for${fy || ' the year'} — tick by hand.`;
+  const held = bm.heldOn.length
+    ? `held ${bm.heldOn.map((d) => formatDate(d)).join(', ')}`
+    : 'none held yet';
+  return `Board meetings${fy}: ${held} — ${bm.heldOn.length} of ${bm.total} recorded`;
 }

@@ -21,7 +21,7 @@ import type { TaskActionContext, WorkTask } from '@/lib/work-types';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { TaskActions } from '@/components/tasks/task-actions';
-import { FilingStatusBadge, daysLeftText, dueTone, filingEnd } from './filing-status';
+import { FilingStatusBadge, boardMeetingsText, daysLeftText, dueTone, filingEnd } from './filing-status';
 
 /** The part of the created client-upload link the page needs. */
 interface UploadLink {
@@ -453,6 +453,8 @@ function Checklist({
               {i.tickedBy === 'partner' && <span className="text-[10px] text-primary-700">partner ticks</span>}
               {i.autoTick === 'event' ? (
                 <span className="text-[10px] text-ink-muted">ticks when the meeting is recorded</span>
+              ) : i.autoTick === 'meetings' ? (
+                <span className="text-[10px] text-ink-muted">ticks when the year’s board meetings are recorded</span>
               ) : (
                 i.autoTick && <span className="text-[10px] text-ink-muted">auto: {i.autoTick}</span>
               )}
@@ -472,6 +474,9 @@ function Checklist({
                 </Button>
               )}
             </div>
+            {i.boardMeetings && (
+              <p className="mt-0.5 pl-6 text-xs text-ink-muted">{boardMeetingsText(i.boardMeetings)}</p>
+            )}
             {udinFor === i.id && i.status === 'open' && (
               <ReasonAction
                 label="Tick with UDIN"

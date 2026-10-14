@@ -122,7 +122,11 @@ export const ROC_CHECKLISTS: RocChecklist[] = [
   checklist('ROC_MGT7', 'ROC — MGT-7 / MGT-7A (annual return)', [
     { code: 'AGM_HELD', label: 'AGM held', required: true, autoTick: 'event', onlyIf: 'hasAgm' },
     doc('SHAREHOLDERS', 'Shareholder / debenture-holder list and transfers in the year', 'SH_LIST'),
-    { code: 'MEETINGS', label: 'Board and committee meetings and attendance for the year' },
+    {
+      code: 'MEETINGS',
+      label: 'Board and committee meetings and attendance for the year',
+      autoTick: 'meetings',
+    },
     {
       ...doc('MGT8', 'MGT-8 by a CS in practice', 'MGT8'),
       onlyIf: 'mgt8Required',

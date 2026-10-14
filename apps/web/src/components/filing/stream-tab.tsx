@@ -141,9 +141,12 @@ export function StreamTab({
     return <EmptyState>{err instanceof ApiError ? err.message : 'Could not load this stream.'}</EmptyState>;
   }
 
-  // ROC: the events panel heads the tab; with no CIN / LLPIN it says why (G13).
+  // ROC: the FY's events sit below the annual strip (spec §6.1); with no
+  // CIN / LLPIN the panel alone says why (G13).
   const rocPanel =
-    stream === 'roc' ? <RocEvents engagementId={engagementId} isLead={ctx.isLead} /> : null;
+    stream === 'roc' ? (
+      <RocEvents engagementId={engagementId} isLead={ctx.isLead} financialYear={fy ?? null} />
+    ) : null;
   if (rocPanel && tree.registrations.length === 0 && tree.annual.length === 0 && tree.periods.length === 0) {
     return rocPanel;
   }
@@ -151,7 +154,6 @@ export function StreamTab({
   let lastQuarter: string | null = null;
   return (
     <div className="space-y-4">
-      {rocPanel}
       <div className="flex flex-wrap items-center gap-2">
         {tree.registrations.length > 1 && (
           <div role="tablist" aria-label="Registration" className="flex flex-wrap gap-1">
@@ -223,6 +225,8 @@ export function StreamTab({
           </CardBody>
         </Card>
       )}
+
+      {rocPanel}
 
       <Card>
         <CardHeader>

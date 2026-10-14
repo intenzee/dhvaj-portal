@@ -387,6 +387,25 @@ describe('ROC events (e2e)', () => {
       expect(ws.body.instance.chargeWindow).toEqual(chargeFilingWindow('2026-08-01', istToday()));
     });
 
+    it('§6.1 — the FY defaults per event and can be picked on the form', async () => {
+      const { eng } = await company();
+      const auto = await record(eng, { eventType: 'allotment', eventDate: '2026-05-04' }).expect(
+        201,
+      );
+      expect(auto.body.event.financialYear).toBe('2026-27');
+      const picked = await record(eng, {
+        eventType: 'allotment',
+        eventDate: '2026-04-02',
+        financialYear: '2025-26',
+      }).expect(201);
+      expect(picked.body.event.financialYear).toBe('2025-26');
+      await record(eng, {
+        eventType: 'allotment',
+        eventDate: '2026-04-03',
+        financialYear: '2025-2026',
+      }).expect(400);
+    });
+
     it('rejects a future date, bad details and a non-lead', async () => {
       const { eng } = await company();
       await record(eng, { eventType: 'allotment', eventDate: '2099-01-01' }).expect(400);
@@ -438,6 +457,86 @@ describe('ROC events (e2e)', () => {
         dueBy: '2026-09-12',
         rule: 'every_120_days',
       });
+    });
+
+    it('§5.4 — MGT-7’s Meetings line fills from the FY’s board meetings', async () => {
+      const { eng, reg } = await company();
+      const all = await items(eng, '2025-26');
+      const mgt7 = all.find((i) => i.ruleCode === 'ROC_MGT7')!;
+      const bms = all.filter((i) => i.ruleCode === 'ROC_BOARD_MEETING');
+      expect(mgt7).toBeDefined();
+      expect(bms.length).toBe(4);
+      const line = async () => {
+        const ws = await http()
+          .get(`/api/v1/compliance-instances/${mgt7.instanceId}`)
+          .set(bearer(pa))
+          .expect(200);
+        return ws.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'MEETINGS');
+      };
+      // Read straight from the table: a board meeting's record re-ticks MGT-7 itself.
+      const statusInDb = () =>
+        superuser(async (db) => {
+          const r = await db.query<{ status: string }>(
+            `SELECT status FROM hsdg.instance_checklist_items
+              WHERE compliance_instance_id = $1 AND item_code = 'MEETINGS'`,
+            [mgt7.instanceId],
+          );
+          return r.rows[0]!.status;
+        });
+      expect(await line()).toMatchObject({
+        autoTick: 'meetings',
+        status: 'open',
+        boardMeetings: { financialYear: '2025-26', heldOn: [], total: 4 },
+      });
+
+      const heldOn: Record<string, string> = {
+        Q1: '2025-05-15',
+        Q2: '2025-08-14',
+        Q3: '2025-11-13',
+        Q4: '2026-02-12',
+      };
+      const ids: Record<string, string> = {};
+      for (const bm of bms) {
+        const q = bm.periodKey!.slice(-2);
+        ids[q] = bm.instanceId;
+        const minutes = await uploadDoc(bm.instanceId);
+        await http()
+          .post(`/api/v1/compliance-instances/${bm.instanceId}/lodge`)
+          .set(bearer(pa))
+          .send({ filedOn: heldOn[q], ackDocumentId: minutes })
+          .expect(201);
+        if (q !== 'Q4') expect(await statusInDb()).toBe('open');
+      }
+      expect(Object.keys(ids).sort()).toEqual(['Q1', 'Q2', 'Q3', 'Q4']);
+      // All four held → ticked by the last record, before anyone opens MGT-7.
+      expect(await statusInDb()).toBe('done');
+      expect(await line()).toMatchObject({
+        status: 'done',
+        doneByName: null,
+        boardMeetings: { heldOn: Object.values(heldOn).sort(), total: 4 },
+      });
+
+      // Undoing a meeting re-opens it …
+      await http()
+        .post(`/api/v1/compliance-instances/${ids.Q4}/lodge/undo`)
+        .set(bearer(pa))
+        .send({ reason: 'Wrong date' })
+        .expect(201);
+      expect(await statusInDb()).toBe('open');
+      const open = await line();
+      expect(open.boardMeetings.heldOn).toHaveLength(3);
+
+      // … and a hand tick (committee meetings count too) stands without it.
+      const ticked = await http()
+        .patch(`/api/v1/compliance-instances/${mgt7.instanceId}/items/${open.id}`)
+        .set(bearer(pa))
+        .send({ status: 'done', version: open.version })
+        .expect(200);
+      expect(
+        ticked.body.checklist.find((c: { itemCode: string }) => c.itemCode === 'MEETINGS').status,
+      ).toBe('done');
+      expect((await line()).status).toBe('done');
+      expect(reg).not.toBeNull();
     });
 
     it('E17 — recording the AGM meeting records the AGM; undoing it voids the event', async () => {

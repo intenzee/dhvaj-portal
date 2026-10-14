@@ -1,12 +1,15 @@
-import type { BoardMeetingCadence } from '@hsdg/contracts';
+import type { BoardMeetingCadence, ComplianceEventRecord } from '@hsdg/contracts';
 import { formatDate } from '@/lib/format';
 import {
   EMPTY_DETAILS,
   cadenceText,
   changeLines,
+  defaultEventFy,
   detailsText,
   detailsToForm,
   eventDetailsPayload,
+  eventFyOptions,
+  eventsForFy,
 } from '../roc-events';
 
 describe('ROC events panel', () => {
@@ -65,5 +68,34 @@ describe('ROC events panel', () => {
     expect(cadenceText({ ...b, lastHeldOn: null, dueBy: null, rule: 'calendar_half' })).toMatch(
       /each half of the calendar year/,
     );
+  });
+
+  it('defaults the FY like the API — the previous FY for an AGM', () => {
+    expect(defaultEventFy('agm', '2026-09-25')).toBe('2025-26');
+    expect(defaultEventFy('agm_extension', '2026-08-01')).toBe('2025-26');
+    expect(defaultEventFy('allotment', '2026-09-25')).toBe('2026-27');
+    expect(defaultEventFy('allotment', '2027-03-31')).toBe('2026-27');
+    expect(defaultEventFy('director_change', '2027-04-01')).toBe('2027-28');
+    expect(defaultEventFy('agm', '2027-01-10')).toBe('2025-26');
+  });
+
+  it('offers the date’s FY and the two before it', () => {
+    expect(eventFyOptions('2026-09-25')).toEqual(['2026-27', '2025-26', '2024-25']);
+    expect(eventFyOptions('2000-02-01')).toEqual(['1999-00', '1998-99', '1997-98']);
+  });
+
+  it('lists the tab FY’s ROC events and counts the rest', () => {
+    const ev = (id: string, eventType: string, financialYear: string | null) =>
+      ({ id, eventType, financialYear }) as ComplianceEventRecord;
+    const all = [
+      ev('a', 'agm', '2025-26'),
+      ev('b', 'allotment', '2026-27'),
+      ev('c', 'director_change', null),
+      ev('d', 'gst_registration', '2025-26'),
+    ];
+    const r = eventsForFy(all, '2025-26');
+    expect(r.shown.map((e) => e.id)).toEqual(['a', 'c']);
+    expect(r.otherYears).toBe(1);
+    expect(eventsForFy(all, null).shown.map((e) => e.id)).toEqual(['a', 'b', 'c']);
   });
 });

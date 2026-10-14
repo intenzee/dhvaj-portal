@@ -19,7 +19,8 @@ export interface TemplateItem {
   required?: boolean;
   sequence?: number;
   /** 'event': ticks when the event it waits on is recorded (AGM held on AOC-4). */
-  autoTick?: 'document' | 'figure' | 'review' | 'lodge' | 'event' | null;
+  /** 'meetings': ticks when the FY's board meetings are all recorded (MGT-7). */
+  autoTick?: 'document' | 'figure' | 'review' | 'lodge' | 'event' | 'meetings' | null;
   /** 'partner': only a partner ticks it by hand, with a note (the UDIN). */
   tickedBy?: 'partner' | null;
   /**
@@ -191,7 +192,7 @@ export async function seedChecklistForInstance(
 /**
  * Bring the self-ticking items in line with the facts: a document in the slot,
  * the task approved (review), a live filing (lodge), the year's AGM recorded
- * (event). Items ticked by hand and
+ * (event), the year's board meetings all held (meetings). Items ticked by hand and
  * items marked Not applicable are left alone; review / lodge items un-tick when
  * the fact goes away (task returned, lodge undone).
  */
@@ -221,7 +222,22 @@ export async function syncAutoTicks(client: PoolClient, instanceId: string): Pro
                           ON ev.engagement_id = ci.engagement_id AND ev.event_type = 'agm'
                          AND ev.voided_at IS NULL AND ev.financial_year = ci.financial_year
                          AND (ev.registration_id IS NULL OR ev.registration_id = ci.registration_id)
-                       WHERE ci.id = $1) AS agm_held
+                       WHERE ci.id = $1) AS agm_held,
+              -- 'meetings': the FY's board-meeting items (same CIN) exist and are all held.
+              (SELECT count(*) > 0 AND bool_and(bm.held)
+                 FROM hsdg.compliance_instances me,
+                      LATERAL (SELECT bi.workflow_status = 'filed'
+                                      OR EXISTS (SELECT 1 FROM hsdg.filing_records fr
+                                                  WHERE fr.compliance_instance_id = bi.id
+                                                    AND fr.undone_at IS NULL) AS held
+                                 FROM hsdg.compliance_instances bi
+                                 JOIN hsdg.compliance_rules br
+                                   ON br.id = bi.compliance_rule_id AND br.code = 'ROC_BOARD_MEETING'
+                                WHERE bi.engagement_id = me.engagement_id
+                                  AND bi.financial_year = me.financial_year
+                                  AND bi.registration_id IS NOT DISTINCT FROM me.registration_id
+                                  AND bi.workflow_status <> 'not_applicable') bm
+                WHERE me.id = $1) AS meetings_held
      )
      UPDATE hsdg.instance_checklist_items it
         SET status = CASE WHEN want THEN 'done' ELSE 'open' END,
@@ -234,9 +250,13 @@ export async function syncAutoTicks(client: PoolClient, instanceId: string): Pro
                       -- a person's own tick (an OPC's member adoption) stands without an event
                       WHEN 'event' THEN f.agm_held
                         OR (i.status = 'done' AND i.done_by_employee_id IS NOT NULL)
+                      -- committee meetings too, so a hand tick stands as well
+                      WHEN 'meetings' THEN f.meetings_held
+                        OR (i.status = 'done' AND i.done_by_employee_id IS NOT NULL)
                       ELSE f.lodged END AS want
                FROM hsdg.instance_checklist_items i, facts f
-              WHERE i.compliance_instance_id = $1 AND i.auto_tick IN ('review','lodge','event')
+              WHERE i.compliance_instance_id = $1
+                AND i.auto_tick IN ('review','lodge','event','meetings')
                 AND i.status <> 'not_applicable') x
       WHERE it.id = x.id AND (it.status = 'done') IS DISTINCT FROM x.want`,
     [instanceId],

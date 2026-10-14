@@ -146,6 +146,41 @@ export function cadenceText(b: BoardMeetingCadence): string {
   return b.notBefore ? `${by}, not before ${formatDate(b.notBefore)}` : by;
 }
 
+const fyLabel = (start: number): string =>
+  `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
+
+/**
+ * The FY an event belongs to unless the lead picks another — the API's own
+ * default: the date's FY, or the previous FY for an AGM / AGM extension
+ * (the AGM adopts last year's accounts). Pure — tested.
+ */
+export function defaultEventFy(type: string, isoDate: string): string {
+  const y = Number(isoDate.slice(0, 4));
+  const start = Number(isoDate.slice(5, 7)) >= 4 ? y : y - 1;
+  return fyLabel(type === 'agm' || type === 'agm_extension' ? start - 1 : start);
+}
+
+/** The FYs the form offers: the date's FY and the two before it. Pure — tested. */
+export function eventFyOptions(isoDate: string): string[] {
+  const y = Number(isoDate.slice(0, 4));
+  const start = Number(isoDate.slice(5, 7)) >= 4 ? y : y - 1;
+  return [start, start - 1, start - 2].map(fyLabel);
+}
+
+/**
+ * The ROC events for the tab's FY (spec §6.1), and how many sit in other
+ * years. An event with no FY shows in every year. Pure — tested.
+ */
+export function eventsForFy(
+  events: ComplianceEventRecord[],
+  financialYear: string | null,
+): { shown: ComplianceEventRecord[]; otherYears: number } {
+  const roc = events.filter((e) => (ROC_EVENT_TYPES as string[]).includes(e.eventType));
+  if (!financialYear) return { shown: roc, otherYears: 0 };
+  const shown = roc.filter((e) => !e.financialYear || e.financialYear === financialYear);
+  return { shown, otherYears: roc.length - shown.length };
+}
+
 const errText = (err: unknown, fallback: string): string =>
   err instanceof ApiError ? err.message : fallback;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -158,9 +193,12 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function RocEvents({
   engagementId,
   isLead,
+  financialYear = null,
 }: {
   engagementId: string;
   isLead: boolean;
+  /** The tab's FY — the list shows that year's events. */
+  financialYear?: string | null;
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
@@ -205,14 +243,12 @@ export function RocEvents({
       </Card>
     );
   }
-  const list = (events.data ?? []).filter((e) =>
-    (ROC_EVENT_TYPES as string[]).includes(e.eventType),
-  );
+  const { shown: list, otherYears } = eventsForFy(events.data ?? [], financialYear);
 
   return (
     <Card>
       <CardHeader className="flex flex-wrap items-center gap-2">
-        <CardTitle>Events</CardTitle>
+        <CardTitle>Events{financialYear ? ` · FY ${financialYear}` : ''}</CardTitle>
         {ov.boardMeetings.map((b) => (
           <span key={b.registrationId} className="text-xs text-ink-muted">
             {ov.boardMeetings.length > 1 && (
@@ -268,8 +304,9 @@ export function RocEvents({
         )}
         {list.length === 0 ? (
           <p className="text-sm text-ink-muted">
-            No events recorded yet. Record the AGM, an allotment, a director change … and the
-            filings they trigger appear below.
+            No events recorded{financialYear ? ` for FY ${financialYear}` : ' yet'}. Record the
+            AGM, an allotment, a director change … and the filings they trigger appear in this
+            tab.
           </p>
         ) : (
           <ul
@@ -288,6 +325,12 @@ export function RocEvents({
               />
             ))}
           </ul>
+        )}
+        {otherYears > 0 && (
+          <p className="text-xs text-ink-muted">
+            {otherYears} more event{otherYears === 1 ? '' : 's'} in other years — pick the FY
+            above.
+          </p>
         )}
       </CardBody>
     </Card>
@@ -419,7 +462,14 @@ function RecordEventForm({
   const [eventDate, setEventDate] = useState(today());
   const [registrationId, setRegistrationId] = useState(registrations[0]?.id ?? '');
   const [notes, setNotes] = useState('');
+  // null = follow the default for the event and date; a pick sticks.
+  const [fyPick, setFyPick] = useState<string | null>(null);
   const [f, setF] = useState<EventDetailForm>(EMPTY_DETAILS);
+  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(eventDate);
+  const fyDefault = validDate ? defaultEventFy(eventType, eventDate) : null;
+  const fyChoices = validDate ? eventFyOptions(eventDate) : [];
+  if (fyPick && !fyChoices.includes(fyPick)) fyChoices.push(fyPick);
+  const financialYear = fyPick ?? fyDefault;
   const save = useMutation({
     mutationFn: () =>
       apiFetch<RecordComplianceEventResult>(`/engagements/${engagementId}/compliance-events`, {
@@ -427,6 +477,7 @@ function RecordEventForm({
         body: {
           eventType,
           eventDate,
+          ...(fyPick && fyPick !== fyDefault ? { financialYear: fyPick } : {}),
           ...(registrationId ? { registrationId } : {}),
           ...(notes.trim() ? { notes: notes.trim() } : {}),
           details: eventDetailsPayload(eventType, f),
@@ -466,6 +517,29 @@ function RecordEventForm({
             required
           />
         </Field>
+        {financialYear && (
+          <Field
+            label="FY"
+            required
+            hint={
+              eventType === 'agm' || eventType === 'agm_extension'
+                ? 'The year whose accounts the AGM adopts.'
+                : undefined
+            }
+          >
+            <Select
+              value={financialYear}
+              onChange={(e) => setFyPick(e.target.value === fyDefault ? null : e.target.value)}
+            >
+              {fyChoices.map((fy) => (
+                <option key={fy} value={fy}>
+                  {fy}
+                  {fy === fyDefault ? ' (default)' : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         {registrations.length > 1 && (
           <Field label="CIN / LLPIN" required>
             <Select value={registrationId} onChange={(e) => setRegistrationId(e.target.value)}>

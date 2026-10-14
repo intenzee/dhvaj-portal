@@ -711,7 +711,10 @@ ${updateRules(ROC_PRIOR)}
 ${templateRls('FORCE')}
 ${rls('FORCE')}
 
+-- Forced RLS would hide the rows from the migrator (and the CHECK then fails).
+ALTER TABLE hsdg.instance_checklist_items NO FORCE ROW LEVEL SECURITY;
 UPDATE hsdg.instance_checklist_items SET auto_tick = NULL WHERE auto_tick = 'event';
+ALTER TABLE hsdg.instance_checklist_items FORCE ROW LEVEL SECURITY;
 ALTER TABLE hsdg.instance_checklist_items
   DROP CONSTRAINT instance_checklist_items_partner_note,
   DROP COLUMN done_note,
