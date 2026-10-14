@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   STREAM_LABEL,
@@ -14,6 +14,9 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { monthKeyFor, monthParamOf, useUrlState } from '@/lib/url-state';
 import type { TaskActionContext } from '@/lib/work-types';
+import { defaultPeriodKey } from '@/lib/period-choice';
+import { rememberPlace } from '@/lib/last-place';
+import { todayIst } from '@/components/work/my-task-columns';
 import { Card, CardBody, CardHeader, CardTitle, EmptyState, Spinner } from '@/components/ui';
 import { Select } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
@@ -123,6 +126,28 @@ export function StreamTab({
     if (stream === 'gst') return monthKeyFor(fy, url.get('m'));
     return url.get('p');
   }, [fy, stream, url]);
+
+  // WF-203: with no period in the URL, open the one that needs action and put
+  // it in the address bar — once per registration and year, so a period the
+  // person collapses stays collapsed.
+  const autoFor = useRef<string | null>(null);
+  const hasPeriod = !!(url.get('m') || url.get('p'));
+  useEffect(() => {
+    if (!tree || !fy) return;
+    const scope = `${tree.registrationId ?? ''}|${fy}`;
+    if (autoFor.current === scope) return;
+    autoFor.current = scope;
+    if (hasPeriod) return;
+    const key = defaultPeriodKey(tree.periods, todayIst());
+    if (!key) return;
+    const param = periodParam(stream, key);
+    url.set({ [param.key]: param.value });
+  }, [tree, fy, hasPeriod, stream, url]);
+
+  // Remember where this engagement was left, for the Engagements list.
+  useEffect(() => {
+    if (openKey) rememberPlace(engagementId, window.location.search);
+  }, [openKey, engagementId]);
 
   // Correction targets: every later filing in the same year.
   const targetsFor = (period: TreePeriod) =>

@@ -8,7 +8,6 @@ import { FolderOpen } from 'lucide-react';
 import {
   ENGAGEMENT_KIND,
   FEATURE_FLAG,
-  ROLE,
   STREAM_LABEL,
   TASK_STATUS,
   type EngagementTabs,
@@ -18,7 +17,7 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
-import { hasRole } from '@/lib/principal';
+import { planningTeam, taskContextFor } from '@/lib/engagement-context';
 import { useUrlState } from '@/lib/url-state';
 import { useWorkLinkFocus } from '@/lib/work-focus';
 import type { TaskActionContext } from '@/lib/work-types';
@@ -40,7 +39,6 @@ import type {
   MyTask,
   ComplianceRow,
   MyClientDependency,
-  TeamMember,
 } from '@/lib/types';
 import {
   PageHeader,
@@ -53,6 +51,7 @@ import {
   Button,
   EmptyState,
 } from '@/components/ui';
+import { NextUpStrip } from '@/components/today/next-up';
 import { StatusBadge, PriorityBadge } from '@/components/status-badge';
 import { LifecycleActions } from '@/components/actions/lifecycle-actions';
 import { ReviewActions } from '@/components/actions/review-actions';
@@ -323,12 +322,7 @@ export default function EngagementDetailPage(): JSX.Element {
 
   const e = eng.data;
   const me = principal?.employeeId ?? null;
-  const ctx: TaskActionContext = {
-    me,
-    isLead:
-      hasRole(principal, ROLE.managingPartner) ||
-      (!!me && (me === e.engagementPartnerId || me === e.engagementManagerId)),
-  };
+  const ctx: TaskActionContext = taskContextFor(principal, e);
   const tabs = tabsQ.data;
   const leadsTeam = planningTeam(e);
 
@@ -347,6 +341,7 @@ export default function EngagementDetailPage(): JSX.Element {
           </Link>
         }
       />
+      <NextUpStrip engagementId={e.id} />
 
       {/* Action bar — always visible */}
       <Card className="mb-4">
@@ -907,32 +902,4 @@ function Fact({ label, value }: { label: string; value: string | null }): JSX.El
       <div className="text-ink">{value ?? '—'}</div>
     </div>
   );
-}
-
-/**
- * The engagement team plus the EP and Manager (held on the engagement itself,
- * not in `team`), so planning owners and discussion participants can include them.
- */
-function planningTeam(e: EngagementDetail): TeamMember[] {
-  const leads: TeamMember[] = [];
-  if (e.engagementPartnerId && e.engagementPartnerName) {
-    leads.push({
-      id: `ep-${e.engagementPartnerId}`,
-      employeeId: e.engagementPartnerId,
-      employeeCode: '',
-      employeeName: e.engagementPartnerName,
-      roleOnEngagement: 'engagement_partner',
-    });
-  }
-  if (e.engagementManagerId && e.engagementManagerName) {
-    leads.push({
-      id: `em-${e.engagementManagerId}`,
-      employeeId: e.engagementManagerId,
-      employeeCode: '',
-      employeeName: e.engagementManagerName,
-      roleOnEngagement: 'engagement_manager',
-    });
-  }
-  const seen = new Set(leads.map((m) => m.employeeId));
-  return [...leads, ...e.team.filter((m) => !seen.has(m.employeeId))];
 }

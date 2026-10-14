@@ -503,6 +503,16 @@ describe('Filing workspace (e2e)', () => {
     });
     expect(sep.nextAction).toMatch(/^GSTR-3B (due|overdue)/);
     expect(tree.body.registrations).toHaveLength(1);
+    // WF-203: the filing is Senior Y's to prepare — not the partner's.
+    expect(sep.sections.summary[0].mine).toBe(true);
+    const asPartner = await http()
+      .get(`/api/v1/engagements/${eng}/streams/gst/tree?fy=2026-27`)
+      .set(bearer(pa))
+      .expect(200);
+    const sepPa = asPartner.body.periods.find(
+      (p: { periodKey: string }) => p.periodKey === '2026-09',
+    );
+    expect(sepPa.sections.summary[0].mine).toBe(false);
   });
 
   it('raises the monthly data request per filing, one item per required client-data slot', async () => {

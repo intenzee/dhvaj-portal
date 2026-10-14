@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useWorkHref } from '@/lib/work-href';
 import { LiveClock, StopTimerButton, useActiveTimer } from './timer-shared';
 
 /**
@@ -11,7 +12,11 @@ import { LiveClock, StopTimerButton, useActiveTimer } from './timer-shared';
  */
 export function RunningTimerBanner(): JSX.Element | null {
   const { data } = useActiveTimer();
+  const workHref = useWorkHref();
   if (!data) return null;
+  // WF-205: the pill opens the filing / task the clock runs on.
+  const href = workHref({ engagementId: data.entry.engagementId, link: data.link });
+  const what = data.entry.taskTitle ? `${data.entry.taskTitle} · ` : '';
 
   return (
     <div className="flex items-center gap-2 rounded-lg border border-success-200 bg-success-50 px-2 py-1 sm:px-2.5">
@@ -20,9 +25,9 @@ export function RunningTimerBanner(): JSX.Element | null {
         <span className="relative inline-flex h-2 w-2 rounded-full bg-success-500" />
       </span>
       <Link
-        href={`/engagements/${data.entry.engagementId}`}
+        href={href}
         className="hidden text-xs font-semibold text-success-800 hover:underline sm:inline"
-        title={`Timing ${data.engagementCode} · ${data.entityName}`}
+        title={`Timing ${what}${data.engagementCode} · ${data.entityName}`}
       >
         {data.engagementCode}
       </Link>

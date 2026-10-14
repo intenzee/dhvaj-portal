@@ -243,7 +243,10 @@ function SidebarContent({
   collapsed: boolean;
 }): JSX.Element {
   const { isOn } = useFeatureFlags();
-  const sections = visibleNavSections(principal, { workLinks: isOn(FEATURE_FLAG.workLinks) });
+  const sections = visibleNavSections(principal, {
+    workLinks: isOn(FEATURE_FLAG.workLinks),
+    todayView: isOn(FEATURE_FLAG.todayView),
+  });
   return (
     <>
       <Link

@@ -258,6 +258,8 @@ export interface TreeItem {
   /** Checklist progress, e.g. 3 of 8 required items done. */
   requiredDone: number;
   requiredTotal: number;
+  /** WF-203: its open task is mine to prepare or review (the stream tab opens on its period). */
+  mine: boolean;
   /** ROC: a director's DSC lapses before the due date ("DSC of A Kumar expires 12 Nov 2026"). */
   dscWarning?: string | null;
 }

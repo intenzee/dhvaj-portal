@@ -78,7 +78,10 @@ export function HelpPanel({
   }, [open, onClose]);
 
   if (!open) return null;
-  const sections = visibleNavSections(principal, { workLinks: isOn(FEATURE_FLAG.workLinks) });
+  const sections = visibleNavSections(principal, {
+    workLinks: isOn(FEATURE_FLAG.workLinks),
+    todayView: isOn(FEATURE_FLAG.todayView),
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>
