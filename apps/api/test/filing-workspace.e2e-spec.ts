@@ -486,6 +486,26 @@ describe('Filing workspace (e2e)', () => {
     expect(lifted.body.instance.workflowStatus).toBe('not_started');
   });
 
+  it('serves one filing under its engagement (WF-202): same workspace, 404 elsewhere or off the team', async () => {
+    const { eng, inst } = await setup();
+    const other = (await setup()).eng;
+    const pb = await token('partner.b@dhvaj.in');
+    const byId = (await ws(sy, inst).expect(200)).body;
+    const scoped = await http()
+      .get(`/api/v1/engagements/${eng}/filings/${inst}`)
+      .set(bearer(sy))
+      .expect(200);
+    expect(scoped.body.instance).toEqual(byId.instance);
+    expect(scoped.body.checklist.map((i: { id: string }) => i.id)).toEqual(
+      byId.checklist.map((i: { id: string }) => i.id),
+    );
+    // Addressed under another engagement it is not found, never cross-linked.
+    await http().get(`/api/v1/engagements/${other}/filings/${inst}`).set(bearer(sy)).expect(404);
+    // RLS: a partner off the engagement sees nothing.
+    await http().get(`/api/v1/engagements/${eng}/filings/${inst}`).set(bearer(pb)).expect(404);
+    await http().get(`/api/v1/engagements/${eng}/filings/not-a-uuid`).set(bearer(sy)).expect(400);
+  });
+
   it('builds the GST year tree: twelve months, sections, next action', async () => {
     const { eng, inst } = await setup();
     const tree = await http()

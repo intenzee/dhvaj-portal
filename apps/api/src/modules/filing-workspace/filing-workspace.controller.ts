@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -36,7 +37,29 @@ import {
 @ApiTags('filing-workspace')
 @Controller('engagements')
 export class EngagementStreamsController {
-  constructor(private readonly trees: StreamTreeService) {}
+  constructor(
+    private readonly trees: StreamTreeService,
+    private readonly workspace: FilingWorkspaceService,
+  ) {}
+
+  /**
+   * Staff Workflow WF-202 — one filing's workspace addressed under its
+   * engagement (the drawer's and the filing runs' read). The same service as
+   * `GET /compliance-instances/:id`, so the rules stay in one place; a filing
+   * on another engagement is a 404, never a cross-link.
+   */
+  @Get(':id/filings/:instanceId')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'One filing’s workspace on this engagement (WF-202)' })
+  async filing(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('instanceId', new ParseUUIDPipe()) instanceId: string,
+  ): Promise<InstanceWorkspace> {
+    const ws = await this.workspace.get(rlsContextFromPrincipal(principal), instanceId);
+    if (ws.instance.engagementId !== id) throw new NotFoundException('Filing not found.');
+    return ws;
+  }
 
   @Get(':id/streams/:stream/tree')
   @RequirePermissions(PERMISSION.engagementRead)
