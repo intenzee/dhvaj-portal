@@ -40,11 +40,11 @@ describe('workItemHref — the URL rules table', () => {
           instanceId: 'i2',
           stream: 'tds',
           financialYear: '2026-27',
-          periodKey: '2026-27-Q2',
+          periodKey: '2026-27:Q2',
           section: null,
         }),
       ),
-    ).toEqual({ tab: 'tds', fy: '2026-27', p: '2026-27-Q2' });
+    ).toEqual({ tab: 'tds', fy: '2026-27', p: '2026-27:Q2' });
   });
 
   it('task on a filing: the filing URL plus task', () => {
@@ -110,6 +110,7 @@ describe('financialYearOfPeriod', () => {
     ['2026-03', '2025-26'],
     ['2026-12', '2026-27'],
     ['2026-27', '2026-27'],
+    ['2026-27:Q2', '2026-27'],
     ['2026-27-Q2', '2026-27'],
     ['FY', null],
     [null, null],

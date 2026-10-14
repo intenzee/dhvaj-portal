@@ -17,7 +17,7 @@ export interface WorkItemRef {
   stream?: Stream | null;
   /** '2026-27'. Derived from `periodKey` when absent. */
   financialYear?: string | null;
-  /** '2026-09' (GST month), '2026-27-Q2', 'FY', … */
+  /** '2026-09' (GST month), '2026-27:Q2', '2026-27' (the year), … */
   periodKey?: string | null;
   /** The part of the filing's period (GST: outward / inward / summary / annual). */
   section?: PeriodSection | null;
@@ -51,13 +51,13 @@ export function workLinkMonthParam(periodKey: string): string | null {
   return m ? String(Number(m[1])) : null;
 }
 
-/** The financial year a period key falls in: `2026-02` → `2025-26`, `2026-27-Q2` → `2026-27`. */
+/** The financial year a period key falls in: `2026-02` → `2025-26`, `2026-27:Q2` → `2026-27`. */
 export function financialYearOfPeriod(periodKey: string | null | undefined): string | null {
-  const k = periodKey ? /^(\d{4})-(\d{2})(-.+)?$/.exec(periodKey) : null;
+  const k = periodKey ? /^(\d{4})-(\d{2})([-:].+)?$/.exec(periodKey) : null;
   if (!k) return null;
   const year = Number(k[1]);
   const two = Number(k[2]);
-  // '2026-27' / '2026-27-Q2': already a financial year (next year's last two digits).
+  // '2026-27' / '2026-27:Q2': already a financial year (next year's last two digits).
   if (two === (year + 1) % 100) return `${k[1]}-${k[2]}`;
   // '2026-09': a calendar month; April starts the year.
   if (k[3] || two < 1 || two > 12) return null;
