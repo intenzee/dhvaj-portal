@@ -340,8 +340,8 @@ describe('Work links, review queue and team tasks (e2e)', () => {
         })
         .expect(201);
 
-      const docs = (await http().get('/api/v1/documents?limit=100').set(bearer(mx)).expect(200)).body
-        .items as Array<{ id: string; engagementId: string; link: WorkItemRef }>;
+      const docs = (await http().get('/api/v1/documents?limit=100').set(bearer(mx)).expect(200))
+        .body.items as Array<{ id: string; engagementId: string; link: WorkItemRef }>;
       const filed = docs.find((d) => d.id === created.body.id);
       expect(filed?.link).toEqual({
         engagementId: eng,
@@ -356,10 +356,13 @@ describe('Work links, review queue and team tasks (e2e)', () => {
       });
       // A plain engagement document still opens its engagement.
       const letter = docs.find((d) => d.id === plain.body.id);
-      expect(letter?.link).toEqual({ engagementId: eng, engagementKind: letter!.link.engagementKind });
+      expect(letter?.link).toEqual({
+        engagementId: eng,
+        engagementKind: letter!.link.engagementKind,
+      });
       // Off the engagement, RLS hides both.
-      const other = (await http().get('/api/v1/documents?limit=100').set(bearer(pb)).expect(200)).body
-        .items as Array<{ id: string }>;
+      const other = (await http().get('/api/v1/documents?limit=100').set(bearer(pb)).expect(200))
+        .body.items as Array<{ id: string }>;
       expect(other.map((d) => d.id)).not.toContain(created.body.id);
     });
   });
