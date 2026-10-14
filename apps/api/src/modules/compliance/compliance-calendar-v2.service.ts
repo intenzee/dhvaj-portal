@@ -215,20 +215,24 @@ const toEventRow = (r: EventSqlRow): EventRow => ({
 
 /**
  * A director appointed or ceased (DIR-12), applied to a directors list. Pure;
- * `undo` reverses it (voiding the event).
+ * `undo` reverses it (voiding the event). `known` is the director as last
+ * recorded (restored when a cessation is undone); a new director's KYC cycle
+ * starts in `kycFy`, the year of appointment.
  */
 export function applyDirectorChange(
   directors: readonly CompanyDirector[],
   details: Record<string, unknown>,
-  undo = false,
+  undo: boolean,
+  fallback: { kycFy: string; known?: CompanyDirector },
 ): CompanyDirector[] {
   const din = String(details.din ?? '');
   const appointed = (details.change === 'appointed') !== undo;
   const others = directors.filter((d) => d.din !== din);
   if (!appointed) return others;
-  const existing = directors.find((d) => d.din === din);
-  const name = typeof details.name === 'string' ? details.name : (existing?.name ?? '');
-  return [...others, { ...(existing ?? {}), din, name } as CompanyDirector];
+  const prior = directors.find((d) => d.din === din) ?? fallback.known;
+  const name =
+    typeof details.name === 'string' && details.name ? details.name : (prior?.name ?? din);
+  return [...others, { din, name, kycCycleStartFy: prior?.kycCycleStartFy ?? fallback.kycFy }];
 }
 
 function summaryOf(s: GenerateSummary): GenerateCalendarResult {
@@ -842,16 +846,22 @@ export class ComplianceCalendarV2Service {
     const details = event.details ?? {};
     if (!details.din) return;
     const from = event.event_date;
-    const rows = await client.query<ProfileSqlRow>(
+    const all = await client.query<ProfileSqlRow>(
       `SELECT ${PROFILE_COLUMNS} FROM hsdg.registration_compliance_profiles
         WHERE entity_id = $1 AND scope = 'cin' AND registration_id = $2
-          AND (effective_to IS NULL OR effective_to >= $3::date)
         ORDER BY effective_from
         FOR UPDATE`,
-      [entityId, registrationId, from],
+      [entityId, registrationId],
     );
+    const rows = { rows: all.rows.filter((p) => !p.effective_to || p.effective_to >= from) };
     const directorsOf = (p: ProfileSqlRow | undefined) =>
       ((p?.attributes ?? {}) as CinProfileAttributes).directors ?? [];
+    // The director as last recorded anywhere (undoing a cessation restores them).
+    const known = all.rows
+      .flatMap((p) => directorsOf(p))
+      .reverse()
+      .find((d) => d.din === details.din);
+    const fallback = { kycFy: eventFinancialYear('director_change', from), known };
     const update = (p: ProfileSqlRow) =>
       client.query(
         `UPDATE hsdg.registration_compliance_profiles
@@ -860,7 +870,7 @@ export class ComplianceCalendarV2Service {
           p.id,
           JSON.stringify({
             ...p.attributes,
-            directors: applyDirectorChange(directorsOf(p), details, undo),
+            directors: applyDirectorChange(directorsOf(p), details, undo, fallback),
           }),
         ],
       );
@@ -884,20 +894,16 @@ export class ComplianceCalendarV2Service {
           inForce.effective_to,
           JSON.stringify({
             ...inForce.attributes,
-            directors: applyDirectorChange(directorsOf(inForce), details, undo),
+            directors: applyDirectorChange(directorsOf(inForce), details, undo, fallback),
           }),
           ctx.employeeId ?? null,
         ],
       );
     } else if (inForce) {
       await update(inForce);
-    } else if (rows.rows.length === 0 && !undo) {
-      const later = await client.query<{ effective_from: string }>(
-        `SELECT effective_from::text FROM hsdg.registration_compliance_profiles
-          WHERE entity_id = $1 AND scope = 'cin' AND registration_id = $2
-          ORDER BY effective_from LIMIT 1`,
-        [entityId, registrationId],
-      );
+    } else if (!undo) {
+      // No profile in force at the event date: start one there, up to the next.
+      const next = rows.rows[0];
       await client.query(
         `INSERT INTO hsdg.registration_compliance_profiles
            (entity_id, registration_id, scope, effective_from, effective_to, attributes,
@@ -907,8 +913,8 @@ export class ComplianceCalendarV2Service {
           entityId,
           registrationId,
           from,
-          later.rows[0] ? dayBefore(later.rows[0].effective_from) : null,
-          JSON.stringify({ directors: applyDirectorChange([], details) }),
+          next ? dayBefore(next.effective_from) : null,
+          JSON.stringify({ directors: applyDirectorChange([], details, false, fallback) }),
           ctx.employeeId ?? null,
         ],
       );

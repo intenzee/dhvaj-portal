@@ -325,8 +325,13 @@ function DetailFields({
               required
             />
           </Field>
-          <Field label="Director name">
-            <Input value={f.name} maxLength={120} onChange={(e) => set({ name: e.target.value })} />
+          <Field label="Director name" required={f.change === 'appointed'}>
+            <Input
+              value={f.name}
+              maxLength={120}
+              onChange={(e) => set({ name: e.target.value })}
+              required={f.change === 'appointed'}
+            />
           </Field>
           <Field label="Change" required>
             <Select value={f.change} onChange={(e) => set({ change: e.target.value as 'appointed' | 'ceased' })}>

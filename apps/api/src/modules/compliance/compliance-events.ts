@@ -48,6 +48,10 @@ export function validateEventDetails(
       if (d.change !== 'appointed' && d.change !== 'ceased') {
         return { error: 'Say whether the director was appointed or ceased.' };
       }
+      // The CIN profile's directors list needs a name for a new director.
+      if (d.change === 'appointed' && !text('name', 120)) {
+        return { error: 'Enter the director’s name.' };
+      }
       return { details: clean({ din, name: text('name', 120), change: d.change }) };
     }
     case 'charge_creation': {
@@ -87,7 +91,7 @@ export function eventContext(
  * The ROC's AGM extension (spec P2-2, up to three months, never the first
  * AGM): the AGM's own due date moves by the months granted, and so does the
  * provisional AGM date the AGM-linked forms (AOC-4, MGT-7, ADT-1) run from
- * until the AGM is recorded — to the end of the extended month.
+ * until the AGM is recorded. The day is kept: 30 Sep + 3 months = 30 Dec.
  */
 export function withAgmExtension(
   version: PeriodRuleVersion,
@@ -95,24 +99,35 @@ export function withAgmExtension(
   months: number,
 ): PeriodRuleVersion {
   if (!months) return version;
+  const shift = (month: number, day: number, yearOffset: number) => {
+    const raw = month + months;
+    return {
+      month: ((raw - 1) % 12) + 1,
+      day: Math.min(day, daysInMonth(((raw - 1) % 12) + 1)),
+      year_offset: yearOffset + Math.floor((raw - 1) / 12),
+    };
+  };
   if (ruleCode === 'ROC_AGM') {
-    return { ...version, offsetMonths: version.offsetMonths + months };
+    // Due offsetMonths after a 31 March year end (30 Sep), pinned for that
+    // year end; any other year end falls back to adding the months.
+    const m0 = ((3 + version.offsetMonths - 1) % 12) + 1;
+    const y0 = Math.floor((3 + version.offsetMonths - 1) / 12);
+    return {
+      ...version,
+      offsetMonths: version.offsetMonths + months,
+      periodOverrides: { ...(version.periodOverrides ?? {}), '03': shift(m0, daysInMonth(m0), y0) },
+    };
   }
   if (version.eventType === 'agm' && version.provisionalEventRule) {
     const p = version.provisionalEventRule;
-    const raw = p.month + months;
-    return {
-      ...version,
-      provisionalEventRule: {
-        month: ((raw - 1) % 12) + 1,
-        // the last day of the month (clamped by dueForPeriod)
-        day: 31,
-        year_offset: (p.year_offset ?? 0) + Math.floor((raw - 1) / 12),
-      },
-    };
+    return { ...version, provisionalEventRule: shift(p.month, p.day, p.year_offset ?? 0) };
   }
   return version;
 }
+
+/** Days in a month of a common year (February 28: no AGM is due on the 29th). */
+const daysInMonth = (month: number): number =>
+  [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
 
 const DAY = 86_400_000;
 const addDays = (iso: string, n: number): string =>
