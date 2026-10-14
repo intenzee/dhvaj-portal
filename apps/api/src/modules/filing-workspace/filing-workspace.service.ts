@@ -14,6 +14,7 @@ import {
   DSC_REQUEST_CODE,
   dscWarningText,
   rocLateCharges,
+  type CarriedAnswer,
   type CinProfileAttributes,
   type ChecklistAutoTick,
   type ChecklistItem,
@@ -40,7 +41,11 @@ import {
   type ClientUploadLinkCreated,
 } from '../documents/client-upload/client-upload.service';
 import { istToday } from '../engagements/time/auto-time';
-import { seedChecklistForInstance, syncAutoTicks } from '../compliance/compliance-checklist';
+import {
+  carryOverAnswers,
+  seedChecklistForInstance,
+  syncAutoTicks,
+} from '../compliance/compliance-checklist';
 import { ComplianceCalendarV2Service } from '../compliance/compliance-calendar-v2.service';
 import { eventFinancialYear } from '../compliance/compliance-generator.service';
 import { chargeFilingWindow } from '../compliance/compliance-events';
@@ -146,6 +151,8 @@ interface ItemRow {
   document_id: string | null;
   client_dependency_id: string | null;
   version: number;
+  carries_over?: boolean;
+  carried?: CarriedAnswer | null;
 }
 
 interface FilingRow {
@@ -251,6 +258,8 @@ export class FilingWorkspaceService {
       if (inst.is_member && !CLOSED_ENGAGEMENT.includes(inst.engagement_status)) {
         await seedChecklistForInstance(client, id);
         await syncAutoTicks(client, id);
+        // WF-303: a checklist seeded ahead of last period's answers picks them up now.
+        await carryOverAnswers(client, id);
       }
       return this.build(client, ctx, id);
     });
@@ -321,6 +330,7 @@ export class FilingWorkspaceService {
                 done_by_employee_id = CASE WHEN $1 = 'done' THEN $2::uuid END,
                 na_reason = CASE WHEN $1 = 'not_applicable' THEN $3 END,
                 done_note = CASE WHEN $1 = 'done' THEN $6 END,
+                carried = NULL,
                 version = version + 1
           WHERE id = $4 AND version = $5`,
         [
@@ -934,7 +944,7 @@ export class FilingWorkspaceService {
     const items = await client.query<ItemRow>(
       `SELECT it.id, it.item_code, it.label, it.slot_code, it.required, it.sequence, it.auto_tick,
                 it.ticked_by, it.note, it.done_note, it.status, e.full_name AS done_by_name, it.done_at, it.na_reason,
-                it.document_id, it.client_dependency_id, it.version
+                it.document_id, it.client_dependency_id, it.version, it.carries_over, it.carried
            FROM hsdg.instance_checklist_items it
            LEFT JOIN hsdg.employees e ON e.id = it.done_by_employee_id
           WHERE it.compliance_instance_id = $1
@@ -1032,6 +1042,12 @@ export class FilingWorkspaceService {
       documentId: r.document_id,
       clientDependencyId: r.client_dependency_id,
       version: r.version,
+      carriesOver: r.carries_over ?? false,
+      // Last period's answer stands only until the line is decided.
+      carried:
+        r.status === 'open' && r.carried
+          ? { ...r.carried, periodLabel: periodLabel(r.carried.periodKey) }
+          : null,
       ...(r.auto_tick === 'meetings' ? { boardMeetings: meetings } : {}),
     }));
 

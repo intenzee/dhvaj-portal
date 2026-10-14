@@ -60,6 +60,21 @@ export interface ChecklistItem {
   version: number;
   /** A 'meetings' line: the FY's board meetings — held-on dates, of how many. */
   boardMeetings?: { financialYear: string | null; heldOn: string[]; total: number } | null;
+  /** WF-303: the template marks this line as one that starts from last period's answer. */
+  carriesOver?: boolean;
+  /** WF-303: last period's answer, pre-filled for the preparer to confirm (open lines only). */
+  carried?: CarriedAnswer | null;
+}
+
+/** WF-303: last period's answer on a line that carries over, awaiting confirmation. */
+export interface CarriedAnswer {
+  status: 'done' | 'not_applicable';
+  note: string | null;
+  naReason: string | null;
+  instanceId: string;
+  periodKey: string | null;
+  /** "Aug 2026", "Q1 2026-27" … */
+  periodLabel: string;
 }
 
 export interface SlotDocument {
@@ -293,4 +308,46 @@ export interface StreamTree {
   financialYear: string | null;
   annual: TreeItem[];
   periods: TreePeriod[];
+}
+
+/**
+ * Staff Workflow WF-303 — last period beside this one: the same return for the
+ * client's previous period (same rule, registration and section), read-only.
+ */
+export interface LastPeriodView {
+  /** Null for the first period, or when the previous one is not visible to you. */
+  previous: {
+    instanceId: string;
+    engagementId: string;
+    formLabel: string | null;
+    ruleName: string;
+    financialYear: string | null;
+    periodKey: string | null;
+    /** "Sep 2026", "Q2", "FY 2025-26" … */
+    periodLabel: string;
+    statutoryDueDate: string;
+    workflowStatus: FilingStatus;
+    /** The filed reference (the latest lodge not undone). */
+    filing: {
+      referenceKind: FilingReferenceKind;
+      referenceNo: string;
+      filedOn: string;
+      filedByName: string | null;
+      isNil: boolean;
+      ackDocumentId: string;
+    } | null;
+    checklist: {
+      itemCode: string;
+      label: string;
+      status: ChecklistItemStatus;
+      doneNote: string | null;
+      naReason: string | null;
+      doneByName: string | null;
+      doneAt: string | null;
+    }[];
+    /** Uploads by slot, in checklist order; slots with none are left out. */
+    slots: { slotCode: string; label: string; documents: SlotDocument[] }[];
+    /** The review points given each time the filing's task was returned. */
+    reviewPoints: { at: string; byName: string | null; note: string }[];
+  } | null;
 }

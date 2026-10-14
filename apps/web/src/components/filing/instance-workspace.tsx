@@ -23,6 +23,7 @@ import { Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { TaskActions } from '@/components/tasks/task-actions';
 import { FilingStatusBadge, boardMeetingsText, daysLeftText, dueTone, filingEnd } from './filing-status';
+import { LastPeriod } from './last-period';
 
 /** The part of the created client-upload link the page needs. */
 interface UploadLink {
@@ -106,6 +107,7 @@ export function InstanceWorkspace({
   return (
     <div className="space-y-4 text-sm">
       <WorkspaceHeader ws={ws} ctx={ctx} team={team} />
+      <LastPeriod instanceId={instanceId} />
 
       {ws.warnings.length > 0 && (
         <ul className="space-y-1" aria-label="Cross-checks">
@@ -494,6 +496,30 @@ function Checklist({
             </div>
             {i.boardMeetings && (
               <p className="mt-0.5 pl-6 text-xs text-ink-muted">{boardMeetingsText(i.boardMeetings)}</p>
+            )}
+            {i.carried && i.status === 'open' && (
+              // WF-303: last period's answer, pre-filled — the preparer confirms it.
+              <p className="mt-0.5 flex flex-wrap items-center gap-2 pl-6 text-xs text-primary-700">
+                <span>
+                  Last period ({i.carried.periodLabel}):{' '}
+                  {i.carried.status === 'done'
+                    ? `Done${i.carried.note ? ` · ${i.carried.note}` : ''}`
+                    : `N/A — ${i.carried.naReason ?? ''}`}
+                </span>
+                {editable && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Confirm ${i.label} as last period`}
+                    onClick={() =>
+                      void patch(i, i.carried!.status, i.carried!.naReason ?? undefined, i.carried!.note ?? undefined)
+                    }
+                  >
+                    Confirm
+                  </Button>
+                )}
+              </p>
             )}
             {udinFor === i.id && i.status === 'open' && (
               <ReasonAction
