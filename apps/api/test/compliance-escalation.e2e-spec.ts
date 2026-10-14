@@ -166,13 +166,15 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
-      const gen = await generate(pa, eng, code, dateFromToday(-4)).expect(201);
+      const due = dateFromToday(-4);
+      const gen = await generate(pa, eng, code, due).expect(201);
       const paEmp = await findEmployeeId('EMP003'); // Partner A
       const pbEmp = await findEmployeeId('EMP004'); // Partner B
 
+      // Pinned to the item's own due date, so other suites' rows cannot page it out.
       const hasIt = async (query: string): Promise<boolean> => {
         const res = await request(app.getHttpServer())
-          .get(`/api/v1/compliance?${query}&limit=100`)
+          .get(`/api/v1/compliance?${query}&dueFrom=${due}&dueTo=${due}&limit=100`)
           .set(bearer(mp))
           .expect(200);
         return (res.body.items as Array<{ id: string }>).some((i) => i.id === gen.body.id);
@@ -410,10 +412,11 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createSourcedRule('STATUTORY_RULE', 'LAW_RULE');
-      const gen = await generate(pa, eng, code, dateFromToday(-57)).expect(201); // critical
+      const due = dateFromToday(-57);
+      const gen = await generate(pa, eng, code, due).expect(201); // critical
 
       const res = await request(app.getHttpServer())
-        .get('/api/v1/compliance?status=open&limit=100')
+        .get(`/api/v1/compliance?status=open&dueFrom=${due}&dueTo=${due}&limit=100`)
         .set(bearer(mp))
         .expect(200);
       const row = (
