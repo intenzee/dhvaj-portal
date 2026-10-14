@@ -1,8 +1,10 @@
 /**
- * Generates db/migrations/1770100000000_calendar_v2_rules.sql and
- * 1770900000000_firm_policy_rules.sql from the typed rule catalogues in
- * apps/api/src/modules/compliance/calendar-v2-rules.ts, so the seeded encodings
- * are exactly the ones the unit tests check.
+ * Generates db/migrations/1770100000000_calendar_v2_rules.sql,
+ * 1770900000000_firm_policy_rules.sql and 1771100000000_roc_rules_checklists.sql
+ * from the typed rule catalogues in
+ * apps/api/src/modules/compliance/calendar-v2-rules.ts (and the ROC checklists in
+ * roc-checklists.ts), so the seeded encodings are exactly the ones the unit
+ * tests check.
  *
  *   npx ts-node -P apps/api/tsconfig.json scripts/gen-calendar-v2-rules.ts
  *
@@ -17,6 +19,7 @@ import {
   FIRM_POLICY_RULES,
   type SeedRule,
 } from '../apps/api/src/modules/compliance/calendar-v2-rules';
+import { ROC_CHECKLISTS } from '../apps/api/src/modules/compliance/roc-checklists';
 
 const MIGRATIONS = join(__dirname, '..', 'db', 'migrations');
 const OUT = join(MIGRATIONS, '1770100000000_calendar_v2_rules.sql');
@@ -465,4 +468,265 @@ ${rls('FORCE')}
 writeFileSync(FIRM_OUT, firmSql);
 console.log(
   `wrote ${FIRM_OUT} (${FIRM_POLICY_RULES.length} rules, ${FIRM_TEMPLATES.length} templates)`,
+);
+
+// ── ROC / MCA rules and checklists (docs/roc-mca-filing-spec.md P1-4…P1-7) ──
+
+const ROC_OUT = join(MIGRATIONS, '1771100000000_roc_rules_checklists.sql');
+
+/** The ROC encodings 1771100000000 replaces, restored by its down migration. */
+const ROC_PRIOR = [
+  {
+    code: 'ROC_AOC4',
+    condition: null,
+    variants: [
+      {
+        when: { field: 'company_subtype', op: '==', value: 'opc' },
+        set: { calculation_basis: 'fy_end', offset_months: 0, offset_days: 180, event_type: null },
+      },
+    ],
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: 'Additional fee ₹100/day.',
+    notes:
+      'AOC-4 — 30 days from the AGM (OPC: 180 days from the FY end). Shown on an assumed 30 September AGM until the AGM is recorded.',
+  },
+  {
+    code: 'ROC_MGT7',
+    condition: null,
+    variants: [
+      {
+        when: { field: 'company_subtype', op: '==', value: 'opc' },
+        set: {
+          calculation_basis: 'fy_end',
+          offset_months: 6,
+          offset_days: 60,
+          event_type: null,
+          form_label: 'MGT-7A',
+        },
+      },
+    ],
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: 'Additional fee ₹100/day.',
+    notes:
+      'MGT-7 / MGT-7A — 60 days from the AGM. Shown on an assumed 30 September AGM until recorded.',
+  },
+  {
+    code: 'ROC_ADT1',
+    condition: { field: 'auditor_appointed_at_agm', op: '==', value: true },
+    variants: null,
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: 'Additional fee ₹100/day.',
+    notes: 'ADT-1 — 15 days from the AGM at which the auditor is appointed.',
+  },
+  {
+    code: 'ROC_DPT3',
+    condition: null,
+    variants: null,
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: 'Additional fee ₹100/day.',
+    notes: 'DPT-3 — 30 June.',
+  },
+  {
+    code: 'ROC_PAS6',
+    condition: { field: 'company_subtype', op: '==', value: 'unlisted_public' },
+    variants: null,
+    schedule: [
+      { period: 'H1', month: 11, day: 29, year_offset: 0 },
+      { period: 'H2', month: 5, day: 30, year_offset: 1 },
+    ],
+    verification: 'verified',
+    late_fee_note: null,
+    notes: 'PAS-6 — 29 Nov (Apr–Sep); 30 May (Oct–Mar). Unlisted public companies.',
+  },
+  {
+    code: 'ROC_DIR3_KYC',
+    condition: null,
+    variants: null,
+    schedule: [{ period: 'FY', month: 6, day: 30, year_offset: 1 }],
+    verification: 'verified',
+    late_fee_note: 'Fee ₹5,000 to reactivate a deactivated DIN.',
+    notes: 'DIR-3 KYC — 30 June, once every three financial years, per DIN.',
+  },
+  {
+    code: 'LLP_FORM11',
+    condition: null,
+    variants: null,
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: 'Additional fee ₹100/day.',
+    notes: 'LLP Form 11 — within 60 days of the FY end (30 May).',
+  },
+  {
+    code: 'ROC_BOARD_MEETING',
+    condition: null,
+    variants: [
+      {
+        when: {
+          any: [
+            { field: 'company_subtype', op: '==', value: 'small' },
+            { field: 'company_subtype', op: '==', value: 'opc' },
+          ],
+        },
+        set: { period_filter: ['Q2', 'Q4'] },
+      },
+    ],
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: 'Penalty u/s 173.',
+    notes:
+      'At least one board meeting each quarter, gap ≤ 120 days (one per half-year for small companies / OPC).',
+  },
+  {
+    code: 'ROC_FIRST_ADT1',
+    condition: null,
+    variants: null,
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: null,
+    notes: 'ADT-1 — 15 days from the board’s appointment of the first auditor.',
+  },
+  {
+    code: 'ROC_PAS3',
+    condition: null,
+    variants: null,
+    schedule: null,
+    verification: 'verified',
+    late_fee_note: null,
+    notes: 'PAS-3 — within 30 days of allotment (15 days for a private placement).',
+  },
+];
+
+/** The current encodings of the same rules (version 1, the only one each has). */
+const rocCurrent = ROC_PRIOR.map((p) => {
+  const r = CALENDAR_V2_RULES.find((x) => x.code === p.code)!;
+  return {
+    code: r.code,
+    condition: r.condition ?? null,
+    variants: r.variants ?? null,
+    schedule: r.schedule ?? null,
+    verification: r.verification ?? 'verified',
+    late_fee_note: r.lateFeeNote ?? null,
+    notes: r.notes,
+  };
+});
+
+const updateRules = (rows: readonly unknown[]) => `UPDATE hsdg.compliance_rule_versions v
+   SET condition = x.condition, variants = x.variants, schedule = x.schedule,
+       verification = x.verification, late_fee_note = x.late_fee_note, notes = x.notes
+  FROM jsonb_to_recordset(${json(rows)})
+       AS x(code text, condition jsonb, variants jsonb, schedule jsonb, verification text,
+            late_fee_note text, notes text),
+       hsdg.compliance_rules r
+ WHERE r.id = v.compliance_rule_id AND r.code = x.code AND v.version = 1;
+UPDATE hsdg.compliance_rules r SET description = x.notes
+  FROM jsonb_to_recordset(${json(rows)}) AS x(code text, notes text)
+ WHERE r.code = x.code;`;
+
+const FREQUENCIES = (extra: boolean) =>
+  ['monthly', 'quarterly', 'half_yearly', ...(extra ? ['calendar_half_yearly'] : [])]
+    .concat(['annual', 'triennial', 'event', 'on_demand'])
+    .map((f) => `'${f}'`)
+    .join(',');
+const AUTO_TICKS = (extra: boolean) =>
+  ['document', 'figure', 'review', 'lodge', ...(extra ? ['event'] : [])]
+    .map((f) => `'${f}'`)
+    .join(',');
+const rocTemplateCodes = `ARRAY[${ROC_CHECKLISTS.map((t) => `'${t.code}'`).join(',')}]`;
+
+const rocSql = `-- ─────────────────────────────────────────────────────────────────────────
+-- ROC / MCA rules and checklists (docs/roc-mca-filing-spec.md, track A).
+-- GENERATED by scripts/gen-calendar-v2-rules.ts from calendar-v2-rules.ts and
+-- roc-checklists.ts — edit those and re-run the script; do not edit by hand.
+--
+--   * Rule fixes on databases that already ran 1770100000000 (regenerated with
+--     the same values for new ones): MGT-7A for a small company (G4); ADT-1
+--     from the AGM event's "auditor appointed" flag (G5); board meetings of a
+--     small company / OPC on calendar halves Jul–Dec / Jan–Jun (G6, new
+--     frequency calendar_half_yearly); DPT-3 dropped only when the profile says
+--     no deposits (G7); PAS-3 in 15 days for a private placement; AOC-4 XBRL /
+--     + CFS labels; DIR-3 KYC due 30 June inside the cycle FY (E12); the §9
+--     Verify tags (PAS-3, DIR-3 KYC, ADT-1, first ADT-1, LLP Form 11, DPT-3,
+--     PAS-6, AOC-4 / MGT-7 thresholds).
+--   * Checklists FILING_<RULE_CODE> for the eleven recurring ROC items (§5).
+--   * instance_checklist_items: auto_tick 'event' (AOC-4's "AGM held"; the
+--     ticking is syncAutoTicks'), ticked_by 'partner' and done_note — a
+--     certification line only a partner ticks, with the UDIN as its note.
+-- Existing items move the next time their calendar is generated; checklists
+-- already created keep their lines (new filings get the per-form ones).
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Up Migration
+
+ALTER TABLE hsdg.compliance_rule_versions
+  DROP CONSTRAINT compliance_rule_versions_frequency_check,
+  ADD CONSTRAINT compliance_rule_versions_frequency_check
+    CHECK (frequency IS NULL OR frequency IN (${FREQUENCIES(true)}));
+
+ALTER TABLE hsdg.instance_checklist_items
+  DROP CONSTRAINT instance_checklist_items_auto_tick_check,
+  ADD CONSTRAINT instance_checklist_items_auto_tick_check
+    CHECK (auto_tick IN (${AUTO_TICKS(true)})),
+  ADD COLUMN ticked_by text CHECK (ticked_by IN ('partner')),
+  ADD COLUMN done_note text,
+  ADD CONSTRAINT instance_checklist_items_partner_note CHECK (
+    ticked_by IS NULL OR status <> 'done' OR length(trim(coalesce(done_note, ''))) > 0);
+COMMENT ON COLUMN hsdg.instance_checklist_items.ticked_by IS
+  'partner: only a partner ticks the line by hand, and the tick carries a note (the UDIN).';
+COMMENT ON COLUMN hsdg.instance_checklist_items.done_note IS
+  'The note given when the line was ticked (the UDIN on a certification).';
+
+${rls('NO FORCE')}
+${templateRls('NO FORCE')}
+
+${updateRules(rocCurrent)}
+
+INSERT INTO hsdg.catalogue_templates (template_type, code, name, description)
+SELECT 'checklist', t.code, t.name, 'Filing workspace checklist (ROC / MCA, per form).'
+FROM jsonb_to_recordset(${json(ROC_CHECKLISTS)}) AS t(code text, name text, body jsonb)
+ON CONFLICT (code) DO NOTHING;
+INSERT INTO hsdg.catalogue_template_versions (catalogue_template_id, version, effective_from, body, notes)
+SELECT ct.id, 1, DATE '2017-04-01', t.body, 'Seeded by 1771100000000_roc_rules_checklists'
+FROM jsonb_to_recordset(${json(ROC_CHECKLISTS)}) AS t(code text, name text, body jsonb)
+JOIN hsdg.catalogue_templates ct ON ct.code = t.code
+ON CONFLICT DO NOTHING;
+
+${templateRls('FORCE')}
+${rls('FORCE')}
+
+-- Down Migration
+
+${rls('NO FORCE')}
+${templateRls('NO FORCE')}
+
+DELETE FROM hsdg.catalogue_template_versions v USING hsdg.catalogue_templates t
+ WHERE v.catalogue_template_id = t.id AND t.code = ANY(${rocTemplateCodes});
+DELETE FROM hsdg.catalogue_templates WHERE code = ANY(${rocTemplateCodes});
+
+${updateRules(ROC_PRIOR)}
+
+${templateRls('FORCE')}
+${rls('FORCE')}
+
+UPDATE hsdg.instance_checklist_items SET auto_tick = NULL WHERE auto_tick = 'event';
+ALTER TABLE hsdg.instance_checklist_items
+  DROP CONSTRAINT instance_checklist_items_partner_note,
+  DROP COLUMN done_note,
+  DROP COLUMN ticked_by,
+  DROP CONSTRAINT instance_checklist_items_auto_tick_check,
+  ADD CONSTRAINT instance_checklist_items_auto_tick_check
+    CHECK (auto_tick IN (${AUTO_TICKS(false)}));
+
+ALTER TABLE hsdg.compliance_rule_versions
+  DROP CONSTRAINT compliance_rule_versions_frequency_check,
+  ADD CONSTRAINT compliance_rule_versions_frequency_check
+    CHECK (frequency IS NULL OR frequency IN (${FREQUENCIES(false)}));
+`;
+
+writeFileSync(ROC_OUT, rocSql);
+console.log(
+  `wrote ${ROC_OUT} (${rocCurrent.length} rule fixes, ${ROC_CHECKLISTS.length} checklists)`,
 );

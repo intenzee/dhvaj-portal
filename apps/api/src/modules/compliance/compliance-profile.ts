@@ -20,6 +20,8 @@ const subtype: Check = (v) =>
 
 const DIN = /^[0-9]{8}$/;
 const FY = /^([0-9]{4})-([0-9]{2})$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DIRECTOR_FIELDS = ['din', 'name', 'kycCycleStartFy', 'dscExpiresOn'];
 
 const directors: Check = (v) => {
   if (!Array.isArray(v)) return 'must be a list';
@@ -35,7 +37,17 @@ const directors: Check = (v) => {
     if (!fy || (Number(fy[1]) + 1) % 100 !== Number(fy[2])) {
       return `entry ${i + 1}: KYC cycle start must be a financial year like 2025-26`;
     }
-    const extra = Object.keys(d).filter((k) => !['din', 'name', 'kycCycleStartFy'].includes(k));
+    const { dscExpiresOn } = d as Record<string, unknown>;
+    if (
+      dscExpiresOn !== undefined &&
+      dscExpiresOn !== null &&
+      (typeof dscExpiresOn !== 'string' ||
+        !ISO_DATE.test(dscExpiresOn) ||
+        Number.isNaN(Date.parse(dscExpiresOn)))
+    ) {
+      return `entry ${i + 1}: DSC expiry must be a date (YYYY-MM-DD)`;
+    }
+    const extra = Object.keys(d).filter((k) => !DIRECTOR_FIELDS.includes(k));
     if (extra.length) return `entry ${i + 1}: unknown field ${extra.join(', ')}`;
   }
   return null;
@@ -63,7 +75,16 @@ export const PROFILE_ATTRIBUTE_SCHEMA: Record<ProfileScope, Record<string, Check
     companySubtype: subtype,
     msmeDuesOver45Days: bool,
     depositsOrExemptedLoans: bool,
+    // Retired (G5): still accepted so older profiles save; the card no longer offers it.
     auditorAppointedAtAgm: bool,
+    xbrlRequired: bool,
+    hasSubsidiaries: bool,
+    mgt8Required: bool,
+    csrApplicable: bool,
+    secretarialAuditRequired: bool,
+    paidUpCapital: rupees,
+    authorisedCapital: rupees,
+    turnover: rupees,
     directors,
   },
   llpin: {},

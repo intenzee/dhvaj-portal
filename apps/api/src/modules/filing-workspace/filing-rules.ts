@@ -6,6 +6,7 @@
 import {
   FILING_REFERENCE_KIND,
   LODGE_UNDO_LEAD_HOURS,
+  calendarHalfLabel,
   type FilingReferenceKind,
 } from '@hsdg/contracts';
 
@@ -117,7 +118,7 @@ export function canFlags(input: {
   hasLiveFiling: boolean;
   liveRecordedAt: Date | null;
   now: Date;
-}): { lodge: boolean; undo: boolean; waive: boolean; edit: boolean } {
+}): { lodge: boolean; undo: boolean; waive: boolean; edit: boolean; certify: boolean } {
   const open = !input.hasLiveFiling && input.workflowStatus !== 'not_applicable';
   return {
     lodge: open && (input.isLead || (input.isAssignee && input.workflowStatus === 'ready_to_file')),
@@ -132,6 +133,7 @@ export function canFlags(input: {
       }).ok,
     waive: input.isLead && !input.hasLiveFiling,
     edit: input.isMember && !input.isLocked,
+    certify: input.isPartner && input.isMember && !input.isLocked,
   };
 }
 
@@ -169,6 +171,8 @@ export function periodLabel(periodKey: string | null): string {
   if (FY_KEY.test(periodKey)) return `FY ${periodKey}`;
   const sub = /^(\d{4}-\d{2}):(Q[1-4]|H[1-2])$/.exec(periodKey);
   if (sub) return `${sub[2]} ${sub[1]}`;
+  const ch = /^(\d{4}-\d{2}):(CH[12])$/.exec(periodKey);
+  if (ch) return calendarHalfLabel(ch[1]!, ch[2] as 'CH1' | 'CH2');
   const din = /^(\d{4}-\d{2}):DIN:(.+)$/.exec(periodKey);
   if (din) return `FY ${din[1]} · DIN ${din[2]}`;
   if (periodKey.startsWith('EVT:')) return 'Event';

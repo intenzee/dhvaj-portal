@@ -136,7 +136,13 @@ export function InstanceWorkspace({
         </div>
       )}
 
-      <Checklist items={ws.checklist} editable={editable} busy={write.isPending} run={run} />
+      <Checklist
+        items={ws.checklist}
+        editable={editable}
+        certify={ws.can.certify}
+        busy={write.isPending}
+        run={run}
+      />
       <Slots
         ws={ws}
         editable={editable}
@@ -278,11 +284,15 @@ function WorkspaceHeader({
           </div>
         )}
       </dl>
-      {inst.lateCharges && !filed && (
+      {inst.lateCharges && (!filed || inst.lateCharges.basis !== 'gst') && (
         <p className="text-xs text-danger-700">
-          {inst.lateCharges.daysLate} days late — indicative late fee {formatMoney(inst.lateCharges.lateFee)}
-          {inst.lateCharges.interest != null && `, interest ${formatMoney(inst.lateCharges.interest)}`}. A hint only;
-          nothing is posted.
+          {inst.lateCharges.daysLate} days late{filed ? ' when filed' : ''} — indicative{' '}
+          {inst.lateCharges.basis === 'gst' ? 'late fee' : 'additional fee'} {formatMoney(inst.lateCharges.lateFee)}
+          {inst.lateCharges.basis === 'per_day' && ' (₹100 a day)'}
+          {inst.lateCharges.basis === 'slab' &&
+            ` (${inst.lateCharges.multiple}× the normal fee of ${formatMoney(inst.lateCharges.normalFee ?? 0)})`}
+          {inst.lateCharges.interest != null && `, interest ${formatMoney(inst.lateCharges.interest)}`}
+          {inst.lateCharges.verify && ' · Verify'}. A hint only; nothing is posted.
         </p>
       )}
       {inst.lateFeeNote && <p className="text-xs text-ink-muted">{inst.lateFeeNote}</p>}
@@ -379,22 +389,26 @@ function AssignWork({
 function Checklist({
   items,
   editable,
+  certify,
   busy,
   run,
 }: {
   items: ChecklistItem[];
   editable: boolean;
+  /** A partner on the engagement: may tick the certification lines (with the UDIN). */
+  certify: boolean;
   busy: boolean;
   run: Run;
 }): JSX.Element | null {
   const [naFor, setNaFor] = useState<string | null>(null);
+  const [udinFor, setUdinFor] = useState<string | null>(null);
   if (items.length === 0) return null;
   const required = items.filter((i) => i.required);
   const done = required.filter((i) => i.status !== 'open').length;
-  const patch = (i: ChecklistItem, status: ChecklistItem['status'], naReason?: string) =>
+  const patch = (i: ChecklistItem, status: ChecklistItem['status'], naReason?: string, note?: string) =>
     run(
       `/items/${i.id}`,
-      { status, version: i.version, ...(naReason ? { naReason } : {}) },
+      { status, version: i.version, ...(naReason ? { naReason } : {}), ...(note ? { note } : {}) },
       status === 'open' ? `${i.label}: reopened.` : `${i.label}: ${status === 'done' ? 'done' : 'not applicable'}.`,
       'PATCH',
     );
@@ -411,14 +425,30 @@ function Checklist({
                 type="checkbox"
                 aria-label={i.label}
                 checked={i.status === 'done'}
-                disabled={!editable || busy || i.status === 'not_applicable'}
-                onChange={(e) => void patch(i, e.target.checked ? 'done' : 'open')}
+                disabled={
+                  !editable ||
+                  busy ||
+                  i.status === 'not_applicable' ||
+                  (i.autoTick === 'event' && i.status === 'open') ||
+                  (i.tickedBy === 'partner' && !certify)
+                }
+                onChange={(e) => {
+                  // A partner's line takes the UDIN inline before it ticks.
+                  if (e.target.checked && i.tickedBy === 'partner') setUdinFor(udinFor === i.id ? null : i.id);
+                  else void patch(i, e.target.checked ? 'done' : 'open');
+                }}
               />
               <span className={i.status === 'not_applicable' ? 'text-ink-muted line-through' : ''}>{i.label}</span>
               {i.required && <span className="text-[10px] text-danger-600">required</span>}
-              {i.autoTick && <span className="text-[10px] text-ink-muted">auto: {i.autoTick}</span>}
+              {i.tickedBy === 'partner' && <span className="text-[10px] text-primary-700">partner ticks</span>}
+              {i.autoTick === 'event' ? (
+                <span className="text-[10px] text-ink-muted">ticks when the meeting is recorded</span>
+              ) : (
+                i.autoTick && <span className="text-[10px] text-ink-muted">auto: {i.autoTick}</span>
+              )}
               <span className="ml-auto text-xs text-ink-muted">
                 {i.status === 'done' && i.doneByName && `${i.doneByName}, ${formatDate(i.doneAt)}`}
+                {i.status === 'done' && i.doneNote && ` · ${i.tickedBy === 'partner' ? 'UDIN ' : ''}${i.doneNote}`}
                 {i.status === 'not_applicable' && `N/A — ${i.naReason ?? ''}`}
               </span>
               {editable && i.status === 'open' && (
@@ -432,6 +462,20 @@ function Checklist({
                 </Button>
               )}
             </div>
+            {udinFor === i.id && i.status === 'open' && (
+              <ReasonAction
+                label="Tick with UDIN"
+                placeholder="UDIN generated for this certificate"
+                busy={busy}
+                startOpen
+                onSubmit={(udin) =>
+                  patch(i, 'done', undefined, udin).then((ok) => {
+                    if (ok) setUdinFor(null);
+                    return ok;
+                  })
+                }
+              />
+            )}
             {naFor === i.id && (
               <ReasonAction
                 label="Not applicable"

@@ -1,12 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type {
-  FilingStatus,
-  PeriodSection,
-  Stream,
-  StreamTree,
-  TreeItem,
-  TreePeriod,
-  TreeRegistration,
+import {
+  dscWarningText,
+  type CinProfileAttributes,
+  type FilingStatus,
+  type PeriodSection,
+  type Stream,
+  type StreamTree,
+  type TreeItem,
+  type TreePeriod,
+  type TreeRegistration,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -178,6 +180,19 @@ export class StreamTreeService {
       }
 
       const today = istToday(new Date());
+      // P2-5: warn on open ROC items due after a director's DSC lapses.
+      const directors =
+        stream === 'roc' && registrationId
+          ? ((
+              await client.query<{ directors: CinProfileAttributes['directors'] | null }>(
+                `SELECT p.attributes->'directors' AS directors
+                   FROM hsdg.registration_compliance_profiles p
+                  WHERE p.registration_id = $1 AND p.scope = 'cin' AND p.effective_from <= CURRENT_DATE
+                  ORDER BY p.effective_from DESC LIMIT 1`,
+                [registrationId],
+              )
+            ).rows[0]?.directors ?? [])
+          : [];
       const toItem = (r: TreeRow): TreeItem => ({
         instanceId: r.id,
         ruleCode: r.rule_code,
@@ -192,6 +207,13 @@ export class StreamTreeService {
         verify: r.verification === 'verify',
         requiredDone: r.required_done,
         requiredTotal: r.required_total,
+        ...(stream === 'roc'
+          ? {
+              dscWarning: CLOSED.has(r.workflow_status)
+                ? null
+                : dscWarningText(directors, r.due, today),
+            }
+          : {}),
       });
 
       const annual: TreeItem[] = [];
