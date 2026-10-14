@@ -18,7 +18,7 @@ import { openComplianceQuery } from '@/lib/queries';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { Card, Spinner } from '@/components/ui';
 import { SectionSelect, useStoredSections } from '@/components/section-filter';
-import { daysLeftLabel, rowHref } from '@/components/compliance/firm-calendar';
+import { daysLeftLabel, useCalendarHref } from '@/components/compliance/firm-calendar';
 import { cn } from '@/lib/cn';
 
 const MONTHS = [
@@ -182,6 +182,7 @@ function DayList({
   showStream: boolean;
   onClose: () => void;
 }): JSX.Element {
+  const hrefOf = useCalendarHref();
   return (
     <div role="region" aria-label={`Filings due ${label}`} className="mt-3 rounded-lg border border-line">
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
@@ -205,7 +206,7 @@ function DayList({
             const mark = rowMark(r);
             return (
               <li key={r.id} className="border-b border-line last:border-0">
-                <Link href={rowHref(r)} className="block px-3 py-2 hover:bg-surface-raised">
+                <Link href={hrefOf(r)} className="block px-3 py-2 hover:bg-surface-raised">
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-[13px] font-medium text-ink">
                       {r.formLabel ?? r.ruleName}

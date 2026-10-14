@@ -198,9 +198,9 @@ export function StreamTab({
       </div>
 
       {tree.annual.length > 0 && (
-        <Card>
+        <Card data-part="annual">
           <CardHeader>
-            <CardTitle>Annual · FY {fy}</CardTitle>
+            <CardTitle data-part-heading>Annual · FY {fy}</CardTitle>
           </CardHeader>
           <CardBody className="space-y-2">
             <div className="flex flex-wrap gap-1.5">
@@ -276,12 +276,12 @@ export function StreamTab({
                       )}
                     </button>
                     {open && (
-                      <div className="border-l-4 border-l-primary-600 bg-surface-sunken/40 px-4 py-3">
+                      <div data-open-period={p.periodKey} className="border-l-4 border-l-primary-600 bg-surface-sunken/40 px-4 py-3">
                         {sectioned ? (
                           <div className="grid gap-4 lg:grid-cols-3">
                             {GST_SECTIONS.map((s) => (
-                              <section key={s.key} aria-label={s.label} className="min-w-0 space-y-3">
-                                <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                              <section key={s.key} aria-label={s.label} data-part={s.key} className="min-w-0 space-y-3">
+                                <h4 data-part-heading className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
                                   {s.label}
                                 </h4>
                                 {(p.sections[s.key] ?? []).length === 0 ? (

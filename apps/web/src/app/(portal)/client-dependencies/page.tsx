@@ -1,10 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
+import { useWorkHref } from '@/lib/work-href';
 import { deadlineLabel } from '@/lib/format';
 import type { MyClientDependency } from '@/lib/types';
 import { PageHeader, Spinner } from '@/components/ui';
@@ -38,7 +38,7 @@ const columns: ColumnDef<MyClientDependency, unknown>[] = [
 ];
 
 export default function ClientDependenciesPage(): JSX.Element {
-  const router = useRouter();
+  const workHref = useWorkHref();
   const q = useQuery({
     queryKey: ['client-dependencies', 'mine'],
     queryFn: () => apiFetch<Paginated<MyClientDependency>>('/work/client-dependencies?limit=100'),
@@ -56,7 +56,7 @@ export default function ClientDependenciesPage(): JSX.Element {
           columns={columns}
           data={q.data.items}
           empty="You're not waiting on any client information."
-          onRowClick={(row) => router.push(`/engagements/${row.engagementId}`)}
+          rowHref={workHref}
         />
       )}
     </div>

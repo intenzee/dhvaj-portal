@@ -6,10 +6,12 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { FolderOpen, CheckCircle2 } from 'lucide-react';
-import { NOTIFICATION_TYPE, TASK_STATUS, type Paginated } from '@hsdg/contracts';
+import { FEATURE_FLAG, NOTIFICATION_TYPE, TASK_STATUS, type Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate, deadlineLabel } from '@/lib/format';
 import { useToast } from '@/lib/toast';
+import { useFeatureFlags } from '@/lib/feature-flags';
+import { useWorkHref } from '@/lib/work-href';
 import type { MyTask, MyClientDependency, NotificationRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, EmptyState, Button } from '@/components/ui';
 import { StatusBadge, PriorityBadge } from '@/components/status-badge';
@@ -19,6 +21,7 @@ import { ClientDependencyActions } from '@/components/actions/client-dependency-
 import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-modal';
 import { CompletionBar } from '@/components/completion';
 import { cn } from '@/lib/cn';
+import { sortMyTasks, todayIst, useMyTaskColumns } from '@/components/work/my-task-columns';
 
 type Tab = 'tasks' | 'client-dependencies' | 'to-review';
 
@@ -115,6 +118,18 @@ function MyWorkInner(): JSX.Element {
     [],
   );
 
+  // ff_work_links (WF-104): the title opens the work, filing context and both
+  // dates show, overdue first; the folder icon keeps the documents popup.
+  const { isOn } = useFeatureFlags();
+  const workLinks = isOn(FEATURE_FLAG.workLinks);
+  const workHref = useWorkHref();
+  const today = useMemo(() => todayIst(), []);
+  const linkedTaskColumns = useMyTaskColumns({
+    hrefOf: workHref,
+    onDocuments: setDocsForTask,
+    today,
+  });
+
   const tasks = useQuery({
     queryKey: ['work', 'tasks'],
     queryFn: () => apiFetch<Paginated<MyTask>>('/work/tasks?limit=100'),
@@ -189,8 +204,8 @@ function MyWorkInner(): JSX.Element {
             )}
             {tasks.data && (
               <DataTable
-                columns={taskColumns}
-                data={tasks.data.items}
+                columns={workLinks ? linkedTaskColumns : taskColumns}
+                data={workLinks ? sortMyTasks(tasks.data.items, today) : tasks.data.items}
                 empty="No open tasks assigned to you."
               />
             )}
@@ -205,6 +220,7 @@ function MyWorkInner(): JSX.Element {
               columns={depColumns}
               data={deps.data.items}
               empty="No open client dependencies you're waiting on."
+              rowHref={workLinks ? workHref : undefined}
             />
           )}
         </Card>

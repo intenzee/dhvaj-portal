@@ -115,3 +115,16 @@ body {
 .doc-surface th, .doc-surface td { border: 1px solid rgb(148 163 184 / 0.5); padding: 0.35rem 0.5rem; text-align: left; }
 .doc-surface strong { font-weight: 700; }
 .doc-surface em { font-style: italic; }
+
+/* A row a work link pointed at (?task= / ?request=), flashed for a few seconds. */
+[data-work-highlight] {
+  outline: 2px solid rgb(37 99 235 / 0.75);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+  background-color: rgb(37 99 235 / 0.08);
+  transition: background-color 0.4s ease, outline-color 0.4s ease;
+}
+[data-part]:focus,
+[data-part-heading]:focus {
+  outline: none;
+}

@@ -18,6 +18,7 @@ import type {
   Stream,
   TaskPriority,
   TaskStatus,
+  WorkItemRef,
 } from '@hsdg/contracts';
 
 import type { PeriodSection, WorkFilingContext } from '@hsdg/contracts';
@@ -106,6 +107,8 @@ export interface MyTask {
   entityName: string;
   /** The stream of the task's engagement service (gst, …); null otherwise. */
   stream?: string | null;
+  /** Where the row opens (Staff Workflow WF-102); absent from older APIs. */
+  link?: WorkItemRef | null;
 }
 
 export interface MyClientDependency {
@@ -124,6 +127,8 @@ export interface MyClientDependency {
   version: number;
   engagementCode: string;
   entityName: string;
+  /** Where the row opens (Staff Workflow WF-102); absent from older APIs. */
+  link?: WorkItemRef | null;
 }
 
 export interface EntityRow {
@@ -366,6 +371,8 @@ export interface ComplianceRow {
   escalation: string;
   /** The distinct §24 action this band triggers (notify_owner, escalate_partner, …). */
   escalationAction: string;
+  /** Where the row opens (Staff Workflow WF-102); absent from older APIs. */
+  link?: WorkItemRef | null;
 }
 
 /**
@@ -393,6 +400,8 @@ export interface ComplianceEventRow {
   isExtended: boolean;
   escalation: string;
   escalationAction: string;
+  /** Where the row opens (Staff Workflow WF-102); absent from older APIs. */
+  link?: WorkItemRef | null;
 }
 
 /**
