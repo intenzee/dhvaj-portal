@@ -214,6 +214,43 @@ describe('Statutory Audit — 03.1 Planning Intelligence engine (e2e)', () => {
     expect(await signals(f.base)).toHaveLength(0);
   });
 
+  it('generates for whichever team member opens 03.1 first (§22), not only a lead', async () => {
+    const f = await newAuditFile();
+    await setArea(f.shellId, 'internal_audit', 'applicable');
+    const emps = await request(app.getHttpServer())
+      .get('/api/v1/employees?limit=100')
+      .set(bearer(mp))
+      .expect(200);
+    const seniorY = (emps.body.items as Array<{ employeeCode: string; id: string }>).find(
+      (e) => e.employeeCode === 'EMP006',
+    )!.id;
+    await post(pa, `/api/v1/engagements/${f.engId}/team`, {
+      employeeId: seniorY,
+      roleOnEngagement: 'in_charge',
+    }).expect(201);
+    const sy = await token('senior.y@dhvaj.in');
+
+    // The senior opens first: the system step derives it under their open.
+    const first = await get(`${f.base}/planning-intelligence`, sy);
+    expect(first.body.record.intelligenceGeneratedAt).toBeTruthy();
+    const auto = (await signals(f.base)).filter((s) => s.isAuto);
+    expect(auto.length).toBeGreaterThan(0);
+
+    // The flag is the step's alone — the senior still cannot generate by hand
+    // or raise a library signal's attention.
+    await post(sy, `${f.base}/planning-intelligence/generate`, {}).expect((r) =>
+      expect([403, 409]).toContain(r.status),
+    );
+    const flag = await su((db) =>
+      db.query<{ n: string }>(
+        `SELECT count(*) AS n FROM hsdg.audit_planning_signal
+          WHERE engagement_id = $1 AND manager_assessment IS NOT NULL`,
+        [f.engId],
+      ),
+    );
+    expect(Number(flag.rows[0]!.n)).toBe(0);
+  });
+
   it('reads the 02.8 baseline, overrides and conditions and fires their rules (§5)', async () => {
     const f = await newAuditFile();
     // An override of a system result and an open AF-02 condition that lets

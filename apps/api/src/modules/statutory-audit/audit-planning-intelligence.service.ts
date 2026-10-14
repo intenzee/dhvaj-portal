@@ -57,7 +57,7 @@ import { AuditPlanningStrategyService } from './audit-planning-strategy.service'
 import { AuditAreaReviewService } from './audit-area-review.service';
 import { readFrameworkApprovalOn } from './framework-approval-read';
 import { readFrameworkEngagementOn } from './framework-summary-inputs';
-import { isEngagementLead } from './master-facts';
+import { isEngagementLead, isEngagementMember } from './master-facts';
 import {
   readPlanningIntelligenceFactsOn,
   type PlanningIntelligenceFacts,
@@ -213,6 +213,14 @@ const CHANGE_SELECT = `
     FROM hsdg.audit_planning_change c`;
 
 /**
+ * Raise (engagement id) or clear ('') the transaction-local flag under which a
+ * team member's open may run the 03.1 auto-generate step (§22).
+ */
+async function setPlanningAutogen(client: PoolClient, engagementId: string): Promise<void> {
+  await client.query(`SELECT set_config('hsdg.planning_autogen', $1, true)`, [engagementId]);
+}
+
+/**
  * Planning Signal Register + 03.1 Planning Intelligence & Overall Audit Strategy
  * (DHVAJ 03.1; docs/section-03-planning-build-spec.md §4, §5.1).
  *
@@ -240,10 +248,8 @@ export class AuditPlanningIntelligenceService {
   ): Promise<PlanningIntelligenceSummary> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertShell(client, engagementId, workflowInstanceId);
-      let record = await this.ensureRecord(client, engagementId, workflowInstanceId);
-      if (await this.autoGenerateOn(client, ctx, engagementId, workflowInstanceId)) {
-        record = await this.readRecord(client, workflowInstanceId);
-      }
+      await this.autoGenerateOn(client, ctx, engagementId, workflowInstanceId);
+      const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
       return this.buildSummary(client, workflowInstanceId, record);
     });
   }
@@ -252,12 +258,17 @@ export class AuditPlanningIntelligenceService {
    * Keep the intelligence current without a "Generate" button (§5, §22): the
    * first run derives it and brings last year's matters forward; a later run
    * re-derives it when the Section 01/02 facts moved. Runs in the caller's
-   * transaction, only for an engagement lead (the 03.1 writes are lead-only),
-   * never while Section 03 is locked (02.8 AF-02) and never once 03.1 is
-   * frozen by the 03.12 approval — the approved signals are the baseline and a
-   * controlled revision refreshes them. Called on a lead's open and by the
-   * 02.8 approval itself, so whoever opens 03.1 first finds it ready.
-   * Returns whether it generated.
+   * transaction for any engagement member, never while Section 03 is locked
+   * (02.8 AF-02) and never once 03.1 is frozen by the 03.12 approval — the
+   * approved signals are the baseline and a controlled revision refreshes them.
+   * Called on every open and by the 02.8 approval itself, so whoever opens 03.1
+   * first finds it ready. Returns whether it generated.
+   *
+   * The 03.1 writes are lead-only; a team member's open runs this system step
+   * under the transaction-local `hsdg.planning_autogen` flag, which the write
+   * policies admit for that engagement's members (migration 1772000000000). The
+   * flag is cleared as soon as the step ends; an error aborts the transaction,
+   * which drops it too.
    */
   async autoGenerateOn(
     client: PoolClient,
@@ -265,10 +276,24 @@ export class AuditPlanningIntelligenceService {
     engagementId: string,
     workflowInstanceId: string,
   ): Promise<boolean> {
-    if (!(await isEngagementLead(client, engagementId))) return false;
+    const lead = await isEngagementLead(client, engagementId);
+    if (!lead && !(await isEngagementMember(client, engagementId))) return false;
     const gate = (await readFrameworkApprovalOn(client, workflowInstanceId)).planning;
     if (!gate.unlocked || (await readPlanningLock(client, workflowInstanceId)).locked) return false;
-    const record = await this.ensureRecord(client, engagementId, workflowInstanceId);
+    if (lead) return this.autoGenerateStepOn(client, ctx, engagementId, workflowInstanceId);
+    await setPlanningAutogen(client, engagementId);
+    const generated = await this.autoGenerateStepOn(client, ctx, engagementId, workflowInstanceId);
+    await setPlanningAutogen(client, '');
+    return generated;
+  }
+
+  private async autoGenerateStepOn(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    workflowInstanceId: string,
+  ): Promise<boolean> {
+    const record = await this.ensureRecord(client, engagementId, workflowInstanceId, true);
     const first = !record.intelligenceGeneratedAt;
     const facts = await readPlanningIntelligenceFactsOn(client, workflowInstanceId);
     if (!first && !(await this.factsMoved(client, workflowInstanceId, facts))) return false;
@@ -1567,15 +1592,18 @@ export class AuditPlanningIntelligenceService {
     client: PoolClient,
     engagementId: string,
     workflowInstanceId: string,
+    /** The auto-generate step: a team member may create it under the flag. */
+    systemStep = false,
   ): Promise<PlanningIntelligenceRecord> {
     const { rows: exists } = await client.query(
       `SELECT 1 FROM hsdg.audit_planning_intelligence WHERE workflow_instance_id = $1`,
       [workflowInstanceId],
     );
     if (exists[0]) return this.readRecord(client, workflowInstanceId);
-    // Only a lead may create the record (RLS checks the INSERT even when it
-    // would conflict) — the engagement team reads it once the Manager opens 03.1.
-    if (!(await isEngagementLead(client, engagementId))) {
+    // Only a lead, or the auto-generate step, may create the record (RLS checks
+    // the INSERT even when it would conflict) — otherwise the team reads it once
+    // 03.1 has been generated.
+    if (!systemStep && !(await isEngagementLead(client, engagementId))) {
       throw new ConflictException(
         '03.1 has not been opened yet — the Engagement Manager or Partner opens it first.',
       );
