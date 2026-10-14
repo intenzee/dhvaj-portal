@@ -1,5 +1,6 @@
 import {
   CALCULATION_BASIS,
+  calendarHalfLabel,
   type CalculationBasis,
   type RuleFrequency,
   type WorkingDayAdjustment,
@@ -25,7 +26,7 @@ import {
 
 /** One row of a `schedule` basis: due on day/month of (FY start year + year_offset). */
 export interface ScheduleEntry {
-  /** Period tag: 'Q1'..'Q4', 'H1'/'H2', 'M1'..'M3', a month '04'..'03', or 'FY'. */
+  /** Period tag: 'Q1'..'Q4', 'H1'/'H2', 'CH1'/'CH2', 'M1'..'M3', a month '04'..'03', or 'FY'. */
   period: string;
   month: number;
   day: number;
@@ -77,7 +78,7 @@ export interface RuleVariant {
 }
 
 export interface Period {
-  /** See PeriodKey in contracts: 'YYYY-MM', 'YYYY-YY:Q1', 'YYYY-YY:H1', 'YYYY-YY'. */
+  /** See PeriodKey in contracts: 'YYYY-MM', 'YYYY-YY:Q1', 'YYYY-YY:H1', 'YYYY-YY:CH2', 'YYYY-YY'. */
   key: string;
   financialYear: string;
   start: string;
@@ -188,6 +189,25 @@ export function periodsForFrequency(
           label: `H${h + 1} ${financialYear} (${MONTH_SHORT[start.getUTCMonth()]}–${MONTH_SHORT[end.getUTCMonth()]})`,
         };
       });
+    case 'calendar_half_yearly': {
+      // Halves of the calendar year (s.173(5)): Jul–Dec of the FY's start year
+      // (CH2) and Jan–Jun after it (CH1), so FY 2026-27 holds Jul–Dec 2026 and
+      // Jan–Jun 2027. Jan–Jun 2027 runs past the FY end; it stays with this FY.
+      const start = fyStartYear(financialYear);
+      return (
+        [
+          ['CH2', start, 6],
+          ['CH1', start + 1, 0],
+        ] as const
+      ).map(([tag, year, m0]) => ({
+        key: `${financialYear}:${tag}`,
+        financialYear,
+        start: toISODate(new Date(Date.UTC(year, m0, 1))),
+        end: toISODate(monthEnd(year, m0 + 5)),
+        tags: [tag],
+        label: calendarHalfLabel(financialYear, tag),
+      }));
+    }
     case 'annual':
     case 'triennial': {
       const { start, end } = span(financialYear, 0, 12);
@@ -210,9 +230,20 @@ export function periodsForFrequency(
 /** The period of `frequency` that contains `isoDate` (used for event instances). */
 export function periodContaining(frequency: RuleFrequency, isoDate: string): Period | null {
   const fy = financialYearOf(isoDate);
-  return (
-    periodsForFrequency(frequency, fy).find((p) => p.start <= isoDate && isoDate <= p.end) ?? null
-  );
+  // Jan–Jun of a calendar half belongs to the FY before the date's own.
+  const years = frequency === 'calendar_half_yearly' ? [fy, previousFinancialYear(fy)] : [fy];
+  for (const y of years) {
+    const hit = periodsForFrequency(frequency, y).find(
+      (p) => p.start <= isoDate && isoDate <= p.end,
+    );
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function previousFinancialYear(fy: string): string {
+  const start = fyStartYear(fy) - 1;
+  return `${start}-${pad2((start + 1) % 100)}`;
 }
 
 /** Does `period` pass the rule's period_filter (e.g. ['M1','M2'] for IFF)? */
@@ -221,10 +252,22 @@ export function passesPeriodFilter(filter: readonly string[] | null, period: Per
   return period.tags.some((t) => filter.includes(t));
 }
 
-/** True when a director's three-year KYC cycle falls due in `financialYear`. */
+/**
+ * True when a director's three-year KYC cycle falls due in `financialYear`:
+ * the cycle's own FY and every third FY after it. DIR-3 KYC for a due FY is
+ * filed by 30 June inside that FY (schedule year_offset 0), so a cycle started
+ * in FY 2025-26 is next due in FY 2028-29, on 30 June 2028 (spec E12).
+ */
 export function isTriennialDue(cycleStartFy: string, financialYear: string): boolean {
   const diff = fyStartYear(financialYear) - fyStartYear(cycleStartFy);
   return diff >= 0 && diff % 3 === 0;
+}
+
+/** The first FY from `fromFy` on in which a KYC cycle started in `cycleStartFy` falls due. */
+export function nextTriennialFy(cycleStartFy: string, fromFy: string): string {
+  let start = Math.max(fyStartYear(fromFy), fyStartYear(cycleStartFy));
+  while ((start - fyStartYear(cycleStartFy)) % 3 !== 0) start += 1;
+  return `${start}-${pad2((start + 1) % 100)}`;
 }
 
 /** Evaluate a condition, reading a field the context lacks as "does not apply". */
@@ -238,6 +281,8 @@ export function conditionHolds(condition: unknown, context: Record<string, unkno
 
 const VARIANT_FIELDS: Record<string, keyof PeriodRuleVersion> = {
   calculation_basis: 'calculationBasis',
+  // Board meetings of a small company / OPC run on calendar halves (G6).
+  frequency: 'frequency',
   offset_months: 'offsetMonths',
   offset_days: 'offsetDays',
   fixed_month: 'fixedMonth',

@@ -949,7 +949,20 @@ export class ComplianceCalendarV2Service {
             ORDER BY scope, registration_id NULLS FIRST, effective_from DESC`,
         [entityId],
       );
-      return { entityId, registrations, profiles: profiles.rows.map(mapProfile) };
+      const ent = await client.query<{ slug: string | null; annual_turnover: string | null }>(
+        `SELECT et.slug, e.annual_turnover::text
+           FROM hsdg.entities e LEFT JOIN hsdg.entity_types et ON et.id = e.entity_type_id
+          WHERE e.id = $1`,
+        [entityId],
+      );
+      const turnover = ent.rows[0]?.annual_turnover ?? null;
+      return {
+        entityId,
+        entityTypeSlug: ent.rows[0]?.slug ?? null,
+        annualTurnover: turnover === null ? null : Number(turnover),
+        registrations,
+        profiles: profiles.rows.map(mapProfile),
+      };
     });
   }
 

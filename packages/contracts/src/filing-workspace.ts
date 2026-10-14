@@ -4,6 +4,7 @@
  * filing's workspace (checklist, document slots, figures, lodge, corrections).
  */
 import type { FilingStatus, PeriodSection, Stream } from './engagement-restructure';
+import type { LateChargeEstimate } from './roc-mca';
 
 export const CHECKLIST_ITEM_STATUS = {
   open: 'open',
@@ -13,7 +14,10 @@ export const CHECKLIST_ITEM_STATUS = {
 export type ChecklistItemStatus = (typeof CHECKLIST_ITEM_STATUS)[keyof typeof CHECKLIST_ITEM_STATUS];
 export const CHECKLIST_ITEM_STATUSES: ChecklistItemStatus[] = Object.values(CHECKLIST_ITEM_STATUS);
 
-export type ChecklistAutoTick = 'document' | 'figure' | 'review' | 'lodge';
+/** 'event': ticks when the compliance event it waits on is recorded (AOC-4's AGM held). */
+export type ChecklistAutoTick = 'document' | 'figure' | 'review' | 'lodge' | 'event';
+/** Who may tick a line by hand: 'partner' lines need a partner and a note (the UDIN). */
+export type ChecklistTickedBy = 'partner';
 
 export const FILING_REFERENCE_KIND = {
   arn: 'arn',
@@ -37,10 +41,14 @@ export interface ChecklistItem {
   required: boolean;
   sequence: number;
   autoTick: ChecklistAutoTick | null;
+  /** 'partner': only a partner ticks it, with the UDIN in the note. */
+  tickedBy: ChecklistTickedBy | null;
   note: string | null;
   status: ChecklistItemStatus;
   doneByName: string | null;
   doneAt: string | null;
+  /** The note given on ticking (the UDIN on a partner's certification). */
+  doneNote: string | null;
   naReason: string | null;
   documentId: string | null;
   clientDependencyId: string | null;
@@ -110,7 +118,13 @@ export interface FilingCorrectionView {
 }
 
 export interface CrossCheckWarning {
-  code: 'gstr3b_before_gstr1' | 'outward_tax_mismatch' | 'itc_exceeds_2b' | 'lut_missing' | 'required_open';
+  code:
+    | 'gstr3b_before_gstr1'
+    | 'outward_tax_mismatch'
+    | 'itc_exceeds_2b'
+    | 'lut_missing'
+    | 'required_open'
+    | 'dsc_expiring';
   message: string;
 }
 
@@ -139,8 +153,12 @@ export interface WorkspaceInstance {
   lockedReason: string | null;
   /** The rule's late-fee note (Verify rules carry a caution). */
   lateFeeNote: string | null;
-  /** Indicative GST late fee / interest while past due and unfiled — a hint, never posted. */
-  lateCharges: { daysLate: number; lateFee: number; interest: number | null } | null;
+  /**
+   * Indicative late fee (and GST interest) — a hint, never posted. GST: while
+   * past due and unfiled. ROC: ₹100/day forms and normal-fee slabs, against the
+   * filing date once lodged so it can be compared with the fee paid.
+   */
+  lateCharges: LateChargeEstimate | null;
   /** Not applicable: the reason recorded. */
   notApplicableReason: string | null;
   /**
@@ -180,7 +198,8 @@ export interface InstanceWorkspace {
   filingHistory: FilingRecordView[];
   corrections: FilingCorrectionView[];
   warnings: CrossCheckWarning[];
-  can: { lodge: boolean; undo: boolean; waive: boolean; edit: boolean };
+  /** certify: tick a partner's line (CERT, with the UDIN). */
+  can: { lodge: boolean; undo: boolean; waive: boolean; edit: boolean; certify: boolean };
 }
 
 /** One filing in the stream tree. */
@@ -199,6 +218,8 @@ export interface TreeItem {
   /** Checklist progress, e.g. 3 of 8 required items done. */
   requiredDone: number;
   requiredTotal: number;
+  /** ROC: a director's DSC lapses before the due date ("DSC of A Kumar expires 12 Nov 2026"). */
+  dscWarning?: string | null;
 }
 
 export interface TreePeriod {

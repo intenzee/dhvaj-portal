@@ -9,6 +9,7 @@
  * using the version effective at the period end (else today).
  */
 import type { PoolClient } from 'pg';
+import { defaultCompanySubtype, resolveCinFacts, type CinProfileAttributes } from '@hsdg/contracts';
 import { eventContext } from './compliance-events';
 
 export interface TemplateItem {
@@ -17,7 +18,10 @@ export interface TemplateItem {
   slotCode?: string;
   required?: boolean;
   sequence?: number;
+  /** 'event': ticks when the event it waits on is recorded (AGM held on AOC-4). */
   autoTick?: 'document' | 'figure' | 'review' | 'lodge' | 'event' | null;
+  /** 'partner': only a partner ticks it by hand, with a note (the UDIN). */
+  tickedBy?: 'partner' | null;
   /**
    * A profile attribute (or event detail, `<event_type>_<detail>`) that must be
    * true for the item to apply; `key=value` matches a text value instead.
@@ -58,6 +62,36 @@ export function applicableItems(
 }
 
 /**
+ * The attributes onlyIf reads for a CIN: the profile as the rules resolve it
+ * (XBRL / MGT-8 defaults from the thresholds, the small-company test) plus
+ * hasAgm / isOpc, so an OPC's AOC-4 asks for adoption by the member instead of
+ * an AGM. Other registrations use their attributes as stored.
+ */
+export function checklistAttributes(
+  registrationType: string | null,
+  attributes: Record<string, unknown>,
+  entity: { slug: string | null; turnover: number | null },
+): Record<string, unknown> {
+  if (registrationType !== 'cin') return attributes;
+  const defaultSubtype = defaultCompanySubtype(entity.slug);
+  const f = resolveCinFacts(attributes as CinProfileAttributes, {
+    subtype: defaultSubtype,
+    turnover: entity.turnover,
+  });
+  const subtype = f.companySubtype ?? defaultSubtype;
+  return {
+    ...attributes,
+    xbrlRequired: f.xbrlRequired,
+    mgt8Required: f.mgt8Required,
+    hasSubsidiaries: f.hasSubsidiaries,
+    csrApplicable: f.csrApplicable,
+    secretarialAuditRequired: f.secretarialAuditRequired,
+    isOpc: subtype === 'opc',
+    hasAgm: subtype !== 'opc',
+  };
+}
+
+/**
  * Create the checklist for one filing if it has none. Returns the number of
  * items the filing has afterwards (0 when the instance is not visible).
  */
@@ -74,6 +108,9 @@ export async function seedChecklistForInstance(
     attributes: Record<string, unknown> | null;
     event_type: string | null;
     event_details: Record<string, unknown> | null;
+    registration_type: string | null;
+    entity_slug: string | null;
+    annual_turnover: string | null;
     has_items: boolean;
   }>(
     `SELECT ci.engagement_id, cr.code AS rule_code,
@@ -85,10 +122,16 @@ export async function seedChecklistForInstance(
                 AND (p.effective_to IS NULL OR p.effective_to >= COALESCE(ci.period_start, CURRENT_DATE))
               ORDER BY p.effective_from DESC LIMIT 1) AS attributes,
             ev.event_type, ev.details AS event_details,
+            (SELECT r.registration_type FROM hsdg.compliance_registrations(ARRAY[ci.registration_id]) r)
+              AS registration_type,
+            et.slug AS entity_slug, ent.annual_turnover::text AS annual_turnover,
             EXISTS (SELECT 1 FROM hsdg.instance_checklist_items it
                      WHERE it.compliance_instance_id = ci.id) AS has_items
        FROM hsdg.compliance_instances ci
        JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+       JOIN hsdg.engagements e ON e.id = ci.engagement_id
+       JOIN hsdg.entities ent ON ent.id = e.entity_id
+       LEFT JOIN hsdg.entity_types et ON et.id = ent.entity_type_id
        LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
        LEFT JOIN hsdg.engagement_services es ON es.id = ci.engagement_service_id
        LEFT JOIN hsdg.services sv ON sv.id = es.service_id
@@ -111,9 +154,12 @@ export async function seedChecklistForInstance(
       [candidates, inst.as_of],
     );
     const chosen = tpl.rows[0];
-    // An event's items also read its details (DIR-12 appointed / ceased …).
+    // The CIN facts, then an event's own details on top (DIR-12 appointed / ceased …).
     const facts = {
-      ...(inst.attributes ?? {}),
+      ...checklistAttributes(inst.registration_type, inst.attributes ?? {}, {
+        slug: inst.entity_slug,
+        turnover: inst.annual_turnover === null ? null : Number(inst.annual_turnover),
+      }),
       ...(inst.event_type
         ? eventContext({ event_type: inst.event_type, details: inst.event_details })
         : {}),
@@ -123,12 +169,12 @@ export async function seedChecklistForInstance(
       await client.query(
         `INSERT INTO hsdg.instance_checklist_items
            (compliance_instance_id, engagement_id, item_code, label, slot_code, required,
-            sequence, auto_tick, note, template_code)
+            sequence, auto_tick, note, template_code, ticked_by)
          SELECT $1, $2, x.code, x.label, x."slotCode", COALESCE(x.required, false),
-                COALESCE(x.sequence, 0), x."autoTick", x.note, $4
+                COALESCE(x.sequence, 0), x."autoTick", x.note, $4, x."tickedBy"
            FROM jsonb_to_recordset($3::jsonb)
                 AS x(code text, label text, "slotCode" text, required boolean, sequence int,
-                     "autoTick" text, note text)
+                     "autoTick" text, note text, "tickedBy" text)
          ON CONFLICT (compliance_instance_id, item_code) DO NOTHING`,
         [instanceId, inst.engagement_id, JSON.stringify(items), chosen.code],
       );

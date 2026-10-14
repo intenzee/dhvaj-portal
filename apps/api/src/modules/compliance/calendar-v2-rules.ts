@@ -733,8 +733,17 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
         when: eq('company_subtype', 'opc'),
         set: { calculation_basis: 'fy_end', offset_months: 0, offset_days: 180, event_type: null },
       },
+      // The form follows the facts: XBRL above the thresholds, + CFS with subsidiaries.
+      { when: eq('has_subsidiaries', true), set: { form_label: 'AOC-4 + CFS' } },
+      { when: eq('xbrl_required', true), set: { form_label: 'AOC-4 XBRL' } },
+      {
+        when: all(eq('xbrl_required', true), eq('has_subsidiaries', true)),
+        set: { form_label: 'AOC-4 XBRL + CFS' },
+      },
     ],
     lateFeeNote: 'Additional fee ₹100/day.',
+    // V4: the XBRL thresholds change by notification.
+    verification: 'verify',
     internalSlaOffsetDays: 7,
     versions: single('AOC-4'),
   },
@@ -763,8 +772,12 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
           form_label: 'MGT-7A',
         },
       },
+      // G4: a small company files MGT-7A too, on its AGM-based dates.
+      { when: eq('company_subtype', 'small'), set: { form_label: 'MGT-7A' } },
     ],
     lateFeeNote: 'Additional fee ₹100/day.',
+    // V4: the MGT-8 thresholds change by notification.
+    verification: 'verify',
     internalSlaOffsetDays: 7,
     versions: single('MGT-7'),
   },
@@ -781,15 +794,19 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     eventType: 'agm',
     offsetDays: 15,
     provisionalEventRule: { month: 9, day: 30, year_offset: 1 },
-    condition: eq('auditor_appointed_at_agm', true),
-    lateFeeNote: 'Additional fee ₹100/day.',
+    // G5: from the AGM event's flag (agm details {auditorAppointed}), not a static profile fact.
+    condition: eq('agm_auditor_appointed', true),
+    lateFeeNote:
+      'Normal-fee form: additional fee is a multiple of the normal fee by days late (2× up to 30 days … 12× after 180).',
+    verification: 'verify',
     internalSlaOffsetDays: 3,
     versions: single('ADT-1'),
   },
   {
     code: 'ROC_DPT3',
     name: 'Return of deposits',
-    notes: 'DPT-3 — 30 June.',
+    notes:
+      'DPT-3 — 30 June. Not created when the profile says there are no deposits or exempted loans.',
     stream: 'roc',
     category: 'roc',
     dueDateCategory: 'STATUTORY_FIXED',
@@ -797,7 +814,11 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     frequency: 'annual',
     basis: 'fy_end',
     offsetMonths: 3,
-    lateFeeNote: 'Additional fee ₹100/day.',
+    // G7: unknown keeps the item (nil filing out of caution, V8); only false drops it.
+    condition: { field: 'deposits', op: '!=', value: false },
+    lateFeeNote:
+      'Normal-fee form: additional fee is a multiple of the normal fee by days late (2× up to 30 days … 12× after 180).',
+    verification: 'verify',
     internalSlaOffsetDays: 7,
     versions: single('DPT-3'),
   },
@@ -834,21 +855,28 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
       { period: 'H2', month: 5, day: 30, year_offset: 1 },
     ],
     condition: eq('company_subtype', 'unlisted_public'),
+    // V5: whether non-small private companies (Rule 9B) also file.
+    verification: 'verify',
     internalSlaOffsetDays: 5,
     versions: single('PAS-6'),
   },
   {
     code: 'ROC_DIR3_KYC',
     name: 'Director KYC',
-    notes: 'DIR-3 KYC — 30 June, once every three financial years, per DIN.',
+    notes:
+      'DIR-3 KYC — 30 June of the FY the three-year cycle falls due in, per DIN (cycle FY 2025-26 → next 30 June 2028).',
     stream: 'roc',
     category: 'roc',
     dueDateCategory: 'STATUTORY_FIXED',
     registrationScope: 'din',
     frequency: 'triennial',
     basis: 'schedule',
-    schedule: [{ period: 'FY', month: 6, day: 30, year_offset: 1 }],
+    // E12: filed by 30 June inside the due FY (year_offset 0), so the cycle's
+    // own FY 2025-26 → 30 Jun 2025 and the next, FY 2028-29 → 30 Jun 2028.
+    schedule: [{ period: 'FY', month: 6, day: 30, year_offset: 0 }],
     lateFeeNote: 'Fee ₹5,000 to reactivate a deactivated DIN.',
+    // V2: the three-yearly cycle (MCA, 31 Dec 2025) and its arithmetic.
+    verification: 'verify',
     internalSlaOffsetDays: 7,
     versions: single('DIR-3 KYC'),
   },
@@ -864,6 +892,8 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     basis: 'fy_end',
     offsetDays: 60,
     lateFeeNote: 'Additional fee ₹100/day.',
+    // V7: the CS-certification threshold (contribution / turnover).
+    verification: 'verify',
     internalSlaOffsetDays: 7,
     versions: single('LLP Form 11'),
   },
@@ -887,7 +917,7 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     code: 'ROC_BOARD_MEETING',
     name: 'Board meeting',
     notes:
-      'At least one board meeting each quarter, gap ≤ 120 days (one per half-year for small companies / OPC).',
+      'At least one board meeting each quarter, gap ≤ 120 days. A small company / OPC: one in each half of the calendar year (Jan–Jun, Jul–Dec), at least 90 days apart.',
     stream: 'roc',
     category: 'roc',
     dueDateCategory: 'STATUTORY_RULE',
@@ -896,8 +926,10 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     basis: 'period_end',
     variants: [
       {
+        // G6: s.173(5) counts halves of the calendar year — Jul–Dec due 31 Dec,
+        // Jan–Jun due 30 Jun of the next year.
         when: any(eq('company_subtype', 'small'), eq('company_subtype', 'opc')),
-        set: { period_filter: ['Q2', 'Q4'] },
+        set: { frequency: 'calendar_half_yearly' },
       },
     ],
     lateFeeNote: 'Penalty u/s 173.',
@@ -967,6 +999,8 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     registrationScope: 'cin',
     eventType: 'first_auditor_appointment',
     offsetDays: 15,
+    // V6: whether the firm files ADT-1 for the first auditor.
+    verification: 'verify',
     versions: single('ADT-1 (first auditor)'),
   },
   {
@@ -1015,6 +1049,10 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     registrationScope: 'cin',
     eventType: 'allotment',
     offsetDays: 30,
+    // s.42(8): a private placement files in 15 days (allotment details {privatePlacement}).
+    variants: [{ when: eq('allotment_private_placement', true), set: { offset_days: 15 } }],
+    // V1: 15 vs 30 days.
+    verification: 'verify',
     versions: single('PAS-3'),
   },
   {

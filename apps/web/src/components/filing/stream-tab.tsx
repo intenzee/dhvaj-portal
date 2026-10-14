@@ -51,7 +51,7 @@ function Pill({ item, stream, label }: { item: TreeItem; stream: Stream; label?:
   const done = filingEnd(stream, item.section, item.ruleCode).done.toLowerCase();
   return (
     <span
-      title={`${item.label}: ${filingStatusLabel(item.workflowStatus, stream, item.section, item.ruleCode)}${item.filedOn ? `, ${done} ${formatDate(item.filedOn)}` : ''}`}
+      title={`${item.label}: ${filingStatusLabel(item.workflowStatus, stream, item.section, item.ruleCode)}${item.filedOn ? `, ${done} ${formatDate(item.filedOn)}` : ''}${item.dscWarning ? ` — ${item.dscWarning}` : ''}`}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${pillTone(item)}`}
     >
       {label ?? item.label}
@@ -61,6 +61,11 @@ function Pill({ item, stream, label }: { item: TreeItem; stream: Stream; label?:
         </span>
       )}
       {item.workflowStatus === 'filed' && <span aria-hidden>✓</span>}
+      {item.dscWarning && (
+        <span className="text-warning-700" aria-label={item.dscWarning}>
+          DSC
+        </span>
+      )}
     </span>
   );
 }
