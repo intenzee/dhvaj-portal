@@ -6,7 +6,8 @@ import { workListQuery } from '@/components/tasks/work-list';
 import { activityQuery } from '@/components/engagement/activity-tab';
 import { linesFromTime } from '@/components/engagement/bill-from-time';
 import { documentFilters } from '@/components/engagement/documents-tab';
-import { dueItemHref } from '@/components/engagement/overview-widgets';
+import { dueItemRef } from '@/components/engagement/overview-widgets';
+import { workItemHref } from '@hsdg/contracts';
 import { figurePayload, referenceError } from '@/components/filing/instance-workspace';
 import { adjustableEntries } from '@/components/engagement/activity-tab';
 import type { TimeEntryRecord } from '@hsdg/contracts';
@@ -138,9 +139,9 @@ describe('filing helpers', () => {
     expect(periodParam('gst', '2026-10')).toEqual({ key: 'm', value: '10' });
     expect(periodParam('tds', '2026-27-Q2')).toEqual({ key: 'p', value: '2026-27-Q2' });
   });
-  it('deep-links an Overview item to its GST month', () => {
-    expect(
-      dueItemHref('e1', {
+  it('deep-links an Overview item to its GST month, year and part', () => {
+    const url = workItemHref(
+      dueItemRef('e1', {
         instanceId: 'i',
         stream: 'gst',
         label: 'GSTR-3B',
@@ -152,7 +153,16 @@ describe('filing helpers', () => {
         workflowStatus: 'in_preparation',
         registrationNumber: '27AAAAA0000A1Z5',
       }),
-    ).toBe('/engagements/e1?tab=gst&m=9&gstin=27AAAAA0000A1Z5');
+    );
+    // The old link's tab / m / gstin, plus fy (F3) and the part.
+    expect(url.split('?')[0]).toBe('/engagements/e1');
+    expect(Object.fromEntries(new URLSearchParams(url.split('?')[1]))).toEqual({
+      tab: 'gst',
+      m: '9',
+      gstin: '27AAAAA0000A1Z5',
+      fy: '2026-27',
+      part: 'summary',
+    });
   });
   it('bills only streams with billable time and a rate', () => {
     const rows = [

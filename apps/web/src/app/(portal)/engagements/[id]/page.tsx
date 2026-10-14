@@ -20,6 +20,7 @@ import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { hasRole } from '@/lib/principal';
 import { useUrlState } from '@/lib/url-state';
+import { useWorkLinkFocus } from '@/lib/work-focus';
 import type { TaskActionContext } from '@/lib/work-types';
 import { StreamTab } from '@/components/filing/stream-tab';
 import { WorkList } from '@/components/tasks/work-list';
@@ -239,7 +240,7 @@ export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const { principal } = useAuth();
   const url = useUrlState();
-  const { isOn } = useFeatureFlags();
+  const { isOn, isLoading: flagsLoading } = useFeatureFlags();
   const tabsQ = useEngagementTabs(id);
   const kind = tabsQ.data?.kind ?? null;
   // Layout by kind and flags; the legacy tabs until ff_compliance_tabs is on.
@@ -258,8 +259,21 @@ export default function EngagementDetailPage(): JSX.Element {
         : TABS;
   const requested = url.get('tab') ?? 'overview';
   const tab: TabKey = visibleTabs.some((t) => t.key === requested) ? requested : 'overview';
+  // A link to a tab this engagement doesn't have (a stream that was ended, say)
+  // lands on Overview with a notice — once the tabs are known, not while loading.
+  const tabsSettled =
+    !flagsLoading && (layout === 'legacy' ? !tabsQ.isLoading : Boolean(tabsQ.data));
+  const missingTab = tabsSettled && requested !== tab ? requested : null;
   const setTab = (key: TabKey) =>
-    url.set({ tab: key === 'overview' ? null : key, m: null, p: null });
+    url.set({
+      tab: key === 'overview' ? null : key,
+      m: null,
+      p: null,
+      part: null,
+      task: null,
+      request: null,
+    });
+  useWorkLinkFocus();
   const gstOn = isOn(FEATURE_FLAG.gstTab);
   const autoTimeOn = isOn(FEATURE_FLAG.autoTime);
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
@@ -378,6 +392,15 @@ export default function EngagementDetailPage(): JSX.Element {
       <p className="mb-4 mt-2 text-xs text-ink-muted">
         {visibleTabs.find((t) => t.key === tab)?.hint}
       </p>
+      {missingTab && (
+        <p
+          role="status"
+          className="mb-4 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700"
+        >
+          This engagement has no {STREAM_LABEL[missingTab as Stream] ?? humanize(missingTab)} tab
+          {layout === 'compliance' && pageFy ? ` in FY ${pageFy}` : ''}, so the link opened Overview.
+        </p>
+      )}
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
       {tab === 'overview' && (
@@ -552,6 +575,7 @@ export default function EngagementDetailPage(): JSX.Element {
                       return (
                         <Fragment key={t.id}>
                           <tr
+                            data-task-id={t.id}
                             className={`border-b border-line last:border-0 ${isOpen ? 'bg-surface-sunken/60' : ''}`}
                           >
                             <td className="px-4 py-2.5">
@@ -648,7 +672,7 @@ export default function EngagementDetailPage(): JSX.Element {
                   </thead>
                   <tbody>
                     {deps.data.items.map((d) => (
-                      <tr key={d.id} className="border-b border-line last:border-0">
+                      <tr key={d.id} data-request-id={d.id} className="border-b border-line last:border-0">
                         <td className="px-4 py-2.5 text-ink">{d.requestedInfo}</td>
                         <td className="px-4 py-2.5">
                           <StatusBadge status={d.status} />
