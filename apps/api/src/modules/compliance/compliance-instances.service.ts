@@ -1211,23 +1211,26 @@ export class ComplianceInstancesService {
       params.push(page.limit, page.offset);
 
       const { rows } = await client.query<EventRow>(
-        `WITH ev AS (${EVENTS_UNION})
-         SELECT ev.compliance_instance_id, ev.deadline_layer_id, ev.kind, ev.layer_type,
-                ev.engagement_id, ev.rule_code, ev.rule_name, ev.label, ev.due_date_category,
-                ev.due_date_source, ev.due_date::text AS due_date, ev.owner_name, ev.is_extended,
-                ev.status,
-                eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
-                eng.kind AS engagement_kind, ${WORK_LINK_COLUMNS},
-                (ev.status = 'open' AND ev.due_date < CURRENT_DATE) AS is_overdue,
-                ${this.escalationCase('ev.status', 'ev.due_date')} AS escalation
-         FROM ev
-         JOIN hsdg.engagements eng ON eng.id = ev.engagement_id
-         JOIN hsdg.entities ent ON ent.id = eng.entity_id
-         JOIN hsdg.services s ON s.id = eng.service_id
-         ${workLinkJoin('ev.compliance_instance_id')}
-         ${where}
-         ORDER BY ev.due_date, ev.kind
-         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        withWorkLinks(
+          `WITH ev AS (${EVENTS_UNION})
+           SELECT ev.compliance_instance_id, ev.deadline_layer_id, ev.kind, ev.layer_type,
+                  ev.engagement_id, ev.rule_code, ev.rule_name, ev.label, ev.due_date_category,
+                  ev.due_date_source, ev.due_date::text AS due_date, ev.owner_name, ev.is_extended,
+                  ev.status,
+                  eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
+                  eng.kind AS engagement_kind,
+                  (ev.status = 'open' AND ev.due_date < CURRENT_DATE) AS is_overdue,
+                  ${this.escalationCase('ev.status', 'ev.due_date')} AS escalation
+           FROM ev
+           JOIN hsdg.engagements eng ON eng.id = ev.engagement_id
+           JOIN hsdg.entities ent ON ent.id = eng.entity_id
+           JOIN hsdg.services s ON s.id = eng.service_id
+           ${where}
+           ORDER BY ev.due_date, ev.kind
+           LIMIT $${params.length - 1} OFFSET $${params.length}`,
+          'compliance_instance_id',
+          'p.due_date, p.kind',
+        ),
         params,
       );
       const totalRes = await client.query<{ total: string }>(
