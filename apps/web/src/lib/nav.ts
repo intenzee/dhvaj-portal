@@ -7,6 +7,7 @@ import {
   Layers,
   MessageSquareWarning,
   ListTodo,
+  ListChecks,
   ClipboardCheck,
   CalendarClock,
   FileText,
@@ -41,7 +42,7 @@ export interface NavItem {
   /** With ff_work_links: a count pill read from `path` (`{ total }`), e.g. reviews waiting (WF-105). */
   badge?: { queryKey: readonly string[]; path: string };
   /** Shown only while this rollout flag is on (e.g. Today behind ff_today_view). */
-  flag?: 'todayView';
+  flag?: 'todayView' | 'filingRuns';
 }
 
 /** Preparers: their sidebar is trimmed to the client work (WF-107). */
@@ -52,6 +53,8 @@ export interface NavOptions {
   workLinks?: boolean;
   /** ff_today_view: the Today screen, and the preparers' landing page (WF-201). */
   todayView?: boolean;
+  /** ff_filing_runs: one form and period across every client (WF-301). */
+  filingRuns?: boolean;
 }
 
 export interface NavSection {
@@ -149,6 +152,15 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: CalendarClock,
         hint: 'Due dates for returns and filings — what is overdue and what is due soon.',
         permission: PERMISSION.complianceRead,
+        ready: true,
+      },
+      {
+        label: 'Filing runs',
+        href: '/compliance/runs',
+        icon: ListChecks,
+        hint: 'One form and period across every client — assign and remind in bulk, lodge one by one.',
+        permission: PERMISSION.engagementRead,
+        flag: 'filingRuns',
         ready: true,
       },
       {
@@ -261,4 +273,11 @@ export function isNavActive(item: NavItem, pathname: string): boolean {
   const base = item.href.split('?')[0]!;
   if (base === '/') return pathname === '/';
   return pathname === base || pathname.startsWith(base + '/');
+}
+
+/** The one item to mark current: the most specific match (Filing runs, not Compliance, on /compliance/runs). */
+export function activeNavHref(items: readonly NavItem[], pathname: string): string | null {
+  const hits = items.filter((i) => isNavActive(i, pathname));
+  hits.sort((a, b) => b.href.split('?')[0]!.length - a.href.split('?')[0]!.length);
+  return hits[0]?.href ?? null;
 }

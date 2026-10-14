@@ -515,11 +515,13 @@ describe('Filing workspace (e2e)', () => {
     expect(sepPa.sections.summary[0].mine).toBe(false);
   });
 
-  it('sends one monthly data request per opted-in GSTIN, filed against last month’s Outward', async () => {
+  it('raises the monthly data request per filing, one item per required client-data slot', async () => {
     const { inst, reg, entityId } = await setup();
-    await su.query(`UPDATE hsdg.compliance_instances SET section = 'outward' WHERE id = $1`, [
-      inst,
-    ]);
+    await su.query(
+      `UPDATE hsdg.compliance_instances SET section = 'outward', internal_sla_override = '2026-10-08'
+        WHERE id = $1`,
+      [inst],
+    );
     await su.query(
       `INSERT INTO hsdg.registration_compliance_profiles (entity_id, registration_id, scope, effective_from, gst_scheme, attributes)
        VALUES ($1,$2,'gstin','2026-04-01','regular','{"monthlyDataRequest": true}')`,
@@ -527,22 +529,38 @@ describe('Filing workspace (e2e)', () => {
     );
     const job = app.get(MonthlyDataRequestScheduler);
     const first = await job.run(new Date('2026-10-01T04:00:00Z'));
-    expect(first).toMatchObject({ periodKey: '2026-09' });
+    expect(first).toMatchObject({ periodKey: '2026-09', failed: 0 });
     expect(first!.requested).toBeGreaterThanOrEqual(1);
     const dep = await su.query<{
+      reminder_date: string;
       escalation_date: string;
       slot_code: string | null;
       period_section: string;
     }>(
-      `SELECT escalation_date::text, slot_code, period_section FROM hsdg.client_dependencies WHERE compliance_instance_id = $1`,
+      `SELECT reminder_date::text, escalation_date::text, slot_code, period_section
+         FROM hsdg.client_dependencies WHERE compliance_instance_id = $1`,
       [inst],
     );
+    // Outward asks for the sales register only (IRN / exports are profile-gated);
+    // reminded T-7 and escalated T-3 against the internal date.
     expect(dep.rows).toEqual([
-      { escalation_date: '2026-10-05', slot_code: null, period_section: 'outward' },
+      {
+        reminder_date: '2026-10-01',
+        escalation_date: '2026-10-05',
+        slot_code: 'SALES_REGISTER',
+        period_section: 'outward',
+      },
     ]);
     // The same day again asks nothing new.
     const again = await job.run(new Date('2026-10-01T06:00:00Z'));
     expect(again!.requested).toBe(0);
+    expect(
+      (
+        await su.query(`SELECT 1 FROM hsdg.client_dependencies WHERE compliance_instance_id = $1`, [
+          inst,
+        ])
+      ).rowCount,
+    ).toBe(1);
     // The open request shows the filing as awaiting data.
     expect((await ws(sy, inst)).body.instance.workflowStatus).toBe('awaiting_data');
   });
