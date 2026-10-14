@@ -32,6 +32,7 @@ import { ThemeToggle } from './theme-toggle';
 import { RunningTimerBanner } from './time/running-timer-banner';
 import { AwayResumeBanner } from './time/away-resume-banner';
 import { HelpPanel } from './help/help-panel';
+import { TelemetryTracker } from './telemetry-tracker';
 
 /** "New …" quick-create actions, shown only to users who may create that thing. */
 const CREATE_ACTIONS: {
@@ -225,6 +226,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
         </header>
 
         <main className="min-w-0 flex-1 p-4 sm:p-5 lg:p-6">{children}</main>
+        <TelemetryTracker />
       </div>
 
       <HelpPanel open={helpOpen} onClose={closeHelp} />
