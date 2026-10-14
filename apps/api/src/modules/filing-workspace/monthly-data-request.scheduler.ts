@@ -9,37 +9,50 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ClientUploadService } from '../documents/client-upload/client-upload.service';
 import { istToday } from '../engagements/time/auto-time';
 import { periodLabel } from './filing-rules';
+import { chasingPolicy, raiseSlotRequests, reminderText } from './client-chase';
 
-/** Marks the request so a re-run on the same day never asks twice. */
-export const MONTHLY_REQUEST_PREFIX = 'Monthly data request — ';
-const ITEMS = 'Sales register; Purchase register; Bank statement';
-
-/** The month before `today` (YYYY-MM-DD) as a period key, and the 5th of this month. */
-export function previousMonth(today: string): { periodKey: string; dueBy: string } {
+/** The month before `today` (YYYY-MM-DD) as a period key. */
+export function previousMonth(today: string): { periodKey: string } {
   const y = Number(today.slice(0, 4));
   const m = Number(today.slice(5, 7));
   const py = m === 1 ? y - 1 : y;
   const pm = m === 1 ? 12 : m - 1;
-  return {
-    periodKey: `${py}-${String(pm).padStart(2, '0')}`,
-    dueBy: `${today.slice(0, 7)}-05`,
-  };
+  return { periodKey: `${py}-${String(pm).padStart(2, '0')}` };
 }
+
+/** The GST sections whose data comes from the client each month. */
+export const MONTHLY_REQUEST_SECTIONS = ['outward', 'inward'] as const;
 
 export interface MonthlyRequestResult {
   periodKey: string;
+  /** Filings that got at least one new request this run. */
   requested: number;
+  /** Request items (one per client-data slot) raised this run. */
+  items: number;
   linked: number;
   emailed: number;
+  failed: number;
+}
+
+interface DueFilingRow {
+  instance_id: string;
+  engagement_id: string;
+  entity_name: string;
+  form: string;
+  internal_due: string | null;
+  client_email: string | null;
 }
 
 /**
- * Change 6 — the monthly data request. On the 1st, every GSTIN whose
- * compliance profile has `monthlyDataRequest` on gets ONE client request for
- * last month's sales register, purchase register and bank statement, filed
- * against that month's Outward filing (internal due date the 5th, firm
- * policy), with a secure upload link e-mailed to the client's primary contact
- * when client upload is enabled. Idempotent per GSTIN and month.
+ * Change 6 / Staff Workflow WF-302 — the monthly data request. On the 1st,
+ * every last-month Outward and Inward filing of a GSTIN whose compliance
+ * profile has `monthlyDataRequest` on gets one client request per required
+ * client-data slot (sales register, purchase register, …) from its own
+ * checklist, dated from its internal due date (firm policy T-7 / T-3). An
+ * upload into the slot closes the request (documents_close_slot_requests).
+ * When client upload is enabled the client's primary contact is e-mailed once
+ * per filing with a secure link per item. One transaction per filing; a slot
+ * already asked for is never asked again, so a re-run is a no-op.
  *
  * Identity mirrors the other schedulers: the first active managing partner.
  */
@@ -79,9 +92,10 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
         return null;
       }
       const res = await this.requestFor(ctx, istToday(now));
-      if (res.requested) {
+      if (res.requested || res.failed) {
         this.logger.log(
-          `Monthly data request ${res.periodKey}: ${res.requested} request(s), ${res.emailed} e-mailed.`,
+          `Monthly data request ${res.periodKey}: ${res.items} item(s) on ${res.requested} ` +
+            `filing(s), ${res.emailed} e-mailed, ${res.failed} failed.`,
         );
       }
       return res;
@@ -95,93 +109,86 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
   }
 
   async requestFor(ctx: RlsContext, today: string): Promise<MonthlyRequestResult> {
-    const { periodKey, dueBy } = previousMonth(today);
-    const what = `${MONTHLY_REQUEST_PREFIX}${periodLabel(periodKey)}`;
-    const created = await this.db.withRlsContext(ctx, async (client) => {
-      const { rows } = await client.query<{
-        dependency_id: string;
-        engagement_id: string;
-        engagement_code: string;
-        registration_number: string;
-        client_email: string | null;
-      }>(
-        `WITH due AS (
-           SELECT DISTINCT ON (ci.registration_id)
-                  ci.id AS instance_id, ci.engagement_id, ci.engagement_service_id, ci.section,
-                  e.engagement_code, e.engagement_manager_id, e.engagement_partner_id, e.entity_id,
-                  r.registration_number
-             FROM hsdg.compliance_instances ci
-             JOIN hsdg.engagements e ON e.id = ci.engagement_id
-             JOIN hsdg.entity_registrations r ON r.id = ci.registration_id
-             JOIN LATERAL (
-               SELECT p.attributes FROM hsdg.registration_compliance_profiles p
-                WHERE p.registration_id = ci.registration_id AND p.effective_from <= $2::date
-                  AND (p.effective_to IS NULL OR p.effective_to >= $2::date)
-                ORDER BY p.effective_from DESC LIMIT 1) p ON true
-            WHERE ci.period_key = $1 AND ci.section = 'outward'
-              AND ci.workflow_status NOT IN ('filed','not_applicable')
-              AND e.status NOT IN ('completed','closed','cancelled','declined','withdrawn','merged')
-              AND (p.attributes ->> 'monthlyDataRequest')::boolean IS TRUE
-              AND NOT EXISTS (
-                SELECT 1 FROM hsdg.client_dependencies d
-                  JOIN hsdg.compliance_instances di ON di.id = d.compliance_instance_id
-                 WHERE di.registration_id = ci.registration_id AND di.period_key = $1
-                   AND d.requested_info LIKE $4 || '%')
-            ORDER BY ci.registration_id, ci.created_at
-         ), ins AS (
-           INSERT INTO hsdg.client_dependencies
-             (engagement_id, requested_info, outstanding_items, responsible_employee_id,
-              escalation_date, engagement_service_id, compliance_instance_id, period_section,
-              task_id)
-           SELECT d.engagement_id, $3, $6,
-                  COALESCE(t.assigned_to_employee_id, d.engagement_manager_id, d.engagement_partner_id),
-                  $5::date,
-                  d.engagement_service_id, d.instance_id, d.section, t.id
-             FROM due d
-             LEFT JOIN LATERAL (
-               SELECT t.id, t.assigned_to_employee_id FROM hsdg.tasks t
-                WHERE t.source_compliance_instance_id = d.instance_id AND t.status <> 'cancelled'
-                ORDER BY t.created_at DESC LIMIT 1) t ON true
-           RETURNING id, engagement_id, compliance_instance_id
-         )
-         SELECT ins.id AS dependency_id, ins.engagement_id, d.engagement_code, d.registration_number,
+    const { periodKey } = previousMonth(today);
+    const result: MonthlyRequestResult = {
+      periodKey,
+      requested: 0,
+      items: 0,
+      linked: 0,
+      emailed: 0,
+      failed: 0,
+    };
+    const due = await this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await client.query<DueFilingRow>(
+        `SELECT ci.id AS instance_id, ci.engagement_id, ent.legal_name AS entity_name,
+                COALESCE(ci.form_label, rv.form_label, cr.name) AS form,
+                COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS internal_due,
                 (SELECT c.email::text FROM hsdg.entity_contacts c
-                  WHERE c.entity_id = d.entity_id AND c.email IS NOT NULL
+                  WHERE c.entity_id = e.entity_id AND c.email IS NOT NULL
                   ORDER BY c.is_primary DESC, c.created_at LIMIT 1) AS client_email
-           FROM ins JOIN due d ON d.instance_id = ins.compliance_instance_id`,
-        [
-          periodKey,
-          today,
-          `${what}: ${ITEMS.toLowerCase().replace(/; /g, ', ')}.`,
-          MONTHLY_REQUEST_PREFIX,
-          dueBy,
-          ITEMS,
-        ],
+           FROM hsdg.compliance_instances ci
+           JOIN hsdg.engagements e ON e.id = ci.engagement_id
+           JOIN hsdg.entities ent ON ent.id = e.entity_id
+           JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+           LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
+           JOIN LATERAL (
+             SELECT p.attributes FROM hsdg.registration_compliance_profiles p
+              WHERE p.registration_id = ci.registration_id AND p.effective_from <= $2::date
+                AND (p.effective_to IS NULL OR p.effective_to >= $2::date)
+              ORDER BY p.effective_from DESC LIMIT 1) p ON true
+          WHERE ci.period_key = $1 AND ci.section = ANY($3::text[])
+            AND ci.workflow_status NOT IN ('filed','not_applicable')
+            AND e.status NOT IN ('completed','closed','cancelled','declined','withdrawn','merged')
+            AND (p.attributes ->> 'monthlyDataRequest')::boolean IS TRUE
+          ORDER BY ci.registration_id, ci.section, ci.created_at`,
+        [periodKey, today, MONTHLY_REQUEST_SECTIONS],
       );
       return rows;
     });
 
-    let linked = 0;
-    let emailed = 0;
-    if (this.uploads.enabled) {
-      const base = this.config.get('WEB_PUBLIC_URL').replace(/\/$/, '');
-      for (const r of created) {
-        const link = await this.uploads.createLink(ctx, r.engagement_id, r.dependency_id, {});
-        linked += 1;
-        emailed += await this.db.withRlsContext(ctx, (client) =>
-          this.notifications.enqueueClientDeliveryWith(client, {
-            recipientEmail: r.client_email,
-            type: NOTIFICATION_TYPE.clientDependencyReminder,
-            title: `${what} — GSTIN ${r.registration_number}`,
-            body:
-              `Please upload last month's ${ITEMS.toLowerCase().replace(/; /g, ', ')} by ${dueBy} ` +
-              `using this secure link (no login needed): ${base}/client-upload/${link.token}`,
-            engagementId: r.engagement_id,
+    const base = this.config.get('WEB_PUBLIC_URL').replace(/\/$/, '');
+    for (const f of due) {
+      try {
+        const raised = await this.db.withRlsContext(ctx, async (client) =>
+          raiseSlotRequests(client, f.instance_id, {
+            today,
+            createdBy: null,
+            policy: await chasingPolicy(client),
           }),
+        );
+        if (raised.length === 0) continue;
+        result.requested += 1;
+        result.items += raised.length;
+        if (!this.uploads.enabled) continue;
+        const items: { label: string; uploadUrl: string }[] = [];
+        for (const r of raised) {
+          const link = await this.uploads.createLink(ctx, f.engagement_id, r.dependencyId, {});
+          result.linked += 1;
+          items.push({ label: r.label, uploadUrl: `${base}/client-upload/${link.token}` });
+        }
+        result.emailed += await this.db.withRlsContext(ctx, (client) =>
+          this.notifications.enqueueClientDeliveryWith(client, {
+            recipientEmail: f.client_email,
+            type: NOTIFICATION_TYPE.clientDependencyReminder,
+            title: `Documents needed — ${f.form} ${periodLabel(periodKey)}`,
+            body: reminderText({
+              entityName: f.entity_name,
+              formLabel: f.form,
+              periodKey,
+              items,
+              dueBy: f.internal_due,
+            }),
+            engagementId: f.engagement_id,
+          }),
+        );
+      } catch (err) {
+        result.failed += 1;
+        this.logger.warn(
+          `Monthly data request for filing ${f.instance_id}: ${(err as Error).message}`,
         );
       }
     }
-    return { periodKey, requested: created.length, linked, emailed };
+    return result;
   }
 
   private async operatorContext(): Promise<RlsContext | null> {

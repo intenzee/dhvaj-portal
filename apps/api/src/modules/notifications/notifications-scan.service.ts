@@ -61,6 +61,8 @@ interface DueDependencyRow {
   requested_info: string;
   responsible_employee_id: string | null;
   engagement_partner_id: string | null;
+  /** The lead of the service (stream) the request was raised for (WF-302). */
+  stream_lead_id: string | null;
   client_email: string | null;
   escalation_overdue: boolean;
 }
@@ -273,16 +275,18 @@ export class NotificationsScanService {
       // ── Client-dependency reminders + PBC overdue escalation ──────────────
       // reminder_date reached → gentle reminder to the responsible staff/EP.
       // escalation_date passed → §24 "PBC overdue → client + owner": escalate to
-      // the responsible owner AND the engagement partner. (Client-facing delivery
+      // the responsible owner, the stream lead (WF-302) AND the engagement
+      // partner. (Client-facing delivery
       // rides the same row via the portal's client surface.)
       const { rows: deps } = await client.query<DueDependencyRow>(
         `SELECT cd.id, cd.engagement_id, e.engagement_code, ent.legal_name AS entity_name,
                 cd.requested_info, cd.responsible_employee_id, e.engagement_partner_id,
-                pc.email::text AS client_email,
+                es.lead_employee_id AS stream_lead_id, pc.email::text AS client_email,
                 (cd.escalation_date IS NOT NULL AND cd.escalation_date <= CURRENT_DATE) AS escalation_overdue
          FROM hsdg.client_dependencies cd
          JOIN hsdg.engagements e ON e.id = cd.engagement_id
          JOIN hsdg.entities ent ON ent.id = e.entity_id
+         LEFT JOIN hsdg.engagement_services es ON es.id = cd.engagement_service_id
          LEFT JOIN LATERAL (
            SELECT email FROM hsdg.entity_contacts
            WHERE entity_id = ent.id AND email IS NOT NULL
@@ -301,7 +305,11 @@ export class NotificationsScanService {
         if (row.escalation_overdue) {
           result.clientDependencyOverdue += await this.notifications.emitWith(client, ctx, {
             type: NOTIFICATION_TYPE.clientDependencyOverdue,
-            recipientEmployeeIds: [row.responsible_employee_id, row.engagement_partner_id],
+            recipientEmployeeIds: [
+              row.responsible_employee_id,
+              row.stream_lead_id,
+              row.engagement_partner_id,
+            ],
             title: `PBC overdue — ${context}`,
             body: `Client information is overdue and has been escalated: ${row.requested_info}.`,
             engagementId: row.engagement_id,

@@ -109,6 +109,11 @@ export class NotificationsService {
     return this.db.withRlsContext(ctx, (client) => this.emitWith(client, ctx, event));
   }
 
+  /** An external channel (e-mail) is configured, so a client can be reached. */
+  get hasExternalChannels(): boolean {
+    return this.channels.length > 0;
+  }
+
   /**
    * Enqueue a CLIENT-facing delivery (external email) on an existing transaction
    * — §24 client-facing routing. Clients have no portal row; this addresses the
