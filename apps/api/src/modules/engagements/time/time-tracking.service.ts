@@ -10,6 +10,7 @@ import {
   FEATURE_FLAG,
   STOPPED_REASON,
   type ActiveTimer,
+  type EngagementKind,
   type EngagementTimePersonRow,
   type EngagementTimeReport,
   type FirmTimeReport,
@@ -24,6 +25,13 @@ import { DatabaseService } from '../../../database/database.service';
 import type { RlsContext } from '../../../database/rls-context';
 import { translatePgError as mapPgError } from '../../../common/errors/pg-error.util';
 import { FeatureFlagsService } from '../../../common/feature-flags/feature-flags.service';
+import {
+  WORK_LINK_COLUMNS,
+  type WorkLinkSqlRow,
+  workLinkFilingOf,
+  workLinkJoin,
+  workLinkOf,
+} from '../../../common/work-links';
 import { AuditService } from '../../audit/audit.service';
 
 interface TimeEntryRow {
@@ -263,25 +271,45 @@ export class TimeTrackingService {
     return rows.length;
   }
 
-  /** The caller's single running timer (for the global banner), or null. */
+  /**
+   * The caller's single running timer (for the global banner), or null — with
+   * a `link` to the work it is running on (its task's filing), so the banner
+   * opens that filing rather than the engagement (WF-205).
+   */
   async activeForCaller(ctx: RlsContext): Promise<ActiveTimer | null> {
     if (!ctx.employeeId) return null;
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<
-        TimeEntryRow & { engagement_code: string; entity_name: string }
+        TimeEntryRow &
+          WorkLinkSqlRow & {
+            engagement_code: string;
+            engagement_kind: EngagementKind;
+            entity_name: string;
+          }
       >(
-        `SELECT ${ENTRY_SELECT}, e.engagement_code, ent.legal_name AS entity_name
+        `SELECT ${ENTRY_SELECT}, e.engagement_code, e.kind AS engagement_kind,
+                ent.legal_name AS entity_name, ${WORK_LINK_COLUMNS}
          FROM hsdg.engagement_time_entries te
          JOIN hsdg.employees emp ON emp.id = te.employee_id
          JOIN hsdg.engagements e ON e.id = te.engagement_id
          JOIN hsdg.entities ent ON ent.id = e.entity_id
+         LEFT JOIN hsdg.tasks lt ON lt.id = te.task_id
+         ${workLinkJoin('lt.source_compliance_instance_id')}
          WHERE te.employee_id = $1 AND te.ended_at IS NULL
          LIMIT 1`,
         [ctx.employeeId],
       );
       const r = rows[0];
       if (!r) return null;
-      return { entry: mapEntry(r), engagementCode: r.engagement_code, entityName: r.entity_name };
+      return {
+        entry: mapEntry(r),
+        engagementCode: r.engagement_code,
+        entityName: r.entity_name,
+        link: workLinkOf(
+          { engagementId: r.engagement_id, engagementKind: r.engagement_kind, taskId: r.task_id },
+          workLinkFilingOf(r),
+        ),
+      };
     });
   }
 
