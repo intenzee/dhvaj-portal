@@ -6,12 +6,20 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { FolderOpen, CheckCircle2 } from 'lucide-react';
-import { FEATURE_FLAG, NOTIFICATION_TYPE, TASK_STATUS, type Paginated } from '@hsdg/contracts';
+import {
+  FEATURE_FLAG,
+  NOTIFICATION_TYPE,
+  PERMISSION,
+  TASK_STATUS,
+  type Paginated,
+} from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate, deadlineLabel } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { useWorkHref } from '@/lib/work-href';
+import { useAuth } from '@/lib/auth';
+import { can } from '@/lib/principal';
 import type { MyTask, MyClientDependency, NotificationRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, EmptyState, Button } from '@/components/ui';
 import { StatusBadge, PriorityBadge } from '@/components/status-badge';
@@ -22,8 +30,10 @@ import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-mo
 import { CompletionBar } from '@/components/completion';
 import { cn } from '@/lib/cn';
 import { sortMyTasks, todayIst, useMyTaskColumns } from '@/components/work/my-task-columns';
+import { ReviewQueueTab, reviewFilterOf } from '@/components/work/review-queue-tab';
 
-type Tab = 'tasks' | 'client-dependencies' | 'to-review';
+type Tab = 'tasks' | 'client-dependencies' | 'to-review' | 'new-uploads';
+type TaskScope = 'mine' | 'team';
 
 const depColumns: ColumnDef<MyClientDependency, unknown>[] = [
   { header: 'Requested', accessorKey: 'requestedInfo' },
@@ -60,7 +70,9 @@ function MyWorkInner(): JSX.Element {
       ? 'client-dependencies'
       : initialTab === 'to-review'
         ? 'to-review'
-        : 'tasks',
+        : initialTab === 'new-uploads'
+          ? 'new-uploads'
+          : 'tasks',
   );
   const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
 
@@ -129,10 +141,32 @@ function MyWorkInner(): JSX.Element {
     onDocuments: setDocsForTask,
     today,
   });
+  // WF-106: engagement leads can switch the Tasks tab to their team's tasks
+  // (everything on engagements they manage or partner), with an Assignee column.
+  const { principal } = useAuth();
+  const canTeam = workLinks && can(principal, PERMISSION.engagementManage);
+  const [scope, setScope] = useState<TaskScope>('mine');
+  const teamScope = canTeam && scope === 'team';
+  const teamTaskColumns = useMemo<ColumnDef<MyTask, unknown>[]>(
+    () => [
+      ...linkedTaskColumns.slice(0, 1),
+      {
+        header: 'Assignee',
+        cell: ({ row }) =>
+          row.original.assignedToName ?? <span className="text-ink-faint">Unassigned</span>,
+      },
+      ...linkedTaskColumns.slice(1),
+    ],
+    [linkedTaskColumns],
+  );
+  // With ff_work_links, "To Review" is the review queue (WF-105) and the
+  // document-upload notifications move to their own "New client uploads" tab.
+  const uploadsTab: Tab = workLinks ? 'new-uploads' : 'to-review';
 
   const tasks = useQuery({
-    queryKey: ['work', 'tasks'],
-    queryFn: () => apiFetch<Paginated<MyTask>>('/work/tasks?limit=100'),
+    queryKey: teamScope ? ['work', 'tasks', 'team'] : ['work', 'tasks'],
+    queryFn: () =>
+      apiFetch<Paginated<MyTask>>(`/work/tasks?limit=100${teamScope ? '&scope=team' : ''}`),
     enabled: tab === 'tasks',
   });
   const deps = useQuery({
@@ -146,7 +180,7 @@ function MyWorkInner(): JSX.Element {
       apiFetch<Paginated<NotificationRow>>(
         `/notifications?limit=100&unreadOnly=true&type=${NOTIFICATION_TYPE.documentUploaded}`,
       ),
-    enabled: tab === 'to-review',
+    enabled: tab === uploadsTab,
   });
   const markReviewed = useMutation({
     mutationFn: (id: string) => apiFetch(`/notifications/${id}/read`, { method: 'POST' }),
@@ -168,6 +202,7 @@ function MyWorkInner(): JSX.Element {
             ['tasks', 'My Tasks'],
             ['client-dependencies', 'Client Dependencies'],
             ['to-review', 'To Review'],
+            ...(workLinks ? ([['new-uploads', 'New client uploads']] as const) : []),
           ] as const
         ).map(([key, label]) => (
           <button
@@ -185,7 +220,32 @@ function MyWorkInner(): JSX.Element {
 
       {tab === 'tasks' && (
         <>
-          {tasks.data && tasks.data.items.length > 0 && (
+          {canTeam && (
+            <div className="mb-3 flex items-center gap-2" role="group" aria-label="Whose tasks">
+              {(
+                [
+                  ['mine', 'Mine'],
+                  ['team', 'Team'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={scope === key}
+                  onClick={() => setScope(key)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-medium transition',
+                    scope === key
+                      ? 'border-primary-600 bg-primary-600 text-white'
+                      : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-raised',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {!teamScope && tasks.data && tasks.data.items.length > 0 && (
             <div className="mb-3 flex items-center gap-3">
               <span className="text-sm text-ink-muted">Your progress:</span>
               <CompletionBar
@@ -204,9 +264,13 @@ function MyWorkInner(): JSX.Element {
             )}
             {tasks.data && (
               <DataTable
-                columns={workLinks ? linkedTaskColumns : taskColumns}
+                columns={
+                  teamScope ? teamTaskColumns : workLinks ? linkedTaskColumns : taskColumns
+                }
                 data={workLinks ? sortMyTasks(tasks.data.items, today) : tasks.data.items}
-                empty="No open tasks assigned to you."
+                empty={
+                  teamScope ? 'No open tasks on your team.' : 'No open tasks assigned to you.'
+                }
               />
             )}
           </Card>
@@ -226,7 +290,11 @@ function MyWorkInner(): JSX.Element {
         </Card>
       )}
 
-      {tab === 'to-review' && (
+      {tab === 'to-review' && workLinks && (
+        <ReviewQueueTab initialFilter={reviewFilterOf(params.get('filter'))} />
+      )}
+
+      {tab === uploadsTab && (
         <Card className="p-0">
           {toReview.isLoading && (
             <div className="p-4">

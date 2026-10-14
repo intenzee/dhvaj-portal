@@ -11,6 +11,7 @@ import { PageHeader, Spinner } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
+import { FoldedRoute } from '@/components/work/folded-route';
 
 const columns: ColumnDef<MyClientDependency, unknown>[] = [
   { header: 'Requested', accessorKey: 'requestedInfo' },
@@ -38,6 +39,14 @@ const columns: ColumnDef<MyClientDependency, unknown>[] = [
 ];
 
 export default function ClientDependenciesPage(): JSX.Element {
+  return (
+    <FoldedRoute from="/client-dependencies">
+      <ClientDependenciesList />
+    </FoldedRoute>
+  );
+}
+
+function ClientDependenciesList(): JSX.Element {
   const workHref = useWorkHref();
   const q = useQuery({
     queryKey: ['client-dependencies', 'mine'],
