@@ -278,7 +278,9 @@ export class FilingWorkspaceService {
         );
       }
       if (dto.status === 'done' && item.auto_tick === 'event') {
-        throw new ConflictException('Record the meeting — this step then ticks itself.');
+        throw new ConflictException(
+          'Record the AGM (its meeting, or Events on the ROC tab) — this step then ticks itself.',
+        );
       }
       // The firm's certification (§5 CERT): a partner ticks or reopens it, with the UDIN.
       if (item.ticked_by === 'partner' && (dto.status === 'done' || item.status === 'done')) {
@@ -1027,6 +1029,7 @@ export class FilingWorkspaceService {
           dueDate: inst.due,
           asOf: live?.filedOn ?? today,
           authorisedCapital: cin?.authorisedCapital ?? null,
+          normalFeePaid: live?.normalFeePaid ?? null,
         });
       }
     }
