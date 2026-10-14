@@ -204,6 +204,10 @@ export const ACTIVITY_KIND = {
   comment: 'comment',
   timeDay: 'time_day',
   independenceAck: 'independence_ack',
+  /** ROC / MCA events (AGM held, director change …) and what they moved. */
+  eventRecorded: 'event_recorded',
+  eventCorrected: 'event_corrected',
+  eventVoided: 'event_voided',
 } as const;
 export type ActivityKind = (typeof ACTIVITY_KIND)[keyof typeof ACTIVITY_KIND];
 

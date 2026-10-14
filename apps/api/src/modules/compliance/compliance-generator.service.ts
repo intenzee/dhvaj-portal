@@ -24,6 +24,7 @@ import {
   type Period,
   type PeriodRuleVersion,
 } from './compliance-periods';
+import { eventContext, withAgmExtension } from './compliance-events';
 
 /**
  * Calendar v2 generator (spec Change 4 "Generation"). Walks year → stream →
@@ -66,6 +67,35 @@ export interface GenerateSummary {
   notApplicable: number;
   /** Ids of newly created instances (checklist seeding, audit). */
   createdIds: string[];
+  /** Items moved, with their statutory date before and after. */
+  movedItems: { id: string; from: string; to: string }[];
+  flaggedIds: string[];
+  notApplicableIds: string[];
+}
+
+const EMPTY_SUMMARY: GenerateSummary = {
+  created: 0,
+  moved: 0,
+  flagged: 0,
+  notApplicable: 0,
+  createdIds: [],
+  movedItems: [],
+  flaggedIds: [],
+  notApplicableIds: [],
+};
+
+/** Add one summary to another (an event's own items, then the year's regeneration). */
+export function mergeSummaries(a: GenerateSummary, b: GenerateSummary): GenerateSummary {
+  return {
+    created: a.created + b.created,
+    moved: a.moved + b.moved,
+    flagged: a.flagged + b.flagged,
+    notApplicable: a.notApplicable + b.notApplicable,
+    createdIds: [...a.createdIds, ...b.createdIds],
+    movedItems: [...a.movedItems, ...b.movedItems],
+    flaggedIds: [...a.flaggedIds, ...b.flaggedIds],
+    notApplicableIds: [...a.notApplicableIds, ...b.notApplicableIds],
+  };
 }
 
 interface VersionRow {
@@ -114,12 +144,28 @@ interface ProfileRow {
   attributes: Record<string, unknown>;
 }
 
-interface EventRow {
+export interface EventRow {
   id: string;
   registration_id: string | null;
   event_type: string;
   financial_year: string;
   event_date: string;
+  details?: Record<string, unknown> | null;
+}
+
+/** The live event of a type for a year and registration (a CIN-less event applies to all). */
+function findEvent(
+  events: readonly EventRow[],
+  eventType: string,
+  financialYear: string,
+  regId: string | null,
+): EventRow | undefined {
+  return events.find(
+    (ev) =>
+      ev.event_type === eventType &&
+      ev.financial_year === financialYear &&
+      (ev.registration_id === null || ev.registration_id === regId),
+  );
 }
 
 interface ExistingRow {
@@ -351,14 +397,7 @@ export class ComplianceGeneratorService {
         ORDER BY financial_year`,
       [engagementId, opts.financialYears ?? null],
     );
-    const empty: GenerateSummary = {
-      created: 0,
-      moved: 0,
-      flagged: 0,
-      notApplicable: 0,
-      createdIds: [],
-    };
-    if (years.rows.length === 0) return empty;
+    if (years.rows.length === 0) return { ...EMPTY_SUMMARY };
 
     const allStreams = [...new Set(years.rows.flatMap((y) => y.streams))];
     const [lines, regs, profiles, versionRows, holidayRows, events, existing] = await inSequence([
@@ -402,9 +441,9 @@ export class ComplianceGeneratorService {
         client.query<{ d: string }>(`SELECT holiday_date::text AS d FROM hsdg.compliance_holidays`),
       () =>
         client.query<EventRow>(
-          `SELECT id, registration_id, event_type, financial_year, event_date::text
-           FROM hsdg.compliance_events WHERE engagement_id = $1
-          ORDER BY event_date DESC`,
+          `SELECT id, registration_id, event_type, financial_year, event_date::text, details
+           FROM hsdg.compliance_events WHERE engagement_id = $1 AND voided_at IS NULL
+          ORDER BY event_date DESC, created_at DESC`,
           [engagementId],
         ),
       () =>
@@ -527,26 +566,27 @@ export class ComplianceGeneratorService {
     const profile =
       profileScope === 'entity' ? null : profileOn(a.profiles, profileScope, regId, a.period.start);
     const panProfile = profileOn(a.profiles, 'pan', null, a.period.start);
-    const ctx = buildRuleContext(
-      a.facts,
-      a.target.scope,
-      a.target.registration,
-      profile,
-      panProfile,
-    );
-    const version = applyVariants(toVersion(row), ctx);
+    // Event facts (auditor appointed at this AGM …) join the client's facts;
+    // the event read is the one the rule runs from.
+    const ruleEvent = row.event_type
+      ? findEvent(a.events, row.event_type, a.period.financialYear, regId)
+      : undefined;
+    const ctx = {
+      ...buildRuleContext(a.facts, a.target.scope, a.target.registration, profile, panProfile),
+      ...eventContext(ruleEvent),
+    };
+    let version = applyVariants(toVersion(row), ctx);
+    const extension = findEvent(a.events, 'agm_extension', a.period.financialYear, regId);
+    if (extension) {
+      version = withAgmExtension(version, row.code, Number(extension.details?.months ?? 0));
+    }
     if (!passesPeriodFilter(version.periodFilter, a.period)) return null;
     if (!conditionHolds(version.condition, ctx)) return null;
 
-    let event: EventRow | undefined;
-    if (version.calculationBasis === 'event_date' && version.eventType) {
-      event = a.events.find(
-        (ev) =>
-          ev.event_type === version.eventType &&
-          ev.financial_year === a.period.financialYear &&
-          (ev.registration_id === null || ev.registration_id === regId),
-      );
-    }
+    const event =
+      version.calculationBasis === 'event_date' && version.eventType
+        ? findEvent(a.events, version.eventType, a.period.financialYear, regId)
+        : undefined;
     const due = dueForPeriod(version, a.period, a.holidays, event?.event_date ?? null);
     if (!due) return null;
     return {
@@ -681,6 +721,9 @@ export class ComplianceGeneratorService {
                 is_optional = m."isOptional",
                 section = m.section,
                 compliance_event_id = m."complianceEventId",
+                period_start = m."periodStart",
+                period_end = m."periodEnd",
+                financial_year = m."financialYear",
                 workflow_status = CASE WHEN m.reopen THEN 'not_started' ELSE ci.workflow_status END,
                 notes = CASE WHEN m.reopen THEN NULL ELSE ci.notes END,
                 government_extension_id = COALESCE(
@@ -695,7 +738,8 @@ export class ComplianceGeneratorService {
            FROM jsonb_to_recordset($1::jsonb) AS m(
                 id uuid, reopen boolean, "versionId" uuid, "referenceDate" date,
                 "statutoryDeadline" date, "internalSlaDate" date, "isProvisional" boolean,
-                "isOptional" boolean, section text, "complianceEventId" uuid)
+                "isOptional" boolean, section text, "complianceEventId" uuid,
+                "periodStart" date, "periodEnd" date, "financialYear" text)
           WHERE ci.id = m.id`,
         [JSON.stringify(toMove.map((m) => ({ id: m.id, reopen: m.reopen, ...m.d })))],
       );
@@ -730,35 +774,59 @@ export class ComplianceGeneratorService {
       );
     }
 
+    const before = new Map(existing.map((x) => [x.id, x.statutory_deadline]));
     return {
       created: createdIds.length,
       moved: toMove.length,
       flagged: toFlag.length,
       notApplicable: toRetire.length,
       createdIds,
+      movedItems: toMove.map((m) => ({
+        id: m.id,
+        from: before.get(m.id) ?? m.d.statutoryDeadline,
+        to: m.d.statutoryDeadline,
+      })),
+      flaggedIds: toFlag,
+      notApplicableIds: toRetire,
     };
   }
 
   /**
-   * Create the instances an event triggers: every event-frequency rule of a
-   * stream in scope with this event type (REG-01, DIR-12, PAS-3, …). Annual
-   * rules that run from an event (AOC-4, MGT-7, ADT-1 from the AGM) are moved
-   * by the next generateForEngagement instead. Keyed 'EVT:<event id>'.
+   * Bring the items an event triggers in line with it: every event-frequency
+   * rule of a stream in scope with this event type (REG-01, DIR-12, PAS-3, …),
+   * its variants and conditions read against the event's details (PAS-3 in 15
+   * days for a private placement). Keyed 'EVT:<event id>', so recording,
+   * correcting and voiding all run through here: new items are created,
+   * not-started ones move with the event's date or fall away when it is voided,
+   * started ones are flagged. Annual rules that run from an event (AOC-4,
+   * MGT-7, ADT-1 from the AGM) move with the next generateForEngagement instead.
    */
-  async createEventInstances(
+  async syncEventInstances(
     client: PoolClient,
     engagementId: string,
     event: EventRow,
-  ): Promise<string[]> {
+    opts: { voided?: boolean } = {},
+  ): Promise<GenerateSummary> {
+    const periodKey = `EVT:${event.id}`;
+    const { rows: existing } = await client.query<ExistingRow>(
+      `SELECT id, compliance_rule_id, registration_id, period_key, financial_year, workflow_status,
+              statutory_deadline::text, internal_sla_date::text, compliance_rule_version_id,
+              is_provisional, compliance_event_id, notes, profile_changed_at, form_label
+         FROM hsdg.compliance_instances
+        WHERE engagement_id = $1 AND period_key = $2`,
+      [engagementId, periodKey],
+    );
     const streams = await client.query<{ stream: Stream }>(
       `SELECT DISTINCT unnest(streams) AS stream FROM hsdg.compliance_engagement_years
         WHERE engagement_id = $1 AND status = 'open'`,
       [engagementId],
     );
-    const inScope = streams.rows.map((s) => s.stream);
-    if (inScope.length === 0) return [];
-    const { rows: versions } = await client.query<VersionRow & { line_id: string | null }>(
-      `SELECT DISTINCT ON (r.id) v.id, v.compliance_rule_id, r.code, v.effective_from::text,
+    const inScope = opts.voided ? [] : streams.rows.map((s) => s.stream);
+    const { rows: versions } =
+      inScope.length === 0
+        ? { rows: [] as Array<VersionRow & { line_id: string | null }> }
+        : await client.query<VersionRow & { line_id: string | null }>(
+            `SELECT DISTINCT ON (r.id) v.id, v.compliance_rule_id, r.code, v.effective_from::text,
               v.effective_to::text, v.calculation_basis, v.offset_months, v.offset_days,
               v.offset_working_days, v.fixed_month, v.fixed_day, v.working_day_adjustment,
               v.internal_sla_offset_days, v.condition, v.stream, v.registration_scope, v.frequency,
@@ -773,55 +841,62 @@ export class ComplianceGeneratorService {
           AND v.stream = ANY($3::text[]) AND v.effective_from <= $4::date
           AND (v.effective_to IS NULL OR v.effective_to >= $4::date)
         ORDER BY r.id, v.effective_from DESC`,
-      [engagementId, event.event_type, inScope, event.event_date],
-    );
-    if (versions.length === 0) return [];
+            [engagementId, event.event_type, inScope, event.event_date],
+          );
+    if (versions.length === 0 && existing.length === 0) return { ...EMPTY_SUMMARY };
     const holidays = new Set(
-      (
-        await client.query<{ d: string }>(
-          `SELECT holiday_date::text AS d FROM hsdg.compliance_holidays`,
-        )
-      ).rows.map((h) => h.d),
+      versions.length === 0
+        ? []
+        : (
+            await client.query<{ d: string }>(
+              `SELECT holiday_date::text AS d FROM hsdg.compliance_holidays`,
+            )
+          ).rows.map((h) => h.d),
     );
+    const ctx = eventContext(event);
     const desired: Desired[] = [];
     for (const v of versions) {
       const scope = v.registration_scope ?? 'entity';
       const needsRegistration = scope !== 'entity' && scope !== 'pan';
       if (needsRegistration && !event.registration_id) continue;
+      const version = applyVariants(toVersion(v), ctx);
+      if (!conditionHolds(version.condition, ctx)) continue;
       const period: Period = {
-        key: `EVT:${event.id}`,
+        key: periodKey,
         financialYear: event.financial_year,
         start: event.event_date,
         end: event.event_date,
         tags: [],
         label: event.event_type,
       };
-      const due = dueForPeriod(toVersion(v), period, holidays, event.event_date);
+      const due = dueForPeriod(version, period, holidays, event.event_date);
       if (!due) continue;
       desired.push({
         ruleId: v.compliance_rule_id,
         versionId: v.id,
         registrationId: needsRegistration ? event.registration_id : null,
         engagementServiceId: v.line_id,
-        periodKey: period.key,
+        periodKey,
         financialYear: event.financial_year,
         periodStart: event.event_date,
         periodEnd: event.event_date,
-        section: v.section,
+        section: version.section,
         referenceDate: due.referenceDate,
         statutoryDeadline: due.statutoryDeadline,
         internalSlaDate: due.internalSlaDate,
         isProvisional: false,
-        isOptional: v.is_optional,
+        isOptional: version.isOptional,
         complianceEventId: event.id,
-        formLabel: null,
+        formLabel: version.formLabel !== v.form_label ? version.formLabel : null,
       });
     }
-    const summary = await this.reconcile(client, engagementId, desired, [], {
-      years: new Set(),
-      ruleIds: new Set(),
+    return this.reconcile(client, engagementId, desired, existing, {
+      years: new Set([event.financial_year, ...existing.map((x) => x.financial_year ?? '')]),
+      ruleIds: new Set([
+        ...versions.map((v) => v.compliance_rule_id),
+        ...existing.map((x) => x.compliance_rule_id),
+      ]),
     });
-    return summary.createdIds;
   }
 
   /**
@@ -861,10 +936,13 @@ export class ComplianceGeneratorService {
   }
 }
 
-/** The FY whose accounts an event belongs to: an AGM adopts the previous FY's accounts. */
+/**
+ * The FY whose accounts an event belongs to: an AGM adopts the previous FY's
+ * accounts, and an AGM extension extends that AGM.
+ */
 export function eventFinancialYear(eventType: string, eventDate: string): string {
   const fy = financialYearOf(eventDate);
-  if (eventType !== 'agm') return fy;
+  if (eventType !== 'agm' && eventType !== 'agm_extension') return fy;
   const start = Number(fy.slice(0, 4)) - 1;
   return `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
 }

@@ -88,6 +88,8 @@ export interface FilingRecordView {
   figures: Record<string, string | number | null>;
   lateFeePaid: number | null;
   interestPaid: number | null;
+  /** ROC: the normal filing fee (the additional fee is lateFeePaid). */
+  normalFeePaid: number | null;
   ackDocumentId: string;
   remarks: string | null;
   recordedAt: string;

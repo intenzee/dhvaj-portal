@@ -47,10 +47,10 @@ export function periodParam(stream: Stream, periodKey: string): { key: 'm' | 'p'
 }
 
 function Pill({ item, stream, label }: { item: TreeItem; stream: Stream; label?: string }): JSX.Element {
-  const done = filingEnd(stream, item.section).done.toLowerCase();
+  const done = filingEnd(stream, item.section, item.ruleCode).done.toLowerCase();
   return (
     <span
-      title={`${item.label}: ${filingStatusLabel(item.workflowStatus, stream, item.section)}${item.filedOn ? `, ${done} ${formatDate(item.filedOn)}` : ''}`}
+      title={`${item.label}: ${filingStatusLabel(item.workflowStatus, stream, item.section, item.ruleCode)}${item.filedOn ? `, ${done} ${formatDate(item.filedOn)}` : ''}`}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${pillTone(item)}`}
     >
       {label ?? item.label}

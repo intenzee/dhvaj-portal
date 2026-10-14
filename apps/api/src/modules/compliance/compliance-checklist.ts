@@ -16,7 +16,7 @@ export interface TemplateItem {
   slotCode?: string;
   required?: boolean;
   sequence?: number;
-  autoTick?: 'document' | 'figure' | 'review' | 'lodge' | null;
+  autoTick?: 'document' | 'figure' | 'review' | 'lodge' | 'event' | null;
   /** A profile attribute that must be true for the item to apply. */
   onlyIf?: string;
   note?: string;
@@ -124,7 +124,8 @@ export async function seedChecklistForInstance(
 
 /**
  * Bring the self-ticking items in line with the facts: a document in the slot,
- * the task approved (review), a live filing (lodge). Items ticked by hand and
+ * the task approved (review), a live filing (lodge), the year's AGM recorded
+ * (event). Items ticked by hand and
  * items marked Not applicable are left alone; review / lodge items un-tick when
  * the fact goes away (task returned, lodge undone).
  */
@@ -147,7 +148,14 @@ export async function syncAutoTicks(client: PoolClient, instanceId: string): Pro
        SELECT EXISTS (SELECT 1 FROM hsdg.tasks t
                        WHERE t.source_compliance_instance_id = $1 AND t.status = 'done') AS reviewed,
               EXISTS (SELECT 1 FROM hsdg.filing_records fr
-                       WHERE fr.compliance_instance_id = $1 AND fr.undone_at IS NULL) AS lodged
+                       WHERE fr.compliance_instance_id = $1 AND fr.undone_at IS NULL) AS lodged,
+              -- 'event': the year's AGM is recorded (and not voided) for this CIN.
+              EXISTS (SELECT 1 FROM hsdg.compliance_instances ci
+                        JOIN hsdg.compliance_events ev
+                          ON ev.engagement_id = ci.engagement_id AND ev.event_type = 'agm'
+                         AND ev.voided_at IS NULL AND ev.financial_year = ci.financial_year
+                         AND (ev.registration_id IS NULL OR ev.registration_id = ci.registration_id)
+                       WHERE ci.id = $1) AS agm_held
      )
      UPDATE hsdg.instance_checklist_items it
         SET status = CASE WHEN want THEN 'done' ELSE 'open' END,
@@ -155,9 +163,14 @@ export async function syncAutoTicks(client: PoolClient, instanceId: string): Pro
             done_by_employee_id = CASE WHEN want THEN it.done_by_employee_id END,
             version = it.version + 1
        FROM (SELECT i.id,
-                    CASE i.auto_tick WHEN 'review' THEN f.reviewed OR f.lodged ELSE f.lodged END AS want
+                    CASE i.auto_tick
+                      WHEN 'review' THEN f.reviewed OR f.lodged
+                      -- a person's own tick (an OPC's member adoption) stands without an event
+                      WHEN 'event' THEN f.agm_held
+                        OR (i.status = 'done' AND i.done_by_employee_id IS NOT NULL)
+                      ELSE f.lodged END AS want
                FROM hsdg.instance_checklist_items i, facts f
-              WHERE i.compliance_instance_id = $1 AND i.auto_tick IN ('review','lodge')
+              WHERE i.compliance_instance_id = $1 AND i.auto_tick IN ('review','lodge','event')
                 AND i.status <> 'not_applicable') x
       WHERE it.id = x.id AND (it.status = 'done') IS DISTINCT FROM x.want`,
     [instanceId],

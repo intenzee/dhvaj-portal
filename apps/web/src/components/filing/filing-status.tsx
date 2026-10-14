@@ -1,4 +1,4 @@
-import type { FilingStatus } from '@hsdg/contracts';
+import { isMeetingRule, type FilingStatus } from '@hsdg/contracts';
 import { Badge } from '@/components/ui';
 
 export const FILING_STATUS_LABEL: Record<FilingStatus, string> = {
@@ -13,12 +13,16 @@ export const FILING_STATUS_LABEL: Record<FilingStatus, string> = {
 
 /**
  * What finishing an item is called. A return is lodged and Filed; an Inward
- * reconciliation, a Bookkeeping month-close or an MIS pack ends inside the firm.
+ * reconciliation, a Bookkeeping month-close or an MIS pack ends inside the firm;
+ * a meeting (AGM, board meeting) is recorded as Held.
  */
 export function filingEnd(
   stream: string | null,
   section?: string | null,
+  ruleCode?: string | null,
 ): { action: string; done: string; ready: string } {
+  if (isMeetingRule(ruleCode))
+    return { action: 'Record meeting', done: 'Held', ready: 'Ready to record' };
   if (stream === 'gst' && section === 'inward')
     return { action: 'Mark reconciled', done: 'Reconciled', ready: 'Ready to reconcile' };
   if (stream === 'bookkeeping')
@@ -32,8 +36,9 @@ export function filingStatusLabel(
   status: FilingStatus,
   stream?: string | null,
   section?: string | null,
+  ruleCode?: string | null,
 ): string {
-  const end = filingEnd(stream ?? null, section);
+  const end = filingEnd(stream ?? null, section, ruleCode);
   if (status === 'filed') return end.done;
   if (status === 'ready_to_file') return end.ready;
   return FILING_STATUS_LABEL[status];
@@ -55,17 +60,21 @@ export function FilingStatusBadge({
   isOverdue,
   stream,
   section,
+  ruleCode,
 }: {
   status: FilingStatus;
   isLate?: boolean;
   isOverdue?: boolean;
   stream?: string | null;
   section?: string | null;
+  ruleCode?: string | null;
 }): JSX.Element {
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
-      <Badge tone={isOverdue ? 'danger' : TONE[status]}>{filingStatusLabel(status, stream, section)}</Badge>
-      {isLate && <Badge tone="warn">{filingEnd(stream ?? null, section).done} late</Badge>}
+      <Badge tone={isOverdue ? 'danger' : TONE[status]}>
+        {filingStatusLabel(status, stream, section, ruleCode)}
+      </Badge>
+      {isLate && <Badge tone="warn">{filingEnd(stream ?? null, section, ruleCode).done} late</Badge>}
     </span>
   );
 }

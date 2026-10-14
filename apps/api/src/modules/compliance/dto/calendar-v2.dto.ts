@@ -11,6 +11,7 @@ import {
   IsUUID,
   Matches,
   MaxLength,
+  MinLength,
 } from 'class-validator';
 import {
   COMPLIANCE_EVENT_TYPES,
@@ -130,6 +131,54 @@ export class RecordComplianceEventDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Event details: agm {auditorAppointed}, allotment {privatePlacement}, agm_extension ' +
+      '{months, approvalRef}, director_change {din, name, change}, charge_creation {chargeHolder, amount}.',
+  })
+  @IsOptional()
+  @IsObject()
+  details?: Record<string, unknown>;
+}
+
+/** PATCH an event — what changes, and why (kept in the event's history). */
+export class CorrectComplianceEventDto {
+  @ApiPropertyOptional({ example: '2027-09-25' })
+  @IsOptional()
+  @IsDateString()
+  eventDate?: string;
+
+  @ApiPropertyOptional({ example: '2026-27' })
+  @IsOptional()
+  @Matches(FY, { message: 'financialYear must look like 2026-27' })
+  financialYear?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
+
+  @ApiPropertyOptional({ description: 'Replaces the event details (same shape as recording).' })
+  @IsOptional()
+  @IsObject()
+  details?: Record<string, unknown>;
+
+  @ApiProperty({ example: 'The AGM was held on the 26th, not the 25th.' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason!: string;
+}
+
+/** DELETE an event — voided, not erased; the reason is kept. */
+export class VoidComplianceEventDto {
+  @ApiProperty({ example: 'Recorded on the wrong client.' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason!: string;
 }
 
 export class SaveComplianceProfileDto {
