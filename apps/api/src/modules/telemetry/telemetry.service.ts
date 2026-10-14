@@ -133,7 +133,7 @@ export class TelemetryService {
       {
         key: WORKFLOW_MEASURE.reviewWait,
         label: 'Review wait',
-        how: 'From sent for review to review started, median, for reviews started in the window',
+        how: 'From sent for review to the review starting, median, for reviews started in the window',
         value: now.reviewWaitHours,
         previous: before.reviewWaitHours,
         unit: 'hours',
@@ -201,16 +201,26 @@ export class TelemetryService {
       officeId,
       ACTIONABLE_TYPES,
     ]);
+    // Approving or returning a task clears review_started_at, so a finished
+    // review is dated by the reviewer's first review clock after it was sent.
     const review = await client.query<{ v: string | null; n: number }>(
-      `SELECT percentile_cont(0.5) WITHIN GROUP (
-                ORDER BY extract(epoch FROM t.review_started_at - t.sent_for_review_at) / 3600) AS v,
+      `WITH r AS (
+         SELECT t.sent_for_review_at AS sent,
+                COALESCE(t.review_started_at,
+                  (SELECT min(te.started_at) FROM hsdg.engagement_time_entries te
+                    WHERE te.task_id = t.id AND te.entry_kind = 'review'
+                      AND te.adjusts_entry_id IS NULL
+                      AND te.started_at >= t.sent_for_review_at)) AS started
+           FROM hsdg.tasks t
+           JOIN hsdg.engagements e ON e.id = t.engagement_id
+          WHERE t.sent_for_review_at IS NOT NULL AND t.sent_for_review_at < $2
+            AND ($3::uuid IS NULL OR e.office_id = $3)
+       )
+       SELECT percentile_cont(0.5) WITHIN GROUP (
+                ORDER BY extract(epoch FROM started - sent) / 3600) AS v,
               count(*)::int AS n
-         FROM hsdg.tasks t
-         JOIN hsdg.engagements e ON e.id = t.engagement_id
-        WHERE t.review_started_at >= $1 AND t.review_started_at < $2
-          AND t.sent_for_review_at IS NOT NULL
-          AND t.review_started_at >= t.sent_for_review_at
-          AND ($3::uuid IS NULL OR e.office_id = $3)`,
+         FROM r
+        WHERE started >= $1 AND started < $2 AND started >= sent`,
       [from, to, officeId],
     );
     const overdue = await client.query<{ n: number }>(
