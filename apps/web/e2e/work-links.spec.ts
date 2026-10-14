@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { arrangeGstEngagement, MONTH, outward, pdf, signIn } from './support/gst-engagement';
 
 /**
@@ -7,6 +7,21 @@ import { arrangeGstEngagement, MONTH, outward, pdf, signIn } from './support/gst
  * their task row flashed; the manager's "Waiting for my review" panel and the
  * Compliance calendar land on the same filing — one click each, no hunting.
  */
+
+/**
+ * Follow a list's link to the filing. With the drawer on (ff_today_view,
+ * WF-202) a plain click works the filing over the list; its "Open in
+ * engagement" goes on to the filing's page — where Phase 1's links land.
+ */
+async function openFiling(page: Page, link: Locator): Promise<void> {
+  await link.click();
+  await page.waitForURL(
+    (u) => u.pathname.startsWith('/engagements/') || u.searchParams.has('open'),
+  );
+  if (new URL(page.url()).searchParams.has('open')) {
+    await page.getByRole('dialog').getByRole('link', { name: 'Open in engagement' }).click();
+  }
+}
 
 /** The page is on the engagement's GST tab, September, Outward — and shows it. */
 async function expectOnSeptemberOutward(page: Page, engagementId: string): Promise<URL> {
@@ -39,7 +54,7 @@ test('My Work, the review panel and the calendar each open the filing in one cli
   await senior.goto('/my-work');
   const row = senior.getByRole('row').filter({ hasText: entityName });
   await expect(row.getByText(/^GSTR-1 · Sep 2026/)).toBeVisible(); // the filing context
-  await row.getByRole('link', { name: /^GSTR-1/ }).click();
+  await openFiling(senior, row.getByRole('link', { name: /^GSTR-1/ }));
   const fromMyWork = await expectOnSeptemberOutward(senior, engagementId);
   const taskId = fromMyWork.searchParams.get('task');
   expect(taskId).toBeTruthy();
@@ -68,7 +83,7 @@ test('My Work, the review panel and the calendar each open the filing in one cli
   await manager.goto('/');
   const waiting = manager.getByRole('link').filter({ hasText: entityName });
   await expect(waiting.first()).toContainText(/waiting today/);
-  await waiting.first().click();
+  await openFiling(manager, waiting.first());
   const fromQueue = await expectOnSeptemberOutward(manager, engagementId);
   expect(fromQueue.searchParams.get('task')).toBe(taskId);
   await expect(
@@ -84,7 +99,7 @@ test('My Work, the review panel and the calendar each open the filing in one cli
     .filter({ hasText: entityName })
     .filter({ hasText: 'GSTR-1' })
     .filter({ hasText: 'Sep 2026' });
-  await filing.getByRole('link', { name: entityName }).click();
+  await openFiling(manager, filing.getByRole('link', { name: entityName }));
   await expectOnSeptemberOutward(manager, engagementId);
 });
 
