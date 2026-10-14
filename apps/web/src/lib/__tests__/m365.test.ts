@@ -1,4 +1,6 @@
-import { editorWindowFeatures, m365EmbedUrl, m365OpenUrl } from '../m365';
+import { editorWindowFeatures, fetchM365Session, m365EmbedUrl, m365OpenUrl } from '../m365';
+
+jest.mock('../api', () => ({ apiFetch: jest.fn() }));
 
 const LINK = 'https://contoso.sharepoint.com/:w:/s/Portal/IQCAw?e=abc';
 
@@ -36,5 +38,36 @@ describe('the editor window', () => {
     expect(
       editorWindowFeatures({ availWidth: 1500, availHeight: 900, availLeft: 1920, availTop: 25 }),
     ).toBe('popup,width=900,height=900,left=2520,top=25');
+  });
+});
+
+describe('Microsoft 365 sessions', () => {
+  const api = jest.requireMock('../api') as { apiFetch: jest.Mock };
+  beforeEach(() => api.apiFetch.mockReset());
+
+  it('shares one request per document and reuses it for a minute', async () => {
+    api.apiFetch.mockResolvedValue({ enabled: true, editorUrl: LINK });
+    let t = 1_000_000;
+    const now = () => t;
+    const a = fetchM365Session('e1', 'd1', now);
+    const b = fetchM365Session('e1', 'd1', now);
+    expect(a).toBe(b);
+    await a;
+    t += 59_000;
+    await fetchM365Session('e1', 'd1', now);
+    expect(api.apiFetch).toHaveBeenCalledTimes(1);
+    await fetchM365Session('e1', 'd2', now);
+    expect(api.apiFetch).toHaveBeenCalledTimes(2);
+    t += 2_000;
+    await fetchM365Session('e1', 'd1', now);
+    expect(api.apiFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not reuse a failure', async () => {
+    api.apiFetch.mockRejectedValueOnce(new Error('down'));
+    await expect(fetchM365Session('e2', 'd1')).rejects.toThrow('down');
+    api.apiFetch.mockResolvedValueOnce({ enabled: true, editorUrl: LINK });
+    await expect(fetchM365Session('e2', 'd1')).resolves.toMatchObject({ enabled: true });
+    expect(api.apiFetch).toHaveBeenCalledTimes(2);
   });
 });

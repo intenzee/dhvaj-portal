@@ -19,7 +19,7 @@ import { SpreadsheetEditor } from '@/components/document-editor/spreadsheet-edit
 import { WordEditor } from '@/components/document-editor/word-editor';
 import { TextEditor } from '@/components/document-editor/text-editor';
 import { M365Editor } from '@/components/document-editor/m365-editor';
-import { isM365Enabled } from '@/lib/m365';
+import { isM365Enabled, isM365File } from '@/lib/m365';
 import type { EditorHandle } from '@/components/document-editor/types';
 import type { DocumentRow } from '@/lib/types';
 
@@ -105,7 +105,7 @@ export function DocumentPreview({
   // show the file and say why Microsoft 365 is not open.
   const [m365Failed, setM365Failed] = useState<string | null>(null);
   const guessName = doc.currentFilename ?? doc.title;
-  const officeKind = ['excel', 'word', 'pdf', 'csv'].includes(detectKind(null, guessName));
+  const officeKind = isM365File(guessName);
   const useM365 = officeKind && isM365Enabled && m365Failed === null;
   // The Microsoft 365 editor holds the bytes itself and saves out-of-band.
   const liveEditor = useM365;

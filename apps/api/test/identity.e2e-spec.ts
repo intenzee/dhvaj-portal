@@ -48,6 +48,20 @@ describe('Identity & Security (e2e)', () => {
       expect(res.body.principal.effectiveRole).toBe('partner');
       expect(res.body.context.role).toBe('partner');
     });
+
+    it('renews a valid token for the same user, and refuses without one', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/renew')
+        .set(bearer(await token('partner.a@dhvaj.in')))
+        .expect(201);
+      expect(res.body.tokenType).toBe('Bearer');
+      const me = await request(app.getHttpServer())
+        .get('/api/v1/auth/me')
+        .set(bearer(res.body.accessToken as string))
+        .expect(200);
+      expect(me.body.principal.email).toBe('partner.a@dhvaj.in');
+      await request(app.getHttpServer()).post('/api/v1/auth/renew').expect(401);
+    });
   });
 
   describe('MFA enforcement', () => {
