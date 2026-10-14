@@ -22,6 +22,7 @@ import { ScopedDocumentsModal } from '@/components/documents/scoped-documents-mo
 import { CompletionBar } from '@/components/completion';
 import { cn } from '@/lib/cn';
 import { sortMyTasks, todayIst, useMyTaskColumns } from '@/components/work/my-task-columns';
+import { SectionChips, useUrlSections, withSections } from '@/components/section-filter';
 
 type Tab = 'tasks' | 'client-dependencies' | 'to-review';
 
@@ -130,9 +131,11 @@ function MyWorkInner(): JSX.Element {
     today,
   });
 
+  // The section a Home panel's "View all" carried (?section=roc), as on /tasks.
+  const [sections, setSections] = useUrlSections();
   const tasks = useQuery({
-    queryKey: ['work', 'tasks'],
-    queryFn: () => apiFetch<Paginated<MyTask>>('/work/tasks?limit=100'),
+    queryKey: ['work', 'tasks', sections],
+    queryFn: () => apiFetch<Paginated<MyTask>>(withSections('/work/tasks?limit=100', sections)),
     enabled: tab === 'tasks',
   });
   const deps = useQuery({
@@ -185,6 +188,9 @@ function MyWorkInner(): JSX.Element {
 
       {tab === 'tasks' && (
         <>
+          <div className="mb-3">
+            <SectionChips value={sections} onChange={setSections} />
+          </div>
           {tasks.data && tasks.data.items.length > 0 && (
             <div className="mb-3 flex items-center gap-3">
               <span className="text-sm text-ink-muted">Your progress:</span>

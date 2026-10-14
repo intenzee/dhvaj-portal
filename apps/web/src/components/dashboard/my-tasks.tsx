@@ -18,7 +18,10 @@ export function MyTasksPanel(): JSX.Element {
   const workHref = useWorkHref();
   const { isOn } = useFeatureFlags();
   // With ff_work_links the Tasks page is a My Work tab.
-  const listHref = isOn(FEATURE_FLAG.workLinks) ? '/my-work?tab=tasks' : withSections('/tasks', sections);
+  const listHref = withSections(
+    isOn(FEATURE_FLAG.workLinks) ? '/my-work?tab=tasks' : '/tasks',
+    sections,
+  );
   const q = useQuery({
     queryKey: ['work', 'tasks', 'dashboard', sections],
     queryFn: () => apiFetch<Paginated<MyTask>>(withSections('/work/tasks?limit=6', sections)),
