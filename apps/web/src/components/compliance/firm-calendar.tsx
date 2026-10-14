@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, ChevronLeft, ChevronRight, Download, List, Settings2 } from 'lucide-react';
@@ -16,9 +16,12 @@ import {
   type FilingStatus,
   type Paginated,
   type Stream,
+  FEATURE_FLAG,
+  workItemHref,
 } from '@hsdg/contracts';
 import { apiFetch, downloadFile, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { can } from '@/lib/principal';
 import { useToast } from '@/lib/toast';
 import type { EmployeeRow, OfficeRow } from '@/lib/types';
@@ -66,10 +69,22 @@ export function daysLeftLabel(
   return `${row.daysLeft} day${row.daysLeft === 1 ? '' : 's'}`;
 }
 
-export function rowHref(r: ComplianceCalendarRow): string {
+/**
+ * Where a calendar row opens: with ff_work_links, the filing itself (its year,
+ * month or period, and part); before that, the stream tab.
+ */
+export function rowHref(r: ComplianceCalendarRow, workLinks = false): string {
+  if (workLinks && r.link) return workItemHref(r.link);
   return r.stream
     ? `/engagements/${r.engagementId}?tab=${r.stream}`
     : `/engagements/${r.engagementId}`;
+}
+
+/** `rowHref` bound to the current ff_work_links flag. */
+export function useCalendarHref(): (r: ComplianceCalendarRow) => string {
+  const { isOn } = useFeatureFlags();
+  const on = isOn(FEATURE_FLAG.workLinks);
+  return useCallback((r: ComplianceCalendarRow) => rowHref(r, on), [on]);
 }
 
 /**
@@ -370,6 +385,7 @@ function ItemBadges({ row }: { row: ComplianceCalendarRow }): JSX.Element {
 /** Columns as on the sheet: due date, day, client, registration, form, period,
  *  status, days left, assignee. */
 function CalendarList({ rows }: { rows: ComplianceCalendarRow[] }): JSX.Element {
+  const hrefOf = useCalendarHref();
   if (rows.length === 0)
     return <EmptyState>Nothing due in this window for these filters.</EmptyState>;
   return (
@@ -422,7 +438,7 @@ function CalendarList({ rows }: { rows: ComplianceCalendarRow[] }): JSX.Element 
                   {due.toLocaleDateString('en-IN', { weekday: 'short' })}
                 </td>
                 <td className="px-3 py-2">
-                  <Link href={rowHref(r)} className="font-medium text-ink hover:text-primary-700">
+                  <Link href={hrefOf(r)} className="font-medium text-ink hover:text-primary-700">
                     {r.entityName}
                   </Link>
                   <span className="block text-xs text-ink-faint">{r.engagementCode}</span>
@@ -466,6 +482,7 @@ function MonthGrid({
   month: string;
   onMonth: (m: string) => void;
 }): JSX.Element {
+  const hrefOf = useCalendarHref();
   const [y, m] = month.split('-').map(Number) as [number, number];
   const first = new Date(y, m - 1, 1);
   const days = new Date(y, m, 0).getDate();
@@ -525,7 +542,7 @@ function MonthGrid({
                 {items.slice(0, 4).map((r) => (
                   <li key={r.id}>
                     <Link
-                      href={rowHref(r)}
+                      href={hrefOf(r)}
                       title={`${r.entityName} · ${r.formLabel ?? r.ruleName} · ${r.periodLabel} · ${daysLeftLabel(r)}`}
                       className={cn(
                         'block truncate rounded border px-1 py-0.5',
