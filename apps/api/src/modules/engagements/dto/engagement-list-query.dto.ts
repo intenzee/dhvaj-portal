@@ -6,8 +6,10 @@ import {
   ENGAGEMENT_STATUSES,
   type EngagementKind,
   type EngagementStatus,
+  type WorkSection,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
+import { SectionQuery } from '../../../common/sections';
 
 const toBool = ({ value }: { value: unknown }): unknown =>
   value === 'true' ? true : value === 'false' ? false : value;
@@ -51,4 +53,8 @@ export class EngagementListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  /** Engagements in any of these sections (a stream it covers, or its kind). */
+  @SectionQuery()
+  section?: WorkSection[];
 }
