@@ -51,6 +51,7 @@ import {
   Button,
   EmptyState,
 } from '@/components/ui';
+import { NextUpStrip } from '@/components/today/next-up';
 import { StatusBadge, PriorityBadge } from '@/components/status-badge';
 import { LifecycleActions } from '@/components/actions/lifecycle-actions';
 import { ReviewActions } from '@/components/actions/review-actions';
@@ -340,6 +341,7 @@ export default function EngagementDetailPage(): JSX.Element {
           </Link>
         }
       />
+      <NextUpStrip engagementId={e.id} />
 
       {/* Action bar — always visible */}
       <Card className="mb-4">
