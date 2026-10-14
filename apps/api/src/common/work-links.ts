@@ -87,6 +87,8 @@ export interface WorkLinkFiling {
   periodKey: string | null;
   section: PeriodSection | null;
   registrationNumber: string | null;
+  /** yyyy-mm of the filing's reference date: a legacy GST filing's month when it has no period key. */
+  referenceMonth?: string | null;
 }
 
 export function workLinkFilingOf(row: WorkLinkSqlRow): WorkLinkFiling {
@@ -97,6 +99,7 @@ export function workLinkFilingOf(row: WorkLinkSqlRow): WorkLinkFiling {
     periodKey: row.wl_period_key,
     section: row.wl_section,
     registrationNumber: row.wl_registration_number,
+    referenceMonth: row.wl_reference_month,
   };
 }
 
@@ -121,7 +124,9 @@ export function workLinkOf(
     ref.instanceId = filing.instanceId;
     ref.stream = filing.stream;
     ref.financialYear = filing.financialYear;
-    ref.periodKey = filing.periodKey;
+    // A legacy GST filing has no period key; its reference month is its month.
+    ref.periodKey =
+      filing.periodKey ?? (filing.stream === 'gst' ? (filing.referenceMonth ?? null) : null);
     ref.section = filing.section;
     ref.registrationNumber = filing.registrationNumber;
   }

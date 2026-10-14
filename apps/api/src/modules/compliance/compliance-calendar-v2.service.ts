@@ -1273,6 +1273,7 @@ export class ComplianceCalendarV2Service {
               periodKey: r.period_key,
               section: r.section,
               registrationNumber: reg?.registration_number ?? null,
+              referenceMonth: r.reference_month,
             },
           ),
         };

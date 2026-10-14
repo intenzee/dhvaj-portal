@@ -196,7 +196,7 @@ const LAYER_SELECT = `
   LEFT JOIN hsdg.employees oe ON oe.id = d.owner_employee_id
   LEFT JOIN hsdg.employees ce ON ce.id = d.completed_by_employee_id`;
 
-interface EventRow {
+interface EventRow extends WorkLinkSqlRow {
   compliance_instance_id: string;
   deadline_layer_id: string | null;
   kind: ComplianceEventKind;
@@ -216,6 +216,7 @@ interface EventRow {
   service_code: string;
   is_overdue: boolean;
   escalation: EscalationLevel;
+  engagement_kind: EngagementKind;
 }
 
 /**
@@ -1216,12 +1217,14 @@ export class ComplianceInstancesService {
                 ev.due_date_source, ev.due_date::text AS due_date, ev.owner_name, ev.is_extended,
                 ev.status,
                 eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
+                eng.kind AS engagement_kind, ${WORK_LINK_COLUMNS},
                 (ev.status = 'open' AND ev.due_date < CURRENT_DATE) AS is_overdue,
                 ${this.escalationCase('ev.status', 'ev.due_date')} AS escalation
          FROM ev
          JOIN hsdg.engagements eng ON eng.id = ev.engagement_id
          JOIN hsdg.entities ent ON ent.id = eng.entity_id
          JOIN hsdg.services s ON s.id = eng.service_id
+         ${workLinkJoin('ev.compliance_instance_id')}
          ${where}
          ORDER BY ev.due_date, ev.kind
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -1646,5 +1649,9 @@ function mapEvent(row: EventRow): ComplianceCalendarEventRecord {
     isExtended: row.is_extended,
     escalation: row.escalation,
     escalationAction: escalationAction(row.escalation).action,
+    link: workLinkOf(
+      { engagementId: row.engagement_id, engagementKind: row.engagement_kind },
+      workLinkFilingOf(row),
+    ),
   };
 }

@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
@@ -27,6 +27,7 @@ import { RollHorizonButton } from '@/components/compliance/roll-horizon-button';
 import { EscalationLegend } from '@/components/compliance/escalation-legend';
 import { cn } from '@/lib/cn';
 import { useFeatureFlags } from '@/lib/feature-flags';
+import { useWorkHref } from '@/lib/work-href';
 import { FirmCalendar } from '@/components/compliance/firm-calendar';
 
 type Filter = 'all' | 'overdue' | 'due-soon';
@@ -205,7 +206,7 @@ function Segmented<T extends string>({
 
 function ComplianceInner(): JSX.Element {
   const params = useSearchParams();
-  const router = useRouter();
+  const workHref = useWorkHref();
   const { principal } = useAuth();
   const initial: Filter =
     params.get('filter') === 'overdue'
@@ -314,7 +315,7 @@ function ComplianceInner(): JSX.Element {
                 columns={columns}
                 data={rows}
                 empty="No obligations match this filter."
-                onRowClick={(row) => router.push(`/engagements/${row.engagementId}`)}
+                rowHref={workHref}
               />
             )}
           </>
@@ -330,7 +331,7 @@ function ComplianceInner(): JSX.Element {
                 columns={eventColumns}
                 data={events.data.items}
                 empty="No deadline events match this view."
-                onRowClick={(row) => router.push(`/engagements/${row.engagementId}`)}
+                rowHref={workHref}
               />
             )}
           </>

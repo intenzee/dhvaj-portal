@@ -325,7 +325,7 @@ function WorkspaceHeader({
       )}
       {inst.lateFeeNote && <p className="text-xs text-ink-muted">{inst.lateFeeNote}</p>}
       {task && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
+        <div data-task-id={task.id} className="flex flex-wrap items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
           <span className="text-xs text-ink-muted">
             Task: <span className="text-ink">{task.title}</span> · {humanize(task.status)}
           </span>
@@ -645,7 +645,7 @@ function SlotRow({
   }
 
   return (
-    <li className="space-y-1.5 px-2.5 py-1.5">
+    <li data-request-id={slot.openRequest?.dependencyId} className="space-y-1.5 px-2.5 py-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className={isNa ? 'text-ink-muted line-through' : 'font-medium'}>{slot.label}</span>
         {slot.required && <span className="text-[10px] text-danger-600">required</span>}
@@ -798,7 +798,7 @@ function ClientRequests({
       {open.length > 0 && (
         <ul className="divide-y divide-line rounded-md border border-line">
           {open.map((r) => (
-            <li key={r.dependencyId} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5">
+            <li key={r.dependencyId} data-request-id={r.dependencyId} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5">
               <span>{r.requestedInfo}</span>
               <Badge tone="warn">
                 Requested {formatDate(r.requestedAt)}

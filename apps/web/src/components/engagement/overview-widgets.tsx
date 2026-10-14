@@ -8,10 +8,11 @@ import {
   type EngagementTabs,
   type OverviewDueItem,
   type Stream,
+  type WorkItemRef,
+  workItemHref,
 } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { formatDate, formatMoney } from '@/lib/format';
-import { monthParamOf } from '@/lib/url-state';
 import { Card, CardBody, CardHeader, CardTitle, EmptyState } from '@/components/ui';
 import { FilingStatusBadge, daysLeftText, dueTone } from '@/components/filing/filing-status';
 
@@ -25,14 +26,17 @@ export function useEngagementTabs(engagementId: string) {
   });
 }
 
-/** A deep link to the filing's month in its stream tab. */
-export function dueItemHref(engagementId: string, d: OverviewDueItem): string {
-  const p = new URLSearchParams({ tab: d.stream ?? 'compliance' });
-  const m = d.stream === 'gst' && d.periodKey ? monthParamOf(d.periodKey) : null;
-  if (m) p.set('m', m);
-  else if (d.periodKey) p.set('p', d.periodKey);
-  if (d.stream === 'gst' && d.registrationNumber) p.set('gstin', d.registrationNumber);
-  return `/engagements/${engagementId}?${p.toString()}`;
+/** An Overview due item as a work link (its filing's month and part in the stream tab). */
+export function dueItemRef(engagementId: string, d: OverviewDueItem): WorkItemRef {
+  return {
+    engagementId,
+    engagementKind: 'compliance',
+    instanceId: d.instanceId,
+    stream: d.stream,
+    periodKey: d.periodKey,
+    section: d.section,
+    registrationNumber: d.registrationNumber,
+  };
 }
 
 function hours(n: number): string {
@@ -63,7 +67,7 @@ export function OverviewWidgets({
       <ul className="divide-y divide-line text-sm">
         {items.map((d) => (
           <li key={d.instanceId} className="flex flex-wrap items-center gap-2 py-1.5">
-            <Link href={dueItemHref(engagementId, d)} className="font-medium text-primary-700 hover:underline">
+            <Link href={workItemHref(dueItemRef(engagementId, d))} className="font-medium text-primary-700 hover:underline">
               {d.label}
             </Link>
             <span className="text-xs text-ink-muted">
