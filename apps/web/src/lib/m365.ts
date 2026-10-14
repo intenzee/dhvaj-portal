@@ -1,4 +1,5 @@
 import { apiFetch } from '@/lib/api';
+import { detectKind } from '@/lib/file-kind';
 
 /**
  * Microsoft 365 (SharePoint Online) editing — client helpers.
@@ -9,6 +10,11 @@ import { apiFetch } from '@/lib/api';
  * the built-in viewers.
  */
 export const isM365Enabled = process.env.NEXT_PUBLIC_M365_ENABLED === 'true';
+
+/** Files Microsoft 365 shows: Word, Excel, CSV and PDF. */
+export function isM365File(filename: string): boolean {
+  return ['excel', 'word', 'pdf', 'csv'].includes(detectKind(null, filename));
+}
 
 export interface M365EditorSession {
   enabled: boolean;
@@ -58,12 +64,40 @@ export function editorWindowFeatures(area: ScreenArea): string {
   return `popup,width=${width},height=${height},left=${left},top=${top}`;
 }
 
-/** Ask the API to build an embedded Microsoft 365 editor session for a document. */
-export function fetchM365Session(engagementId: string, docId: string): Promise<M365EditorSession> {
-  return apiFetch<M365EditorSession>(
+/** How long a fetched session is reused (its sharing link lives far longer). */
+const SESSION_REUSE_MS = 60_000;
+const sessions = new Map<string, { at: number; session: Promise<M365EditorSession> }>();
+
+/**
+ * Ask the API to build an embedded Microsoft 365 editor session for a
+ * document. Calls for the same document share one request, and a session is
+ * reused for a minute, so a prefetch on hover, the inline view and the full
+ * view open from one round trip. A failure is never reused.
+ */
+export function fetchM365Session(
+  engagementId: string,
+  docId: string,
+  now: () => number = Date.now,
+): Promise<M365EditorSession> {
+  const key = `${engagementId}:${docId}`;
+  const hit = sessions.get(key);
+  if (hit && now() - hit.at < SESSION_REUSE_MS) return hit.session;
+  const session = apiFetch<M365EditorSession>(
     `/engagements/${engagementId}/documents/${docId}/m365/session`,
     { method: 'POST' },
   );
+  const entry = { at: now(), session };
+  sessions.set(key, entry);
+  session.catch(() => {
+    if (sessions.get(key) === entry) sessions.delete(key);
+  });
+  return session;
+}
+
+/** Start building a document's session early (e.g. on hover), ignoring failures. */
+export function prefetchM365Session(engagementId: string, docId: string): void {
+  if (!isM365Enabled) return;
+  fetchM365Session(engagementId, docId).catch(() => undefined);
 }
 
 export interface M365SyncResult {
