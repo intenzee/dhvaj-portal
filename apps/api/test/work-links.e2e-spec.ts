@@ -306,6 +306,62 @@ describe('Work links, review queue and team tasks (e2e)', () => {
         registrationNumber: gstin,
       });
     });
+
+    it('a filing document on the Documents page links to its filing part and task (WF-103)', async () => {
+      const { eng, inst, task, gstin } = await setup();
+      const created = await http()
+        .post(`/api/v1/engagements/${eng}/documents`)
+        .set(bearer(pa))
+        .send({
+          title: `Sales register ${unique()}`,
+          documentType: 'working_paper',
+          classification: 'internal',
+          taskId: task,
+          filename: 'sales.pdf',
+          contentType: 'application/pdf',
+          contentBase64: Buffer.from('%PDF-1.4 sales').toString('base64'),
+        })
+        .expect(201);
+      // As a slot upload would file it: the filing and its Outward part.
+      await su.query(
+        `UPDATE hsdg.documents SET compliance_instance_id = $2, period_section = 'outward' WHERE id = $1`,
+        [created.body.id, inst],
+      );
+      const plain = await http()
+        .post(`/api/v1/engagements/${eng}/documents`)
+        .set(bearer(pa))
+        .send({
+          title: `Engagement letter ${unique()}`,
+          documentType: 'engagement_letter',
+          classification: 'client_shared',
+          filename: 'letter.pdf',
+          contentType: 'application/pdf',
+          contentBase64: Buffer.from('%PDF-1.4 letter').toString('base64'),
+        })
+        .expect(201);
+
+      const docs = (await http().get('/api/v1/documents?limit=100').set(bearer(mx)).expect(200)).body
+        .items as Array<{ id: string; engagementId: string; link: WorkItemRef }>;
+      const filed = docs.find((d) => d.id === created.body.id);
+      expect(filed?.link).toEqual({
+        engagementId: eng,
+        engagementKind: filed!.link.engagementKind,
+        instanceId: inst,
+        stream: 'gst',
+        financialYear: '2026-27',
+        periodKey: '2026-09',
+        section: 'outward',
+        registrationNumber: gstin,
+        taskId: task,
+      });
+      // A plain engagement document still opens its engagement.
+      const letter = docs.find((d) => d.id === plain.body.id);
+      expect(letter?.link).toEqual({ engagementId: eng, engagementKind: letter!.link.engagementKind });
+      // Off the engagement, RLS hides both.
+      const other = (await http().get('/api/v1/documents?limit=100').set(bearer(pb)).expect(200)).body
+        .items as Array<{ id: string }>;
+      expect(other.map((d) => d.id)).not.toContain(created.body.id);
+    });
   });
 
   describe('WF-105 — the review queue', () => {

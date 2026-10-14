@@ -3,6 +3,7 @@ import type {
   DocumentSensitivity,
   DocumentStatus,
   DocumentType,
+  WorkItemRef,
 } from '@hsdg/contracts';
 
 /** One immutable version in a document's chain. Storage reference is never exposed. */
@@ -70,6 +71,8 @@ export interface DocumentDetail extends DocumentRecord {
 export interface GlobalDocumentRecord extends DocumentRecord {
   engagementCode: string;
   entityName: string | null;
+  /** Where the document's work lives: its filing's part (and task), else the engagement. */
+  link: WorkItemRef;
 }
 
 /** The bytes plus what a caller needs to save them — returned by download. */
