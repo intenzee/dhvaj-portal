@@ -282,3 +282,12 @@ export class MyTasksQueryDto extends PaginationQueryDto {
   @IsIn(['mine', 'team'])
   scope?: 'mine' | 'team';
 }
+
+export class TodayQueryDto {
+  @ApiPropertyOptional({
+    description: "Only this engagement's items (the engagement's Next up strip).",
+  })
+  @IsOptional()
+  @IsUUID()
+  engagementId?: string;
+}
