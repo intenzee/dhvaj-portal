@@ -114,6 +114,19 @@ export class FilingWorkspaceController {
     return this.workspace.requestSlot(rlsContextFromPrincipal(principal), id, slot, dto);
   }
 
+  @Post(':id/dsc-request')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Request the director’s DSC from the client (a dependency; no upload slot)',
+  })
+  requestDsc(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: SlotRequestDto,
+  ): Promise<InstanceWorkspace> {
+    return this.workspace.requestDsc(rlsContextFromPrincipal(principal), id, dto);
+  }
+
   @Post(':id/slots/:slot/documents')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'Upload a document into a slot (ticks its step)' })
