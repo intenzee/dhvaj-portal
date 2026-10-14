@@ -62,6 +62,8 @@ export interface FilingReviewItem extends WorkReviewBase {
   statutoryDate: string | null;
   /** True once the reviewer has opened the review (their clock is running). */
   reviewStarted: boolean;
+  /** When the current review was opened (null until Start review). */
+  reviewStartedAt: string | null;
   /** The task's version, for acting on it from the queue (start review / approve / return). */
   taskVersion: number;
   filing: WorkFilingContext | null;

@@ -27,6 +27,7 @@ describe('review queue panel helpers', () => {
       internalDate: null,
       statutoryDate: null,
       reviewStarted: false,
+      reviewStartedAt: null,
       taskVersion: 1,
       filing: {
         instanceId: 'i1',

@@ -63,6 +63,28 @@ describe('DataTable rowHref (WF-103)', () => {
   });
 });
 
+describe('DataTable onRowOpen (WF-202)', () => {
+  it('a plain click on the row or its link is offered to onRowOpen first', () => {
+    const onRowOpen = jest.fn(() => true);
+    render(<DataTable columns={columns} data={rows} rowHref={hrefOf} onRowOpen={onRowOpen} />);
+    fireEvent.click(screen.getByText('note'));
+    fireEvent.click(screen.getByRole('link', { name: 'September GSTR-1' }));
+    expect(onRowOpen).toHaveBeenCalledTimes(2);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('declined (no filing), the row opens its link; a modified click never asks', () => {
+    const onRowOpen = jest.fn(() => false);
+    const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+    render(<DataTable columns={columns} data={rows} rowHref={hrefOf} onRowOpen={onRowOpen} />);
+    fireEvent.click(screen.getByText('note'));
+    expect(push).toHaveBeenCalledWith('/engagements/e1?tab=gst&task=r1');
+    fireEvent.click(screen.getByText('note'), { metaKey: true });
+    expect(onRowOpen).toHaveBeenCalledTimes(1);
+    open.mockRestore();
+  });
+});
+
 describe('workHrefFor', () => {
   const link = { engagementId: 'e1', engagementKind: 'compliance' as const, taskId: 't1' };
   it('uses the link with ff_work_links on', () => {

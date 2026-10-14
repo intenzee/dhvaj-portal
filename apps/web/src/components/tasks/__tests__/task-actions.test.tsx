@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import type { WorkTask } from '@/lib/work-types';
-import { TaskActions } from '../task-actions';
+import { pausedByStart, TaskActions } from '../task-actions';
 
 const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
@@ -65,5 +65,25 @@ describe('TaskActions', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Start review' })).not.toBeDisabled(),
     );
+  });
+});
+
+describe('pausedByStart (WF-205)', () => {
+  const running = (taskId: string | null, taskTitle: string | null) =>
+    ({
+      entry: { taskId, taskTitle },
+      engagementCode: 'ENG-7',
+      entityName: 'Bharat Textiles',
+    }) as unknown as import('@hsdg/contracts').ActiveTimer;
+
+  it('names the other task a start paused', () => {
+    expect(pausedByStart('start', 't1', running('t9', 'TDS Q2'))).toBe('TDS Q2');
+    expect(pausedByStart('start-review', 't1', running(null, null))).toBe('ENG-7');
+  });
+
+  it('is silent with no clock, the same task, or an action that opens none', () => {
+    expect(pausedByStart('start', 't1', null)).toBeNull();
+    expect(pausedByStart('start', 't1', running('t1', 'GSTR-1'))).toBeNull();
+    expect(pausedByStart('send-for-review', 't1', running('t9', 'TDS Q2'))).toBeNull();
   });
 });

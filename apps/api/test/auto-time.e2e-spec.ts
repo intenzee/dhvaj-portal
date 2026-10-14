@@ -167,6 +167,10 @@ describe('Automatic time (e2e)', () => {
 
     const clock = await http().get('/api/v1/time/clock').set(bearer(sy)).expect(200);
     expect(clock.body.running.taskId).toBe(b);
+    // WF-205: the top-bar pill links to the running task, not just its engagement.
+    const active = await http().get('/api/v1/engagements/time/active').set(bearer(sy)).expect(200);
+    expect(active.body.entry.taskId).toBe(b);
+    expect(active.body.link).toMatchObject({ engagementId: eng, taskId: b });
 
     await act(sy, eng, b, 'pause').expect(201);
     expect(await runningCountFor(seniorY)).toBe(0);

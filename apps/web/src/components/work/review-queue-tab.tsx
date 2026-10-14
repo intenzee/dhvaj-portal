@@ -67,7 +67,7 @@ export function reviewTask(item: FilingReviewItem, me: string | null): WorkTask 
     workType: item.filing ? 'filing' : null,
     complianceInstanceId: item.filing?.instanceId ?? null,
     sentForReviewAt: item.waitingSince,
-    reviewStartedAt: item.reviewStarted ? item.waitingSince : null,
+    reviewStartedAt: item.reviewStartedAt ?? (item.reviewStarted ? item.waitingSince : null),
     version: item.taskVersion,
   };
 }

@@ -69,10 +69,13 @@ export function useMyTaskColumns({
   hrefOf,
   onDocuments,
   today,
+  onOpen,
 }: {
   hrefOf: (t: MyTask) => string;
   onDocuments: (t: MyTask) => void;
   today: string;
+  /** A plain click on the title, offered first (true = handled, e.g. the filing drawer). */
+  onOpen?: (t: MyTask) => boolean;
 }): ColumnDef<MyTask, unknown>[] {
   return useMemo<ColumnDef<MyTask, unknown>[]>(
     () => [
@@ -84,6 +87,10 @@ export function useMyTaskColumns({
             <div className="min-w-0">
               <Link
                 href={hrefOf(row.original)}
+                onClick={(e) => {
+                  const plain = !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+                  if (plain && e.button === 0 && onOpen?.(row.original)) e.preventDefault();
+                }}
                 className="block font-medium text-primary-700 hover:underline"
                 title="Open the work"
               >
@@ -147,6 +154,6 @@ export function useMyTaskColumns({
         ),
       },
     ],
-    [hrefOf, onDocuments, today],
+    [hrefOf, onDocuments, today, onOpen],
   );
 }

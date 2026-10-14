@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ClockState, TaskAction } from '@hsdg/contracts';
+import type { ActiveTimer, ClockState, TaskAction } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/components/ui';
@@ -15,7 +15,23 @@ import {
   type WorkTask,
 } from '@/lib/work-types';
 
-const PRIMARY: TaskAction[] = ['start', 'send-for-review', 'start-review', 'approve'];
+/** Each state's main move forward — what a list row offers (Today, WF-201). */
+export const PRIMARY: TaskAction[] = ['start', 'send-for-review', 'start-review', 'approve'];
+
+/**
+ * WF-205: one clock at a time — starting this task (or its review) paused
+ * whatever was running on another task. Name it, so the switch is never silent.
+ * Pure — tested.
+ */
+export function pausedByStart(
+  action: TaskAction,
+  taskId: string,
+  before: ActiveTimer | null | undefined,
+): string | null {
+  if (action !== 'start' && action !== 'start-review') return null;
+  if (!before || before.entry.taskId === taskId) return null;
+  return before.entry.taskTitle ?? before.engagementCode;
+}
 
 /**
  * Change 3 — the task's next moves as buttons (Start work, Pause, Send for
@@ -26,16 +42,19 @@ export function TaskActions({
   task,
   ctx,
   onDone,
+  only,
 }: {
   task: WorkTask;
   ctx: TaskActionContext;
   onDone?: () => void;
+  /** Offer only these moves (a list row keeps to the main one; the filing has the rest). */
+  only?: readonly TaskAction[];
 }): JSX.Element | null {
   const qc = useQueryClient();
   const toast = useToast();
   const [asking, setAsking] = useState<TaskAction | null>(null);
   const [reason, setReason] = useState('');
-  const actions = availableTaskActions(task, ctx);
+  const actions = availableTaskActions(task, ctx).filter((a) => !only || only.includes(a));
 
   const run = useMutation({
     mutationFn: ({ action, why }: { action: TaskAction; why?: string }) =>
@@ -47,7 +66,12 @@ export function TaskActions({
     // the lists hold the task's new version, so a quick second click (Start
     // review → Approve) never sends the stale one and hits a version conflict.
     onSuccess: async (_clock, { action }) => {
-      toast(`${task.title}: ${TASK_ACTION_LABEL[action].toLowerCase()}.`);
+      // The banner's cache still holds the clock as it was before this move.
+      const paused = pausedByStart(action, task.id, qc.getQueryData<ActiveTimer | null>(['active-timer']));
+      toast(
+        `${task.title}: ${TASK_ACTION_LABEL[action].toLowerCase()}.` +
+          (paused ? ` Paused ${paused}.` : ''),
+      );
       setAsking(null);
       setReason('');
       onDone?.();
@@ -57,6 +81,7 @@ export function TaskActions({
         qc.invalidateQueries({ queryKey: ['tasks'] }),
         qc.invalidateQueries({ queryKey: ['filing'] }),
         qc.invalidateQueries({ queryKey: ['time', 'clock'] }),
+        qc.invalidateQueries({ queryKey: ['active-timer'] }),
       ]);
     },
     onError: (err) =>

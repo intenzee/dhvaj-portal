@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { AFTER_SIGN_IN } from '@/components/landing-redirect';
 import { ApiError } from '@/lib/api';
 import { Button, Card, CardBody } from '@/components/ui';
 
@@ -28,7 +29,7 @@ export default function LoginPage(): JSX.Element {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!loading && principal) router.replace('/');
+    if (!loading && principal) router.replace(AFTER_SIGN_IN);
   }, [loading, principal, router]);
 
   const run = async (fn: () => Promise<void>, fallbackMsg: string) => {
@@ -36,7 +37,7 @@ export default function LoginPage(): JSX.Element {
     setError(null);
     try {
       await fn();
-      router.replace('/');
+      router.replace(AFTER_SIGN_IN);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : fallbackMsg);
     } finally {

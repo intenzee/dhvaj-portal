@@ -8,6 +8,7 @@ import { TasksController } from './tasks.controller';
 import { ClientDependenciesController } from './client-dependencies.controller';
 import { WorkController } from './work.controller';
 import { WorkReviewsService } from './work-reviews.service';
+import { WorkTodayService } from './work-today.service';
 
 /**
  * Tasks & client dependencies (Phase 9). Internal work items (assignment, due
@@ -18,7 +19,13 @@ import { WorkReviewsService } from './work-reviews.service';
 @Module({
   imports: [AuditModule, NotificationsModule],
   controllers: [TasksController, ClientDependenciesController, WorkController],
-  providers: [TasksService, TaskWorkflowService, ClientDependenciesService, WorkReviewsService],
+  providers: [
+    TasksService,
+    TaskWorkflowService,
+    ClientDependenciesService,
+    WorkReviewsService,
+    WorkTodayService,
+  ],
   exports: [TasksService, TaskWorkflowService, ClientDependenciesService],
 })
 export class TasksModule {}

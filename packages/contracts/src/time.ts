@@ -16,6 +16,7 @@ import type {
   TimeSource,
   TimeStopReason,
 } from './time-auto';
+import type { WorkItemRef } from './work-links';
 
 /**
  * Why a running entry was stopped — the manual-timer subset of TIME_STOP_REASON
@@ -70,6 +71,8 @@ export interface ActiveTimer {
   entry: TimeEntryRecord;
   engagementCode: string;
   entityName: string;
+  /** The work the clock runs on — its task's filing when it has one (WF-205). */
+  link: WorkItemRef;
 }
 
 /** Per-person rollup of time on a single engagement. */
