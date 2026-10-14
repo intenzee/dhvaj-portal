@@ -24,10 +24,9 @@ import {
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import {
-  WORK_LINK_COLUMNS,
   type WorkLinkSqlRow,
+  withWorkLinks,
   workLinkFilingOf,
-  workLinkJoin,
   workLinkOf,
 } from '../../common/work-links';
 import type { RlsContext } from '../../database/rls-context';
@@ -685,20 +684,23 @@ export class ComplianceInstancesService {
       params.push(page.limit, page.offset);
 
       const { rows } = await client.query<InstanceRow & CalendarExtraRow>(
-        `${INSTANCE_BASE.replace(
-          'FROM hsdg.compliance_instances ci',
-          `, eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
-             eng.kind AS engagement_kind, ${WORK_LINK_COLUMNS},
-             ${this.escalationCase('ci.status', effective)} AS escalation
-           FROM hsdg.compliance_instances ci
-           JOIN hsdg.engagements eng ON eng.id = ci.engagement_id
-           JOIN hsdg.entities ent ON ent.id = eng.entity_id
-           JOIN hsdg.services s ON s.id = eng.service_id`,
-        )}
-         ${workLinkJoin('ci.id')}
-         ${where}
-         ORDER BY ${effective}
-         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        withWorkLinks(
+          `${INSTANCE_BASE.replace(
+            'FROM hsdg.compliance_instances ci',
+            `, eng.engagement_code, ent.legal_name AS entity_name, s.code AS service_code,
+               eng.kind AS engagement_kind,
+               ${this.escalationCase('ci.status', effective)} AS escalation
+             FROM hsdg.compliance_instances ci
+             JOIN hsdg.engagements eng ON eng.id = ci.engagement_id
+             JOIN hsdg.entities ent ON ent.id = eng.entity_id
+             JOIN hsdg.services s ON s.id = eng.service_id`,
+          )}
+           ${where}
+           ORDER BY ${effective}
+           LIMIT $${params.length - 1} OFFSET $${params.length}`,
+          'id',
+          'p.effective_statutory',
+        ),
         params,
       );
       const totalRes = await client.query<{ total: string }>(

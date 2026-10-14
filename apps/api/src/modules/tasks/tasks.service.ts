@@ -16,11 +16,10 @@ import {
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import {
-  WORK_LINK_COLUMNS,
   type WorkLinkSqlRow,
+  withWorkLinks,
   workFilingContextOf,
   workLinkFilingOf,
-  workLinkJoin,
   workLinkOf,
 } from '../../common/work-links';
 import type { RlsContext } from '../../database/rls-context';
@@ -468,9 +467,11 @@ export class TasksService {
       const conds =
         filter.scope === 'team'
           ? [
-              `EXISTS (SELECT 1 FROM hsdg.engagements teng
-                        WHERE teng.id = t.engagement_id
-                          AND (teng.engagement_manager_id = $1 OR teng.engagement_partner_id = $1))`,
+              // An ARRAY() sub-select runs once (an InitPlan) and probes tasks by
+              // engagement; an EXISTS here became a semi-join rescanning tasks.
+              `t.engagement_id = ANY(ARRAY(SELECT teng.id FROM hsdg.engagements teng
+                                            WHERE teng.engagement_manager_id = $1
+                                               OR teng.engagement_partner_id = $1))`,
             ]
           : ['t.assigned_to_employee_id = $1'];
       if (filter.status) {
@@ -496,18 +497,19 @@ export class TasksService {
       const where = `WHERE ${conds.join(' AND ')}`;
       params.push(page.limit, page.offset);
       const { rows } = await client.query<MyTaskRow>(
-        `${TASK_BASE.replace(
-          'FROM hsdg.tasks t',
-          `, eng.engagement_code, ent.legal_name AS entity_name, eng.kind AS engagement_kind,
-           ${WORK_LINK_COLUMNS}
-           FROM hsdg.tasks t
-           JOIN hsdg.engagements eng ON eng.id = t.engagement_id
-           JOIN hsdg.entities ent ON ent.id = eng.entity_id`,
-        )}
-         ${workLinkJoin('t.source_compliance_instance_id')}
-         ${where}
-         ORDER BY t.due_date NULLS LAST, t.created_at
-         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        withWorkLinks(
+          `${TASK_BASE.replace(
+            'FROM hsdg.tasks t',
+            `, eng.engagement_code, ent.legal_name AS entity_name, eng.kind AS engagement_kind
+             FROM hsdg.tasks t
+             JOIN hsdg.engagements eng ON eng.id = t.engagement_id
+             JOIN hsdg.entities ent ON ent.id = eng.entity_id`,
+          )} ${where}
+           ORDER BY t.due_date NULLS LAST, t.created_at
+           LIMIT $${params.length - 1} OFFSET $${params.length}`,
+          'source_compliance_instance_id',
+          'p.due_date NULLS LAST, p.created_at',
+        ),
         params,
       );
       const totalRes = await client.query<{ total: string }>(

@@ -45,6 +45,19 @@ export function workLinkJoin(instanceIdExpr: string): string {
   ) wl ON true`;
 }
 
+/**
+ * Add the link columns to an already-paged query: the lateral then probes one
+ * filing per page row, instead of the planner flattening it into a scan of
+ * every filing the caller can see before the LIMIT. `instanceColumn` and
+ * `orderBy` name columns of the paged query's select-list (alias `p`).
+ */
+export function withWorkLinks(pagedSql: string, instanceColumn: string, orderBy: string): string {
+  return `SELECT p.*, ${WORK_LINK_COLUMNS}
+    FROM (${pagedSql}) p
+    ${workLinkJoin(`p.${instanceColumn}`)}
+   ORDER BY ${orderBy}`;
+}
+
 /** The select-list for `workLinkJoin` (prefix `wl_` so it never shadows a row's own columns). */
 export const WORK_LINK_COLUMNS = `wl.instance_id AS wl_instance_id, wl.stream AS wl_stream,
        wl.financial_year AS wl_financial_year, wl.period_key AS wl_period_key,
