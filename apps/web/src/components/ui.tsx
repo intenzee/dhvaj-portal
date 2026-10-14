@@ -30,6 +30,7 @@ export function Panel({
   linkHref,
   linkLabel = 'View all',
   action,
+  toolbar,
   bodyClassName,
   className,
   children,
@@ -38,6 +39,8 @@ export function Panel({
   linkHref?: string;
   linkLabel?: string;
   action?: ReactNode;
+  /** A filter row under the header (e.g. a section filter). */
+  toolbar?: ReactNode;
   bodyClassName?: string;
   className?: string;
   children: ReactNode;
@@ -56,6 +59,7 @@ export function Panel({
             </Link>
           ))}
       </div>
+      {toolbar && <div className="border-b border-line px-5 py-2">{toolbar}</div>}
       <div className={cn('flex-1 px-5 py-4', bodyClassName)}>{children}</div>
     </Card>
   );

@@ -82,3 +82,4 @@ export * from './time-auto';
 export * from './filing-workspace';
 export * from './roc-mca';
 export * from './engagement-tabs';
+export * from './work-sections';
