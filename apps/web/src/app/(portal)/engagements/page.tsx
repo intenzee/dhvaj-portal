@@ -26,6 +26,7 @@ import type { EngagementRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
+import { rememberedHref } from '@/lib/last-place';
 import { Pagination } from '@/components/pagination';
 import { SectionChips, useUrlSections } from '@/components/section-filter';
 import { engagementListPath } from '@/lib/list-paths';
@@ -230,7 +231,8 @@ function EngagementsInner(): JSX.Element {
             columns={kindsOn ? [codeColumn, kindColumn, ...columns.slice(1)] : columns}
             data={q.data.items}
             empty="No engagements match this view."
-            onRowClick={(row) => router.push(`/engagements/${row.id}`)}
+            // WF-203: reopen the tab and period last worked on here, when remembered.
+            onRowClick={(row) => router.push(rememberedHref(row.id) ?? `/engagements/${row.id}`)}
           />
         )}
       </Card>

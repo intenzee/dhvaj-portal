@@ -39,6 +39,7 @@ interface TreeRow {
   required_total: number;
   pending_label: string | null;
   has_items: boolean;
+  mine: boolean;
 }
 
 const STREAM_SQL = `COALESCE(rv.stream, sv.stream)`;
@@ -149,7 +150,12 @@ export class StreamTreeService {
                   COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)::text AS due,
                   ci.workflow_status, fr.filed_on::text, ci.is_provisional, rv.verification,
                   COALESCE(ck.required_done, 0) AS required_done, COALESCE(ck.required_total, 0) AS required_total,
-                  ck.pending_label, ck.required_total IS NOT NULL AS has_items
+                  ck.pending_label, ck.required_total IS NOT NULL AS has_items,
+                  EXISTS (SELECT 1 FROM hsdg.tasks mt
+                           WHERE mt.source_compliance_instance_id = ci.id
+                             AND mt.status NOT IN ('done', 'cancelled')
+                             AND (mt.assigned_to_employee_id = $5 OR mt.reviewer_employee_id = $5))
+                    AS mine
              FROM hsdg.compliance_instances ci
              JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
              LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
@@ -169,7 +175,7 @@ export class StreamTreeService {
             WHERE ci.engagement_id = $1 AND ${STREAM_SQL} = $2 AND ci.financial_year = $3
               AND ($4::uuid IS NULL OR ci.registration_id = $4 OR ci.registration_id IS NULL)
             ORDER BY due, cr.code`,
-          [engagementId, stream, financialYear, registrationId],
+          [engagementId, stream, financialYear, registrationId, ctx.employeeId ?? null],
         );
       let rows = (await select()).rows;
       // Checklists are created lazily; fill them for this year so progress shows.
@@ -207,6 +213,7 @@ export class StreamTreeService {
         verify: r.verification === 'verify',
         requiredDone: r.required_done,
         requiredTotal: r.required_total,
+        mine: r.mine,
         ...(stream === 'roc'
           ? {
               dscWarning: CLOSED.has(r.workflow_status)
