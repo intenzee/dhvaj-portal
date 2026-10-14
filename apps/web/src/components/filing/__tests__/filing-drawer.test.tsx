@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ActiveTimer } from '@hsdg/contracts';
-import { drawerNeighbours, FilingDrawer, type DrawerItem } from '../filing-drawer';
+import { drawerItemsFrom, drawerNeighbours, FilingDrawer, type DrawerItem } from '../filing-drawer';
 import { clockIsOn } from '../filing-clock';
 
 let search = new URLSearchParams();
@@ -67,6 +67,27 @@ describe('drawerNeighbours', () => {
   it('a filing not in the list (or none) has no neighbours', () => {
     expect(drawerNeighbours(items, 'gone')).toEqual({ index: -1, prev: null, next: null });
     expect(drawerNeighbours(items, null)).toEqual({ index: -1, prev: null, next: null });
+  });
+});
+
+describe('drawerItemsFrom', () => {
+  it('keeps each filing once, in list order, and skips rows with none', () => {
+    const link = (instanceId?: string) => ({
+      engagementId: 'e1',
+      engagementKind: 'compliance' as const,
+      ...(instanceId ? { instanceId } : {}),
+    });
+    const rows = [
+      { t: 'a', link: link('i2') },
+      { t: 'b', link: link() },
+      { t: 'c', link: link('i1') },
+      { t: 'd', link: link('i2') },
+      { t: 'e', link: null },
+    ];
+    expect(drawerItemsFrom(rows, (r) => r.t, (r) => `/x/${r.t}`)).toEqual([
+      { instanceId: 'i2', title: 'a', href: '/x/a' },
+      { instanceId: 'i1', title: 'c', href: '/x/c' },
+    ]);
   });
 });
 

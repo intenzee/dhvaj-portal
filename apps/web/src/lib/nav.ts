@@ -1,6 +1,7 @@
 import { PERMISSION, ROLE, type PermissionSlug, type RoleSlug } from '@hsdg/contracts';
 import {
   Home,
+  Sun,
   Briefcase,
   Building2,
   Layers,
@@ -39,6 +40,8 @@ export interface NavItem {
   foldedInto?: string;
   /** With ff_work_links: a count pill read from `path` (`{ total }`), e.g. reviews waiting (WF-105). */
   badge?: { queryKey: readonly string[]; path: string };
+  /** Shown only while this rollout flag is on (e.g. Today behind ff_today_view). */
+  flag?: 'todayView';
 }
 
 /** Preparers: their sidebar is trimmed to the client work (WF-107). */
@@ -47,6 +50,8 @@ export const PREPARER_ROLES: RoleSlug[] = [ROLE.article, ROLE.senior];
 export interface NavOptions {
   /** ff_work_links: fold duplicate lists into My Work and trim the sidebar by role. */
   workLinks?: boolean;
+  /** ff_today_view: the Today screen, and the preparers' landing page (WF-201). */
+  todayView?: boolean;
 }
 
 export interface NavSection {
@@ -63,6 +68,15 @@ export interface NavSection {
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
+      {
+        label: 'Today',
+        href: '/today',
+        icon: Sun,
+        hint: 'Your day in one list — what to prepare, review and chase, overdue first.',
+        permission: PERMISSION.engagementRead,
+        flag: 'todayView',
+        ready: true,
+      },
       { label: 'Home', href: '/', icon: Home, hint: 'Your dashboard — what needs attention today.', ready: true },
       {
         label: 'My Work',
@@ -211,9 +225,19 @@ function onlyIn(principal: Principal | null, roles: RoleSlug[]): boolean {
 
 function canSee(item: NavItem, principal: Principal | null, opts: NavOptions): boolean {
   if (item.permission && !(principal?.permissions ?? []).includes(item.permission)) return false;
+  if (item.flag && !opts[item.flag]) return false;
   if (!opts.workLinks) return true;
   if (item.foldedInto) return false;
   return !(item.hideFor && onlyIn(principal, item.hideFor));
+}
+
+/**
+ * Where sign-in lands (WF-201): Today for preparers (article / senior) once
+ * ff_today_view is on for their office; Home for everyone else.
+ */
+export function landingPath(principal: Principal | null, opts: NavOptions = {}): string {
+  const canRead = (principal?.permissions ?? []).includes(PERMISSION.engagementRead);
+  return opts.todayView && canRead && onlyIn(principal, PREPARER_ROLES) ? '/today' : '/';
 }
 
 /** The nav items a principal may see. */

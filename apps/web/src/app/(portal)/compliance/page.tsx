@@ -23,6 +23,7 @@ import type { ComplianceRow, ComplianceEventRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge, Button } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
+import { drawerItemsFrom, FilingDrawer, useDrawerOpener } from '@/components/filing/filing-drawer';
 import { RollHorizonButton } from '@/components/compliance/roll-horizon-button';
 import { EscalationLegend } from '@/components/compliance/escalation-legend';
 import { cn } from '@/lib/cn';
@@ -207,6 +208,8 @@ function Segmented<T extends string>({
 function ComplianceInner(): JSX.Element {
   const params = useSearchParams();
   const workHref = useWorkHref();
+  // WF-202: a filing opens in the drawer over the calendar (ff_today_view).
+  const openInDrawer = useDrawerOpener();
   const { principal } = useAuth();
   const initial: Filter =
     params.get('filter') === 'overdue'
@@ -239,6 +242,14 @@ function ComplianceInner(): JSX.Element {
       return !r.isStatutoryOverdue && inNextDays(r.effectiveStatutoryDeadline, 7);
     return true;
   });
+  const drawerItems =
+    view === 'obligations'
+      ? drawerItemsFrom(rows, (r) => `${r.complianceRuleName} · ${r.entityName}`, workHref)
+      : drawerItemsFrom(
+          events.data?.items ?? [],
+          (r) => `${r.complianceRuleName} · ${r.entityName}`,
+          workHref,
+        );
 
   return (
     <div>
@@ -316,6 +327,7 @@ function ComplianceInner(): JSX.Element {
                 data={rows}
                 empty="No obligations match this filter."
                 rowHref={workHref}
+                onRowOpen={openInDrawer}
               />
             )}
           </>
@@ -332,11 +344,13 @@ function ComplianceInner(): JSX.Element {
                 data={events.data.items}
                 empty="No deadline events match this view."
                 rowHref={workHref}
+                onRowOpen={openInDrawer}
               />
             )}
           </>
         )}
       </Card>
+      <FilingDrawer items={drawerItems} listKey={['compliance']} />
     </div>
   );
 }

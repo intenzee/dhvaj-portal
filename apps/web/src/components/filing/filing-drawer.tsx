@@ -4,9 +4,14 @@ import { useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, ExternalLink, X } from 'lucide-react';
-import type { InstanceWorkspace as Workspace } from '@hsdg/contracts';
+import {
+  FEATURE_FLAG,
+  type InstanceWorkspace as Workspace,
+  type WorkItemRef,
+} from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { planningTeam, taskContextFor } from '@/lib/engagement-context';
 import type { EngagementDetail } from '@/lib/types';
 import { useUrlState } from '@/lib/url-state';
@@ -39,6 +44,43 @@ export function useOpenFiling(): {
   );
   const close = useCallback(() => url.set({ [OPEN_FILING_PARAM]: null }), [url]);
   return { openId, open, close };
+}
+
+/**
+ * For a list's plain row click: open the row's filing in the drawer and say so
+ * (true), or leave the click to the row's link (false) — no filing, or the
+ * drawer is not switched on (it ships with ff_today_view).
+ */
+export function useDrawerOpener(): (row: { link?: WorkItemRef | null }) => boolean {
+  const { open } = useOpenFiling();
+  const { isOn } = useFeatureFlags();
+  const on = isOn(FEATURE_FLAG.todayView) && isOn(FEATURE_FLAG.workLinks);
+  return useCallback(
+    (row) => {
+      const id = row.link?.instanceId;
+      if (!on || !id) return false;
+      open(id);
+      return true;
+    },
+    [on, open],
+  );
+}
+
+/** A list's rows as the drawer's Previous / Next list: each filing once, in order. Pure — tested. */
+export function drawerItemsFrom<T extends { link?: WorkItemRef | null }>(
+  rows: readonly T[],
+  titleOf: (row: T) => string,
+  hrefOf: (row: T) => string,
+): DrawerItem[] {
+  const seen = new Set<string>();
+  const out: DrawerItem[] = [];
+  for (const row of rows) {
+    const id = row.link?.instanceId;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ instanceId: id, title: titleOf(row), href: hrefOf(row) });
+  }
+  return out;
 }
 
 /** The neighbours of the open filing in its list. Pure — tested. */

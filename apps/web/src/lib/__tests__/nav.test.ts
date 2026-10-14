@@ -1,5 +1,5 @@
 import { PERMISSION } from '@hsdg/contracts';
-import { NAV_ITEMS, isNavActive, visibleNav, visibleNavSections } from '../nav';
+import { NAV_ITEMS, isNavActive, landingPath, visibleNav, visibleNavSections } from '../nav';
 import type { RoleSlug } from '@hsdg/contracts';
 import type { Principal } from '../principal';
 
@@ -135,5 +135,32 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
     for (const item of NAV_ITEMS.filter((i) => i.foldedInto)) {
       expect(item.foldedInto).toMatch(/^\/my-work\?tab=/);
     }
+  });
+});
+
+describe('Today (WF-201)', () => {
+  const STAFF = [PERMISSION.engagementRead, PERMISSION.notificationRead];
+  const as = (roles: RoleSlug[], permissions: string[] = STAFF): Principal => ({
+    ...principal(permissions),
+    roles,
+  });
+
+  it('heads the sidebar only with ff_today_view on', () => {
+    const p = as(['manager']);
+    expect(visibleNav(p, { todayView: true }).map((i) => i.label)[0]).toBe('Today');
+    expect(visibleNav(p).map((i) => i.label)).not.toContain('Today');
+  });
+
+  it.each(['article', 'senior'] as RoleSlug[])('a %s lands on Today; Home stays in the sidebar', (role) => {
+    expect(landingPath(as([role]), { todayView: true })).toBe('/today');
+    expect(visibleNav(as([role]), { todayView: true }).map((i) => i.label)).toContain('Home');
+  });
+
+  it('everyone else, or anyone with the flag off, lands on Home', () => {
+    expect(landingPath(as(['manager']), { todayView: true })).toBe('/');
+    expect(landingPath(as(['senior', 'manager']), { todayView: true })).toBe('/');
+    expect(landingPath(as(['senior']))).toBe('/');
+    expect(landingPath(as(['senior'], []), { todayView: true })).toBe('/');
+    expect(landingPath(null, { todayView: true })).toBe('/');
   });
 });

@@ -28,12 +28,19 @@ export function DataTable<T>({
   empty = 'Nothing to show.',
   onRowClick,
   rowHref,
+  onRowOpen,
 }: {
   columns: ColumnDef<T, unknown>[];
   data: T[];
   empty?: string;
   onRowClick?: (row: T) => void;
   rowHref?: (row: T) => string;
+  /**
+   * A plain click on a `rowHref` row is offered here first; return true to
+   * handle it in place (e.g. open the filing drawer, WF-202). Modified clicks
+   * always open the link.
+   */
+  onRowOpen?: (row: T) => boolean;
 }): JSX.Element {
   const router = useRouter();
   const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() });
@@ -44,7 +51,7 @@ export function DataTable<T>({
     const href = rowHref(row);
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) {
       window.open(href, '_blank', 'noopener');
-    } else {
+    } else if (!onRowOpen?.(row)) {
       router.push(href);
     }
   };
@@ -84,6 +91,10 @@ export function DataTable<T>({
                   {rowHref && i === 0 ? (
                     <Link
                       href={rowHref(row.original)}
+                      onClick={(e) => {
+                        const plain = !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+                        if (plain && e.button === 0 && onRowOpen?.(row.original)) e.preventDefault();
+                      }}
                       className="font-medium text-primary-700 hover:underline"
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
