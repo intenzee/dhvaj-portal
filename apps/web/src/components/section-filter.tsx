@@ -49,6 +49,13 @@ function Chip({
   );
 }
 
+/** `path` with `section=` appended when a selection is made. Pure. */
+export function withSections(path: string, sections: readonly WorkSection[]): string {
+  const value = workSectionsParam(sections);
+  if (!value) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}section=${value}`;
+}
+
 /** Toggle one section in a selection, keeping WORK_SECTIONS order. Pure. */
 export function toggleSection(value: readonly WorkSection[], s: WorkSection): WorkSection[] {
   const next = value.includes(s) ? value.filter((x) => x !== s) : [...value, s];
@@ -68,7 +75,11 @@ export function SectionChips({
   className?: string;
 }): JSX.Element {
   return (
-    <div role="group" aria-label="Section" className={cn('flex flex-wrap items-center gap-2', className)}>
+    <div
+      role="group"
+      aria-label="Section"
+      className={cn('flex flex-wrap items-center gap-2', className)}
+    >
       <span className="text-xs font-medium text-ink-faint">Section</span>
       <Chip active={value.length === 0} onClick={() => onChange([])}>
         All

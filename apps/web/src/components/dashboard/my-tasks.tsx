@@ -7,19 +7,30 @@ import { apiFetch } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import type { MyTask } from '@/lib/types';
 import { Panel, Spinner, EmptyState } from '@/components/ui';
+import { SectionSelect, useStoredSections, withSections } from '@/components/section-filter';
 import { cn } from '@/lib/cn';
 
 export function MyTasksPanel(): JSX.Element {
+  const [sections, setSections] = useStoredSections('home-tasks');
   const q = useQuery({
-    queryKey: ['work', 'tasks', 'dashboard'],
-    queryFn: () => apiFetch<Paginated<MyTask>>('/work/tasks?limit=6'),
+    queryKey: ['work', 'tasks', 'dashboard', sections],
+    queryFn: () => apiFetch<Paginated<MyTask>>(withSections('/work/tasks?limit=6', sections)),
   });
 
   return (
-    <Panel title="My Tasks" linkHref="/tasks" bodyClassName="p-0">
+    <Panel
+      title="My Tasks"
+      linkHref={withSections('/tasks', sections)}
+      bodyClassName="p-0"
+      toolbar={<SectionSelect value={sections} onChange={setSections} />}
+    >
       {q.isLoading && <div className="p-5"><Spinner /></div>}
       {q.data && q.data.items.length === 0 && (
-        <div className="p-5"><EmptyState>You&rsquo;re all caught up.</EmptyState></div>
+        <div className="p-5">
+          <EmptyState>
+            {sections.length ? 'No tasks for you in this section.' : <>You&rsquo;re all caught up.</>}
+          </EmptyState>
+        </div>
       )}
       <ul>
         {(q.data?.items ?? []).map((t) => {

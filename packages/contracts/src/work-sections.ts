@@ -41,7 +41,9 @@ export function isStreamSection(s: WorkSection): s is Stream {
  * order, unknown keys and duplicates dropped. Lenient on purpose: it reads
  * URLs and saved preferences, where a stale key should not break the page.
  */
-export function parseWorkSections(raw: string | readonly string[] | null | undefined): WorkSection[] {
+export function parseWorkSections(
+  raw: string | readonly string[] | null | undefined,
+): WorkSection[] {
   if (!raw) return [];
   const parts = (typeof raw === 'string' ? [raw] : raw).flatMap((p) => p.split(','));
   const set = new Set(parts.map((p) => p.trim()));

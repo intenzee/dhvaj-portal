@@ -28,15 +28,18 @@ export class WorkController {
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
     summary: 'Tasks assigned to me across all engagements (paginated)',
-    description: 'Filter ?status= and ?overdueOnly=true (internally-overdue work).',
+    description:
+      'Filter ?status=, ?overdueOnly=true (internally-overdue work) and ?section=gst,income_tax ' +
+      "(a stream via the task's engagement service; statutory_audit / assignment via the engagement).",
   })
   myTasks(
     @CurrentPrincipal() principal: Principal,
     @Query() query: MyTasksQueryDto,
   ): Promise<Paginated<MyTaskRecord>> {
-    const filter: { status?: MyTasksQueryDto['status']; overdueOnly?: boolean } = {};
+    const filter: Parameters<TasksService['myTasks']>[2] = {};
     if (query.status) filter.status = query.status;
     if (query.overdueOnly !== undefined) filter.overdueOnly = query.overdueOnly;
+    if (query.section?.length) filter.sections = query.section;
     return this.tasks
       .myTasks(rlsContextFromPrincipal(principal), query, filter)
       .then((result) => paginate(result, query));

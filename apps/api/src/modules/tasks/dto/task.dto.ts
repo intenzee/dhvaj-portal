@@ -19,9 +19,11 @@ import {
   WORK_TYPES,
   type TaskPriority,
   type TaskStatus,
+  type WorkSection,
   type WorkType,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
+import { SectionQuery } from '../../../common/sections';
 
 const toBool = ({ value }: { value: unknown }): unknown =>
   value === 'true' ? true : value === 'false' ? false : value;
@@ -267,4 +269,7 @@ export class MyTasksQueryDto extends PaginationQueryDto {
   @Transform(toBool)
   @IsBoolean()
   overdueOnly?: boolean;
+
+  @SectionQuery()
+  section?: WorkSection[];
 }
