@@ -6,6 +6,7 @@ import { useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, ExternalLink, X } from 'lucide-react';
 import {
   FEATURE_FLAG,
+  periodKeyLabel,
   type InstanceWorkspace as Workspace,
   type WorkItemRef,
 } from '@hsdg/contracts';
@@ -121,6 +122,13 @@ export function FilingDrawer({
   const { openId, open, close } = useOpenFiling();
   const { index, prev, next } = drawerNeighbours(items, openId);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  // The same query the body runs (shared by key): it names a filing that is not
+  // (or no longer) in the list — e.g. once approved it leaves "To review".
+  const ws = useQuery({
+    queryKey: workspaceKey(openId ?? ''),
+    queryFn: () => apiFetch<Workspace>(`/compliance-instances/${openId}`),
+    enabled: !!openId,
+  });
 
   useEffect(() => {
     if (!openId) return;
@@ -153,7 +161,7 @@ export function FilingDrawer({
             tabIndex={-1}
             className="truncate text-base font-semibold text-ink outline-none"
           >
-            {item?.title ?? 'Filing'}
+            {item?.title ?? (ws.data ? workspaceTitle(ws.data) : 'Filing')}
           </h2>
           {index >= 0 && (
             <p className="text-xs text-ink-faint">
@@ -206,6 +214,14 @@ export function FilingDrawer({
       </div>
     </aside>
   );
+}
+
+/** "GSTR-1 · Sep 2026" for a filing's workspace. Pure — tested. */
+export function workspaceTitle(ws: Pick<Workspace, 'instance'>): string {
+  const i = ws.instance;
+  return [i.formLabel ?? i.ruleName, i.periodKey ? periodKeyLabel(i.periodKey) : null]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** The filing, with the task context its engagement gives me (lead or not, the team). */

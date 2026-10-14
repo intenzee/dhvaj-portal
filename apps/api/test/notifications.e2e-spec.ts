@@ -266,7 +266,8 @@ describe('Notifications (e2e)', () => {
         .send({ engagementPartnerEmployeeId: partnerB, reason: 'load balancing' })
         .expect(201);
 
-      const notes = await myNotifications(pb, '&unreadOnly=true');
+      // Informational (WF-305): it is in the digest, not the bell.
+      const notes = await myNotifications(pb, '&unreadOnly=true&scope=all');
       expect(notes.some((n) => n.type === 'ep_changed' && n.engagementId === eng.id)).toBe(true);
     });
 
@@ -297,7 +298,8 @@ describe('Notifications (e2e)', () => {
         .send({ version: completed.body.version, reason: 'client sent revised figures' })
         .expect(201);
 
-      const notes = await myNotifications(pa, '&unreadOnly=true');
+      // Informational (WF-305): it is in the digest, not the bell.
+      const notes = await myNotifications(pa, '&unreadOnly=true&scope=all');
       expect(notes.some((n) => n.type === 'engagement_reopened' && n.engagementId === eng.id)).toBe(
         true,
       );

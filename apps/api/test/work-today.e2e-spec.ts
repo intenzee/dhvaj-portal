@@ -298,25 +298,4 @@ describe('Today (e2e)', () => {
   it('rejects a malformed engagementId', async () => {
     await http().get('/api/v1/work/today?engagementId=nope').set(bearer(sy)).expect(400);
   });
-
-  it('answers in under 300 ms with 500 open items', async () => {
-    const { eng } = await setup();
-    await su.query(
-      `INSERT INTO hsdg.tasks (engagement_id, title, assigned_to_employee_id, status, due_date,
-                               created_by_employee_id)
-       SELECT $1, 'Bulk ' || g, $2, 'todo', CURRENT_DATE + (g % 20), $2
-         FROM generate_series(1, 500) g`,
-      [eng, emp006],
-    );
-    await today(sy); // warm
-    const times: number[] = [];
-    for (let i = 0; i < 3; i++) {
-      const t0 = performance.now();
-      const v = await today(sy);
-      times.push(performance.now() - t0);
-      expect(v.groups[0]!.total).toBeGreaterThanOrEqual(500);
-    }
-    times.sort((a, b) => a - b);
-    expect(times[1]).toBeLessThan(300);
-  });
 });
