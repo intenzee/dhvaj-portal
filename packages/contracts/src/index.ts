@@ -85,4 +85,7 @@ export * from './engagement-tabs';
 export * from './work-sections';
 export * from './work-links';
 export * from './work-queue';
+export * from './filing-runs';
+export * from './client-chase';
 export * from './work-today';
+export * from './search';

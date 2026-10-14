@@ -1,5 +1,12 @@
 import { PERMISSION } from '@hsdg/contracts';
-import { NAV_ITEMS, isNavActive, landingPath, visibleNav, visibleNavSections } from '../nav';
+import {
+  NAV_ITEMS,
+  activeNavHref,
+  isNavActive,
+  landingPath,
+  visibleNav,
+  visibleNavSections,
+} from '../nav';
 import type { RoleSlug } from '@hsdg/contracts';
 import type { Principal } from '../principal';
 
@@ -162,5 +169,27 @@ describe('Today (WF-201)', () => {
     expect(landingPath(as(['senior']))).toBe('/');
     expect(landingPath(as(['senior'], []), { todayView: true })).toBe('/');
     expect(landingPath(null, { todayView: true })).toBe('/');
+  });
+});
+
+describe('Filing runs (WF-301)', () => {
+  const STAFF = [PERMISSION.engagementRead, PERMISSION.complianceRead];
+  const as = (roles: RoleSlug[]): Principal => ({ ...principal(STAFF), roles });
+
+  it('shows only with ff_filing_runs on, to preparers too', () => {
+    expect(visibleNav(as(['senior']), { workLinks: true }).map((i) => i.label)).not.toContain(
+      'Filing runs',
+    );
+    expect(
+      visibleNav(as(['senior']), { workLinks: true, filingRuns: true }).map((i) => i.label),
+    ).toContain('Filing runs');
+  });
+
+  it('marks Filing runs current on /compliance/runs, not Compliance', () => {
+    const items = visibleNav(as(['manager']), { filingRuns: true });
+    expect(activeNavHref(items, '/compliance/runs')).toBe('/compliance/runs');
+    expect(activeNavHref(items, '/compliance')).toBe('/compliance');
+    expect(activeNavHref(items, '/compliance/rules')).toBe('/compliance');
+    expect(activeNavHref(items, '/nowhere')).toBeNull();
   });
 });
