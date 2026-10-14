@@ -76,6 +76,11 @@ export class EngagementsService {
     if (filter.status) {
       params.push(filter.status);
       conditions.push(`eng.status = $${params.length}`);
+    } else {
+      // A merged engagement lives on inside the client's Compliance engagement
+      // (which answers to its code in search), so it is not listed again
+      // beside it. Asking for status=merged still shows them.
+      conditions.push(`eng.status <> 'merged'`);
     }
     if (filter.kind) {
       params.push(filter.kind);
