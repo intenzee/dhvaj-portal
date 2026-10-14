@@ -6,6 +6,7 @@ import { Public } from '../auth/auth.decorators';
 import { ComplianceSchedulerService } from './compliance-scheduler.service';
 import { TimeCloserScheduler } from '../engagements/time/time-closer.scheduler';
 import { MonthlyDataRequestScheduler } from '../filing-workspace/monthly-data-request.scheduler';
+import { NotificationDigestScheduler } from '../notifications/notification-digest.scheduler';
 import { istToday } from '../engagements/time/auto-time';
 
 /**
@@ -23,6 +24,7 @@ export class CronController {
     private readonly scheduler: ComplianceSchedulerService,
     private readonly timeCloser: TimeCloserScheduler,
     private readonly monthlyRequest: MonthlyDataRequestScheduler,
+    private readonly digest: NotificationDigestScheduler,
   ) {}
 
   @Get()
@@ -38,6 +40,8 @@ export class CronController {
     await this.scheduler.runHorizonRoll();
     // The monthly GST data request goes out on the 1st (IST), before the drain.
     if (istToday(new Date()).endsWith('-01')) await this.monthlyRequest.run();
+    // Yesterday's informational notices in one message (once a day).
+    await this.digest.run();
     await this.scheduler.runOutboxDrain();
     await this.scheduler.runCalendarMaintenance();
     await this.timeCloser.run();

@@ -254,6 +254,9 @@ export const envSchema = z.object({
   // Change 6 monthly GST data request: on the 1st (09:00 IST) each GSTIN with
   // the request switched on gets one upload link for last month's registers.
   SCHEDULER_GST_DATA_REQUEST_CRON: z.string().default('30 3 1 * *'),
+  // Staff Workflow WF-305: yesterday's informational notices in one message,
+  // 07:00 IST, once actionable notifications are on firm-wide.
+  SCHEDULER_DIGEST_CRON: z.string().default('30 1 * * *'),
   // Browser-facing base URL of the web app (links sent to clients).
   WEB_PUBLIC_URL: z.string().url().default('http://localhost:3000'),
   // Bearer secret for GET /internal/cron — the HTTP trigger serverless hosts
