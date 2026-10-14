@@ -11,7 +11,8 @@ export const CHECKLIST_ITEM_STATUS = {
   done: 'done',
   notApplicable: 'not_applicable',
 } as const;
-export type ChecklistItemStatus = (typeof CHECKLIST_ITEM_STATUS)[keyof typeof CHECKLIST_ITEM_STATUS];
+export type ChecklistItemStatus =
+  (typeof CHECKLIST_ITEM_STATUS)[keyof typeof CHECKLIST_ITEM_STATUS];
 export const CHECKLIST_ITEM_STATUSES: ChecklistItemStatus[] = Object.values(CHECKLIST_ITEM_STATUS);
 
 /**
@@ -30,7 +31,8 @@ export const FILING_REFERENCE_KIND = {
   challan: 'challan',
   internal: 'internal',
 } as const;
-export type FilingReferenceKind = (typeof FILING_REFERENCE_KIND)[keyof typeof FILING_REFERENCE_KIND];
+export type FilingReferenceKind =
+  (typeof FILING_REFERENCE_KIND)[keyof typeof FILING_REFERENCE_KIND];
 export const FILING_REFERENCE_KINDS: FilingReferenceKind[] = Object.values(FILING_REFERENCE_KIND);
 
 /** A lead may undo a lodge within this many hours; after that only a partner. */
@@ -76,7 +78,13 @@ export interface WorkspaceSlot {
   required: boolean;
   documents: SlotDocument[];
   /** The open client request for this slot, if any. */
-  openRequest: { dependencyId: string; requestedAt: string; escalationDate: string | null } | null;
+  openRequest: {
+    dependencyId: string;
+    requestedAt: string;
+    escalationDate: string | null;
+    /** An upload link was created (a request raised with the checklist has none yet). */
+    hasLink?: boolean;
+  } | null;
 }
 
 export type FigureKind = 'amount' | 'integer' | 'text' | 'date';
@@ -175,6 +183,31 @@ export interface WorkspaceInstance {
     feeWindowEnds: string;
     day: number;
   } | null;
+  /** A government extension in force: statutoryDueDate is the revised date. */
+  extension?: { reference: string; originalDueDate: string; notes: string | null } | null;
+  /**
+   * AOC-4 when the firm is also the statutory auditor (roc-mca §5.3): the audit
+   * report date from the Statutory Audit file for the same entity and FY (null
+   * while unsigned). Read-only; it never blocks. Null when there is no such
+   * audit (or it is not visible to you).
+   */
+  statutoryAudit?: { engagementId: string; reportDate: string | null } | null;
+}
+
+/**
+ * The client dependency code for the director's DSC (roc-mca Decision 5): it
+ * has no upload slot; the item shows Awaiting data until it is received.
+ */
+export const DSC_REQUEST_CODE = 'DSC';
+
+/** An open client request on the filing (a slot's, or one with no slot such as the DSC). */
+export interface WorkspaceClientRequest {
+  dependencyId: string;
+  /** The slot it fills, or DSC_REQUEST_CODE; null for a free-text request. */
+  slotCode: string | null;
+  requestedInfo: string;
+  requestedAt: string;
+  escalationDate: string | null;
 }
 
 export interface WorkspaceTask {
@@ -203,6 +236,8 @@ export interface InstanceWorkspace {
   filingHistory: FilingRecordView[];
   corrections: FilingCorrectionView[];
   warnings: CrossCheckWarning[];
+  /** Open client requests (roc-mca §10: MGT-8, MR-3, the director's DSC …). */
+  clientRequests?: WorkspaceClientRequest[];
   /** certify: tick a partner's line (CERT, with the UDIN). */
   can: { lodge: boolean; undo: boolean; waive: boolean; edit: boolean; certify: boolean };
 }
