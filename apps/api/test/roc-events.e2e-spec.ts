@@ -175,7 +175,9 @@ describe('ROC events (e2e)', () => {
         financialYear: '2025-26',
         details: { auditorAppointed: true },
       });
-      expect(res.body.changes.created.map((c: { label: string }) => c.label).join()).toMatch(/ADT-1/);
+      expect(res.body.changes.created.map((c: { label: string }) => c.label).join()).toMatch(
+        /ADT-1/,
+      );
       expect((await item(eng, '2025-26', 'ROC_ADT1'))?.dueDate).toBe('2026-10-15');
       expect(await item(eng, '2025-26', 'ROC_AOC4')).toMatchObject({
         dueDate: '2026-10-30',
@@ -221,9 +223,7 @@ describe('ROC events (e2e)', () => {
         .expect(200);
       expect(fixed.body.event.eventDate).toBe('2026-09-28');
       expect(fixed.body.changes.moved).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ from: '2026-11-24', to: '2026-11-27' }),
-        ]),
+        expect.arrayContaining([expect.objectContaining({ from: '2026-11-24', to: '2026-11-27' })]),
       );
       expect(fixed.body.changes.flagged.length).toBeGreaterThanOrEqual(1);
       expect((await item(eng, '2025-26', 'ROC_MGT7'))?.dueDate).toBe('2026-11-27');
@@ -260,9 +260,11 @@ describe('ROC events (e2e)', () => {
     it('P2-2 — a 3-month AGM extension moves the AGM and the provisional AOC-4 date', async () => {
       const { eng } = await company();
       expect((await item(eng, '2025-26', 'ROC_AGM'))?.dueDate).toBe('2026-09-30');
-      await record(eng, { eventType: 'agm_extension', eventDate: '2026-09-01', details: {} }).expect(
-        400,
-      );
+      await record(eng, {
+        eventType: 'agm_extension',
+        eventDate: '2026-09-01',
+        details: {},
+      }).expect(400);
       await record(eng, {
         eventType: 'agm_extension',
         eventDate: '2026-09-01',
@@ -303,15 +305,26 @@ describe('ROC events (e2e)', () => {
 
       const profiles = async () =>
         (
-          await http().get(`/api/v1/entities/${entity}/compliance-profiles`).set(bearer(pa)).expect(200)
+          await http()
+            .get(`/api/v1/entities/${entity}/compliance-profiles`)
+            .set(bearer(pa))
+            .expect(200)
         ).body;
-      const cinRows = (p: { profiles: Array<{ scope: string; registrationId: string; effectiveFrom: string; attributes: { directors?: Array<{ din: string }> } }> }) =>
-        p.profiles.filter((r) => r.scope === 'cin' && r.registrationId === reg);
+      const cinRows = (p: {
+        profiles: Array<{
+          scope: string;
+          registrationId: string;
+          effectiveFrom: string;
+          attributes: { directors?: Array<{ din: string }> };
+        }>;
+      }) => p.profiles.filter((r) => r.scope === 'cin' && r.registrationId === reg);
       const after = cinRows(await profiles());
       const current = after.find((r) => r.effectiveFrom === '2026-09-05')!;
       expect(current.attributes.directors!.map((d) => d.din)).toEqual(['11111111', '22222222']);
       expect(
-        after.find((r) => r.effectiveFrom === '2025-04-01')!.attributes.directors!.map((d) => d.din),
+        after
+          .find((r) => r.effectiveFrom === '2025-04-01')!
+          .attributes.directors!.map((d) => d.din),
       ).toEqual(['11111111']);
 
       // Void: the unstarted DIR-12 no longer applies; the director is removed again.
@@ -415,7 +428,10 @@ describe('ROC events (e2e)', () => {
       expect(res.body.instance.workflowStatus).toBe('filed');
 
       // P2-6: the next board meeting is due within 120 days of it.
-      const ov = await http().get(`/api/v1/engagements/${eng}/roc-overview`).set(bearer(pa)).expect(200);
+      const ov = await http()
+        .get(`/api/v1/engagements/${eng}/roc-overview`)
+        .set(bearer(pa))
+        .expect(200);
       expect(ov.body.message).toBeNull();
       expect(ov.body.boardMeetings[0]).toMatchObject({
         lastHeldOn: '2026-05-15',
@@ -501,7 +517,10 @@ describe('ROC events (e2e)', () => {
   describe('the ROC tab when there is nothing to file (G13)', () => {
     it('asks for the CIN on a company without one', async () => {
       const { eng } = await company({ cin: false });
-      const ov = await http().get(`/api/v1/engagements/${eng}/roc-overview`).set(bearer(pa)).expect(200);
+      const ov = await http()
+        .get(`/api/v1/engagements/${eng}/roc-overview`)
+        .set(bearer(pa))
+        .expect(200);
       expect(ov.body).toMatchObject({ registrations: [], boardMeetings: [] });
       expect(ov.body.message).toMatch(/Add the CIN/);
       await record(eng, { eventType: 'allotment', eventDate: '2026-09-01' }).expect(400);
