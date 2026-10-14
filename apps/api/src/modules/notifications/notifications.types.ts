@@ -1,18 +1,7 @@
-import type { NotificationStatus, NotificationType } from '@hsdg/contracts';
+import type { NotificationItem, NotificationType, WorkItemRef } from '@hsdg/contracts';
 
-/** A notification as the recipient sees it. */
-export interface NotificationRecord {
-  id: string;
-  type: NotificationType;
-  title: string;
-  body: string | null;
-  engagementId: string | null;
-  objectType: string | null;
-  objectId: string | null;
-  status: NotificationStatus;
-  readAt: string | null;
-  createdAt: string;
-}
+/** A notification as the recipient sees it (WF-305: with its kind and link). */
+export type NotificationRecord = NotificationItem;
 
 /**
  * A single notification to emit. Recipients are engagement employees (the emit
@@ -28,4 +17,9 @@ export interface NotificationEvent {
   objectType?: string | null;
   objectId?: string | null;
   dedupKey?: string | null;
+  /**
+   * Where it opens. Omitted: resolved from the object (its filing, section, task
+   * or request), else the engagement. Pass it when the emitter already has it.
+   */
+  link?: WorkItemRef | null;
 }

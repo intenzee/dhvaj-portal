@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiFetch, getToken, setToken } from './api';
 import { isSignedOut, reconnectDelay, renewalDue } from './session';
 import { entraSignIn, entraSignOut, isEntraConfigured } from './entra';
+import { newTelemetrySession } from './telemetry';
 import type { Principal } from './principal';
 
 interface AuthState {
@@ -126,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
       anonymous: true,
     });
     queryClient.clear();
+    newTelemetrySession();
     setToken(res.accessToken);
     setPrincipal(await loadMe());
   }, [queryClient]);
@@ -133,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   const loginWithEntra = useCallback(async () => {
     const accessToken = await entraSignIn();
     queryClient.clear();
+    newTelemetrySession();
     setToken(accessToken);
     setPrincipal(await loadMe());
   }, [queryClient]);
