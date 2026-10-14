@@ -61,7 +61,13 @@ const gstTask = task({
   },
 });
 
-function Table({ rows, onDocuments }: { rows: MyTask[]; onDocuments: (t: MyTask) => void }): JSX.Element {
+function Table({
+  rows,
+  onDocuments,
+}: {
+  rows: MyTask[];
+  onDocuments: (t: MyTask) => void;
+}): JSX.Element {
   const columns = useMyTaskColumns({
     hrefOf: (t) => workItemHref(t.link!),
     onDocuments,

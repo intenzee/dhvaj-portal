@@ -47,7 +47,12 @@ describe('review queue panel helpers', () => {
       raisedByName: 'Meera',
       isKeyMatter: false,
     };
-    const signOff: SignOffItem = { ...base, type: 'sign_off', reviewModelName: 'EP', clearedByName: null };
+    const signOff: SignOffItem = {
+      ...base,
+      type: 'sign_off',
+      reviewModelName: 'EP',
+      clearedByName: null,
+    };
     expect(reviewItemContext(point)).toBe('Bharat Textiles · from Meera');
     expect(reviewItemContext(signOff)).toBe('Bharat Textiles');
   });

@@ -66,7 +66,9 @@ describe('DataTable rowHref (WF-103)', () => {
 describe('workHrefFor', () => {
   const link = { engagementId: 'e1', engagementKind: 'compliance' as const, taskId: 't1' };
   it('uses the link with ff_work_links on', () => {
-    expect(workHrefFor({ engagementId: 'e1', link }, true)).toBe('/engagements/e1?tab=services&task=t1');
+    expect(workHrefFor({ engagementId: 'e1', link }, true)).toBe(
+      '/engagements/e1?tab=services&task=t1',
+    );
   });
   it('falls back to the engagement with the flag off or no link', () => {
     expect(workHrefFor({ engagementId: 'e1', link }, false)).toBe('/engagements/e1');

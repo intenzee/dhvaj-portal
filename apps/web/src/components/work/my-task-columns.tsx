@@ -113,7 +113,9 @@ export function useMyTaskColumns({
             <span>
               {internal && (
                 <span
-                  className={isTaskOverdue(row.original, today) ? 'font-medium text-danger-600' : ''}
+                  className={
+                    isTaskOverdue(row.original, today) ? 'font-medium text-danger-600' : ''
+                  }
                   title="Internal due date"
                 >
                   {formatDate(internal)}
