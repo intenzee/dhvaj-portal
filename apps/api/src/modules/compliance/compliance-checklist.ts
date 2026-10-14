@@ -9,6 +9,7 @@
  * using the version effective at the period end (else today).
  */
 import type { PoolClient } from 'pg';
+import { eventContext } from './compliance-events';
 
 export interface TemplateItem {
   code: string;
@@ -17,7 +18,10 @@ export interface TemplateItem {
   required?: boolean;
   sequence?: number;
   autoTick?: 'document' | 'figure' | 'review' | 'lodge' | 'event' | null;
-  /** A profile attribute that must be true for the item to apply. */
+  /**
+   * A profile attribute (or event detail, `<event_type>_<detail>`) that must be
+   * true for the item to apply; `key=value` matches a text value instead.
+   */
   onlyIf?: string;
   note?: string;
 }
@@ -45,7 +49,12 @@ export function applicableItems(
   items: TemplateItem[],
   attributes: Record<string, unknown>,
 ): TemplateItem[] {
-  return items.filter((it) => !it.onlyIf || attributes[it.onlyIf] === true);
+  return items.filter((it) => {
+    if (!it.onlyIf) return true;
+    const eq = it.onlyIf.indexOf('=');
+    if (eq < 0) return attributes[it.onlyIf] === true;
+    return String(attributes[it.onlyIf.slice(0, eq)] ?? '') === it.onlyIf.slice(eq + 1);
+  });
 }
 
 /**
@@ -63,6 +72,8 @@ export async function seedChecklistForInstance(
     section: string | null;
     as_of: string;
     attributes: Record<string, unknown> | null;
+    event_type: string | null;
+    event_details: Record<string, unknown> | null;
     has_items: boolean;
   }>(
     `SELECT ci.engagement_id, cr.code AS rule_code,
@@ -73,6 +84,7 @@ export async function seedChecklistForInstance(
                 AND p.effective_from <= COALESCE(ci.period_end, CURRENT_DATE)
                 AND (p.effective_to IS NULL OR p.effective_to >= COALESCE(ci.period_start, CURRENT_DATE))
               ORDER BY p.effective_from DESC LIMIT 1) AS attributes,
+            ev.event_type, ev.details AS event_details,
             EXISTS (SELECT 1 FROM hsdg.instance_checklist_items it
                      WHERE it.compliance_instance_id = ci.id) AS has_items
        FROM hsdg.compliance_instances ci
@@ -80,6 +92,7 @@ export async function seedChecklistForInstance(
        LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
        LEFT JOIN hsdg.engagement_services es ON es.id = ci.engagement_service_id
        LEFT JOIN hsdg.services sv ON sv.id = es.service_id
+       LEFT JOIN hsdg.compliance_events ev ON ev.id = ci.compliance_event_id
       WHERE ci.id = $1`,
     [instanceId],
   );
@@ -98,7 +111,14 @@ export async function seedChecklistForInstance(
       [candidates, inst.as_of],
     );
     const chosen = tpl.rows[0];
-    const items = applicableItems(chosen?.body.items ?? [], inst.attributes ?? {});
+    // An event's items also read its details (DIR-12 appointed / ceased …).
+    const facts = {
+      ...(inst.attributes ?? {}),
+      ...(inst.event_type
+        ? eventContext({ event_type: inst.event_type, details: inst.event_details })
+        : {}),
+    };
+    const items = applicableItems(chosen?.body.items ?? [], facts);
     if (chosen && items.length > 0) {
       await client.query(
         `INSERT INTO hsdg.instance_checklist_items

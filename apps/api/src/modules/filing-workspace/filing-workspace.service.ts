@@ -37,6 +37,7 @@ import { istToday } from '../engagements/time/auto-time';
 import { seedChecklistForInstance, syncAutoTicks } from '../compliance/compliance-checklist';
 import { ComplianceCalendarV2Service } from '../compliance/compliance-calendar-v2.service';
 import { eventFinancialYear } from '../compliance/compliance-generator.service';
+import { chargeFilingWindow } from '../compliance/compliance-events';
 import {
   figureForm,
   figureSchema,
@@ -97,6 +98,7 @@ interface InstanceRow {
   workflow_status: FilingStatus;
   is_provisional: boolean;
   notes: string | null;
+  event_date: string | null;
   is_lead: boolean;
   is_member: boolean;
   engagement_partner_id: string | null;
@@ -163,6 +165,8 @@ const INSTANCE_SQL = `
          COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)::text AS due,
          COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS internal_due,
          ci.workflow_status, ci.is_provisional, ci.notes,
+         (SELECT ev.event_date::text FROM hsdg.compliance_events ev
+           WHERE ev.id = ci.compliance_event_id) AS event_date,
          hsdg.is_engagement_lead(ci.engagement_id) AS is_lead,
          hsdg.is_engagement_member(ci.engagement_id) AS is_member,
          e.engagement_partner_id, e.engagement_manager_id, e.status AS engagement_status
@@ -1010,6 +1014,13 @@ export class FilingWorkspaceService {
             ? inst.notes?.startsWith(NA_NOTE_PREFIX)
               ? inst.notes.slice(NA_NOTE_PREFIX.length)
               : inst.notes
+            : null,
+        chargeWindow:
+          inst.rule_code === 'ROC_CHG1' &&
+          inst.event_date &&
+          !live &&
+          inst.workflow_status !== 'not_applicable'
+            ? chargeFilingWindow(inst.event_date, today)
             : null,
       },
       task: task
