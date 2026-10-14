@@ -29,6 +29,8 @@ export interface TemplateItem {
    */
   onlyIf?: string;
   note?: string;
+  /** WF-303: starts from last period's answer, for the preparer to confirm. */
+  carriesOver?: boolean;
 }
 
 /** Candidate template codes for a filing, most specific first. */
@@ -170,16 +172,18 @@ export async function seedChecklistForInstance(
       await client.query(
         `INSERT INTO hsdg.instance_checklist_items
            (compliance_instance_id, engagement_id, item_code, label, slot_code, required,
-            sequence, auto_tick, note, template_code, ticked_by)
+            sequence, auto_tick, note, template_code, ticked_by, carries_over)
          SELECT $1, $2, x.code, x.label, x."slotCode", COALESCE(x.required, false),
-                COALESCE(x.sequence, 0), x."autoTick", x.note, $4, x."tickedBy"
+                COALESCE(x.sequence, 0), x."autoTick", x.note, $4, x."tickedBy",
+                COALESCE(x."carriesOver", false)
            FROM jsonb_to_recordset($3::jsonb)
                 AS x(code text, label text, "slotCode" text, required boolean, sequence int,
-                     "autoTick" text, note text, "tickedBy" text)
+                     "autoTick" text, note text, "tickedBy" text, "carriesOver" boolean)
          ON CONFLICT (compliance_instance_id, item_code) DO NOTHING`,
         [instanceId, inst.engagement_id, JSON.stringify(items), chosen.code],
       );
       await syncAutoTicks(client, instanceId);
+      await carryOverAnswers(client, instanceId);
     }
   }
   await raiseClientDependencies(client, instanceId);
@@ -188,6 +192,55 @@ export async function seedChecklistForInstance(
     [instanceId],
   );
   return count.rows[0]?.n ?? 0;
+}
+
+/**
+ * Staff Workflow WF-303 — the same return for the client's previous period:
+ * same rule, registration and section, on the same client, ending before this
+ * one. $1 is the filing. Runs under the caller's RLS, so a period the caller
+ * cannot see is no previous period.
+ */
+export const PREVIOUS_INSTANCE_SQL = `
+  SELECT p.id, p.period_key
+    FROM hsdg.compliance_instances ci
+    JOIN hsdg.engagements e ON e.id = ci.engagement_id
+    JOIN hsdg.compliance_instances p
+      ON p.compliance_rule_id = ci.compliance_rule_id
+     AND p.registration_id IS NOT DISTINCT FROM ci.registration_id
+     AND p.section IS NOT DISTINCT FROM ci.section
+     AND p.id <> ci.id
+    JOIN hsdg.engagements pe ON pe.id = p.engagement_id AND pe.entity_id = e.entity_id
+   WHERE ci.id = $1
+     AND COALESCE(p.period_end, p.statutory_deadline) < COALESCE(ci.period_end, ci.statutory_deadline)
+   ORDER BY COALESCE(p.period_end, p.statutory_deadline) DESC, p.created_at DESC
+   LIMIT 1`;
+
+/**
+ * WF-303: pre-fill the lines that carry over from last period's answer. The
+ * line stays open with the answer in `carried`, so the preparer confirms it. A
+ * Done carries only on a line ticked by hand (a document line needs this
+ * period's document); Not applicable carries on any. Idempotent.
+ */
+export async function carryOverAnswers(client: PoolClient, instanceId: string): Promise<number> {
+  const prev = await client.query<{ id: string; period_key: string | null }>(
+    PREVIOUS_INSTANCE_SQL,
+    [instanceId],
+  );
+  const p = prev.rows[0];
+  if (!p) return 0;
+  const res = await client.query(
+    `UPDATE hsdg.instance_checklist_items it
+        SET carried = jsonb_build_object('status', last.status, 'note', last.done_note,
+                                         'naReason', last.na_reason, 'instanceId', $2::text,
+                                         'periodKey', $3::text)
+       FROM hsdg.instance_checklist_items last
+      WHERE it.compliance_instance_id = $1 AND it.carries_over AND it.status = 'open'
+        AND it.carried IS NULL
+        AND last.compliance_instance_id = $2 AND last.item_code = it.item_code
+        AND (last.status = 'not_applicable' OR (last.status = 'done' AND it.auto_tick IS NULL))`,
+    [instanceId, p.id, p.period_key],
+  );
+  return res.rowCount ?? 0;
 }
 
 /**
