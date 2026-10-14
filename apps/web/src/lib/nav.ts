@@ -268,6 +268,31 @@ export function visibleNavSections(
   })).filter((s) => s.items.length > 0);
 }
 
+/**
+ * Where an old route lands now that it lives in My Work, keeping the link's
+ * own query (e.g. /reviews?filter=signoff → /my-work?tab=to-review&filter=signoff);
+ * the target's params win. Null when the route was not folded. Pure — tested.
+ */
+export function foldedTarget(from: string, search: string): string | null {
+  const to = NAV_ITEMS.find((i) => i.href === from)?.foldedInto;
+  if (!to) return null;
+  const [path = to, query = ''] = to.split('?');
+  const params = new URLSearchParams(search);
+  new URLSearchParams(query).forEach((v, k) => params.set(k, v));
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+/**
+ * A link to an old list route, sent straight to its My Work tab once
+ * ff_work_links is on, so a click skips the redirect hop (WF-106).
+ */
+export function foldedHref(href: string, workLinks: boolean): string {
+  if (!workLinks) return href;
+  const [path = href, query = ''] = href.split('?');
+  return foldedTarget(path, query) ?? href;
+}
+
 /** Is this nav item the current page? Exact match or a sub-path, never a prefix-substring. */
 export function isNavActive(item: NavItem, pathname: string): boolean {
   const base = item.href.split('?')[0]!;

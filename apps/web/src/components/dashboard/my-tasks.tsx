@@ -3,25 +3,22 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Circle } from 'lucide-react';
-import { FEATURE_FLAG, type Paginated } from '@hsdg/contracts';
+import type { Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
-import { useFeatureFlags } from '@/lib/feature-flags';
 import { useWorkHref } from '@/lib/work-href';
 import { formatDate } from '@/lib/format';
 import type { MyTask } from '@/lib/types';
 import { Panel, Spinner, EmptyState } from '@/components/ui';
 import { SectionSelect, useStoredSections, withSections } from '@/components/section-filter';
 import { cn } from '@/lib/cn';
+import { useFoldedHref } from '@/components/work/folded-route';
 
 export function MyTasksPanel(): JSX.Element {
   const [sections, setSections] = useStoredSections('home-tasks');
   const workHref = useWorkHref();
-  const { isOn } = useFeatureFlags();
+  const folded = useFoldedHref();
   // With ff_work_links the Tasks page is a My Work tab.
-  const listHref = withSections(
-    isOn(FEATURE_FLAG.workLinks) ? '/my-work?tab=tasks' : '/tasks',
-    sections,
-  );
+  const listHref = withSections(folded('/tasks'), sections);
   const q = useQuery({
     queryKey: ['work', 'tasks', 'dashboard', sections],
     queryFn: () => apiFetch<Paginated<MyTask>>(withSections('/work/tasks?limit=6', sections)),

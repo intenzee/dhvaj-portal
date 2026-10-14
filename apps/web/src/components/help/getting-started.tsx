@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth';
 import { onboardingSteps, useOnboarding } from '@/lib/onboarding';
 import { Card, CardBody } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { useFoldedHref } from '@/components/work/folded-route';
 
 /** Wide-screen columns by step count, so the checklist fills one row (static for Tailwind). */
 const XL_COLS: Record<number, string> = {
@@ -24,6 +25,7 @@ export function GettingStarted(): JSX.Element | null {
   const { principal } = useAuth();
   const { state, dismiss } = useOnboarding(principal?.userId);
   const steps = onboardingSteps(principal);
+  const folded = useFoldedHref();
 
   if (!principal || state.dismissed || steps.length === 0) return null;
   const done = steps.filter((s) => state.visited.includes(s.key)).length;
@@ -87,7 +89,7 @@ export function GettingStarted(): JSX.Element | null {
                 </div>
                 <p className="mt-1 flex-1 text-xs leading-relaxed text-ink-muted">{s.body}</p>
                 <Link
-                  href={s.href}
+                  href={folded(s.href)}
                   className="mt-2 text-sm font-medium text-primary-600 hover:text-primary-700"
                 >
                   {s.cta} →

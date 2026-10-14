@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { PERMISSION } from '@hsdg/contracts';
+import { foldedTarget } from './nav';
 import { can, hasRole, type Principal } from './principal';
 
 /**
@@ -149,6 +150,21 @@ export function useOnboarding(userId: string | undefined): {
   return { state, dismiss, restart };
 }
 
+/**
+ * Is the user at the step's place? Its own path, or — the old list routes now
+ * being My Work tabs (WF-106) — the tab it folded into (/reviews ↔
+ * /my-work?tab=to-review), so the step ticks off however they got there. Pure — tested.
+ */
+export function reachedStep(step: OnboardingStep, pathname: string, search: string): boolean {
+  if (pathname.startsWith(step.donePath)) return true;
+  const target = foldedTarget(step.donePath, '');
+  if (!target) return false;
+  const [path, query = ''] = target.split('?');
+  if (pathname !== path) return false;
+  const here = new URLSearchParams(search);
+  return [...new URLSearchParams(query)].every(([k, v]) => here.get(k) === v);
+}
+
 /** Records page visits so the checklist ticks itself off. Mount once, in the shell. */
 export function useTrackOnboardingVisit(principal: Principal | null, pathname: string): void {
   const userId = principal?.userId;
@@ -157,7 +173,10 @@ export function useTrackOnboardingVisit(principal: Principal | null, pathname: s
     const current = read(userId);
     if (current.dismissed) return;
     const hits = onboardingSteps(principal)
-      .filter((s) => pathname.startsWith(s.donePath) && !current.visited.includes(s.key))
+      .filter(
+        (s) =>
+          reachedStep(s, pathname, window.location.search) && !current.visited.includes(s.key),
+      )
       .map((s) => s.key);
     if (hits.length > 0) write(userId, { ...current, visited: [...current.visited, ...hits] });
     // principal identity is stable per session; re-run on navigation only.

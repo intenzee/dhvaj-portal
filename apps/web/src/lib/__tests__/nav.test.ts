@@ -2,6 +2,7 @@ import { PERMISSION } from '@hsdg/contracts';
 import {
   NAV_ITEMS,
   activeNavHref,
+  foldedHref,
   isNavActive,
   landingPath,
   visibleNav,
@@ -191,5 +192,25 @@ describe('Filing runs (WF-301)', () => {
     expect(activeNavHref(items, '/compliance')).toBe('/compliance');
     expect(activeNavHref(items, '/compliance/rules')).toBe('/compliance');
     expect(activeNavHref(items, '/nowhere')).toBeNull();
+  });
+});
+
+describe('foldedHref', () => {
+  it('sends links to the old list routes straight to their My Work tab with ff_work_links', () => {
+    expect(foldedHref('/tasks', true)).toBe('/my-work?tab=tasks');
+    expect(foldedHref('/client-dependencies', true)).toBe('/my-work?tab=client-dependencies');
+    expect(foldedHref('/reviews?filter=signoff', true)).toBe(
+      '/my-work?filter=signoff&tab=to-review',
+    );
+    expect(foldedHref('/reviews?filter=high-risk', true)).toBe(
+      '/my-work?filter=high-risk&tab=to-review',
+    );
+  });
+
+  it('leaves every link alone with the flag off, and other routes always', () => {
+    expect(foldedHref('/tasks', false)).toBe('/tasks');
+    expect(foldedHref('/reviews?filter=signoff', false)).toBe('/reviews?filter=signoff');
+    expect(foldedHref('/engagements/new', true)).toBe('/engagements/new');
+    expect(foldedHref('/my-work?tab=tasks', true)).toBe('/my-work?tab=tasks');
   });
 });
