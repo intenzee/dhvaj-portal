@@ -3,7 +3,9 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { X, RotateCcw } from 'lucide-react';
+import { FEATURE_FLAG } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { visibleNavSections } from '@/lib/nav';
 import { useOnboarding } from '@/lib/onboarding';
 import { Button } from '@/components/ui';
@@ -64,6 +66,7 @@ export function HelpPanel({
 }): JSX.Element | null {
   const { principal } = useAuth();
   const { restart } = useOnboarding(principal?.userId);
+  const { isOn } = useFeatureFlags();
 
   useEffect(() => {
     if (!open) return;
@@ -75,7 +78,7 @@ export function HelpPanel({
   }, [open, onClose]);
 
   if (!open) return null;
-  const sections = visibleNavSections(principal);
+  const sections = visibleNavSections(principal, { workLinks: isOn(FEATURE_FLAG.workLinks) });
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>

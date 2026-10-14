@@ -1,5 +1,6 @@
 import { PERMISSION } from '@hsdg/contracts';
 import { NAV_ITEMS, isNavActive, visibleNav, visibleNavSections } from '../nav';
+import type { RoleSlug } from '@hsdg/contracts';
 import type { Principal } from '../principal';
 
 const principal = (permissions: string[]): Principal => ({
@@ -66,5 +67,73 @@ describe('isNavActive', () => {
     expect(isNavActive(engagements, '/engagements')).toBe(true);
     expect(isNavActive(engagements, '/engagements/abc')).toBe(true);
     expect(isNavActive(engagements, '/engagements-archive')).toBe(false);
+  });
+});
+
+describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
+  // What the seeded roles hold (hsdg.role_permissions): preparers keep
+  // service.read / employee.read / report.read for other screens.
+  const STAFF = [
+    PERMISSION.engagementRead,
+    PERMISSION.notificationRead,
+    PERMISSION.entityRead,
+    PERMISSION.complianceRead,
+    PERMISSION.serviceRead,
+    PERMISSION.employeeRead,
+    PERMISSION.reportRead,
+  ];
+  const as = (roles: RoleSlug[], permissions: string[] = STAFF, effectiveRole?: RoleSlug) => ({
+    ...principal(permissions),
+    roles,
+    effectiveRole,
+  });
+  const labels = (p: Principal, workLinks = true) => visibleNav(p, { workLinks }).map((i) => i.label);
+
+  it.each(['article', 'senior'] as RoleSlug[])('a %s sees at most 7 items: the client work', (role) => {
+    expect(labels(as([role]))).toEqual([
+      'Home',
+      'My Work',
+      'Notifications',
+      'Engagements',
+      'Clients',
+      'Compliance',
+      'Documents',
+    ]);
+  });
+
+  it.each(['manager', 'partner', 'managing_partner', 'admin'] as RoleSlug[])(
+    'a %s keeps the back-office, minus the lists folded into My Work',
+    (role) => {
+      const all = [...STAFF, PERMISSION.userManage];
+      const off = labels(as([role], all), false);
+      const on = labels(as([role], all));
+      expect(off.filter((l) => !on.includes(l)).sort()).toEqual(
+        ['Client Dependencies', 'Reviews & Sign-offs', 'Tasks'].sort(),
+      );
+      expect(on).toEqual(expect.arrayContaining(['Services', 'Resource Management', 'Reports & MIS']));
+    },
+  );
+
+  it('a senior who is also a manager keeps the manager’s sidebar', () => {
+    expect(labels(as(['senior', 'manager']))).toContain('Resource Management');
+  });
+
+  it('judges by the effective role when one is set', () => {
+    expect(labels(as(['senior', 'manager'], STAFF, 'senior'))).not.toContain('Resource Management');
+  });
+
+  it('never shows what the permissions hide', () => {
+    expect(labels(as(['senior'], [PERMISSION.engagementRead]))).toEqual(['Home', 'My Work', 'Engagements', 'Documents']);
+  });
+
+  it('with the flag off nothing changes for anyone', () => {
+    expect(labels(as(['senior']), false)).toEqual(visibleNav(as(['senior'])).map((i) => i.label));
+    expect(labels(as(['senior']), false)).toContain('Services');
+  });
+
+  it('each folded item names the My Work tab it moved to', () => {
+    for (const item of NAV_ITEMS.filter((i) => i.foldedInto)) {
+      expect(item.foldedInto).toMatch(/^\/my-work\?tab=/);
+    }
   });
 });
