@@ -155,6 +155,18 @@ describe('ROC late fee (P1-8, P2-4)', () => {
     // A normal-fee form needs the authorised capital for the slab.
     expect(rocLateCharges({ ...base, ruleCode: 'ROC_ADT1', asOf: '2026-12-30' })).toBeNull();
   });
+  it('the normal fee paid at lodge wins over the schedule (no Verify)', () => {
+    const late = rocLateCharges({
+      ruleCode: 'ROC_CHG1',
+      dueDate: '2026-10-30',
+      asOf: '2026-11-09',
+      authorisedCapital: 50_000,
+      normalFeePaid: 600,
+    })!;
+    expect(late).toMatchObject({ basis: 'slab', normalFee: 600 });
+    expect(late.lateFee).toBe(600 * late.multiple!);
+    expect(late.verify).toBeUndefined();
+  });
   it('normal-fee forms: the slab multiple of the fee by authorised capital (Verify)', () => {
     expect(rocNormalFee(50_000)).toBe(200);
     expect(rocNormalFee(100_000)).toBe(300);

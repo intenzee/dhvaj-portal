@@ -200,6 +200,8 @@ export function rocLateCharges(input: {
   dueDate: string;
   asOf: string;
   authorisedCapital: number | null;
+  /** The normal fee actually paid (recorded at lodge) — wins over the schedule. */
+  normalFeePaid?: number | null;
 }): LateChargeEstimate | null {
   const daysLate = Math.round((Date.parse(input.asOf) - Date.parse(input.dueDate)) / 86_400_000);
   if (!(daysLate > 0)) return null;
@@ -213,8 +215,11 @@ export function rocLateCharges(input: {
       ...(isLlp ? { verify: true } : {}),
     };
   }
-  if (ROC_NORMAL_FEE_RULES.includes(input.ruleCode) && input.authorisedCapital !== null) {
-    const normalFee = rocNormalFee(input.authorisedCapital);
+  if (ROC_NORMAL_FEE_RULES.includes(input.ruleCode)) {
+    const paid = input.normalFeePaid ?? null;
+    const normalFee =
+      paid ?? (input.authorisedCapital !== null ? rocNormalFee(input.authorisedCapital) : null);
+    if (normalFee === null) return null;
     const multiple = rocLateMultiple(daysLate);
     return {
       daysLate,
@@ -223,7 +228,8 @@ export function rocLateCharges(input: {
       basis: 'slab',
       normalFee,
       multiple,
-      verify: true,
+      // The schedule fee is read from the authorised capital; a paid fee is known.
+      ...(paid === null ? { verify: true } : {}),
     };
   }
   return null;
