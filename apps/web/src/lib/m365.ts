@@ -38,6 +38,26 @@ export function m365OpenUrl(link: string, canEdit: boolean): string {
   return url.toString();
 }
 
+interface ScreenArea {
+  availWidth: number;
+  availHeight: number;
+  availLeft?: number;
+  availTop?: number;
+}
+
+/**
+ * window.open features for the Word / Excel / PowerPoint window: a popup on
+ * the right of the screen (60% of its width, at least 900px when it fits) so
+ * the portal stays visible beside it.
+ */
+export function editorWindowFeatures(area: ScreenArea): string {
+  const width = Math.min(area.availWidth, Math.max(900, Math.round(area.availWidth * 0.6)));
+  const height = area.availHeight;
+  const left = (area.availLeft ?? 0) + area.availWidth - width;
+  const top = area.availTop ?? 0;
+  return `popup,width=${width},height=${height},left=${left},top=${top}`;
+}
+
 /** Ask the API to build an embedded Microsoft 365 editor session for a document. */
 export function fetchM365Session(engagementId: string, docId: string): Promise<M365EditorSession> {
   return apiFetch<M365EditorSession>(
