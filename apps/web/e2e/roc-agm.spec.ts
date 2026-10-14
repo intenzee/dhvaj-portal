@@ -7,6 +7,11 @@ import { expect, request, test, type Browser, type Page } from '@playwright/test
  * (30 Oct). The manager records the AGM held on 25 Sep from the ROC tab's
  * Events panel: the what-changed summary says AOC-4 moved and the annual pill
  * shows 25 Oct. Voiding the event (with a reason) puts AOC-4 back on 30 Oct.
+ *
+ * P1-9: AGM held → AOC-4 lodged with SRN. The form offers the AGM's FY (the
+ * previous one) by default; once the AGM is recorded, AOC-4's "AGM held" line
+ * has ticked itself, and the manager lodges AOC-4 with its SRN and the
+ * acknowledgement, inline. Activity shows the lodge with the SRN.
  */
 const API = process.env.PW_API_URL ?? 'http://localhost:3001/api/v1';
 const FY = '2025-26';
@@ -104,4 +109,46 @@ test('recording the AGM moves AOC-4; voiding it moves it back', async ({ browser
   // Activity shows the event recorded and voided.
   await page.goto(`/engagements/${engagementId}?tab=activity`);
   await expect(page.getByText(/AGM held/).first()).toBeVisible();
+});
+
+test('AGM held → AOC-4 lodged with SRN', async ({ browser }) => {
+  const engagementId = await arrange();
+  const page = await signIn(browser);
+  await page.goto(`/engagements/${engagementId}?tab=roc&fy=${FY}`);
+  await expect(aoc4(page, '30 Oct 2026')).toBeVisible();
+
+  // The AGM held on 25 Sep adopts FY 2025-26's accounts — the form's default FY.
+  await page.getByRole('button', { name: 'Record event' }).click();
+  const form = page.getByRole('form', { name: 'Record event' });
+  await form.getByLabel(/^Event/).selectOption({ label: 'AGM held' });
+  await form.getByLabel(/^Date/).fill('2026-09-25');
+  await expect(form.getByLabel(/^FY/)).toHaveValue(FY);
+  await form.getByRole('button', { name: 'Record', exact: true }).click();
+  await expect(aoc4(page, '25 Oct 2026')).toBeVisible();
+
+  // Open AOC-4 in place: "AGM held" has ticked itself from the event.
+  await aoc4(page, '25 Oct 2026').click();
+  const checklist = page.getByRole('region', { name: 'Checklist' });
+  await expect(checklist.getByRole('checkbox', { name: 'AGM held' })).toBeChecked();
+
+  // Lodge with the SRN and the acknowledgement.
+  await page.getByRole('button', { name: 'Lodge filing' }).click();
+  const lodge = page.getByRole('form', { name: 'Lodge filing' });
+  await expect(lodge.getByLabel(/^Reference type/)).toHaveValue('srn');
+  await lodge.getByLabel(/^Reference no\./).fill('AB1234567');
+  await lodge.getByLabel('Upload acknowledgement').setInputFiles({
+    name: 'aoc4-challan.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.4\n%%EOF\n'),
+  });
+  await expect(lodge.getByLabel(/^Acknowledgement/)).not.toHaveValue('');
+  await lodge.getByRole('button', { name: 'Lodge', exact: true }).click();
+
+  const filed = page.getByRole('region', { name: 'Filed' });
+  await expect(filed).toContainText('AB1234567');
+  await expect(filed).toContainText(/^Filed/);
+
+  // Activity shows the lodge with its SRN.
+  await page.goto(`/engagements/${engagementId}?tab=activity`);
+  await expect(page.getByText(/SRN AB1234567/).first()).toBeVisible();
 });

@@ -641,6 +641,7 @@ export class FilingWorkspaceService {
         );
       }
       await syncAutoTicks(client, id);
+      await this.syncMeetingsLines(client, inst);
 
       const what = `${inst.form_label ?? inst.rule_name} ${periodLabel(inst.period_key)}`.trim();
       const recipients = [inst.engagement_manager_id ?? inst.engagement_partner_id].filter(
@@ -706,6 +707,7 @@ export class FilingWorkspaceService {
         );
       }
       await syncAutoTicks(client, id);
+      await this.syncMeetingsLines(client, inst);
       await this.audit.recordWith(client, ctx, {
         action: 'filing.lodge_undone',
         objectType: 'compliance_instance',
@@ -815,6 +817,47 @@ export class FilingWorkspaceService {
 
   // ── read model ─────────────────────────────────────────────────────────
 
+  /**
+   * A board meeting recorded or undone re-ticks the FY's MGT-7 "Meetings"
+   * line (auto_tick 'meetings') on the same CIN (spec §5.4).
+   */
+  private async syncMeetingsLines(client: PoolClient, inst: InstanceRow): Promise<void> {
+    if (inst.rule_code !== 'ROC_BOARD_MEETING' || !inst.financial_year) return;
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT DISTINCT it.compliance_instance_id AS id
+         FROM hsdg.instance_checklist_items it
+         JOIN hsdg.compliance_instances ci ON ci.id = it.compliance_instance_id
+        WHERE it.engagement_id = $1 AND it.auto_tick = 'meetings'
+          AND ci.financial_year = $2 AND ci.registration_id IS NOT DISTINCT FROM $3`,
+      [inst.engagement_id, inst.financial_year, inst.registration_id],
+    );
+    for (const { id } of rows) await syncAutoTicks(client, id);
+  }
+
+  /** The FY's board meetings on this CIN: held-on dates, of how many items. */
+  private async boardMeetingsFor(
+    client: PoolClient,
+    inst: InstanceRow,
+  ): Promise<NonNullable<ChecklistItem['boardMeetings']>> {
+    const { rows } = await client.query<{ held_on: string | null }>(
+      `SELECT (SELECT fr.filed_on::text FROM hsdg.filing_records fr
+                WHERE fr.compliance_instance_id = bi.id AND fr.undone_at IS NULL
+                ORDER BY fr.created_at DESC LIMIT 1) AS held_on
+         FROM hsdg.compliance_instances bi
+         JOIN hsdg.compliance_rules br
+           ON br.id = bi.compliance_rule_id AND br.code = 'ROC_BOARD_MEETING'
+        WHERE bi.engagement_id = $1 AND bi.financial_year = $2
+          AND bi.registration_id IS NOT DISTINCT FROM $3
+          AND bi.workflow_status <> 'not_applicable'`,
+      [inst.engagement_id, inst.financial_year, inst.registration_id],
+    );
+    return {
+      financialYear: inst.financial_year,
+      heldOn: rows.flatMap((r) => (r.held_on ? [r.held_on] : [])).sort(),
+      total: rows.length,
+    };
+  }
+
   private async build(client: PoolClient, ctx: RlsContext, id: string): Promise<InstanceWorkspace> {
     const inst = await this.loadInstance(client, id);
     const now = new Date();
@@ -832,6 +875,9 @@ export class FilingWorkspaceService {
           ORDER BY it.sequence, it.item_code`,
       [id],
     );
+    const meetings = items.rows.some((r) => r.auto_tick === 'meetings')
+      ? await this.boardMeetingsFor(client, inst)
+      : null;
     const docs = await client.query<{
       id: string;
       title: string;
@@ -915,6 +961,7 @@ export class FilingWorkspaceService {
       documentId: r.document_id,
       clientDependencyId: r.client_dependency_id,
       version: r.version,
+      ...(r.auto_tick === 'meetings' ? { boardMeetings: meetings } : {}),
     }));
 
     // Slots: one per checklist slot, in checklist order, plus any slot a

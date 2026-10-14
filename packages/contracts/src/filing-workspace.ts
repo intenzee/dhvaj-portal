@@ -14,8 +14,11 @@ export const CHECKLIST_ITEM_STATUS = {
 export type ChecklistItemStatus = (typeof CHECKLIST_ITEM_STATUS)[keyof typeof CHECKLIST_ITEM_STATUS];
 export const CHECKLIST_ITEM_STATUSES: ChecklistItemStatus[] = Object.values(CHECKLIST_ITEM_STATUS);
 
-/** 'event': ticks when the compliance event it waits on is recorded (AOC-4's AGM held). */
-export type ChecklistAutoTick = 'document' | 'figure' | 'review' | 'lodge' | 'event';
+/**
+ * 'event': ticks when the compliance event it waits on is recorded (AOC-4's AGM held).
+ * 'meetings': ticks when the FY's board-meeting items are all recorded (MGT-7's "Meetings").
+ */
+export type ChecklistAutoTick = 'document' | 'figure' | 'review' | 'lodge' | 'event' | 'meetings';
 /** Who may tick a line by hand: 'partner' lines need a partner and a note (the UDIN). */
 export type ChecklistTickedBy = 'partner';
 
@@ -53,6 +56,8 @@ export interface ChecklistItem {
   documentId: string | null;
   clientDependencyId: string | null;
   version: number;
+  /** A 'meetings' line: the FY's board meetings — held-on dates, of how many. */
+  boardMeetings?: { financialYear: string | null; heldOn: string[]; total: number } | null;
 }
 
 export interface SlotDocument {
