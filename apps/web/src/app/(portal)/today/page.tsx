@@ -219,6 +219,14 @@ function TodayScreen(): JSX.Element {
                     })}
                   </ul>
                 )}
+                {g.total > g.items.length && (
+                  <p className="border-t border-line px-4 py-2 text-xs text-ink-muted">
+                    Showing the {g.items.length} most urgent of {g.total}.{' '}
+                    <Link href="/my-work" className="text-primary-700 hover:underline">
+                      See all on My Work
+                    </Link>
+                  </p>
+                )}
               </Card>
             </section>
           ))}

@@ -1,4 +1,9 @@
-import type { FilingReviewItem, ReviewPointItem, TodayItem } from '@hsdg/contracts';
+import {
+  TODAY_GROUP_LIMIT,
+  type FilingReviewItem,
+  type ReviewPointItem,
+  type TodayItem,
+} from '@hsdg/contracts';
 import { buildTodayView, reviewToToday } from './work-today';
 
 const TODAY = '2026-10-14';
@@ -58,6 +63,23 @@ describe('buildTodayView (WF-201)', () => {
     const due = view.groups.find((g) => g.group === 'due_soon')!;
     expect(due.items.map((i) => i.key)).toEqual(['filing:i4']);
     expect(due.total).toBe(1);
+  });
+
+  it('sends the most urgent TODAY_GROUP_LIMIT rows of a group and counts them all', () => {
+    const many = Array.from({ length: TODAY_GROUP_LIMIT + 20 }, (_, n) =>
+      item({ key: `t${n}`, internalDate: `2026-11-${String((n % 28) + 1).padStart(2, '0')}` }),
+    );
+    const late = item({ key: 'late', internalDate: '2026-09-01', isOverdue: true });
+    const v = buildTodayView('2026-10-14', {
+      prepare: [...many, late],
+      review: [],
+      waiting: [],
+      due_soon: [],
+    });
+    const prepare = v.groups[0]!;
+    expect(prepare.total).toBe(TODAY_GROUP_LIMIT + 21);
+    expect(prepare.items).toHaveLength(TODAY_GROUP_LIMIT);
+    expect(prepare.items[0]!.key).toBe('late');
   });
 
   it('?engagementId= keeps one engagement in every group', () => {
