@@ -17,6 +17,7 @@ import { ClientDependenciesPanel } from '@/components/dashboard/client-dependenc
 import { ComplianceMiniCalendar } from '@/components/dashboard/compliance-mini-calendar';
 import { ProfileCard } from '@/components/dashboard/profile-card';
 import { LandingRedirect } from '@/components/landing-redirect';
+import { useFoldedHref } from '@/components/work/folded-route';
 
 /**
  * Home — the practice cockpit. A role-scoped stat strip over one RLS-scoped
@@ -30,7 +31,11 @@ export default function HomePage(): JSX.Element {
     queryFn: () => apiFetch<DashboardSummary>('/dashboard/summary'),
   });
 
-  const strip = stripCardsForRole(principal?.effectiveRole);
+  const folded = useFoldedHref();
+  const strip = stripCardsForRole(principal?.effectiveRole).map((c) => ({
+    ...c,
+    href: folded(c.href),
+  }));
   const firstName = principal?.displayName.split(' ').slice(0, 2).join(' ') ?? '';
 
   return (

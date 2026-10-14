@@ -7,6 +7,7 @@ import { daysUntil, deadlineLabel } from '@/lib/format';
 import type { MyClientDependency } from '@/lib/types';
 import { Panel, Spinner, EmptyState } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { useFoldedHref } from '@/components/work/folded-route';
 
 function tone(iso: string | null, overdue: boolean): string {
   if (overdue) return 'text-danger-600';
@@ -16,6 +17,7 @@ function tone(iso: string | null, overdue: boolean): string {
 }
 
 export function ClientDependenciesPanel(): JSX.Element {
+  const folded = useFoldedHref();
   const q = useQuery({
     queryKey: ['work', 'client-dependencies', 'dashboard'],
     queryFn: () => apiFetch<Paginated<MyClientDependency>>('/work/client-dependencies?limit=5'),
@@ -24,7 +26,7 @@ export function ClientDependenciesPanel(): JSX.Element {
   return (
     <Panel
       title="Client Dependencies"
-      linkHref="/client-dependencies"
+      linkHref={folded('/client-dependencies')}
       bodyClassName="p-0"
     >
       {q.isLoading && <div className="p-5"><Spinner /></div>}

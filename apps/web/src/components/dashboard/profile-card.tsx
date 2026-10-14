@@ -5,6 +5,7 @@ import { PlusCircle, ListTodo, Building2, Upload, MessageSquareWarning, Clipboar
 import { useAuth } from '@/lib/auth';
 import { initials, roleLabel } from '@/lib/principal';
 import { Card } from '@/components/ui';
+import { useFoldedHref } from '@/components/work/folded-route';
 
 const ACTIONS = [
   { label: 'Create Engagement', href: '/engagements/new', icon: PlusCircle },
@@ -17,6 +18,7 @@ const ACTIONS = [
 
 export function ProfileCard(): JSX.Element {
   const { principal } = useAuth();
+  const folded = useFoldedHref();
   if (!principal) return <Card className="p-5" />;
 
   return (
@@ -47,7 +49,7 @@ export function ProfileCard(): JSX.Element {
             return (
               <Link
                 key={a.label}
-                href={a.href}
+                href={folded(a.href)}
                 className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-ink-muted transition hover:bg-primary-50 hover:text-primary-700"
               >
                 <Icon className="h-4 w-4 shrink-0" />

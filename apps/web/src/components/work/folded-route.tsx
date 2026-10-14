@@ -4,22 +4,16 @@ import { useEffect, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { FEATURE_FLAG } from '@hsdg/contracts';
 import { useFeatureFlags } from '@/lib/feature-flags';
-import { NAV_ITEMS } from '@/lib/nav';
+import { foldedHref, foldedTarget } from '@/lib/nav';
 import { Spinner } from '@/components/ui';
 
-/**
- * Where an old route lands now that it lives in My Work, keeping the link's
- * own query (e.g. /reviews?filter=signoff → /my-work?tab=to-review&filter=signoff);
- * the target's params win. Null when the route was not folded. Pure — tested.
- */
-export function foldedTarget(from: string, search: string): string | null {
-  const to = NAV_ITEMS.find((i) => i.href === from)?.foldedInto;
-  if (!to) return null;
-  const [path = to, query = ''] = to.split('?');
-  const params = new URLSearchParams(search);
-  new URLSearchParams(query).forEach((v, k) => params.set(k, v));
-  const qs = params.toString();
-  return qs ? `${path}?${qs}` : path;
+export { foldedTarget };
+
+/** Resolves links to old list routes to their My Work tab while ff_work_links is on. */
+export function useFoldedHref(): (href: string) => string {
+  const { isOn } = useFeatureFlags();
+  const workLinks = isOn(FEATURE_FLAG.workLinks);
+  return (href) => foldedHref(href, workLinks);
 }
 
 /**

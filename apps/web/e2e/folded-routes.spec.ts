@@ -57,6 +57,14 @@ test('old list routes redirect to their My Work tab, keeping the link’s query'
   await expect(page.getByRole('button', { name: /^Sign-offs/, pressed: true })).toBeVisible();
   // The document-upload notifications keep their own tab.
   await expect(page.getByRole('button', { name: 'New client uploads' })).toBeVisible();
+
+  // Home's own links go straight to the tab, with no redirect hop on the way.
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
+  await expect(page.locator('main a[href^="/my-work"]').first()).toBeVisible();
+  await expect(
+    page.locator('a[href^="/tasks"], a[href^="/reviews"], a[href^="/client-dependencies"]'),
+  ).toHaveCount(0);
 });
 
 test('a filing review is acted on from My Work and leaves the queue', async ({ browser }) => {
