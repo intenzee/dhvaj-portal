@@ -13,4 +13,14 @@ describe('filing end-state wording', () => {
     expect(filingStatusLabel('ready_to_file', 'mis', null)).toBe('Ready to send');
     expect(filingStatusLabel('in_review', 'mis', null)).toBe('In review');
   });
+
+  it('a meeting is recorded as Held (spec P1-2)', () => {
+    expect(filingEnd('roc', null, 'ROC_BOARD_MEETING')).toEqual({
+      action: 'Record meeting',
+      done: 'Held',
+      ready: 'Ready to record',
+    });
+    expect(filingStatusLabel('filed', 'roc', null, 'ROC_AGM')).toBe('Held');
+    expect(filingStatusLabel('filed', 'roc', null, 'ROC_AOC4')).toBe('Filed');
+  });
 });
