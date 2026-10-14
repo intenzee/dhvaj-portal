@@ -31,6 +31,7 @@ import { NotesModule } from './modules/notes/notes.module';
 import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.module';
 import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module';
 import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspace.module';
+import { SearchModule } from './modules/search/search.module';
 
 /**
  * Composition root of the modular monolith.
@@ -104,6 +105,7 @@ import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspa
     NotesModule,
     StatutoryAuditModule,
     FilingWorkspaceModule,
+    SearchModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

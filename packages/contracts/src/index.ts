@@ -88,3 +88,4 @@ export * from './work-queue';
 export * from './filing-runs';
 export * from './client-chase';
 export * from './work-today';
+export * from './search';
