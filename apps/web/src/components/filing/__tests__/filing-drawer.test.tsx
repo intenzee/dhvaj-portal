@@ -1,7 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ActiveTimer } from '@hsdg/contracts';
-import { drawerItemsFrom, drawerNeighbours, FilingDrawer, type DrawerItem } from '../filing-drawer';
+import {
+  drawerItemsFrom,
+  drawerNeighbours,
+  FilingDrawer,
+  workspaceTitle,
+  type DrawerItem,
+} from '../filing-drawer';
 import { clockIsOn } from '../filing-clock';
 
 let search = new URLSearchParams();
@@ -84,7 +90,13 @@ describe('drawerItemsFrom', () => {
       { t: 'd', link: link('i2') },
       { t: 'e', link: null },
     ];
-    expect(drawerItemsFrom(rows, (r) => r.t, (r) => `/x/${r.t}`)).toEqual([
+    expect(
+      drawerItemsFrom(
+        rows,
+        (r) => r.t,
+        (r) => `/x/${r.t}`,
+      ),
+    ).toEqual([
       { instanceId: 'i2', title: 'a', href: '/x/a' },
       { instanceId: 'i1', title: 'c', href: '/x/c' },
     ]);
@@ -131,6 +143,18 @@ describe('FilingDrawer (WF-202)', () => {
     });
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/today', { scroll: false }));
     field.remove();
+  });
+});
+
+describe('workspaceTitle', () => {
+  const ws = (i: object) =>
+    ({
+      instance: { formLabel: 'GSTR-1', ruleName: 'GSTR-1 (monthly)', periodKey: '2026-09', ...i },
+    }) as never;
+  it('names a filing that has left the list by form and period', () => {
+    expect(workspaceTitle(ws({}))).toBe('GSTR-1 · Sep 2026');
+    expect(workspaceTitle(ws({ formLabel: null }))).toBe('GSTR-1 (monthly) · Sep 2026');
+    expect(workspaceTitle(ws({ periodKey: null }))).toBe('GSTR-1');
   });
 });
 

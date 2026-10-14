@@ -7,7 +7,8 @@ import { arrangeGstEngagement, pdf, signIn } from './support/gst-engagement';
  * Compliance calendar; Senior Y signs in, lands on Today with the late GSTR-1
  * among the work to prepare, opens it with the keyboard, prepares it and sends
  * it for review; Manager X reviews and approves it from their own Today; Senior
- * Y lodges it — and never opens the engagement page.
+ * Y lodges it — and never opens the engagement page. Both people's time is
+ * recorded on the way (WF-205).
  */
 
 /** One Today group (To prepare, To review, Due this week …). */
@@ -32,7 +33,7 @@ async function drawerOn(page: Page): Promise<Locator> {
 test('a filing is assigned, prepared, reviewed and lodged from Today, in the drawer', async ({
   browser,
 }) => {
-  const { entityName, arn } = await arrangeGstEngagement();
+  const { engagementId, entityName, arn } = await arrangeGstEngagement();
   const manager = await signIn(browser, 'Manager X');
 
   // The GST lead assigns September's GSTR-1 in the drawer over the Compliance
@@ -121,4 +122,15 @@ test('a filing is assigned, prepared, reviewed and lodged from Today, in the dra
   await s.getByRole('button', { name: 'Close' }).click();
   await expect(gstr1Row(group(senior, 'Due this week'), entityName)).toHaveCount(0);
   expect(visited.filter((p) => p.startsWith('/engagements'))).toEqual([]);
+
+  // WF-205: the clock followed the work — both people's time is on the engagement,
+  // and nobody entered any.
+  await manager.goto(`/engagements/${engagementId}?tab=activity`);
+  await manager
+    .getByRole('tablist', { name: 'Activity view' })
+    .getByRole('tab', { name: 'Time', exact: true })
+    .click();
+  await expect(manager.getByText('Recorded time', { exact: true })).toBeVisible();
+  await expect(manager.getByRole('row', { name: /^Senior Y\b/ })).toBeVisible();
+  await expect(manager.getByRole('row', { name: /^Manager X\b/ })).toBeVisible();
 });
