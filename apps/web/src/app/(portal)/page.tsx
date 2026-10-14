@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DashboardSummary } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
@@ -15,6 +16,7 @@ import { ReviewQueuePanel } from '@/components/dashboard/review-queue';
 import { ClientDependenciesPanel } from '@/components/dashboard/client-dependencies';
 import { ComplianceMiniCalendar } from '@/components/dashboard/compliance-mini-calendar';
 import { ProfileCard } from '@/components/dashboard/profile-card';
+import { LandingRedirect } from '@/components/landing-redirect';
 
 /**
  * Home — the practice cockpit. A role-scoped stat strip over one RLS-scoped
@@ -33,6 +35,9 @@ export default function HomePage(): JSX.Element {
 
   return (
     <div className="space-y-5">
+      <Suspense fallback={null}>
+        <LandingRedirect />
+      </Suspense>
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-ink">Welcome, {firstName}</h1>
         <p className="mt-1 text-sm text-ink-muted">

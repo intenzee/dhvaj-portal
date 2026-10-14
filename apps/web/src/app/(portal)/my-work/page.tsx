@@ -32,6 +32,7 @@ import { cn } from '@/lib/cn';
 import { sortMyTasks, todayIst, useMyTaskColumns } from '@/components/work/my-task-columns';
 import { ReviewQueueTab, reviewFilterOf } from '@/components/work/review-queue-tab';
 import { SectionChips, useUrlSections, withSections } from '@/components/section-filter';
+import { drawerItemsFrom, FilingDrawer, useDrawerOpener } from '@/components/filing/filing-drawer';
 
 type Tab = 'tasks' | 'client-dependencies' | 'to-review' | 'new-uploads';
 type TaskScope = 'mine' | 'team';
@@ -137,10 +138,13 @@ function MyWorkInner(): JSX.Element {
   const workLinks = isOn(FEATURE_FLAG.workLinks);
   const workHref = useWorkHref();
   const today = useMemo(() => todayIst(), []);
+  // WF-202: a filing's task opens in the drawer over the list (ff_today_view).
+  const openInDrawer = useDrawerOpener();
   const linkedTaskColumns = useMyTaskColumns({
     hrefOf: workHref,
     onDocuments: setDocsForTask,
     today,
+    onOpen: openInDrawer,
   });
   // WF-106: engagement leads can switch the Tasks tab to their team's tasks
   // (everything on engagements they manage or partner), with an Assignee column.
@@ -179,6 +183,24 @@ function MyWorkInner(): JSX.Element {
     queryFn: () => apiFetch<Paginated<MyClientDependency>>('/work/client-dependencies?limit=100'),
     enabled: tab === 'client-dependencies',
   });
+  const sortedTasks = useMemo(
+    () => (tasks.data ? (workLinks ? sortMyTasks(tasks.data.items, today) : tasks.data.items) : []),
+    [tasks.data, workLinks, today],
+  );
+  // The drawer's Previous / Next walk the tab it was opened from.
+  const drawerItems = useMemo(
+    () =>
+      tab === 'tasks'
+        ? drawerItemsFrom(sortedTasks, (t) => `${t.title} · ${t.entityName}`, workHref)
+        : tab === 'client-dependencies'
+          ? drawerItemsFrom(
+              deps.data?.items ?? [],
+              (d) => `${d.requestedInfo} · ${d.entityName}`,
+              workHref,
+            )
+          : [],
+    [tab, sortedTasks, deps.data, workHref],
+  );
   const toReview = useQuery({
     queryKey: ['work', 'to-review'],
     queryFn: () =>
@@ -275,7 +297,7 @@ function MyWorkInner(): JSX.Element {
                 columns={
                   teamScope ? teamTaskColumns : workLinks ? linkedTaskColumns : taskColumns
                 }
-                data={workLinks ? sortMyTasks(tasks.data.items, today) : tasks.data.items}
+                data={sortedTasks}
                 empty={
                   teamScope ? 'No open tasks on your team.' : 'No open tasks assigned to you.'
                 }
@@ -293,6 +315,7 @@ function MyWorkInner(): JSX.Element {
               data={deps.data.items}
               empty="No open client dependencies you're waiting on."
               rowHref={workLinks ? workHref : undefined}
+              onRowOpen={openInDrawer}
             />
           )}
         </Card>
@@ -365,6 +388,7 @@ function MyWorkInner(): JSX.Element {
           onClose={() => setDocsForTask(null)}
         />
       )}
+      <FilingDrawer items={drawerItems} listKey={['work']} />
     </div>
   );
 }

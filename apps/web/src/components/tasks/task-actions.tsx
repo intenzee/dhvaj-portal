@@ -15,7 +15,8 @@ import {
   type WorkTask,
 } from '@/lib/work-types';
 
-const PRIMARY: TaskAction[] = ['start', 'send-for-review', 'start-review', 'approve'];
+/** Each state's main move forward — what a list row offers (Today, WF-201). */
+export const PRIMARY: TaskAction[] = ['start', 'send-for-review', 'start-review', 'approve'];
 
 /**
  * WF-205: one clock at a time — starting this task (or its review) paused
@@ -41,16 +42,19 @@ export function TaskActions({
   task,
   ctx,
   onDone,
+  only,
 }: {
   task: WorkTask;
   ctx: TaskActionContext;
   onDone?: () => void;
+  /** Offer only these moves (a list row keeps to the main one; the filing has the rest). */
+  only?: readonly TaskAction[];
 }): JSX.Element | null {
   const qc = useQueryClient();
   const toast = useToast();
   const [asking, setAsking] = useState<TaskAction | null>(null);
   const [reason, setReason] = useState('');
-  const actions = availableTaskActions(task, ctx);
+  const actions = availableTaskActions(task, ctx).filter((a) => !only || only.includes(a));
 
   const run = useMutation({
     mutationFn: ({ action, why }: { action: TaskAction; why?: string }) =>
