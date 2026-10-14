@@ -7,6 +7,9 @@ import { ComplianceModule } from '../compliance/compliance.module';
 import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
 import { MonthlyDataRequestScheduler } from './monthly-data-request.scheduler';
+import { ClientChaseService } from './client-chase.service';
+import { FilingRunsService } from './filing-runs.service';
+import { ClientChaseController, FilingRunsController } from './filing-runs.controller';
 import {
   EngagementStreamsController,
   FilingWorkspaceController,
@@ -19,8 +22,19 @@ import {
  */
 @Module({
   imports: [AuditModule, NotificationsModule, TasksModule, DocumentsModule, ComplianceModule],
-  controllers: [EngagementStreamsController, FilingWorkspaceController],
-  providers: [FilingWorkspaceService, StreamTreeService, MonthlyDataRequestScheduler],
-  exports: [FilingWorkspaceService, MonthlyDataRequestScheduler],
+  controllers: [
+    EngagementStreamsController,
+    FilingWorkspaceController,
+    FilingRunsController,
+    ClientChaseController,
+  ],
+  providers: [
+    FilingWorkspaceService,
+    StreamTreeService,
+    MonthlyDataRequestScheduler,
+    ClientChaseService,
+    FilingRunsService,
+  ],
+  exports: [FilingWorkspaceService, MonthlyDataRequestScheduler, ClientChaseService],
 })
 export class FilingWorkspaceModule {}
