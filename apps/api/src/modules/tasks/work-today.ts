@@ -1,5 +1,6 @@
 import {
   TODAY_GROUP,
+  TODAY_GROUP_LIMIT,
   TODAY_GROUPS,
   WORK_REVIEW_TYPE,
   compareTodayItems,
@@ -86,7 +87,7 @@ export function buildTodayView(
       items = items.filter((i) => !i.link.instanceId || !listed.has(i.link.instanceId));
     }
     items = [...items].sort(compareTodayItems);
-    return { group, items, total: items.length };
+    return { group, items: items.slice(0, TODAY_GROUP_LIMIT), total: items.length };
   });
   return { today, groups };
 }

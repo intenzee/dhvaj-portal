@@ -33,6 +33,13 @@ export const TODAY_GROUP_LABEL: Record<TodayGroup, string> = {
 /** How far ahead "Due this week" looks, in days. */
 export const TODAY_DUE_WITHIN_DAYS = 7;
 
+/**
+ * Rows sent per Today group (plan risk "paginate every group"): the most
+ * urgent ones, already sorted; `total` still counts them all, and the rest
+ * are on My Work and the Compliance calendar.
+ */
+export const TODAY_GROUP_LIMIT = 100;
+
 export const TODAY_ITEM_KIND = {
   task: 'task',
   clientRequest: 'client_request',

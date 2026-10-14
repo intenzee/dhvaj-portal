@@ -73,6 +73,7 @@ type TaskRow = EngagementCols & WorkLinkSqlRow & TaskCols;
 
 interface RequestRow extends EngagementCols, WorkLinkSqlRow {
   id: string;
+  task_id: string | null;
   requested_info: string;
   status: string;
   escalation_date: string | null;
@@ -114,7 +115,7 @@ export class WorkTodayService {
           ),
           [TODAY_GROUP.waiting]: [
             ...tasks.filter((t) => t.group === TODAY_GROUP.waiting),
-            ...(await this.myRequests(client, me, eng, today)),
+            ...(await this.myRequests(client, me, eng, today, listedWaiting(tasks))),
           ],
           [TODAY_GROUP.dueSoon]: await this.filingsDueSoon(client, me, eng, today),
         },
@@ -170,49 +171,52 @@ export class WorkTodayService {
   /**
    * Open client requests I'm responsible for — less those raised by a task of
    * mine that is already listed as waiting (Waiting on client raises one).
+   * Those are dropped here, against the tasks already read, rather than by an
+   * anti-join: on freshly loaded rows the planner probed every task of mine per
+   * request (WF-201's 300 ms budget, see work-today-perf.e2e-spec.ts).
    */
   private async myRequests(
     client: PoolClient,
     me: string,
     engagementId: string | null,
     today: string,
+    listedTaskIds: ReadonlySet<string>,
   ): Promise<TodayItem[]> {
     const { rows } = await client.query<RequestRow>(
-      `SELECT ${ENGAGEMENT_COLS}, cd.id, cd.requested_info, cd.status,
+      `SELECT ${ENGAGEMENT_COLS}, cd.id, cd.task_id, cd.requested_info, cd.status,
               cd.escalation_date::text, cd.period_section, ${WORK_LINK_COLUMNS}
          FROM hsdg.client_dependencies cd
          ${ENGAGEMENT_JOIN('cd.engagement_id')}
          ${workLinkJoin('cd.compliance_instance_id')}
         WHERE cd.responsible_employee_id = $1
           AND cd.status IN ('pending', 'partially_received')
-          AND ($2::uuid IS NULL OR cd.engagement_id = $2)
-          AND NOT EXISTS (SELECT 1 FROM hsdg.tasks bt
-                           WHERE bt.id = cd.task_id AND bt.assigned_to_employee_id = $1
-                             AND bt.status = 'blocked')`,
+          AND ($2::uuid IS NULL OR cd.engagement_id = $2)`,
       [me, engagementId],
     );
-    return rows.map((r) => {
-      const filing = workFilingContextOf(r);
-      return {
-        key: `client_request:${r.id}`,
-        kind: 'client_request',
-        group: TODAY_GROUP.waiting,
-        title: r.requested_info,
-        ...engagementOf(r),
-        filing,
-        internalDate: filing?.internalDate ?? r.escalation_date,
-        statutoryDate: filing?.statutoryDate ?? null,
-        status: r.status,
-        // A request is late once the client is past its escalation date.
-        isOverdue: isPastDate(r.escalation_date, today),
-        blockedByOpenCount: 0,
-        task: null,
-        link: workLinkOf(
-          { engagementId: r.engagement_id, engagementKind: r.engagement_kind, requestId: r.id },
-          { ...workLinkFilingOf(r), section: r.period_section ?? r.wl_section },
-        ),
-      };
-    });
+    return rows
+      .filter((r) => !r.task_id || !listedTaskIds.has(r.task_id))
+      .map((r) => {
+        const filing = workFilingContextOf(r);
+        return {
+          key: `client_request:${r.id}`,
+          kind: 'client_request',
+          group: TODAY_GROUP.waiting,
+          title: r.requested_info,
+          ...engagementOf(r),
+          filing,
+          internalDate: filing?.internalDate ?? r.escalation_date,
+          statutoryDate: filing?.statutoryDate ?? null,
+          status: r.status,
+          // A request is late once the client is past its escalation date.
+          isOverdue: isPastDate(r.escalation_date, today),
+          blockedByOpenCount: 0,
+          task: null,
+          link: workLinkOf(
+            { engagementId: r.engagement_id, engagementKind: r.engagement_kind, requestId: r.id },
+            { ...workLinkFilingOf(r), section: r.period_section ?? r.wl_section },
+          ),
+        };
+      });
   }
 
   /**
@@ -279,6 +283,13 @@ export class WorkTodayService {
       };
     });
   }
+}
+
+/** The ids of my tasks already listed as waiting on the client. */
+function listedWaiting(tasks: TodayItem[]): Set<string> {
+  return new Set(
+    tasks.flatMap((t) => (t.group === TODAY_GROUP.waiting && t.task ? [t.task.id] : [])),
+  );
 }
 
 function emptyGroups(): Parameters<typeof buildTodayView>[1] {
