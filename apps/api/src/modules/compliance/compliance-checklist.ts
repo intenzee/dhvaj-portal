@@ -181,11 +181,80 @@ export async function seedChecklistForInstance(
       await syncAutoTicks(client, instanceId);
     }
   }
+  await raiseClientDependencies(client, instanceId);
   const count = await client.query<{ n: number }>(
     `SELECT count(*)::int AS n FROM hsdg.instance_checklist_items WHERE compliance_instance_id = $1`,
     [instanceId],
   );
   return count.rows[0]?.n ?? 0;
+}
+
+/**
+ * Slots only the client can fill (roc-mca Decision 5): a CS in practice's
+ * MGT-8 and MR-3. Their lines exist only where onlyIf applies.
+ */
+export const CLIENT_DEPENDENCY_SLOTS = ['MGT8', 'MR3'];
+
+/**
+ * Raise a client dependency for each open client-only slot on the filing, so it
+ * shows Awaiting data until the certificate arrives. Idempotent: never a second
+ * one for a slot that has ever had one (a cancelled request stays cancelled) or
+ * already holds a document. Runs when the checklist is seeded (on generate) and
+ * again when a member opens the filing, as only a member may raise one.
+ */
+export async function raiseClientDependencies(
+  client: PoolClient,
+  instanceId: string,
+): Promise<void> {
+  const { rows } = await client.query<{
+    slot_code: string;
+    label: string;
+    engagement_id: string;
+    form: string;
+    financial_year: string | null;
+  }>(
+    `SELECT it.slot_code, it.label, ci.engagement_id, ci.financial_year,
+            COALESCE(ci.form_label, rv.form_label, cr.name) AS form
+       FROM hsdg.instance_checklist_items it
+       JOIN hsdg.compliance_instances ci ON ci.id = it.compliance_instance_id
+       JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+       LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
+      WHERE it.compliance_instance_id = $1 AND it.slot_code = ANY($2::text[])
+        AND it.status = 'open' AND it.client_dependency_id IS NULL
+        AND ci.status = 'open' AND ci.workflow_status NOT IN ('filed','not_applicable')
+        AND hsdg.is_engagement_member(ci.engagement_id)
+        AND NOT EXISTS (SELECT 1 FROM hsdg.client_dependencies d
+                         WHERE d.compliance_instance_id = ci.id AND d.slot_code = it.slot_code)
+        AND NOT EXISTS (SELECT 1 FROM hsdg.documents d
+                         WHERE d.compliance_instance_id = ci.id AND d.slot_code = it.slot_code
+                           AND d.status = 'active')`,
+    [instanceId, CLIENT_DEPENDENCY_SLOTS],
+  );
+  for (const r of rows) {
+    const fy = r.financial_year ? ` FY ${r.financial_year}` : '';
+    await client.query(
+      `WITH dep AS (
+         INSERT INTO hsdg.client_dependencies
+           (engagement_id, requested_info, responsible_employee_id, created_by_employee_id,
+            engagement_service_id, compliance_instance_id, task_id, period_section, slot_code)
+         SELECT ci.engagement_id, $2, t.assigned_to_employee_id, hsdg.ctx_employee_id(),
+                ci.engagement_service_id, ci.id, t.id, ci.section, $3
+           FROM hsdg.compliance_instances ci
+           LEFT JOIN LATERAL (
+             SELECT tk.id, tk.assigned_to_employee_id FROM hsdg.tasks tk
+              WHERE tk.source_compliance_instance_id = ci.id AND tk.status <> 'cancelled'
+              ORDER BY tk.created_at DESC LIMIT 1
+           ) t ON true
+          WHERE ci.id = $1
+         RETURNING id
+       )
+       UPDATE hsdg.instance_checklist_items it
+          SET client_dependency_id = dep.id, version = it.version + 1
+         FROM dep
+        WHERE it.compliance_instance_id = $1 AND it.slot_code = $3 AND it.status = 'open'`,
+      [instanceId, `${r.label} — ${r.form}${fy}`, r.slot_code],
+    );
+  }
 }
 
 /**
