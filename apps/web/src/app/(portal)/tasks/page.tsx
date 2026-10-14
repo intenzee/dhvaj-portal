@@ -1,11 +1,11 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { WORK_SECTION_LABEL, type Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
+import { useWorkHref } from '@/lib/work-href';
 import { formatDate } from '@/lib/format';
 import type { MyTask } from '@/lib/types';
 import { PageHeader, Spinner } from '@/components/ui';
@@ -55,7 +55,7 @@ export default function TasksPage(): JSX.Element {
 }
 
 function TasksInner(): JSX.Element {
-  const router = useRouter();
+  const workHref = useWorkHref();
   const [openOnly, setOpenOnly] = useState(true);
   const [sections, setSections] = useUrlSections();
 
@@ -103,7 +103,7 @@ function TasksInner(): JSX.Element {
           columns={columns}
           data={rows}
           empty="No tasks match this view."
-          onRowClick={(row) => router.push(`/engagements/${row.engagementId}`)}
+          rowHref={workHref}
         />
       )}
     </div>

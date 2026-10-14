@@ -228,6 +228,8 @@ export interface ComplianceCalendarEventRecord {
   escalation: EscalationLevel;
   /** The distinct §24 action this band triggers. */
   escalationAction: EscalationAction;
+  /** The filing the event belongs to, as a work link (Staff Workflow WF-102). */
+  link: WorkItemRef;
 }
 
 /** Result of a bulk generate-for-service call. */

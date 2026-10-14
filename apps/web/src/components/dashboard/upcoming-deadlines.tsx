@@ -18,7 +18,8 @@ import { daysUntil, deadlineLabel } from '@/lib/format';
 import type { ComplianceRow } from '@/lib/types';
 import { Panel, Spinner, EmptyState } from '@/components/ui';
 import { SectionSelect, useStoredSections } from '@/components/section-filter';
-import { rowHref } from '@/components/compliance/firm-calendar';
+import { useCalendarHref } from '@/components/compliance/firm-calendar';
+import { useWorkHref } from '@/lib/work-href';
 import { cn } from '@/lib/cn';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -56,6 +57,8 @@ interface Item {
 export function UpcomingDeadlinesPanel(): JSX.Element {
   const { isOn, isLoading } = useFeatureFlags();
   const v2 = isOn(FEATURE_FLAG.calendarV2);
+  const calendarHref = useCalendarHref();
+  const workHref = useWorkHref();
   const [sections, setSections] = useStoredSections('home-deadlines', STREAM_SECTIONS);
   const stream = workSectionsParam(sections);
 
@@ -73,7 +76,7 @@ export function UpcomingDeadlinesPanel(): JSX.Element {
         due: r.dueDate,
         title: r.formLabel ?? r.ruleName,
         sub: `${sections.length !== 1 && r.stream ? `${WORK_SECTION_LABEL[r.stream]} · ` : ''}${r.entityName}`,
-        href: rowHref(r),
+        href: calendarHref(r),
       }))
     : [...(legacy.data?.items ?? [])]
         .sort(
@@ -87,7 +90,7 @@ export function UpcomingDeadlinesPanel(): JSX.Element {
           due: r.effectiveStatutoryDeadline,
           title: r.complianceRuleName,
           sub: `${r.engagementCode} · ${r.entityName}`,
-          href: `/engagements/${r.engagementId}`,
+          href: workHref(r),
         }));
 
   return (
