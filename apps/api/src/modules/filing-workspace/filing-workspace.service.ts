@@ -668,6 +668,7 @@ export class FilingWorkspaceService {
           inst.engagement_id,
           eventId,
           `Meeting record undone: ${reason.trim()}`,
+          { fromMeeting: true },
         );
       }
       await syncAutoTicks(client, id);

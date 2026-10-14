@@ -469,6 +469,11 @@ export class ComplianceCalendarV2Service {
       const before = await this.loadEvent(client, engagementId, eventId, true);
       if (before.voided_at) throw new BadRequestException('A voided event cannot be corrected.');
       const eventDate = input.eventDate?.slice(0, 10) ?? before.event_date;
+      if (before.source_instance_id && eventDate !== before.event_date) {
+        throw new BadRequestException(
+          'The date comes from the AGM meeting record — undo it and record the meeting again.',
+        );
+      }
       if (eventDate > istToday()) {
         throw new BadRequestException('An event cannot be in the future.');
       }
@@ -562,10 +567,17 @@ export class ComplianceCalendarV2Service {
     engagementId: string,
     eventId: string,
     reason: string,
+    opts: { fromMeeting?: boolean } = {},
   ): Promise<RecordComplianceEventResult> {
     const eng = await this.assertLead(client, engagementId);
     const before = await this.loadEvent(client, engagementId, eventId, true);
     if (before.voided_at) throw new BadRequestException('This event is already voided.');
+    if (before.source_instance_id && !opts.fromMeeting) {
+      // The meeting stays "Held" otherwise: the two go together.
+      throw new BadRequestException(
+        'This AGM was recorded from the AGM meeting — undo the meeting record instead.',
+      );
+    }
     if (!reason.trim()) throw new BadRequestException('Say why the event is being voided.');
     await client.query(
       `UPDATE hsdg.compliance_events
@@ -615,17 +627,8 @@ export class ComplianceCalendarV2Service {
         (r) =>
           (r.registrationType === 'cin' || r.registrationType === 'llpin') && r.status === 'active',
       );
-      const held = await client.query<{
-        registration_id: string;
-        filed_on: string;
-        subtype: string | null;
-      }>(
-        `SELECT ci.registration_id, fr.filed_on::text,
-                (SELECT p.attributes ->> 'companySubtype'
-                   FROM hsdg.registration_compliance_profiles p
-                  WHERE p.registration_id = ci.registration_id AND p.scope = 'cin'
-                    AND p.effective_from <= CURRENT_DATE
-                  ORDER BY p.effective_from DESC LIMIT 1) AS subtype
+      const held = await client.query<{ registration_id: string; filed_on: string }>(
+        `SELECT ci.registration_id, fr.filed_on::text
            FROM hsdg.filing_records fr
            JOIN hsdg.compliance_instances ci ON ci.id = fr.compliance_instance_id
            JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id

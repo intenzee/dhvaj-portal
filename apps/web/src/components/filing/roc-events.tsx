@@ -15,7 +15,16 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate, formatMoney, humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
-import { Badge, Button, Card, CardBody, CardHeader, CardTitle, EmptyState, Spinner } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Spinner,
+} from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 
@@ -55,9 +64,16 @@ export function eventDetailsPayload(
     case 'allotment':
       return { privatePlacement: f.privatePlacement };
     case 'agm_extension':
-      return { months: Number(f.months), ...(f.approvalRef.trim() ? { approvalRef: f.approvalRef.trim() } : {}) };
+      return {
+        months: Number(f.months),
+        ...(f.approvalRef.trim() ? { approvalRef: f.approvalRef.trim() } : {}),
+      };
     case 'director_change':
-      return { din: f.din.trim(), change: f.change, ...(f.name.trim() ? { name: f.name.trim() } : {}) };
+      return {
+        din: f.din.trim(),
+        change: f.change,
+        ...(f.name.trim() ? { name: f.name.trim() } : {}),
+      };
     case 'charge_creation':
       return {
         ...(f.chargeHolder.trim() ? { chargeHolder: f.chargeHolder.trim() } : {}),
@@ -158,7 +174,8 @@ export function RocEvents({
   });
   const events = useQuery({
     queryKey: ['roc', 'events', engagementId],
-    queryFn: () => apiFetch<ComplianceEventRecord[]>(`/engagements/${engagementId}/compliance-events`),
+    queryFn: () =>
+      apiFetch<ComplianceEventRecord[]>(`/engagements/${engagementId}/compliance-events`),
   });
 
   const done = (r: RecordComplianceEventResult, verb: string) => {
@@ -188,7 +205,9 @@ export function RocEvents({
       </Card>
     );
   }
-  const list = (events.data ?? []).filter((e) => (ROC_EVENT_TYPES as string[]).includes(e.eventType));
+  const list = (events.data ?? []).filter((e) =>
+    (ROC_EVENT_TYPES as string[]).includes(e.eventType),
+  );
 
   return (
     <Card>
@@ -196,7 +215,9 @@ export function RocEvents({
         <CardTitle>Events</CardTitle>
         {ov.boardMeetings.map((b) => (
           <span key={b.registrationId} className="text-xs text-ink-muted">
-            {ov.boardMeetings.length > 1 && <span className="mr-1 font-mono">{b.registrationNumber}</span>}
+            {ov.boardMeetings.length > 1 && (
+              <span className="mr-1 font-mono">{b.registrationNumber}</span>
+            )}
             {cadenceText(b)}
           </span>
         ))}
@@ -224,10 +245,17 @@ export function RocEvents({
           />
         )}
         {lastChanges && (
-          <div role="status" className="rounded-md border border-success-500/30 bg-success-50 p-3 text-sm">
+          <div
+            role="status"
+            className="rounded-md border border-success-500/30 bg-success-50 p-3 text-sm"
+          >
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium text-ink">{lastChanges.title} — what changed</p>
-              <button type="button" className="text-xs text-ink-muted" onClick={() => setLastChanges(null)}>
+              <button
+                type="button"
+                className="text-xs text-ink-muted"
+                onClick={() => setLastChanges(null)}
+              >
                 Dismiss
               </button>
             </div>
@@ -240,11 +268,14 @@ export function RocEvents({
         )}
         {list.length === 0 ? (
           <p className="text-sm text-ink-muted">
-            No events recorded yet. Record the AGM, an allotment, a director change … and the filings they
-            trigger appear below.
+            No events recorded yet. Record the AGM, an allotment, a director change … and the
+            filings they trigger appear below.
           </p>
         ) : (
-          <ul className="divide-y divide-line rounded-md border border-line" aria-label="Recorded events">
+          <ul
+            className="divide-y divide-line rounded-md border border-line"
+            aria-label="Recorded events"
+          >
             {list.map((ev) => (
               <EventRow
                 key={ev.id}
@@ -308,7 +339,11 @@ function DetailFields({
             </Select>
           </Field>
           <Field label="ROC approval ref.">
-            <Input value={f.approvalRef} maxLength={60} onChange={(e) => set({ approvalRef: e.target.value })} />
+            <Input
+              value={f.approvalRef}
+              maxLength={60}
+              onChange={(e) => set({ approvalRef: e.target.value })}
+            />
           </Field>
         </>
       );
@@ -334,7 +369,10 @@ function DetailFields({
             />
           </Field>
           <Field label="Change" required>
-            <Select value={f.change} onChange={(e) => set({ change: e.target.value as 'appointed' | 'ceased' })}>
+            <Select
+              value={f.change}
+              onChange={(e) => set({ change: e.target.value as 'appointed' | 'ceased' })}
+            >
               <option value="appointed">Appointed</option>
               <option value="ceased">Ceased / resigned</option>
             </Select>
@@ -345,10 +383,18 @@ function DetailFields({
       return (
         <>
           <Field label="Charge holder">
-            <Input value={f.chargeHolder} maxLength={160} onChange={(e) => set({ chargeHolder: e.target.value })} />
+            <Input
+              value={f.chargeHolder}
+              maxLength={160}
+              onChange={(e) => set({ chargeHolder: e.target.value })}
+            />
           </Field>
           <Field label="Amount secured">
-            <Input inputMode="decimal" value={f.amount} onChange={(e) => set({ amount: e.target.value })} />
+            <Input
+              inputMode="decimal"
+              value={f.amount}
+              onChange={(e) => set({ amount: e.target.value })}
+            />
           </Field>
         </>
       );
@@ -400,7 +446,10 @@ function RecordEventForm({
     >
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <Field label="Event" required>
-          <Select value={eventType} onChange={(e) => setEventType(e.target.value as ComplianceEventType)}>
+          <Select
+            value={eventType}
+            onChange={(e) => setEventType(e.target.value as ComplianceEventType)}
+          >
             {ROC_EVENT_TYPES.map((t) => (
               <option key={t} value={t}>
                 {COMPLIANCE_EVENT_TYPE_LABEL[t]}
@@ -409,7 +458,13 @@ function RecordEventForm({
           </Select>
         </Field>
         <Field label="Date" required>
-          <Input type="date" value={eventDate} max={today()} onChange={(e) => setEventDate(e.target.value)} required />
+          <Input
+            type="date"
+            value={eventDate}
+            max={today()}
+            onChange={(e) => setEventDate(e.target.value)}
+            required
+          />
         </Field>
         {registrations.length > 1 && (
           <Field label="CIN / LLPIN" required>
@@ -482,7 +537,10 @@ function EventRow({
   });
   const voidIt = useMutation({
     mutationFn: () =>
-      apiFetch<RecordComplianceEventResult>(url, { method: 'DELETE', body: { reason: reason.trim() } }),
+      apiFetch<RecordComplianceEventResult>(url, {
+        method: 'DELETE',
+        body: { reason: reason.trim() },
+      }),
     onSuccess: (r) => {
       setMode('view');
       setReason('');
@@ -525,7 +583,9 @@ function EventRow({
           {ev.notes && <p className="whitespace-pre-wrap text-ink">{ev.notes}</p>}
           <p className="text-xs text-ink-muted">
             Recorded by {ev.recordedByName ?? '—'} on {formatDate(ev.createdAt)}
-            {ev.updatedAt && ev.updatedAt !== ev.createdAt ? ` · last changed ${formatDate(ev.updatedAt)}` : ''}
+            {ev.updatedAt && ev.updatedAt !== ev.createdAt
+              ? ` · last changed ${formatDate(ev.updatedAt)}`
+              : ''}
           </p>
           {ev.items && ev.items.length > 0 && (
             <ul className="space-y-0.5" aria-label="Filings from this event">
@@ -543,9 +603,15 @@ function EventRow({
               <Button size="sm" variant="ghost" onClick={() => setMode('correct')}>
                 Correct
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setMode('void')}>
-                Void
-              </Button>
+              {ev.sourceInstanceId ? (
+                <span className="self-center text-xs text-ink-muted">
+                  To undo it, undo the AGM meeting record.
+                </span>
+              ) : (
+                <Button size="sm" variant="ghost" onClick={() => setMode('void')}>
+                  Void
+                </Button>
+              )}
             </div>
           )}
           {mode !== 'view' && (
@@ -560,11 +626,16 @@ function EventRow({
             >
               {mode === 'correct' && (
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <Field label="Date" required>
+                  <Field
+                    label="Date"
+                    required
+                    hint={ev.sourceInstanceId ? 'From the AGM meeting record.' : undefined}
+                  >
                     <Input
                       type="date"
                       value={eventDate}
                       max={today()}
+                      readOnly={!!ev.sourceInstanceId}
                       onChange={(e) => setEventDate(e.target.value)}
                       required
                     />
@@ -574,7 +645,11 @@ function EventRow({
               )}
               {mode === 'correct' && (
                 <Field label="Notes">
-                  <Textarea value={notes} maxLength={2000} onChange={(e) => setNotes(e.target.value)} />
+                  <Textarea
+                    value={notes}
+                    maxLength={2000}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
                 </Field>
               )}
               <Field
@@ -582,7 +657,13 @@ function EventRow({
                 required
                 hint="Kept in the event’s history."
               >
-                <Input value={reason} minLength={3} maxLength={500} onChange={(e) => setReason(e.target.value)} required />
+                <Input
+                  value={reason}
+                  minLength={3}
+                  maxLength={500}
+                  onChange={(e) => setReason(e.target.value)}
+                  required
+                />
               </Field>
               <div className="flex gap-2">
                 <Button
