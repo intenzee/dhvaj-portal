@@ -9,20 +9,33 @@ import { formatDate } from '@/lib/format';
 import { myEngagementRole, type EngagementRow } from '@/lib/types';
 import { Panel, Spinner, EmptyState, Badge } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
+import { SectionSelect, useStoredSections } from '@/components/section-filter';
+import { engagementListPath, myEngagementsHref } from '@/lib/list-paths';
 
 export function MyEngagementsPanel(): JSX.Element {
   const { principal } = useAuth();
   const router = useRouter();
+  const [sections, setSections] = useStoredSections('home-engagements');
   const q = useQuery({
-    queryKey: ['engagements', 'mine', 'glance'],
-    queryFn: () => apiFetch<Paginated<EngagementRow>>('/engagements?mine=true&limit=8'),
+    queryKey: ['engagements', 'mine', 'glance', sections],
+    queryFn: () =>
+      apiFetch<Paginated<EngagementRow>>(engagementListPath({ limit: 8, offset: 0, mine: true, sections })),
   });
 
   return (
-    <Panel title="My Engagements — At a Glance" linkHref="/engagements?mine=true" bodyClassName="p-0">
+    <Panel
+      title="My Engagements — At a Glance"
+      linkHref={myEngagementsHref(sections)}
+      toolbar={<SectionSelect value={sections} onChange={setSections} />}
+      bodyClassName="p-0"
+    >
       {q.isLoading && <div className="p-5"><Spinner /></div>}
       {q.data && q.data.items.length === 0 && (
-        <div className="p-5"><EmptyState>No engagements assigned to you.</EmptyState></div>
+        <div className="p-5">
+          <EmptyState>
+            {sections.length ? 'None of your engagements are in this section.' : 'No engagements assigned to you.'}
+          </EmptyState>
+        </div>
       )}
       {q.data && q.data.items.length > 0 && (
         <div className="overflow-x-auto">

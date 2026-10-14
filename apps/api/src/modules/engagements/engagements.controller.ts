@@ -74,6 +74,7 @@ export class EngagementsController {
     if (query.officeCode) filter.officeCode = query.officeCode;
     if (query.mine !== undefined) filter.mine = query.mine;
     if (query.search) filter.search = query.search;
+    if (query.section?.length) filter.section = query.section;
     const result = await this.engagements.listEngagements(
       rlsContextFromPrincipal(principal),
       filter,

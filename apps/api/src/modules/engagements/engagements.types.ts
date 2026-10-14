@@ -1,4 +1,5 @@
 import type {
+  WorkSection,
   BillingModel,
   EngagementConfidentiality,
   EngagementCoveredEntity,
@@ -146,6 +147,8 @@ export interface EngagementFilter {
   mine?: boolean;
   /** Case-insensitive search on engagement code or client legal name. */
   search?: string;
+  /** Any-of: a stream the engagement covers, or its kind (statutory_audit / assignment). */
+  section?: WorkSection[];
 }
 
 export interface CreateEngagementInput {
