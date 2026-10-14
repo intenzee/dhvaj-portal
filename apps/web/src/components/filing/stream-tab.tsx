@@ -20,6 +20,7 @@ import { ExpandToggle } from '@/components/inline-panel';
 import { WorkList } from '@/components/tasks/work-list';
 import { filingEnd, filingStatusLabel } from './filing-status';
 import { InstanceWorkspace } from './instance-workspace';
+import { RocEvents } from './roc-events';
 
 const GST_SECTIONS: { key: PeriodSection; label: string }[] = [
   { key: 'outward', label: 'Outward' },
@@ -135,9 +136,17 @@ export function StreamTab({
     return <EmptyState>{err instanceof ApiError ? err.message : 'Could not load this stream.'}</EmptyState>;
   }
 
+  // ROC: the events panel heads the tab; with no CIN / LLPIN it says why (G13).
+  const rocPanel =
+    stream === 'roc' ? <RocEvents engagementId={engagementId} isLead={ctx.isLead} /> : null;
+  if (rocPanel && tree.registrations.length === 0 && tree.annual.length === 0 && tree.periods.length === 0) {
+    return rocPanel;
+  }
+
   let lastQuarter: string | null = null;
   return (
     <div className="space-y-4">
+      {rocPanel}
       <div className="flex flex-wrap items-center gap-2">
         {tree.registrations.length > 1 && (
           <div role="tablist" aria-label="Registration" className="flex flex-wrap gap-1">

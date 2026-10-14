@@ -243,6 +243,14 @@ function WorkspaceHeader({
           ruleCode={inst.ruleCode}
         />
         {inst.isProvisional && <Badge tone="warn">Provisional dates</Badge>}
+        {inst.chargeWindow?.status === 'fee_window' && (
+          <Badge tone="warn">
+            Late — within the additional-fee window until {formatDate(inst.chargeWindow.feeWindowEnds)}
+          </Badge>
+        )}
+        {inst.chargeWindow?.status === 'beyond_window' && (
+          <Badge tone="danger">Beyond the 90-day filing window</Badge>
+        )}
         {inst.verify && <Badge tone="warn">Verify rule</Badge>}
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">

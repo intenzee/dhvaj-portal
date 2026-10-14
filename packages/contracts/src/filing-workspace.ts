@@ -143,6 +143,15 @@ export interface WorkspaceInstance {
   lateCharges: { daysLate: number; lateFee: number; interest: number | null } | null;
   /** Not applicable: the reason recorded. */
   notApplicableReason: string | null;
+  /**
+   * CHG-1 while unfiled (roc-mca P2-3): due 30 days from the charge, then a
+   * further 60 days with the additional fee, then beyond the window.
+   */
+  chargeWindow?: {
+    status: 'on_time' | 'fee_window' | 'beyond_window';
+    feeWindowEnds: string;
+    day: number;
+  } | null;
 }
 
 export interface WorkspaceTask {
