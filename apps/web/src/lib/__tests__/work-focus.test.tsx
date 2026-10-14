@@ -55,6 +55,14 @@ describe('revealWorkElement', () => {
     expect(document.activeElement?.textContent).toBe('Outward');
     expect(el.hasAttribute('data-work-highlight')).toBe(false);
   });
+  it('jumps without animation when the system asks for reduced motion', () => {
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q.includes('reduce') })) as never;
+    document.body.innerHTML = '<section data-part="outward"></section>';
+    revealWorkElement(document.querySelector<HTMLElement>('section')!, false);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' });
+    window.matchMedia = matchMedia;
+  });
   it('centres and flashes a row, then clears the highlight', () => {
     jest.useFakeTimers();
     document.body.innerHTML = '<li data-task-id="t1">Task</li>';

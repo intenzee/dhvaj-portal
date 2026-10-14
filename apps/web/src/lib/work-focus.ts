@@ -50,9 +50,17 @@ export function firstPresentTarget(root: ParentNode, targets: WorkFocusTarget[])
   return targets.findIndex((t) => root.querySelector(t.selector) !== null);
 }
 
+/** Smooth scrolling, unless the person asked their system for reduced motion. */
+function scrollBehavior(): ScrollBehavior {
+  const reduce =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return reduce ? 'auto' : 'smooth';
+}
+
 /** Scroll an element into view, move focus to it (or its heading) and flash a row. */
 export function revealWorkElement(el: HTMLElement, highlight: boolean): void {
-  el.scrollIntoView({ behavior: 'smooth', block: highlight ? 'center' : 'start' });
+  el.scrollIntoView({ behavior: scrollBehavior(), block: highlight ? 'center' : 'start' });
   const focusable = el.querySelector<HTMLElement>('[data-part-heading]') ?? el;
   if (
     !focusable.hasAttribute('tabindex') &&
