@@ -26,6 +26,7 @@ import { useTrackOnboardingVisit } from '@/lib/onboarding';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { Spinner } from './ui';
+import { NavCount } from './nav-count';
 import { GlobalSearch } from './global-search';
 import { ThemeToggle } from './theme-toggle';
 import { RunningTimerBanner } from './time/running-timer-banner';
@@ -292,6 +293,9 @@ function SidebarContent({
                 >
                   <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
                   {!collapsed && <span className="truncate">{item.label}</span>}
+                  {!collapsed && item.badge && isOn(FEATURE_FLAG.workLinks) && (
+                    <NavCount badge={item.badge} />
+                  )}
                   {!collapsed && !item.ready && (
                     <span className="ml-auto rounded bg-white/5 px-1 text-[9px] uppercase tracking-wide text-sidebar-muted">
                       soon
