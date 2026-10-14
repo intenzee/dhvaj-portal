@@ -1,27 +1,31 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ExternalLink, Lock } from 'lucide-react';
+import { ExternalLink, Lock, Pencil } from 'lucide-react';
 import { ApiError } from '@/lib/api';
-import { fetchM365Session, syncM365Version, type M365EditorSession } from '@/lib/m365';
+import {
+  fetchM365Session,
+  m365EmbedUrl,
+  m365OpenUrl,
+  syncM365Version,
+  type M365EditorSession,
+} from '@/lib/m365';
 import { useToast } from '@/lib/toast';
 import { Spinner, Button } from '@/components/ui';
 
 /**
- * Embeds Microsoft's genuine Office-for-the-web surface for one document, backed
+ * Shows one document in Microsoft's genuine Office-for-the-web surface, backed
  * by ONE persistent SharePoint Online copy. Fetches a session from the API (which
  * RLS-checks access, ensures the live copy exists and mints a short-lived
- * ANONYMOUS sharing link so the file opens with NO per-user Microsoft sign-in),
- * then iframes the returned URL. When editing is enabled the file co-authors and
- * autosaves into the live copy; the portal pulls those saves back as a new
- * audited version automatically — when the editor closes and whenever the
- * portal window regains focus (the API compares SharePoint's cTag, so an
- * unchanged file is a no-op). Approved work (`editLocked`) opens read-only.
+ * ANONYMOUS sharing link so the file opens with NO per-user Microsoft sign-in).
  *
- * SharePoint sometimes refuses to render its editor inside a cross-origin iframe
- * (frame-ancestors). We always offer an "Open in Microsoft 365" button that
- * launches the same URL in a new tab, which is not subject to that restriction —
- * the focus sync picks up edits made there when the user comes back.
+ * SharePoint allows another site to frame only its read-only embed view, so
+ * the file is shown inline in that view and "Edit in Microsoft 365" opens
+ * Word / Excel / PowerPoint for the web in a new tab. Edits there co-author and
+ * autosave into the live copy; the portal pulls them back as a new audited
+ * version when the user returns to the portal and when the editor closes (the
+ * API compares SharePoint's cTag, so an unchanged file is a no-op), then
+ * reloads the inline view. Approved work (`editLocked`) opens read-only.
  *
  * If Microsoft 365 editing is disabled or unavailable, it calls
  * {@link onUnsupported} so the host can fall back to the built-in viewers.
@@ -41,6 +45,8 @@ export function M365Editor({
   const [session, setSession] = useState<M365EditorSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  // Bumped after a sync so the inline view shows the saved file.
+  const [viewKey, setViewKey] = useState(0);
   const syncing = useRef(false);
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
@@ -79,11 +85,16 @@ export function M365Editor({
         const res = await syncM365Version(engagementId, docId);
         if (res.synced) {
           setLastSync(new Date().toLocaleTimeString());
+          setViewKey((k) => k + 1);
           if (!quiet) toast(`Saved as version ${res.versionNo ?? ''}`.trim());
           onSavedRef.current?.();
         }
       } catch (err) {
-        if (!quiet) toast(err instanceof ApiError ? err.message : 'Could not sync from Microsoft 365.', 'error');
+        if (!quiet)
+          toast(
+            err instanceof ApiError ? err.message : 'Could not sync from Microsoft 365.',
+            'error',
+          );
       } finally {
         syncing.current = false;
       }
@@ -91,8 +102,8 @@ export function M365Editor({
     [engagementId, docId, toast],
   );
 
-  // Edits made in the iframe or in the Microsoft 365 tab come back when the user
-  // returns to the portal, and once more when the editor closes.
+  // Edits made in the Microsoft 365 tab come back when the user returns to the
+  // portal, and once more when the editor closes.
   useEffect(() => {
     if (!canEdit) return;
     const onFocus = (): void => void sync(false);
@@ -119,7 +130,10 @@ export function M365Editor({
         <div className="flex shrink-0 items-center justify-end gap-2 border-b border-line bg-surface px-4 py-2">
           <span className="flex items-center gap-1 text-xs text-ink-faint">
             {session.canEdit ? (
-              <>Saves automatically · versions recorded on close{lastSync ? ` · synced ${lastSync}` : ''}</>
+              <>
+                Edits save in Microsoft 365 and come back here as a new version
+                {lastSync ? ` · synced ${lastSync}` : ''}
+              </>
             ) : (
               <>
                 <Lock className="h-3.5 w-3.5" /> Read-only
@@ -128,17 +142,32 @@ export function M365Editor({
           </span>
           <Button
             size="sm"
-            variant="secondary"
-            onClick={() => window.open(session.editorUrl, '_blank', 'noopener,noreferrer')}
+            variant={session.canEdit ? 'primary' : 'secondary'}
+            onClick={() =>
+              window.open(
+                m365OpenUrl(session.editorUrl, session.canEdit),
+                '_blank',
+                'noopener,noreferrer',
+              )
+            }
           >
-            <ExternalLink className="h-4 w-4" /> Open in Microsoft 365
+            {session.canEdit ? (
+              <>
+                <Pencil className="h-4 w-4" /> Edit in Microsoft 365
+              </>
+            ) : (
+              <>
+                <ExternalLink className="h-4 w-4" /> Open in Microsoft 365
+              </>
+            )}
           </Button>
         </div>
       )}
       {session?.editorUrl && (
         <iframe
-          title="Microsoft 365 editor"
-          src={session.editorUrl}
+          key={viewKey}
+          title="Microsoft 365 viewer"
+          src={m365EmbedUrl(session.editorUrl)}
           className="min-h-0 w-full flex-1 border-0"
           allow="clipboard-read; clipboard-write"
         />
