@@ -14,8 +14,16 @@ import {
   type DocumentSensitivity,
   type DocumentStatus,
   type DocumentType,
+  type EngagementKind,
+  type PeriodSection,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
+import {
+  type WorkLinkSqlRow,
+  withWorkLinks,
+  workLinkFilingOf,
+  workLinkOf,
+} from '../../common/work-links';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { translatePgError } from '../../common/errors/pg-error.util';
@@ -140,7 +148,8 @@ const GLOBAL_DOC_BASE = `
          d.edit_locked,
          d.created_by_employee_id, ce.full_name AS created_by_name,
          d.version, d.created_at, d.updated_at,
-         eng.engagement_code, ent.legal_name AS entity_name
+         eng.engagement_code, ent.legal_name AS entity_name,
+         eng.kind AS engagement_kind, d.compliance_instance_id, d.period_section
   FROM hsdg.documents d
   LEFT JOIN hsdg.document_versions cv ON cv.id = d.current_version_id
   LEFT JOIN hsdg.employees ce ON ce.id = d.created_by_employee_id
@@ -486,10 +495,15 @@ export class DocumentsService {
       }
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
       params.push(page.limit, page.offset);
+      // WF-103: each row links to its filing's part (and task), resolved per page row.
       const { rows } = await client.query<GlobalDocumentRow>(
-        `${GLOBAL_DOC_BASE} ${where}
-         ORDER BY d.created_at DESC
-         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        withWorkLinks(
+          `${GLOBAL_DOC_BASE} ${where}
+           ORDER BY d.created_at DESC, d.id
+           LIMIT $${params.length - 1} OFFSET $${params.length}`,
+          'compliance_instance_id',
+          'p.created_at DESC, p.id',
+        ),
         params,
       );
       const totalRes = await client.query<{ total: string }>(
@@ -950,9 +964,12 @@ export class DocumentsService {
   }
 }
 
-interface GlobalDocumentRow extends DocumentRow {
+interface GlobalDocumentRow extends DocumentRow, WorkLinkSqlRow {
   engagement_code: string;
   entity_name: string | null;
+  engagement_kind: EngagementKind;
+  compliance_instance_id: string | null;
+  period_section: PeriodSection | null;
 }
 
 function mapGlobalDocument(row: GlobalDocumentRow): GlobalDocumentRecord {
@@ -960,6 +977,14 @@ function mapGlobalDocument(row: GlobalDocumentRow): GlobalDocumentRecord {
     ...mapDocument(row),
     engagementCode: row.engagement_code,
     entityName: row.entity_name,
+    link: workLinkOf(
+      {
+        engagementId: row.engagement_id,
+        engagementKind: row.engagement_kind,
+        taskId: row.task_id,
+      },
+      { ...workLinkFilingOf(row), section: row.period_section ?? row.wl_section },
+    ),
   };
 }
 

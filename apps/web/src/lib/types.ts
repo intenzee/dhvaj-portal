@@ -567,6 +567,8 @@ export interface GlobalDocumentRow extends DocumentRow {
   entityName: string | null;
   currentSizeBytes: number | null;
   createdAt: string;
+  /** Where the document's work lives (WF-103): its filing's part and task, else the engagement. */
+  link?: WorkItemRef | null;
 }
 
 export interface ServiceRow {

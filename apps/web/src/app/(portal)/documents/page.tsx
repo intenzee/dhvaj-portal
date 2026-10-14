@@ -16,6 +16,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import { Pagination } from '@/components/pagination';
 import { DocumentPreview } from '@/components/document-preview';
+import { useWorkHref } from '@/lib/work-href';
 
 const PAGE_SIZE = 25;
 
@@ -26,6 +27,8 @@ export default function DocumentsPage(): JSX.Element {
   const [status, setStatus] = useState<string>('');
   const [offset, setOffset] = useState(0);
   const [preview, setPreview] = useState<GlobalDocumentRow | null>(null);
+  // ff_work_links: the engagement code opens the filing part the document belongs to.
+  const workHref = useWorkHref();
 
   const reset = (fn: () => void): void => {
     fn();
@@ -80,7 +83,7 @@ export default function DocumentsPage(): JSX.Element {
       header: 'Engagement',
       cell: ({ row }) => (
         <Link
-          href={`/engagements/${row.original.engagementId}`}
+          href={workHref(row.original)}
           className="font-medium text-primary-700 hover:underline"
           onClick={(e) => e.stopPropagation()}
         >
