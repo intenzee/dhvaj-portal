@@ -43,16 +43,21 @@ export function TaskActions({
         method: 'POST',
         body: { version: task.version, ...(why ? { reason: why } : {}) },
       }),
-    onSuccess: (_clock, { action }) => {
+    // Returning the refetch keeps the mutation pending (buttons disabled) until
+    // the lists hold the task's new version, so a quick second click (Start
+    // review → Approve) never sends the stale one and hits a version conflict.
+    onSuccess: async (_clock, { action }) => {
       toast(`${task.title}: ${TASK_ACTION_LABEL[action].toLowerCase()}.`);
       setAsking(null);
       setReason('');
-      void qc.invalidateQueries({ queryKey: ['engagement', task.engagementId] });
-      void qc.invalidateQueries({ queryKey: ['work'] });
-      void qc.invalidateQueries({ queryKey: ['tasks'] });
-      void qc.invalidateQueries({ queryKey: ['filing'] });
-      void qc.invalidateQueries({ queryKey: ['time', 'clock'] });
       onDone?.();
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['engagement', task.engagementId] }),
+        qc.invalidateQueries({ queryKey: ['work'] }),
+        qc.invalidateQueries({ queryKey: ['tasks'] }),
+        qc.invalidateQueries({ queryKey: ['filing'] }),
+        qc.invalidateQueries({ queryKey: ['time', 'clock'] }),
+      ]);
     },
     onError: (err) =>
       toast(err instanceof ApiError ? err.message : 'Could not move the task.', 'error'),
