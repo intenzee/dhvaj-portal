@@ -148,7 +148,7 @@ test('home calendar and tasks, section by section', async ({ browser }) => {
 
   // The Tasks page keeps its sections in the URL; chips add sections.
   await page.goto('/tasks?section=gst');
-  await expect(page.getByRole('button', { name: 'GST', pressed: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'GST', exact: true, pressed: true })).toBeVisible();
   await expect(page.getByText(gstTask)).toBeVisible();
   await expect(page.getByText(rocTask)).toHaveCount(0);
   await page.getByRole('button', { name: 'ROC / MCA' }).click();
