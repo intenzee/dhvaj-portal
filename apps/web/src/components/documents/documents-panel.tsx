@@ -36,6 +36,7 @@ import { Modal } from '@/components/modal';
 import { Field, Input, Select } from '@/components/form';
 import { DocumentPreview } from '@/components/document-preview';
 import { detectKind } from '@/lib/file-kind';
+import { isM365File, prefetchM365Session } from '@/lib/m365';
 
 /** How a document is filed — drives the list filter and pre-scopes new uploads. */
 export interface DocumentScope {
@@ -333,6 +334,10 @@ export function DocumentsPanel({
                     <button
                       type="button"
                       onClick={() => setSelectedId(d.id)}
+                      onPointerEnter={() => {
+                        if (isM365File(d.currentFilename ?? d.title))
+                          prefetchM365Session(engagementId, d.id);
+                      }}
                       className={`flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors ${
                         active ? 'bg-primary-50' : 'hover:bg-surface-sunken'
                       }`}

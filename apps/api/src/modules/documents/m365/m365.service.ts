@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PERMISSION, type FileVersionHistory } from '@hsdg/contracts';
 import { AppConfigService } from '../../../config/config.module';
 import { DatabaseService } from '../../../database/database.service';
@@ -6,6 +6,39 @@ import { rlsContextFromPrincipal, type Principal } from '../../auth/principal';
 import type { DocumentDetail } from '../documents.types';
 import { DocumentsService } from '../documents.service';
 import { GraphClient } from './graph-client';
+
+/**
+ * Anonymous sharing links, reused while they have time left so opening a file
+ * again skips Graph's createLink call and SharePoint does not collect a new
+ * link per open. Concurrent requests for the same link share one call.
+ */
+export class ShareLinkCache {
+  private readonly links = new Map<string, { url: string; expiresAt: number | null }>();
+  private readonly pending = new Map<string, Promise<string>>();
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  get(key: string, expiryMinutes: number, create: () => Promise<string>): Promise<string> {
+    const hit = this.links.get(key);
+    // Keep a margin so a reused link does not expire while the file is open.
+    const margin = Math.min(15 * 60_000, (expiryMinutes * 60_000) / 2);
+    if (hit && (hit.expiresAt === null || hit.expiresAt - this.now() > margin)) {
+      return Promise.resolve(hit.url);
+    }
+    const inFlight = this.pending.get(key);
+    if (inFlight) return inFlight;
+    const startedAt = this.now();
+    const created = create()
+      .then((url) => {
+        const expiresAt = expiryMinutes > 0 ? startedAt + expiryMinutes * 60_000 : null;
+        this.links.set(key, { url, expiresAt });
+        return url;
+      })
+      .finally(() => this.pending.delete(key));
+    this.pending.set(key, created);
+    return created;
+  }
+}
 
 /** File extensions Microsoft 365 for the web can EDIT (co-author). */
 const M365_EDITABLE_EXT = new Set(['doc', 'docx', 'xls', 'xlsx', 'xlsm', 'csv', 'ppt', 'pptx']);
@@ -52,7 +85,10 @@ export interface M365SyncResult {
  * end-to-end once the SharePoint site is provisioned.
  */
 @Injectable()
-export class M365Service {
+export class M365Service implements OnApplicationBootstrap {
+  private readonly logger = new Logger(M365Service.name);
+  private readonly links = new ShareLinkCache();
+
   constructor(
     private readonly config: AppConfigService,
     private readonly db: DatabaseService,
@@ -62,6 +98,18 @@ export class M365Service {
 
   get enabled(): boolean {
     return this.config.get('M365_ENABLED') && this.graph.configured;
+  }
+
+  /** Get the Graph token and the library's drive id at start, so the first open is not slow. */
+  onApplicationBootstrap(): void {
+    if (!this.enabled) return;
+    this.graph.resolveDriveId().then(
+      () => this.logger.log('Microsoft 365 connected.'),
+      (err: unknown) =>
+        this.logger.warn(
+          `Microsoft 365 warm-up failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+    );
   }
 
   private extOf(filename: string): string {
@@ -117,18 +165,19 @@ export class M365Service {
     // its short expiry limits the value of a copied URL.
     const expiryMinutes = this.config.get('M365_LINK_EXPIRY_MINUTES');
     let effectiveCanEdit = canEdit;
+    const link = (edit: boolean): Promise<string> =>
+      this.links.get(`${driveId}:${itemId}:${edit ? 'edit' : 'view'}`, expiryMinutes, () =>
+        this.graph.createShareLink(driveId, itemId, { canEdit: edit, expiryMinutes }),
+      );
     let editorUrl: string;
     try {
-      editorUrl = await this.graph.createShareLink(driveId, itemId, { canEdit, expiryMinutes });
+      editorUrl = await link(canEdit);
     } catch (err) {
       // If the tenant/site refuses anonymous EDIT links, don't fail to
       // OnlyOffice — degrade to a VIEW link so the file still opens in Office
       // 365 for the web (read-only). Non-edit failures rethrow.
       if (!canEdit) throw err;
-      editorUrl = await this.graph.createShareLink(driveId, itemId, {
-        canEdit: false,
-        expiryMinutes,
-      });
+      editorUrl = await link(false);
       effectiveCanEdit = false;
     }
 

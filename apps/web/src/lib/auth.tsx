@@ -1,8 +1,17 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiFetch, setToken } from './api';
+import { ApiError, apiFetch, getToken, setToken } from './api';
+import { isSignedOut, reconnectDelay, renewalDue } from './session';
 import { entraSignIn, entraSignOut, isEntraConfigured } from './entra';
 import type { Principal } from './principal';
 
@@ -34,12 +43,34 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   // the Managing Partner's engagements).
   const queryClient = useQueryClient();
 
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
+
+  // Only a 401 ends the session. If the API cannot be reached (it is
+  // restarting, or the network blipped) keep the token and try again, so the
+  // portal reconnects instead of asking to sign in.
   const refresh = useCallback(async () => {
-    try {
-      setPrincipal(await loadMe());
-    } catch {
-      setToken(null);
-      setPrincipal(null);
+    for (let attempt = 0; !unmounted.current; attempt++) {
+      if (!getToken()) {
+        setPrincipal(null);
+        return;
+      }
+      try {
+        setPrincipal(await loadMe());
+        return;
+      } catch (err) {
+        if (isSignedOut(err)) {
+          setToken(null);
+          setPrincipal(null);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, reconnectDelay(attempt)));
+      }
     }
   }, []);
 
@@ -50,6 +81,43 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
       setLoading(false);
     })();
   }, [refresh]);
+
+  // Swap the token for a fresh one while the portal is in use, so a working
+  // session does not lapse. Only dev sign-in renews this way; elsewhere the
+  // API answers 404 and the portal stops asking.
+  const signedIn = principal !== null;
+  useEffect(() => {
+    if (!signedIn) return;
+    let stopped = false;
+    let busy = false;
+    const renew = async (): Promise<void> => {
+      const token = getToken();
+      if (stopped || busy || !token || !renewalDue(token)) return;
+      busy = true;
+      try {
+        const res = await apiFetch<{ accessToken: string }>('/auth/renew', { method: 'POST' });
+        // Not if the user signed out or switched while this was in flight.
+        if (getToken() === token) setToken(res.accessToken);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) stopped = true;
+      } finally {
+        busy = false;
+      }
+    };
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void renew();
+    };
+    void renew();
+    const timer = window.setInterval(() => void renew(), 60_000);
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [signedIn]);
 
   const login = useCallback(async (email: string) => {
     const res = await apiFetch<{ accessToken: string }>('/auth/dev-token', {
