@@ -463,6 +463,19 @@ describe('ROC events (e2e)', () => {
         sourceInstanceId: agm.instanceId,
         details: { auditorAppointed: true },
       });
+      // The meeting and the event go together: neither voided nor re-dated on its own.
+      const evId = events.body[0].id as string;
+      const lone = await http()
+        .delete(`/api/v1/engagements/${eng}/compliance-events/${evId}`)
+        .set(bearer(pa))
+        .send({ reason: 'Try it alone' })
+        .expect(400);
+      expect(lone.body.message).toMatch(/undo the meeting record/);
+      await http()
+        .patch(`/api/v1/engagements/${eng}/compliance-events/${evId}`)
+        .set(bearer(pa))
+        .send({ eventDate: '2026-09-29', reason: 'Wrong date' })
+        .expect(400);
       expect((await item(eng, '2025-26', 'ROC_ADT1'))?.dueDate).toBe('2026-10-15');
 
       // AOC-4's "AGM held" line ticks itself.
