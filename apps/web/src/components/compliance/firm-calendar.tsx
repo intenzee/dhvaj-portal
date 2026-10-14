@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, ChevronLeft, ChevronRight, Download, List, Settings2 } from 'lucide-react';
@@ -28,6 +28,7 @@ import type { EmployeeRow, OfficeRow } from '@/lib/types';
 import { PageHeader, Card, Badge, Button, Spinner, EmptyState } from '@/components/ui';
 import { Select, Input } from '@/components/form';
 import { EntityPicker, type Picked } from '@/components/entity-picker';
+import { drawerItemsFrom, FilingDrawer, useDrawerOpener } from '@/components/filing/filing-drawer';
 import { cn } from '@/lib/cn';
 
 type View = 'list' | 'month';
@@ -78,6 +79,26 @@ export function rowHref(r: ComplianceCalendarRow, workLinks = false): string {
   return r.stream
     ? `/engagements/${r.engagementId}?tab=${r.stream}`
     : `/engagements/${r.engagementId}`;
+}
+
+/** The drawer's title for a calendar row: form, period, client. */
+const drawerTitle = (r: ComplianceCalendarRow): string =>
+  `${r.formLabel ?? r.ruleName} · ${r.periodLabel} · ${r.entityName}`;
+
+/**
+ * WF-202: a plain click on a row's link works the filing in the drawer over the
+ * calendar (ff_today_view); a modified click, or a row with no filing, follows
+ * the link.
+ */
+function useRowOpen(): (e: MouseEvent, r: ComplianceCalendarRow) => void {
+  const openInDrawer = useDrawerOpener();
+  return useCallback(
+    (e: MouseEvent, r: ComplianceCalendarRow) => {
+      const plain = !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0;
+      if (plain && openInDrawer(r)) e.preventDefault();
+    },
+    [openInDrawer],
+  );
 }
 
 /** `rowHref` bound to the current ff_work_links flag. */
@@ -148,7 +169,9 @@ export function FirmCalendar({
   });
 
   const people = employees.data?.items ?? [];
-  const rows = calendar.data?.items ?? [];
+  const rows = useMemo(() => calendar.data?.items ?? [], [calendar.data]);
+  const hrefOf = useCalendarHref();
+  const drawerItems = useMemo(() => drawerItemsFrom(rows, drawerTitle, hrefOf), [rows, hrefOf]);
 
   const toggle = <T,>(list: T[], v: T): T[] =>
     list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
@@ -330,6 +353,7 @@ export function FirmCalendar({
         ) : (
           <MonthGrid rows={rows} month={month} onMonth={setMonth} />
         ))}
+      <FilingDrawer items={drawerItems} listKey={['compliance', 'calendar-v2', qs]} />
     </div>
   );
 }
@@ -386,6 +410,7 @@ function ItemBadges({ row }: { row: ComplianceCalendarRow }): JSX.Element {
  *  status, days left, assignee. */
 function CalendarList({ rows }: { rows: ComplianceCalendarRow[] }): JSX.Element {
   const hrefOf = useCalendarHref();
+  const onOpen = useRowOpen();
   if (rows.length === 0)
     return <EmptyState>Nothing due in this window for these filters.</EmptyState>;
   return (
@@ -438,7 +463,11 @@ function CalendarList({ rows }: { rows: ComplianceCalendarRow[] }): JSX.Element 
                   {due.toLocaleDateString('en-IN', { weekday: 'short' })}
                 </td>
                 <td className="px-3 py-2">
-                  <Link href={hrefOf(r)} className="font-medium text-ink hover:text-primary-700">
+                  <Link
+                    href={hrefOf(r)}
+                    onClick={(e) => onOpen(e, r)}
+                    className="font-medium text-ink hover:text-primary-700"
+                  >
                     {r.entityName}
                   </Link>
                   <span className="block text-xs text-ink-faint">{r.engagementCode}</span>
@@ -483,6 +512,7 @@ function MonthGrid({
   onMonth: (m: string) => void;
 }): JSX.Element {
   const hrefOf = useCalendarHref();
+  const onOpen = useRowOpen();
   const [y, m] = month.split('-').map(Number) as [number, number];
   const first = new Date(y, m - 1, 1);
   const days = new Date(y, m, 0).getDate();
@@ -543,6 +573,7 @@ function MonthGrid({
                   <li key={r.id}>
                     <Link
                       href={hrefOf(r)}
+                      onClick={(e) => onOpen(e, r)}
                       title={`${r.entityName} · ${r.formLabel ?? r.ruleName} · ${r.periodLabel} · ${daysLeftLabel(r)}`}
                       className={cn(
                         'block truncate rounded border px-1 py-0.5',
