@@ -272,4 +272,13 @@ export class MyTasksQueryDto extends PaginationQueryDto {
 
   @SectionQuery()
   section?: WorkSection[];
+
+  @ApiPropertyOptional({
+    enum: ['mine', 'team'],
+    description:
+      "'team' — every task on engagements I manage or am the partner on (needs engagement.manage).",
+  })
+  @IsOptional()
+  @IsIn(['mine', 'team'])
+  scope?: 'mine' | 'team';
 }
