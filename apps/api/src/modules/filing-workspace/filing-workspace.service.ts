@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  isMeetingRule,
   NOTIFICATION_TYPE,
   TASK_ACTION,
   type ChecklistAutoTick,
@@ -34,6 +35,8 @@ import {
 } from '../documents/client-upload/client-upload.service';
 import { istToday } from '../engagements/time/auto-time';
 import { seedChecklistForInstance, syncAutoTicks } from '../compliance/compliance-checklist';
+import { ComplianceCalendarV2Service } from '../compliance/compliance-calendar-v2.service';
+import { eventFinancialYear } from '../compliance/compliance-generator.service';
 import {
   figureForm,
   figureSchema,
@@ -50,6 +53,7 @@ import {
   defaultReferenceKind,
   indicativeLateCharges,
   lockState,
+  meetingReference,
   periodLabel,
   undoAllowed,
 } from './filing-rules';
@@ -61,6 +65,9 @@ import type {
   SlotRequestDto,
   SlotUploadDto,
 } from './dto/filing-workspace.dto';
+
+/** The meetings whose "Record meeting" records the year's AGM (decision 2). */
+const AGM_RULES: ReadonlySet<string> = new Set(['ROC_AGM', 'ROC_FIRST_AGM']);
 
 /** The prefix on compliance_instances.notes that records a waiver reason. */
 const NA_NOTE_PREFIX = 'Not applicable: ';
@@ -138,6 +145,7 @@ interface FilingRow {
   figures: Figures;
   late_fee_paid: string | null;
   interest_paid: string | null;
+  normal_fee_paid: string | null;
   ack_document_id: string;
   remarks: string | null;
   created_at: Date;
@@ -211,6 +219,7 @@ export class FilingWorkspaceService {
     private readonly workflow: TaskWorkflowService,
     private readonly documents: DocumentsService,
     private readonly uploads: ClientUploadService,
+    private readonly calendar: ComplianceCalendarV2Service,
   ) {}
 
   /** GET /compliance-instances/:id — seeds the checklist on first open. */
@@ -494,11 +503,29 @@ export class FilingWorkspaceService {
         );
       }
 
-      const kind = dto.referenceKind ?? defaultReferenceKind(inst.stream, inst.section);
-      const ref = checkReference(kind, dto.referenceNo, inst.stream);
-      if ('error' in ref) throw new BadRequestException(ref.error);
+      // A meeting closes as a meeting: held on (in the period), the minutes, an
+      // internal reference — no SRN (spec decision 1).
+      const meeting = isMeetingRule(inst.rule_code);
+      const agm = AGM_RULES.has(inst.rule_code);
+      if (agm && !inst.is_lead) {
+        throw new ForbiddenException(
+          'Only the engagement partner or manager records the AGM — it moves AOC-4, MGT-7 and ADT-1.',
+        );
+      }
       const filedOn = dto.filedOn.slice(0, 10);
-      const dateErr = checkFiledOn(filedOn, istToday(new Date()), inst.period_end);
+      const kind =
+        dto.referenceKind ??
+        (meeting ? 'internal' : defaultReferenceKind(inst.stream, inst.section));
+      const rawRef = dto.referenceNo?.trim() || (meeting ? meetingReference(filedOn) : '');
+      if (!rawRef) throw new BadRequestException('Enter the reference number.');
+      const ref = checkReference(kind, rawRef, inst.stream);
+      if ('error' in ref) throw new BadRequestException(ref.error);
+      const dateErr = checkFiledOn(
+        filedOn,
+        istToday(new Date()),
+        inst.period_end,
+        meeting ? { periodStart: inst.period_start } : undefined,
+      );
       if (dateErr) throw new BadRequestException(dateErr);
 
       const form = this.formOf(inst);
@@ -525,8 +552,9 @@ export class FilingWorkspaceService {
         `INSERT INTO hsdg.filing_records
            (compliance_instance_id, engagement_id, registration_id, compliance_rule_id, period_key,
             reference_kind, reference_no, filed_on, filed_by_employee_id, is_nil, figures,
-            late_fee_paid, interest_paid, ack_document_id, remarks, recorded_by_employee_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+            late_fee_paid, interest_paid, ack_document_id, remarks, recorded_by_employee_id,
+            normal_fee_paid)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [
           id,
           inst.engagement_id,
@@ -546,8 +574,11 @@ export class FilingWorkspaceService {
           dto.ackDocumentId,
           dto.remarks?.trim() || null,
           me,
+          dto.normalFeePaid ?? null,
         ],
       );
+      // Holding the AGM records the year's AGM (once): AOC-4 / MGT-7 / ADT-1 move.
+      if (agm) await this.recordAgmFromMeeting(client, ctx, inst, filedOn, dto.auditorAppointed);
       // The lodged figures are the filing's figures from now on.
       if (Object.keys(figures).length > 0) {
         await client.query(
@@ -620,6 +651,21 @@ export class FilingWorkspaceService {
           WHERE id = $3`,
         [ctx.employeeId ?? null, reason.trim(), rec.id],
       );
+      // The AGM this meeting recorded goes with it.
+      const ev = await client.query<{ id: string }>(
+        `SELECT id FROM hsdg.compliance_events
+          WHERE source_instance_id = $1 AND voided_at IS NULL`,
+        [id],
+      );
+      for (const { id: eventId } of ev.rows) {
+        await this.calendar.voidEventWith(
+          client,
+          ctx,
+          inst.engagement_id,
+          eventId,
+          `Meeting record undone: ${reason.trim()}`,
+        );
+      }
       await syncAutoTicks(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'filing.lodge_undone',
@@ -781,7 +827,7 @@ export class FilingWorkspaceService {
     const filings = await client.query<FilingRow>(
       `SELECT fr.id, fr.reference_kind, fr.reference_no, fr.filed_on::text, fr.filed_by_employee_id,
                 fe.full_name AS filed_by_name, fr.is_nil, fr.figures, fr.late_fee_paid::text,
-                fr.interest_paid::text, fr.ack_document_id, fr.remarks, fr.created_at, fr.undone_at,
+                fr.interest_paid::text, fr.normal_fee_paid::text, fr.ack_document_id, fr.remarks, fr.created_at, fr.undone_at,
                 ue.full_name AS undone_by_name, fr.undo_reason
            FROM hsdg.filing_records fr
            LEFT JOIN hsdg.employees fe ON fe.id = fr.filed_by_employee_id
@@ -1070,6 +1116,7 @@ export class FilingWorkspaceService {
       figures: r.figures ?? {},
       lateFeePaid: num(r.late_fee_paid),
       interestPaid: num(r.interest_paid),
+      normalFeePaid: num(r.normal_fee_paid),
       ackDocumentId: r.ack_document_id,
       remarks: r.remarks,
       recordedAt: r.created_at.toISOString(),
@@ -1081,6 +1128,43 @@ export class FilingWorkspaceService {
   }
 
   // ── internals ──────────────────────────────────────────────────────────
+
+  /**
+   * "Record meeting" on the AGM creates the year's `agm` event if none is
+   * recorded yet (spec decision 2); one already recorded in the ROC tab stands.
+   */
+  private async recordAgmFromMeeting(
+    client: PoolClient,
+    ctx: RlsContext,
+    inst: InstanceRow,
+    heldOn: string,
+    auditorAppointed: boolean | undefined,
+  ): Promise<void> {
+    const financialYear =
+      inst.rule_code === 'ROC_AGM' && inst.financial_year
+        ? inst.financial_year
+        : eventFinancialYear('agm', heldOn);
+    const existing = await client.query(
+      `SELECT 1 FROM hsdg.compliance_events
+        WHERE engagement_id = $1 AND event_type = 'agm' AND financial_year = $2
+          AND registration_id IS NOT DISTINCT FROM $3 AND voided_at IS NULL`,
+      [inst.engagement_id, financialYear, inst.registration_id],
+    );
+    if (existing.rowCount) return;
+    await this.calendar.recordEventWith(
+      client,
+      ctx,
+      inst.engagement_id,
+      {
+        eventType: 'agm',
+        eventDate: heldOn,
+        registrationId: inst.registration_id,
+        financialYear,
+        details: auditorAppointed === undefined ? {} : { auditorAppointed },
+      },
+      { sourceInstanceId: inst.id },
+    );
+  }
 
   /** Run a change for a member, then return the fresh workspace — one transaction. */
   private async write(

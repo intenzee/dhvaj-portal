@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   FILING_REFERENCE_KINDS,
+  isMeetingRule,
   type ChecklistItem,
   type FigureField,
   type FilingRecordView,
@@ -149,7 +150,7 @@ export function InstanceWorkspace({
       )}
 
       {ws.filing ? (
-        <FiledRecord filing={ws.filing} end={filingEnd(inst.stream, inst.section)} canUndo={ws.can.undo} busy={write.isPending} run={run} engagementId={inst.engagementId} />
+        <FiledRecord filing={ws.filing} end={filingEnd(inst.stream, inst.section, inst.ruleCode)} canUndo={ws.can.undo} busy={write.isPending} run={run} engagementId={inst.engagementId} />
       ) : (
         ws.can.lodge && (
           <LodgeForm
@@ -239,6 +240,7 @@ function WorkspaceHeader({
           isOverdue={!filed && inst.daysLeft < 0}
           stream={inst.stream}
           section={inst.section}
+          ruleCode={inst.ruleCode}
         />
         {inst.isProvisional && <Badge tone="warn">Provisional dates</Badge>}
         {inst.verify && <Badge tone="warn">Verify rule</Badge>}
@@ -796,7 +798,12 @@ function LodgeForm({
   const [filedBy, setFiledBy] = useState(me ?? '');
   const [uploading, setUploading] = useState(false);
   const ackSlot = ws.slots.find((sl) => sl.slotCode.startsWith('ACK')) ?? null;
-  const end = filingEnd(ws.instance.stream, ws.instance.section);
+  const end = filingEnd(ws.instance.stream, ws.instance.section, ws.instance.ruleCode);
+  // A meeting closes with a held-on date in its period and the minutes; no SRN.
+  const meeting = isMeetingRule(ws.instance.ruleCode);
+  const agm = ws.instance.ruleCode === 'ROC_AGM' || ws.instance.ruleCode === 'ROC_FIRST_AGM';
+  const [auditorAppointed, setAuditorAppointed] = useState(false);
+  const [normalFeePaid, setNormalFeePaid] = useState('');
   const [referenceKind, setReferenceKind] = useState<FilingReferenceKind>(
     end.done !== 'Filed'
       ? 'internal'
@@ -807,7 +814,11 @@ function LodgeForm({
           : 'ack',
   );
   const [referenceNo, setReferenceNo] = useState('');
-  const [filedOn, setFiledOn] = useState(today());
+  const [filedOn, setFiledOn] = useState(() => {
+    // A meeting is held in its period: default to the period end if that is past.
+    const periodEnd = ws.instance.periodEnd;
+    return meeting && periodEnd && periodEnd < today() ? periodEnd : today();
+  });
   const [isNil, setIsNil] = useState(false);
   const [lateFeePaid, setLateFeePaid] = useState('');
   const [interestPaid, setInterestPaid] = useState('');
@@ -870,9 +881,11 @@ function LodgeForm({
           '/lodge',
           {
             referenceKind,
-            referenceNo: referenceNo.trim(),
+            ...(referenceNo.trim() || !meeting ? { referenceNo: referenceNo.trim() } : {}),
             filedOn,
-            isNil,
+            ...(meeting ? {} : { isNil }),
+            ...(agm ? { auditorAppointed } : {}),
+            ...(num(normalFeePaid) != null ? { normalFeePaid: num(normalFeePaid) } : {}),
             ackDocumentId,
             ...(filedBy && filedBy !== me ? { filedByEmployeeId: filedBy } : {}),
             ...(ws.figureSchema.length ? { figures: figurePayload(ws.figureSchema, figureState(ws.figureSchema, ws.figures)) } : {}),
@@ -884,7 +897,9 @@ function LodgeForm({
         ).then((ok) => ok && setOpen(false));
       }}
     >
-      <h5 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Lodge</h5>
+      <h5 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        {meeting ? 'Record meeting' : 'Lodge'}
+      </h5>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <Field label="Reference type">
           <Select value={referenceKind} onChange={(e) => setReferenceKind(e.target.value as FilingReferenceKind)}>
@@ -895,7 +910,11 @@ function LodgeForm({
             ))}
           </Select>
         </Field>
-        <Field label="Reference no." required>
+        <Field
+          label="Reference no."
+          required={!meeting}
+          hint={meeting && !referenceNo ? `Defaults to MTG-${filedOn}.` : undefined}
+        >
           <Input
             value={referenceNo}
             onChange={(e) =>
@@ -903,15 +922,15 @@ function LodgeForm({
             }
             maxLength={referenceKind === 'arn' ? 15 : 60}
             aria-invalid={!!refErr}
-            required
+            required={!meeting}
           />
           {refErr && <span className="mt-1 block text-xs text-danger-700">{refErr}</span>}
         </Field>
-        <Field label="Filed on" required>
+        <Field label={meeting ? 'Held on' : 'Filed on'} required>
           <Input
             type="date"
             value={filedOn}
-            min={ws.instance.periodEnd ?? undefined}
+            min={(meeting ? ws.instance.periodStart : ws.instance.periodEnd) ?? undefined}
             max={today()}
             onChange={(e) => setFiledOn(e.target.value)}
             required
@@ -929,7 +948,11 @@ function LodgeForm({
             </Select>
           </Field>
         )}
-        <Field label="Acknowledgement" required hint={docs.length ? undefined : 'Upload the acknowledgement.'}>
+        <Field
+          label={meeting ? 'Minutes' : 'Acknowledgement'}
+          required
+          hint={docs.length ? undefined : meeting ? 'Upload the minutes.' : 'Upload the acknowledgement.'}
+        >
           <Select value={ackDocumentId} onChange={(e) => setAckDocumentId(e.target.value)} required>
             {docs.length === 0 && <option value="">No documents yet</option>}
             {docs.map((d) => (
@@ -952,22 +975,47 @@ function LodgeForm({
             />
           )}
         </Field>
-        <Field label="Late fee paid">
-          <Input inputMode="decimal" value={lateFeePaid} onChange={(e) => setLateFeePaid(e.target.value)} />
-        </Field>
-        <Field label="Interest paid">
-          <Input inputMode="decimal" value={interestPaid} onChange={(e) => setInterestPaid(e.target.value)} />
-        </Field>
-        <label className="flex items-center gap-2 self-end pb-2 text-sm">
-          <input type="checkbox" checked={isNil} onChange={(e) => setIsNil(e.target.checked)} /> Nil return
-        </label>
+        {!meeting && ws.instance.stream === 'roc' && (
+          <Field label="Normal fee paid">
+            <Input inputMode="decimal" value={normalFeePaid} onChange={(e) => setNormalFeePaid(e.target.value)} />
+          </Field>
+        )}
+        {!meeting && (
+          <Field label={ws.instance.stream === 'roc' ? 'Additional fee paid' : 'Late fee paid'}>
+            <Input inputMode="decimal" value={lateFeePaid} onChange={(e) => setLateFeePaid(e.target.value)} />
+          </Field>
+        )}
+        {!meeting && ws.instance.stream !== 'roc' && (
+          <Field label="Interest paid">
+            <Input inputMode="decimal" value={interestPaid} onChange={(e) => setInterestPaid(e.target.value)} />
+          </Field>
+        )}
+        {!meeting && (
+          <label className="flex items-center gap-2 self-end pb-2 text-sm">
+            <input type="checkbox" checked={isNil} onChange={(e) => setIsNil(e.target.checked)} /> Nil return
+          </label>
+        )}
+        {agm && (
+          <label className="flex items-center gap-2 self-end pb-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={auditorAppointed}
+              onChange={(e) => setAuditorAppointed(e.target.checked)}
+            />{' '}
+            Auditor appointed or re-appointed at this AGM (ADT-1 follows)
+          </label>
+        )}
       </div>
       <Field label="Remarks">
         <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} />
       </Field>
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={busy || uploading || !!refErr || !referenceNo.trim() || !ackDocumentId}>
-          Lodge
+        <Button
+          type="submit"
+          size="sm"
+          disabled={busy || uploading || !!refErr || (!meeting && !referenceNo.trim()) || !ackDocumentId}
+        >
+          {meeting ? 'Record meeting' : 'Lodge'}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
           Cancel
@@ -1002,6 +1050,7 @@ function FiledRecord({
       </p>
       <p className="text-ink-muted">
         By {filing.filedByName ?? '—'} · recorded {formatDate(filing.recordedAt)}
+        {filing.normalFeePaid != null && ` · fee ${formatMoney(filing.normalFeePaid)}`}
         {filing.lateFeePaid != null && ` · late fee ${formatMoney(filing.lateFeePaid)}`}
         {filing.interestPaid != null && ` · interest ${formatMoney(filing.interestPaid)}`}
       </p>

@@ -449,6 +449,7 @@ export interface SaveComplianceProfileResult {
 /** Event types a manager can record (REG-01, DIR-12, the AGM, …). */
 export const COMPLIANCE_EVENT_TYPE = {
   agm: 'agm',
+  agmExtension: 'agm_extension',
   incorporation: 'incorporation',
   firstFyEnd: 'first_fy_end',
   firstAuditorAppointment: 'first_auditor_appointment',
@@ -468,6 +469,7 @@ export const COMPLIANCE_EVENT_TYPES: ComplianceEventType[] = Object.values(COMPL
 
 export const COMPLIANCE_EVENT_TYPE_LABEL: Record<ComplianceEventType, string> = {
   agm: 'AGM held',
+  agm_extension: 'AGM extended (ROC approval)',
   incorporation: 'Incorporation',
   first_fy_end: 'End of first financial year',
   first_auditor_appointment: 'First auditor appointed',
@@ -483,16 +485,91 @@ export const COMPLIANCE_EVENT_TYPE_LABEL: Record<ComplianceEventType, string> = 
   tds_month_end: 'Property / rent TDS deducted (month end)',
 };
 
+/** The events recorded from the ROC tab (spec roc-mca §6–§7). */
+export const ROC_EVENT_TYPES: ComplianceEventType[] = [
+  'agm',
+  'agm_extension',
+  'incorporation',
+  'first_fy_end',
+  'first_auditor_appointment',
+  'director_change',
+  'allotment',
+  'registered_office_change',
+  'resolution',
+  'charge_creation',
+  'capital_alteration',
+];
+
+/**
+ * Event facts (spec roc-mca §6.2). The rules read them as
+ * `<event_type>_<snake_case key>` (agm.auditorAppointed → agm_auditor_appointed).
+ */
+export interface AgmEventDetails {
+  /** The auditor was appointed or re-appointed at this AGM → ADT-1. */
+  auditorAppointed?: boolean;
+}
+export interface AgmExtensionEventDetails {
+  /** Months the ROC extended the AGM by (1–3; never the first AGM). */
+  months: number;
+  approvalRef?: string;
+}
+export interface AllotmentEventDetails {
+  /** Private placement (s.42) → PAS-3 in 15 days, else 30. */
+  privatePlacement?: boolean;
+}
+export interface DirectorChangeEventDetails {
+  din: string;
+  name?: string;
+  change: 'appointed' | 'ceased';
+}
+export interface ChargeEventDetails {
+  chargeHolder?: string;
+  amount?: number;
+}
+export type ComplianceEventDetails =
+  | AgmEventDetails
+  | AgmExtensionEventDetails
+  | AllotmentEventDetails
+  | DirectorChangeEventDetails
+  | ChargeEventDetails
+  | Record<string, never>;
+
+/** What recording / correcting / voiding an event changed on the calendar. */
+export interface ComplianceEventChanges {
+  created: { instanceId: string; label: string; dueDate: string }[];
+  moved: { instanceId: string; label: string; from: string; to: string }[];
+  /** Started items whose dates no longer match ("Profile changed — check"). */
+  flagged: { instanceId: string; label: string }[];
+  notApplicable: { instanceId: string; label: string }[];
+}
+
+/** An item an event created or dated. */
+export interface ComplianceEventItem {
+  instanceId: string;
+  label: string;
+  dueDate: string;
+  workflowStatus: string;
+}
+
 export interface ComplianceEventRecord {
   id: string;
   engagementId: string;
   registrationId: string | null;
+  registrationNumber?: string | null;
   eventType: string;
   financialYear: string | null;
   eventDate: string;
   notes: string | null;
+  details: Record<string, unknown>;
   recordedByName: string | null;
   createdAt: string;
+  updatedAt: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  /** The AGM item whose "Record meeting" created this event. */
+  sourceInstanceId: string | null;
+  /** Items this event created or dates (DIR-12, or AOC-4 / MGT-7 / ADT-1 from the AGM). */
+  items?: ComplianceEventItem[];
 }
 
 export interface RecordComplianceEventInput {
@@ -502,6 +579,16 @@ export interface RecordComplianceEventInput {
   /** Defaults to the FY of the event date (the previous FY for an AGM). */
   financialYear?: string;
   notes?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface CorrectComplianceEventInput {
+  eventDate?: string;
+  financialYear?: string;
+  notes?: string | null;
+  details?: Record<string, unknown>;
+  /** Why the event is being corrected. */
+  reason: string;
 }
 
 export interface RecordComplianceEventResult {
@@ -510,6 +597,39 @@ export interface RecordComplianceEventResult {
   created: number;
   /** AGM-linked items moved from the provisional date. */
   moved: number;
+  changes: ComplianceEventChanges;
+}
+
+/** Board meeting cadence for one CIN (spec roc-mca §5.2, P2-6). */
+export interface BoardMeetingCadence {
+  registrationId: string;
+  registrationNumber: string;
+  lastHeldOn: string | null;
+  /** Latest date for the next meeting (last + 120 days); null before any is held. */
+  dueBy: string | null;
+  /** Small company / OPC: not before last + 90 days, one in each calendar half. */
+  notBefore: string | null;
+  rule: 'every_120_days' | 'calendar_half';
+}
+
+/** The ROC tab's header facts (spec roc-mca P1-10 / G13, P2-6). */
+export interface RocOverview {
+  /** CIN / LLPIN registrations on the client. */
+  registrations: { id: string; type: 'cin' | 'llpin'; number: string }[];
+  /** Why the tab is empty, when it is (no CIN / LLPIN, or not an MCA entity). */
+  message: string | null;
+  boardMeetings: BoardMeetingCadence[];
+}
+
+/** Rules that close as a meeting (held-on date, minutes) instead of a filing (SRN). */
+export const ROC_MEETING_RULES = [
+  'ROC_AGM',
+  'ROC_BOARD_MEETING',
+  'ROC_FIRST_BOARD',
+  'ROC_FIRST_AGM',
+] as const;
+export function isMeetingRule(ruleCode: string | null | undefined): boolean {
+  return !!ruleCode && (ROC_MEETING_RULES as readonly string[]).includes(ruleCode);
 }
 
 export interface GenerateCalendarResult {

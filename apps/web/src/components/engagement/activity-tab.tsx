@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ACTIVITY_KIND,
+  COMPLIANCE_EVENT_TYPE_LABEL,
   NON_BILLABLE_TIME_CATEGORIES,
   OTHER_TIME_CATEGORIES,
   STREAMS,
@@ -41,7 +42,25 @@ const KIND_LABEL: Record<ActivityKind, string> = {
   comment: 'Comment',
   time_day: 'Time',
   independence_ack: 'Independence',
+  event_recorded: 'Event',
+  event_corrected: 'Event corrected',
+  event_voided: 'Event voided',
 };
+
+const EVENT_KINDS: readonly ActivityKind[] = [
+  ACTIVITY_KIND.eventRecorded,
+  ACTIVITY_KIND.eventCorrected,
+  ACTIVITY_KIND.eventVoided,
+];
+
+/** A timeline line's text: an event shows its name (AGM held …), not its code. */
+export function activityTitle(a: Pick<ActivityItem, 'kind' | 'title' | 'meta'>): string {
+  if (!EVENT_KINDS.includes(a.kind)) return a.title;
+  const label =
+    (COMPLIANCE_EVENT_TYPE_LABEL as Record<string, string>)[a.title] ?? humanize(a.title);
+  const on = typeof a.meta?.eventDate === 'string' ? ` on ${formatDate(a.meta.eventDate)}` : '';
+  return `${label}${on}`;
+}
 
 /** Filter chips: a few kinds grouped the way people ask ("show me filings"). */
 export const ACTIVITY_FILTERS: { key: string; label: string; kinds: ActivityKind[] }[] = [
@@ -57,6 +76,7 @@ export const ACTIVITY_FILTERS: { key: string; label: string; kinds: ActivityKind
       ACTIVITY_KIND.filingWaived,
     ],
   },
+  { key: 'events', label: 'Events', kinds: [...EVENT_KINDS] },
   { key: 'tasks', label: 'Tasks', kinds: [ACTIVITY_KIND.taskEvent, ACTIVITY_KIND.reviewPoint] },
   {
     key: 'client',
@@ -255,7 +275,7 @@ function Timeline({
                   {KIND_LABEL[a.kind] ?? humanize(a.kind)}
                 </Badge>
                 <div className="min-w-0 flex-1">
-                  <p className={a.kind === 'comment' ? 'whitespace-pre-wrap text-ink' : 'text-ink'}>{a.title}</p>
+                  <p className={a.kind === 'comment' ? 'whitespace-pre-wrap text-ink' : 'text-ink'}>{activityTitle(a)}</p>
                   {a.detail && <p className="text-xs text-ink-muted">{a.detail}</p>}
                   <p className="text-xs text-ink-faint">
                     {a.actorName ?? 'System'} · {formatDate(a.occurredAt)}{' '}

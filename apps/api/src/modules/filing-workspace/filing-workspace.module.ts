@@ -3,6 +3,7 @@ import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { ComplianceModule } from '../compliance/compliance.module';
 import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
 import { MonthlyDataRequestScheduler } from './monthly-data-request.scheduler';
@@ -17,7 +18,7 @@ import {
  * reads compliance_instances and writes only the workspace's own facts.
  */
 @Module({
-  imports: [AuditModule, NotificationsModule, TasksModule, DocumentsModule],
+  imports: [AuditModule, NotificationsModule, TasksModule, DocumentsModule, ComplianceModule],
   controllers: [EngagementStreamsController, FilingWorkspaceController],
   providers: [FilingWorkspaceService, StreamTreeService, MonthlyDataRequestScheduler],
   exports: [FilingWorkspaceService, MonthlyDataRequestScheduler],

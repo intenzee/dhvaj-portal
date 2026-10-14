@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   NotFoundException,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Put,
   Query,
@@ -20,6 +22,7 @@ import {
   type EntityComplianceProfiles,
   type GenerateCalendarResult,
   type RecordComplianceEventResult,
+  type RocOverview,
   type SaveComplianceProfileResult,
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -28,10 +31,12 @@ import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.se
 import { ComplianceCalendarV2Service } from './compliance-calendar-v2.service';
 import {
   ComplianceCalendarV2QueryDto,
+  CorrectComplianceEventDto,
   GenerateCalendarDto,
   RecordComplianceEventDto,
   SaveComplianceProfileDto,
   VerifyRuleDto,
+  VoidComplianceEventDto,
 } from './dto/calendar-v2.dto';
 
 /** Calendar v2 ships behind ff_calendar_v2: off → the routes 404 like they don't exist. */
@@ -89,6 +94,49 @@ export class EngagementCalendarV2Controller {
   ): Promise<RecordComplianceEventResult> {
     requireCalendarV2(this.flags);
     return this.calendar.recordEvent(rlsContextFromPrincipal(principal), id, body);
+  }
+
+  @Patch(':id/compliance-events/:eventId')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Correct an event (date, year, details) — the filings it drives follow',
+  })
+  correctEvent(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('eventId', new ParseUUIDPipe()) eventId: string,
+    @Body() body: CorrectComplianceEventDto,
+  ): Promise<RecordComplianceEventResult> {
+    requireCalendarV2(this.flags);
+    return this.calendar.correctEvent(rlsContextFromPrincipal(principal), id, eventId, body);
+  }
+
+  @Delete(':id/compliance-events/:eventId')
+  @RequirePermissions(PERMISSION.engagementManage)
+  @ApiOperation({
+    summary: 'Void an event (with a reason) — not-started items it created no longer apply',
+  })
+  voidEvent(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('eventId', new ParseUUIDPipe()) eventId: string,
+    @Body() body: VoidComplianceEventDto,
+  ): Promise<RecordComplianceEventResult> {
+    requireCalendarV2(this.flags);
+    return this.calendar.voidEvent(rlsContextFromPrincipal(principal), id, eventId, body.reason);
+  }
+
+  @Get(':id/roc-overview')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'The ROC tab header: CIN / LLPINs, why it is empty, next board meeting',
+  })
+  rocOverview(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<RocOverview> {
+    requireCalendarV2(this.flags);
+    return this.calendar.rocOverview(rlsContextFromPrincipal(principal), id);
   }
 }
 

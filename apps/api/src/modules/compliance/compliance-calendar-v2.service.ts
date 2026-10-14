@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -8,7 +9,12 @@ import type { PoolClient } from 'pg';
 import * as XLSX from 'xlsx';
 import {
   periodKeyLabel,
+  ROC_EVENT_TYPES,
+  type CinProfileAttributes,
+  type CompanyDirector,
   type ComplianceCalendarResponse,
+  type ComplianceEventChanges,
+  type ComplianceEventItem,
   type ComplianceCalendarRow,
   type ComplianceEventRecord,
   type ComplianceProfileRecord,
@@ -20,6 +26,7 @@ import {
   type ProfileScope,
   type QrmpCategory,
   type RecordComplianceEventResult,
+  type RocOverview,
   type SaveComplianceProfileResult,
   type Stream,
 } from '@hsdg/contracts';
@@ -30,8 +37,12 @@ import { dueBand } from './compliance-periods';
 import {
   ComplianceGeneratorService,
   eventFinancialYear,
+  mergeSummaries,
+  type EventRow,
   type GenerateSummary,
 } from './compliance-generator.service';
+import { syncAutoTicks } from './compliance-checklist';
+import { boardMeetingCadence, rocEmptyMessage, validateEventDetails } from './compliance-events';
 import {
   compactAttributes,
   dayBefore,
@@ -40,6 +51,7 @@ import {
 } from './compliance-profile';
 import type {
   ComplianceCalendarV2QueryDto,
+  CorrectComplianceEventDto,
   RecordComplianceEventDto,
   SaveComplianceProfileDto,
 } from './dto/calendar-v2.dto';
@@ -114,12 +126,42 @@ interface EventSqlRow {
   id: string;
   engagement_id: string;
   registration_id: string | null;
+  registration_number: string | null;
   event_type: string;
   financial_year: string | null;
   event_date: string;
   notes: string | null;
+  details: Record<string, unknown> | null;
   recorded_by_name: string | null;
   created_at: Date;
+  updated_at: Date | null;
+  voided_at: Date | null;
+  void_reason: string | null;
+  source_instance_id: string | null;
+}
+
+/** compliance_events columns, aliased `ev` (recorded_by_name / registration_number joined). */
+const EVENT_SELECT = `SELECT ev.id, ev.engagement_id, ev.registration_id, er.registration_number,
+       ev.event_type, ev.financial_year, ev.event_date::text, ev.notes, ev.details,
+       emp.full_name AS recorded_by_name, ev.created_at, ev.updated_at, ev.voided_at,
+       ev.void_reason, ev.source_instance_id
+  FROM hsdg.compliance_events ev
+  LEFT JOIN hsdg.employees emp ON emp.id = ev.recorded_by_employee_id
+  LEFT JOIN hsdg.entity_registrations er ON er.id = ev.registration_id`;
+
+/** Event types the recurring (AGM-linked) rules run from: recording one regenerates the year. */
+const RECURRING_EVENT_TYPES: ReadonlySet<string> = new Set(['agm', 'agm_extension']);
+/** One live event of these per year and registration: the AGM is never recorded twice. */
+const ONCE_A_YEAR_EVENT_TYPES: ReadonlySet<string> = new Set(['agm', 'agm_extension']);
+
+/** What recording an event takes, besides the engagement. */
+export interface EventInput {
+  eventType: string;
+  eventDate: string;
+  registrationId?: string | null;
+  financialYear?: string | null;
+  notes?: string | null;
+  details?: Record<string, unknown> | null;
 }
 
 const PROFILE_COLUMNS = `id, entity_id, registration_id, scope, effective_from::text, effective_to::text,
@@ -141,18 +183,52 @@ function mapProfile(r: ProfileSqlRow): ComplianceProfileRecord {
   };
 }
 
-function mapEvent(r: EventSqlRow): ComplianceEventRecord {
+function mapEvent(r: EventSqlRow, items?: ComplianceEventItem[]): ComplianceEventRecord {
   return {
     id: r.id,
     engagementId: r.engagement_id,
     registrationId: r.registration_id,
+    registrationNumber: r.registration_number,
     eventType: r.event_type,
     financialYear: r.financial_year,
     eventDate: r.event_date,
     notes: r.notes,
+    details: r.details ?? {},
     recordedByName: r.recorded_by_name,
     createdAt: r.created_at.toISOString(),
+    updatedAt: r.updated_at?.toISOString() ?? null,
+    voidedAt: r.voided_at?.toISOString() ?? null,
+    voidReason: r.void_reason,
+    sourceInstanceId: r.source_instance_id,
+    ...(items ? { items } : {}),
   };
+}
+
+const toEventRow = (r: EventSqlRow): EventRow => ({
+  id: r.id,
+  registration_id: r.registration_id,
+  event_type: r.event_type,
+  financial_year: r.financial_year ?? '',
+  event_date: r.event_date,
+  details: r.details,
+});
+
+/**
+ * A director appointed or ceased (DIR-12), applied to a directors list. Pure;
+ * `undo` reverses it (voiding the event).
+ */
+export function applyDirectorChange(
+  directors: readonly CompanyDirector[],
+  details: Record<string, unknown>,
+  undo = false,
+): CompanyDirector[] {
+  const din = String(details.din ?? '');
+  const appointed = (details.change === 'appointed') !== undo;
+  const others = directors.filter((d) => d.din !== din);
+  if (!appointed) return others;
+  const existing = directors.find((d) => d.din === din);
+  const name = typeof details.name === 'string' ? details.name : (existing?.name ?? '');
+  return [...others, { ...(existing ?? {}), din, name } as CompanyDirector];
 }
 
 function summaryOf(s: GenerateSummary): GenerateCalendarResult {
@@ -260,15 +336,29 @@ export class ComplianceCalendarV2Service {
   async listEvents(ctx: RlsContext, engagementId: string): Promise<ComplianceEventRecord[]> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<EventSqlRow>(
-        `SELECT ev.id, ev.engagement_id, ev.registration_id, ev.event_type, ev.financial_year,
-                ev.event_date::text, ev.notes, emp.full_name AS recorded_by_name, ev.created_at
-           FROM hsdg.compliance_events ev
-           LEFT JOIN hsdg.employees emp ON emp.id = ev.recorded_by_employee_id
+        `${EVENT_SELECT}
           WHERE ev.engagement_id = $1
           ORDER BY ev.event_date DESC, ev.created_at DESC`,
         [engagementId],
       );
-      return rows.map(mapEvent);
+      if (rows.length === 0) return [];
+      // The items each event created (DIR-12 …) or dates (AOC-4 / MGT-7 / ADT-1).
+      const items = await client.query<ComplianceEventItem & { eventId: string }>(
+        `SELECT ci.compliance_event_id AS "eventId", ci.id AS "instanceId",
+                COALESCE(ci.form_label, rv.form_label, cr.name) AS label,
+                ci.statutory_deadline::text AS "dueDate", ci.workflow_status AS "workflowStatus"
+           FROM hsdg.compliance_instances ci
+           JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+           LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
+          WHERE ci.compliance_event_id = ANY($1::uuid[])
+          ORDER BY ci.statutory_deadline, label`,
+        [rows.map((r) => r.id)],
+      );
+      const byEvent = new Map<string, ComplianceEventItem[]>();
+      for (const { eventId, ...it } of items.rows) {
+        byEvent.set(eventId, [...(byEvent.get(eventId) ?? []), it]);
+      }
+      return rows.map((r) => mapEvent(r, byEvent.get(r.id) ?? []));
     });
   }
 
@@ -277,77 +367,553 @@ export class ComplianceCalendarV2Service {
     engagementId: string,
     input: RecordComplianceEventDto,
   ): Promise<RecordComplianceEventResult> {
+    return this.db.withRlsContext(ctx, (client) =>
+      this.recordEventWith(client, ctx, engagementId, input),
+    );
+  }
+
+  /**
+   * Record an event on the caller's transaction (the AGM's "Record meeting"
+   * calls this too): create the items it triggers, move the AGM-linked dates,
+   * tick the lines it satisfies, and log what changed.
+   */
+  async recordEventWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    input: EventInput,
+    opts: { sourceInstanceId?: string } = {},
+  ): Promise<RecordComplianceEventResult> {
+    const eng = await this.assertLead(client, engagementId);
+    if (eng.kind !== 'compliance') {
+      throw new BadRequestException('Events are recorded on a Compliance engagement.');
+    }
+    const eventDate = input.eventDate.slice(0, 10);
+    if (eventDate > istToday()) throw new BadRequestException('An event cannot be in the future.');
+    const checked = validateEventDetails(input.eventType, input.details);
+    if ('error' in checked) throw new BadRequestException(checked.error);
+    const registrationId = await this.eventRegistration(
+      client,
+      eng.entity_id,
+      input.eventType,
+      input.registrationId ?? null,
+    );
+    const financialYear = input.financialYear ?? eventFinancialYear(input.eventType, eventDate);
+    await this.assertNotRecordedTwice(
+      client,
+      engagementId,
+      input.eventType,
+      financialYear,
+      registrationId,
+    );
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO hsdg.compliance_events
+         (engagement_id, registration_id, event_type, financial_year, event_date, notes, details,
+          recorded_by_employee_id, source_instance_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+       RETURNING id`,
+      [
+        engagementId,
+        registrationId,
+        input.eventType,
+        financialYear,
+        eventDate,
+        input.notes ?? null,
+        JSON.stringify(checked.details),
+        ctx.employeeId ?? null,
+        opts.sourceInstanceId ?? null,
+      ],
+    );
+    const event = await this.loadEvent(client, engagementId, rows[0]!.id);
+    if (input.eventType === 'director_change' && registrationId) {
+      await this.applyDirectorEvent(client, ctx, eng.entity_id, registrationId, event, false);
+    }
+    const summary = await this.applyEvent(client, engagementId, toEventRow(event), {});
+    const changes = await this.describeChanges(client, summary);
+    await this.logEvent(client, ctx, event, 'recorded', null, changes, null);
+    await this.audit.recordWith(client, ctx, {
+      action: 'compliance.event_recorded',
+      objectType: 'engagement',
+      objectId: engagementId,
+      after: {
+        eventId: event.id,
+        eventType: input.eventType,
+        eventDate,
+        financialYear,
+        details: checked.details,
+        created: summary.created,
+        moved: summary.moved,
+      },
+    });
+    return {
+      event: mapEvent(event),
+      created: summary.created,
+      moved: summary.moved,
+      changes,
+    };
+  }
+
+  /** PATCH — correct an event's date, year, details or notes; the calendar follows. */
+  async correctEvent(
+    ctx: RlsContext,
+    engagementId: string,
+    eventId: string,
+    input: CorrectComplianceEventDto,
+  ): Promise<RecordComplianceEventResult> {
     return this.db.withRlsContext(ctx, async (client) => {
       const eng = await this.assertLead(client, engagementId);
-      if (eng.kind !== 'compliance') {
-        throw new BadRequestException('Events are recorded on a Compliance engagement.');
+      const before = await this.loadEvent(client, engagementId, eventId, true);
+      if (before.voided_at) throw new BadRequestException('A voided event cannot be corrected.');
+      const eventDate = input.eventDate?.slice(0, 10) ?? before.event_date;
+      if (eventDate > istToday()) {
+        throw new BadRequestException('An event cannot be in the future.');
       }
-      if (input.registrationId) {
-        const reg = await client.query(
-          `SELECT 1 FROM hsdg.entity_compliance_registrations($1) WHERE id = $2`,
-          [eng.entity_id, input.registrationId],
-        );
-        if (reg.rowCount === 0) {
-          throw new BadRequestException('That registration does not belong to this client.');
-        }
-      }
-      const eventDate = input.eventDate.slice(0, 10);
-      const financialYear = input.financialYear ?? eventFinancialYear(input.eventType, eventDate);
-      const { rows } = await client.query<EventSqlRow>(
-        `INSERT INTO hsdg.compliance_events
-           (engagement_id, registration_id, event_type, financial_year, event_date, notes,
-            recorded_by_employee_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, engagement_id, registration_id, event_type, financial_year,
-                   event_date::text, notes, NULL::text AS recorded_by_name, created_at`,
-        [
+      const checked = validateEventDetails(before.event_type, input.details ?? before.details);
+      if ('error' in checked) throw new BadRequestException(checked.error);
+      const financialYear =
+        input.financialYear ??
+        (input.eventDate
+          ? eventFinancialYear(before.event_type, eventDate)
+          : (before.financial_year ?? eventFinancialYear(before.event_type, eventDate)));
+      if (financialYear !== before.financial_year) {
+        await this.assertNotRecordedTwice(
+          client,
           engagementId,
-          input.registrationId ?? null,
-          input.eventType,
+          before.event_type,
           financialYear,
+          before.registration_id,
+          before.id,
+        );
+      }
+      await client.query(
+        `UPDATE hsdg.compliance_events
+            SET event_date = $2, financial_year = $3, details = $4::jsonb,
+                notes = $5, updated_at = now()
+          WHERE id = $1`,
+        [
+          eventId,
           eventDate,
-          input.notes ?? null,
+          financialYear,
+          JSON.stringify(checked.details),
+          input.notes === undefined ? before.notes : input.notes,
+        ],
+      );
+      const after = await this.loadEvent(client, engagementId, eventId);
+      if (before.event_type === 'director_change' && before.registration_id) {
+        // Re-apply from the corrected date: undo the old change, apply the new one.
+        await this.applyDirectorEvent(
+          client,
+          ctx,
+          eng.entity_id,
+          before.registration_id,
+          before,
+          true,
+        );
+        await this.applyDirectorEvent(
+          client,
+          ctx,
+          eng.entity_id,
+          before.registration_id,
+          after,
+          false,
+        );
+      }
+      const summary = await this.applyEvent(client, engagementId, toEventRow(after), {
+        alsoYears: before.financial_year ? [before.financial_year] : [],
+      });
+      const changes = await this.describeChanges(client, summary);
+      await this.logEvent(client, ctx, after, 'corrected', before, changes, input.reason);
+      await this.audit.recordWith(client, ctx, {
+        action: 'compliance.event_corrected',
+        objectType: 'engagement',
+        objectId: engagementId,
+        before: { eventId, eventDate: before.event_date, details: before.details },
+        after: { eventId, eventDate, financialYear, details: checked.details, reason: input.reason },
+      });
+      return { event: mapEvent(after), created: summary.created, moved: summary.moved, changes };
+    });
+  }
+
+  /** DELETE — void an event (with a reason). Its items fall away or are flagged. */
+  async voidEvent(
+    ctx: RlsContext,
+    engagementId: string,
+    eventId: string,
+    reason: string,
+  ): Promise<RecordComplianceEventResult> {
+    return this.db.withRlsContext(ctx, (client) =>
+      this.voidEventWith(client, ctx, engagementId, eventId, reason),
+    );
+  }
+
+  async voidEventWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    eventId: string,
+    reason: string,
+  ): Promise<RecordComplianceEventResult> {
+    const eng = await this.assertLead(client, engagementId);
+    const before = await this.loadEvent(client, engagementId, eventId, true);
+    if (before.voided_at) throw new BadRequestException('This event is already voided.');
+    if (!reason.trim()) throw new BadRequestException('Say why the event is being voided.');
+    await client.query(
+      `UPDATE hsdg.compliance_events
+          SET voided_at = now(), voided_by_employee_id = $2, void_reason = $3, updated_at = now()
+        WHERE id = $1`,
+      [eventId, ctx.employeeId ?? null, reason.trim()],
+    );
+    const after = await this.loadEvent(client, engagementId, eventId);
+    if (before.event_type === 'director_change' && before.registration_id) {
+      await this.applyDirectorEvent(client, ctx, eng.entity_id, before.registration_id, before, true);
+    }
+    const summary = await this.applyEvent(client, engagementId, toEventRow(after), {
+      voided: true,
+    });
+    const changes = await this.describeChanges(client, summary);
+    await this.logEvent(client, ctx, after, 'voided', before, changes, reason.trim());
+    await this.audit.recordWith(client, ctx, {
+      action: 'compliance.event_voided',
+      objectType: 'engagement',
+      objectId: engagementId,
+      after: { eventId, eventType: before.event_type, reason: reason.trim() },
+    });
+    return { event: mapEvent(after), created: summary.created, moved: summary.moved, changes };
+  }
+
+  /** The ROC tab header: CIN / LLPINs, why it is empty, board-meeting cadence (P2-6). */
+  async rocOverview(ctx: RlsContext, engagementId: string): Promise<RocOverview> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const eng = await client.query<{ entity_id: string; category: string | null }>(
+        `SELECT e.entity_id, et.category
+           FROM hsdg.engagements e
+           JOIN hsdg.entities ent ON ent.id = e.entity_id
+           LEFT JOIN hsdg.entity_types et ON et.id = ent.entity_type_id
+          WHERE e.id = $1`,
+        [engagementId],
+      );
+      const e = eng.rows[0];
+      if (!e) throw new NotFoundException('Engagement not found.');
+      const regs = (await this.registrations(client, e.entity_id)).filter(
+        (r) =>
+          (r.registrationType === 'cin' || r.registrationType === 'llpin') &&
+          r.status === 'active',
+      );
+      const held = await client.query<{
+        registration_id: string;
+        filed_on: string;
+        subtype: string | null;
+      }>(
+        `SELECT ci.registration_id, fr.filed_on::text,
+                (SELECT p.attributes ->> 'companySubtype'
+                   FROM hsdg.registration_compliance_profiles p
+                  WHERE p.registration_id = ci.registration_id AND p.scope = 'cin'
+                    AND p.effective_from <= CURRENT_DATE
+                  ORDER BY p.effective_from DESC LIMIT 1) AS subtype
+           FROM hsdg.filing_records fr
+           JOIN hsdg.compliance_instances ci ON ci.id = fr.compliance_instance_id
+           JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+          WHERE ci.engagement_id = $1 AND fr.undone_at IS NULL
+            AND cr.code IN ('ROC_BOARD_MEETING', 'ROC_FIRST_BOARD')`,
+        [engagementId],
+      );
+      const subtypes = await client.query<{ registration_id: string; subtype: string | null }>(
+        `SELECT DISTINCT ON (p.registration_id) p.registration_id,
+                p.attributes ->> 'companySubtype' AS subtype
+           FROM hsdg.registration_compliance_profiles p
+          WHERE p.entity_id = $1 AND p.scope = 'cin' AND p.effective_from <= CURRENT_DATE
+          ORDER BY p.registration_id, p.effective_from DESC`,
+        [e.entity_id],
+      );
+      const subtypeOf = new Map(subtypes.rows.map((r) => [r.registration_id, r.subtype]));
+      return {
+        registrations: regs.map((r) => ({
+          id: r.id,
+          type: r.registrationType as 'cin' | 'llpin',
+          number: r.registrationNumber,
+        })),
+        message: rocEmptyMessage(e.category, regs.length),
+        boardMeetings: regs
+          .filter((r) => r.registrationType === 'cin')
+          .map((r) =>
+            boardMeetingCadence(
+              { id: r.id, number: r.registrationNumber },
+              held.rows.filter((h) => h.registration_id === r.id).map((h) => h.filed_on),
+              subtypeOf.get(r.id) ?? null,
+            ),
+          ),
+      };
+    });
+  }
+
+  // ── event helpers ──────────────────────────────────────────────────────
+
+  private async loadEvent(
+    client: PoolClient,
+    engagementId: string,
+    eventId: string,
+    lock = false,
+  ): Promise<EventSqlRow> {
+    if (lock) {
+      await client.query(`SELECT 1 FROM hsdg.compliance_events WHERE id = $1 FOR UPDATE`, [
+        eventId,
+      ]);
+    }
+    const { rows } = await client.query<EventSqlRow>(
+      `${EVENT_SELECT} WHERE ev.id = $1 AND ev.engagement_id = $2`,
+      [eventId, engagementId],
+    );
+    if (!rows[0]) throw new NotFoundException('Event not found.');
+    return rows[0];
+  }
+
+  /**
+   * The registration an event is on. A ROC event needs the company's CIN (or
+   * LLPIN): the only one by default; with several, the caller must choose.
+   */
+  private async eventRegistration(
+    client: PoolClient,
+    entityId: string,
+    eventType: string,
+    registrationId: string | null,
+  ): Promise<string | null> {
+    const regs = await this.registrations(client, entityId);
+    if (registrationId) {
+      if (!regs.some((r) => r.id === registrationId)) {
+        throw new BadRequestException('That registration does not belong to this client.');
+      }
+      return registrationId;
+    }
+    if (!(ROC_EVENT_TYPES as string[]).includes(eventType)) return null;
+    const mca = regs.filter(
+      (r) =>
+        (r.registrationType === 'cin' || r.registrationType === 'llpin') && r.status === 'active',
+    );
+    if (mca.length === 1) return mca[0]!.id;
+    if (mca.length === 0) {
+      throw new BadRequestException('Add the CIN (or LLPIN) to the client to record ROC events.');
+    }
+    throw new BadRequestException('Choose the CIN (or LLPIN) the event is on.');
+  }
+
+  /** The AGM (and its extension) is recorded once a year per company — correct it instead. */
+  private async assertNotRecordedTwice(
+    client: PoolClient,
+    engagementId: string,
+    eventType: string,
+    financialYear: string,
+    registrationId: string | null,
+    exceptId?: string,
+  ): Promise<void> {
+    if (!ONCE_A_YEAR_EVENT_TYPES.has(eventType)) return;
+    const dup = await client.query(
+      `SELECT 1 FROM hsdg.compliance_events
+        WHERE engagement_id = $1 AND event_type = $2 AND financial_year = $3
+          AND registration_id IS NOT DISTINCT FROM $4 AND voided_at IS NULL
+          AND ($5::uuid IS NULL OR id <> $5)`,
+      [engagementId, eventType, financialYear, registrationId, exceptId ?? null],
+    );
+    if (dup.rowCount) {
+      throw new ConflictException(
+        eventType === 'agm'
+          ? `The AGM for FY ${financialYear} is already recorded — correct it instead.`
+          : `An AGM extension for FY ${financialYear} is already recorded — correct it instead.`,
+      );
+    }
+  }
+
+  /**
+   * Bring the calendar in line with an event: its own items (DIR-12 …), the
+   * AGM-linked years (AOC-4 / MGT-7 / ADT-1, the AGM's extended date), and the
+   * checklist lines that tick from the AGM.
+   */
+  private async applyEvent(
+    client: PoolClient,
+    engagementId: string,
+    event: EventRow,
+    opts: { voided?: boolean; alsoYears?: string[] },
+  ): Promise<GenerateSummary> {
+    let summary = await this.generator.syncEventInstances(client, engagementId, event, {
+      voided: opts.voided,
+    });
+    if (RECURRING_EVENT_TYPES.has(event.event_type)) {
+      const years = [...new Set([event.financial_year, ...(opts.alsoYears ?? [])])];
+      summary = mergeSummaries(
+        summary,
+        await this.generator.generateForEngagement(client, engagementId, {
+          financialYears: years,
+        }),
+      );
+      const lines = await client.query<{ id: string }>(
+        `SELECT DISTINCT compliance_instance_id AS id FROM hsdg.instance_checklist_items
+          WHERE engagement_id = $1 AND auto_tick = 'event'`,
+        [engagementId],
+      );
+      for (const { id } of lines.rows) await syncAutoTicks(client, id);
+    }
+    return summary;
+  }
+
+  /** A generator summary in words: which items were created, moved, flagged, retired. */
+  private async describeChanges(
+    client: PoolClient,
+    s: GenerateSummary,
+  ): Promise<ComplianceEventChanges> {
+    const ids = [
+      ...s.createdIds,
+      ...s.movedItems.map((m) => m.id),
+      ...s.flaggedIds,
+      ...s.notApplicableIds,
+    ];
+    if (ids.length === 0) return { created: [], moved: [], flagged: [], notApplicable: [] };
+    const { rows } = await client.query<{ id: string; label: string; due: string }>(
+      `SELECT ci.id, COALESCE(ci.form_label, rv.form_label, cr.name) AS label,
+              ci.statutory_deadline::text AS due
+         FROM hsdg.compliance_instances ci
+         JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
+         LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
+        WHERE ci.id = ANY($1::uuid[])`,
+      [ids],
+    );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const label = (id: string) => byId.get(id)?.label ?? 'Item';
+    return {
+      created: s.createdIds.map((id) => ({
+        instanceId: id,
+        label: label(id),
+        dueDate: byId.get(id)?.due ?? '',
+      })),
+      moved: s.movedItems.map((m) => ({
+        instanceId: m.id,
+        label: label(m.id),
+        from: m.from,
+        to: m.to,
+      })),
+      flagged: s.flaggedIds.map((id) => ({ instanceId: id, label: label(id) })),
+      notApplicable: s.notApplicableIds.map((id) => ({ instanceId: id, label: label(id) })),
+    };
+  }
+
+  private async logEvent(
+    client: PoolClient,
+    ctx: RlsContext,
+    event: EventSqlRow,
+    action: 'recorded' | 'corrected' | 'voided',
+    before: EventSqlRow | null,
+    changes: ComplianceEventChanges,
+    reason: string | null,
+  ): Promise<void> {
+    const snap = (e: EventSqlRow) => ({
+      eventDate: e.event_date,
+      financialYear: e.financial_year,
+      details: e.details ?? {},
+      notes: e.notes,
+    });
+    await client.query(
+      `INSERT INTO hsdg.compliance_event_log
+         (event_id, engagement_id, action, before, after, changes, reason, actor_employee_id)
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8)`,
+      [
+        event.id,
+        event.engagement_id,
+        action,
+        before ? JSON.stringify(snap(before)) : null,
+        JSON.stringify(snap(event)),
+        JSON.stringify(changes),
+        reason,
+        ctx.employeeId ?? null,
+      ],
+    );
+  }
+
+  /**
+   * DIR-12 keeps the CIN profile's directors current (spec §6.2): the change
+   * applies to every profile row in force on or after the event date, splitting
+   * the row in force at that date. `undo` reverses it (a voided event).
+   */
+  private async applyDirectorEvent(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    registrationId: string,
+    event: EventSqlRow,
+    undo: boolean,
+  ): Promise<void> {
+    const details = event.details ?? {};
+    if (!details.din) return;
+    const from = event.event_date;
+    const rows = await client.query<ProfileSqlRow>(
+      `SELECT ${PROFILE_COLUMNS} FROM hsdg.registration_compliance_profiles
+        WHERE entity_id = $1 AND scope = 'cin' AND registration_id = $2
+          AND (effective_to IS NULL OR effective_to >= $3::date)
+        ORDER BY effective_from
+        FOR UPDATE`,
+      [entityId, registrationId, from],
+    );
+    const directorsOf = (p: ProfileSqlRow | undefined) =>
+      ((p?.attributes ?? {}) as CinProfileAttributes).directors ?? [];
+    const update = (p: ProfileSqlRow) =>
+      client.query(
+        `UPDATE hsdg.registration_compliance_profiles
+            SET attributes = $2::jsonb, version = version + 1 WHERE id = $1`,
+        [
+          p.id,
+          JSON.stringify({
+            ...p.attributes,
+            directors: applyDirectorChange(directorsOf(p), details, undo),
+          }),
+        ],
+      );
+    const inForce = rows.rows.find((p) => p.effective_from <= from);
+    if (inForce && inForce.effective_from < from) {
+      // Split: the old list up to the day before, the changed list from the event.
+      await client.query(
+        `UPDATE hsdg.registration_compliance_profiles
+            SET effective_to = $2, version = version + 1 WHERE id = $1`,
+        [inForce.id, dayBefore(from)],
+      );
+      await client.query(
+        `INSERT INTO hsdg.registration_compliance_profiles
+           (entity_id, registration_id, scope, effective_from, effective_to, gst_scheme,
+            qrmp_category, attributes, created_by_employee_id)
+         VALUES ($1, $2, 'cin', $3, $4, NULL, NULL, $5::jsonb, $6)`,
+        [
+          entityId,
+          registrationId,
+          from,
+          inForce.effective_to,
+          JSON.stringify({
+            ...inForce.attributes,
+            directors: applyDirectorChange(directorsOf(inForce), details, undo),
+          }),
           ctx.employeeId ?? null,
         ],
       );
-      const event = rows[0]!;
-      const created = await this.generator.createEventInstances(client, engagementId, {
-        id: event.id,
-        registration_id: event.registration_id,
-        event_type: event.event_type,
-        financial_year: financialYear,
-        event_date: eventDate,
-      });
-      // Annual items that run from this event (AOC-4 / MGT-7 / ADT-1 from the
-      // AGM) move from their provisional date on a regeneration of that year.
-      const regen = await this.generator.generateForEngagement(client, engagementId, {
-        financialYears: [financialYear],
-      });
-      await this.audit.recordWith(client, ctx, {
-        action: 'compliance.event_recorded',
-        objectType: 'engagement',
-        objectId: engagementId,
-        after: {
-          eventId: event.id,
-          eventType: input.eventType,
-          eventDate,
-          financialYear,
-          created: created.length + regen.created,
-          moved: regen.moved,
-        },
-      });
-      const recorder = ctx.employeeId
-        ? await client.query<{ full_name: string }>(
-            `SELECT full_name FROM hsdg.employees WHERE id = $1`,
-            [ctx.employeeId],
-          )
-        : null;
-      return {
-        event: mapEvent({ ...event, recorded_by_name: recorder?.rows[0]?.full_name ?? null }),
-        created: created.length + regen.created,
-        moved: regen.moved,
-      };
-    });
+    } else if (inForce) {
+      await update(inForce);
+    } else if (rows.rows.length === 0 && !undo) {
+      const later = await client.query<{ effective_from: string }>(
+        `SELECT effective_from::text FROM hsdg.registration_compliance_profiles
+          WHERE entity_id = $1 AND scope = 'cin' AND registration_id = $2
+          ORDER BY effective_from LIMIT 1`,
+        [entityId, registrationId],
+      );
+      await client.query(
+        `INSERT INTO hsdg.registration_compliance_profiles
+           (entity_id, registration_id, scope, effective_from, effective_to, attributes,
+            created_by_employee_id)
+         VALUES ($1, $2, 'cin', $3, $4, $5::jsonb, $6)`,
+        [
+          entityId,
+          registrationId,
+          from,
+          later.rows[0] ? dayBefore(later.rows[0].effective_from) : null,
+          JSON.stringify({ directors: applyDirectorChange([], details) }),
+          ctx.employeeId ?? null,
+        ],
+      );
+    }
+    for (const p of rows.rows) if (p.effective_from > from) await update(p);
   }
 
   // ── Profiles ────────────────────────────────────────────────────────────

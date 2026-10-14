@@ -131,15 +131,26 @@ export class LodgeDto {
   @IsIn(FILING_REFERENCE_KINDS)
   referenceKind?: FilingReferenceKind;
 
-  @ApiProperty({ example: 'AA191026123456Z' })
+  @ApiPropertyOptional({
+    example: 'AA191026123456Z',
+    description: 'Required for a filing; a meeting (AGM, board meeting) defaults to an internal one.',
+  })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(60)
-  referenceNo!: string;
+  referenceNo?: string;
 
-  @ApiProperty({ example: '2026-10-20' })
+  @ApiProperty({ example: '2026-10-20', description: 'Filed on — for a meeting, held on.' })
   @IsDateString()
   filedOn!: string;
+
+  @ApiPropertyOptional({
+    description: 'AGM only: the auditor was appointed or re-appointed at this AGM (ADT-1 follows).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  auditorAppointed?: boolean;
 
   @ApiPropertyOptional({ description: 'Defaults to you.' })
   @IsOptional()
@@ -169,6 +180,13 @@ export class LodgeDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   interestPaid?: number;
+
+  @ApiPropertyOptional({ description: 'ROC: the normal filing fee paid (the additional fee is lateFeePaid).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  normalFeePaid?: number;
 
   @ApiProperty({ description: 'The acknowledgement, uploaded to this filing first.' })
   @IsUUID()

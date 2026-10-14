@@ -53,18 +53,35 @@ export function checkReference(
   return { value };
 }
 
-/** Filing date: not after today, not before the period ends. */
+/**
+ * Filing date: not after today, not before the period ends. A meeting is held
+ * during its period (a board meeting on 15 May is Apr–Jun's), so its held-on
+ * date need only be on or after the period start.
+ */
 export function checkFiledOn(
   filedOn: string,
   today: string,
   periodEnd: string | null,
+  meeting?: { periodStart: string | null },
 ): string | null {
+  const what = meeting ? 'meeting date' : 'filing date';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(filedOn) || Number.isNaN(Date.parse(filedOn))) {
-    return 'The filing date must be a date (YYYY-MM-DD).';
+    return `The ${what} must be a date (YYYY-MM-DD).`;
   }
-  if (filedOn > today) return 'The filing date cannot be in the future.';
+  if (filedOn > today) return `The ${what} cannot be in the future.`;
+  if (meeting) {
+    if (meeting.periodStart && filedOn < meeting.periodStart) {
+      return 'The meeting date cannot be before the period starts.';
+    }
+    return null;
+  }
   if (periodEnd && filedOn < periodEnd) return 'The filing date cannot be before the period ends.';
   return null;
+}
+
+/** A meeting's internal reference when none is given: MTG-<held on>. */
+export function meetingReference(heldOn: string): string {
+  return `MTG-${heldOn}`;
 }
 
 /** Undo a lodge: a lead within 24 hours, a partner any time. Reason required. */
