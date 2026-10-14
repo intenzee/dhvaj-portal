@@ -14,6 +14,7 @@ import { cn } from '@/lib/cn';
 import { Button, Card, EmptyState, PageHeader, Spinner } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { PRIMARY, TaskActions } from '@/components/tasks/task-actions';
+import { RemindClientButton } from '@/components/filing/client-chase';
 import { FilingDrawer, useOpenFiling } from '@/components/filing/filing-drawer';
 import {
   stepSelection,
@@ -206,6 +207,9 @@ function TodayScreen(): JSX.Element {
                           </div>
                           <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                             {task && <TaskActions task={task} ctx={ctx} only={PRIMARY} />}
+                            {item.group === 'waiting' && item.link.instanceId && (
+                              <RemindClientButton instanceId={item.link.instanceId} />
+                            )}
                             <Button size="sm" variant="secondary" onClick={() => openItem(item)}>
                               Open
                             </Button>
