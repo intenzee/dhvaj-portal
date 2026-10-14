@@ -30,9 +30,11 @@ jest.mock('@/lib/auth', () => ({
 }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
 let flagOn = true;
+let runsOn = false;
 jest.mock('@/lib/feature-flags', () => ({
   useFeatureFlags: () => ({
-    isOn: (f: string) => (f === 'ff_today_view' ? flagOn : f === 'ff_work_links'),
+    isOn: (f: string) =>
+      f === 'ff_today_view' ? flagOn : f === 'ff_filing_runs' ? runsOn : f === 'ff_work_links',
     isLoading: false,
     flags: {},
   }),
@@ -145,6 +147,7 @@ beforeEach(() => {
   push.mockClear();
   apiFetch.mockReset();
   flagOn = true;
+  runsOn = false;
 });
 
 describe('Today page (WF-201)', () => {
@@ -189,6 +192,46 @@ describe('Today page (WF-201)', () => {
     renderPage();
     await screen.findByRole('link', { name: 'GSTR-1 · Sep 2026' });
     expect(screen.getByTestId('drawer').textContent).toBe('i1');
+  });
+
+  it('a filing waiting on the client offers Remind client right on the row (WF-302)', async () => {
+    runsOn = true;
+    const chase = item({
+      key: 'task:t3',
+      group: 'waiting',
+      title: 'GSTR-3B · Sep 2026',
+      status: 'blocked',
+      filing: filing('i9'),
+      link: { engagementId: 'e1', engagementKind: 'compliance', instanceId: 'i9', taskId: 't3' },
+    });
+    apiFetch.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === '/work/today'
+          ? { ...view, groups: [{ group: 'waiting', items: [chase, request], total: 2 }] }
+          : url.endsWith('/client-chase/remind')
+            ? { channel: 'copy', text: 'Please send the purchase register.', raised: 0 }
+            : null,
+      ),
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TodayPage />
+      </QueryClientProvider>,
+    );
+    const waiting = await screen.findByRole('region', { name: /Waiting on client/ });
+    // Only the row on a filing can be reminded from here; a bare request opens its page.
+    expect(within(waiting).getAllByRole('button', { name: 'Remind client' })).toHaveLength(1);
+    fireEvent.click(within(waiting).getByRole('button', { name: 'Remind client' }));
+    expect(await screen.findByDisplayValue('Please send the purchase register.')).toBeTruthy();
+    expect(apiFetch).toHaveBeenCalledWith('/compliance-instances/i9/client-chase/remind', {
+      method: 'POST',
+    });
+  });
+
+  it('Remind client stays hidden with ff_filing_runs off', async () => {
+    renderPage();
+    await screen.findByRole('link', { name: 'GSTR-1 · Sep 2026' });
+    expect(screen.queryByRole('button', { name: 'Remind client' })).toBeNull();
   });
 
   it('with ff_today_view off it points to My Work and asks for nothing', () => {

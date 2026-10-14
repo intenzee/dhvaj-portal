@@ -44,38 +44,18 @@ async function copy(text: string): Promise<boolean> {
 }
 
 /**
- * Staff Workflow WF-302 — client chasing on the filing: what the filing still
- * needs from the client, and one button to remind them. The reminder goes by
- * e-mail (with fresh upload links) when the firm's channel is on and the
- * client has an address; otherwise the text is shown ready to paste into
- * WhatsApp or e-mail. A client upload into a slot closes its request on the
- * server, so the list shrinks on its own. Behind ff_filing_runs.
+ * Send a filing's client reminder (WF-302): e-mailed when the firm's channel
+ * is on and the client has an address, otherwise returned as text, copied to
+ * the clipboard and kept in `pasteText` for the caller to show. Shared by the
+ * filing panel and Today's "Remind client" row action.
  */
-export function ClientChase({ instance }: { instance: WorkspaceInstance }): JSX.Element | null {
-  const { isOn } = useFeatureFlags();
-  const on = isOn(FEATURE_FLAG.filingRuns);
-  const closed =
-    instance.workflowStatus === 'filed' || instance.workflowStatus === 'not_applicable';
+export function useClientReminder(instanceId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   const [pasteText, setPasteText] = useState<string | null>(null);
-
-  const chase = useQuery({
-    queryKey: clientChaseKey(instance.id),
-    queryFn: () => apiFetch<Chase>(`/compliance-instances/${instance.id}/client-chase`),
-    enabled: on && !closed,
-  });
-
-  // An upload or a "received" in the workspace may close a request: re-read.
-  const { refetch } = chase;
-  const wsUpdatedAt = qc.getQueryState(['filing', 'instance', instance.id])?.dataUpdatedAt;
-  useEffect(() => {
-    if (on && !closed && wsUpdatedAt) void refetch();
-  }, [wsUpdatedAt, on, closed, refetch]);
-
-  const remind = useMutation({
+  const m = useMutation({
     mutationFn: () =>
-      apiFetch<ClientReminderResult>(`/compliance-instances/${instance.id}/client-chase/remind`, {
+      apiFetch<ClientReminderResult>(`/compliance-instances/${instanceId}/client-chase/remind`, {
         method: 'POST',
       }),
     onSuccess: async (r) => {
@@ -90,13 +70,72 @@ export function ClientChase({ instance }: { instance: WorkspaceInstance }): JSX.
             : 'Reminder ready to copy.',
         );
       }
-      void qc.invalidateQueries({ queryKey: clientChaseKey(instance.id) });
-      if (r.raised > 0)
-        void qc.invalidateQueries({ queryKey: ['filing', 'instance', instance.id] });
+      void qc.invalidateQueries({ queryKey: clientChaseKey(instanceId) });
+      if (r.raised > 0) void qc.invalidateQueries({ queryKey: ['filing', 'instance', instanceId] });
     },
     onError: (err) =>
       toast(err instanceof ApiError ? err.message : 'Could not send the reminder.', 'error'),
   });
+  return { ...m, pasteText };
+}
+
+/** The reminder text to paste, with a Copy button — shown when it couldn't go by e-mail. */
+export function ReminderPaste({ text }: { text: string }): JSX.Element {
+  const toast = useToast();
+  return (
+    <div className="space-y-1">
+      <textarea
+        readOnly
+        aria-label="Reminder text"
+        value={text}
+        rows={Math.min(8, text.split('\n').length + 1)}
+        className="w-full rounded-md border border-line-strong bg-surface px-2 py-1.5 text-xs text-ink"
+      />
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() =>
+          void copy(text).then((ok) =>
+            toast(ok ? 'Copied.' : 'Select the text and copy it.', ok ? 'success' : 'error'),
+          )
+        }
+      >
+        <Copy className="h-4 w-4" /> Copy
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Staff Workflow WF-302 — client chasing on the filing: what the filing still
+ * needs from the client, and one button to remind them. The reminder goes by
+ * e-mail (with fresh upload links) when the firm's channel is on and the
+ * client has an address; otherwise the text is shown ready to paste into
+ * WhatsApp or e-mail. A client upload into a slot closes its request on the
+ * server, so the list shrinks on its own. Behind ff_filing_runs.
+ */
+export function ClientChase({ instance }: { instance: WorkspaceInstance }): JSX.Element | null {
+  const { isOn } = useFeatureFlags();
+  const on = isOn(FEATURE_FLAG.filingRuns);
+  const closed =
+    instance.workflowStatus === 'filed' || instance.workflowStatus === 'not_applicable';
+  const qc = useQueryClient();
+
+  const chase = useQuery({
+    queryKey: clientChaseKey(instance.id),
+    queryFn: () => apiFetch<Chase>(`/compliance-instances/${instance.id}/client-chase`),
+    enabled: on && !closed,
+  });
+
+  // An upload or a "received" in the workspace may close a request: re-read.
+  const { refetch } = chase;
+  const wsUpdatedAt = qc.getQueryState(['filing', 'instance', instance.id])?.dataUpdatedAt;
+  useEffect(() => {
+    if (on && !closed && wsUpdatedAt) void refetch();
+  }, [wsUpdatedAt, on, closed, refetch]);
+
+  const remind = useClientReminder(instance.id);
+  const pasteText = remind.pasteText;
 
   if (!on || closed || !chase.data) return null;
   const line = waitingLine(chase.data);
@@ -133,28 +172,38 @@ export function ClientChase({ instance }: { instance: WorkspaceInstance }): JSX.
           ))}
         </ul>
       )}
-      {pasteText && (
-        <div className="space-y-1">
-          <textarea
-            readOnly
-            aria-label="Reminder text"
-            value={pasteText}
-            rows={Math.min(8, pasteText.split('\n').length + 1)}
-            className="w-full rounded-md border border-line-strong bg-surface px-2 py-1.5 text-xs text-ink"
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              void copy(pasteText).then((ok) =>
-                toast(ok ? 'Copied.' : 'Select the text and copy it.', ok ? 'success' : 'error'),
-              )
-            }
-          >
-            <Copy className="h-4 w-4" /> Copy
-          </Button>
+      {pasteText && <ReminderPaste text={pasteText} />}
+    </section>
+  );
+}
+
+/**
+ * WF-201 / WF-302 — Today's "Remind client" row action: the filing's reminder
+ * without opening it. Behind ff_filing_runs, like the rest of client chasing.
+ */
+export function RemindClientButton({ instanceId }: { instanceId: string }): JSX.Element | null {
+  const { isOn } = useFeatureFlags();
+  const remind = useClientReminder(instanceId);
+  if (!isOn(FEATURE_FLAG.filingRuns)) return null;
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={remind.isPending}
+        onClick={(e) => {
+          e.stopPropagation();
+          remind.mutate();
+        }}
+      >
+        <BellRing className="h-4 w-4" />
+        {remind.isPending ? 'Sending…' : 'Remind client'}
+      </Button>
+      {remind.pasteText && (
+        <div className="min-w-72 basis-full" onClick={(e) => e.stopPropagation()}>
+          <ReminderPaste text={remind.pasteText} />
         </div>
       )}
-    </section>
+    </>
   );
 }
