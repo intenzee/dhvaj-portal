@@ -14,6 +14,7 @@ import { DataTable } from '@/components/data-table';
 import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { SectionChips, useUrlSections, withSections } from '@/components/section-filter';
 import { cn } from '@/lib/cn';
+import { FoldedRoute } from '@/components/work/folded-route';
 
 const columns: ColumnDef<MyTask, unknown>[] = [
   { header: 'Task', accessorKey: 'title' },
@@ -48,9 +49,11 @@ const columns: ColumnDef<MyTask, unknown>[] = [
 
 export default function TasksPage(): JSX.Element {
   return (
-    <Suspense fallback={<Spinner />}>
-      <TasksInner />
-    </Suspense>
+    <FoldedRoute from="/tasks">
+      <Suspense fallback={<Spinner />}>
+        <TasksInner />
+      </Suspense>
+    </FoldedRoute>
   );
 }
 

@@ -37,6 +37,8 @@ export interface NavItem {
   hideFor?: RoleSlug[];
   /** With ff_work_links: folded into this My Work tab; the old route redirects (WF-106). */
   foldedInto?: string;
+  /** With ff_work_links: a count pill read from `path` (`{ total }`), e.g. reviews waiting (WF-105). */
+  badge?: { queryKey: readonly string[]; path: string };
 }
 
 /** Preparers: their sidebar is trimmed to the client work (WF-107). */
@@ -69,6 +71,7 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'Your tasks, client follow-ups and items waiting for your review, in one place.',
         permission: PERMISSION.engagementRead,
         ready: true,
+        badge: { queryKey: ['work', 'reviews', 'count'], path: '/work/reviews/count' },
       },
       {
         label: 'Notifications',

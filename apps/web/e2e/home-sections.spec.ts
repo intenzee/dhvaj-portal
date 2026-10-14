@@ -150,8 +150,10 @@ test('home calendar and tasks, section by section', async ({ browser }) => {
   await expect(page.getByText(rocTask)).toBeVisible();
   await expect(page.getByText(gstTask)).toHaveCount(0);
 
-  // The Tasks page keeps its sections in the URL; chips add sections.
+  // ff_work_links: the old Tasks page redirects to My Work's tasks, keeping
+  // its sections in the URL (WF-106); chips add sections.
   await page.goto('/tasks?section=gst');
+  await page.waitForURL(/\/my-work\?section=gst&tab=tasks/);
   await expect(page.getByRole('button', { name: 'GST', exact: true, pressed: true })).toBeVisible();
   await expect(page.getByText(gstTask)).toBeVisible();
   await expect(page.getByText(rocTask)).toHaveCount(0);
