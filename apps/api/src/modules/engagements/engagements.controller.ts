@@ -60,7 +60,7 @@ export class EngagementsController {
   @ApiOperation({
     summary: 'List engagements the caller can access (paginated)',
     description:
-      'RLS-scoped to assignment (EP / manager / team), independent of office. Firm-wide roles see all. Filter by status/entity/service/office or ?mine=true.',
+      'RLS-scoped to assignment (EP / manager / team), independent of office. Firm-wide roles see all. Filter by status/entity/service/office or ?mine=true. Merged engagements are listed only with ?status=merged.',
   })
   async list(
     @CurrentPrincipal() principal: Principal,

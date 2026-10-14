@@ -202,7 +202,7 @@ describe('Firm calendar v2 (e2e)', () => {
   });
 
   describe('engagement search', () => {
-    it('finds the standing engagement by a code merged into it', async () => {
+    it('finds the standing engagement by a code merged into it, and lists it once', async () => {
       const other = await http()
         .post('/api/v1/engagements')
         .set(bearer(pa))
@@ -230,6 +230,23 @@ describe('Firm calendar v2 (e2e)', () => {
         .expect(200);
       const ids = res.body.items.map((e: { id: string }) => e.id);
       expect(ids).toContain(eng);
+      expect(ids).not.toContain(other.body.id);
+
+      // The client's list shows the standing engagement, not the one merged into it…
+      const listed = await http()
+        .get(`/api/v1/engagements?entityId=${client}&limit=100`)
+        .set(bearer(pa))
+        .expect(200);
+      const listedIds = listed.body.items.map((e: { id: string }) => e.id);
+      expect(listedIds).toContain(eng);
+      expect(listedIds).not.toContain(other.body.id);
+      expect(listed.body.total).toBe(listedIds.length);
+      // …unless merged ones are asked for.
+      const merged = await http()
+        .get(`/api/v1/engagements?entityId=${client}&status=merged`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(merged.body.items.map((e: { id: string }) => e.id)).toEqual([other.body.id]);
     });
   });
 
