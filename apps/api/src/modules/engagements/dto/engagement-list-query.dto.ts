@@ -14,7 +14,11 @@ const toBool = ({ value }: { value: unknown }): unknown =>
 
 /** Pagination + filters for GET /engagements (all params whitelisted). */
 export class EngagementListQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ enum: ENGAGEMENT_STATUSES })
+  @ApiPropertyOptional({
+    enum: ENGAGEMENT_STATUSES,
+    description:
+      'Filter by status. Without it, merged engagements are left out (they are part of the engagement they merged into).',
+  })
   @IsOptional()
   @IsIn(ENGAGEMENT_STATUSES)
   status?: EngagementStatus;
