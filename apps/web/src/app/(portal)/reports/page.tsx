@@ -16,9 +16,10 @@ import { downloadCsv } from '@/lib/csv';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { cn } from '@/lib/cn';
+import { WorkflowMeasures } from '@/components/reports/workflow-measures';
 import { PageHeader, Card, CardHeader, CardTitle, CardBody, Spinner, EmptyState, Button, Badge } from '@/components/ui';
 
-type Tab = 'engagements' | 'compliance' | 'utilisation' | 'time';
+type Tab = 'engagements' | 'compliance' | 'utilisation' | 'time' | 'workflow';
 
 export default function ReportsPage(): JSX.Element {
   const { principal } = useAuth();
@@ -38,6 +39,7 @@ export default function ReportsPage(): JSX.Element {
     { id: 'compliance', label: 'Compliance' },
     { id: 'utilisation', label: 'Utilisation' },
     { id: 'time', label: 'Time' },
+    { id: 'workflow', label: 'Workflow' },
   ];
 
   return (
@@ -65,6 +67,7 @@ export default function ReportsPage(): JSX.Element {
       {tab === 'compliance' && <ComplianceReport />}
       {tab === 'utilisation' && <UtilisationReportView />}
       {tab === 'time' && <TimeReportView />}
+      {tab === 'workflow' && <WorkflowMeasures />}
     </div>
   );
 }
