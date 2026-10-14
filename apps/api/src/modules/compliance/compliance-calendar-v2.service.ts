@@ -23,6 +23,7 @@ import {
   type FilingStatus,
   type GenerateCalendarResult,
   type GstScheme,
+  type PeriodSection,
   type ProfileScope,
   type QrmpCategory,
   type RecordComplianceEventResult,
@@ -30,6 +31,7 @@ import {
   type SaveComplianceProfileResult,
   type Stream,
 } from '@hsdg/contracts';
+import { workLinkOf } from '../../common/work-links';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
@@ -105,6 +107,7 @@ interface CalendarSqlRow {
   assignee_name: string | null;
   partner_name: string | null;
   manager_name: string | null;
+  section: PeriodSection | null;
   total: string;
 }
 
@@ -1176,7 +1179,7 @@ export class ComplianceCalendarV2Service {
         `SELECT ci.id, ci.engagement_id, eng.engagement_code, eng.entity_id,
                 ent.legal_name AS entity_name, o.code AS office_code, ${FILING_STREAM} AS stream,
                 cr.code AS rule_code, cr.name AS rule_name, COALESCE(ci.form_label, v.form_label) AS form_label, ci.registration_id,
-                ci.financial_year, ci.period_key,
+                ci.financial_year, ci.period_key, ci.section,
                 to_char(ci.reference_date, 'YYYY-MM') AS reference_month,
                 ${EFFECTIVE_DUE}::text AS due_date, ci.statutory_deadline::text AS computed_due,
                 ge.notification_reference AS extension_reference,
@@ -1259,6 +1262,19 @@ export class ComplianceCalendarV2Service {
           assigneeName: r.assignee_name,
           partnerName: r.partner_name,
           managerName: r.manager_name,
+          section: r.section,
+          // Same fields the shared work-link fragment selects; the calendar already has them.
+          link: workLinkOf(
+            { engagementId: r.engagement_id, engagementKind: 'compliance' },
+            {
+              instanceId: r.id,
+              stream: r.stream,
+              financialYear: r.financial_year,
+              periodKey: r.period_key,
+              section: r.section,
+              registrationNumber: reg?.registration_number ?? null,
+            },
+          ),
         };
       });
       return { items, total: Number(rows[0]?.total ?? 0), from, to };

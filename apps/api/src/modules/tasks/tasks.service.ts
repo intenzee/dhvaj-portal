@@ -8,12 +8,21 @@ import {
 import type { PoolClient } from 'pg';
 import {
   NOTIFICATION_TYPE,
+  type EngagementKind,
   type TaskPriority,
   type TaskStatus,
   type WorkSection,
   type WorkType,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
+import {
+  WORK_LINK_COLUMNS,
+  type WorkLinkSqlRow,
+  workFilingContextOf,
+  workLinkFilingOf,
+  workLinkJoin,
+  workLinkOf,
+} from '../../common/work-links';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { translatePgError as mapPgError } from '../../common/errors/pg-error.util';
@@ -30,7 +39,7 @@ import type {
   UpdateTaskInput,
 } from './tasks.types';
 
-interface TaskRow {
+export interface TaskRow {
   id: string;
   engagement_id: string;
   title: string;
@@ -65,7 +74,7 @@ interface TaskRow {
   updated_at: Date;
 }
 
-const TASK_BASE = `
+export const TASK_BASE = `
   SELECT t.id, t.engagement_id, t.title, t.description,
          t.assigned_to_employee_id, ae.full_name AS assigned_to_name,
          t.created_by_employee_id, ce.full_name AS created_by_name,
@@ -436,16 +445,34 @@ export class TasksService {
     });
   }
 
-  /** Tasks assigned to the caller across every engagement they can see ("My Work"). */
+  /**
+   * Tasks assigned to the caller across every engagement they can see ("My
+   * Work"). `scope: 'team'` (WF-106, engagement.manage — checked by the
+   * controller) lists every task, whoever holds it, on engagements the caller
+   * manages or is the partner on. Each row carries its filing's context and a
+   * `link` (WF-102).
+   */
   async myTasks(
     ctx: RlsContext,
     page: PageParams,
-    filter: { status?: TaskStatus; overdueOnly?: boolean; sections?: WorkSection[] },
+    filter: {
+      status?: TaskStatus;
+      overdueOnly?: boolean;
+      sections?: WorkSection[];
+      scope?: 'mine' | 'team';
+    },
   ): Promise<PageResult<MyTaskRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       if (!ctx.employeeId) return { items: [], total: 0 };
       const params: unknown[] = [ctx.employeeId];
-      const conds = ['t.assigned_to_employee_id = $1'];
+      const conds =
+        filter.scope === 'team'
+          ? [
+              `EXISTS (SELECT 1 FROM hsdg.engagements teng
+                        WHERE teng.id = t.engagement_id
+                          AND (teng.engagement_manager_id = $1 OR teng.engagement_partner_id = $1))`,
+            ]
+          : ['t.assigned_to_employee_id = $1'];
       if (filter.status) {
         params.push(filter.status);
         conds.push(`t.status = $${params.length}`);
@@ -468,16 +495,17 @@ export class TasksService {
       }
       const where = `WHERE ${conds.join(' AND ')}`;
       params.push(page.limit, page.offset);
-      const { rows } = await client.query<
-        TaskRow & { engagement_code: string; entity_name: string }
-      >(
+      const { rows } = await client.query<MyTaskRow>(
         `${TASK_BASE.replace(
           'FROM hsdg.tasks t',
-          `, eng.engagement_code, ent.legal_name AS entity_name
+          `, eng.engagement_code, ent.legal_name AS entity_name, eng.kind AS engagement_kind,
+           ${WORK_LINK_COLUMNS}
            FROM hsdg.tasks t
            JOIN hsdg.engagements eng ON eng.id = t.engagement_id
            JOIN hsdg.entities ent ON ent.id = eng.entity_id`,
-        )} ${where}
+        )}
+         ${workLinkJoin('t.source_compliance_instance_id')}
+         ${where}
          ORDER BY t.due_date NULLS LAST, t.created_at
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params,
@@ -487,11 +515,7 @@ export class TasksService {
         params.slice(0, params.length - 2),
       );
       return {
-        items: rows.map((r) => ({
-          ...mapTask(r),
-          engagementCode: r.engagement_code,
-          entityName: r.entity_name,
-        })),
+        items: rows.map(myTaskOf),
         total: Number(totalRes.rows[0]?.total ?? 0),
       };
     });
@@ -679,6 +703,34 @@ function mapTask(row: TaskRow): TaskRecord {
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+/** A task row joined to its engagement and its filing's link fields. */
+export type MyTaskRow = TaskRow &
+  WorkLinkSqlRow & {
+    engagement_code: string;
+    entity_name: string;
+    engagement_kind: EngagementKind;
+  };
+
+/** A "My Work" row: the task, its engagement and its filing's link fields (WF-102). */
+export function myTaskOf(r: MyTaskRow): MyTaskRecord {
+  const filing = workLinkFilingOf(r);
+  return {
+    ...mapTask(r),
+    engagementCode: r.engagement_code,
+    entityName: r.entity_name,
+    engagementKind: r.engagement_kind,
+    section: filing.section,
+    financialYear: filing.financialYear,
+    periodKey: filing.periodKey,
+    registrationNumber: filing.registrationNumber,
+    filing: workFilingContextOf(r),
+    link: workLinkOf(
+      { engagementId: r.engagement_id, engagementKind: r.engagement_kind, taskId: r.id },
+      filing,
+    ),
   };
 }
 

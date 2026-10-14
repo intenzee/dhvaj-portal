@@ -1,7 +1,19 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import { CLIENT_DEPENDENCY_STATUS, type ClientDependencyStatus } from '@hsdg/contracts';
+import {
+  CLIENT_DEPENDENCY_STATUS,
+  type ClientDependencyStatus,
+  type EngagementKind,
+  type PeriodSection,
+} from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
+import {
+  WORK_LINK_COLUMNS,
+  type WorkLinkSqlRow,
+  workLinkFilingOf,
+  workLinkJoin,
+  workLinkOf,
+} from '../../common/work-links';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { AuditService } from '../audit/audit.service';
@@ -264,15 +276,24 @@ export class ClientDependenciesService {
       }
       const where = `WHERE ${conds.join(' AND ')}`;
       const { rows } = await client.query<
-        DependencyRow & { engagement_code: string; entity_name: string }
+        DependencyRow &
+          WorkLinkSqlRow & {
+            engagement_code: string;
+            entity_name: string;
+            engagement_kind: EngagementKind;
+            compliance_instance_id: string | null;
+            period_section: PeriodSection | null;
+            slot_code: string | null;
+          }
       >(
         `${DEP_BASE.replace(
           'FROM hsdg.client_dependencies cd',
-          `, eng.engagement_code, ent.legal_name AS entity_name
+          `, eng.engagement_code, ent.legal_name AS entity_name, eng.kind AS engagement_kind,
+             cd.compliance_instance_id, cd.period_section, cd.slot_code, ${WORK_LINK_COLUMNS}
            FROM hsdg.client_dependencies cd
            JOIN hsdg.engagements eng ON eng.id = cd.engagement_id
            JOIN hsdg.entities ent ON ent.id = eng.entity_id`,
-        )} ${where}
+        )} ${workLinkJoin('cd.compliance_instance_id')} ${where}
          ORDER BY cd.escalation_date NULLS LAST, cd.request_date
          LIMIT $1 OFFSET $2`,
         [page.limit, page.offset],
@@ -281,11 +302,23 @@ export class ClientDependenciesService {
         `SELECT count(*) AS total FROM hsdg.client_dependencies cd ${where}`,
       );
       return {
-        items: rows.map((r) => ({
-          ...mapDependency(r),
-          engagementCode: r.engagement_code,
-          entityName: r.entity_name,
-        })),
+        items: rows.map((r) => {
+          // The request names its part of the period; the filing's own part is the fallback.
+          const filing = { ...workLinkFilingOf(r), section: r.period_section ?? r.wl_section };
+          return {
+            ...mapDependency(r),
+            engagementCode: r.engagement_code,
+            entityName: r.entity_name,
+            engagementKind: r.engagement_kind,
+            complianceInstanceId: r.compliance_instance_id,
+            periodSection: r.period_section,
+            slotCode: r.slot_code,
+            link: workLinkOf(
+              { engagementId: r.engagement_id, engagementKind: r.engagement_kind, requestId: r.id },
+              filing,
+            ),
+          };
+        }),
         total: Number(totalRes.rows[0]?.total ?? 0),
       };
     });
