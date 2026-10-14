@@ -11,6 +11,7 @@ import {
   isMeetingRule,
   NOTIFICATION_TYPE,
   TASK_ACTION,
+  DSC_REQUEST_CODE,
   dscWarningText,
   rocLateCharges,
   type CinProfileAttributes,
@@ -109,6 +110,10 @@ interface InstanceRow {
   engagement_partner_id: string | null;
   engagement_manager_id: string | null;
   engagement_status: string;
+  entity_id: string;
+  ext_reference: string | null;
+  ext_original_due: string | null;
+  ext_notes: string | null;
 }
 
 interface TaskRow {
@@ -176,7 +181,13 @@ const INSTANCE_SQL = `
            WHERE ev.id = ci.compliance_event_id) AS event_date,
          hsdg.is_engagement_lead(ci.engagement_id) AS is_lead,
          hsdg.is_engagement_member(ci.engagement_id) AS is_member,
-         e.engagement_partner_id, e.engagement_manager_id, e.status AS engagement_status
+         e.engagement_partner_id, e.engagement_manager_id, e.status AS engagement_status,
+         e.entity_id,
+         CASE WHEN ci.statutory_deadline_override IS NULL THEN ge.notification_reference END
+           AS ext_reference,
+         CASE WHEN ci.statutory_deadline_override IS NULL THEN ge.original_due_date::text END
+           AS ext_original_due,
+         CASE WHEN ci.statutory_deadline_override IS NULL THEN ge.notes END AS ext_notes
     FROM hsdg.compliance_instances ci
     JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
     JOIN hsdg.engagements e ON e.id = ci.engagement_id
@@ -404,38 +415,29 @@ export class FilingWorkspaceService {
       engagementId = inst.engagement_id;
       this.requireUnlocked(client, inst, await this.summaryFiledLabel(client, inst));
       const label = await this.slotLabel(client, id, slot);
-      const open = await client.query(
-        `SELECT 1 FROM hsdg.client_dependencies
-          WHERE compliance_instance_id = $1 AND slot_code = $2
-            AND status IN ('pending','partially_received')`,
+      const open = await client.query<{ id: string; linked: boolean }>(
+        `SELECT d.id, EXISTS (SELECT 1 FROM hsdg.client_upload_links l
+                               WHERE l.client_dependency_id = d.id) AS linked
+           FROM hsdg.client_dependencies d
+          WHERE d.compliance_instance_id = $1 AND d.slot_code = $2
+            AND d.status IN ('pending','partially_received')
+          ORDER BY d.created_at LIMIT 1`,
         [id, slot],
       );
-      if (open.rows[0])
+      if (open.rows[0]?.linked)
         throw new ConflictException('This document is already requested from the client.');
-      const task = await this.loadTask(client, id);
-      const requested =
-        dto.requestedInfo?.trim() ||
-        `${label} — ${inst.rule_name} ${periodLabel(inst.period_key)}`.trim();
-      const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO hsdg.client_dependencies
-           (engagement_id, requested_info, responsible_employee_id, created_by_employee_id,
-            escalation_date, engagement_service_id, compliance_instance_id, task_id,
-            period_section, slot_code)
-         SELECT $1, $2, $3, $4, $5, ci.engagement_service_id, ci.id, $6, ci.section, $7
-           FROM hsdg.compliance_instances ci WHERE ci.id = $8
-         RETURNING id`,
-        [
-          inst.engagement_id,
-          requested,
-          task?.assigned_to_employee_id ?? ctx.employeeId ?? null,
-          ctx.employeeId ?? null,
-          dto.escalationDate ?? null,
-          task?.id ?? null,
-          slot,
-          id,
-        ],
-      );
-      dependencyId = rows[0]!.id;
+      if (open.rows[0]) {
+        // Raised with the checklist (MGT-8, MR-3): this request adds its upload link.
+        dependencyId = open.rows[0].id;
+      } else {
+        dependencyId = await this.insertDependency(client, ctx, inst, {
+          requestedInfo:
+            dto.requestedInfo?.trim() ||
+            `${label} — ${inst.rule_name} ${periodLabel(inst.period_key)}`.trim(),
+          escalationDate: dto.escalationDate ?? null,
+          slotCode: slot,
+        });
+      }
       await client.query(
         `UPDATE hsdg.instance_checklist_items
             SET client_dependency_id = $1, version = version + 1
@@ -454,6 +456,70 @@ export class FilingWorkspaceService {
       ...(dto.ttlHours ? { ttlHours: dto.ttlHours } : {}),
     });
     return { workspace: await this.get(ctx, id), link };
+  }
+
+  /**
+   * POST /compliance-instances/:id/dsc-request — the director's DSC as a client
+   * dependency (roc-mca Decision 5). No slot and no upload link: the item shows
+   * Awaiting data until the dependency is received.
+   */
+  async requestDsc(ctx: RlsContext, id: string, dto: SlotRequestDto): Promise<InstanceWorkspace> {
+    return this.write(ctx, id, async (client, inst) => {
+      if (inst.stream !== 'roc')
+        throw new BadRequestException('Only an MCA filing is signed with a DSC.');
+      this.requireUnlocked(client, inst, null);
+      const open = await client.query(
+        `SELECT 1 FROM hsdg.client_dependencies
+          WHERE compliance_instance_id = $1 AND slot_code = $2
+            AND status IN ('pending','partially_received')`,
+        [id, DSC_REQUEST_CODE],
+      );
+      if (open.rows[0])
+        throw new ConflictException('The director’s DSC is already requested from the client.');
+      const dependencyId = await this.insertDependency(client, ctx, inst, {
+        requestedInfo:
+          dto.requestedInfo?.trim() ||
+          `Director’s DSC — ${inst.form_label ?? inst.rule_name} ${periodLabel(inst.period_key)}`.trim(),
+        escalationDate: dto.escalationDate ?? null,
+        slotCode: DSC_REQUEST_CODE,
+      });
+      await this.audit.recordWith(client, ctx, {
+        action: 'filing.dsc_requested',
+        objectType: 'compliance_instance',
+        objectId: id,
+        after: { dependencyId },
+      });
+    });
+  }
+
+  /** A client dependency on the filing, owned by its preparer (else the requester). */
+  private async insertDependency(
+    client: PoolClient,
+    ctx: RlsContext,
+    inst: InstanceRow,
+    d: { requestedInfo: string; escalationDate: string | null; slotCode: string },
+  ): Promise<string> {
+    const task = await this.loadTask(client, inst.id);
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO hsdg.client_dependencies
+         (engagement_id, requested_info, responsible_employee_id, created_by_employee_id,
+          escalation_date, engagement_service_id, compliance_instance_id, task_id,
+          period_section, slot_code)
+       SELECT $1, $2, $3, $4, $5, ci.engagement_service_id, ci.id, $6, ci.section, $7
+         FROM hsdg.compliance_instances ci WHERE ci.id = $8
+       RETURNING id`,
+      [
+        inst.engagement_id,
+        d.requestedInfo,
+        task?.assigned_to_employee_id ?? ctx.employeeId ?? null,
+        ctx.employeeId ?? null,
+        d.escalationDate,
+        task?.id ?? null,
+        d.slotCode,
+        inst.id,
+      ],
+    );
+    return rows[0]!.id;
   }
 
   /** POST /compliance-instances/:id/slots/:slot/documents — a member uploads into a slot. */
@@ -854,12 +920,17 @@ export class FilingWorkspaceService {
     const requests = await client.query<{
       id: string;
       slot_code: string | null;
+      requested_info: string;
       created_at: Date;
       escalation_date: string | null;
+      has_link: boolean;
     }>(
-      `SELECT id, slot_code, created_at, escalation_date::text
-           FROM hsdg.client_dependencies
-          WHERE compliance_instance_id = $1 AND status IN ('pending','partially_received')`,
+      `SELECT id, slot_code, requested_info, created_at, escalation_date::text,
+              EXISTS (SELECT 1 FROM hsdg.client_upload_links l
+                       WHERE l.client_dependency_id = d.id) AS has_link
+           FROM hsdg.client_dependencies d
+          WHERE compliance_instance_id = $1 AND status IN ('pending','partially_received')
+          ORDER BY created_at`,
       [id],
     );
     const figures = await this.loadFigures(client, id);
@@ -944,6 +1015,7 @@ export class FilingWorkspaceService {
               dependencyId: req.id,
               requestedAt: req.created_at.toISOString(),
               escalationDate: req.escalation_date,
+              hasLink: req.has_link,
             }
           : null,
       });
@@ -1078,6 +1150,16 @@ export class FilingWorkspaceService {
           inst.workflow_status !== 'not_applicable'
             ? chargeFilingWindow(inst.event_date, today)
             : null,
+        extension:
+          inst.ext_reference && inst.ext_original_due
+            ? {
+                reference: inst.ext_reference,
+                originalDueDate: inst.ext_original_due,
+                notes: inst.ext_notes,
+              }
+            : null,
+        statutoryAudit:
+          inst.rule_code === 'ROC_AOC4' ? await this.statutoryAudit(client, inst) : null,
       },
       task: task
         ? {
@@ -1100,6 +1182,13 @@ export class FilingWorkspaceService {
       figuresRequiredToLodge: figuresRequiredToLodge(form),
       filing: live,
       filingHistory: views,
+      clientRequests: requests.rows.map((q) => ({
+        dependencyId: q.id,
+        slotCode: q.slot_code,
+        requestedInfo: q.requested_info,
+        requestedAt: q.created_at.toISOString(),
+        escalationDate: q.escalation_date,
+      })),
       corrections: corrections.rows.map((c): FilingCorrectionView => ({
         id: c.id,
         correctedInInstanceId: c.corrected_in_instance_id,
@@ -1376,6 +1465,33 @@ export class FilingWorkspaceService {
       [inst.registration_id],
     );
     return rows[0]?.attributes ?? null;
+  }
+
+  /**
+   * roc-mca §5.3: when the firm is also the statutory auditor, the audit report
+   * date of that FY's Statutory Audit for the same entity (the archived report
+   * date, else the sign-off date). Read under the caller's access, so an audit
+   * they cannot see shows nothing. Never blocks the AOC-4.
+   */
+  private async statutoryAudit(
+    client: PoolClient,
+    inst: InstanceRow,
+  ): Promise<{ engagementId: string; reportDate: string | null } | null> {
+    if (!inst.financial_year) return null;
+    const { rows } = await client.query<{ id: string; report_date: string | null }>(
+      `SELECT e.id,
+              (SELECT COALESCE(wi.report_date, (wi.signed_off_at AT TIME ZONE 'Asia/Kolkata')::date)::text
+                 FROM hsdg.service_workflow_instances wi
+                WHERE wi.engagement_id = e.id AND wi.status <> 'cancelled'
+                ORDER BY wi.created_at LIMIT 1) AS report_date
+         FROM hsdg.engagements e
+        WHERE e.entity_id = $1 AND e.financial_year = $2 AND e.kind = 'statutory_audit'
+          AND e.status NOT IN ('prospect','pending_acceptance','declined','withdrawn','cancelled','merged')
+        ORDER BY e.created_at DESC LIMIT 1`,
+      [inst.entity_id, inst.financial_year],
+    );
+    const row = rows[0];
+    return row ? { engagementId: row.id, reportDate: row.report_date } : null;
   }
 
   private isPartner(ctx: RlsContext, inst: InstanceRow): boolean {

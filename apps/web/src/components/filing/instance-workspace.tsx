@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  DSC_REQUEST_CODE,
   FILING_REFERENCE_KINDS,
   isMeetingRule,
   type ChecklistItem,
@@ -147,10 +148,12 @@ export function InstanceWorkspace({
       <Slots
         ws={ws}
         editable={editable}
+        isLead={ctx.isLead}
         busy={write.isPending}
         run={run}
         onUploaded={(next) => qc.setQueryData(workspaceKey(instanceId), next)}
       />
+      <ClientRequests ws={ws} editable={editable} isLead={ctx.isLead} busy={write.isPending} run={run} />
       {ws.figureSchema.length > 0 && (
         <Figures ws={ws} editable={editable} busy={write.isPending} run={run} />
       )}
@@ -273,6 +276,12 @@ function WorkspaceHeader({
           <dd>
             {formatDate(inst.statutoryDueDate)}
             {!filed && <span className={`ml-1 ${dueTone(inst.daysLeft)}`}>({daysLeftText(inst.daysLeft)})</span>}
+            {inst.extension && (
+              <span className="block text-ink-muted">
+                Extended from {formatDate(inst.extension.originalDueDate)} by {inst.extension.reference}
+                {inst.extension.notes?.startsWith('Verify') && ' · Verify'}
+              </span>
+            )}
           </dd>
         </div>
         <div>
@@ -294,6 +303,15 @@ function WorkspaceHeader({
           </div>
         )}
       </dl>
+      {inst.statutoryAudit && (
+        <p className="text-xs text-ink-muted">
+          We are the statutory auditor:{' '}
+          <a className="text-primary-700 underline-offset-2 hover:underline" href={`/engagements/${inst.statutoryAudit.engagementId}`}>
+            audit report
+          </a>{' '}
+          {inst.statutoryAudit.reportDate ? `signed on ${formatDate(inst.statutoryAudit.reportDate)}` : 'not signed yet'}.
+        </p>
+      )}
       {inst.lateCharges && (!filed || inst.lateCharges.basis !== 'gst') && (
         <p className="text-xs text-danger-700">
           {inst.lateCharges.daysLate} days late{filed ? ' when filed' : ''} — indicative{' '}
@@ -510,12 +528,14 @@ function Checklist({
 function Slots({
   ws,
   editable,
+  isLead,
   busy,
   run,
   onUploaded,
 }: {
   ws: Workspace;
   editable: boolean;
+  isLead: boolean;
   busy: boolean;
   run: Run;
   onUploaded: (ws: Workspace) => void;
@@ -532,6 +552,7 @@ function Slots({
             ws={ws}
             item={ws.checklist.find((i) => i.slotCode === s.slotCode) ?? null}
             editable={editable}
+            isLead={isLead}
             busy={busy}
             run={run}
             onUploaded={onUploaded}
@@ -547,6 +568,7 @@ function SlotRow({
   ws,
   item,
   editable,
+  isLead,
   busy,
   run,
   onUploaded,
@@ -555,6 +577,7 @@ function SlotRow({
   ws: Workspace;
   item: ChecklistItem | null;
   editable: boolean;
+  isLead: boolean;
   busy: boolean;
   run: Run;
   onUploaded: (ws: Workspace) => void;
@@ -594,8 +617,8 @@ function SlotRow({
     }
   }
 
-  async function request(e: FormEvent) {
-    e.preventDefault();
+  async function request(e?: FormEvent) {
+    e?.preventDefault();
     try {
       const res = await apiFetch<{ workspace: Workspace; link: UploadLink }>(
         `/compliance-instances/${ws.instance.id}/slots/${encodeURIComponent(slot.slotCode)}/request`,
@@ -627,6 +650,7 @@ function SlotRow({
             {slot.openRequest.escalationDate && ` · escalate ${formatDate(slot.openRequest.escalationDate)}`}
           </Badge>
         )}
+        {slot.openRequest && isLead && <ReceivedButton ws={ws} dependencyId={slot.openRequest.dependencyId} />}
         {editable && !isNa && (
           <span className="ml-auto flex flex-wrap gap-1">
             <input
@@ -645,6 +669,11 @@ function SlotRow({
             {!slot.openRequest && (
               <Button size="sm" variant="secondary" aria-expanded={asking} onClick={() => setAsking(!asking)}>
                 Request from client
+              </Button>
+            )}
+            {slot.openRequest?.hasLink === false && (
+              <Button size="sm" variant="secondary" onClick={() => void request()}>
+                Create upload link
               </Button>
             )}
             {item && (
@@ -729,6 +758,92 @@ function SlotRow({
         />
       )}
     </li>
+  );
+}
+
+/**
+ * Client requests with no document slot — the director's DSC (roc-mca
+ * Decision 5). The filing shows Awaiting data until each is received.
+ */
+function ClientRequests({
+  ws,
+  editable,
+  isLead,
+  busy,
+  run,
+}: {
+  ws: Workspace;
+  editable: boolean;
+  isLead: boolean;
+  busy: boolean;
+  run: Run;
+}): JSX.Element | null {
+  const inst = ws.instance;
+  const open = (ws.clientRequests ?? []).filter((r) => !r.slotCode || r.slotCode === DSC_REQUEST_CODE);
+  const canAskDsc =
+    editable &&
+    inst.stream === 'roc' &&
+    !isMeetingRule(inst.ruleCode) &&
+    !ws.filing &&
+    !open.some((r) => r.slotCode === DSC_REQUEST_CODE);
+  if (open.length === 0 && !canAskDsc) return null;
+  return (
+    <section aria-label="From the client" className="space-y-1">
+      <h5 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">From the client</h5>
+      {open.length > 0 && (
+        <ul className="divide-y divide-line rounded-md border border-line">
+          {open.map((r) => (
+            <li key={r.dependencyId} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5">
+              <span>{r.requestedInfo}</span>
+              <Badge tone="warn">
+                Requested {formatDate(r.requestedAt)}
+                {r.escalationDate && ` · escalate ${formatDate(r.escalationDate)}`}
+              </Badge>
+              {isLead && <ReceivedButton ws={ws} dependencyId={r.dependencyId} />}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canAskDsc && (
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => void run('/dsc-request', {}, 'Director’s DSC requested from the client.')}
+        >
+          Request director’s DSC
+        </Button>
+      )}
+    </section>
+  );
+}
+
+/** A lead records that the client sent what was asked; the filing leaves Awaiting data. */
+function ReceivedButton({ ws, dependencyId }: { ws: Workspace; dependencyId: string }): JSX.Element {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const inst = ws.instance;
+  async function received() {
+    setSaving(true);
+    try {
+      await apiFetch(`/engagements/${inst.engagementId}/client-dependencies/${dependencyId}/receive`, {
+        method: 'POST',
+        body: { fully: true },
+      });
+      await qc.invalidateQueries({ queryKey: workspaceKey(inst.id) });
+      void qc.invalidateQueries({ queryKey: ['filing', 'tree'] });
+      toast('Marked received.');
+    } catch (err) {
+      toast(errText(err, 'Could not mark it received.'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <Button size="sm" variant="ghost" disabled={saving} onClick={() => void received()}>
+      Received
+    </Button>
   );
 }
 
