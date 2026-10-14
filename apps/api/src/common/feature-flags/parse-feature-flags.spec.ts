@@ -1,5 +1,5 @@
 import { FEATURE_FLAGS } from '@hsdg/contracts';
-import { parseFeatureFlags } from './parse-feature-flags';
+import { parseFeatureFlags, parseFlagOffices } from './parse-feature-flags';
 
 describe('parseFeatureFlags', () => {
   it('defaults to every flag outside production and none in production', () => {
@@ -14,5 +14,14 @@ describe('parseFeatureFlags', () => {
       'ff_auto_time',
       'ff_gst_tab',
     ]);
+  });
+});
+
+describe('parseFlagOffices', () => {
+  it('limits named flags to their offices, upper-cased; ignores junk', () => {
+    const m = parseFlagOffices(' ff_today_view:north, South ;ff_bogus:NORTH;ff_filing_runs:;x');
+    expect([...m.keys()]).toEqual(['ff_today_view']);
+    expect([...m.get('ff_today_view')!].sort()).toEqual(['NORTH', 'SOUTH']);
+    expect(parseFlagOffices(undefined).size).toBe(0);
   });
 });

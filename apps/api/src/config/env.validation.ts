@@ -203,10 +203,16 @@ export const envSchema = z.object({
 
   // ── Feature flags (Engagement Restructure phases) ─────────────────────────
   // Comma list of enabled flags (ff_engagement_kinds, ff_calendar_v2,
-  // ff_gst_tab, ff_compliance_tabs, ff_auto_time, ff_work_links), 'all', or 'none'. Unset →
+  // ff_gst_tab, ff_compliance_tabs, ff_auto_time, ff_work_links, ff_today_view,
+  // ff_filing_runs), 'all', or 'none'. Unset →
   // 'all' outside production (dev/test cover the new paths) and 'none' in
   // production, so each phase is switched on deliberately per environment.
   FEATURE_FLAGS: z.string().optional(),
+  // Rollout to one office first (Staff Workflow "Rollout"): limit an enabled flag
+  // to users whose office is listed. `flag:CODE,CODE;flag:CODE`, e.g.
+  // FEATURE_FLAG_OFFICES=ff_today_view:NORTH;ff_filing_runs:NORTH. A flag not
+  // named here is on for every office (when FEATURE_FLAGS enables it).
+  FEATURE_FLAG_OFFICES: z.string().optional(),
   // How many days ahead the sweep flags an internal SLA / statutory deadline as
   // "approaching".
   NOTIFICATION_SLA_LEAD_DAYS: z.coerce.number().int().nonnegative().default(3),
