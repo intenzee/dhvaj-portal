@@ -1,3 +1,5 @@
+import type { WorkItemRef } from './work-links';
+
 /**
  * Notification vocabulary (Phase 11) shared by the API and web.
  *
@@ -86,3 +88,158 @@ export const NOTIFICATION_CHANNEL = {
 export type NotificationChannelName =
   (typeof NOTIFICATION_CHANNEL)[keyof typeof NOTIFICATION_CHANNEL];
 export const NOTIFICATION_CHANNELS: NotificationChannelName[] = Object.values(NOTIFICATION_CHANNEL);
+
+// ── Staff Workflow WF-305 · Fewer, actionable notifications ─────────────────
+
+/**
+ * Actionable: the recipient must do something (review, sign off, chase, file),
+ * and it clears itself once that is done. Informational: worth knowing, nothing
+ * to do — it goes to the daily digest unless the user asks for it in the bell.
+ */
+export const NOTIFICATION_KIND = {
+  actionable: 'actionable',
+  informational: 'informational',
+} as const;
+export type NotificationKind = (typeof NOTIFICATION_KIND)[keyof typeof NOTIFICATION_KIND];
+
+const A = NOTIFICATION_KIND.actionable;
+const I = NOTIFICATION_KIND.informational;
+
+/** Every type, classified. A Record, so a new type will not compile until it is. */
+export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> = {
+  task_assigned: A,
+  review_pending: A,
+  ep_signoff_pending: A,
+  internal_sla_approaching: I,
+  internal_sla_overdue: A,
+  statutory_deadline_approaching: I,
+  statutory_deadline_overdue: A,
+  compliance_due_today: A,
+  deadline_layer_overdue: A,
+  client_commitment_overdue: A,
+  client_dependency_overdue: A,
+  client_dependency_reminder: I,
+  engagement_reopened: I,
+  ep_changed: I,
+  high_risk_exception: A,
+  document_uploaded: A,
+  framework_reopened: I,
+  framework_work_impacted: A,
+  planning_signal_alert: I,
+  planning_partner_attention: A,
+  planning_strategy_reopened: I,
+  planning_understanding_reassessment: A,
+  planning_understanding_challenge: A,
+  planning_materiality_reassessment: A,
+  planning_materiality_challenge: A,
+  planning_areas_review: A,
+  planning_areas_update_required: A,
+  planning_scope_reassessment: A,
+  planning_scope_partner_action: A,
+  task_review_requested: A,
+  task_returned: A,
+  filing_lodged: I,
+  time_adjustment_pending: A,
+};
+
+export function notificationKind(type: NotificationType): NotificationKind {
+  return NOTIFICATION_TYPE_KIND[type] ?? A;
+}
+
+/** Plain names for the profile's per-type settings and the digest's headings. */
+export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
+  task_assigned: 'Task assigned to you',
+  review_pending: 'Review pending',
+  ep_signoff_pending: 'Sign-off pending',
+  internal_sla_approaching: 'Internal due date coming up',
+  internal_sla_overdue: 'Internal due date passed',
+  statutory_deadline_approaching: 'Statutory due date coming up',
+  statutory_deadline_overdue: 'Statutory due date passed',
+  compliance_due_today: 'Due today',
+  deadline_layer_overdue: 'Review overdue',
+  client_commitment_overdue: 'Client commitment overdue',
+  client_dependency_overdue: 'Client request overdue',
+  client_dependency_reminder: 'Client reminder sent',
+  engagement_reopened: 'Engagement reopened',
+  ep_changed: 'Engagement partner changed',
+  high_risk_exception: 'High-risk exception',
+  document_uploaded: 'Document to review',
+  framework_reopened: 'Audit framework reopened',
+  framework_work_impacted: 'Audit work affected',
+  planning_signal_alert: 'Planning signal',
+  planning_partner_attention: 'Partner attention',
+  planning_strategy_reopened: 'Planning strategy reopened',
+  planning_understanding_reassessment: 'Understanding needs reassessment',
+  planning_understanding_challenge: 'Understanding challenged',
+  planning_materiality_reassessment: 'Materiality needs reassessment',
+  planning_materiality_challenge: 'Materiality challenged',
+  planning_areas_review: 'Audit areas review',
+  planning_areas_update_required: 'Audit areas need updating',
+  planning_scope_reassessment: 'Scope needs reassessment',
+  planning_scope_partner_action: 'Scope partner action',
+  task_review_requested: 'Review requested',
+  task_returned: 'Returned with review points',
+  filing_lodged: 'Filing lodged',
+  time_adjustment_pending: 'Time correction to approve',
+};
+
+/** Where a type reaches the user. Actionable types always reach the bell. */
+export const NOTIFICATION_DELIVERY = { bell: 'bell', digest: 'digest', off: 'off' } as const;
+export type NotificationDelivery =
+  (typeof NOTIFICATION_DELIVERY)[keyof typeof NOTIFICATION_DELIVERY];
+export const NOTIFICATION_DELIVERIES: NotificationDelivery[] = Object.values(NOTIFICATION_DELIVERY);
+
+/**
+ * Where a type actually goes for a user: an actionable type always to the bell;
+ * an informational one where they chose, the digest by default.
+ */
+export function notificationDelivery(
+  type: NotificationType,
+  chosen?: NotificationDelivery | null,
+): NotificationDelivery {
+  if (notificationKind(type) === NOTIFICATION_KIND.actionable) return NOTIFICATION_DELIVERY.bell;
+  return chosen ?? NOTIFICATION_DELIVERY.digest;
+}
+
+/** One type's setting, as the profile shows it. */
+export interface NotificationPreference {
+  type: NotificationType;
+  label: string;
+  kind: NotificationKind;
+  delivery: NotificationDelivery;
+  /** Whether the user may change it (informational types only). */
+  editable: boolean;
+}
+
+/** PUT /notifications/preferences — informational types only. */
+export interface NotificationPreferenceUpdate {
+  type: NotificationType;
+  delivery: NotificationDelivery;
+}
+
+/** A notification as its recipient sees it. */
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  kind: NotificationKind;
+  title: string;
+  body: string | null;
+  engagementId: string | null;
+  objectType: string | null;
+  objectId: string | null;
+  /** The exact place it opens (`workItemHref`); null for an engagement-less notice. */
+  link: WorkItemRef | null;
+  status: NotificationStatus;
+  readAt: string | null;
+  /** Set when it was read because the action it asked for was done. */
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+/** GET /notifications/digest — the day's informational notices, by type. */
+export interface NotificationDigest {
+  /** IST day the digest covers (yyyy-mm-dd). */
+  date: string;
+  total: number;
+  groups: { type: NotificationType; label: string; items: NotificationItem[] }[];
+}
