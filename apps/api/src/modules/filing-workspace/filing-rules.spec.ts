@@ -110,7 +110,16 @@ describe('filing rules', () => {
       liveRecordedAt: null,
       now: new Date(),
     };
-    expect(canFlags(base)).toEqual({ lodge: false, undo: false, waive: false, edit: true });
+    expect(canFlags(base)).toEqual({
+      lodge: false,
+      undo: false,
+      waive: false,
+      edit: true,
+      certify: false,
+    });
+    // Only a partner on the team ticks a certification line (UDIN).
+    expect(canFlags({ ...base, isPartner: true }).certify).toBe(true);
+    expect(canFlags({ ...base, isPartner: true, isLocked: true }).certify).toBe(false);
     expect(canFlags({ ...base, workflowStatus: 'ready_to_file' }).lodge).toBe(true);
     expect(canFlags({ ...base, isAssignee: false, isLead: true })).toMatchObject({
       lodge: true,
@@ -126,7 +135,7 @@ describe('filing rules', () => {
         workflowStatus: 'filed',
         isLocked: true,
       }),
-    ).toEqual({ lodge: false, undo: true, waive: false, edit: false });
+    ).toEqual({ lodge: false, undo: true, waive: false, edit: false, certify: false });
   });
 
   it('lays out the financial year and its quarters', () => {
@@ -150,6 +159,10 @@ describe('filing rules', () => {
     expect(isAnnualKey('2026-27')).toBe(true);
     expect(isAnnualKey('2026-27:H2')).toBe(true);
     expect(isAnnualKey('2026-10')).toBe(false);
+    // Calendar halves (small company / OPC board meetings) are their own periods.
+    expect(periodLabel('2026-27:CH2')).toBe('Jul–Dec 2026');
+    expect(periodLabel('2026-27:CH1')).toBe('Jan–Jun 2027');
+    expect(isAnnualKey('2026-27:CH1')).toBe(false);
     expect(isAnnualKey('2026-27:Q1')).toBe(false);
   });
 

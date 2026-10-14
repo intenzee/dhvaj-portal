@@ -12,6 +12,7 @@ import {
   financialYearOf,
   isTriennialDue,
   legacyPeriodDue,
+  nextTriennialFy,
   passesPeriodFilter,
   periodContaining,
   periodsForFrequency,
@@ -35,7 +36,10 @@ function due(
   eventDate?: string,
 ) {
   const r = rule(code);
-  const period = periodsForFrequency(r.frequency, fy).find((p) => p.key === key);
+  // A variant may move the rule onto another frequency (calendar halves, G6).
+  const fyEnd = `${Number(fy.slice(0, 4)) + 1}-03-31`;
+  const frequency = applyVariants(seedVersion(r, fyEnd), ctx).frequency ?? r.frequency;
+  const period = periodsForFrequency(frequency, fy).find((p) => p.key === key);
   if (!period) throw new Error(`no period ${key}`);
   const version = applyVariants(seedVersion(r, period.end), ctx);
   return dueForPeriod(version, period, NO_HOLIDAYS, eventDate);
@@ -184,19 +188,16 @@ describe('compliance-periods', () => {
         ),
       ).toEqual(['2026-06-15', '2026-09-15', '2026-12-15', '2027-03-15']);
     });
-    it('LUT for FY 2026-27 by 31 March 2026; DIR-3 KYC 30 June after the cycle year', () => {
+    it('LUT for FY 2026-27 by 31 March 2026; DIR-3 KYC 30 June inside the due FY', () => {
       expect(due('GST_LUT', '2026-27', '2026-27')!.statutoryDeadline).toBe('2026-03-31');
-      expect(due('ROC_DIR3_KYC', '2026-27', '2026-27')!.statutoryDeadline).toBe('2027-06-30');
+      expect(due('ROC_DIR3_KYC', '2026-27', '2026-27')!.statutoryDeadline).toBe('2026-06-30');
     });
-    it('board meetings: each quarter end; small / OPC only Q2 and Q4', () => {
+    it('board meetings: each quarter end; small / OPC on calendar halves instead', () => {
       const base = seedVersion(rule('ROC_BOARD_MEETING'), '2026-06-30');
-      const quarters = periodsForFrequency('quarterly', '2026-27');
-      const keep = (ctx: Record<string, unknown>) =>
-        quarters
-          .filter((p) => passesPeriodFilter(applyVariants(base, ctx).periodFilter, p))
-          .map((p) => p.key);
-      expect(keep({ company_subtype: 'private' })).toHaveLength(4);
-      expect(keep({ company_subtype: 'small' })).toEqual(['2026-27:Q2', '2026-27:Q4']);
+      expect(applyVariants(base, { company_subtype: 'private' }).frequency).toBe('quarterly');
+      expect(applyVariants(base, { company_subtype: 'opc' }).frequency).toBe(
+        'calendar_half_yearly',
+      );
       expect(due('ROC_BOARD_MEETING', '2026-27', '2026-27:Q1')!.statutoryDeadline).toBe(
         '2026-06-30',
       );
@@ -208,6 +209,139 @@ describe('compliance-periods', () => {
       expect(
         dueForPeriod(seedVersion(r, p.end), p, NO_HOLIDAYS, '2026-11-03')!.statutoryDeadline,
       ).toBe('2026-12-03');
+    });
+  });
+
+  describe('ROC / MCA worked examples (docs/roc-mca-filing-spec.md §8)', () => {
+    const priv = { company_subtype: 'private' };
+    it('E1: private company FY 2025-26 — AOC-4 30 Oct, MGT-7 29 Nov 2026 (provisional); no ADT-1', () => {
+      expect(due('ROC_AOC4', '2025-26', '2025-26', priv)).toMatchObject({
+        statutoryDeadline: '2026-10-30',
+        isProvisional: true,
+      });
+      expect(due('ROC_MGT7', '2025-26', '2025-26', priv)).toMatchObject({
+        statutoryDeadline: '2026-11-29',
+        isProvisional: true,
+      });
+      expect(conditionHolds(rule('ROC_ADT1').condition, priv)).toBe(false);
+    });
+    it('E2: AGM 30 Sep 2026 with the auditor appointed — ADT-1 due 15 Oct 2026', () => {
+      const ctx = { ...priv, agm_auditor_appointed: true };
+      expect(conditionHolds(rule('ROC_ADT1').condition, ctx)).toBe(true);
+      const p = periodContaining('annual', '2026-09-30')!;
+      const v = applyVariants(seedVersion(rule('ROC_ADT1'), p.end), ctx);
+      expect(dueForPeriod(v, p, NO_HOLIDAYS, '2026-09-30')!.statutoryDeadline).toBe('2026-10-15');
+      expect(conditionHolds(rule('ROC_ADT1').condition, { agm_auditor_appointed: false })).toBe(
+        false,
+      );
+    });
+    it('E4: OPC — no AGM, AOC-4 27 Sep 2026, MGT-7A 29 Nov 2026', () => {
+      const opc = { company_subtype: 'opc' };
+      expect(conditionHolds(rule('ROC_AGM').condition, opc)).toBe(false);
+      expect(due('ROC_AOC4', '2025-26', '2025-26', opc)!.statutoryDeadline).toBe('2026-09-27');
+      expect(due('ROC_MGT7', '2025-26', '2025-26', opc)!.statutoryDeadline).toBe('2026-11-29');
+      expect(applyVariants(seedVersion(rule('ROC_MGT7'), '2026-03-31'), opc).formLabel).toBe(
+        'MGT-7A',
+      );
+    });
+    it('E5: small company, AGM 30 Sep 2026 — MGT-7A due 29 Nov 2026', () => {
+      const small = { company_subtype: 'small' };
+      expect(due('ROC_MGT7', '2025-26', '2025-26', small, '2026-09-30')).toMatchObject({
+        statutoryDeadline: '2026-11-29',
+        isProvisional: false,
+      });
+      expect(applyVariants(seedVersion(rule('ROC_MGT7'), '2026-03-31'), small).formLabel).toBe(
+        'MGT-7A',
+      );
+      expect(applyVariants(seedVersion(rule('ROC_MGT7'), '2026-03-31'), priv).formLabel).toBe(
+        'MGT-7',
+      );
+    });
+    it('E6: small company FY 2026-27 — board meetings Jul–Dec 2026 and Jan–Jun 2027, no quarters', () => {
+      const small = { company_subtype: 'small' };
+      const halves = periodsForFrequency('calendar_half_yearly', '2026-27');
+      expect(halves.map((p) => [p.key, p.start, p.end])).toEqual([
+        ['2026-27:CH2', '2026-07-01', '2026-12-31'],
+        ['2026-27:CH1', '2027-01-01', '2027-06-30'],
+      ]);
+      expect(due('ROC_BOARD_MEETING', '2026-27', '2026-27:CH2', small)!.statutoryDeadline).toBe(
+        '2026-12-31',
+      );
+      expect(due('ROC_BOARD_MEETING', '2026-27', '2026-27:CH1', small)!.statutoryDeadline).toBe(
+        '2027-06-30',
+      );
+      expect(() => due('ROC_BOARD_MEETING', '2026-27', '2026-27:Q1', small)).toThrow(/no period/);
+      // An event date in Jan–Jun 2027 falls in FY 2026-27's CH1; May 2026 in FY 2025-26's.
+      expect(periodContaining('calendar_half_yearly', '2027-02-10')!.key).toBe('2026-27:CH1');
+      expect(periodContaining('calendar_half_yearly', '2026-05-15')!.key).toBe('2025-26:CH1');
+      expect(periodContaining('calendar_half_yearly', '2026-08-01')!.key).toBe('2026-27:CH2');
+    });
+    it('E8: MSME-1 due 31 Oct 2026 and 30 Apr 2027', () => {
+      const ctx = { msme_dues_45: true };
+      expect(conditionHolds(rule('ROC_MSME1').condition, ctx)).toBe(true);
+      expect(due('ROC_MSME1', '2026-27', '2026-27:H1', ctx)!.statutoryDeadline).toBe('2026-10-31');
+      expect(due('ROC_MSME1', '2026-27', '2026-27:H2', ctx)!.statutoryDeadline).toBe('2027-04-30');
+    });
+    it('E9: unlisted public company — PAS-6 due 29 Nov 2026 and 30 May 2027', () => {
+      const ctx = { company_subtype: 'unlisted_public' };
+      expect(conditionHolds(rule('ROC_PAS6').condition, ctx)).toBe(true);
+      expect(conditionHolds(rule('ROC_PAS6').condition, priv)).toBe(false);
+      expect(due('ROC_PAS6', '2026-27', '2026-27:H1', ctx)!.statutoryDeadline).toBe('2026-11-29');
+      expect(due('ROC_PAS6', '2026-27', '2026-27:H2', ctx)!.statutoryDeadline).toBe('2027-05-30');
+    });
+    it('E10: DPT-3 due 30 Jun 2027 when deposits are unknown or yes; not created when no', () => {
+      const cond = rule('ROC_DPT3').condition;
+      expect(conditionHolds(cond, { deposits: null })).toBe(true);
+      expect(conditionHolds(cond, { deposits: true })).toBe(true);
+      expect(conditionHolds(cond, { deposits: false })).toBe(false);
+      expect(due('ROC_DPT3', '2026-27', '2026-27')!.statutoryDeadline).toBe('2027-06-30');
+    });
+    it('E11: LLP Form 8 (FY 2025-26) 30 Oct 2026; Form 11 (FY 2026-27) 30 May 2027', () => {
+      expect(due('LLP_FORM8', '2025-26', '2025-26')!.statutoryDeadline).toBe('2026-10-30');
+      expect(due('LLP_FORM11', '2026-27', '2026-27')!.statutoryDeadline).toBe('2027-05-30');
+    });
+    it('E12: KYC cycle 2025-26 — nothing in FY 2026-27, next due 30 Jun 2028', () => {
+      expect(isTriennialDue('2025-26', '2026-27')).toBe(false);
+      expect(isTriennialDue('2025-26', '2027-28')).toBe(false);
+      expect(nextTriennialFy('2025-26', '2026-27')).toBe('2028-29');
+      expect(nextTriennialFy('2025-26', '2025-26')).toBe('2025-26');
+      expect(due('ROC_DIR3_KYC', '2028-29', '2028-29')!.statutoryDeadline).toBe('2028-06-30');
+    });
+    it('E14: allotment 10 Nov 2026 — PAS-3 due 25 Nov (private placement) / 10 Dec 2026', () => {
+      const r = rule('ROC_PAS3');
+      const p = periodContaining('annual', '2026-11-10')!;
+      const at = (ctx: Record<string, unknown>) =>
+        dueForPeriod(applyVariants(seedVersion(r, p.end), ctx), p, NO_HOLIDAYS, '2026-11-10')!
+          .statutoryDeadline;
+      expect(at({ allotment_private_placement: true })).toBe('2026-11-25');
+      expect(at({ allotment_private_placement: false })).toBe('2026-12-10');
+      expect(at({})).toBe('2026-12-10');
+    });
+    it('§9 Verify: the rules a partner must confirm are flagged', () => {
+      for (const code of [
+        'ROC_PAS3',
+        'ROC_DIR3_KYC',
+        'ROC_ADT1',
+        'ROC_FIRST_ADT1',
+        'LLP_FORM11',
+        'ROC_DPT3',
+        'ROC_PAS6',
+        'ROC_AOC4',
+        'ROC_MGT7',
+      ]) {
+        expect([code, rule(code).verification]).toEqual([code, 'verify']);
+      }
+    });
+    it('AOC-4 files as XBRL and / or with consolidated statements', () => {
+      const label = (ctx: Record<string, unknown>) =>
+        applyVariants(seedVersion(rule('ROC_AOC4'), '2027-03-31'), ctx).formLabel;
+      const base = { ...priv, xbrl_required: false, has_subsidiaries: false };
+      expect(label(base)).toBe('AOC-4');
+      expect(label({ ...base, xbrl_required: true })).toBe('AOC-4 XBRL');
+      expect(label({ ...base, has_subsidiaries: true })).toBe('AOC-4 + CFS');
+      expect(label({ ...base, xbrl_required: true, has_subsidiaries: true })).toBe(
+        'AOC-4 XBRL + CFS',
+      );
     });
   });
 

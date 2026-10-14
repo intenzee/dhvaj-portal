@@ -57,6 +57,14 @@ export class PatchChecklistItemDto {
   @MaxLength(500)
   naReason?: string;
 
+  @ApiPropertyOptional({
+    description: 'Note on the tick; required (the UDIN) on a step a partner ticks.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+
   @ApiProperty()
   @Type(() => Number)
   @IsInt()
