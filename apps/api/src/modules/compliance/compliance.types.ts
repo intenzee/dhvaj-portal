@@ -6,9 +6,13 @@ import type {
   DeadlineLayerType,
   DueDateCategory,
   DueDateSource,
+  EngagementKind,
   EscalationAction,
   EscalationLevel,
+  PeriodSection,
+  Stream,
   WorkingDayAdjustment,
+  WorkItemRef,
 } from '@hsdg/contracts';
 
 /** One effective-dated, append-only calculation snapshot for a rule. */
@@ -179,6 +183,14 @@ export interface ComplianceCalendarRecord extends ComplianceInstanceRecord {
   escalation: EscalationLevel;
   /** The distinct §24 action this band triggers (who is told, what happens). */
   escalationAction: EscalationAction;
+  /** WF-102 — the filing's place in its stream tab, and where the row opens. */
+  engagementKind: EngagementKind;
+  stream: Stream | null;
+  financialYear: string | null;
+  periodKey: string | null;
+  section: PeriodSection | null;
+  registrationNumber: string | null;
+  link: WorkItemRef;
 }
 
 /** The kind of a flattened calendar event (§16). */

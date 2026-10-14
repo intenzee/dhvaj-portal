@@ -1,4 +1,13 @@
-import type { ClientDependencyStatus, TaskPriority, TaskStatus, WorkType } from '@hsdg/contracts';
+import type {
+  ClientDependencyStatus,
+  EngagementKind,
+  PeriodSection,
+  TaskPriority,
+  TaskStatus,
+  WorkFilingContext,
+  WorkItemRef,
+  WorkType,
+} from '@hsdg/contracts';
 
 /** A blocker link shown on a task's detail. */
 export interface TaskDependencyRef {
@@ -60,6 +69,16 @@ export interface TaskDetail extends TaskRecord {
 export interface MyTaskRecord extends TaskRecord {
   engagementCode: string;
   entityName: string;
+  engagementKind: EngagementKind;
+  /** WF-102 — the filing's part, year, period and registration (null with no filing). */
+  section: PeriodSection | null;
+  financialYear: string | null;
+  periodKey: string | null;
+  registrationNumber: string | null;
+  /** The filing the task produces: form, period label and both dates. */
+  filing: WorkFilingContext | null;
+  /** Where the row opens: the filing (with `taskId`), else the engagement's work tab. */
+  link: WorkItemRef;
 }
 
 export interface ClientDependencyRecord {
@@ -91,6 +110,13 @@ export interface ClientDependencyRecord {
 export interface ClientDependencyWithContext extends ClientDependencyRecord {
   engagementCode: string;
   entityName: string;
+  engagementKind: EngagementKind;
+  /** WF-102 — the filing (and upload slot) the request is for, when it is for one. */
+  complianceInstanceId: string | null;
+  periodSection: PeriodSection | null;
+  slotCode: string | null;
+  /** Where the row opens: the filing with `requestId`, else the engagement. */
+  link: WorkItemRef;
 }
 
 // ── Inputs ──────────────────────────────────────────────────────────────────
