@@ -16,3 +16,26 @@ export function parseFeatureFlags(
       .filter((f): f is FeatureFlag => known.has(f)),
   );
 }
+
+/**
+ * FEATURE_FLAG_OFFICES env → the offices each restricted flag is limited to
+ * (`flag:CODE,CODE;flag:CODE`). Office codes are upper-cased; unknown flags and
+ * entries with no office are ignored (that flag stays firm-wide).
+ */
+export function parseFlagOffices(
+  raw: string | undefined,
+): ReadonlyMap<FeatureFlag, ReadonlySet<string>> {
+  const known = new Set<string>(FEATURE_FLAGS);
+  const out = new Map<FeatureFlag, Set<string>>();
+  for (const entry of (raw ?? '').split(';')) {
+    const [name, offices] = entry.split(':');
+    const flag = name?.trim().toLowerCase();
+    if (!flag || !known.has(flag) || !offices) continue;
+    const codes = offices
+      .split(',')
+      .map((c) => c.trim().toUpperCase())
+      .filter(Boolean);
+    if (codes.length) out.set(flag as FeatureFlag, new Set(codes));
+  }
+  return out;
+}

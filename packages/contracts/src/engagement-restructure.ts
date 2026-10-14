@@ -320,6 +320,10 @@ export const FEATURE_FLAG = {
   autoTime: 'ff_auto_time',
   /** Staff Workflow Phase 1: rows open the exact work, review queue, trimmed sidebar. */
   workLinks: 'ff_work_links',
+  /** Staff Workflow Phase 2: Today, the filing drawer, stream tabs open on the period to act on. */
+  todayView: 'ff_today_view',
+  /** Staff Workflow Phase 3: filing runs, client chasing, search, actionable notifications. */
+  filingRuns: 'ff_filing_runs',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);
