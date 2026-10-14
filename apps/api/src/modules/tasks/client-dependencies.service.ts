@@ -8,10 +8,9 @@ import {
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import {
-  WORK_LINK_COLUMNS,
   type WorkLinkSqlRow,
+  withWorkLinks,
   workLinkFilingOf,
-  workLinkJoin,
   workLinkOf,
 } from '../../common/work-links';
 import type { RlsContext } from '../../database/rls-context';
@@ -286,16 +285,20 @@ export class ClientDependenciesService {
             slot_code: string | null;
           }
       >(
-        `${DEP_BASE.replace(
-          'FROM hsdg.client_dependencies cd',
-          `, eng.engagement_code, ent.legal_name AS entity_name, eng.kind AS engagement_kind,
-             cd.compliance_instance_id, cd.period_section, cd.slot_code, ${WORK_LINK_COLUMNS}
-           FROM hsdg.client_dependencies cd
-           JOIN hsdg.engagements eng ON eng.id = cd.engagement_id
-           JOIN hsdg.entities ent ON ent.id = eng.entity_id`,
-        )} ${workLinkJoin('cd.compliance_instance_id')} ${where}
-         ORDER BY cd.escalation_date NULLS LAST, cd.request_date
-         LIMIT $1 OFFSET $2`,
+        withWorkLinks(
+          `${DEP_BASE.replace(
+            'FROM hsdg.client_dependencies cd',
+            `, eng.engagement_code, ent.legal_name AS entity_name, eng.kind AS engagement_kind,
+               cd.compliance_instance_id, cd.period_section, cd.slot_code
+             FROM hsdg.client_dependencies cd
+             JOIN hsdg.engagements eng ON eng.id = cd.engagement_id
+             JOIN hsdg.entities ent ON ent.id = eng.entity_id`,
+          )} ${where}
+           ORDER BY cd.escalation_date NULLS LAST, cd.request_date
+           LIMIT $1 OFFSET $2`,
+          'compliance_instance_id',
+          'p.escalation_date NULLS LAST, p.request_date',
+        ),
         [page.limit, page.offset],
       );
       const totalRes = await client.query<{ total: string }>(

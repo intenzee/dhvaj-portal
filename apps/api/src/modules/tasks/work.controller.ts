@@ -1,11 +1,12 @@
 import { Controller, ForbiddenException, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type Paginated } from '@hsdg/contracts';
+import { PERMISSION, type Paginated, type WorkReviewQueue } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { TasksService } from './tasks.service';
 import { ClientDependenciesService } from './client-dependencies.service';
+import { WorkReviewsService } from './work-reviews.service';
 import type { ClientDependencyWithContext, MyTaskRecord } from './tasks.types';
 import { MyTasksQueryDto } from './dto/task.dto';
 import { MyClientDependenciesQueryDto } from './dto/client-dependency.dto';
@@ -22,6 +23,7 @@ export class WorkController {
   constructor(
     private readonly tasks: TasksService,
     private readonly deps: ClientDependenciesService,
+    private readonly reviews: WorkReviewsService,
   ) {}
 
   @Get('tasks')
@@ -68,5 +70,26 @@ export class WorkController {
     return this.deps
       .mine(rlsContextFromPrincipal(principal), query, filter)
       .then((result) => paginate(result, query));
+  }
+
+  @Get('reviews')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Everything waiting for my review, oldest first (WF-105)',
+    description:
+      'filing_review: tasks sent to me for review (reviewer = me, status in_review); ' +
+      'review_point: open review points on active engagements I manage (or partner with no ' +
+      'manager); sign_off: active engagements I partner whose review model needs EP sign-off, ' +
+      'cleared at review with no open points. Each item carries `link` (a WorkItemRef).',
+  })
+  reviewQueue(@CurrentPrincipal() principal: Principal): Promise<WorkReviewQueue> {
+    return this.reviews.queue(rlsContextFromPrincipal(principal));
+  }
+
+  @Get('reviews/count')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'How many items are waiting for my review (the sidebar badge)' })
+  reviewCount(@CurrentPrincipal() principal: Principal): Promise<{ total: number }> {
+    return this.reviews.count(rlsContextFromPrincipal(principal));
   }
 }
