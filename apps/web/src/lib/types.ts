@@ -20,6 +20,8 @@ import type {
   TaskStatus,
 } from '@hsdg/contracts';
 
+import type { PeriodSection, WorkFilingContext } from '@hsdg/contracts';
+
 export interface EngagementRow {
   id: string;
   engagementCode: string;
@@ -83,6 +85,15 @@ export interface EngagementDetail extends EngagementRow {
 export interface MyTask {
   id: string;
   engagementId: string;
+  /** WF-102 — the engagement's kind and the filing the task produces (nulls with no filing). */
+  engagementKind?: EngagementKind;
+  section?: PeriodSection | null;
+  financialYear?: string | null;
+  /** Raw period key: '2026-09', '2026-27:Q2', '2026-27'. */
+  periodKey?: string | null;
+  registrationNumber?: string | null;
+  /** Form, period label and both dates of the task's filing; null with no filing. */
+  filing?: WorkFilingContext | null;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
@@ -100,6 +111,11 @@ export interface MyTask {
 export interface MyClientDependency {
   id: string;
   engagementId: string;
+  /** WF-102 — the filing (and upload slot) the request is for, when it is for one. */
+  engagementKind?: EngagementKind;
+  complianceInstanceId?: string | null;
+  periodSection?: PeriodSection | null;
+  slotCode?: string | null;
   requestedInfo: string;
   status: ClientDependencyStatus;
   escalationDate: string | null;
@@ -319,6 +335,13 @@ export interface ClientDetail extends ClientRow {
 export interface ComplianceRow {
   id: string;
   engagementId: string;
+  /** WF-102 — the filing's place in its stream tab. */
+  engagementKind?: EngagementKind;
+  stream?: Stream | null;
+  financialYear?: string | null;
+  periodKey?: string | null;
+  section?: PeriodSection | null;
+  registrationNumber?: string | null;
   engagementCode: string;
   entityName: string;
   serviceCode: string;
