@@ -150,15 +150,18 @@ describe('Telemetry (e2e)', () => {
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [user, sid, kind, path, params, kind === 'row_open' ? 'today' : null, at(min)],
       );
-    // Manager X (North): sign-in lands on /today, opens a filing → 1 step.
-    await ins(mxUser, 'sessNorth01', 'route', '/today', [], 0);
+    // Manager X (North): sign-in redirects to /today (not a step), a filing → 1 step.
+    await ins(mxUser, 'sessNorth01', 'route', '/', ['landing'], 0);
+    await ins(mxUser, 'sessNorth01', 'redirect', '/today', [], 0);
     await ins(mxUser, 'sessNorth01', 'row_open', '/engagements/:id', ['m', 'part', 'tab'], 1);
     await ins(mxUser, 'sessNorth01', 'route', '/engagements/:id', ['m', 'part', 'tab'], 1);
-    // Senior Y (South): /today → /engagements (Overview) → the filing → 2 steps…
+    // Senior Y (South): /today → /engagements (Overview) → the GST tab, whose
+    // month the app fills in (not a step) → the section → 3 steps…
     await ins(syUser, 'sessSouth001', 'route', '/today', [], 0);
     await ins(syUser, 'sessSouth001', 'row_open', '/engagements/:id', [], 1);
     await ins(syUser, 'sessSouth001', 'route', '/engagements/:id', [], 1);
-    await ins(syUser, 'sessSouth001', 'route', '/engagements/:id', ['m', 'tab'], 2);
+    await ins(syUser, 'sessSouth001', 'route', '/engagements/:id', ['tab'], 2);
+    await ins(syUser, 'sessSouth001', 'redirect', '/engagements/:id', ['m', 'tab'], 2);
     await ins(syUser, 'sessSouth001', 'route', '/engagements/:id', ['m', 'part', 'tab'], 3);
     // …and a session that never reaches a filing.
     await ins(syUser, 'sessSouth002', 'route', '/notifications', [], 5);

@@ -17,9 +17,14 @@ const UNIT: Record<WorkflowMeasure['unit'], string> = {
   notifications: 'per person',
 };
 
-/** `2`, `93.5%`, `4.25 h` — or a dash when there is nothing to measure. */
+/** `2 steps`, `93.5%`, `4.25 h`, `25 min` — or a dash when there is nothing to measure. */
 export function formatMeasure(value: number | null, unit: WorkflowMeasure['unit']): string {
   if (value === null) return '—';
+  // Under an hour, in minutes: a review picked up at once reads "< 1 min", not "0 h".
+  if (unit === 'hours' && value < 1) {
+    const min = Math.round(value * 60);
+    return min < 1 ? '< 1 min' : `${min} min`;
+  }
   const n = Number.isInteger(value) ? String(value) : value.toFixed(value < 10 ? 2 : 1);
   return unit === 'percent' ? `${n}%` : `${n} ${UNIT[unit]}`;
 }

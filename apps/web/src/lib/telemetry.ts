@@ -44,7 +44,7 @@ export function rowOpenFrom(prev: string | null, next: string): { source: string
   return null;
 }
 
-/** Whether `next` is a new step: another page, or a different set of parameters. */
+/** Whether `next` is a different place: another page, or a different set of parameters. */
 export function isNewRoute(prev: string | null, next: string): boolean {
   if (!prev) return true;
   const a = telemetryPath(prev);
@@ -53,6 +53,26 @@ export function isNewRoute(prev: string | null, next: string): boolean {
     new URL(prev, 'http://x').pathname !== new URL(next, 'http://x').pathname ||
     a.params.join() !== b.params.join()
   );
+}
+
+/** How long a click or key press stays the reason for the next URL change. */
+export const INPUT_WINDOW_MS = 5_000;
+
+/**
+ * What a URL change was: a page the person moved to (`route`, a step), one
+ * the app made on its own — the sign-in landing redirect, a default month or
+ * section filled in (`redirect`, not a step), or neither (`null`: the same
+ * place with other values). The first page of a load is always a route.
+ * Pure — tested.
+ */
+export function classifyChange(
+  prev: string | null,
+  next: string,
+  byPerson: boolean,
+): 'route' | 'redirect' | null {
+  if (!prev) return 'route';
+  if (!isNewRoute(prev, next)) return null;
+  return byPerson ? 'route' : 'redirect';
 }
 
 function randomId(): string {
