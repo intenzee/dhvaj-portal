@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
-import { Plus } from 'lucide-react';
+import { Plus, Upload } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -58,11 +58,20 @@ function EntitiesInner(): JSX.Element {
         subtitle="Companies, firms and individuals we work for. Click a client to see everything we do for them."
         actions={
           can(principal, PERMISSION.entityManage) ? (
-            <Link href="/entities/new">
-              <Button>
-                <Plus className="h-4 w-4" /> New client
-              </Button>
-            </Link>
+            <div className="flex gap-2">
+              {can(principal, PERMISSION.credentialManage) && (
+                <Link href="/entities/import">
+                  <Button variant="secondary">
+                    <Upload className="h-4 w-4" /> Import GST clients
+                  </Button>
+                </Link>
+              )}
+              <Link href="/entities/new">
+                <Button>
+                  <Plus className="h-4 w-4" /> New client
+                </Button>
+              </Link>
+            </div>
           ) : undefined
         }
       />

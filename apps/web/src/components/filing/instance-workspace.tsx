@@ -6,6 +6,7 @@ import {
   DSC_REQUEST_CODE,
   FILING_REFERENCE_KINDS,
   isMeetingRule,
+  isValidGstin,
   type ChecklistItem,
   type FigureField,
   type FilingRecordView,
@@ -25,6 +26,7 @@ import { TaskActions } from '@/components/tasks/task-actions';
 import { FilingStatusBadge, boardMeetingsText, daysLeftText, dueTone, filingEnd } from './filing-status';
 import { ClientChase } from './client-chase';
 import { LastPeriod } from './last-period';
+import { RegistrationLogin } from '@/components/entities/portal-login';
 
 /** The part of the created client-upload link the page needs. */
 interface UploadLink {
@@ -304,6 +306,11 @@ function WorkspaceHeader({
           <div>
             <dt className="text-ink-muted">Registration</dt>
             <dd className="font-mono">{inst.registrationNumber}</dd>
+            {inst.registrationId && isValidGstin(inst.registrationNumber) && (
+              <dd>
+                <RegistrationLogin registrationId={inst.registrationId} />
+              </dd>
+            )}
           </div>
         )}
       </dl>

@@ -92,3 +92,4 @@ export * from './work-today';
 export * from './workflow-settings';
 export * from './search';
 export * from './feature-rollout';
+export * from './credentials';
