@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -130,4 +130,33 @@ export class WorkflowTargetsUpdateDto implements WorkflowTargetsUpdate {
   @ValidateNested({ each: true })
   @Type(() => WorkflowTargetDto)
   items!: WorkflowTargetDto[];
+}
+
+/** A practice session watches a few people for at most this long. */
+export const PRACTICE_MAX_PEOPLE = 20;
+
+export class PracticeQueryDto {
+  @ApiProperty({ example: '2026-10-15T10:00:00+05:30', description: 'Start of the window' })
+  @IsISO8601({ strict: true })
+  from!: string;
+
+  @ApiProperty({ example: '2026-10-15T11:00:00+05:30', description: 'End of the window' })
+  @IsISO8601({ strict: true })
+  to!: string;
+
+  @ApiProperty({
+    type: String,
+    example: '7f1c2a9e-3b4d-4c5e-8f6a-0b1c2d3e4f5a,0b1c2d3e-…',
+    description: `Employees watched, comma-separated (at most ${PRACTICE_MAX_PEOPLE})`,
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    (Array.isArray(value) ? value : String(value ?? '').split(','))
+      .map((v) => String(v).trim())
+      .filter(Boolean),
+  )
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(PRACTICE_MAX_PEOPLE)
+  @IsUUID('all', { each: true })
+  employeeIds!: string[];
 }

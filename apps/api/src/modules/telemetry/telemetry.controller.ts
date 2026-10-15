@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Post, Put, Query } from '@nestjs/commo
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
+  type PracticeReport,
   type WorkflowBaselineInfo,
   type WorkflowMeasuresReport,
   type WorkflowTarget,
@@ -9,6 +10,7 @@ import {
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import {
+  PracticeQueryDto,
   SaveWorkflowBaselineDto,
   TelemetryBatchDto,
   WorkflowMeasuresQueryDto,
@@ -54,6 +56,22 @@ export class TelemetryController {
     @Query() query: WorkflowMeasuresQueryDto,
   ): Promise<WorkflowMeasuresReport> {
     return this.telemetry.measures(rlsContextFromPrincipal(principal), query);
+  }
+
+  @Get('practice')
+  @RequirePermissions(PERMISSION.reportRead)
+  @ApiOperation({
+    summary: 'A practice session: chosen people over an exact window',
+    description:
+      'Per person: sessions, steps from sign-in to the first filing (median), pages moved to, ' +
+      'row opens and how many landed on the exact item, and task status changes plus filings ' +
+      'lodged, with pages per action. At most 7 days; people the caller cannot see are left out.',
+  })
+  practice(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: PracticeQueryDto,
+  ): Promise<PracticeReport> {
+    return this.telemetry.practice(rlsContextFromPrincipal(principal), query);
   }
 
   @Post('baselines')

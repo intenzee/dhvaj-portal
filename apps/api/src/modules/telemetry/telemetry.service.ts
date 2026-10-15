@@ -9,6 +9,7 @@ import {
   notificationKind,
   telemetryPath,
   workflowTargetLabel,
+  type PracticeReport,
   type TelemetryEventInput,
   type WorkflowBaselineInfo,
   type WorkflowMeasure,
@@ -21,11 +22,17 @@ import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { istToday } from '../engagements/time/auto-time';
-import type { SaveWorkflowBaselineDto, WorkflowMeasuresQueryDto } from './telemetry.dto';
+import type {
+  PracticeQueryDto,
+  SaveWorkflowBaselineDto,
+  WorkflowMeasuresQueryDto,
+} from './telemetry.dto';
 
 const DAY_MS = 86_400_000;
 /** The longest window the report measures. */
 const MAX_DAYS = 366;
+/** The longest practice session. */
+const PRACTICE_MAX_MS = 7 * DAY_MS;
 /** Engagements that never carry live work. */
 const DEAD_ENGAGEMENT = ['cancelled', 'declined', 'withdrawn', 'merged'];
 const ACTIONABLE_TYPES = NOTIFICATION_TYPES.filter((t) => notificationKind(t) === 'actionable');
@@ -207,6 +214,77 @@ export class TelemetryService {
         savedBy: r.saved_by,
       };
     });
+  }
+
+  /**
+   * A practice session: the people chosen, watched over an exact window (say
+   * today 10:00–11:00). Per person, from the same events as the measures: steps
+   * from sign-in to the first filing, pages moved to, row opens and the exact
+   * share, and the work done — task status changes and filings lodged — to put
+   * the pages against. People the caller cannot see are left out.
+   */
+  async practice(ctx: RlsContext, q: PracticeQueryDto): Promise<PracticeReport> {
+    const from = new Date(q.from);
+    const to = new Date(q.to);
+    const span = to.getTime() - from.getTime();
+    if (!(span > 0 && span <= PRACTICE_MAX_MS))
+      throw new BadRequestException('from must be before to, at most 7 days apart');
+    const ids = [...new Set(q.employeeIds)];
+    const { rows } = await this.db.withRlsContext(ctx, (client) =>
+      client.query<{
+        employee_id: string;
+        name: string;
+        sessions: number | null;
+        sessions_with_filing: number | null;
+        steps_median: string | null;
+        routes: number | null;
+        row_opens: number | null;
+        exact_row_opens: number | null;
+        actions: number;
+      }>(
+        `WITH emp AS (
+           SELECT e.id, e.full_name, e.user_id FROM hsdg.employees e WHERE e.id = ANY ($3::uuid[])
+         ),
+         t AS (
+           SELECT * FROM hsdg.telemetry_practice($1, $2,
+             ARRAY(SELECT user_id FROM emp WHERE user_id IS NOT NULL))
+         )
+         SELECT emp.id AS employee_id, emp.full_name AS name,
+                t.sessions, t.sessions_with_filing, t.steps_median, t.routes,
+                t.row_opens, t.exact_row_opens,
+                ((SELECT count(*) FROM hsdg.task_events te
+                   WHERE te.actor_employee_id = emp.id
+                     AND te.created_at >= $1 AND te.created_at < $2)
+                 + (SELECT count(*) FROM hsdg.filing_records fr
+                     WHERE fr.recorded_by_employee_id = emp.id
+                       AND fr.created_at >= $1 AND fr.created_at < $2))::int AS actions
+           FROM emp LEFT JOIN t ON t.user_id = emp.user_id
+          ORDER BY emp.full_name, emp.id`,
+        [from, to, ids],
+      ),
+    );
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      people: rows.map((r) => {
+        const routes = r.routes ?? 0;
+        const rowOpens = r.row_opens ?? 0;
+        const exactRowOpens = r.exact_row_opens ?? 0;
+        return {
+          employeeId: r.employee_id,
+          name: r.name,
+          sessions: r.sessions ?? 0,
+          sessionsWithFiling: r.sessions_with_filing ?? 0,
+          steps: num(r.steps_median),
+          routes,
+          rowOpens,
+          exactRowOpens,
+          exactShare: rowOpens ? Math.round((exactRowOpens / rowOpens) * 1000) / 10 : null,
+          actions: r.actions,
+          routesPerAction: r.actions ? Math.round((routes / r.actions) * 10) / 10 : null,
+        };
+      }),
+    };
   }
 
   async targets(ctx: RlsContext): Promise<WorkflowTarget[]> {
