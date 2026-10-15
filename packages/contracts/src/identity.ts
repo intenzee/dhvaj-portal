@@ -79,6 +79,10 @@ export const PERMISSION = {
   notificationRead: 'notification.read',
   notificationScan: 'notification.scan',
   workflowManage: 'workflow.manage',
+  /** ADR-0035: show a client's saved portal login. */
+  credentialReveal: 'credential.reveal',
+  /** ADR-0035: add, change, remove or import clients' portal logins. */
+  credentialManage: 'credential.manage',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

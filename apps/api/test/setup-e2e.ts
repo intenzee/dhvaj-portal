@@ -20,3 +20,6 @@ process.env.DATABASE_SUPERUSER_URL ??= 'postgres://postgres:postgres@localhost:5
 // exercised without allocating multi-megabyte payloads (which pressure memory
 // when every suite boots its own app in-band). Production uses the 10 MiB default.
 process.env.DOCUMENT_MAX_BYTES ??= String(256 * 1024);
+
+// A fixed key for clients' saved portal logins (ADR-0035). Test-only.
+process.env.CREDENTIALS_KEYS ??= '1:dGVzdC1vbmx5LWNyZWRlbnRpYWwta2V5LTMyLWJ5dGU=';

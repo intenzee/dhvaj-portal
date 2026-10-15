@@ -32,6 +32,11 @@ import { DataTable } from '@/components/data-table';
 import { EntityDetailActions } from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
+import {
+  CredentialAccessNote,
+  PortalLogin,
+  useCredentials,
+} from '@/components/entities/portal-login';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import {
   ClientMasterModal,
@@ -67,6 +72,7 @@ export default function EntityDetailPage(): JSX.Element {
     queryKey: ['entity', id, 'engagements'],
     queryFn: () => apiFetch<Paginated<EngagementRow>>(`/engagements?entityId=${id}&limit=100`),
   });
+  const logins = useCredentials({ entityId: id });
 
   useEffect(() => {
     if (!editing || !entity.data) return;
@@ -172,10 +178,17 @@ export default function EntityDetailPage(): JSX.Element {
               <p className="text-ink-faint">No registrations recorded.</p>
             )}
             {e.registrations.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-2">
+              <div key={r.id} className="flex items-start justify-between gap-2">
                 <div>
                   <span className="text-ink-muted">{humanize(r.registrationType)}</span>{' '}
                   <span className="font-medium text-ink">{r.registrationNumber}</span>
+                  {r.registrationType === 'gstin' && logins.data && (
+                    <PortalLogin
+                      registrationId={r.id}
+                      credential={logins.data.items.find((c) => c.registrationId === r.id)}
+                      vaultReady={logins.data.vaultReady}
+                    />
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Badge
@@ -197,6 +210,7 @@ export default function EntityDetailPage(): JSX.Element {
                 </div>
               </div>
             ))}
+            <CredentialAccessNote data={logins.data} />
           </CardBody>
         </Card>
 
