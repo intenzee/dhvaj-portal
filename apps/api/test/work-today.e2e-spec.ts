@@ -232,6 +232,32 @@ describe('Today (e2e)', () => {
       requestId: dep.body.id,
     });
     expect(keys(view, 'due_soon')).not.toContain(`filing:${inst}`);
+
+    // PS-001: the filing's row offers WhatsApp once the client has a phone (the
+    // firm reminds by e-mail); the request with no filing says nothing. Client
+    // contacts are office-scoped, so this is the North assignee's Today.
+    expect(req.offersWhatsapp).toBeUndefined();
+    await su.query(`UPDATE hsdg.tasks SET assigned_to_employee_id = $2 WHERE id = $1`, [
+      task,
+      emp005,
+    ]);
+    const blocked = async () =>
+      group(await today(mx, `?engagementId=${eng}`), 'waiting').find(
+        (i) => i.key === `task:${task}`,
+      )!;
+    expect((await blocked()).offersWhatsapp).toBe(false);
+    const entity = (
+      await su.query<{ entity_id: string }>(
+        `SELECT entity_id FROM hsdg.engagements WHERE id = $1`,
+        [eng],
+      )
+    ).rows[0]!.entity_id;
+    await su.query(
+      `INSERT INTO hsdg.entity_contacts (entity_id, full_name, phone, is_primary)
+       VALUES ($1, 'Accounts', '98765 43210', false)`,
+      [entity],
+    );
+    expect((await blocked()).offersWhatsapp).toBe(true);
   });
 
   it('To review: the reviewer sees the filing with its task, and can start the review from the row', async () => {

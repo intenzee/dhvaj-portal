@@ -1,4 +1,4 @@
-import { reminderChannelFor, whatsappNumber, whatsappUrl } from '@hsdg/contracts';
+import { canRemindBy, reminderChannelFor, whatsappNumber, whatsappUrl } from '@hsdg/contracts';
 import { CLIENT_DATA_SLOTS, chasingDates, reminderText, slotItemLabel } from './client-chase';
 import { previousMonth } from './monthly-data-request.scheduler';
 
@@ -134,5 +134,14 @@ describe('the reminder channel (client_reminder_channel)', () => {
       channel: 'copy',
       fallback: 'no_phone',
     });
+  });
+
+  it('says whether the client can be reached on a channel', () => {
+    expect(canRemindBy('whatsapp', { canEmail: false, phone: '098765 43210' })).toBe(true);
+    expect(canRemindBy('whatsapp', { canEmail: true, phone: '12345' })).toBe(false);
+    expect(canRemindBy('whatsapp', { canEmail: true, phone: null })).toBe(false);
+    expect(canRemindBy('email', { canEmail: true, phone: null })).toBe(true);
+    expect(canRemindBy('email', { canEmail: false, phone: '9876543210' })).toBe(false);
+    expect(canRemindBy('copy', { canEmail: false, phone: null })).toBe(true);
   });
 });
