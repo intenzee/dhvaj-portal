@@ -29,6 +29,8 @@ export interface ClientChase {
   canEmail: boolean;
   /** The client contact's phone, for a WhatsApp reminder. */
   clientPhone: string | null;
+  /** The phone is usable on WhatsApp, so a reminder can go that way whatever the firm's channel. */
+  canWhatsapp: boolean;
   /** What "remind" will do now, under the firm's setting (see `reminderChannelFor`). */
   channel: ClientReminderChannel;
   fallback: ClientReminderFallback | null;
@@ -78,6 +80,16 @@ export function whatsappUrl(phone: string | null | undefined, text: string): str
   return n ? `https://wa.me/${n}?text=${encodeURIComponent(text)}` : null;
 }
 
+/** Whether the client can be reached on a channel (copy always can). Pure — tested. */
+export function canRemindBy(
+  channel: ClientReminderChannel,
+  client: { canEmail: boolean; phone: string | null },
+): boolean {
+  if (channel === CLIENT_REMINDER_CHANNEL.email) return client.canEmail;
+  if (channel === CLIENT_REMINDER_CHANNEL.whatsapp) return whatsappNumber(client.phone) !== null;
+  return true;
+}
+
 /**
  * The channel a reminder takes under the firm's setting, and the fallback
  * reason when it cannot. Pure — tested.
@@ -86,15 +98,24 @@ export function reminderChannelFor(
   setting: ClientReminderChannel,
   client: { canEmail: boolean; phone: string | null },
 ): { channel: ClientReminderChannel; fallback: ClientReminderFallback | null } {
-  if (setting === CLIENT_REMINDER_CHANNEL.email)
-    return client.canEmail
-      ? { channel: setting, fallback: null }
-      : { channel: CLIENT_REMINDER_CHANNEL.copy, fallback: CLIENT_REMINDER_FALLBACK.noEmail };
-  if (setting === CLIENT_REMINDER_CHANNEL.whatsapp)
-    return whatsappNumber(client.phone)
-      ? { channel: setting, fallback: null }
-      : { channel: CLIENT_REMINDER_CHANNEL.copy, fallback: CLIENT_REMINDER_FALLBACK.noPhone };
-  return { channel: CLIENT_REMINDER_CHANNEL.copy, fallback: null };
+  if (canRemindBy(setting, client)) return { channel: setting, fallback: null };
+  return {
+    channel: CLIENT_REMINDER_CHANNEL.copy,
+    fallback:
+      setting === CLIENT_REMINDER_CHANNEL.email
+        ? CLIENT_REMINDER_FALLBACK.noEmail
+        : CLIENT_REMINDER_FALLBACK.noPhone,
+  };
+}
+
+/**
+ * POST /compliance-instances/:id/client-chase/remind body (PS-001). Omit
+ * `channel` for the firm's channel; name one to send that way instead (say
+ * WhatsApp from the phone when the firm e-mails). A channel the client cannot
+ * be reached on is refused (400), not swapped for copy.
+ */
+export interface ClientReminderRequest {
+  channel?: ClientReminderChannel;
 }
 
 interface ClientReminderBase {
