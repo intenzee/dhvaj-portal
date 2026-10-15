@@ -33,8 +33,11 @@ import { EntityDetailActions } from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import {
+  ClientLogins,
   CredentialAccessNote,
   PortalLogin,
+  loginFor,
+  loginTargetsOf,
   useCredentials,
 } from '@/components/entities/portal-login';
 import { useFeatureFlags } from '@/lib/feature-flags';
@@ -182,13 +185,16 @@ export default function EntityDetailPage(): JSX.Element {
                 <div>
                   <span className="text-ink-muted">{humanize(r.registrationType)}</span>{' '}
                   <span className="font-medium text-ink">{r.registrationNumber}</span>
-                  {r.registrationType === 'gstin' && logins.data && (
-                    <PortalLogin
-                      registrationId={r.id}
-                      credential={logins.data.items.find((c) => c.registrationId === r.id)}
-                      vaultReady={logins.data.vaultReady}
-                    />
-                  )}
+                  {logins.data &&
+                    loginTargetsOf(r).map((t) => (
+                      <PortalLogin
+                        key={`${t.portal}-${t.account}`}
+                        entityId={id}
+                        target={t}
+                        credential={loginFor(logins.data, t)}
+                        vaultReady={logins.data.vaultReady}
+                      />
+                    ))}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Badge
@@ -210,6 +216,7 @@ export default function EntityDetailPage(): JSX.Element {
                 </div>
               </div>
             ))}
+            {logins.data && <ClientLogins entityId={id} data={logins.data} />}
             <CredentialAccessNote data={logins.data} />
           </CardBody>
         </Card>

@@ -31,9 +31,14 @@ export function parseCredentialKeys(raw: string | undefined): Map<number, Buffer
   return keys;
 }
 
-/** The additional data a sealed login is bound to: its row, registration and portal. */
-export function credentialAad(id: string, registrationId: string, portal: string): string {
-  return `${id}|${registrationId}|${portal}`;
+/** The additional data a sealed login is bound to: its row, client, portal and account. */
+export function credentialAad(
+  id: string,
+  entityId: string,
+  portal: string,
+  account: string,
+): string {
+  return `${id}|${entityId}|${portal}|${account}`;
 }
 
 /**

@@ -104,6 +104,8 @@ beforeEach(() => {
   apiFetch.mockImplementation((url: string) => {
     if (url === '/entities/ent1') return Promise.resolve(entity);
     if (url.startsWith('/engagements')) return Promise.resolve({ items: [], total: 0 });
+    if (url.startsWith('/credentials'))
+      return Promise.resolve({ vaultReady: true, items: [], recentAccess: [] });
     return Promise.resolve([]);
   });
 });

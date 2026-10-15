@@ -6,7 +6,7 @@ const cipherWith = (keys: string | undefined) => new CredentialCipher({ get: () 
 
 describe('CredentialCipher (ADR-0035)', () => {
   const secret = { username: 'bharat_traders', password: 'S3cret!pass' };
-  const aad = credentialAad('c1', 'r1', 'gst');
+  const aad = credentialAad('c1', 'e1', 'gst', 'main');
 
   it('round-trips a login and never leaves it readable in the ciphertext', () => {
     const c = cipherWith(`1:${key()}`);
@@ -26,7 +26,8 @@ describe('CredentialCipher (ADR-0035)', () => {
   it('refuses a ciphertext moved to another row, or tampered with', () => {
     const c = cipherWith(`1:${key()}`);
     const sealed = c.seal(secret, aad);
-    expect(() => c.open(sealed, credentialAad('c2', 'r1', 'gst'))).toThrow();
+    expect(() => c.open(sealed, credentialAad('c2', 'e1', 'gst', 'main'))).toThrow();
+    expect(() => c.open(sealed, credentialAad('c1', 'e1', 'traces', 'deductor'))).toThrow();
     const bad = Buffer.from(sealed.ciphertext);
     bad[0] = bad[0]! ^ 1;
     expect(() => c.open({ ...sealed, ciphertext: bad }, aad)).toThrow();
