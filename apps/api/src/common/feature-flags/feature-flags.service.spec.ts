@@ -33,3 +33,47 @@ describe('FeatureFlagsService office rollout', () => {
     expect(flags.all()).toMatchObject({ ff_today_view: true });
   });
 });
+
+describe('FeatureFlagsService with the firm’s rollout choices (Admin → Rollout)', () => {
+  const flags = service({
+    FEATURE_FLAGS: 'ff_work_links,ff_today_view,ff_filing_runs',
+    FEATURE_FLAG_OFFICES: 'ff_today_view:NORTH',
+  });
+  const rule = (mode: 'firm' | 'offices' | 'off', codes: string[] = []) => ({
+    mode,
+    officeCodes: new Set(codes),
+  });
+  afterEach(() => flags.setRules(new Map()));
+
+  it('a pilot list replaces the deploy’s office list', () => {
+    flags.setRules(new Map([['ff_today_view', rule('offices', ['SOUTH'])]]));
+    expect(flags.isOnFor('ff_today_view', 'south')).toBe(true);
+    expect(flags.isOnFor('ff_today_view', 'NORTH')).toBe(false);
+    expect(flags.liveIn('ff_today_view')).toEqual(['SOUTH']);
+  });
+
+  it('every office, or paused everywhere — background jobs pause too', () => {
+    flags.setRules(
+      new Map([
+        ['ff_today_view', rule('firm')],
+        ['ff_filing_runs', rule('off')],
+      ]),
+    );
+    expect(flags.isOnFor('ff_today_view', 'SOUTH')).toBe(true);
+    expect(flags.isOnFor('ff_filing_runs', 'NORTH')).toBe(false);
+    expect(flags.isOn('ff_filing_runs')).toBe(false);
+    expect(flags.liveIn('ff_filing_runs')).toEqual([]);
+  });
+
+  it('nothing here turns on a flag the deploy left off', () => {
+    flags.setRules(new Map([['ff_gst_tab', rule('firm')]]));
+    expect(flags.isOnFor('ff_gst_tab', 'NORTH')).toBe(false);
+    expect(flags.isOn('ff_gst_tab')).toBe(false);
+  });
+
+  it('without a choice the deploy decides', () => {
+    expect(flags.liveIn('ff_today_view')).toEqual(['NORTH']);
+    expect(flags.liveIn('ff_work_links')).toBe('all');
+    expect(flags.deployOffices('ff_work_links')).toBeNull();
+  });
+});
