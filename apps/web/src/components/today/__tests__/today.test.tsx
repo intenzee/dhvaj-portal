@@ -237,6 +237,7 @@ describe('Today page (WF-201)', () => {
       status: 'blocked',
       filing: filing('i9'),
       link: { engagementId: 'e1', engagementKind: 'compliance', instanceId: 'i9', taskId: 't3' },
+      offersWhatsapp: true,
     });
     apiFetch.mockImplementation((url: string) =>
       Promise.resolve(
@@ -249,9 +250,7 @@ describe('Today page (WF-201)', () => {
                 text: 'Please',
                 raised: 0,
               }
-            : url.endsWith('/client-chase')
-              ? { channel: 'email', canWhatsapp: true }
-              : null,
+            : null,
       ),
     );
     render(

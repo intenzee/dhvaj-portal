@@ -208,7 +208,10 @@ function TodayScreen(): JSX.Element {
                           <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                             {task && <TaskActions task={task} ctx={ctx} only={PRIMARY} />}
                             {item.group === 'waiting' && item.link.instanceId && (
-                              <RemindClientButton instanceId={item.link.instanceId} />
+                              <RemindClientButton
+                                instanceId={item.link.instanceId}
+                                offersWhatsapp={item.offersWhatsapp}
+                              />
                             )}
                             <Button size="sm" variant="secondary" onClick={() => openItem(item)}>
                               Open
