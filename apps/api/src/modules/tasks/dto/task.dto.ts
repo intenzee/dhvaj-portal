@@ -89,6 +89,13 @@ export class CreateTaskDto {
   @IsOptional()
   @IsUUID()
   complianceInstanceId?: string;
+
+  @ApiPropertyOptional({
+    description: "Statutory audit — the audit file's area this task is about; links open on it.",
+  })
+  @IsOptional()
+  @IsUUID()
+  auditAreaId?: string;
 }
 
 /** §31 — a lead's approval of an out-of-scope request. */
@@ -155,6 +162,12 @@ export class UpdateTaskDto {
   @ValidateIf((_, v) => v !== null)
   @IsIn(WORK_TYPES)
   workType?: WorkType | null;
+
+  @ApiPropertyOptional({ nullable: true, description: "The audit file's area (null to clear)." })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  auditAreaId?: string | null;
 
   @ApiPropertyOptional({
     description: 'Expected version for optimistic concurrency (stale ⇒ 409).',

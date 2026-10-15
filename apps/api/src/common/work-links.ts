@@ -113,6 +113,8 @@ export function workLinkOf(
     engagementKind: EngagementKind;
     taskId?: string | null;
     requestId?: string | null;
+    /** A statutory-audit task's area of the audit file. */
+    auditAreaId?: string | null;
   },
   filing?: WorkLinkFiling | null,
 ): WorkItemRef {
@@ -132,6 +134,7 @@ export function workLinkOf(
   }
   if (base.taskId) ref.taskId = base.taskId;
   if (base.requestId) ref.requestId = base.requestId;
+  if (base.taskId && base.auditAreaId) ref.auditAreaId = base.auditAreaId;
   return ref;
 }
 

@@ -27,6 +27,8 @@ export interface WorkItemRef {
   taskId?: string | null;
   /** A client request (hsdg.client_dependencies.id). */
   requestId?: string | null;
+  /** A statutory-audit task's area of the audit file (hsdg.audit_work_areas.id). */
+  auditAreaId?: string | null;
 }
 
 /**
@@ -43,7 +45,14 @@ export const WORK_LINK_PARAM = {
   part: 'part',
   task: 'task',
   request: 'request',
+  /** The audit file: the section (phase) to open, e.g. `audit_areas`, `risk`. */
+  auditSection: 'phase',
+  /** The audit file: the area to open (hsdg.audit_work_areas.id). */
+  auditArea: 'area',
 } as const;
+
+/** The audit file section that lists every area. */
+export const AUDIT_AREAS_SECTION = 'audit_areas';
 
 /** `2026-09` → `9` (the GST tab's `m`); null for any other period key. */
 export function workLinkMonthParam(periodKey: string): string | null {
@@ -76,7 +85,8 @@ const NO_FILING_TAB: Record<EngagementKind, string> = {
  * The URL of a piece of work (see the plan's URL rules table):
  * - a filing → `/engagements/:id?tab=<stream>&fy=…&gstin=…&m=9|p=Q2&part=outward`
  *   (+ `&task=` / `&request=` to highlight a row in it);
- * - a task with no filing → its kind's work tab with `&task=`;
+ * - a task with no filing → its kind's work tab with `&task=` — on a statutory
+ *   audit, with `&phase=audit_areas&area=` when the task is about one area;
  * - otherwise the engagement itself (with `?request=` when it is a request).
  */
 export function workItemHref(ref: WorkItemRef): string {
@@ -98,6 +108,10 @@ export function workItemHref(ref: WorkItemRef): string {
     if (ref.section) p.set(WORK_LINK_PARAM.part, ref.section);
   } else if (ref.taskId) {
     p.set(WORK_LINK_PARAM.tab, NO_FILING_TAB[ref.engagementKind] ?? 'overview');
+    if (ref.engagementKind === 'statutory_audit' && ref.auditAreaId) {
+      p.set(WORK_LINK_PARAM.auditSection, AUDIT_AREAS_SECTION);
+      p.set(WORK_LINK_PARAM.auditArea, ref.auditAreaId);
+    }
   }
   if (ref.taskId) p.set(WORK_LINK_PARAM.task, ref.taskId);
   if (ref.requestId) p.set(WORK_LINK_PARAM.request, ref.requestId);
