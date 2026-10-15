@@ -271,6 +271,8 @@ export default function EngagementDetailPage(): JSX.Element {
       part: null,
       task: null,
       request: null,
+      phase: null,
+      area: null,
     });
   useWorkLinkFocus();
   const gstOn = isOn(FEATURE_FLAG.gstTab);
@@ -505,6 +507,7 @@ export default function EngagementDetailPage(): JSX.Element {
           <AuditFileNav
             engagementId={e.id}
             panelKeys={AUDIT_PHASE_PANELS}
+            link={{ phase: url.get('phase'), area: url.get('area') }}
             renderPhase={(key) => (
               <>
                 {key === 'acceptance' && (

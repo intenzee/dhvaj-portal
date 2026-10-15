@@ -13,7 +13,11 @@ import {
   RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
-import type { AuditPhaseState, StatutoryAuditWorkflow } from '@hsdg/contracts';
+import {
+  AUDIT_AREAS_SECTION,
+  type AuditPhaseState,
+  type StatutoryAuditWorkflow,
+} from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { Card } from '@/components/ui';
 import { ExpandToggle } from '@/components/inline-panel';
@@ -102,14 +106,32 @@ function scrollToTarget(phaseKey: string, anchor: string | undefined, tries = 20
 /** Distinct legend entries in professional-file order. */
 const LEGEND: AuditPhaseState[] = ['complete', 'in_progress', 'not_started', 'needs_attention'];
 
+/**
+ * What a work link opens in the audit file: `?phase=` (a section) and/or
+ * `?area=` (an area, which lives in the audit-areas section). Null when the
+ * link names neither. Pure — tested.
+ */
+export function auditFileTarget(
+  phase: string | null,
+  area: string | null,
+  panelKeys: readonly string[],
+): OpenAuditPhaseDetail | null {
+  if (area) return { phaseKey: AUDIT_AREAS_SECTION, anchor: `area-${area}` };
+  if (phase && panelKeys.includes(phase)) return { phaseKey: phase };
+  return null;
+}
+
 export function AuditFileNav({
   engagementId,
   panelKeys = [],
   renderPhase,
+  link,
 }: {
   engagementId: string;
   /** Phase / tracker keys that have a workspace to expand. */
   panelKeys?: readonly string[];
+  /** The section and area a work link names (`?phase=`, `?area=`): opened once the file loads. */
+  link?: { phase: string | null; area: string | null };
   /** The workspace for an expanded phase, rendered directly under its row. */
   renderPhase?: (phaseKey: string) => ReactNode;
 }): JSX.Element | null {
@@ -138,6 +160,19 @@ export function AuditFileNav({
     window.addEventListener(OPEN_PHASE_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_PHASE_EVENT, onOpen);
   }, [panelKeys]);
+
+  // A work link to a section or an area: open it once the file has loaded, and
+  // again only when the link changes.
+  const loaded = Boolean(query.data?.length);
+  const target = auditFileTarget(link?.phase ?? null, link?.area ?? null, panelKeys);
+  const targetKey = target ? `${target.phaseKey}:${target.anchor ?? ''}` : null;
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!loaded || !target || opened.current === targetKey) return;
+    opened.current = targetKey;
+    openAuditPhase(target.phaseKey, target.anchor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on targetKey
+  }, [loaded, targetKey]);
 
   // Silent when there is no audit file — this section is additive to Work.
   if (!query.data || query.data.length === 0) return null;
