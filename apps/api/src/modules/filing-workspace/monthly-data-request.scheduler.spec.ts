@@ -1,5 +1,6 @@
 import { MonthlyDataRequestScheduler } from './monthly-data-request.scheduler';
 import { raiseSlotRequests } from './client-chase';
+import { DEFAULT_WORKFLOW_POLICY, workflowPolicy } from '../workflow-settings/workflow-policy';
 
 jest.mock('./client-chase', () => ({
   ...jest.requireActual('./client-chase'),
@@ -7,7 +8,13 @@ jest.mock('./client-chase', () => ({
   raiseSlotRequests: jest.fn(),
 }));
 
+jest.mock('../workflow-settings/workflow-policy', () => ({
+  ...jest.requireActual('../workflow-settings/workflow-policy'),
+  workflowPolicy: jest.fn(),
+}));
+
 const raise = raiseSlotRequests as jest.MockedFunction<typeof raiseSlotRequests>;
+const policy = workflowPolicy as jest.MockedFunction<typeof workflowPolicy>;
 
 const ctx = { userId: 'u1', role: 'managing_partner', officeId: 'o1' };
 const filing = (id: string, email: string | null = 'accounts@bharat.test') => ({
@@ -50,7 +57,10 @@ function build(opts: { due: ReturnType<typeof filing>[]; uploads: boolean }) {
 }
 
 describe('MonthlyDataRequestScheduler (WF-302)', () => {
-  beforeEach(() => raise.mockReset());
+  beforeEach(() => {
+    raise.mockReset();
+    policy.mockResolvedValue(DEFAULT_WORKFLOW_POLICY);
+  });
 
   it('raises requests filing by filing for last month and e-mails each filing once', async () => {
     const { job, notifications, uploads, queries } = build({
@@ -78,6 +88,7 @@ describe('MonthlyDataRequestScheduler (WF-302)', () => {
       items: 3,
       linked: 3,
       emailed: 2,
+      held: 0,
       failed: 0,
     });
     expect(uploads.createLink).toHaveBeenCalledTimes(3);
@@ -119,4 +130,21 @@ describe('MonthlyDataRequestScheduler (WF-302)', () => {
     expect(uploads.createLink).not.toHaveBeenCalled();
     expect(notifications.enqueueClientDeliveryWith).not.toHaveBeenCalled();
   });
+
+  it.each(['whatsapp', 'copy'] as const)(
+    'under the %s channel raises the requests but leaves the reminder to the team',
+    async (channel) => {
+      policy.mockResolvedValue({ ...DEFAULT_WORKFLOW_POLICY, clientReminderChannel: channel });
+      const { job, notifications, uploads } = build({ due: [filing('a')], uploads: true });
+      raise.mockResolvedValueOnce([
+        { dependencyId: 'd1', slotCode: 'SALES_REGISTER', label: 'Sales register' },
+      ]);
+
+      const res = await job.requestFor(ctx, '2026-10-01');
+
+      expect(res).toMatchObject({ requested: 1, items: 1, linked: 0, emailed: 0, held: 1 });
+      expect(uploads.createLink).not.toHaveBeenCalled();
+      expect(notifications.enqueueClientDeliveryWith).not.toHaveBeenCalled();
+    },
+  );
 });

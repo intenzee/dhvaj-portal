@@ -17,6 +17,7 @@ import {
   type ClientReminderResult,
   type FilingRun,
   type FilingRunBulkResult,
+  type FilingRunRemindResult,
   type FilingRunForm,
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -90,11 +91,14 @@ export class FilingRunsController {
   @Post('remind')
   @HttpCode(200)
   @RequirePermissions(PERMISSION.engagementRead)
-  @ApiOperation({ summary: 'Remind each filing’s client of what is still outstanding' })
+  @ApiOperation({
+    summary:
+      'Remind each filing’s client by the firm’s channel (e-mail, WhatsApp link or text to copy)',
+  })
   remind(
     @CurrentPrincipal() principal: Principal,
     @Body() dto: FilingRunInstancesDto,
-  ): Promise<FilingRunBulkResult> {
+  ): Promise<FilingRunRemindResult> {
     this.requireFlag(principal);
     return this.runs.remind(rlsContextFromPrincipal(principal), dto.instanceIds);
   }
@@ -128,7 +132,7 @@ export class ClientChaseController {
   @HttpCode(200)
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
-    summary: 'Remind the client: e-mail with upload links when possible, else text to copy',
+    summary: 'Remind the client by the firm’s channel: e-mail, a WhatsApp link, or text to copy',
   })
   remind(
     @CurrentPrincipal() principal: Principal,

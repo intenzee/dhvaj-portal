@@ -209,7 +209,7 @@ describe('Today page (WF-201)', () => {
         url === '/work/today'
           ? { ...view, groups: [{ group: 'waiting', items: [chase, request], total: 2 }] }
           : url.endsWith('/client-chase/remind')
-            ? { channel: 'copy', text: 'Please send the purchase register.', raised: 0 }
+            ? { channel: 'copy', fallback: null, text: 'Please send the purchase register.', raised: 0 }
             : null,
       ),
     );
