@@ -20,6 +20,8 @@ import type { RlsContext } from '../../database/rls-context';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { reviewerCandidates } from '../workflow-settings/default-reviewer';
+import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import {
   clockState,
   closeRunningFor,
@@ -64,6 +66,7 @@ interface TaskCtxRow {
   engagement_status: string;
   engagement_partner_id: string | null;
   engagement_manager_id: string | null;
+  stream_lead_id: string | null;
 }
 
 /**
@@ -178,12 +181,18 @@ export class TaskWorkflowService {
     // Reviewer: default on Send for review; a lead taking over a review.
     let reviewerId = row.reviewer_employee_id;
     if (plan.defaultReviewer || body.reviewerEmployeeId) {
+      // Questions for the partners, 2: the firm chooses who reviews by default.
       reviewerId =
         body.reviewerEmployeeId ??
-        [row.engagement_manager_id, row.engagement_partner_id].find(
-          (id) => id && id !== row.assigned_to_employee_id,
-        ) ??
-        null;
+        reviewerCandidates(
+          (await workflowPolicy(client)).defaultReviewer,
+          {
+            streamLead: row.stream_lead_id,
+            manager: row.engagement_manager_id,
+            partner: row.engagement_partner_id,
+          },
+          row.assigned_to_employee_id,
+        );
       if (!reviewerId) {
         throw new BadRequestException('Choose a reviewer before sending this task for review.');
       }
@@ -340,7 +349,9 @@ export class TaskWorkflowService {
                 WHERE d.task_id = t.id AND bt.status NOT IN ('done','cancelled'))::int AS blocked_by_open,
               hsdg.is_engagement_lead(t.engagement_id) AS is_lead,
               e.kind AS engagement_kind, e.status AS engagement_status,
-              e.engagement_partner_id, e.engagement_manager_id
+              e.engagement_partner_id, e.engagement_manager_id,
+              (SELECT es.lead_employee_id FROM hsdg.engagement_services es
+                WHERE es.id = t.engagement_service_id) AS stream_lead_id
          FROM hsdg.tasks t
          JOIN hsdg.engagements e ON e.id = t.engagement_id
         WHERE t.id = $1 AND t.engagement_id = $2`,

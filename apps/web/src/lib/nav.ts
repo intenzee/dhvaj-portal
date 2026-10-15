@@ -27,8 +27,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** One plain-language line on what the screen is for — shown as a tooltip and in the Help panel. */
   hint: string;
-  /** Permission required to see the item (undefined ⇒ always visible). */
-  permission?: PermissionSlug;
+  /** Permission required to see the item — any one of a list (undefined ⇒ always visible). */
+  permission?: PermissionSlug | PermissionSlug[];
   /** Screens not yet built in this foundation render a "coming soon" placeholder. */
   ready: boolean;
   /**
@@ -80,7 +80,13 @@ export const NAV_SECTIONS: NavSection[] = [
         flag: 'todayView',
         ready: true,
       },
-      { label: 'Home', href: '/', icon: Home, hint: 'Your dashboard — what needs attention today.', ready: true },
+      {
+        label: 'Home',
+        href: '/',
+        icon: Home,
+        hint: 'Your dashboard — what needs attention today.',
+        ready: true,
+      },
       {
         label: 'My Work',
         href: '/my-work',
@@ -216,8 +222,9 @@ export const NAV_SECTIONS: NavSection[] = [
         label: 'Administration',
         href: '/admin',
         icon: Settings,
-        hint: 'Users, roles, offices and firm templates.',
-        permission: PERMISSION.userManage,
+        hint: 'Users, roles, offices, firm templates and the firm’s workflow policy.',
+        // Partners set the workflow policy without administering users.
+        permission: [PERMISSION.userManage, PERMISSION.workflowManage],
         hideFor: PREPARER_ROLES,
         ready: true,
       },
@@ -236,7 +243,11 @@ function onlyIn(principal: Principal | null, roles: RoleSlug[]): boolean {
 }
 
 function canSee(item: NavItem, principal: Principal | null, opts: NavOptions): boolean {
-  if (item.permission && !(principal?.permissions ?? []).includes(item.permission)) return false;
+  if (item.permission) {
+    const held = principal?.permissions ?? [];
+    const needed = Array.isArray(item.permission) ? item.permission : [item.permission];
+    if (!needed.some((p) => held.includes(p))) return false;
+  }
   if (item.flag && !opts[item.flag]) return false;
   if (!opts.workLinks) return true;
   if (item.foldedInto) return false;

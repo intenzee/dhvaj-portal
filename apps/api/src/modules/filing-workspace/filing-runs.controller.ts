@@ -69,9 +69,12 @@ export class FilingRunsController {
 
   @Post('assign')
   @HttpCode(200)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
     summary: 'Assign a preparer and/or reviewer on many filings (per-filing result)',
+    description:
+      'Per filing: an engagement lead, or the filing’s stream lead when the firm lets stream ' +
+      'leads bulk-assign (Admin → Workflow). Others get that filing back as failed.',
   })
   assign(
     @CurrentPrincipal() principal: Principal,

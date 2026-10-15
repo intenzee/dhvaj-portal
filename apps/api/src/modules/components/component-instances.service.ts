@@ -722,7 +722,8 @@ export class ComponentInstancesService {
   private async loadVersions(client: PoolClient, ruleId: string): Promise<RuleVersionRow[]> {
     const { rows } = await client.query<RuleVersionRow>(
       `SELECT id, effective_from::text, effective_to::text, calculation_basis, offset_months,
-              offset_days, fixed_month, fixed_day, working_day_adjustment, internal_sla_offset_days,
+              offset_days, fixed_month, fixed_day, working_day_adjustment,
+              hsdg.internal_due_days(compliance_rule_id, internal_sla_offset_days) AS internal_sla_offset_days,
               offset_working_days
        FROM hsdg.compliance_rule_versions
        WHERE compliance_rule_id = $1

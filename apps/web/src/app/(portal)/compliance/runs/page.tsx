@@ -100,7 +100,8 @@ function RunsScreen(): JSX.Element {
 
   useEffect(() => setSelected((s) => pruneSelection(s, rows)), [rows]);
 
-  const canManage = can(principal, PERMISSION.engagementManage);
+  // Managers, and stream leads where the firm allows it (the API marks each row).
+  const canManage = can(principal, PERMISSION.engagementManage) || rows.some((r) => r.canAssign);
   const toAssign = actionable(rows, selected, 'assign');
   const toRemind = actionable(rows, selected, 'remind');
   const allIds = rows.map((r) => r.instanceId);
