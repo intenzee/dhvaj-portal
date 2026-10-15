@@ -447,7 +447,8 @@ describe('Telemetry (e2e)', () => {
       .set(bearer(mp))
       .expect(400);
     await http().get(`/api/v1/telemetry/practice?${qs}`).set(bearer(mp)).expect(400);
-    // Partner B (South) cannot see Manager X (North): left out.
+    // Partner B (South) cannot see Manager X's (North) activity. Manager X is left
+    // out, or listed with nothing if an earlier suite put them on a shared engagement.
     const pb = await token('partner.b@dhvaj.in');
     const south = (
       await http()
@@ -455,6 +456,13 @@ describe('Telemetry (e2e)', () => {
         .set(bearer(pb))
         .expect(200)
     ).body as PracticeReport;
-    expect(south.people).toEqual([]);
+    for (const p of south.people)
+      expect(p).toMatchObject({
+        employeeId: mxEmp,
+        sessions: 0,
+        routes: 0,
+        rowOpens: 0,
+        actions: 0,
+      });
   });
 });
