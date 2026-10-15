@@ -10,6 +10,16 @@ import { periodLabel } from './filing-rules';
  */
 
 /**
+ * The client's phone for a reminder: the primary contact's, else the oldest
+ * with one. `entityId` is the SQL expression for the client (entity) id.
+ */
+export function clientPhoneSql(entityId: string): string {
+  return `(SELECT c.phone FROM hsdg.entity_contacts c
+            WHERE c.entity_id = ${entityId} AND NULLIF(trim(c.phone), '') IS NOT NULL
+            ORDER BY c.is_primary DESC, c.created_at LIMIT 1)`;
+}
+
+/**
  * Upload slots the CLIENT fills (registers, statements, certificates from a
  * CS). Everything else on a checklist is the firm's own working. Client
  * approval of tax payable is client-side too but follows the working, so it is

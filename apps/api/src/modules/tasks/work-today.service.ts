@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  CLIENT_REMINDER_CHANNEL,
   TODAY_DUE_WITHIN_DAYS,
   TODAY_GROUP,
   isPastDate,
+  whatsappNumber,
   type EngagementKind,
   type TaskStatus,
   type TodayItem,
@@ -21,6 +23,8 @@ import {
   workLinkOf,
 } from '../../common/work-links';
 import { CLOSED_ENGAGEMENT_STATUSES } from '../compliance/compliance-calendar-v2.service';
+import { clientPhoneSql } from '../filing-workspace/client-chase';
+import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { WorkReviewsService } from './work-reviews.service';
 import { buildTodayView, reviewToToday } from './work-today';
 
@@ -115,16 +119,40 @@ export class WorkTodayService {
           [TODAY_GROUP.review]: (await this.reviews.itemsWith(client, me)).map((r) =>
             reviewToToday(r, today, me),
           ),
-          [TODAY_GROUP.waiting]: [
+          [TODAY_GROUP.waiting]: await this.withWhatsapp(client, [
             ...tasks.filter((t) => t.group === TODAY_GROUP.waiting),
             ...(await this.myRequests(client, me, eng, today, listedWaiting(tasks))),
-          ],
+          ]),
           [TODAY_GROUP.dueSoon]: await this.filingsDueSoon(client, me, eng, today),
         },
         engagementId,
       );
       return view;
     });
+  }
+
+  /**
+   * PS-001: on rows waiting on a filing's client, whether to offer WhatsApp
+   * beside the firm's reminder. One query for every such filing, none when
+   * WhatsApp is already the firm's channel.
+   */
+  private async withWhatsapp(client: PoolClient, items: TodayItem[]): Promise<TodayItem[]> {
+    const ids = [...new Set(items.flatMap((i) => (i.link.instanceId ? [i.link.instanceId] : [])))];
+    if (ids.length === 0) return items;
+    let reachable = new Set<string>();
+    if ((await workflowPolicy(client)).clientReminderChannel !== CLIENT_REMINDER_CHANNEL.whatsapp) {
+      const { rows } = await client.query<{ id: string; phone: string | null }>(
+        `SELECT ci.id, ${clientPhoneSql('e.entity_id')} AS phone
+           FROM hsdg.compliance_instances ci
+           JOIN hsdg.engagements e ON e.id = ci.engagement_id
+          WHERE ci.id = ANY($1::uuid[])`,
+        [ids],
+      );
+      reachable = new Set(rows.filter((r) => whatsappNumber(r.phone)).map((r) => r.id));
+    }
+    return items.map((i) =>
+      i.link.instanceId ? { ...i, offersWhatsapp: reachable.has(i.link.instanceId) } : i,
+    );
   }
 
   /** My tasks to prepare (todo / in_progress / paused) and the ones waiting on the client (blocked). */

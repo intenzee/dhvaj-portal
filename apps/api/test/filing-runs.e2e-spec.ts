@@ -511,4 +511,70 @@ describe('Filing runs + client chasing (e2e)', () => {
       await setChannel('email');
     }
   });
+
+  it('sends by the channel asked for (PS-001), and refuses one the client cannot be reached on', async () => {
+    // The firm's channel stays e-mail (off in e2e, so it would fall back to copy).
+    const d = await filing(pa, 'Bharat', { manager: managerX });
+    const entityId = (
+      await su.query<{ entity_id: string }>(
+        `SELECT entity_id FROM hsdg.engagements WHERE id = $1`,
+        [d.eng],
+      )
+    ).rows[0]!.entity_id;
+    await su.query(`DELETE FROM hsdg.entity_contacts WHERE entity_id = $1`, [entityId]);
+    const remind = (channel?: string) =>
+      http()
+        .post(`/api/v1/compliance-instances/${d.inst}/client-chase/remind`)
+        .set(bearer(pa))
+        .send(channel ? { channel } : {});
+    const requests = async () =>
+      Number(
+        (
+          await su.query<{ n: string }>(
+            `SELECT count(*) AS n FROM hsdg.client_dependencies WHERE compliance_instance_id = $1`,
+            [d.inst],
+          )
+        ).rows[0]!.n,
+      );
+
+    // No phone: WhatsApp is refused before anything is asked of the client.
+    expect((await chase(pa, d.inst).expect(200)).body).toMatchObject({ canWhatsapp: false });
+    const refused = await remind('whatsapp').expect(400);
+    expect(refused.body.message).toMatch(/no phone number/i);
+    expect(await requests()).toBe(0);
+    await remind('email').expect(400);
+    await remind('sms').expect(400);
+
+    await su.query(
+      `INSERT INTO hsdg.entity_contacts (entity_id, full_name, phone, is_primary)
+       VALUES ($1, 'Accounts', '98765 43210', true)`,
+      [entityId],
+    );
+    expect((await chase(pa, d.inst).expect(200)).body).toMatchObject({
+      channel: 'copy',
+      fallback: 'no_email',
+      canWhatsapp: true,
+    });
+    const wa = (await remind('whatsapp').expect(200)).body;
+    expect(wa).toMatchObject({ instanceId: d.inst, channel: 'whatsapp', raised: 1 });
+    expect(wa.waUrl).toBe(`https://wa.me/919876543210?text=${encodeURIComponent(wa.text)}`);
+    const audit = await su.query<{ after_state: Record<string, unknown> }>(
+      `SELECT after_state FROM hsdg.audit_events
+        WHERE action = 'filing.client_reminded' AND object_id = $1
+        ORDER BY occurred_at DESC, id DESC`,
+      [d.inst],
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0]!.after_state).toMatchObject({
+      channel: 'whatsapp',
+      fallback: null,
+      requested: 'whatsapp',
+    });
+
+    // Without a channel the firm's setting still decides.
+    expect((await remind().expect(200)).body).toMatchObject({
+      channel: 'copy',
+      fallback: 'no_email',
+    });
+  });
 });
