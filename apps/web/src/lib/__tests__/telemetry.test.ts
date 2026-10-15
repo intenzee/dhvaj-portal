@@ -1,5 +1,5 @@
 import { isExactLanding, telemetryPath } from '@hsdg/contracts';
-import { isNewRoute, rowOpenFrom, sourceOf } from '@/lib/telemetry';
+import { classifyChange, isNewRoute, rowOpenFrom, sourceOf } from '@/lib/telemetry';
 import { changeOf, formatMeasure } from '@/components/reports/workflow-measures';
 
 const ENG = '/engagements/7f1c2a9e-3b4d-4c5e-8f6a-0b1c2d3e4f5a';
@@ -68,11 +68,35 @@ describe('workflow measures', () => {
     expect(formatMeasure(2, 'steps')).toBe('2 steps');
     expect(formatMeasure(93.5, 'percent')).toBe('93.5%');
     expect(formatMeasure(4.25, 'hours')).toBe('4.25 h');
+    expect(formatMeasure(0.42, 'hours')).toBe('25 min');
+    expect(formatMeasure(0, 'hours')).toBe('< 1 min');
   });
 
   it('compares with the window before', () => {
     expect(changeOf({ value: 7, previous: 10 })).toBe(-30);
     expect(changeOf({ value: 7, previous: null })).toBeNull();
     expect(changeOf({ value: 7, previous: 0 })).toBeNull();
+  });
+});
+
+describe('classifyChange — steps are the person’s', () => {
+  it('the first page of a load is a step', () => {
+    expect(classifyChange(null, '/?landing=1', false)).toBe('route');
+  });
+
+  it('a URL the app changes on its own is a redirect, not a step', () => {
+    expect(classifyChange('/?landing=1', '/today', false)).toBe('redirect');
+    expect(classifyChange(`${ENG}?tab=gst`, `${ENG}?tab=gst&m=9`, false)).toBe('redirect');
+  });
+
+  it('a page the person moved to is a step', () => {
+    expect(classifyChange('/today', `${ENG}?tab=gst&m=9&part=outward`, true)).toBe('route');
+    expect(classifyChange('/compliance/runs?run=x', '/compliance/runs?run=x&open=i1', true)).toBe(
+      'route',
+    );
+  });
+
+  it('the same place with other values is nothing', () => {
+    expect(classifyChange(`${ENG}?tab=gst&m=9`, `${ENG}?tab=gst&m=10`, true)).toBeNull();
   });
 });

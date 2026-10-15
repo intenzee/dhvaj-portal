@@ -2,13 +2,15 @@
  * Staff Workflow · How we measure it — lightweight client events with no
  * content, and the measures report built on them.
  *
- * An event is a route change or a list row opened: the path with every id
+ * An event is a page the person moved to (`route`), a URL the app changed on
+ * its own — a redirect or a default filled in (`redirect`, not a step), or a
+ * list row opened (`row_open`): the path with every id
  * replaced, the NAMES of its query parameters (never their values), the list it
  * came from, and a per-tab session id. Shared so the web app and the API strip
  * content the same way.
  */
 
-export const TELEMETRY_KIND = { route: 'route', rowOpen: 'row_open' } as const;
+export const TELEMETRY_KIND = { route: 'route', redirect: 'redirect', rowOpen: 'row_open' } as const;
 export type TelemetryKind = (typeof TELEMETRY_KIND)[keyof typeof TELEMETRY_KIND];
 export const TELEMETRY_KINDS: TelemetryKind[] = Object.values(TELEMETRY_KIND);
 
