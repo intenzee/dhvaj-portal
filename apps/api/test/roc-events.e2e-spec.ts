@@ -20,7 +20,9 @@ describe('ROC events (e2e)', () => {
   const http = () => request(app.getHttpServer());
   const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
   const b64 = (s: string) => Buffer.from(s).toString('base64');
-  let seq = 0;
+  // PAN and CIN are unique, so each company takes the next of 10,000 numbers,
+  // starting from the clock so a rerun on the same database starts elsewhere.
+  let seq = Math.floor(Date.now() / 1000);
 
   type Item = {
     instanceId: string;
@@ -51,7 +53,7 @@ describe('ROC events (e2e)', () => {
     opts: { type?: string; cin?: boolean; directors?: object[] } = {},
   ): Promise<{ eng: string; entity: string; reg: string | null }> => {
     seq += 1;
-    const n = `${String(Date.now()).slice(-3)}${seq}`.slice(-4);
+    const n = String(seq % 10000).padStart(4, '0');
     const type = opts.type ?? 'private_limited';
     const entity = await http()
       .post('/api/v1/entities')
