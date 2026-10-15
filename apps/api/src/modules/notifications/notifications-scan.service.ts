@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { NOTIFICATION_TYPE } from '@hsdg/contracts';
+import { NOTIFICATION_TYPE, REMINDER_CHANNEL_SETTING } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AppConfigService } from '../../config/config.module';
 import { NotificationsService } from './notifications.service';
+import { workflowPolicy } from '../workflow-settings/workflow-policy';
 
 /** What one sweep produced, by event type. */
 export interface ScanResult {
@@ -300,6 +301,10 @@ export class NotificationsScanService {
            )`,
       );
 
+      // The client is e-mailed only when the firm reminds clients by e-mail;
+      // under WhatsApp or copy the team, escalated below, reaches them instead.
+      const emailClients =
+        (await workflowPolicy(client)).clientReminderChannel === REMINDER_CHANNEL_SETTING.email;
       for (const row of deps) {
         const context = `${row.engagement_code} · ${row.entity_name}`;
         if (row.escalation_overdue) {
@@ -319,16 +324,17 @@ export class NotificationsScanService {
           });
           // §24 "PBC overdue → client + owner": also reach the CLIENT directly,
           // via the delivery outbox to their contact email (no portal row).
-          result.clientDeliveryEnqueued += await this.notifications.enqueueClientDeliveryWith(
-            client,
-            {
-              recipientEmail: row.client_email,
-              type: NOTIFICATION_TYPE.clientDependencyOverdue,
-              title: `Information overdue — ${row.engagement_code}`,
-              body: `The following is overdue; please provide it at the earliest: ${row.requested_info}.`,
-              engagementId: row.engagement_id,
-            },
-          );
+          if (emailClients)
+            result.clientDeliveryEnqueued += await this.notifications.enqueueClientDeliveryWith(
+              client,
+              {
+                recipientEmail: row.client_email,
+                type: NOTIFICATION_TYPE.clientDependencyOverdue,
+                title: `Information overdue — ${row.engagement_code}`,
+                body: `The following is overdue; please provide it at the earliest: ${row.requested_info}.`,
+                engagementId: row.engagement_id,
+              },
+            );
         } else {
           result.clientDependencyReminder += await this.notifications.emitWith(client, ctx, {
             type: NOTIFICATION_TYPE.clientDependencyReminder,

@@ -1,9 +1,21 @@
-import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Put, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type WorkflowMeasuresReport } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type PracticeReport,
+  type WorkflowBaselineInfo,
+  type WorkflowMeasuresReport,
+  type WorkflowTarget,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
-import { TelemetryBatchDto, WorkflowMeasuresQueryDto } from './telemetry.dto';
+import {
+  PracticeQueryDto,
+  SaveWorkflowBaselineDto,
+  TelemetryBatchDto,
+  WorkflowMeasuresQueryDto,
+  WorkflowTargetsUpdateDto,
+} from './telemetry.dto';
 import { TelemetryService } from './telemetry.service';
 
 /**
@@ -44,5 +56,58 @@ export class TelemetryController {
     @Query() query: WorkflowMeasuresQueryDto,
   ): Promise<WorkflowMeasuresReport> {
     return this.telemetry.measures(rlsContextFromPrincipal(principal), query);
+  }
+
+  @Get('practice')
+  @RequirePermissions(PERMISSION.reportRead)
+  @ApiOperation({
+    summary: 'A practice session: chosen people over an exact window',
+    description:
+      'Per person: sessions, steps from sign-in to the first filing (median), pages moved to, ' +
+      'row opens and how many landed on the exact item, and task status changes plus filings ' +
+      'lodged, with pages per action. At most 7 days; people the caller cannot see are left out.',
+  })
+  practice(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: PracticeQueryDto,
+  ): Promise<PracticeReport> {
+    return this.telemetry.practice(rlsContextFromPrincipal(principal), query);
+  }
+
+  @Post('baselines')
+  @RequirePermissions(PERMISSION.workflowManage)
+  @ApiOperation({
+    summary: 'Save the measures for a window as the baseline',
+    description:
+      'Freezes the six measures for the IST days given, for the firm or one office. The ' +
+      'latest baseline for a scope is the one the report compares with. Audited.',
+  })
+  saveBaseline(
+    @CurrentPrincipal() principal: Principal,
+    @Body() body: SaveWorkflowBaselineDto,
+  ): Promise<WorkflowBaselineInfo> {
+    return this.telemetry.saveBaseline(rlsContextFromPrincipal(principal), body);
+  }
+
+  @Get('targets')
+  @RequirePermissions(PERMISSION.reportRead)
+  @ApiOperation({ summary: 'The target the partners set for each measure' })
+  targets(@CurrentPrincipal() principal: Principal): Promise<WorkflowTarget[]> {
+    return this.telemetry.targets(rlsContextFromPrincipal(principal));
+  }
+
+  @Put('targets')
+  @RequirePermissions(PERMISSION.workflowManage)
+  @ApiOperation({
+    summary: 'Set targets for some measures',
+    description:
+      'A ceiling (at_most), a floor (at_least), or a change on the baseline in per cent ' +
+      '(change_by, −30 = thirty per cent lower). Measures left out keep theirs. Audited.',
+  })
+  setTargets(
+    @CurrentPrincipal() principal: Principal,
+    @Body() body: WorkflowTargetsUpdateDto,
+  ): Promise<WorkflowTarget[]> {
+    return this.telemetry.setTargets(rlsContextFromPrincipal(principal), body.items);
   }
 }

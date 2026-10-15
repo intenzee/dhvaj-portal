@@ -79,6 +79,29 @@ describe('workItemHref — the URL rules table', () => {
     });
   });
 
+  it('a statutory-audit task about one area opens the audit file on that area', () => {
+    expect(
+      query(href({ engagementKind: 'statutory_audit', taskId: 't1', auditAreaId: 'a1' })),
+    ).toEqual({ tab: 'audit_file', phase: 'audit_areas', area: 'a1', task: 't1' });
+    // The area only rides on a task with no filing, on a statutory audit.
+    expect(query(href({ engagementKind: 'assignment', taskId: 't1', auditAreaId: 'a1' }))).toEqual(
+      { tab: 'work', task: 't1' },
+    );
+    expect(
+      query(
+        href({
+          engagementKind: 'statutory_audit',
+          instanceId: 'i1',
+          stream: 'gst',
+          periodKey: '2026-09',
+          taskId: 't1',
+          auditAreaId: 'a1',
+        }),
+      ),
+    ).toEqual({ tab: 'gst', fy: '2026-27', m: '9', task: 't1' });
+    expect(query(href({ engagementKind: 'statutory_audit', auditAreaId: 'a1' }))).toEqual({});
+  });
+
   it('client request on a filing: the filing URL plus request', () => {
     expect(
       query(href({ instanceId: 'i1', stream: 'gst', periodKey: '2026-09', requestId: 'd1' })),

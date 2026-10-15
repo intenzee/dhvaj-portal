@@ -216,6 +216,17 @@ describe('Filing runs page', () => {
         return Promise.resolve({
           succeeded: ['1'],
           failed: [{ instanceId: '2', message: 'You are not on this engagement.' }],
+          reminders: [
+            {
+              instanceId: '1',
+              client: 'Client 1',
+              channel: 'whatsapp',
+              waUrl: 'https://wa.me/919876543210?text=Please',
+              text: 'Please',
+              waitingOn: ['Sales register'],
+              raised: 0,
+            },
+          ],
         });
       return Promise.resolve({ items: [] });
     });
@@ -250,6 +261,14 @@ describe('Filing runs page', () => {
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText(/Client 2: You are not on this engagement/)).toBeInTheDocument();
     expect(toast).toHaveBeenCalledWith('Reminded 1 filing; 1 could not be done.', 'error');
+    // Under the WhatsApp channel each reminded client is one tap away.
+    const toSend = screen.getByRole('region', { name: 'Reminders to send' });
+    expect(
+      within(toSend).getByRole('link', { name: 'Open WhatsApp for Client 1' }),
+    ).toHaveAttribute('href', 'https://wa.me/919876543210?text=Please');
+    expect(
+      within(toSend).getByRole('button', { name: 'Copy text for Client 1' }),
+    ).toBeInTheDocument();
   });
 
   it('offers Assign only for filings the caller leads', async () => {

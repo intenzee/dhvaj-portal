@@ -9,6 +9,7 @@ import type {
   EngagementKind,
   FilingRun,
   FilingRunBulkResult,
+  FilingRunRemindResult,
   FilingRunForm,
   FilingRunRow,
   FilingStatus,
@@ -291,14 +292,18 @@ export class FilingRunsService {
   }
 
   /** POST /compliance/runs/remind — WF-302's reminder on each filing. */
-  async remind(ctx: RlsContext, instanceIds: string[]): Promise<FilingRunBulkResult> {
+  async remind(ctx: RlsContext, instanceIds: string[]): Promise<FilingRunRemindResult> {
     const result = await this.chase.remindMany(ctx, unique(instanceIds));
     await this.db.withRlsContext(ctx, (client) =>
       this.audit.recordWith(client, ctx, {
         action: 'filing_run.reminded',
         objectType: 'filing_run',
         objectId: 'bulk',
-        after: { succeeded: result.succeeded, failed: result.failed.map((f) => f.instanceId) },
+        after: {
+          succeeded: result.succeeded,
+          failed: result.failed.map((f) => f.instanceId),
+          channels: Object.fromEntries(result.reminders.map((r) => [r.instanceId, r.channel])),
+        },
       }),
     );
     return result;

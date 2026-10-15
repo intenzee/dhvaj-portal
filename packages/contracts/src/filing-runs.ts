@@ -1,3 +1,4 @@
+import type { ClientReminderResult } from './client-chase';
 import type { EngagementKind, FilingStatus, PeriodSection } from './engagement-restructure';
 import type { TaskStatus } from './tasks';
 import type { WorkItemRef } from './work-links';
@@ -75,4 +76,9 @@ export interface FilingRun {
 export interface FilingRunBulkResult {
   succeeded: string[];
   failed: { instanceId: string; message: string }[];
+}
+
+/** POST /compliance/runs/remind — each succeeded filing's reminder, to open or copy. */
+export interface FilingRunRemindResult extends FilingRunBulkResult {
+  reminders: ClientReminderResult[];
 }

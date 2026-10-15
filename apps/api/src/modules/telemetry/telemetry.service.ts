@@ -1,22 +1,38 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
   NOTIFICATION_TYPES,
   WORKFLOW_MEASURE,
+  WORKFLOW_TARGET_RULE,
+  changeOnBaseline,
+  measureOnTrack,
   notificationKind,
   telemetryPath,
+  workflowTargetLabel,
+  type PracticeReport,
   type TelemetryEventInput,
+  type WorkflowBaselineInfo,
   type WorkflowMeasure,
+  type WorkflowMeasureKey,
   type WorkflowMeasuresReport,
+  type WorkflowTarget,
+  type WorkflowTargetRule,
 } from '@hsdg/contracts';
+import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { istToday } from '../engagements/time/auto-time';
-import type { WorkflowMeasuresQueryDto } from './telemetry.dto';
+import type {
+  PracticeQueryDto,
+  SaveWorkflowBaselineDto,
+  WorkflowMeasuresQueryDto,
+} from './telemetry.dto';
 
 const DAY_MS = 86_400_000;
 /** The longest window the report measures. */
 const MAX_DAYS = 366;
+/** The longest practice session. */
+const PRACTICE_MAX_MS = 7 * DAY_MS;
 /** Engagements that never carry live work. */
 const DEAD_ENGAGEMENT = ['cancelled', 'declined', 'withdrawn', 'merged'];
 const ACTIONABLE_TYPES = NOTIFICATION_TYPES.filter((t) => notificationKind(t) === 'actionable');
@@ -31,6 +47,23 @@ function istStart(day: string): Date {
 }
 const num = (v: string | number | null | undefined): number | null =>
   v === null || v === undefined ? null : Math.round(Number(v) * 100) / 100;
+
+/** A measure before the baseline and target are laid on it. */
+type RawMeasure = Omit<
+  WorkflowMeasure,
+  'baseline' | 'vsBaseline' | 'target' | 'targetLabel' | 'onTrack'
+>;
+
+const MEASURE_ORDER = Object.values(WORKFLOW_MEASURE);
+/** The plan's starting points — what the migration seeds. */
+const DEFAULT_TARGETS: Record<WorkflowMeasureKey, WorkflowTarget> = {
+  steps_to_first_action: { key: 'steps_to_first_action', rule: 'at_most', value: 2 },
+  exact_link_share: { key: 'exact_link_share', rule: 'at_least', value: 90 },
+  review_wait: { key: 'review_wait', rule: 'change_by', value: -30 },
+  filings_past_internal: { key: 'filings_past_internal', rule: 'change_by', value: -25 },
+  received_to_filed: { key: 'received_to_filed', rule: 'change_by', value: -20 },
+  unread_per_user: { key: 'unread_per_user', rule: 'at_most', value: 10 },
+};
 
 /** One window's raw numbers. */
 interface WindowNumbers {
@@ -56,7 +89,10 @@ interface WindowNumbers {
  */
 @Injectable()
 export class TelemetryService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly audit: AuditService,
+  ) {}
 
   async record(ctx: RlsContext, events: TelemetryEventInput[], now = new Date()): Promise<void> {
     const rows = events.map((e) => {
@@ -89,25 +125,247 @@ export class TelemetryService {
   }
 
   async measures(ctx: RlsContext, q: WorkflowMeasuresQueryDto): Promise<WorkflowMeasuresReport> {
-    const today = istToday();
-    const to = q.to ?? today;
+    const { from, to, days } = this.days(q);
+    const officeId = q.officeId ?? null;
+    return this.db.withRlsContext(ctx, async (client) => {
+      const raw = await this.rawMeasures(client, from, to, days, officeId);
+      const targets = await this.readTargets(client);
+      const b = await client.query<{
+        id: string;
+        from_day: string;
+        to_day: string;
+        office_id: string | null;
+        created_at: Date;
+        saved_by: string | null;
+        measures: Record<string, number | null>;
+      }>(
+        `SELECT b.id, b.from_day::text, b.to_day::text, b.office_id, b.created_at,
+                u.display_name AS saved_by, b.measures
+           FROM hsdg.workflow_baselines b
+           LEFT JOIN hsdg.users u ON u.id = b.saved_by_user_id
+          WHERE b.office_id IS NOT DISTINCT FROM $1
+          ORDER BY b.created_at DESC, b.id DESC LIMIT 1`,
+        [officeId],
+      );
+      const row = b.rows[0];
+      const baseline: WorkflowBaselineInfo | null = row
+        ? {
+            id: row.id,
+            from: row.from_day,
+            to: row.to_day,
+            officeId: row.office_id,
+            savedAt: row.created_at.toISOString(),
+            savedBy: row.saved_by,
+          }
+        : null;
+      const measures = raw.map((m): WorkflowMeasure => {
+        const target = targets.find((t) => t.key === m.key) ?? DEFAULT_TARGETS[m.key];
+        const base = row ? num(row.measures[m.key]) : null;
+        return {
+          ...m,
+          baseline: base,
+          vsBaseline: changeOnBaseline(m.value, base),
+          target,
+          targetLabel: workflowTargetLabel(target, m.unit),
+          onTrack: measureOnTrack(m.value, base, target),
+        };
+      });
+      return { from, to, officeId, baseline, measures };
+    });
+  }
+
+  /**
+   * Freeze the six measures for a window as the baseline for its scope (the
+   * firm, or one office). Never edited: a later save becomes the baseline.
+   */
+  async saveBaseline(ctx: RlsContext, q: SaveWorkflowBaselineDto): Promise<WorkflowBaselineInfo> {
+    const { from, to, days } = this.days(q);
+    if (to > istToday()) throw new BadRequestException('A baseline is a window already measured');
+    const officeId = q.officeId ?? null;
+    // A partner measures only their office's people, so that is what they baseline.
+    if (ctx.role !== 'managing_partner' && (!officeId || officeId !== ctx.officeId))
+      throw new ForbiddenException('A partner saves the baseline for their own office');
+    return this.db.withRlsContext(ctx, async (client) => {
+      const raw = await this.rawMeasures(client, from, to, days, officeId);
+      const values = Object.fromEntries(raw.map((m) => [m.key, m.value]));
+      const { rows } = await client.query<{ id: string; created_at: Date; saved_by: string }>(
+        `WITH b AS (
+           INSERT INTO hsdg.workflow_baselines (office_id, from_day, to_day, measures)
+           VALUES ($1, $2, $3, $4::jsonb)
+           RETURNING id, created_at, saved_by_user_id
+         )
+         SELECT b.id, b.created_at, u.display_name AS saved_by
+           FROM b LEFT JOIN hsdg.users u ON u.id = b.saved_by_user_id`,
+        [officeId, from, to, JSON.stringify(values)],
+      );
+      const r = rows[0]!;
+      await this.audit.recordWith(client, ctx, {
+        action: 'workflow.baseline_saved',
+        objectType: 'workflow_baseline',
+        objectId: r.id,
+        after: { from, to, officeId, measures: values },
+      });
+      return {
+        id: r.id,
+        from,
+        to,
+        officeId,
+        savedAt: r.created_at.toISOString(),
+        savedBy: r.saved_by,
+      };
+    });
+  }
+
+  /**
+   * A practice session: the people chosen, watched over an exact window (say
+   * today 10:00–11:00). Per person, from the same events as the measures: steps
+   * from sign-in to the first filing, pages moved to, row opens and the exact
+   * share, and the work done — task status changes and filings lodged — to put
+   * the pages against. People the caller cannot see are left out.
+   */
+  async practice(ctx: RlsContext, q: PracticeQueryDto): Promise<PracticeReport> {
+    const from = new Date(q.from);
+    const to = new Date(q.to);
+    const span = to.getTime() - from.getTime();
+    if (!(span > 0 && span <= PRACTICE_MAX_MS))
+      throw new BadRequestException('from must be before to, at most 7 days apart');
+    const ids = [...new Set(q.employeeIds)];
+    const { rows } = await this.db.withRlsContext(ctx, (client) =>
+      client.query<{
+        employee_id: string;
+        name: string;
+        sessions: number | null;
+        sessions_with_filing: number | null;
+        steps_median: string | null;
+        routes: number | null;
+        row_opens: number | null;
+        exact_row_opens: number | null;
+        actions: number;
+      }>(
+        `WITH emp AS (
+           SELECT e.id, e.full_name, e.user_id FROM hsdg.employees e WHERE e.id = ANY ($3::uuid[])
+         ),
+         t AS (
+           SELECT * FROM hsdg.telemetry_practice($1, $2,
+             ARRAY(SELECT user_id FROM emp WHERE user_id IS NOT NULL))
+         )
+         SELECT emp.id AS employee_id, emp.full_name AS name,
+                t.sessions, t.sessions_with_filing, t.steps_median, t.routes,
+                t.row_opens, t.exact_row_opens,
+                ((SELECT count(*) FROM hsdg.task_events te
+                   WHERE te.actor_employee_id = emp.id
+                     AND te.created_at >= $1 AND te.created_at < $2)
+                 + (SELECT count(*) FROM hsdg.filing_records fr
+                     WHERE fr.recorded_by_employee_id = emp.id
+                       AND fr.created_at >= $1 AND fr.created_at < $2))::int AS actions
+           FROM emp LEFT JOIN t ON t.user_id = emp.user_id
+          ORDER BY emp.full_name, emp.id`,
+        [from, to, ids],
+      ),
+    );
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      people: rows.map((r) => {
+        const routes = r.routes ?? 0;
+        const rowOpens = r.row_opens ?? 0;
+        const exactRowOpens = r.exact_row_opens ?? 0;
+        return {
+          employeeId: r.employee_id,
+          name: r.name,
+          sessions: r.sessions ?? 0,
+          sessionsWithFiling: r.sessions_with_filing ?? 0,
+          steps: num(r.steps_median),
+          routes,
+          rowOpens,
+          exactRowOpens,
+          exactShare: rowOpens ? Math.round((exactRowOpens / rowOpens) * 1000) / 10 : null,
+          actions: r.actions,
+          routesPerAction: r.actions ? Math.round((routes / r.actions) * 10) / 10 : null,
+        };
+      }),
+    };
+  }
+
+  async targets(ctx: RlsContext): Promise<WorkflowTarget[]> {
+    return this.db.withRlsContext(ctx, (client) => this.readTargets(client));
+  }
+
+  /** Set the targets the partners named; the others stay as they are. */
+  async setTargets(ctx: RlsContext, items: WorkflowTarget[]): Promise<WorkflowTarget[]> {
+    const keys = items.map((t) => t.key);
+    if (new Set(keys).size !== keys.length)
+      throw new BadRequestException('Each measure may appear once');
+    for (const t of items) {
+      if (t.rule === WORKFLOW_TARGET_RULE.changeBy ? t.value < -100 || t.value > 1000 : t.value < 0)
+        throw new BadRequestException(
+          t.rule === WORKFLOW_TARGET_RULE.changeBy
+            ? 'A change on the baseline is between −100% and +1000%'
+            : 'A ceiling or floor is zero or more',
+        );
+    }
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.readTargets(client);
+      const { rowCount } = await client.query(
+        `UPDATE hsdg.workflow_measure_targets t
+            SET rule = i.rule, value = i.value,
+                updated_by_user_id = hsdg.ctx_user_id(), updated_at = now()
+           FROM jsonb_to_recordset($1::jsonb) AS i(key text, rule text, value numeric)
+          WHERE t.measure_key = i.key`,
+        [JSON.stringify(items)],
+      );
+      // Keys are checked by the DTO, so a short count is RLS: not a partner.
+      if (rowCount !== items.length)
+        throw new ForbiddenException('Targets are set by the partners');
+      const after = await this.readTargets(client);
+      await this.audit.recordWith(client, ctx, {
+        action: 'workflow.targets_updated',
+        objectType: 'workflow_measure_targets',
+        before: { targets: before.filter((t) => keys.includes(t.key)) },
+        after: { targets: after.filter((t) => keys.includes(t.key)) },
+      });
+      return after;
+    });
+  }
+
+  private async readTargets(client: PoolClient): Promise<WorkflowTarget[]> {
+    const { rows } = await client.query<{
+      key: WorkflowMeasureKey;
+      rule: WorkflowTargetRule;
+      value: string;
+    }>(`SELECT measure_key AS key, rule, value FROM hsdg.workflow_measure_targets`);
+    const byKey = new Map(
+      rows.map((r) => [r.key, { key: r.key, rule: r.rule, value: Number(r.value) }]),
+    );
+    return MEASURE_ORDER.map((k) => byKey.get(k) ?? DEFAULT_TARGETS[k]);
+  }
+
+  /** The window asked for, checked: IST days, inclusive. */
+  private days(q: { from?: string; to?: string }): { from: string; to: string; days: number } {
+    const to = q.to ?? istToday();
     const from = q.from ?? shiftDay(to, -6);
     const days = Math.round((Date.parse(to) - Date.parse(from)) / DAY_MS) + 1;
-    if (days < 1 || days > MAX_DAYS)
+    if (!(days >= 1 && days <= MAX_DAYS))
       throw new BadRequestException(`from must be on or before to, at most ${MAX_DAYS} days`);
-    const officeId = q.officeId ?? null;
+    return { from, to, days };
+  }
 
+  /** The six measures for a window, with the window before it; no baseline or target yet. */
+  private async rawMeasures(
+    client: PoolClient,
+    from: string,
+    to: string,
+    days: number,
+    officeId: string | null,
+  ): Promise<RawMeasure[]> {
     const cur = { from: istStart(from), to: istStart(shiftDay(to, 1)) };
     const prev = { from: istStart(shiftDay(from, -days)), to: cur.from };
-    const [now, before] = await this.db.withRlsContext(ctx, async (client) => [
-      await this.window(client, cur.from, cur.to, officeId),
-      await this.window(client, prev.from, prev.to, officeId),
-    ]);
+    const now = await this.window(client, cur.from, cur.to, officeId);
+    const before = await this.window(client, prev.from, prev.to, officeId);
 
     const share = (w: WindowNumbers): number | null =>
       w.rowOpens ? Math.round((w.exactRowOpens / w.rowOpens) * 1000) / 10 : null;
-    const exact = share(now);
-    const measures: WorkflowMeasure[] = [
+    return [
       {
         key: WORKFLOW_MEASURE.stepsToFirstAction,
         label: 'Steps from sign-in to the first filing',
@@ -116,19 +374,15 @@ export class TelemetryService {
         previous: before.steps,
         unit: 'steps',
         sample: now.sessionsWithFiling,
-        target: '≤ 2',
-        meetsTarget: now.steps === null ? null : now.steps <= 2,
       },
       {
         key: WORKFLOW_MEASURE.exactLinkShare,
         label: 'List clicks that land on the exact item',
         how: 'Rows opened from a list whose link names a section, task, request or the filing drawer',
-        value: exact,
+        value: share(now),
         previous: share(before),
         unit: 'percent',
         sample: now.rowOpens,
-        target: '≥ 90%',
-        meetsTarget: exact === null ? null : exact >= 90,
       },
       {
         key: WORKFLOW_MEASURE.reviewWait,
@@ -138,8 +392,6 @@ export class TelemetryService {
         previous: before.reviewWaitHours,
         unit: 'hours',
         sample: now.reviews,
-        target: '−30% on the baseline',
-        meetsTarget: null,
       },
       {
         key: WORKFLOW_MEASURE.filingsPastInternal,
@@ -149,8 +401,6 @@ export class TelemetryService {
         previous: before.overdue,
         unit: 'filings',
         sample: now.overdue,
-        target: '−25% on the baseline',
-        meetsTarget: null,
       },
       {
         key: WORKFLOW_MEASURE.receivedToFiled,
@@ -160,8 +410,6 @@ export class TelemetryService {
         previous: before.receivedToFiledDays,
         unit: 'days',
         sample: now.filed,
-        target: '−20% on the baseline',
-        meetsTarget: null,
       },
       {
         key: WORKFLOW_MEASURE.unreadPerUser,
@@ -171,11 +419,8 @@ export class TelemetryService {
         previous: before.unreadPerUser,
         unit: 'notifications',
         sample: now.users,
-        target: '≤ 10',
-        meetsTarget: now.unreadPerUser === null ? null : now.unreadPerUser <= 10,
       },
     ];
-    return { from, to, officeId, measures };
   }
 
   /** The raw numbers for [from, to). */

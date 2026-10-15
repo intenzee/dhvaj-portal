@@ -434,4 +434,81 @@ describe('Filing runs + client chasing (e2e)', () => {
       'senior.y@dhvaj.in',
     ]);
   });
+
+  it('follows the firm’s reminder channel: a WhatsApp link, copy without a phone, or copy', async () => {
+    const setChannel = async (clientReminderChannel: 'email' | 'whatsapp' | 'copy') => {
+      const { version } = (
+        await http().get('/api/v1/workflow-settings').set(bearer(mp)).expect(200)
+      ).body as { version: number };
+      await http()
+        .patch('/api/v1/workflow-settings')
+        .set(bearer(mp))
+        .send({ version, clientReminderChannel })
+        .expect(200);
+    };
+    const d = await filing(pa, 'Bharat', { manager: managerX });
+    const entityId = (
+      await su.query<{ entity_id: string }>(
+        `SELECT entity_id FROM hsdg.engagements WHERE id = $1`,
+        [d.eng],
+      )
+    ).rows[0]!.entity_id;
+    await su.query(`DELETE FROM hsdg.entity_contacts WHERE entity_id = $1`, [entityId]);
+    await su.query(
+      `INSERT INTO hsdg.entity_contacts (entity_id, full_name, phone, is_primary)
+       VALUES ($1, 'Accounts', '+91 98765-43210', true)`,
+      [entityId],
+    );
+    const reminded = async () =>
+      (
+        await su.query<{ after_state: { channel: string; fallback: string | null } }>(
+          `SELECT after_state FROM hsdg.audit_events
+            WHERE action = 'filing.client_reminded' AND object_id = $1
+            ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+          [d.inst],
+        )
+      ).rows[0]!.after_state;
+
+    try {
+      await setChannel('whatsapp');
+      expect((await chase(pa, d.inst).expect(200)).body).toMatchObject({
+        channel: 'whatsapp',
+        fallback: null,
+        clientPhone: '+91 98765-43210',
+      });
+      const bulk = await http()
+        .post('/api/v1/compliance/runs/remind')
+        .set(bearer(pa))
+        .send({ instanceIds: [d.inst] })
+        .expect(200);
+      expect(bulk.body.succeeded).toEqual([d.inst]);
+      const wa = bulk.body.reminders[0];
+      expect(wa).toMatchObject({ instanceId: d.inst, channel: 'whatsapp', raised: 1 });
+      expect(wa.waUrl).toBe(`https://wa.me/919876543210?text=${encodeURIComponent(wa.text)}`);
+      expect(wa.text).toContain('• Sales register');
+      expect(await reminded()).toMatchObject({ channel: 'whatsapp', fallback: null });
+
+      // No usable phone: the reminder falls back to copy and says why — not an error.
+      await su.query(`UPDATE hsdg.entity_contacts SET phone = NULL WHERE entity_id = $1`, [
+        entityId,
+      ]);
+      const noPhone = await http()
+        .post(`/api/v1/compliance-instances/${d.inst}/client-chase/remind`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(noPhone.body).toMatchObject({ channel: 'copy', fallback: 'no_phone' });
+      expect(noPhone.body.waUrl).toBeUndefined();
+      expect(await reminded()).toMatchObject({ channel: 'copy', fallback: 'no_phone' });
+
+      await setChannel('copy');
+      const copied = await http()
+        .post(`/api/v1/compliance-instances/${d.inst}/client-chase/remind`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(copied.body).toMatchObject({ channel: 'copy', fallback: null });
+      expect(await reminded()).toMatchObject({ channel: 'copy', fallback: null });
+    } finally {
+      await setChannel('email');
+    }
+  });
 });

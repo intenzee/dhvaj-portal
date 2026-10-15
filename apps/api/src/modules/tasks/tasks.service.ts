@@ -66,6 +66,7 @@ export interface TaskRow {
   reviewer_name: string | null;
   work_type: WorkType | null;
   source_compliance_instance_id: string | null;
+  audit_work_area_id: string | null;
   sent_for_review_at: Date | null;
   review_started_at: Date | null;
   version: number;
@@ -89,7 +90,8 @@ export const TASK_BASE = `
          t.out_of_scope_approved_at, t.out_of_scope_approved_by_employee_id,
          obe.full_name AS out_of_scope_approved_by_name,
          t.engagement_service_id, tsv.stream, t.reviewer_employee_id, re.full_name AS reviewer_name,
-         t.work_type, t.source_compliance_instance_id, t.sent_for_review_at, t.review_started_at,
+         t.work_type, t.source_compliance_instance_id, t.audit_work_area_id,
+         t.sent_for_review_at, t.review_started_at,
          t.version, t.created_at, t.updated_at
   FROM hsdg.tasks t
   LEFT JOIN hsdg.employees ae ON ae.id = t.assigned_to_employee_id
@@ -124,15 +126,17 @@ export class TasksService {
         await this.requireMember(client, engagementId, input.reviewerEmployeeId);
       }
       const links = await this.resolveWorkLinks(client, engagementId, input);
+      if (input.auditAreaId) await this.requireAuditArea(client, engagementId, input.auditAreaId);
       let id: string;
       try {
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO hsdg.tasks
              (engagement_id, title, description, assigned_to_employee_id, created_by_employee_id,
               priority, due_date, is_out_of_scope, is_billable,
-              engagement_service_id, reviewer_employee_id, work_type, source_compliance_instance_id)
+              engagement_service_id, reviewer_employee_id, work_type, source_compliance_instance_id,
+              audit_work_area_id)
            VALUES ($1,$2,$3,$4,$5,COALESCE($6,'normal'),$7,COALESCE($8,false),COALESCE($9,false),
-                   $10,$11,$12,$13)
+                   $10,$11,$12,$13,$14)
            RETURNING id`,
           [
             engagementId,
@@ -148,6 +152,7 @@ export class TasksService {
             input.reviewerEmployeeId ?? null,
             input.workType ?? (input.complianceInstanceId ? 'filing' : null),
             input.complianceInstanceId ?? null,
+            input.auditAreaId ?? null,
           ],
         );
         id = rows[0]!.id;
@@ -284,6 +289,7 @@ export class TasksService {
           engagementServiceId: input.engagementServiceId,
         });
       }
+      if (input.auditAreaId) await this.requireAuditArea(client, engagementId, input.auditAreaId);
       const sets: string[] = [];
       const params: unknown[] = [];
       const set = (col: string, val: unknown): void => {
@@ -301,6 +307,7 @@ export class TasksService {
       if (input.reviewerEmployeeId !== undefined)
         set('reviewer_employee_id', input.reviewerEmployeeId);
       if (input.workType !== undefined) set('work_type', input.workType);
+      if (input.auditAreaId !== undefined) set('audit_work_area_id', input.auditAreaId);
       if (sets.length === 0) return before;
 
       await this.versionedUpdate(client, taskId, engagementId, sets, params, input.version, false);
@@ -554,6 +561,20 @@ export class TasksService {
     return { engagementServiceId };
   }
 
+  /** A task's audit area must be an area of its own engagement's audit file. */
+  private async requireAuditArea(
+    client: PoolClient,
+    engagementId: string,
+    auditAreaId: string,
+  ): Promise<void> {
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.audit_work_areas WHERE id = $1 AND engagement_id = $2`,
+      [auditAreaId, engagementId],
+    );
+    if (!rows[0])
+      throw new BadRequestException('That area is not in this engagement’s audit file.');
+  }
+
   private async requireEngagement(client: PoolClient, engagementId: string): Promise<void> {
     const eng = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [engagementId]);
     if (!eng.rows[0]) throw new NotFoundException('Engagement not found.');
@@ -700,6 +721,7 @@ function mapTask(row: TaskRow): TaskRecord {
     reviewerName: row.reviewer_name,
     workType: row.work_type,
     complianceInstanceId: row.source_compliance_instance_id,
+    auditAreaId: row.audit_work_area_id,
     sentForReviewAt: row.sent_for_review_at ? row.sent_for_review_at.toISOString() : null,
     reviewStartedAt: row.review_started_at ? row.review_started_at.toISOString() : null,
     version: row.version,
@@ -730,7 +752,12 @@ export function myTaskOf(r: MyTaskRow): MyTaskRecord {
     registrationNumber: filing.registrationNumber,
     filing: workFilingContextOf(r),
     link: workLinkOf(
-      { engagementId: r.engagement_id, engagementKind: r.engagement_kind, taskId: r.id },
+      {
+        engagementId: r.engagement_id,
+        engagementKind: r.engagement_kind,
+        taskId: r.id,
+        auditAreaId: r.audit_work_area_id,
+      },
       filing,
     ),
   };
