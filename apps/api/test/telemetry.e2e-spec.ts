@@ -3,6 +3,7 @@ import request from 'supertest';
 import { Client } from 'pg';
 import {
   WORKFLOW_MEASURE,
+  type PracticeReport,
   type WorkflowBaselineInfo,
   type WorkflowMeasuresReport,
   type WorkflowTarget,
@@ -343,5 +344,117 @@ describe('Telemetry (e2e)', () => {
     } finally {
       await http().put('/api/v1/telemetry/targets').set(bearer(mp)).send({ items: before });
     }
+  });
+
+  it('a practice session counts steps, pages and work per person over an exact window', async () => {
+    const day = '2020-03-09';
+    const at = (h: number, min: number) =>
+      `${day}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00+05:30`;
+    const ins = (user: string, sid: string, kind: string, params: string[], when: string) =>
+      su.query(
+        `INSERT INTO hsdg.telemetry_events (user_id, session_id, kind, path, params, source, occurred_at)
+         VALUES ($1, $2, $3, '/today', $4, $5, $6)`,
+        [user, sid, kind, params, kind === 'row_open' ? 'today' : null, when],
+      );
+    const emp = async (email: string): Promise<string> =>
+      (
+        await su.query<{ id: string }>(
+          `SELECT e.id FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id WHERE u.email = $1`,
+          [email],
+        )
+      ).rows[0]!.id;
+    const mxEmp = await emp('manager.x@dhvaj.in');
+    const syEmp = await emp('senior.y@dhvaj.in');
+    // Manager X: sign-in → a filing (1 step), a row that lands exactly, and a
+    // task moved on — inside 10:00–11:00. An event at 11:05 is outside it.
+    await ins(mxUser, 'practiceMx01', 'route', [], at(10, 2));
+    await ins(mxUser, 'practiceMx01', 'row_open', ['part', 'tab'], at(10, 3));
+    await ins(mxUser, 'practiceMx01', 'route', ['part', 'tab'], at(10, 3));
+    await ins(mxUser, 'practiceMx01', 'route', [], at(11, 5));
+    const eng = (
+      await su.query<{ id: string }>(
+        `SELECT e.id FROM hsdg.engagements e JOIN hsdg.offices o ON o.id = e.office_id
+          WHERE o.code = 'NORTH' LIMIT 1`,
+      )
+    ).rows[0]!.id;
+    const task = (
+      await su.query<{ id: string }>(
+        `INSERT INTO hsdg.tasks (engagement_id, title, assigned_to_employee_id)
+         VALUES ($1, 'Practice task', $2) RETURNING id`,
+        [eng, mxEmp],
+      )
+    ).rows[0]!.id;
+    await su.query(
+      `INSERT INTO hsdg.task_events (task_id, engagement_id, from_status, to_status, actor_employee_id, created_at)
+       VALUES ($1, $2, 'todo', 'in_progress', $3, $4)`,
+      [task, eng, mxEmp, at(10, 4)],
+    );
+    // Senior Y: two pages, no filing reached, no work done.
+    await ins(syUser, 'practiceSy01', 'route', [], at(10, 10));
+    await ins(syUser, 'practiceSy01', 'route', ['tab'], at(10, 11));
+
+    const qs = `from=${encodeURIComponent(at(10, 0))}&to=${encodeURIComponent(at(11, 0))}`;
+    const res = (
+      await http()
+        .get(`/api/v1/telemetry/practice?${qs}&employeeIds=${mxEmp},${syEmp}`)
+        .set(bearer(mp))
+        .expect(200)
+    ).body as PracticeReport;
+    expect(res.from).toBe('2020-03-09T04:30:00.000Z');
+    const by = Object.fromEntries(res.people.map((p) => [p.employeeId, p]));
+    expect(by[mxEmp]).toMatchObject({
+      name: 'Manager X',
+      sessions: 1,
+      sessionsWithFiling: 1,
+      steps: 1,
+      routes: 2,
+      rowOpens: 1,
+      exactRowOpens: 1,
+      exactShare: 100,
+      actions: 1,
+      routesPerAction: 2,
+    });
+    expect(by[syEmp]).toMatchObject({
+      sessions: 1,
+      sessionsWithFiling: 0,
+      steps: null,
+      routes: 2,
+      rowOpens: 0,
+      exactShare: null,
+      actions: 0,
+      routesPerAction: null,
+    });
+
+    // Report readers only; a window of at most 7 days that ends after it starts.
+    await http()
+      .get(`/api/v1/telemetry/practice?${qs}&employeeIds=${mxEmp}`)
+      .set(bearer(sy))
+      .expect(403);
+    await http()
+      .get(
+        `/api/v1/telemetry/practice?from=${encodeURIComponent(at(11, 0))}&to=${encodeURIComponent(at(10, 0))}&employeeIds=${mxEmp}`,
+      )
+      .set(bearer(mp))
+      .expect(400);
+    await http()
+      .get(
+        `/api/v1/telemetry/practice?from=2020-03-01T00:00:00Z&to=2020-03-09T00:00:00Z&employeeIds=${mxEmp}`,
+      )
+      .set(bearer(mp))
+      .expect(400);
+    await http()
+      .get(`/api/v1/telemetry/practice?${qs}&employeeIds=nope`)
+      .set(bearer(mp))
+      .expect(400);
+    await http().get(`/api/v1/telemetry/practice?${qs}`).set(bearer(mp)).expect(400);
+    // Partner B (South) cannot see Manager X (North): left out.
+    const pb = await token('partner.b@dhvaj.in');
+    const south = (
+      await http()
+        .get(`/api/v1/telemetry/practice?${qs}&employeeIds=${mxEmp}`)
+        .set(bearer(pb))
+        .expect(200)
+    ).body as PracticeReport;
+    expect(south.people).toEqual([]);
   });
 });

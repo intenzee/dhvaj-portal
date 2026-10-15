@@ -17,6 +17,7 @@ import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { cn } from '@/lib/cn';
 import { WorkflowMeasures } from '@/components/reports/workflow-measures';
+import { WorkflowPractice } from '@/components/reports/workflow-practice';
 import { PageHeader, Card, CardHeader, CardTitle, CardBody, Spinner, EmptyState, Button, Badge } from '@/components/ui';
 
 type Tab = 'engagements' | 'compliance' | 'utilisation' | 'time' | 'workflow';
@@ -67,7 +68,12 @@ export default function ReportsPage(): JSX.Element {
       {tab === 'compliance' && <ComplianceReport />}
       {tab === 'utilisation' && <UtilisationReportView />}
       {tab === 'time' && <TimeReportView />}
-      {tab === 'workflow' && <WorkflowMeasures />}
+      {tab === 'workflow' && (
+        <div className="space-y-6">
+          <WorkflowMeasures />
+          <WorkflowPractice />
+        </div>
+      )}
     </div>
   );
 }
