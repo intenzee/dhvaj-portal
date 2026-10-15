@@ -4,21 +4,21 @@ import { PERMISSION } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { EmptyState, PageHeader } from '@/components/ui';
-import { GstClientImport } from '@/components/entities/gst-import';
+import { ClientImport } from '@/components/entities/client-import';
 
-/** ADR-0035 — bring a spreadsheet of GST clients and their portal logins into the portal. */
-export default function ImportGstClientsPage(): JSX.Element {
+/** ADR-0035 — bring the firm's login workbook (GST and TDS logins) into the portal. */
+export default function ImportClientLoginsPage(): JSX.Element {
   const { principal } = useAuth();
   const allowed =
     can(principal, PERMISSION.entityManage) && can(principal, PERMISSION.credentialManage);
   return (
     <div>
       <PageHeader
-        title="Import GST clients"
-        subtitle="Add clients, their GSTINs and GST portal logins from a spreadsheet. Clients sharing a PAN become one client."
+        title="Import client logins"
+        subtitle="Add clients, their GSTINs and TANs, and their GST, income-tax and TRACES logins from the firm's login workbook. Rows sharing a PAN or name become one client."
       />
       {allowed ? (
-        <GstClientImport />
+        <ClientImport />
       ) : (
         <EmptyState>Only partners and managers can import clients.</EmptyState>
       )}

@@ -14,8 +14,8 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
+  type ClientCredential,
   type EntityCredentials,
-  type RegistrationCredential,
   type RevealedCredential,
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -32,7 +32,7 @@ export class CredentialsController {
   @Get()
   @RequirePermissions(PERMISSION.entityRead)
   @ApiOperation({
-    summary: "A client's (or one registration's) saved logins — masked, never the secret",
+    summary: "A client's (or one GSTIN's / TAN's) saved logins — masked, never the secret",
   })
   list(
     @CurrentPrincipal() principal: Principal,
@@ -43,14 +43,17 @@ export class CredentialsController {
 
   @Put()
   @RequirePermissions(PERMISSION.credentialManage)
-  @ApiOperation({ summary: "Save or replace a registration's portal login (encrypted)" })
+  @ApiOperation({ summary: "Save or replace one of a client's portal logins (encrypted)" })
   save(
     @CurrentPrincipal() principal: Principal,
     @Body() body: SaveCredentialDto,
-  ): Promise<RegistrationCredential> {
+  ): Promise<ClientCredential> {
     return this.credentials.save(rlsContextFromPrincipal(principal), {
-      registrationId: body.registrationId,
-      portal: body.portal ?? 'gst',
+      entityId: body.entityId,
+      registrationId: body.registrationId ?? null,
+      portal: body.portal,
+      account: body.account ?? 'main',
+      stateCode: body.stateCode ?? null,
       username: body.username,
       password: body.password,
     });

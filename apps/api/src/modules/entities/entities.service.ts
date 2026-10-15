@@ -276,7 +276,7 @@ export class EntitiesService {
     return this.db.withRlsContext(ctx, (client) => this.createEntityWith(client, ctx, input));
   }
 
-  /** createEntity inside the caller's transaction (the GST client import). */
+  /** createEntity inside the caller's transaction (the client import). */
   async createEntityWith(
     client: PoolClient,
     ctx: RlsContext,
@@ -471,7 +471,7 @@ export class EntitiesService {
     );
   }
 
-  /** addRegistration inside the caller's transaction (the GST client import). */
+  /** addRegistration inside the caller's transaction (the client import). */
   async addRegistrationWith(
     client: PoolClient,
     ctx: RlsContext,
@@ -551,6 +551,18 @@ export class EntitiesService {
 
   async addContact(ctx: RlsContext, entityId: string, input: ContactInput): Promise<EntityDetail> {
     return this.mutateChild(ctx, entityId, 'entity.contact_added', (client) =>
+      this.insertContact(client, entityId, input),
+    );
+  }
+
+  /** addContact inside the caller's transaction (the client import). */
+  async addContactWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    input: ContactInput,
+  ): Promise<EntityDetail> {
+    return this.mutateChildWith(client, ctx, entityId, 'entity.contact_added', () =>
       this.insertContact(client, entityId, input),
     );
   }

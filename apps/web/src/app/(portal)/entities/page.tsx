@@ -62,7 +62,7 @@ function EntitiesInner(): JSX.Element {
               {can(principal, PERMISSION.credentialManage) && (
                 <Link href="/entities/import">
                   <Button variant="secondary">
-                    <Upload className="h-4 w-4" /> Import GST clients
+                    <Upload className="h-4 w-4" /> Import client logins
                   </Button>
                 </Link>
               )}

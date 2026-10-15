@@ -11,9 +11,11 @@ import {
 import type { PoolClient } from 'pg';
 import {
   usernameHint,
+  type ClientCredential,
+  type CredentialAccount,
   type CredentialPortal,
   type EntityCredentials,
-  type RegistrationCredential,
+  type GstFrequency,
   type RevealedCredential,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -23,28 +25,67 @@ import { CredentialCipher, credentialAad, type CredentialSecret } from './creden
 
 interface CredentialRow {
   id: string;
-  registration_id: string;
+  entity_id: string;
+  registration_id: string | null;
+  registration_number: string | null;
+  state_code: string | null;
   portal: CredentialPortal;
+  account: CredentialAccount;
   username_hint: string;
+  pending_gst_scheme: 'regular' | 'qrmp' | null;
   updated_at: Date;
   updated_by: string | null;
 }
 
+/** What a login is saved against. */
+export interface SaveCredentialInput extends CredentialSecret {
+  entityId: string;
+  registrationId: string | null;
+  portal: CredentialPortal;
+  account: CredentialAccount;
+  /** A GST login without its GSTIN: the state it is for. */
+  stateCode: string | null;
+  /** A GST login without its GSTIN: the frequency to apply when the GSTIN comes. */
+  pendingFrequency?: GstFrequency | null;
+}
+
 const NOT_READY =
   'Client logins are not set up on this server yet (CREDENTIALS_KEYS). Ask the administrator.';
+const MANAGE_ONLY = 'Only a partner or manager of the client’s office can change its logins.';
+
+/** The accounts each portal has. */
+const ACCOUNTS: Partial<Record<CredentialPortal, CredentialAccount[]>> = {
+  income_tax: ['main', 'tan'],
+  traces: ['deductor', 'taxpayer'],
+};
 
 const LIST_SQL = `
-  SELECT c.id, c.registration_id, c.portal, c.username_hint, c.updated_at,
+  SELECT c.id, c.entity_id, c.registration_id, r.registration_number, c.state_code, c.portal,
+         c.account, c.username_hint, c.pending_gst_scheme, c.updated_at,
          (SELECT u.display_name FROM hsdg.users u WHERE u.id = c.updated_by_user_id) AS updated_by
-    FROM hsdg.registration_credentials c
-    JOIN hsdg.entity_registrations r ON r.id = c.registration_id`;
+    FROM hsdg.client_credentials c
+    LEFT JOIN hsdg.entity_registrations r ON r.id = c.registration_id`;
 
-function toCredential(r: CredentialRow): RegistrationCredential {
+const ORDER = `
+  ORDER BY array_position(ARRAY['gst','income_tax','traces','mca','eway_bill','einvoice'], c.portal),
+           c.account, r.registration_number NULLS LAST, c.state_code NULLS LAST`;
+
+function toCredential(r: CredentialRow): ClientCredential {
   return {
     id: r.id,
+    entityId: r.entity_id,
     registrationId: r.registration_id,
+    registrationNumber: r.registration_number,
+    stateCode: r.state_code,
     portal: r.portal,
+    account: r.account,
     usernameHint: r.username_hint,
+    pendingFrequency:
+      r.pending_gst_scheme === 'qrmp'
+        ? 'quarterly'
+        : r.pending_gst_scheme === 'regular'
+          ? 'monthly'
+          : null,
     updatedAt: r.updated_at.toISOString(),
     updatedBy: r.updated_by,
   };
@@ -53,7 +94,7 @@ function toCredential(r: CredentialRow): RegistrationCredential {
 /**
  * ADR-0035 — clients' saved portal logins. Lists carry only a masked user
  * name; the secret is sealed here before it is written, and read back only
- * through hsdg.reveal_registration_credential, which checks the caller,
+ * through hsdg.reveal_client_credential, which checks the caller,
  * rate-limits and logs every reveal in the database. Nothing secret is ever
  * written to the audit log.
  */
@@ -79,8 +120,8 @@ export class CredentialsService {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<CredentialRow>(
         `${LIST_SQL}
-          WHERE ($1::uuid IS NULL OR r.entity_id = $1) AND ($2::uuid IS NULL OR r.id = $2)
-          ORDER BY r.registration_number, c.portal`,
+          WHERE ($1::uuid IS NULL OR c.entity_id = $1) AND ($2::uuid IS NULL OR c.registration_id = $2)
+          ${ORDER}`,
         [by.entityId ?? null, by.registrationId ?? null],
       );
       const items = rows.map(toCredential);
@@ -111,43 +152,92 @@ export class CredentialsService {
     });
   }
 
-  /** PUT /credentials — save (or replace) a registration's login. */
-  async save(
-    ctx: RlsContext,
-    input: { registrationId: string; portal: CredentialPortal } & CredentialSecret,
-  ): Promise<RegistrationCredential> {
+  /** PUT /credentials — save (or replace) one of a client's logins. */
+  async save(ctx: RlsContext, input: SaveCredentialInput): Promise<ClientCredential> {
     return this.db.withRlsContext(ctx, (client) => this.saveWith(client, ctx, input));
   }
 
-  /** Save inside the caller's transaction (the GST import uses it per row). */
+  /**
+   * Save inside the caller's transaction (the import uses it per client). A
+   * GST login names its GSTIN, or its state until the GSTIN is added — when
+   * the client already has that state's GSTIN it goes onto it at once.
+   */
   async saveWith(
     client: PoolClient,
     ctx: RlsContext,
-    input: { registrationId: string; portal: CredentialPortal } & CredentialSecret,
-  ): Promise<RegistrationCredential> {
+    input: SaveCredentialInput,
+  ): Promise<ClientCredential> {
     if (!this.cipher.ready) throw new ServiceUnavailableException(NOT_READY);
     const username = input.username.trim();
     if (!username || !input.password)
       throw new BadRequestException('Both the user name and the password are needed.');
-    const reg = await client.query<{ id: string }>(
-      `SELECT id FROM hsdg.entity_registrations WHERE id = $1`,
-      [input.registrationId],
-    );
-    if (reg.rowCount === 0) throw new NotFoundException('Registration not found.');
+    const { portal, account } = input;
+    if (!(ACCOUNTS[portal] ?? ['main']).includes(account))
+      throw new BadRequestException(`A ${portal} login cannot be a "${account}" login.`);
 
-    const existing = await client.query<{ id: string }>(
-      `SELECT id FROM hsdg.registration_credentials WHERE registration_id = $1 AND portal = $2`,
-      [input.registrationId, input.portal],
+    const entity = await client.query(`SELECT 1 FROM hsdg.entities WHERE id = $1`, [
+      input.entityId,
+    ]);
+    if (entity.rowCount === 0) throw new NotFoundException('Client not found.');
+
+    let registrationId = input.registrationId;
+    let stateCode = portal === 'gst' ? input.stateCode : null;
+    if (registrationId) {
+      const reg = await client.query<{ registration_type: string; registration_number: string }>(
+        `SELECT registration_type, registration_number FROM hsdg.entity_registrations
+          WHERE id = $1 AND entity_id = $2`,
+        [registrationId, input.entityId],
+      );
+      const r = reg.rows[0];
+      if (!r) throw new NotFoundException('Registration not found on this client.');
+      const wants = portal === 'gst' ? 'gstin' : 'tan';
+      if (
+        r.registration_type !== wants ||
+        (portal !== 'gst' && !['tan', 'deductor'].includes(account))
+      )
+        throw new BadRequestException(
+          `This login cannot be tied to a ${r.registration_type.toUpperCase()}.`,
+        );
+      if (portal === 'gst') stateCode = r.registration_number.slice(0, 2);
+    } else if (portal === 'gst' && stateCode) {
+      // The client already has a GSTIN in that state: the login is for it.
+      const regs = await client.query<{ id: string }>(
+        `SELECT id FROM hsdg.entity_registrations
+          WHERE entity_id = $1 AND registration_type = 'gstin' AND left(registration_number, 2) = $2`,
+        [input.entityId, stateCode],
+      );
+      if (regs.rowCount === 1) registrationId = regs.rows[0]!.id;
+    }
+    if (stateCode && !/^\d{2}$/.test(stateCode))
+      throw new BadRequestException('A GST state code is two digits, e.g. 07 for Delhi.');
+    const pendingScheme =
+      portal === 'gst' && !registrationId && input.pendingFrequency
+        ? input.pendingFrequency === 'quarterly'
+          ? 'qrmp'
+          : 'regular'
+        : null;
+
+    const existing = await client.query<{ id: string; pending_gst_scheme: string | null }>(
+      `SELECT id, pending_gst_scheme FROM hsdg.client_credentials
+        WHERE entity_id = $1 AND portal = $2 AND account = $3
+          AND COALESCE(registration_id::text, state_code, '') = COALESCE($4::text, $5::text, '')`,
+      [input.entityId, portal, account, registrationId, stateCode],
     );
-    const id = existing.rows[0]?.id ?? randomUUID();
+    const before = existing.rows[0];
+    const id = before?.id ?? randomUUID();
     const sealed = this.cipher.seal(
       { username, password: input.password },
-      credentialAad(id, input.registrationId, input.portal),
+      credentialAad(id, input.entityId, portal, account),
     );
     const values = [
       id,
-      input.registrationId,
-      input.portal,
+      input.entityId,
+      registrationId,
+      portal,
+      account,
+      stateCode,
+      // Saving without a frequency keeps the one waiting.
+      pendingScheme ?? (registrationId ? null : (before?.pending_gst_scheme ?? null)),
       usernameHint(username),
       sealed.ciphertext,
       sealed.iv,
@@ -156,39 +246,35 @@ export class CredentialsService {
       ctx.userId,
     ];
     try {
-      if (existing.rowCount) {
+      if (before) {
         const res = await client.query(
-          `UPDATE hsdg.registration_credentials
-              SET username_hint = $4, ciphertext = $5, iv = $6, auth_tag = $7,
-                  key_version = $8, updated_by_user_id = $9
-            WHERE id = $1 AND registration_id = $2 AND portal = $3`,
+          `UPDATE hsdg.client_credentials
+              SET registration_id = $3, state_code = $6, pending_gst_scheme = $7,
+                  username_hint = $8, ciphertext = $9, iv = $10, auth_tag = $11,
+                  key_version = $12, updated_by_user_id = $13
+            WHERE id = $1 AND entity_id = $2 AND portal = $4 AND account = $5`,
           values,
         );
-        if (res.rowCount === 0)
-          throw new ForbiddenException(
-            'Only a partner or manager of the client’s office can change its login.',
-          );
+        if (res.rowCount === 0) throw new ForbiddenException(MANAGE_ONLY);
       } else {
         await client.query(
-          `INSERT INTO hsdg.registration_credentials
-             (id, registration_id, portal, username_hint, ciphertext, iv, auth_tag,
-              key_version, created_by_user_id, updated_by_user_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
+          `INSERT INTO hsdg.client_credentials
+             (id, entity_id, registration_id, portal, account, state_code, pending_gst_scheme,
+              username_hint, ciphertext, iv, auth_tag, key_version,
+              created_by_user_id, updated_by_user_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)`,
           values,
         );
       }
     } catch (err) {
-      if ((err as { code?: string }).code === '42501')
-        throw new ForbiddenException(
-          'Only a partner or manager of the client’s office can change its login.',
-        );
+      if ((err as { code?: string }).code === '42501') throw new ForbiddenException(MANAGE_ONLY);
       throw err;
     }
     await this.audit.recordWith(client, ctx, {
-      action: existing.rowCount ? 'credential.updated' : 'credential.saved',
-      objectType: 'registration_credential',
+      action: before ? 'credential.updated' : 'credential.saved',
+      objectType: 'client_credential',
       objectId: id,
-      after: { registrationId: input.registrationId, portal: input.portal },
+      after: { entityId: input.entityId, registrationId, portal, account, stateCode },
     });
     const { rows } = await client.query<CredentialRow>(`${LIST_SQL} WHERE c.id = $1`, [id]);
     return toCredential(rows[0]!);
@@ -197,23 +283,29 @@ export class CredentialsService {
   /** DELETE /credentials/:id */
   async remove(ctx: RlsContext, id: string): Promise<void> {
     await this.db.withRlsContext(ctx, async (client) => {
-      const seen = await client.query<{ registration_id: string; portal: string }>(
-        `SELECT registration_id, portal FROM hsdg.registration_credentials WHERE id = $1`,
+      const seen = await client.query<{
+        entity_id: string;
+        registration_id: string | null;
+        portal: string;
+        account: string;
+      }>(
+        `SELECT entity_id, registration_id, portal, account FROM hsdg.client_credentials WHERE id = $1`,
         [id],
       );
-      if (seen.rowCount === 0) throw new NotFoundException('Login not found.');
-      const res = await client.query(`DELETE FROM hsdg.registration_credentials WHERE id = $1`, [
-        id,
-      ]);
-      if (res.rowCount === 0)
-        throw new ForbiddenException(
-          'Only a partner or manager of the client’s office can remove its login.',
-        );
+      const was = seen.rows[0];
+      if (!was) throw new NotFoundException('Login not found.');
+      const res = await client.query(`DELETE FROM hsdg.client_credentials WHERE id = $1`, [id]);
+      if (res.rowCount === 0) throw new ForbiddenException(MANAGE_ONLY);
       await this.audit.recordWith(client, ctx, {
         action: 'credential.removed',
-        objectType: 'registration_credential',
+        objectType: 'client_credential',
         objectId: id,
-        before: { registrationId: seen.rows[0]!.registration_id, portal: seen.rows[0]!.portal },
+        before: {
+          entityId: was.entity_id,
+          registrationId: was.registration_id,
+          portal: was.portal,
+          account: was.account,
+        },
       });
     });
   }
@@ -227,14 +319,14 @@ export class CredentialsService {
         iv: Buffer;
         auth_tag: Buffer;
         key_version: number;
-        registration_id: string;
+        entity_id: string;
         portal: CredentialPortal;
+        account: CredentialAccount;
       };
       try {
-        const { rows } = await client.query(
-          `SELECT * FROM hsdg.reveal_registration_credential($1)`,
-          [id],
-        );
+        const { rows } = await client.query(`SELECT * FROM hsdg.reveal_client_credential($1)`, [
+          id,
+        ]);
         row = rows[0];
       } catch (err) {
         const message = (err as { message?: string }).message ?? '';
@@ -258,15 +350,15 @@ export class CredentialsService {
           authTag: row.auth_tag,
           keyVersion: row.key_version,
         },
-        credentialAad(id, row.registration_id, row.portal),
+        credentialAad(id, row.entity_id, row.portal, row.account),
       );
       await this.audit.recordWith(client, ctx, {
         action: 'credential.revealed',
-        objectType: 'registration_credential',
+        objectType: 'client_credential',
         objectId: id,
-        after: { registrationId: row.registration_id, portal: row.portal },
+        after: { entityId: row.entity_id, portal: row.portal, account: row.account },
       });
-      return { id, portal: row.portal, ...secret };
+      return { id, portal: row.portal, account: row.account, ...secret };
     });
   }
 }
