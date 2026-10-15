@@ -885,7 +885,8 @@ export class EngagementComponentsService {
     const { rows } = await client.query<RuleVersionRow>(
       `SELECT DISTINCT ON (compliance_rule_id)
               compliance_rule_id, id, calculation_basis, offset_months, offset_days,
-              fixed_month, fixed_day, working_day_adjustment, internal_sla_offset_days
+              fixed_month, fixed_day, working_day_adjustment,
+              hsdg.internal_due_days(compliance_rule_id, internal_sla_offset_days) AS internal_sla_offset_days
        FROM hsdg.compliance_rule_versions
        WHERE compliance_rule_id = ANY($1::uuid[])
          AND effective_from <= $2::date AND (effective_to IS NULL OR $2::date <= effective_to)

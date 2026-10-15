@@ -346,7 +346,9 @@ export class ComplianceInstancesService {
 
       const verRes = await client.query<VersionRow>(
         `SELECT id, version, calculation_basis, offset_months, offset_days, fixed_month, fixed_day,
-                working_day_adjustment, internal_sla_offset_days, offset_working_days, condition,
+                working_day_adjustment,
+                hsdg.internal_due_days(compliance_rule_id, internal_sla_offset_days) AS internal_sla_offset_days,
+                offset_working_days, condition,
                 frequency, schedule, period_overrides, provisional_event_rule
          FROM hsdg.compliance_rule_versions
          WHERE compliance_rule_id = $1 AND effective_from <= $2::date

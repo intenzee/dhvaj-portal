@@ -16,6 +16,7 @@ import { AnalyticsMethodologySection } from '@/components/admin/analytics-method
 import { MaterialityMethodologySection } from '@/components/admin/materiality-methodology-section';
 import { ScopeMethodologySection } from '@/components/admin/scope-methodology-section';
 import { AuditAreaLibrarySection } from '@/components/admin/audit-area-library-section';
+import { WorkflowSection } from '@/components/admin/workflow-section';
 
 type Tab =
   | 'users'
@@ -26,15 +27,19 @@ type Tab =
   | 'analytics'
   | 'materiality'
   | 'scope'
-  | 'areas';
+  | 'areas'
+  | 'workflow';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
-  const [tab, setTab] = useState<Tab>('users');
+  const administers = can(principal, PERMISSION.userManage);
+  const setsWorkflow = can(principal, PERMISSION.workflowManage);
+  // Partners come here only for the workflow policy.
+  const [tab, setTab] = useState<Tab>(administers ? 'users' : 'workflow');
 
-  // Nav already gates the whole section on user.manage; this is defence in depth
-  // (the API enforces every rule regardless of what the UI shows).
-  if (!can(principal, PERMISSION.userManage)) {
+  // Nav already gates the whole section on user.manage or workflow.manage; this
+  // is defence in depth (the API enforces every rule regardless of the UI).
+  if (!administers && !setsWorkflow) {
     return (
       <div>
         <PageHeader title="Administration" />
@@ -44,8 +49,12 @@ export default function AdministrationPage(): JSX.Element {
   }
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'users', label: 'Users & Roles' },
-    { id: 'offices', label: 'Offices' },
+    ...(administers
+      ? [
+          { id: 'users' as const, label: 'Users & Roles' },
+          { id: 'offices' as const, label: 'Offices' },
+        ]
+      : []),
     // Firm templates are configured with service.manage (MP / admin).
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'templates' as const, label: 'Templates' }]
@@ -74,13 +83,15 @@ export default function AdministrationPage(): JSX.Element {
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'areas' as const, label: 'Audit Area Library' }]
       : []),
+    // The partners' answers to the Staff Workflow plan's questions.
+    ...(setsWorkflow ? [{ id: 'workflow' as const, label: 'Workflow' }] : []),
   ];
 
   return (
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries and the Audit Area Library. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library and the firm’s workflow policy. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -115,6 +126,8 @@ export default function AdministrationPage(): JSX.Element {
             <ScopeMethodologySection />
           ) : tab === 'areas' ? (
             <AuditAreaLibrarySection />
+          ) : tab === 'workflow' ? (
+            <WorkflowSection />
           ) : tab === 'signals' ? (
             <div className="space-y-8">
               <PlanningSignalLibrarySection />

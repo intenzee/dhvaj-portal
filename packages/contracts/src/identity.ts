@@ -78,6 +78,7 @@ export const PERMISSION = {
   taskUpdate: 'task.update',
   notificationRead: 'notification.read',
   notificationScan: 'notification.scan',
+  workflowManage: 'workflow.manage',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

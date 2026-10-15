@@ -42,6 +42,11 @@ describe('visibleNav', () => {
     expect(labels).toEqual(expect.arrayContaining(['Engagements', 'My Work', 'Reviews & Sign-offs']));
     expect(labels).not.toContain('Administration');
   });
+
+  it('shows Administration to a partner who sets the workflow policy, without user.manage', () => {
+    expect(visibleNav(principal([PERMISSION.workflowManage])).map((i) => i.label)).toContain('Administration');
+    expect(visibleNav(principal([PERMISSION.userManage])).map((i) => i.label)).toContain('Administration');
+  });
 });
 
 describe('visibleNavSections', () => {

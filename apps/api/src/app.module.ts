@@ -33,6 +33,7 @@ import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module'
 import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspace.module';
 import { SearchModule } from './modules/search/search.module';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
+import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-settings.module';
 
 /**
  * Composition root of the modular monolith.
@@ -108,6 +109,7 @@ import { TelemetryModule } from './modules/telemetry/telemetry.module';
     FilingWorkspaceModule,
     SearchModule,
     TelemetryModule,
+    WorkflowSettingsModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

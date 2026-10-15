@@ -79,6 +79,8 @@ interface RunSqlRow extends WorkLinkSqlRow {
   reference_no: string | null;
   filed_on: string | null;
   is_lead: boolean;
+  /** The filing's stream lead, when the firm lets stream leads assign (Questions for the partners, 5). */
+  is_stream_lead: boolean;
 }
 
 interface AssignInstanceRow {
@@ -88,6 +90,8 @@ interface AssignInstanceRow {
   internal_date: string | null;
   workflow_status: FilingStatus;
   is_lead: boolean;
+  /** The filing's stream lead, when the firm lets stream leads assign (Questions for the partners, 5). */
+  is_stream_lead: boolean;
   task_id: string | null;
   task_status: TaskStatus | null;
   task_version: number | null;
@@ -192,7 +196,8 @@ export class FilingRunsService {
                     COALESCE(ci.statutory_deadline_override, ge.revised_due_date,
                              ci.statutory_deadline)::text AS statutory_date,
                     fr.reference_no, fr.filed_on::text AS filed_on,
-                    hsdg.is_engagement_lead(ci.engagement_id) AS is_lead
+                    hsdg.is_engagement_lead(ci.engagement_id) AS is_lead,
+                    hsdg.can_assign_as_stream_lead(ci.id) AS is_stream_lead
                FROM hsdg.compliance_instances ci
                JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
                JOIN hsdg.engagements e ON e.id = ci.engagement_id
@@ -307,9 +312,9 @@ export class FilingRunsService {
     const inst = await this.db.withRlsContext(ctx, (client) =>
       this.loadForAssign(client, instanceId),
     );
-    if (!inst.is_lead)
+    if (!inst.is_lead && !inst.is_stream_lead)
       throw new ForbiddenException(
-        'Only the engagement partner or manager can assign this filing.',
+        'Only the engagement partner or manager, or the stream lead where the firm allows it, can assign this filing.',
       );
     if (inst.workflow_status === 'filed')
       throw new BadRequestException('This filing is already lodged.');
@@ -346,6 +351,7 @@ export class FilingRunsService {
                         COALESCE(ci.period_key, ci.financial_year), r.registration_number) AS title,
               COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS internal_date,
               ci.workflow_status, hsdg.is_engagement_lead(ci.engagement_id) AS is_lead,
+              hsdg.can_assign_as_stream_lead(ci.id) AS is_stream_lead,
               t.id AS task_id, t.status AS task_status, t.version AS task_version,
               t.assigned_to_employee_id AS preparer_id, t.reviewer_employee_id AS reviewer_id
          FROM hsdg.compliance_instances ci
@@ -394,7 +400,7 @@ export class FilingRunsService {
       filed:
         r.reference_no && r.filed_on ? { referenceNo: r.reference_no, filedOn: r.filed_on } : null,
       canLodge: !filed && (r.is_lead || (me !== null && r.preparer_id === me)),
-      canAssign: !filed && r.is_lead,
+      canAssign: !filed && (r.is_lead || r.is_stream_lead),
       link: workLinkOf(
         { engagementId: r.engagement_id, engagementKind: r.engagement_kind, taskId: r.task_id },
         workLinkFilingOf(r),

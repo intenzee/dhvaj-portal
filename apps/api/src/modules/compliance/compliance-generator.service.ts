@@ -465,7 +465,8 @@ export class ComplianceGeneratorService {
         client.query<VersionRow>(
           `SELECT v.id, v.compliance_rule_id, r.code, v.effective_from::text, v.effective_to::text,
                 v.calculation_basis, v.offset_months, v.offset_days, v.offset_working_days,
-                v.fixed_month, v.fixed_day, v.working_day_adjustment, v.internal_sla_offset_days,
+                v.fixed_month, v.fixed_day, v.working_day_adjustment,
+                hsdg.internal_due_days(v.compliance_rule_id, v.internal_sla_offset_days) AS internal_sla_offset_days,
                 v.condition, v.stream, v.registration_scope, v.frequency, v.form_label, v.section,
                 v.schedule, v.period_overrides, v.period_filter, v.event_type,
                 v.provisional_event_rule, v.variants, v.is_optional
@@ -902,7 +903,8 @@ export class ComplianceGeneratorService {
             `SELECT DISTINCT ON (r.id) v.id, v.compliance_rule_id, r.code, v.effective_from::text,
               v.effective_to::text, v.calculation_basis, v.offset_months, v.offset_days,
               v.offset_working_days, v.fixed_month, v.fixed_day, v.working_day_adjustment,
-              v.internal_sla_offset_days, v.condition, v.stream, v.registration_scope, v.frequency,
+              hsdg.internal_due_days(v.compliance_rule_id, v.internal_sla_offset_days) AS internal_sla_offset_days,
+              v.condition, v.stream, v.registration_scope, v.frequency,
               v.form_label, v.section, v.schedule, v.period_overrides, v.period_filter,
               v.event_type, v.provisional_event_rule, v.variants, v.is_optional,
               (SELECT es.id FROM hsdg.engagement_services es JOIN hsdg.services s ON s.id = es.service_id
