@@ -8,6 +8,7 @@ import type {
 import {
   ClientChase,
   fallbackNote,
+  offersWhatsapp,
   reminderButtonLabel,
   remindersToSend,
   waitingLine,
@@ -42,6 +43,7 @@ const chase = (over: Partial<Chase> = {}): Chase => ({
   clientEmail: null,
   canEmail: false,
   clientPhone: null,
+  canWhatsapp: false,
   channel: 'copy',
   fallback: 'no_email',
   reminderText: 'Dear client …',
@@ -108,14 +110,67 @@ describe('client chase', () => {
             waitingOn: ['Bank statement'],
             raised: 0,
           })
-        : Promise.resolve(chase({ channel: 'whatsapp', fallback: null, clientPhone: '98765' })),
+        : Promise.resolve(
+            chase({
+              channel: 'whatsapp',
+              fallback: null,
+              clientPhone: '9876543210',
+              canWhatsapp: true,
+            }),
+          ),
     );
     renderIt(inst());
     fireEvent.click(await screen.findByRole('button', { name: /WhatsApp reminder/ }));
+    // WhatsApp is already the firm's channel: no second button for it.
+    expect(screen.queryByRole('button', { name: 'Remind on WhatsApp' })).toBeNull();
     const link = await screen.findByRole('link', { name: /Open WhatsApp/ });
     expect(link).toHaveAttribute('href', 'https://wa.me/919876543210?text=Please');
     expect(link).toHaveAttribute('target', '_blank');
     expect(screen.getByRole('button', { name: /Copy text/ })).toBeInTheDocument();
+  });
+
+  it('offers WhatsApp beside another channel only when the phone works on WhatsApp (PS-001)', () => {
+    expect(offersWhatsapp({ canWhatsapp: true, channel: 'email' })).toBe(true);
+    expect(offersWhatsapp({ canWhatsapp: true, channel: 'copy' })).toBe(true);
+    expect(offersWhatsapp({ canWhatsapp: true, channel: 'whatsapp' })).toBe(false);
+    expect(offersWhatsapp({ canWhatsapp: false, channel: 'email' })).toBe(false);
+  });
+
+  it('sends by WhatsApp from the phone when the firm e-mails (PS-001)', async () => {
+    apiFetch.mockImplementation((_path: string, opts?: { method?: string }) =>
+      opts?.method === 'POST'
+        ? Promise.resolve({
+            instanceId: 'i1',
+            client: 'Bharat Traders',
+            channel: 'whatsapp',
+            waUrl: 'https://wa.me/919876543210?text=Please',
+            text: 'Please',
+            waitingOn: ['Bank statement'],
+            raised: 0,
+          })
+        : Promise.resolve(
+            chase({
+              channel: 'email',
+              fallback: null,
+              canEmail: true,
+              clientEmail: 'a@b.in',
+              clientPhone: '9876543210',
+              canWhatsapp: true,
+            }),
+          ),
+    );
+    renderIt(inst());
+    expect(
+      await screen.findByRole('button', { name: /E-mail reminder to a@b.in/ }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remind on WhatsApp' }));
+    const link = await screen.findByRole('link', { name: /Open WhatsApp/ });
+    expect(link).toHaveAttribute('href', 'https://wa.me/919876543210?text=Please');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(apiFetch).toHaveBeenCalledWith('/compliance-instances/i1/client-chase/remind', {
+      method: 'POST',
+      body: { channel: 'whatsapp' },
+    });
   });
 
   it('shows the copy text when there is no e-mail channel', async () => {
@@ -142,6 +197,8 @@ describe('client chase', () => {
     );
     expect(screen.getByText(/cannot be e-mailed/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Open WhatsApp/ })).toBeNull();
+    // No phone: nothing offers WhatsApp.
+    expect(screen.queryByRole('button', { name: 'Remind on WhatsApp' })).toBeNull();
     expect(apiFetch).toHaveBeenCalledWith('/compliance-instances/i1/client-chase/remind', {
       method: 'POST',
     });

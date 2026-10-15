@@ -8,7 +8,9 @@ import type { PoolClient } from 'pg';
 import {
   CLIENT_REMINDER_CHANNEL,
   NOTIFICATION_TYPE,
+  canRemindBy,
   reminderChannelFor,
+  whatsappNumber,
   whatsappUrl,
   type ClientChase,
   type ClientChaseItem,
@@ -27,6 +29,7 @@ import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import {
   CLIENT_DATA_SLOTS,
   chasingPolicy,
+  clientPhoneSql,
   raiseSlotRequests,
   reminderText,
   slotItemLabel,
@@ -64,9 +67,7 @@ const CHASE_INSTANCE_SQL = `
          (SELECT c.email::text FROM hsdg.entity_contacts c
            WHERE c.entity_id = e.entity_id AND c.email IS NOT NULL
            ORDER BY c.is_primary DESC, c.created_at LIMIT 1) AS client_email,
-         (SELECT c.phone FROM hsdg.entity_contacts c
-           WHERE c.entity_id = e.entity_id AND NULLIF(trim(c.phone), '') IS NOT NULL
-           ORDER BY c.is_primary DESC, c.created_at LIMIT 1) AS client_phone,
+         ${clientPhoneSql('e.entity_id')} AS client_phone,
          (SELECT f.firm_name FROM hsdg.firm_settings f LIMIT 1) AS firm_name
     FROM hsdg.compliance_instances ci
     JOIN hsdg.engagements e ON e.id = ci.engagement_id
@@ -138,20 +139,35 @@ export class ClientChaseService {
         clientEmail: inst.client_email,
         canEmail: this.canEmail(inst),
         clientPhone: inst.client_phone,
+        canWhatsapp: whatsappNumber(inst.client_phone) !== null,
         ...this.channelFor(setting, inst),
         reminderText: this.text(inst, items),
       };
     });
   }
 
-  /** POST /compliance-instances/:id/client-chase/remind */
-  async remind(ctx: RlsContext, id: string): Promise<ClientReminderResult> {
+  /**
+   * POST /compliance-instances/:id/client-chase/remind. `requested` sends by that
+   * channel instead of the firm's (PS-001), refused when the client cannot be
+   * reached on it — before any request is raised.
+   */
+  async remind(
+    ctx: RlsContext,
+    id: string,
+    requested?: ClientReminderChannel,
+  ): Promise<ClientReminderResult> {
     const today = istToday(new Date());
     const { inst, raised, open, setting } = await this.db.withRlsContext(ctx, async (client) => {
       const inst = await this.load(client, id);
       const setting = (await workflowPolicy(client)).clientReminderChannel;
       if (DONE_STATUSES.includes(inst.workflow_status))
         throw new BadRequestException('This filing is closed — there is nothing to chase.');
+      if (requested && !canRemindBy(requested, this.reach(inst)))
+        throw new BadRequestException(
+          requested === CLIENT_REMINDER_CHANNEL.whatsapp
+            ? 'The client has no phone number WhatsApp can use.'
+            : 'The client cannot be e-mailed: no address, or e-mail is off.',
+        );
       const policy = await chasingPolicy(client);
       const raised = await raiseSlotRequests(client, id, {
         today,
@@ -164,7 +180,9 @@ export class ClientChaseService {
     if (open.length === 0)
       throw new BadRequestException('Nothing on this filing is waiting on the client.');
 
-    const { channel, fallback } = this.channelFor(setting, inst);
+    const { channel, fallback } = requested
+      ? { channel: requested, fallback: null }
+      : this.channelFor(setting, inst);
     // A fresh secure link per item, so the reminder is one tap from the upload.
     const base = this.config.get('WEB_PUBLIC_URL').replace(/\/$/, '');
     const items: { label: string; uploadUrl: string | null }[] = [];
@@ -195,6 +213,7 @@ export class ClientChaseService {
         after: {
           channel,
           fallback,
+          requested: requested ?? null,
           dependencyIds: open.map((r) => r.id),
           raised: raised.map((r) => r.dependencyId),
         },
@@ -232,9 +251,13 @@ export class ClientChaseService {
     return Boolean(inst.client_email) && this.notifications.hasExternalChannels;
   }
 
+  private reach(inst: ChaseInstanceRow) {
+    return { canEmail: this.canEmail(inst), phone: inst.client_phone };
+  }
+
   /** The firm's channel for this client, falling back to copy when they cannot be reached on it. */
   private channelFor(setting: ClientReminderChannel, inst: ChaseInstanceRow) {
-    return reminderChannelFor(setting, { canEmail: this.canEmail(inst), phone: inst.client_phone });
+    return reminderChannelFor(setting, this.reach(inst));
   }
 
   private text(inst: ChaseInstanceRow, items: { label: string; uploadUrl?: string | null }[]) {

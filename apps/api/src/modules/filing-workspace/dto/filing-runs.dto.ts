@@ -12,6 +12,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { CLIENT_REMINDER_CHANNEL, type ClientReminderChannel } from '@hsdg/contracts';
 import type { FilingRunScope } from '../filing-runs.service';
 
 const SCOPES: FilingRunScope[] = ['mine', 'team'];
@@ -57,4 +58,18 @@ export class FilingRunAssignDto extends FilingRunInstancesDto {
   @ValidateIf((_, v) => v !== null)
   @IsUUID()
   reviewerId?: string | null;
+}
+
+const CHANNELS = Object.values(CLIENT_REMINDER_CHANNEL);
+
+/** POST /compliance-instances/:id/client-chase/remind (PS-001). */
+export class ClientReminderDto {
+  @ApiPropertyOptional({
+    enum: CHANNELS,
+    description:
+      'Send this way instead of the firm’s channel; refused (400) when the client cannot be reached on it.',
+  })
+  @IsOptional()
+  @IsIn(CHANNELS)
+  channel?: ClientReminderChannel;
 }

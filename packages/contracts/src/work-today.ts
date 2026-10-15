@@ -85,6 +85,12 @@ export interface TodayItem {
   /** The task, when the row is one (or the filing has one). */
   task: TodayTask | null;
   link: WorkItemRef;
+  /**
+   * Rows waiting on the client of a filing: offer a WhatsApp reminder beside
+   * the firm's channel — the client has a usable phone and the firm reminds
+   * another way (PS-001). Absent on other rows.
+   */
+  offersWhatsapp?: boolean;
 }
 
 export interface TodayGroupResult {

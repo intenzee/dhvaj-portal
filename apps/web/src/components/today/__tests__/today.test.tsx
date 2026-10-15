@@ -228,6 +228,48 @@ describe('Today page (WF-201)', () => {
     });
   });
 
+  it('a waiting filing whose client has a phone also offers WhatsApp (PS-001)', async () => {
+    runsOn = true;
+    const chase = item({
+      key: 'task:t3',
+      group: 'waiting',
+      title: 'GSTR-3B · Sep 2026',
+      status: 'blocked',
+      filing: filing('i9'),
+      link: { engagementId: 'e1', engagementKind: 'compliance', instanceId: 'i9', taskId: 't3' },
+      offersWhatsapp: true,
+    });
+    apiFetch.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === '/work/today'
+          ? { ...view, groups: [{ group: 'waiting', items: [chase], total: 1 }] }
+          : url.endsWith('/client-chase/remind')
+            ? {
+                channel: 'whatsapp',
+                waUrl: 'https://wa.me/919876543210?text=Please',
+                text: 'Please',
+                raised: 0,
+              }
+            : null,
+      ),
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TodayPage />
+      </QueryClientProvider>,
+    );
+    const waiting = await screen.findByRole('region', { name: /Waiting on client/ });
+    fireEvent.click(await within(waiting).findByRole('button', { name: 'Remind on WhatsApp' }));
+    expect(await screen.findByRole('link', { name: /Open WhatsApp/ })).toHaveAttribute(
+      'href',
+      'https://wa.me/919876543210?text=Please',
+    );
+    expect(apiFetch).toHaveBeenCalledWith('/compliance-instances/i9/client-chase/remind', {
+      method: 'POST',
+      body: { channel: 'whatsapp' },
+    });
+  });
+
   it('Remind client stays hidden with ff_filing_runs off', async () => {
     renderPage();
     await screen.findByRole('link', { name: 'GSTR-1 · Sep 2026' });

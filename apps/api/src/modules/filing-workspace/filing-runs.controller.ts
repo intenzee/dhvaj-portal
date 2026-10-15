@@ -26,6 +26,7 @@ import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.se
 import { FilingRunsService } from './filing-runs.service';
 import { ClientChaseService } from './client-chase.service';
 import {
+  ClientReminderDto,
   FilingRunAssignDto,
   FilingRunFormsQueryDto,
   FilingRunInstancesDto,
@@ -132,12 +133,14 @@ export class ClientChaseController {
   @HttpCode(200)
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
-    summary: 'Remind the client by the firm’s channel: e-mail, a WhatsApp link, or text to copy',
+    summary:
+      'Remind the client by the firm’s channel, or the one named: e-mail, a WhatsApp link, or text to copy',
   })
   remind(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: ClientReminderDto,
   ): Promise<ClientReminderResult> {
-    return this.chase.remind(rlsContextFromPrincipal(principal), id);
+    return this.chase.remind(rlsContextFromPrincipal(principal), id, body.channel);
   }
 }
