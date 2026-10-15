@@ -273,94 +273,101 @@ export class EntitiesService {
   }
 
   async createEntity(ctx: RlsContext, input: CreateEntityInput): Promise<EntityDetail> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const typeId = await this.resolveTypeId(client, input.typeSlug);
-      const officeId = await this.resolveOfficeId(client, input.officeCode);
+    return this.db.withRlsContext(ctx, (client) => this.createEntityWith(client, ctx, input));
+  }
 
-      let entityId: string;
-      try {
-        const { rows } = await client.query<{ id: string }>(
-          `INSERT INTO hsdg.entities
-             (legal_name, display_name, trade_name, short_name, entity_type_id, pan,
-              home_office_id, client_id, parent_entity_id, status, legal_status,
-              listing_status, current_accounting_framework, country_of_incorporation,
-              incorporation_date, roc, authorised_capital, paid_up_capital,
-              llp_contribution, business_description,
-              act_manufacturing, act_trading, act_services, act_import, act_export,
-              act_ecommerce, act_regulated)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-                   COALESCE($14,'IN'),$15,$16,$17,$18,$19,$20,
-                   COALESCE($21,false),COALESCE($22,false),COALESCE($23,false),
-                   COALESCE($24,false),COALESCE($25,false),COALESCE($26,false),COALESCE($27,false))
-           RETURNING id`,
-          [
-            input.legalName,
-            input.displayName ?? null,
-            input.tradeName ?? null,
-            input.shortName ?? null,
-            typeId,
-            input.pan ?? null,
-            officeId,
-            input.clientId ?? null,
-            input.parentEntityId ?? null,
-            input.status ?? ENTITY_STATUS.active,
-            input.legalStatus ?? null,
-            input.listingStatus ?? 'unlisted',
-            input.currentAccountingFramework ?? 'not_assessed',
-            input.countryOfIncorporation ?? null,
-            input.incorporationDate ?? null,
-            input.roc ?? null,
-            input.authorisedCapital ?? null,
-            input.paidUpCapital ?? null,
-            input.llpContribution ?? null,
-            input.businessDescription ?? null,
-            input.activities?.manufacturing ?? null,
-            input.activities?.trading ?? null,
-            input.activities?.services ?? null,
-            input.activities?.import ?? null,
-            input.activities?.export ?? null,
-            input.activities?.ecommerce ?? null,
-            input.activities?.regulated ?? null,
-          ],
-        );
-        entityId = rows[0]!.id;
+  /** createEntity inside the caller's transaction (the client import). */
+  async createEntityWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    input: CreateEntityInput,
+  ): Promise<EntityDetail> {
+    const typeId = await this.resolveTypeId(client, input.typeSlug);
+    const officeId = await this.resolveOfficeId(client, input.officeCode);
 
-        for (const reg of input.registrations ?? []) {
-          await this.insertRegistration(client, entityId, reg);
-        }
-        for (const contact of input.contacts ?? []) {
-          await this.insertContact(client, entityId, contact);
-        }
-        // Atomic wizard submit (§4): the rest of the factual children in the
-        // same transaction. Relationships are excluded (they need other entities).
-        for (const addr of input.addresses ?? []) {
-          await this.insertAddress(client, entityId, addr);
-        }
-        for (const act of input.businessActivities ?? []) {
-          await this.insertBusinessActivity(client, entityId, act);
-        }
-        for (const listing of input.listings ?? []) {
-          await this.insertListing(client, entityId, listing);
-        }
-        for (const attr of input.regulatoryAttributes ?? []) {
-          await this.insertRegulatoryAttribute(client, entityId, attr);
-        }
-        for (const fin of input.financialProfiles ?? []) {
-          await this.writeFinancialProfile(client, entityId, fin, ctx.userId);
-        }
-      } catch (err) {
-        throw translatePgError(err);
+    let entityId: string;
+    try {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO hsdg.entities
+           (legal_name, display_name, trade_name, short_name, entity_type_id, pan,
+            home_office_id, client_id, parent_entity_id, status, legal_status,
+            listing_status, current_accounting_framework, country_of_incorporation,
+            incorporation_date, roc, authorised_capital, paid_up_capital,
+            llp_contribution, business_description,
+            act_manufacturing, act_trading, act_services, act_import, act_export,
+            act_ecommerce, act_regulated)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+                 COALESCE($14,'IN'),$15,$16,$17,$18,$19,$20,
+                 COALESCE($21,false),COALESCE($22,false),COALESCE($23,false),
+                 COALESCE($24,false),COALESCE($25,false),COALESCE($26,false),COALESCE($27,false))
+         RETURNING id`,
+        [
+          input.legalName,
+          input.displayName ?? null,
+          input.tradeName ?? null,
+          input.shortName ?? null,
+          typeId,
+          input.pan ?? null,
+          officeId,
+          input.clientId ?? null,
+          input.parentEntityId ?? null,
+          input.status ?? ENTITY_STATUS.active,
+          input.legalStatus ?? null,
+          input.listingStatus ?? 'unlisted',
+          input.currentAccountingFramework ?? 'not_assessed',
+          input.countryOfIncorporation ?? null,
+          input.incorporationDate ?? null,
+          input.roc ?? null,
+          input.authorisedCapital ?? null,
+          input.paidUpCapital ?? null,
+          input.llpContribution ?? null,
+          input.businessDescription ?? null,
+          input.activities?.manufacturing ?? null,
+          input.activities?.trading ?? null,
+          input.activities?.services ?? null,
+          input.activities?.import ?? null,
+          input.activities?.export ?? null,
+          input.activities?.ecommerce ?? null,
+          input.activities?.regulated ?? null,
+        ],
+      );
+      entityId = rows[0]!.id;
+
+      for (const reg of input.registrations ?? []) {
+        await this.insertRegistration(client, entityId, reg);
       }
+      for (const contact of input.contacts ?? []) {
+        await this.insertContact(client, entityId, contact);
+      }
+      // Atomic wizard submit (§4): the rest of the factual children in the
+      // same transaction. Relationships are excluded (they need other entities).
+      for (const addr of input.addresses ?? []) {
+        await this.insertAddress(client, entityId, addr);
+      }
+      for (const act of input.businessActivities ?? []) {
+        await this.insertBusinessActivity(client, entityId, act);
+      }
+      for (const listing of input.listings ?? []) {
+        await this.insertListing(client, entityId, listing);
+      }
+      for (const attr of input.regulatoryAttributes ?? []) {
+        await this.insertRegulatoryAttribute(client, entityId, attr);
+      }
+      for (const fin of input.financialProfiles ?? []) {
+        await this.writeFinancialProfile(client, entityId, fin, ctx.userId);
+      }
+    } catch (err) {
+      throw translatePgError(err);
+    }
 
-      const detail = await this.selectDetail(client, entityId);
-      await this.audit.recordWith(client, ctx, {
-        action: 'entity.created',
-        objectType: 'entity',
-        objectId: entityId,
-        after: detail,
-      });
-      return detail!;
+    const detail = await this.selectDetail(client, entityId);
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.created',
+      objectType: 'entity',
+      objectId: entityId,
+      after: detail,
     });
+    return detail!;
   }
 
   async updateEntity(ctx: RlsContext, id: string, input: UpdateEntityInput): Promise<EntityDetail> {
@@ -459,7 +466,19 @@ export class EntitiesService {
     entityId: string,
     input: RegistrationInput,
   ): Promise<EntityDetail> {
-    return this.mutateChild(ctx, entityId, 'entity.registration_added', async (client) => {
+    return this.db.withRlsContext(ctx, (client) =>
+      this.addRegistrationWith(client, ctx, entityId, input),
+    );
+  }
+
+  /** addRegistration inside the caller's transaction (the client import). */
+  async addRegistrationWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    input: RegistrationInput,
+  ): Promise<EntityDetail> {
+    return this.mutateChildWith(client, ctx, entityId, 'entity.registration_added', async () => {
       await this.insertRegistration(client, entityId, input);
       await this.flagReassessmentIfComplete(client, entityId);
     });
@@ -532,6 +551,18 @@ export class EntitiesService {
 
   async addContact(ctx: RlsContext, entityId: string, input: ContactInput): Promise<EntityDetail> {
     return this.mutateChild(ctx, entityId, 'entity.contact_added', (client) =>
+      this.insertContact(client, entityId, input),
+    );
+  }
+
+  /** addContact inside the caller's transaction (the client import). */
+  async addContactWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    input: ContactInput,
+  ): Promise<EntityDetail> {
+    return this.mutateChildWith(client, ctx, entityId, 'entity.contact_added', () =>
       this.insertContact(client, entityId, input),
     );
   }
@@ -785,24 +816,34 @@ export class EntitiesService {
     action: string,
     work: (client: PoolClient) => Promise<void>,
   ): Promise<EntityDetail> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectDetail(client, entityId);
-      if (!before) throw new NotFoundException('Entity not found.');
-      try {
-        await work(client);
-      } catch (err) {
-        throw translatePgError(err);
-      }
-      const after = await this.selectDetail(client, entityId);
-      await this.audit.recordWith(client, ctx, {
-        action,
-        objectType: 'entity',
-        objectId: entityId,
-        before,
-        after,
-      });
-      return after!;
+    return this.db.withRlsContext(ctx, (client) =>
+      this.mutateChildWith(client, ctx, entityId, action, work),
+    );
+  }
+
+  private async mutateChildWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    action: string,
+    work: (client: PoolClient) => Promise<void>,
+  ): Promise<EntityDetail> {
+    const before = await this.selectDetail(client, entityId);
+    if (!before) throw new NotFoundException('Entity not found.');
+    try {
+      await work(client);
+    } catch (err) {
+      throw translatePgError(err);
+    }
+    const after = await this.selectDetail(client, entityId);
+    await this.audit.recordWith(client, ctx, {
+      action,
+      objectType: 'entity',
+      objectId: entityId,
+      before,
+      after,
     });
+    return after!;
   }
 
   /**

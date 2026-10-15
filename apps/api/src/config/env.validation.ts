@@ -60,6 +60,24 @@ export const envSchema = z.object({
   AUTH_JWT_AUDIENCE: z.string().default('hsdg-portal'),
   AUTH_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
+  // ── Clients' portal logins (ADR-0035) ────────────────────────────────────
+  // AES-256-GCM keys for the GST (and later other) portal logins the firm saves
+  // for its clients: `1:<base64 of 32 random bytes>`, comma-separated to rotate
+  // (the highest version encrypts, every listed version decrypts). The key is
+  // never stored in the database. Unset ⇒ logins can be neither saved nor shown;
+  // the rest of the portal is unaffected. Generate one with
+  //   node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
+  CREDENTIALS_KEYS: z
+    .string()
+    .optional()
+    .refine(
+      (v) =>
+        v === undefined ||
+        v.trim() === '' ||
+        v.split(',').every((part) => /^\s*[1-9][0-9]*:[A-Za-z0-9+/]{43}=\s*$/.test(part)),
+      'CREDENTIALS_KEYS must be "<version>:<base64 of 32 bytes>", comma-separated',
+    ),
+
   // Entra ID (required only when AUTH_PROVIDER=entra; validated at provider use).
   AUTH_ENTRA_TENANT_ID: z.string().optional(),
   AUTH_ENTRA_CLIENT_ID: z.string().optional(),
