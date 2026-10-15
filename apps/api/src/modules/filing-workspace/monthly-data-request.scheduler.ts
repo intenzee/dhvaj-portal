@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
-import { NOTIFICATION_TYPE, SYSTEM_ROLE } from '@hsdg/contracts';
+import { NOTIFICATION_TYPE, REMINDER_CHANNEL_SETTING, SYSTEM_ROLE } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AppConfigService } from '../../config/config.module';
@@ -9,6 +9,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ClientUploadService } from '../documents/client-upload/client-upload.service';
 import { istToday } from '../engagements/time/auto-time';
 import { periodLabel } from './filing-rules';
+import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { chasingPolicy, raiseSlotRequests, reminderText } from './client-chase';
 
 /** The month before `today` (YYYY-MM-DD) as a period key. */
@@ -31,6 +32,11 @@ export interface MonthlyRequestResult {
   items: number;
   linked: number;
   emailed: number;
+  /**
+   * Filings whose new requests were not e-mailed because the firm reminds
+   * clients by WhatsApp or by hand: the team sends them from the filing.
+   */
+  held: number;
   failed: number;
 }
 
@@ -50,8 +56,10 @@ interface DueFilingRow {
  * client-data slot (sales register, purchase register, …) from its own
  * checklist, dated from its internal due date (firm policy T-7 / T-3). An
  * upload into the slot closes the request (documents_close_slot_requests).
- * When client upload is enabled the client's primary contact is e-mailed once
- * per filing with a secure link per item. One transaction per filing; a slot
+ * When client upload is enabled and the firm reminds clients by e-mail
+ * (`client_reminder_channel`), the client's primary contact is e-mailed once
+ * per filing with a secure link per item; under WhatsApp or copy nothing goes
+ * to the client — the team sends the reminder from the filing. One transaction per filing; a slot
  * already asked for is never asked again, so a re-run is a no-op.
  *
  * Identity mirrors the other schedulers: the first active managing partner.
@@ -95,7 +103,7 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
       if (res.requested || res.failed) {
         this.logger.log(
           `Monthly data request ${res.periodKey}: ${res.items} item(s) on ${res.requested} ` +
-            `filing(s), ${res.emailed} e-mailed, ${res.failed} failed.`,
+            `filing(s), ${res.emailed} e-mailed, ${res.held} held for the team, ${res.failed} failed.`,
         );
       }
       return res;
@@ -116,9 +124,12 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
       items: 0,
       linked: 0,
       emailed: 0,
+      held: 0,
       failed: 0,
     };
-    const due = await this.db.withRlsContext(ctx, async (client) => {
+    const { due, byEmail } = await this.db.withRlsContext(ctx, async (client) => {
+      const byEmail =
+        (await workflowPolicy(client)).clientReminderChannel === REMINDER_CHANNEL_SETTING.email;
       const { rows } = await client.query<DueFilingRow>(
         `SELECT ci.id AS instance_id, ci.engagement_id, ent.legal_name AS entity_name,
                 COALESCE(ci.form_label, rv.form_label, cr.name) AS form,
@@ -143,7 +154,7 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
           ORDER BY ci.registration_id, ci.section, ci.created_at`,
         [periodKey, today, MONTHLY_REQUEST_SECTIONS],
       );
-      return rows;
+      return { due: rows, byEmail };
     });
 
     const base = this.config.get('WEB_PUBLIC_URL').replace(/\/$/, '');
@@ -159,6 +170,10 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
         if (raised.length === 0) continue;
         result.requested += 1;
         result.items += raised.length;
+        if (!byEmail) {
+          result.held += 1;
+          continue;
+        }
         if (!this.uploads.enabled) continue;
         const items: { label: string; uploadUrl: string }[] = [];
         for (const r of raised) {

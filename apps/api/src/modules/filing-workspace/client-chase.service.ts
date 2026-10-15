@@ -8,10 +8,13 @@ import type { PoolClient } from 'pg';
 import {
   CLIENT_REMINDER_CHANNEL,
   NOTIFICATION_TYPE,
+  reminderChannelFor,
+  whatsappUrl,
   type ClientChase,
   type ClientChaseItem,
+  type ClientReminderChannel,
   type ClientReminderResult,
-  type FilingRunBulkResult,
+  type FilingRunRemindResult,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -20,6 +23,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ClientUploadService } from '../documents/client-upload/client-upload.service';
 import { istToday } from '../engagements/time/auto-time';
+import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import {
   CLIENT_DATA_SLOTS,
   chasingPolicy,
@@ -38,6 +42,7 @@ interface ChaseInstanceRow {
   workflow_status: string;
   is_member: boolean;
   client_email: string | null;
+  client_phone: string | null;
   firm_name: string | null;
 }
 
@@ -59,6 +64,9 @@ const CHASE_INSTANCE_SQL = `
          (SELECT c.email::text FROM hsdg.entity_contacts c
            WHERE c.entity_id = e.entity_id AND c.email IS NOT NULL
            ORDER BY c.is_primary DESC, c.created_at LIMIT 1) AS client_email,
+         (SELECT c.phone FROM hsdg.entity_contacts c
+           WHERE c.entity_id = e.entity_id AND NULLIF(trim(c.phone), '') IS NOT NULL
+           ORDER BY c.is_primary DESC, c.created_at LIMIT 1) AS client_phone,
          (SELECT f.firm_name FROM hsdg.firm_settings f LIMIT 1) AS firm_name
     FROM hsdg.compliance_instances ci
     JOIN hsdg.engagements e ON e.id = ci.engagement_id
@@ -72,9 +80,11 @@ const DONE_STATUSES = ['filed', 'not_applicable'];
 /**
  * Staff Workflow WF-302 — client chasing on a filing. Reads what the filing is
  * waiting on from the client; a reminder first raises a request for every
- * required client-data slot nobody has asked for yet, then goes to the client
- * by e-mail (with fresh upload links when client upload is on) or comes back
- * as text to paste into WhatsApp. Any engagement member may chase; RLS scopes
+ * required client-data slot nobody has asked for yet, then follows the firm's
+ * `client_reminder_channel`: e-mail (with fresh upload links when client upload
+ * is on), a wa.me link with the text filled in, or text to copy — the fallback
+ * when the client has no address or phone. Each one is recorded with its
+ * channel (audit 'filing.client_reminded'). Any engagement member may chase; RLS scopes
  * every read and write.
  */
 @Injectable()
@@ -92,6 +102,7 @@ export class ClientChaseService {
     const today = istToday(new Date());
     return this.db.withRlsContext(ctx, async (client) => {
       const inst = await this.load(client, id);
+      const setting = (await workflowPolicy(client)).clientReminderChannel;
       const open = await this.openRequests(client, id);
       const { rows: missing } = await client.query<{ slot_code: string; label: string }>(
         `SELECT DISTINCT ON (it.slot_code) it.slot_code, it.label
@@ -126,6 +137,8 @@ export class ClientChaseService {
         notRequested,
         clientEmail: inst.client_email,
         canEmail: this.canEmail(inst),
+        clientPhone: inst.client_phone,
+        ...this.channelFor(setting, inst),
         reminderText: this.text(inst, items),
       };
     });
@@ -134,8 +147,9 @@ export class ClientChaseService {
   /** POST /compliance-instances/:id/client-chase/remind */
   async remind(ctx: RlsContext, id: string): Promise<ClientReminderResult> {
     const today = istToday(new Date());
-    const { inst, raised, open } = await this.db.withRlsContext(ctx, async (client) => {
+    const { inst, raised, open, setting } = await this.db.withRlsContext(ctx, async (client) => {
       const inst = await this.load(client, id);
+      const setting = (await workflowPolicy(client)).clientReminderChannel;
       if (DONE_STATUSES.includes(inst.workflow_status))
         throw new BadRequestException('This filing is closed — there is nothing to chase.');
       const policy = await chasingPolicy(client);
@@ -145,14 +159,12 @@ export class ClientChaseService {
         policy,
       });
       const open = await this.openRequests(client, id);
-      return { inst, raised, open };
+      return { inst, raised, open, setting };
     });
     if (open.length === 0)
       throw new BadRequestException('Nothing on this filing is waiting on the client.');
 
-    const channel = this.canEmail(inst)
-      ? CLIENT_REMINDER_CHANNEL.email
-      : CLIENT_REMINDER_CHANNEL.copy;
+    const { channel, fallback } = this.channelFor(setting, inst);
     // A fresh secure link per item, so the reminder is one tap from the upload.
     const base = this.config.get('WEB_PUBLIC_URL').replace(/\/$/, '');
     const items: { label: string; uploadUrl: string | null }[] = [];
@@ -182,26 +194,32 @@ export class ClientChaseService {
         objectId: id,
         after: {
           channel,
+          fallback,
           dependencyIds: open.map((r) => r.id),
           raised: raised.map((r) => r.dependencyId),
         },
       });
     });
-    return {
+    const common = {
       instanceId: id,
-      channel,
+      client: inst.entity_name,
       text,
       waitingOn: open.map((r) => r.label),
       raised: raised.length,
     };
+    if (channel === CLIENT_REMINDER_CHANNEL.email)
+      return { ...common, channel, to: inst.client_email as string };
+    if (channel === CLIENT_REMINDER_CHANNEL.whatsapp)
+      return { ...common, channel, waUrl: whatsappUrl(inst.client_phone, text) as string };
+    return { ...common, channel: CLIENT_REMINDER_CHANNEL.copy, fallback };
   }
 
   /** Filing-run bulk remind: one transaction per filing, failures reported per row. */
-  async remindMany(ctx: RlsContext, instanceIds: string[]): Promise<FilingRunBulkResult> {
-    const result: FilingRunBulkResult = { succeeded: [], failed: [] };
+  async remindMany(ctx: RlsContext, instanceIds: string[]): Promise<FilingRunRemindResult> {
+    const result: FilingRunRemindResult = { succeeded: [], failed: [], reminders: [] };
     for (const instanceId of instanceIds) {
       try {
-        await this.remind(ctx, instanceId);
+        result.reminders.push(await this.remind(ctx, instanceId));
         result.succeeded.push(instanceId);
       } catch (err) {
         result.failed.push({ instanceId, message: (err as Error).message });
@@ -212,6 +230,11 @@ export class ClientChaseService {
 
   private canEmail(inst: ChaseInstanceRow): boolean {
     return Boolean(inst.client_email) && this.notifications.hasExternalChannels;
+  }
+
+  /** The firm's channel for this client, falling back to copy when they cannot be reached on it. */
+  private channelFor(setting: ClientReminderChannel, inst: ChaseInstanceRow) {
+    return reminderChannelFor(setting, { canEmail: this.canEmail(inst), phone: inst.client_phone });
   }
 
   private text(inst: ChaseInstanceRow, items: { label: string; uploadUrl?: string | null }[]) {

@@ -1,7 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ClientChase as Chase, WorkspaceInstance } from '@hsdg/contracts';
-import { ClientChase, reminderButtonLabel, waitingLine } from '../client-chase';
+import type {
+  ClientChase as Chase,
+  ClientReminderResult,
+  WorkspaceInstance,
+} from '@hsdg/contracts';
+import {
+  ClientChase,
+  fallbackNote,
+  reminderButtonLabel,
+  remindersToSend,
+  waitingLine,
+} from '../client-chase';
 
 const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
@@ -31,6 +41,9 @@ const chase = (over: Partial<Chase> = {}): Chase => ({
   notRequested: [{ slotCode: 'purchase_register', label: 'Purchase register' }],
   clientEmail: null,
   canEmail: false,
+  clientPhone: null,
+  channel: 'copy',
+  fallback: 'no_email',
   reminderText: 'Dear client …',
   ...over,
 });
@@ -59,11 +72,50 @@ describe('client chase', () => {
     expect(waitingLine(chase({ waitingOn: [], notRequested: [] }))).toBeNull();
   });
 
-  it('says e-mail only when the firm can e-mail the client', () => {
+  it('names the button by the channel the firm picks for this client', () => {
     expect(reminderButtonLabel(chase())).toBe('Send reminder');
-    expect(reminderButtonLabel(chase({ canEmail: true, clientEmail: 'a@b.in' }))).toBe(
+    expect(reminderButtonLabel(chase({ channel: 'email', clientEmail: 'a@b.in' }))).toBe(
       'E-mail reminder to a@b.in',
     );
+    expect(reminderButtonLabel(chase({ channel: 'whatsapp' }))).toBe('WhatsApp reminder');
+  });
+
+  it('says why a reminder fell back to copying', () => {
+    expect(fallbackNote('no_phone')).toMatch(/no phone number/);
+    expect(fallbackNote('no_email')).toMatch(/cannot be e-mailed/);
+    expect(fallbackNote(null)).toBeNull();
+  });
+
+  it('keeps only the reminders a person still has to send', () => {
+    const base = { text: 't', waitingOn: [], raised: 0 };
+    const all: ClientReminderResult[] = [
+      { ...base, instanceId: 'a', client: 'A', channel: 'email', to: 'a@a.in' },
+      { ...base, instanceId: 'b', client: 'B', channel: 'whatsapp', waUrl: 'https://wa.me/91' },
+      { ...base, instanceId: 'c', client: 'C', channel: 'copy', fallback: 'no_phone' },
+    ];
+    expect(remindersToSend(all).map((r) => r.instanceId)).toEqual(['b', 'c']);
+  });
+
+  it('offers Open WhatsApp under the WhatsApp channel', async () => {
+    apiFetch.mockImplementation((_path: string, opts?: { method?: string }) =>
+      opts?.method === 'POST'
+        ? Promise.resolve({
+            instanceId: 'i1',
+            client: 'Bharat Traders',
+            channel: 'whatsapp',
+            waUrl: 'https://wa.me/919876543210?text=Please',
+            text: 'Please',
+            waitingOn: ['Bank statement'],
+            raised: 0,
+          })
+        : Promise.resolve(chase({ channel: 'whatsapp', fallback: null, clientPhone: '98765' })),
+    );
+    renderIt(inst());
+    fireEvent.click(await screen.findByRole('button', { name: /WhatsApp reminder/ }));
+    const link = await screen.findByRole('link', { name: /Open WhatsApp/ });
+    expect(link).toHaveAttribute('href', 'https://wa.me/919876543210?text=Please');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.getByRole('button', { name: /Copy text/ })).toBeInTheDocument();
   });
 
   it('shows the copy text when there is no e-mail channel', async () => {
@@ -71,7 +123,9 @@ describe('client chase', () => {
       opts?.method === 'POST'
         ? Promise.resolve({
             instanceId: 'i1',
+            client: 'Bharat Traders',
             channel: 'copy',
+            fallback: 'no_email',
             text: 'Please send the bank statement.',
             waitingOn: ['Bank statement'],
             raised: 1,
@@ -86,6 +140,8 @@ describe('client chase', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('Reminder text')).toHaveValue('Please send the bank statement.'),
     );
+    expect(screen.getByText(/cannot be e-mailed/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open WhatsApp/ })).toBeNull();
     expect(apiFetch).toHaveBeenCalledWith('/compliance-instances/i1/client-chase/remind', {
       method: 'POST',
     });
