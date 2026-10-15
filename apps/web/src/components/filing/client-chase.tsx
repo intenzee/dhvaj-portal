@@ -323,17 +323,17 @@ export function ClientChase({ instance }: { instance: WorkspaceInstance }): JSX.
  * firm's channel would not use (PS-001). Behind ff_filing_runs, like the rest
  * of client chasing.
  */
-export function RemindClientButton({ instanceId }: { instanceId: string }): JSX.Element | null {
+export function RemindClientButton({
+  instanceId,
+  offersWhatsapp: whatsapp = false,
+}: {
+  instanceId: string;
+  /** From Today's row (`TodayItem.offersWhatsapp`), so the row needn't fetch the chase. */
+  offersWhatsapp?: boolean;
+}): JSX.Element | null {
   const { isOn } = useFeatureFlags();
   const on = isOn(FEATURE_FLAG.filingRuns);
   const remind = useClientReminder(instanceId);
-  // The same query the filing panel reads, so opening the filing is instant.
-  const chase = useQuery({
-    queryKey: clientChaseKey(instanceId),
-    queryFn: () => apiFetch<Chase>(`/compliance-instances/${instanceId}/client-chase`),
-    enabled: on,
-    staleTime: 60_000,
-  });
   if (!on) return null;
   return (
     <>
@@ -349,7 +349,7 @@ export function RemindClientButton({ instanceId }: { instanceId: string }): JSX.
         <BellRing className="h-4 w-4" />
         {remind.isPending && !remind.variables ? 'Sending…' : 'Remind client'}
       </Button>
-      {chase.data && offersWhatsapp(chase.data) && <WhatsappReminderButton remind={remind} />}
+      {whatsapp && <WhatsappReminderButton remind={remind} />}
       {remind.toSend && (
         <div className="min-w-72 basis-full" onClick={(e) => e.stopPropagation()}>
           <ReminderToSendPanel reminder={remind.toSend} />
