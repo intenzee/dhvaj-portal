@@ -274,14 +274,25 @@ describe('Actionable notifications (e2e)', () => {
     expect(lodged.label).toBe('Filing lodged');
     expect(lodged.items.map((n) => n.objectId)).toContain(inst);
 
-    // Moved to the bell, it counts; turned off, it is nowhere.
+    // Moved to the bell, it counts — with any lodged notices earlier suites left
+    // X — and turned off, it is nowhere.
+    const lodgedUnread = Number(
+      (
+        await su.query<{ n: string }>(
+          `SELECT count(*) AS n FROM hsdg.notifications n JOIN hsdg.employees e
+              ON e.user_id = n.recipient_user_id
+            WHERE e.id = $1 AND n.type = 'filing_lodged' AND n.status = 'unread'`,
+          [emp005],
+        )
+      ).rows[0]!.n,
+    );
     await http()
       .put('/api/v1/notifications/preferences')
       .set(bearer(mx))
       .send({ items: [{ type: 'filing_lodged', delivery: 'bell' }] })
       .expect(200);
     expect(about(await inbox(mx), inst, 'filing_lodged')).toBeDefined();
-    expect(await unread(mx)).toBe(before + 1);
+    expect(await unread(mx)).toBe(before + lodgedUnread);
     await http()
       .put('/api/v1/notifications/preferences')
       .set(bearer(mx))
