@@ -1,7 +1,13 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Client } from 'pg';
-import { WORKFLOW_MEASURE, type WorkflowMeasuresReport } from '@hsdg/contracts';
+import {
+  WORKFLOW_MEASURE,
+  type PracticeReport,
+  type WorkflowBaselineInfo,
+  type WorkflowMeasuresReport,
+  type WorkflowTarget,
+} from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 
 /**
@@ -180,7 +186,8 @@ describe('Telemetry (e2e)', () => {
     expect(all[WORKFLOW_MEASURE.exactLinkShare]).toMatchObject({
       value: 50,
       sample: 2,
-      meetsTarget: false,
+      onTrack: false,
+      targetLabel: '≥ 90%',
     });
     // Nothing before it to compare with.
     expect(all[WORKFLOW_MEASURE.stepsToFirstAction]!.previous).toBeNull();
@@ -189,8 +196,265 @@ describe('Telemetry (e2e)', () => {
     expect(n[WORKFLOW_MEASURE.stepsToFirstAction]).toMatchObject({
       value: 1,
       sample: 1,
-      meetsTarget: true,
+      onTrack: true,
     });
     expect(n[WORKFLOW_MEASURE.exactLinkShare]).toMatchObject({ value: 100, sample: 1 });
+  });
+
+  it('partners save a baseline and set targets; the report compares with them', async () => {
+    const day = '2020-03-02';
+    const pa = await token('partner.a@dhvaj.in');
+    const mx = await token('manager.x@dhvaj.in');
+    const body = { from: day, to: day };
+    // Saving and setting need workflow.manage; reading the targets, report.read.
+    await http().post('/api/v1/telemetry/baselines').set(bearer(mx)).send(body).expect(403);
+    await http().post('/api/v1/telemetry/baselines').set(bearer(sy)).send(body).expect(403);
+    await http()
+      .put('/api/v1/telemetry/targets')
+      .set(bearer(mx))
+      .send({ items: [{ key: 'steps_to_first_action', rule: 'at_most', value: 1 }] })
+      .expect(403);
+    await http().get('/api/v1/telemetry/targets').set(bearer(sy)).expect(403);
+    // A window still to come cannot be a baseline.
+    await http()
+      .post('/api/v1/telemetry/baselines')
+      .set(bearer(pa))
+      .send({ from: day, to: '2999-01-01' })
+      .expect(400);
+
+    // A partner (North) sees North's people, so baselines North only.
+    await http().post('/api/v1/telemetry/baselines').set(bearer(pa)).send(body).expect(403);
+    const south = (
+      await su.query<{ id: string }>(`SELECT id FROM hsdg.offices WHERE code = 'SOUTH'`)
+    ).rows[0]!.id;
+    await http()
+      .post('/api/v1/telemetry/baselines')
+      .set(bearer(pa))
+      .send({ ...body, officeId: south })
+      .expect(403);
+    const ownNorth = (
+      await http()
+        .post('/api/v1/telemetry/baselines')
+        .set(bearer(pa))
+        .send({ ...body, officeId: north })
+        .expect(201)
+    ).body as WorkflowBaselineInfo;
+    expect(ownNorth).toMatchObject({ officeId: north });
+
+    const saved = (
+      await http().post('/api/v1/telemetry/baselines').set(bearer(mp)).send(body).expect(201)
+    ).body as WorkflowBaselineInfo;
+    expect(saved).toMatchObject({ from: day, to: day, officeId: null });
+    expect(saved.savedBy).toBeTruthy();
+    const frozen = (
+      await su.query<{ measures: Record<string, number | null> }>(
+        `SELECT measures FROM hsdg.workflow_baselines WHERE id = $1`,
+        [saved.id],
+      )
+    ).rows[0]!.measures;
+    expect(frozen).toMatchObject({ steps_to_first_action: 2, exact_link_share: 50 });
+    const audited = await su.query(
+      `SELECT 1 FROM hsdg.audit_events WHERE action = 'workflow.baseline_saved' AND object_id = $1`,
+      [saved.id],
+    );
+    expect(audited.rowCount).toBe(1);
+
+    const report = async (): Promise<WorkflowMeasuresReport> =>
+      (
+        await http()
+          .get(`/api/v1/telemetry/measures?from=${day}&to=${day}`)
+          .set(bearer(mp))
+          .expect(200)
+      ).body as WorkflowMeasuresReport;
+    const byKey = (r: WorkflowMeasuresReport) =>
+      Object.fromEntries(r.measures.map((m) => [m.key, m]));
+    let r = await report();
+    expect(r.baseline).toMatchObject({ id: saved.id, from: day, to: day });
+    expect(byKey(r)[WORKFLOW_MEASURE.stepsToFirstAction]).toMatchObject({
+      value: 2,
+      baseline: 2,
+      vsBaseline: 0,
+      targetLabel: '≤ 2 steps',
+      onTrack: true,
+    });
+    // North's baseline is its own scope.
+    const n = (
+      await http()
+        .get(`/api/v1/telemetry/measures?from=${day}&to=${day}&officeId=${north}`)
+        .set(bearer(mp))
+        .expect(200)
+    ).body as WorkflowMeasuresReport;
+    expect(n.baseline).toMatchObject({ id: ownNorth.id, officeId: north });
+    expect(byKey(n)[WORKFLOW_MEASURE.stepsToFirstAction]).toMatchObject({
+      value: 1,
+      baseline: 1,
+    });
+
+    const before = (await http().get('/api/v1/telemetry/targets').set(bearer(mx)).expect(200))
+      .body as WorkflowTarget[];
+    expect(before.map((t) => t.key)).toEqual(Object.values(WORKFLOW_MEASURE));
+    try {
+      // Bad rules and values are refused.
+      for (const item of [
+        { key: 'steps_to_first_action', rule: 'about', value: 1 },
+        { key: 'nope', rule: 'at_most', value: 1 },
+        { key: 'steps_to_first_action', rule: 'at_most', value: -1 },
+        { key: 'review_wait', rule: 'change_by', value: -101 },
+      ])
+        await http()
+          .put('/api/v1/telemetry/targets')
+          .set(bearer(pa))
+          .send({ items: [item] })
+          .expect(400);
+      const after = (
+        await http()
+          .put('/api/v1/telemetry/targets')
+          .set(bearer(mp))
+          .send({
+            items: [
+              { key: 'steps_to_first_action', rule: 'at_most', value: 1 },
+              { key: 'exact_link_share', rule: 'change_by', value: -10 },
+            ],
+          })
+          .expect(200)
+      ).body as WorkflowTarget[];
+      expect(after.find((t) => t.key === 'review_wait')).toEqual(
+        before.find((t) => t.key === 'review_wait'),
+      );
+      r = await report();
+      expect(byKey(r)[WORKFLOW_MEASURE.stepsToFirstAction]).toMatchObject({
+        targetLabel: '≤ 1 step',
+        onTrack: false,
+      });
+      // −10% on a baseline of 50%: 50% is no cut.
+      expect(byKey(r)[WORKFLOW_MEASURE.exactLinkShare]).toMatchObject({
+        targetLabel: '−10% on the baseline',
+        onTrack: false,
+      });
+      const log = await su.query<{ before_state: unknown; after_state: unknown }>(
+        `SELECT before_state, after_state FROM hsdg.audit_events
+          WHERE action = 'workflow.targets_updated' ORDER BY occurred_at DESC LIMIT 1`,
+      );
+      expect(log.rows[0]!.after_state).toMatchObject({
+        targets: [
+          { key: 'steps_to_first_action', rule: 'at_most', value: 1 },
+          { key: 'exact_link_share', rule: 'change_by', value: -10 },
+        ],
+      });
+    } finally {
+      await http().put('/api/v1/telemetry/targets').set(bearer(mp)).send({ items: before });
+    }
+  });
+
+  it('a practice session counts steps, pages and work per person over an exact window', async () => {
+    const day = '2020-03-09';
+    const at = (h: number, min: number) =>
+      `${day}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00+05:30`;
+    const ins = (user: string, sid: string, kind: string, params: string[], when: string) =>
+      su.query(
+        `INSERT INTO hsdg.telemetry_events (user_id, session_id, kind, path, params, source, occurred_at)
+         VALUES ($1, $2, $3, '/today', $4, $5, $6)`,
+        [user, sid, kind, params, kind === 'row_open' ? 'today' : null, when],
+      );
+    const emp = async (email: string): Promise<string> =>
+      (
+        await su.query<{ id: string }>(
+          `SELECT e.id FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id WHERE u.email = $1`,
+          [email],
+        )
+      ).rows[0]!.id;
+    const mxEmp = await emp('manager.x@dhvaj.in');
+    const syEmp = await emp('senior.y@dhvaj.in');
+    // Manager X: sign-in → a filing (1 step), a row that lands exactly, and a
+    // task moved on — inside 10:00–11:00. An event at 11:05 is outside it.
+    await ins(mxUser, 'practiceMx01', 'route', [], at(10, 2));
+    await ins(mxUser, 'practiceMx01', 'row_open', ['part', 'tab'], at(10, 3));
+    await ins(mxUser, 'practiceMx01', 'route', ['part', 'tab'], at(10, 3));
+    await ins(mxUser, 'practiceMx01', 'route', [], at(11, 5));
+    const eng = (
+      await su.query<{ id: string }>(
+        `SELECT e.id FROM hsdg.engagements e JOIN hsdg.offices o ON o.id = e.office_id
+          WHERE o.code = 'NORTH' LIMIT 1`,
+      )
+    ).rows[0]!.id;
+    const task = (
+      await su.query<{ id: string }>(
+        `INSERT INTO hsdg.tasks (engagement_id, title, assigned_to_employee_id)
+         VALUES ($1, 'Practice task', $2) RETURNING id`,
+        [eng, mxEmp],
+      )
+    ).rows[0]!.id;
+    await su.query(
+      `INSERT INTO hsdg.task_events (task_id, engagement_id, from_status, to_status, actor_employee_id, created_at)
+       VALUES ($1, $2, 'todo', 'in_progress', $3, $4)`,
+      [task, eng, mxEmp, at(10, 4)],
+    );
+    // Senior Y: two pages, no filing reached, no work done.
+    await ins(syUser, 'practiceSy01', 'route', [], at(10, 10));
+    await ins(syUser, 'practiceSy01', 'route', ['tab'], at(10, 11));
+
+    const qs = `from=${encodeURIComponent(at(10, 0))}&to=${encodeURIComponent(at(11, 0))}`;
+    const res = (
+      await http()
+        .get(`/api/v1/telemetry/practice?${qs}&employeeIds=${mxEmp},${syEmp}`)
+        .set(bearer(mp))
+        .expect(200)
+    ).body as PracticeReport;
+    expect(res.from).toBe('2020-03-09T04:30:00.000Z');
+    const by = Object.fromEntries(res.people.map((p) => [p.employeeId, p]));
+    expect(by[mxEmp]).toMatchObject({
+      name: 'Manager X',
+      sessions: 1,
+      sessionsWithFiling: 1,
+      steps: 1,
+      routes: 2,
+      rowOpens: 1,
+      exactRowOpens: 1,
+      exactShare: 100,
+      actions: 1,
+      routesPerAction: 2,
+    });
+    expect(by[syEmp]).toMatchObject({
+      sessions: 1,
+      sessionsWithFiling: 0,
+      steps: null,
+      routes: 2,
+      rowOpens: 0,
+      exactShare: null,
+      actions: 0,
+      routesPerAction: null,
+    });
+
+    // Report readers only; a window of at most 7 days that ends after it starts.
+    await http()
+      .get(`/api/v1/telemetry/practice?${qs}&employeeIds=${mxEmp}`)
+      .set(bearer(sy))
+      .expect(403);
+    await http()
+      .get(
+        `/api/v1/telemetry/practice?from=${encodeURIComponent(at(11, 0))}&to=${encodeURIComponent(at(10, 0))}&employeeIds=${mxEmp}`,
+      )
+      .set(bearer(mp))
+      .expect(400);
+    await http()
+      .get(
+        `/api/v1/telemetry/practice?from=2020-03-01T00:00:00Z&to=2020-03-09T00:00:00Z&employeeIds=${mxEmp}`,
+      )
+      .set(bearer(mp))
+      .expect(400);
+    await http()
+      .get(`/api/v1/telemetry/practice?${qs}&employeeIds=nope`)
+      .set(bearer(mp))
+      .expect(400);
+    await http().get(`/api/v1/telemetry/practice?${qs}`).set(bearer(mp)).expect(400);
+    // Partner B (South) cannot see Manager X (North): left out.
+    const pb = await token('partner.b@dhvaj.in');
+    const south = (
+      await http()
+        .get(`/api/v1/telemetry/practice?${qs}&employeeIds=${mxEmp}`)
+        .set(bearer(pb))
+        .expect(200)
+    ).body as PracticeReport;
+    expect(south.people).toEqual([]);
   });
 });

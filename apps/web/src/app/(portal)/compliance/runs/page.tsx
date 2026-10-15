@@ -9,6 +9,7 @@ import {
   PERMISSION,
   workItemHref,
   type FilingRunBulkResult,
+  type FilingRunRemindResult,
   type FilingRunRow,
   type Paginated,
 } from '@hsdg/contracts';
@@ -27,6 +28,11 @@ import { Modal } from '@/components/modal';
 import { StatusBadge } from '@/components/status-badge';
 import { FilingStatusBadge } from '@/components/filing/filing-status';
 import { FilingDrawer, useOpenFiling, type DrawerItem } from '@/components/filing/filing-drawer';
+import {
+  RemindersToSend,
+  remindersToSend,
+  type ReminderToSend,
+} from '@/components/filing/client-chase';
 import {
   actionable,
   bulkSummary,
@@ -97,6 +103,8 @@ function RunsScreen(): JSX.Element {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignOpen, setAssignOpen] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // WhatsApp / copy reminders from the last bulk remind, for the team to send.
+  const [toSend, setToSend] = useState<ReminderToSend[]>([]);
 
   useEffect(() => setSelected((s) => pruneSelection(s, rows)), [rows]);
 
@@ -119,11 +127,14 @@ function RunsScreen(): JSX.Element {
 
   const remind = useMutation({
     mutationFn: () =>
-      apiFetch<FilingRunBulkResult>('/compliance/runs/remind', {
+      apiFetch<FilingRunRemindResult>('/compliance/runs/remind', {
         method: 'POST',
         body: { instanceIds: toRemind },
       }),
-    onSuccess: (r) => finish('remind', r),
+    onSuccess: (r) => {
+      setToSend(remindersToSend(r.reminders));
+      finish('remind', r);
+    },
     onError,
   });
 
@@ -267,6 +278,10 @@ function RunsScreen(): JSX.Element {
             ))}
           </ul>
         </div>
+      )}
+
+      {toSend.length > 0 && (
+        <RemindersToSend reminders={toSend} onDismiss={() => setToSend([])} />
       )}
 
       {(forms.isLoading || run.isLoading || flags.isLoading) && (

@@ -1,3 +1,4 @@
+import { reminderChannelFor, whatsappNumber, whatsappUrl } from '@hsdg/contracts';
 import { CLIENT_DATA_SLOTS, chasingDates, reminderText, slotItemLabel } from './client-chase';
 import { previousMonth } from './monthly-data-request.scheduler';
 
@@ -96,5 +97,42 @@ describe('client chasing (WF-302)', () => {
   it('runs the monthly request for the month just ended', () => {
     expect(previousMonth('2026-10-01')).toEqual({ periodKey: '2026-09' });
     expect(previousMonth('2027-01-01')).toEqual({ periodKey: '2026-12' });
+  });
+});
+
+describe('the reminder channel (client_reminder_channel)', () => {
+  it('reads a phone number the way wa.me wants it', () => {
+    expect(whatsappNumber('98765 43210')).toBe('919876543210');
+    expect(whatsappNumber('098765-43210')).toBe('919876543210');
+    expect(whatsappNumber('+91 98765 43210')).toBe('919876543210');
+    expect(whatsappNumber('0044 20 7946 0958')).toBe('442079460958');
+    expect(whatsappNumber('12345')).toBeNull();
+    expect(whatsappNumber('')).toBeNull();
+    expect(whatsappNumber(null)).toBeNull();
+  });
+
+  it('builds the wa.me link with the text filled in', () => {
+    expect(whatsappUrl('9876543210', 'Dear Sir & Madam,\nplease send')).toBe(
+      'https://wa.me/919876543210?text=Dear%20Sir%20%26%20Madam%2C%0Aplease%20send',
+    );
+    expect(whatsappUrl(null, 'x')).toBeNull();
+  });
+
+  it('follows the setting and falls back to copy with a reason', () => {
+    const reachable = { canEmail: true, phone: '9876543210' };
+    expect(reminderChannelFor('email', reachable)).toEqual({ channel: 'email', fallback: null });
+    expect(reminderChannelFor('whatsapp', reachable)).toEqual({
+      channel: 'whatsapp',
+      fallback: null,
+    });
+    expect(reminderChannelFor('copy', reachable)).toEqual({ channel: 'copy', fallback: null });
+    expect(reminderChannelFor('email', { canEmail: false, phone: '9876543210' })).toEqual({
+      channel: 'copy',
+      fallback: 'no_email',
+    });
+    expect(reminderChannelFor('whatsapp', { canEmail: true, phone: 'n/a' })).toEqual({
+      channel: 'copy',
+      fallback: 'no_phone',
+    });
   });
 });

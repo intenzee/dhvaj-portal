@@ -122,13 +122,15 @@ export function WorkAreasPanel({
   const selected = selectedId ? gen.areas.find((a) => a.id === selectedId) ?? null : null;
   if (selected) {
     return (
-      <AuditAreaScreen
-        engagementId={engagementId}
-        area={selected}
-        allAreas={gen.areas}
-        team={team}
-        onBack={() => setSelectedId(null)}
-      />
+      <div id={`audit-anchor-area-${selected.id}`}>
+        <AuditAreaScreen
+          engagementId={engagementId}
+          area={selected}
+          allAreas={gen.areas}
+          team={team}
+          onBack={() => setSelectedId(null)}
+        />
+      </div>
     );
   }
 

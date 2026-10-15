@@ -44,6 +44,7 @@ interface TaskCols {
   tk_reviewer_name: string | null;
   tk_sent_for_review_at: Date | null;
   tk_review_started_at: Date | null;
+  tk_audit_area_id: string | null;
   tk_blocked_by_open_count: number | null;
 }
 
@@ -53,6 +54,7 @@ const TASK_COLS = (t: string): string => `
   ${t}.assigned_to_employee_id AS tk_assigned_to_id, tae.full_name AS tk_assigned_to_name,
   ${t}.reviewer_employee_id AS tk_reviewer_id, tre.full_name AS tk_reviewer_name,
   ${t}.sent_for_review_at AS tk_sent_for_review_at, ${t}.review_started_at AS tk_review_started_at,
+  ${t}.audit_work_area_id AS tk_audit_area_id,
   (SELECT count(*) FROM hsdg.task_dependencies d
      JOIN hsdg.tasks bt ON bt.id = d.depends_on_task_id
     WHERE d.task_id = ${t}.id AND bt.status NOT IN ('done', 'cancelled'))::int
@@ -161,7 +163,12 @@ export class WorkTodayService {
         blockedByOpenCount: r.tk_blocked_by_open_count ?? 0,
         task,
         link: workLinkOf(
-          { engagementId: r.engagement_id, engagementKind: r.engagement_kind, taskId: task.id },
+          {
+            engagementId: r.engagement_id,
+            engagementKind: r.engagement_kind,
+            taskId: task.id,
+            auditAreaId: r.tk_audit_area_id,
+          },
           workLinkFilingOf(r),
         ),
       };

@@ -53,6 +53,8 @@ export interface TaskRecord {
   workType: WorkType | null;
   /** The filing this task produces (generated from a compliance instance). */
   complianceInstanceId: string | null;
+  /** Statutory audit — the audit file's area this task is about. */
+  auditAreaId: string | null;
   sentForReviewAt: string | null;
   /** When the reviewer opened the current review (their clock is running). */
   reviewStartedAt: string | null;
@@ -135,6 +137,7 @@ export interface CreateTaskInput {
   reviewerEmployeeId?: string;
   workType?: WorkType;
   complianceInstanceId?: string;
+  auditAreaId?: string;
 }
 
 /** §31 — a lead's decision on an out-of-scope request. */
@@ -153,6 +156,7 @@ export interface UpdateTaskInput {
   engagementServiceId?: string | null;
   reviewerEmployeeId?: string | null;
   workType?: WorkType | null;
+  auditAreaId?: string | null;
   version?: number;
 }
 
