@@ -17,6 +17,7 @@ import { MaterialityMethodologySection } from '@/components/admin/materiality-me
 import { ScopeMethodologySection } from '@/components/admin/scope-methodology-section';
 import { AuditAreaLibrarySection } from '@/components/admin/audit-area-library-section';
 import { WorkflowSection } from '@/components/admin/workflow-section';
+import { RolloutSection } from '@/components/admin/rollout-section';
 
 type Tab =
   | 'users'
@@ -28,7 +29,8 @@ type Tab =
   | 'materiality'
   | 'scope'
   | 'areas'
-  | 'workflow';
+  | 'workflow'
+  | 'rollout';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -85,13 +87,15 @@ export default function AdministrationPage(): JSX.Element {
       : []),
     // The partners' answers to the Staff Workflow plan's questions.
     ...(setsWorkflow ? [{ id: 'workflow' as const, label: 'Workflow' }] : []),
+    // Each Staff Workflow phase, office by office (user.manage — MP / admin).
+    ...(administers ? [{ id: 'rollout' as const, label: 'Rollout' }] : []),
   ];
 
   return (
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library and the firm’s workflow policy. Every change is audited."
+        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library, the firm’s workflow policy and the rollout of each phase. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -128,6 +132,8 @@ export default function AdministrationPage(): JSX.Element {
             <AuditAreaLibrarySection />
           ) : tab === 'workflow' ? (
             <WorkflowSection />
+          ) : tab === 'rollout' ? (
+            <RolloutSection />
           ) : tab === 'signals' ? (
             <div className="space-y-8">
               <PlanningSignalLibrarySection />

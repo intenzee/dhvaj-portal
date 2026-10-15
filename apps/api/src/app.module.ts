@@ -34,6 +34,7 @@ import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspa
 import { SearchModule } from './modules/search/search.module';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-settings.module';
+import { FeatureRolloutsModule } from './modules/feature-rollouts/feature-rollouts.module';
 
 /**
  * Composition root of the modular monolith.
@@ -110,6 +111,7 @@ import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-set
     SearchModule,
     TelemetryModule,
     WorkflowSettingsModule,
+    FeatureRolloutsModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.
