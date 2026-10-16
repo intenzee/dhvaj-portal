@@ -16,6 +16,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import {
   WORK_LINK_COLUMNS,
+  filingTitle,
   type WorkLinkSqlRow,
   workFilingContextOf,
   workLinkFilingOf,
@@ -181,7 +182,8 @@ export class WorkTodayService {
         key: `task:${task.id}`,
         kind: 'task',
         group: task.status === 'blocked' ? TODAY_GROUP.waiting : TODAY_GROUP.prepare,
-        title: task.title,
+        // The filing's own task reads as the filing, like its review row.
+        title: filingTitle(filing, task.title),
         ...engagementOf(r),
         filing,
         internalDate,

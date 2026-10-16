@@ -34,6 +34,7 @@ import {
   reminderText,
   slotItemLabel,
 } from './client-chase';
+import { periodLabel } from './filing-rules';
 
 interface ChaseInstanceRow {
   id: string;
@@ -58,9 +59,14 @@ interface OpenRequestRow {
   escalation_date: string | null;
 }
 
+/** How many past reminders the chase panel lists. */
+const CHASE_HISTORY_LIMIT = 5;
+
 const CHASE_INSTANCE_SQL = `
   SELECT ci.id, ci.engagement_id, ent.legal_name AS entity_name,
-         COALESCE(ci.form_label, rv.form_label, cr.name) AS form, ci.period_key,
+         COALESCE(ci.form_label, rv.form_label, cr.name) AS form,
+         -- A filing added by hand has no period key; its reference month names the period.
+         COALESCE(ci.period_key, to_char(ci.reference_date, 'YYYY-MM')) AS period_key,
          COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS internal_due,
          ci.workflow_status,
          hsdg.is_engagement_member(ci.engagement_id) AS is_member,
@@ -132,6 +138,19 @@ export class ClientChaseService {
         label: slotItemLabel(m.label),
       }));
       const items = [...waitingOn, ...notRequested].map((i) => ({ label: i.label }));
+      const { rows: sent } = await client.query<{
+        sent_at: Date;
+        channel: ClientReminderChannel;
+        sent_by_name: string | null;
+      }>(
+        `SELECT r.sent_at, r.channel, e.full_name AS sent_by_name
+           FROM hsdg.client_reminders r
+           LEFT JOIN hsdg.employees e ON e.id = r.sent_by_employee_id
+          WHERE r.compliance_instance_id = $1
+          ORDER BY r.sent_at DESC
+          LIMIT ${CHASE_HISTORY_LIMIT}`,
+        [id],
+      );
       return {
         instanceId: id,
         waitingOn,
@@ -142,6 +161,11 @@ export class ClientChaseService {
         canWhatsapp: whatsappNumber(inst.client_phone) !== null,
         ...this.channelFor(setting, inst),
         reminderText: this.text(inst, items),
+        reminders: sent.map((r) => ({
+          sentAt: r.sent_at.toISOString(),
+          channel: r.channel,
+          sentByName: r.sent_by_name,
+        })),
       };
     });
   }
@@ -201,11 +225,18 @@ export class ClientChaseService {
         await this.notifications.enqueueClientDeliveryWith(client, {
           recipientEmail: inst.client_email,
           type: NOTIFICATION_TYPE.clientDependencyReminder,
-          title: `Documents needed — ${[inst.form, inst.period_key].filter(Boolean).join(' ')}`,
+          title: `Documents needed — ${[inst.form, periodLabel(inst.period_key)].filter(Boolean).join(' ')}`,
           body: text,
           engagementId: inst.engagement_id,
         });
       }
+      // The chase history the team reads (the audit event is firm-wide only).
+      await client.query(
+        `INSERT INTO hsdg.client_reminders
+           (compliance_instance_id, engagement_id, channel, sent_by_employee_id)
+         VALUES ($1, $2, $3, $4)`,
+        [id, inst.engagement_id, channel, ctx.employeeId ?? null],
+      );
       await this.audit.recordWith(client, ctx, {
         action: 'filing.client_reminded',
         objectType: 'compliance_instance',

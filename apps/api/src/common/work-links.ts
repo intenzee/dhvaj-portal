@@ -138,6 +138,11 @@ export function workLinkOf(
   return ref;
 }
 
+/** A row's title: "GSTR-3B · Sep 2026" for a filing's work, else its own. */
+export function filingTitle(filing: WorkFilingContext | null, fallback: string): string {
+  return filing?.formLabel ? `${filing.formLabel} · ${filing.periodLabel}` : fallback;
+}
+
 /** The filing context a task row shows (null when the task has no filing). */
 export function workFilingContextOf(row: WorkLinkSqlRow): WorkFilingContext | null {
   if (!row.wl_instance_id) return null;

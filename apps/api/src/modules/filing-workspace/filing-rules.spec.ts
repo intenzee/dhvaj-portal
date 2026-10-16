@@ -10,6 +10,7 @@ import {
   lockState,
   nextActionText,
   periodLabel,
+  workspacePeriodLabel,
   quarterOfMonth,
   undoAllowed,
 } from './filing-rules';
@@ -156,6 +157,9 @@ describe('filing rules', () => {
     expect(periodLabel('2026-27:Q2')).toBe('Q2 2026-27');
     expect(periodLabel('2026-27:H1')).toBe('H1 2026-27');
     expect(periodLabel('2026-27:DIN:01234567')).toBe('FY 2026-27 · DIN 01234567');
+    expect(workspacePeriodLabel('2026-27:Q2', '2026-09')).toBe('Q2 2026-27');
+    expect(workspacePeriodLabel(null, '2026-09')).toBe('Sep 2026');
+    expect(workspacePeriodLabel(null, null)).toBeNull();
     expect(isAnnualKey('2026-27')).toBe(true);
     expect(isAnnualKey('2026-27:H2')).toBe(true);
     expect(isAnnualKey('2026-10')).toBe(false);

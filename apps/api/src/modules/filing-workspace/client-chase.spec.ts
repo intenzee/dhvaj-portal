@@ -72,7 +72,9 @@ describe('client chasing (WF-302)', () => {
         firmName: 'HSDG & Co',
       });
       expect(text).toContain('Dear Bharat Traders,');
-      expect(text).toContain('To prepare your GSTR-1 for Sep 2026, we still need by 2026-10-08:');
+      expect(text).toContain(
+        'To prepare your GSTR-1 for Sep 2026, we still need by 8 October 2026:',
+      );
       expect(text).toContain('• Sales register: https://x/client-upload/a');
       expect(text).toContain('• E-way bill report: https://x/client-upload/b');
       expect(text).toContain('secure link');

@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { seedChecklistForInstance } from '../compliance/compliance-checklist';
+import { formatLongDate } from '../statutory-audit/acceptance-merge-values';
 import { periodLabel } from './filing-rules';
 
 /**
@@ -108,7 +109,8 @@ export function reminderText(r: {
   const period = periodLabel(r.periodKey);
   const what = [r.formLabel, period].filter(Boolean).join(' for ');
   const lines = r.items.map((i) => `• ${i.label}${i.uploadUrl ? `: ${i.uploadUrl}` : ''}`);
-  const by = r.dueBy ? ` by ${r.dueBy}` : '';
+  // The client reads "by 15 October 2026", not the ISO date.
+  const by = r.dueBy ? ` by ${formatLongDate(r.dueBy)}` : '';
   const hasLinks = r.items.some((i) => i.uploadUrl);
   return [
     `Dear ${r.entityName},`,

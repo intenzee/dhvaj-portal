@@ -36,6 +36,16 @@ export interface ClientChase {
   fallback: ClientReminderFallback | null;
   /** Ready-to-paste reminder (WhatsApp / e-mail), without upload links. */
   reminderText: string;
+  /** The filing's chase history, newest first (the last few): who reminded the client, when and how. */
+  reminders: ClientReminderEntry[];
+}
+
+/** One reminder sent to the client about a filing (PS-001). */
+export interface ClientReminderEntry {
+  sentAt: string;
+  channel: ClientReminderChannel;
+  /** Null once the employee is gone. */
+  sentByName: string | null;
 }
 
 /**

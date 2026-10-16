@@ -219,7 +219,10 @@ export function FilingDrawer({
 /** "GSTR-1 · Sep 2026" for a filing's workspace. Pure — tested. */
 export function workspaceTitle(ws: Pick<Workspace, 'instance'>): string {
   const i = ws.instance;
-  return [i.formLabel ?? i.ruleName, i.periodKey ? periodKeyLabel(i.periodKey) : null]
+  return [
+    i.formLabel ?? i.ruleName,
+    i.periodLabel ?? (i.periodKey ? periodKeyLabel(i.periodKey) : null),
+  ]
     .filter(Boolean)
     .join(' · ');
 }

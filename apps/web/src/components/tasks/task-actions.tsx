@@ -10,6 +10,7 @@ import { Input } from '@/components/form';
 import {
   ACTIONS_NEEDING_REASON,
   TASK_ACTION_LABEL,
+  taskActionLabel,
   availableTaskActions,
   type TaskActionContext,
   type WorkTask,
@@ -67,9 +68,13 @@ export function TaskActions({
     // review → Approve) never sends the stale one and hits a version conflict.
     onSuccess: async (_clock, { action }) => {
       // The banner's cache still holds the clock as it was before this move.
-      const paused = pausedByStart(action, task.id, qc.getQueryData<ActiveTimer | null>(['active-timer']));
+      const paused = pausedByStart(
+        action,
+        task.id,
+        qc.getQueryData<ActiveTimer | null>(['active-timer']),
+      );
       toast(
-        `${task.title}: ${TASK_ACTION_LABEL[action].toLowerCase()}.` +
+        `${task.title}: ${taskActionLabel(action, task.status).toLowerCase()}.` +
           (paused ? ` Paused ${paused}.` : ''),
       );
       setAsking(null);
@@ -109,7 +114,7 @@ export function TaskActions({
             aria-expanded={ACTIONS_NEEDING_REASON.includes(a) ? asking === a : undefined}
             onClick={() => click(a)}
           >
-            {TASK_ACTION_LABEL[a]}
+            {taskActionLabel(a, task.status)}
           </Button>
         ))}
       </div>
@@ -126,7 +131,11 @@ export function TaskActions({
             className="min-w-[16rem] flex-1"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder={asking === 'return' ? 'Review points for the preparer' : 'What is needed from the client'}
+            placeholder={
+              asking === 'return'
+                ? 'Review points for the preparer'
+                : 'What is needed from the client'
+            }
             aria-label={asking === 'return' ? 'Review points' : 'What is needed from the client'}
           />
           <Button size="sm" type="submit" disabled={!reason.trim() || run.isPending}>

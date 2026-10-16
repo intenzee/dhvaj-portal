@@ -155,6 +155,9 @@ describe('workspaceTitle', () => {
     expect(workspaceTitle(ws({}))).toBe('GSTR-1 · Sep 2026');
     expect(workspaceTitle(ws({ formLabel: null }))).toBe('GSTR-1 (monthly) · Sep 2026');
     expect(workspaceTitle(ws({ periodKey: null }))).toBe('GSTR-1');
+    expect(workspaceTitle(ws({ periodKey: null, periodLabel: 'Sep 2026' }))).toBe(
+      'GSTR-1 · Sep 2026',
+    );
   });
 });
 
