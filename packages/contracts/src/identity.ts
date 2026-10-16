@@ -85,6 +85,10 @@ export const PERMISSION = {
   credentialManage: 'credential.manage',
   /** PS-101: record notices, their replies, hearings and orders, and close them. */
   noticeManage: 'notice.manage',
+  /** PS-201: draft, issue and chase the firm's invoices; record receipts. */
+  billingManage: 'billing.manage',
+  /** PS-201: void an issued invoice; approve credit notes and write-offs. */
+  billingApprove: 'billing.approve',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

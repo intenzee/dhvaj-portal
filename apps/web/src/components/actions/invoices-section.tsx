@@ -2,23 +2,34 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, FileText, Send, CheckCircle2, Ban } from 'lucide-react';
+import { Plus, Trash2, FileText, Send, CheckCircle2, Ban, Download } from 'lucide-react';
 import {
   BILLING_FREQUENCIES,
+  GST_RATES,
+  GST_STATES,
   INVOICE_STATUS,
+  gstSplit,
   type EngagementCommercial,
   type InvoiceDetail,
   type InvoiceRecord,
   type InvoiceStatus,
   type Paginated,
 } from '@hsdg/contracts';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch, ApiError, downloadFile } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { formatDate, humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { Card, EmptyState, Button, Spinner } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import {
+  invoiceActions,
+  invoiceNumberLabel,
+  stateLabel,
+  taxRows,
+  useBillingSettings,
+} from '@/components/billing/invoice-gst';
 
 /** Format a decimal-string amount as money in the invoice's currency. */
 function money(amount: string | null | undefined, currency = 'INR'): string {
@@ -34,7 +45,11 @@ interface DraftLine {
   description: string;
   quantity: string;
   unitAmount: string;
+  /** PS-201: GST rate, used once the firm's GST state is set. */
+  gstRate: string;
 }
+
+const blankLine = (): DraftLine => ({ description: '', quantity: '1', unitAmount: '0', gstRate: '18' });
 
 export function InvoicesSection({ engagementId }: { engagementId: string }): JSX.Element {
   const qc = useQueryClient();
@@ -120,7 +135,7 @@ export function InvoicesSection({ engagementId }: { engagementId: string }): JSX
                   >
                     <td className="px-4 py-2 font-medium text-ink">
                       <FileText className="mr-1.5 inline h-3.5 w-3.5 text-ink-faint" />
-                      {inv.invoiceNumber}
+                      {inv.invoiceNumber ?? <span className="font-normal italic text-ink-faint">Draft</span>}
                     </td>
                     <td className="px-4 py-2"><StatusBadge status={inv.status} /></td>
                     <td className="px-4 py-2 text-ink-muted">{formatDate(inv.issueDate)}</td>
@@ -266,11 +281,15 @@ function CreateInvoiceModal({
   onCreated: (id: string) => void;
 }): JSX.Element {
   const toast = useToast();
+  const { settings, gstMode } = useBillingSettings();
   const [currency, setCurrency] = useState('INR');
   const [dueDate, setDueDate] = useState('');
   const [taxAmount, setTaxAmount] = useState('0');
   const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<DraftLine[]>([{ description: '', quantity: '1', unitAmount: '0' }]);
+  const [clientGstin, setClientGstin] = useState('');
+  const [placeOfSupply, setPlaceOfSupply] = useState('');
+  const [reverseCharge, setReverseCharge] = useState(false);
+  const [lines, setLines] = useState<DraftLine[]>([blankLine()]);
 
   const setLine = (i: number, patch: Partial<DraftLine>): void =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
@@ -282,7 +301,14 @@ function CreateInvoiceModal({
         body: {
           currency,
           dueDate: dueDate || null,
-          taxAmount: taxAmount.trim() || '0',
+          ...(gstMode
+            ? {
+                // Left blank, the server takes the client's only GSTIN.
+                ...(clientGstin.trim() ? { clientGstin: clientGstin.trim().toUpperCase() } : {}),
+                ...(placeOfSupply ? { placeOfSupplyState: placeOfSupply } : {}),
+                isReverseCharge: reverseCharge,
+              }
+            : { taxAmount: taxAmount.trim() || '0' }),
           notes: notes.trim() || null,
           lines: lines
             .filter((l) => l.description.trim())
@@ -290,18 +316,31 @@ function CreateInvoiceModal({
               description: l.description.trim(),
               quantity: l.quantity.trim() || '1',
               unitAmount: l.unitAmount.trim() || '0',
+              ...(gstMode ? { gstRate: Number(l.gstRate) } : {}),
             })),
         },
       }),
     onSuccess: (inv) => {
-      toast(`Draft ${inv.invoiceNumber} created.`);
+      toast('Draft created. It is numbered when you issue it.');
       onCreated(inv.id);
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not create the invoice.', 'error'),
   });
 
   const subtotal = lines.reduce((s, l) => s + Number(l.quantity || 0) * Number(l.unitAmount || 0), 0);
-  const total = subtotal + Number(taxAmount || 0);
+  const place = placeOfSupply || (clientGstin.length >= 2 ? clientGstin.slice(0, 2) : null);
+  const preview = gstMode
+    ? gstSplit(
+        lines.map((l) => ({
+          taxableValue: (Number(l.quantity || 0) * Number(l.unitAmount || 0)).toFixed(2),
+          gstRate: l.gstRate,
+        })),
+        settings?.stateCode ?? null,
+        place,
+      )
+    : null;
+  const tax = preview ? (reverseCharge ? 0 : Number(preview.tax)) : Number(taxAmount || 0);
+  const total = subtotal + tax;
 
   return (
     <Modal
@@ -325,10 +364,31 @@ function CreateInvoiceModal({
           <Field label="Due date">
             <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </Field>
-          <Field label="Tax amount">
-            <Input inputMode="decimal" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} />
-          </Field>
+          {!gstMode && (
+            <Field label="Tax amount">
+              <Input inputMode="decimal" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} />
+            </Field>
+          )}
         </div>
+        {gstMode && (
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Client GSTIN" hint="Blank: the client's only GSTIN, if it has one.">
+              <Input value={clientGstin} maxLength={15} onChange={(e) => setClientGstin(e.target.value)} />
+            </Field>
+            <Field label="Place of supply">
+              <Select value={placeOfSupply} onChange={(e) => setPlaceOfSupply(e.target.value)}>
+                <option value="">{place ? `From the GSTIN — ${stateLabel(place)}` : `Our state — ${stateLabel(settings?.stateCode)}`}</option>
+                {Object.entries(GST_STATES).map(([code, name]) => (
+                  <option key={code} value={code}>{name} ({code})</option>
+                ))}
+              </Select>
+            </Field>
+            <label className="mt-6 flex items-center gap-2 text-sm text-ink">
+              <input type="checkbox" checked={reverseCharge} onChange={(e) => setReverseCharge(e.target.checked)} />
+              Reverse charge
+            </label>
+          </div>
+        )}
 
         <div>
           <div className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">Lines</div>
@@ -355,6 +415,13 @@ function CreateInvoiceModal({
                   value={l.unitAmount}
                   onChange={(e) => setLine(i, { unitAmount: e.target.value })}
                 />
+                {gstMode && (
+                  <Select className="w-20" aria-label="GST rate" value={l.gstRate} onChange={(e) => setLine(i, { gstRate: e.target.value })}>
+                    {GST_RATES.map((r) => (
+                      <option key={r} value={String(r)}>{r}%</option>
+                    ))}
+                  </Select>
+                )}
                 <button
                   type="button"
                   className="rounded p-1.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
@@ -369,7 +436,7 @@ function CreateInvoiceModal({
           <button
             type="button"
             className="mt-2 inline-flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700"
-            onClick={() => setLines((ls) => [...ls, { description: '', quantity: '1', unitAmount: '0' }])}
+            onClick={() => setLines((ls) => [...ls, blankLine()])}
           >
             <Plus className="h-3.5 w-3.5" /> Add line
           </button>
@@ -381,6 +448,12 @@ function CreateInvoiceModal({
 
         <div className="flex justify-end gap-6 border-t border-line pt-3 text-sm">
           <span className="text-ink-muted">Subtotal <span className="ml-2 font-medium text-ink">{money(String(subtotal), currency)}</span></span>
+          {preview && (
+            <span className="text-ink-muted">
+              {preview.intraState ? 'CGST + SGST' : 'IGST'}
+              <span className="ml-2 font-medium text-ink">{money(preview.tax, currency)}</span>
+            </span>
+          )}
           <span className="text-ink-muted">Total <span className="ml-2 font-semibold text-ink">{money(String(total), currency)}</span></span>
         </div>
       </div>
@@ -401,9 +474,14 @@ function InvoiceDetailModal({
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
+  const { principal } = useAuth();
+  const { gstMode } = useBillingSettings();
   const [desc, setDesc] = useState('');
   const [qty, setQty] = useState('1');
   const [unit, setUnit] = useState('0');
+  const [rate, setRate] = useState('18');
+  const [voiding, setVoiding] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
 
   const key = ['engagement', engagementId, 'invoice', invoiceId] as const;
   const invoice = useQuery({
@@ -419,7 +497,12 @@ function InvoiceDetailModal({
     mutationFn: () =>
       apiFetch(`/engagements/${engagementId}/invoices/${invoiceId}/lines`, {
         method: 'POST',
-        body: { description: desc.trim(), quantity: qty.trim() || '1', unitAmount: unit.trim() || '0' },
+        body: {
+          description: desc.trim(),
+          quantity: qty.trim() || '1',
+          unitAmount: unit.trim() || '0',
+          ...(gstMode ? { gstRate: Number(rate) } : {}),
+        },
       }),
     onSuccess: () => {
       setDesc('');
@@ -436,13 +519,19 @@ function InvoiceDetailModal({
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not remove the line.', 'error'),
   });
   const setStatus = useMutation({
-    mutationFn: (status: InvoiceStatus) =>
-      apiFetch(`/engagements/${engagementId}/invoices/${invoiceId}/status`, {
+    mutationFn: (v: { status: InvoiceStatus; reason?: string }) =>
+      apiFetch<InvoiceDetail>(`/engagements/${engagementId}/invoices/${invoiceId}/status`, {
         method: 'POST',
-        body: { status },
+        body: v,
       }),
-    onSuccess: (_d, status) => {
-      toast(`Invoice ${humanize(status)}.`);
+    onSuccess: (after, v) => {
+      toast(
+        v.status === INVOICE_STATUS.issued && after.invoiceNumber
+          ? `Issued as ${after.invoiceNumber}.`
+          : `Invoice ${humanize(v.status)}.`,
+      );
+      setVoiding(false);
+      setVoidReason('');
       refresh();
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not update the invoice.', 'error'),
@@ -450,36 +539,50 @@ function InvoiceDetailModal({
 
   const inv = invoice.data;
   const isDraft = inv?.status === INVOICE_STATUS.draft;
+  const may = inv ? invoiceActions(inv, principal?.permissions ?? []) : null;
 
   return (
     <Modal
       open
       onClose={onClose}
       wide
-      title={inv ? inv.invoiceNumber : 'Invoice'}
+      title={inv ? invoiceNumberLabel(inv) : 'Invoice'}
       description={inv ? `${humanize(inv.status)} · ${money(inv.total, inv.currency)}` : undefined}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Close</Button>
-          {isDraft && (
-            <>
-              <Button variant="secondary" onClick={() => setStatus.mutate(INVOICE_STATUS.void)} disabled={setStatus.isPending}>
-                <Ban className="h-4 w-4" /> Void
-              </Button>
-              <Button onClick={() => setStatus.mutate(INVOICE_STATUS.issued)} disabled={setStatus.isPending}>
-                <Send className="h-4 w-4" /> Issue
-              </Button>
-            </>
+          {inv?.hasPdf && inv.invoiceNumber && (
+            <Button
+              variant="secondary"
+              onClick={() =>
+                void downloadFile(
+                  `/engagements/${engagementId}/invoices/${invoiceId}/pdf`,
+                  `${inv.invoiceNumber!.replace(/\//g, '-')}.pdf`,
+                ).catch(() => toast('Could not download the PDF.', 'error'))
+              }
+            >
+              <Download className="h-4 w-4" /> PDF
+            </Button>
           )}
-          {inv?.status === INVOICE_STATUS.issued && (
-            <>
-              <Button variant="secondary" onClick={() => setStatus.mutate(INVOICE_STATUS.void)} disabled={setStatus.isPending}>
-                <Ban className="h-4 w-4" /> Void
-              </Button>
-              <Button onClick={() => setStatus.mutate(INVOICE_STATUS.paid)} disabled={setStatus.isPending}>
-                <CheckCircle2 className="h-4 w-4" /> Mark paid
-              </Button>
-            </>
+          {may?.voidDraft && (
+            <Button variant="secondary" onClick={() => setStatus.mutate({ status: INVOICE_STATUS.void })} disabled={setStatus.isPending}>
+              <Ban className="h-4 w-4" /> Discard draft
+            </Button>
+          )}
+          {may?.issue && (
+            <Button onClick={() => setStatus.mutate({ status: INVOICE_STATUS.issued })} disabled={setStatus.isPending}>
+              <Send className="h-4 w-4" /> Issue
+            </Button>
+          )}
+          {may?.voidIssued && !voiding && (
+            <Button variant="secondary" onClick={() => setVoiding(true)} disabled={setStatus.isPending}>
+              <Ban className="h-4 w-4" /> Void
+            </Button>
+          )}
+          {may?.markPaid && (
+            <Button onClick={() => setStatus.mutate({ status: INVOICE_STATUS.paid })} disabled={setStatus.isPending}>
+              <CheckCircle2 className="h-4 w-4" /> Mark paid
+            </Button>
           )}
         </>
       }
@@ -491,12 +594,41 @@ function InvoiceDetailModal({
             <Fact label="Status" value={humanize(inv.status)} />
             <Fact label="Issued" value={formatDate(inv.issueDate)} />
             <Fact label="Due" value={formatDate(inv.dueDate)} />
+            <Fact label="Client GSTIN" value={inv.clientGstin ?? 'Unregistered'} />
+            <Fact label="Place of supply" value={stateLabel(inv.placeOfSupplyState)} />
+            <Fact label="Reverse charge" value={inv.isReverseCharge ? 'Yes' : 'No'} />
           </div>
+          {isDraft && !may?.issue && (
+            <p className="text-xs text-ink-faint">Issuing needs the billing.manage permission (partners and managers).</p>
+          )}
+          {inv.status === INVOICE_STATUS.void && inv.voidedReason && (
+            <p className="rounded-md bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
+              Voided{inv.voidedByName ? ` by ${inv.voidedByName}` : ''}: {inv.voidedReason}
+            </p>
+          )}
+          {voiding && (
+            <div className="flex items-end gap-2 rounded-md border border-line p-3">
+              <div className="flex-1">
+                <Field label="Why is this invoice void?" hint="The number stays used; a void invoice cannot be reissued.">
+                  <Input autoFocus value={voidReason} onChange={(e) => setVoidReason(e.target.value)} />
+                </Field>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setVoiding(false)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={() => setStatus.mutate({ status: INVOICE_STATUS.void, reason: voidReason.trim() })}
+                disabled={!voidReason.trim() || setStatus.isPending}
+              >
+                Void invoice
+              </Button>
+            </div>
+          )}
 
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
                 <th className="px-2 py-1.5">Description</th>
+                <th className="px-2 py-1.5">SAC · GST</th>
                 <th className="px-2 py-1.5 text-right">Qty</th>
                 <th className="px-2 py-1.5 text-right">Unit</th>
                 <th className="px-2 py-1.5 text-right">Amount</th>
@@ -505,13 +637,16 @@ function InvoiceDetailModal({
             </thead>
             <tbody>
               {inv.lines.length === 0 && (
-                <tr><td colSpan={5} className="px-2 py-3 text-ink-faint">No lines yet.</td></tr>
+                <tr><td colSpan={6} className="px-2 py-3 text-ink-faint">No lines yet.</td></tr>
               )}
               {inv.lines.map((l) => (
                 <tr key={l.id} className="border-b border-line last:border-0">
                   <td className="px-2 py-1.5 text-ink">
                     {l.description}
                     {l.componentName && <span className="ml-2 text-xs text-ink-faint">· {l.componentName}</span>}
+                  </td>
+                  <td className="px-2 py-1.5 text-ink-muted">
+                    {l.sacCode ?? '—'} · {Number(l.gstRate)}%
                   </td>
                   <td className="px-2 py-1.5 text-right text-ink-muted">{l.quantity}</td>
                   <td className="px-2 py-1.5 text-right text-ink-muted">{money(l.unitAmount, inv.currency)}</td>
@@ -533,15 +668,17 @@ function InvoiceDetailModal({
             </tbody>
             <tfoot>
               <tr className="text-sm">
-                <td className="px-2 pt-2 text-right text-ink-muted" colSpan={isDraft ? 4 : 3}>Subtotal</td>
+                <td className="px-2 pt-2 text-right text-ink-muted" colSpan={isDraft ? 5 : 4}>Subtotal</td>
                 <td className="px-2 pt-2 text-right text-ink">{money(inv.subtotal, inv.currency)}</td>
               </tr>
-              <tr className="text-sm">
-                <td className="px-2 text-right text-ink-muted" colSpan={isDraft ? 4 : 3}>Tax</td>
-                <td className="px-2 text-right text-ink">{money(inv.taxAmount, inv.currency)}</td>
-              </tr>
+              {taxRows(inv).map((t) => (
+                <tr key={t.label} className="text-sm">
+                  <td className="px-2 text-right text-ink-muted" colSpan={isDraft ? 5 : 4}>{t.label}</td>
+                  <td className="px-2 text-right text-ink">{money(t.amount, inv.currency)}</td>
+                </tr>
+              ))}
               <tr className="text-sm font-semibold">
-                <td className="px-2 pb-1 text-right text-ink" colSpan={isDraft ? 4 : 3}>Total</td>
+                <td className="px-2 pb-1 text-right text-ink" colSpan={isDraft ? 5 : 4}>Total</td>
                 <td className="px-2 pb-1 text-right text-ink">{money(inv.total, inv.currency)}</td>
               </tr>
             </tfoot>
@@ -556,10 +693,20 @@ function InvoiceDetailModal({
               </div>
               <Input className="w-16" aria-label="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} />
               <Input className="w-28" aria-label="Unit amount" value={unit} onChange={(e) => setUnit(e.target.value)} />
+              {gstMode && (
+                <Select className="w-20" aria-label="GST rate" value={rate} onChange={(e) => setRate(e.target.value)}>
+                  {GST_RATES.map((r) => (
+                    <option key={r} value={String(r)}>{r}%</option>
+                  ))}
+                </Select>
+              )}
               <Button size="sm" onClick={() => addLine.mutate()} disabled={!desc.trim() || addLine.isPending}>
                 <Plus className="h-4 w-4" /> Add
               </Button>
             </div>
+          )}
+          {inv.amountInWords && inv.status !== INVOICE_STATUS.draft && (
+            <p className="text-sm font-medium text-ink">{inv.amountInWords}</p>
           )}
           {inv.notes && <p className="text-sm text-ink-muted">{inv.notes}</p>}
         </div>

@@ -108,7 +108,8 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
         })
         .expect(201);
       expect(created.body.status).toBe('draft');
-      expect(created.body.invoiceNumber).toMatch(/^INV-\d{4}-\d{5}$/);
+      // PS-201: a draft has no number; it is assigned at issue.
+      expect(created.body.invoiceNumber).toBeNull();
       expect(Number(created.body.subtotal)).toBe(11000);
       expect(Number(created.body.total)).toBe(11180);
       const invId = created.body.id as string;
@@ -130,6 +131,7 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
         .expect(201);
       expect(issued.body.status).toBe('issued');
       expect(issued.body.issueDate).toBeTruthy();
+      expect(issued.body.invoiceNumber).toMatch(/^INV\/\d{2}-\d{2}\/\d{4,}$/);
 
       // A line cannot be added to an issued invoice.
       await request(app.getHttpServer())

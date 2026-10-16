@@ -25,6 +25,7 @@ export const FEATURE_FLAG_LABEL: Record<FeatureFlag, string> = {
   ff_today_view: 'Staff Workflow 2 — Today and the filing drawer',
   ff_filing_runs: 'Staff Workflow 3 — filing runs, client chasing, search',
   ff_notices: 'Practice Services 1 — notices, their clock on Today, appeal deadlines',
+  ff_billing_v2: 'Practice Services 2 — GST invoices, receipts, receivables, 26AS',
 };
 
 /** One flag on Admin → Rollout. */

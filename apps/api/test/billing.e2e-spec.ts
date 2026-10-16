@@ -55,7 +55,7 @@ describe('Billing & Collections (e2e)', () => {
     t: string,
     eng: string,
     opts: { issue?: boolean; overdue?: boolean } = {},
-  ): Promise<{ id: string; number: string }> => {
+  ): Promise<{ id: string; number: string | null }> => {
     const created = await request(app.getHttpServer())
       .post(`/api/v1/engagements/${eng}/invoices`)
       .set(bearer(t))
@@ -66,14 +66,17 @@ describe('Billing & Collections (e2e)', () => {
       })
       .expect(201);
     const id = created.body.id as string;
+    let number = created.body.invoiceNumber as string | null;
     if (opts.issue) {
-      await request(app.getHttpServer())
+      const issued = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/invoices/${id}/status`)
         .set(bearer(t))
         .send({ status: 'issued', issueDate: opts.overdue ? dateFromToday(-30) : dateFromToday(0) })
         .expect(201);
+      // PS-201: the number is assigned at issue.
+      number = issued.body.invoiceNumber as string;
     }
-    return { id, number: created.body.invoiceNumber as string };
+    return { id, number };
   };
 
   beforeAll(async () => {

@@ -11,12 +11,16 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
   BILLING_FREQUENCIES,
+  GSTIN_REGEX,
+  GST_RATES,
   INVOICE_STATUSES,
   type BillingFrequency,
   type InvoiceStatus,
@@ -78,9 +82,39 @@ export class InvoiceLineDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @ApiPropertyOptional({ example: '998221', description: "SAC; defaults to the firm's." })
+  @IsOptional()
+  @Matches(/^\d{4,8}$/, { message: 'sacCode must be a 4–8 digit SAC.' })
+  sacCode?: string;
+
+  @ApiPropertyOptional({ enum: GST_RATES, default: 18 })
+  @IsOptional()
+  @IsIn(GST_RATES)
+  gstRate?: number;
 }
 
-export class CreateInvoiceDto {
+/** PS-201: a draft's GST facts (create and amend). */
+class InvoiceGstDto {
+  @ApiPropertyOptional({ description: "The client's GSTIN; null for an unregistered client." })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Matches(GSTIN_REGEX, { message: 'clientGstin is not a valid GSTIN.' })
+  clientGstin?: string | null;
+
+  @ApiPropertyOptional({ example: '07', description: 'Two-digit GST state code.' })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Matches(/^\d{2}$/, { message: 'placeOfSupplyState must be a two-digit state code.' })
+  placeOfSupplyState?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isReverseCharge?: boolean;
+}
+
+export class CreateInvoiceDto extends InvoiceGstDto {
   @ApiPropertyOptional({ example: 'INR' })
   @IsOptional()
   @IsString()
@@ -111,7 +145,7 @@ export class CreateInvoiceDto {
   lines?: InvoiceLineDto[];
 }
 
-export class UpdateInvoiceDto {
+export class UpdateInvoiceDto extends InvoiceGstDto {
   @ApiPropertyOptional({ example: 'INR' })
   @IsOptional()
   @IsString()
@@ -155,6 +189,12 @@ export class SetInvoiceStatusDto {
   @IsOptional()
   @IsDateString()
   issueDate?: string;
+
+  @ApiPropertyOptional({ description: 'Why — required to void an issued invoice.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

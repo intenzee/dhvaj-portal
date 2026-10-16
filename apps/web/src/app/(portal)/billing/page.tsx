@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
+  FEATURE_FLAG,
   INVOICE_STATUSES,
   PERMISSION,
   type BillingSummary,
@@ -15,6 +16,9 @@ import { apiFetch } from '@/lib/api';
 import { humanize, formatDate, formatMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
+import { useFeatureFlags } from '@/lib/feature-flags';
+import { useBillingSettings } from '@/components/billing/invoice-gst';
+import { BillingSettingsCard } from '@/components/billing/billing-settings';
 import { cn } from '@/lib/cn';
 import {
   PageHeader,
@@ -34,8 +38,12 @@ const PAGE_SIZE = 25;
 
 export default function BillingPage(): JSX.Element {
   const { principal } = useAuth();
+  const { isOn } = useFeatureFlags();
+  const v2 = isOn(FEATURE_FLAG.billing);
+  // PS-201: billers (billing.manage) see their office's invoices too.
+  const allowed = can(principal, PERMISSION.reportRead) || (v2 && can(principal, PERMISSION.billingManage));
 
-  if (!can(principal, PERMISSION.reportRead)) {
+  if (!allowed) {
     return (
       <div>
         <PageHeader title="Billing & Collections" />
@@ -43,10 +51,11 @@ export default function BillingPage(): JSX.Element {
       </div>
     );
   }
-  return <Billing />;
+  return <Billing base={v2 ? '/billing/invoices' : '/invoices'} />;
 }
 
-function Billing(): JSX.Element {
+function Billing({ base }: { base: string }): JSX.Element {
+  const { settings } = useBillingSettings();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>('');
   const [overdueOnly, setOverdueOnly] = useState(false);
@@ -58,18 +67,18 @@ function Billing(): JSX.Element {
   };
 
   const summary = useQuery({
-    queryKey: ['billing', 'summary'],
-    queryFn: () => apiFetch<BillingSummary>('/invoices/summary'),
+    queryKey: ['billing', 'summary', base],
+    queryFn: () => apiFetch<BillingSummary>(`${base}/summary`),
   });
 
   const list = useQuery({
-    queryKey: ['billing', 'invoices', search, status, overdueOnly, offset],
+    queryKey: ['billing', 'invoices', base, search, status, overdueOnly, offset],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
       if (search) params.set('search', search);
       if (status) params.set('status', status);
       if (overdueOnly) params.set('overdueOnly', 'true');
-      return apiFetch<Paginated<GlobalInvoiceRecord>>(`/invoices?${params.toString()}`);
+      return apiFetch<Paginated<GlobalInvoiceRecord>>(`${base}?${params.toString()}`);
     },
   });
 
@@ -77,7 +86,9 @@ function Billing(): JSX.Element {
     {
       header: 'Invoice',
       cell: ({ row }) => (
-        <span className="font-medium tabular-nums text-ink">{row.original.invoiceNumber}</span>
+        <span className="font-medium tabular-nums text-ink">
+          {row.original.invoiceNumber ?? <span className="font-normal italic text-ink-faint">Draft</span>}
+        </span>
       ),
     },
     {
@@ -86,14 +97,17 @@ function Billing(): JSX.Element {
     },
     {
       header: 'Engagement',
-      cell: ({ row }) => (
-        <Link
-          href={`/engagements/${row.original.engagementId}`}
-          className="font-medium text-primary-700 hover:underline"
-        >
-          {row.original.engagementCode}
-        </Link>
-      ),
+      cell: ({ row }) =>
+        row.original.engagementCode ? (
+          <Link
+            href={`/engagements/${row.original.engagementId}`}
+            className="font-medium text-primary-700 hover:underline"
+          >
+            {row.original.engagementCode}
+          </Link>
+        ) : (
+          <span className="text-ink-faint">—</span>
+        ),
     },
     { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
     {
@@ -123,6 +137,11 @@ function Billing(): JSX.Element {
 
       {summary.data && <SummaryCards s={summary.data} />}
       {summary.data && <AgingPanel s={summary.data} />}
+      {settings && (
+        <div className="mt-3">
+          <BillingSettingsCard settings={settings} />
+        </div>
+      )}
 
       <div className="mb-3 mt-5 flex flex-wrap items-center gap-2">
         <input

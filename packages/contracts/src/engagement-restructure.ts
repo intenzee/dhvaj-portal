@@ -340,6 +340,8 @@ export const FEATURE_FLAG = {
   filingRuns: 'ff_filing_runs',
   /** Practice Services Phase 1: the notice register, its clock on Today, appeal deadlines. */
   notices: 'ff_notices',
+  /** Practice Services Phase 2: GST invoices, receipts, credit notes, receivables, 26AS. */
+  billing: 'ff_billing_v2',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);
