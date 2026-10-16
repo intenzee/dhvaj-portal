@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { StorageModule } from '../documents/storage/storage.module';
 import { CommercialService } from './commercial.service';
 import { CommercialController } from './commercial.controller';
 import { InvoicesListController } from './invoices-list.controller';
@@ -11,7 +12,7 @@ import { InvoicesListController } from './invoices-list.controller';
  * through the database's row-level security.
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, StorageModule],
   controllers: [CommercialController, InvoicesListController],
   providers: [CommercialService],
   exports: [CommercialService],

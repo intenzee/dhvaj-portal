@@ -56,13 +56,19 @@ export interface InvoiceLineItem {
   unitAmount: string;
   amount: string;
   sortOrder: number;
+  /** PS-201: SAC printed on the invoice; null on lines from before GST invoicing. */
+  sacCode: string | null;
+  /** quantity × unit amount, the value GST is worked on. */
+  taxableValue: string;
+  gstRate: string;
 }
 
 /** An engagement invoice header (spec §31). Totals are derived from the lines. */
 export interface InvoiceRecord {
   id: string;
   engagementId: string;
-  invoiceNumber: string;
+  /** PS-201: assigned at issue (`INV/26-27/0001`); a draft has none. */
+  invoiceNumber: string | null;
   status: InvoiceStatus;
   currency: string;
   issueDate: string | null;
@@ -76,6 +82,24 @@ export interface InvoiceRecord {
   version: number;
   createdAt: string;
   updatedAt: string;
+  // ── PS-201: a GST tax invoice ──
+  clientEntityId: string | null;
+  clientGstin: string | null;
+  /** Two-digit GST state code; intra-state when it equals the firm's. */
+  placeOfSupplyState: string | null;
+  isReverseCharge: boolean;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  amountInWords: string | null;
+  financialYear: string | null;
+  issuedAt: string | null;
+  issuedByName: string | null;
+  voidedReason: string | null;
+  voidedAt: string | null;
+  voidedByName: string | null;
+  /** The issued invoice's PDF is kept; GET /billing/invoices/:id/pdf. */
+  hasPdf: boolean;
 }
 
 /** An invoice with its lines (the detail view). */
@@ -90,7 +114,8 @@ export interface InvoiceDetail extends InvoiceRecord {
  * are on. `overdue` is derived: issued and past its due date.
  */
 export interface GlobalInvoiceRecord extends InvoiceRecord {
-  engagementCode: string;
+  /** Null when you bill the client (PS-201 home office) but are not on the engagement. */
+  engagementCode: string | null;
   entityId: string | null;
   entityName: string | null;
   overdue: boolean;

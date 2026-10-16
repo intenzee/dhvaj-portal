@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
@@ -124,7 +125,28 @@ export class CommercialController {
     @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
     @Body() dto: SetInvoiceStatusDto,
   ): Promise<InvoiceDetail> {
-    return this.commercial.setStatus(rlsContextFromPrincipal(principal), id, invoiceId, dto);
+    return this.commercial.setStatus(
+      rlsContextFromPrincipal(principal),
+      id,
+      invoiceId,
+      dto,
+      principal.permissions,
+    );
+  }
+
+  @Get(':id/invoices/:invoiceId/pdf')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'The issued invoice as a PDF (PS-201; kept at issue).' })
+  async invoicePdf(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+  ): Promise<StreamableFile> {
+    const pdf = await this.commercial.invoicePdf(rlsContextFromPrincipal(principal), id, invoiceId);
+    return new StreamableFile(pdf.data, {
+      type: 'application/pdf',
+      disposition: `inline; filename="${pdf.filename}"`,
+    });
   }
 
   @Post(':id/invoices/:invoiceId/lines')
