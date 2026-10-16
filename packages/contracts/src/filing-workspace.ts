@@ -166,6 +166,8 @@ export interface WorkspaceInstance {
   section: PeriodSection | null;
   financialYear: string | null;
   periodKey: string | null;
+  /** "Sep 2026" — from the period key, else (a filing added by hand) its reference month. */
+  periodLabel: string | null;
   periodStart: string | null;
   periodEnd: string | null;
   statutoryDueDate: string;

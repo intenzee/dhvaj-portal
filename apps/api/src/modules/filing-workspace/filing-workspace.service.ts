@@ -68,6 +68,7 @@ import {
   meetingReference,
   periodLabel,
   undoAllowed,
+  workspacePeriodLabel,
 } from './filing-rules';
 import type {
   CorrectionDto,
@@ -102,6 +103,7 @@ interface InstanceRow {
   section: PeriodSection | null;
   financial_year: string | null;
   period_key: string | null;
+  reference_month: string | null;
   period_start: string | null;
   period_end: string | null;
   due: string;
@@ -180,6 +182,7 @@ const INSTANCE_SQL = `
          ci.compliance_rule_id, cr.code AS rule_code, cr.name AS rule_name,
          COALESCE(ci.form_label, rv.form_label) AS form_label, rv.verification, rv.late_fee_note,
          COALESCE(rv.stream, sv.stream) AS stream, ci.section, ci.financial_year, ci.period_key,
+         to_char(ci.reference_date, 'YYYY-MM') AS reference_month,
          ci.period_start::text, ci.period_end::text,
          COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)::text AS due,
          COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS internal_due,
@@ -1186,6 +1189,7 @@ export class FilingWorkspaceService {
         section: inst.section,
         financialYear: inst.financial_year,
         periodKey: inst.period_key,
+        periodLabel: workspacePeriodLabel(inst.period_key, inst.reference_month),
         periodStart: inst.period_start,
         periodEnd: inst.period_end,
         statutoryDueDate: inst.due,

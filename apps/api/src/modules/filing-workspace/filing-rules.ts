@@ -196,6 +196,17 @@ export function periodLabel(periodKey: string | null): string {
   return periodKey;
 }
 
+/**
+ * The filing's period as read: its key's label, else — a filing added by hand
+ * carries no key — its reference month's; null when it has neither.
+ */
+export function workspacePeriodLabel(
+  periodKey: string | null,
+  referenceMonth: string | null,
+): string | null {
+  return periodLabel(periodKey ?? referenceMonth) || null;
+}
+
 /** Year-level keys ('2026-27', '2026-27:H1', '2026-27:DIN:…') hang off the annual strip. */
 export function isAnnualKey(periodKey: string | null): boolean {
   if (!periodKey || MONTH_KEY.test(periodKey)) return false;

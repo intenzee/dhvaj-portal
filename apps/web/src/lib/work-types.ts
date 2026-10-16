@@ -67,6 +67,12 @@ export const TASK_ACTION_LABEL: Record<TaskAction, string> = {
   reopen: 'Reopen',
 };
 
+/** The label in context: picking a paused or blocked task back up reads "Resume work". */
+export function taskActionLabel(action: TaskAction, status: string): string {
+  if (action === 'start' && (status === 'blocked' || status === 'paused')) return 'Resume work';
+  return TASK_ACTION_LABEL[action];
+}
+
 /**
  * The transitions to offer for a task (spec Change 3 table). The server is the
  * judge; this only hides buttons that would certainly be refused.
@@ -91,7 +97,8 @@ export function availableTaskActions(task: WorkTask, ctx: TaskActionContext): Ta
       if (canWork) out.push('cancel');
       break;
     case 'in_review':
-      if (canReview && !task.reviewStartedAt && !(isAssignee && !ctx.isLead)) out.push('start-review');
+      if (canReview && !task.reviewStartedAt && !(isAssignee && !ctx.isLead))
+        out.push('start-review');
       if (canReview) out.push('approve', 'return');
       if (canWork) out.push('cancel');
       break;

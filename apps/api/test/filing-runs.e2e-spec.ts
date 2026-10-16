@@ -576,5 +576,11 @@ describe('Filing runs + client chasing (e2e)', () => {
       channel: 'copy',
       fallback: 'no_email',
     });
+
+    // The chase history, newest first, for the team (Manager X is not firm-wide).
+    const history = (await chase(mx, d.inst).expect(200)).body.reminders;
+    expect(history.map((r: { channel: string }) => r.channel)).toEqual(['copy', 'whatsapp']);
+    expect(history[0].sentByName).toEqual(expect.any(String));
+    expect(Date.parse(history[0].sentAt)).not.toBeNaN();
   });
 });

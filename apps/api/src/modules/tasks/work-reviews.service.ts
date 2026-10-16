@@ -13,6 +13,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import {
   WORK_LINK_COLUMNS,
+  filingTitle,
   type WorkLinkSqlRow,
   workFilingContextOf,
   workLinkFilingOf,
@@ -125,7 +126,7 @@ export class WorkReviewsService {
         ...engagementOf(r),
         id: r.id,
         type: WORK_REVIEW_TYPE.filingReview,
-        title: filing ? `${filing.formLabel} · ${filing.periodLabel}` : r.title,
+        title: filingTitle(filing, r.title),
         taskId: r.id,
         preparerId: r.preparer_id,
         preparerName: r.preparer_name,

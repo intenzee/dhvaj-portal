@@ -10,6 +10,7 @@ import {
   fallbackNote,
   offersWhatsapp,
   reminderButtonLabel,
+  reminderLine,
   remindersToSend,
   waitingLine,
 } from '../client-chase';
@@ -47,6 +48,7 @@ const chase = (over: Partial<Chase> = {}): Chase => ({
   channel: 'copy',
   fallback: 'no_email',
   reminderText: 'Dear client …',
+  reminders: [],
   ...over,
 });
 
@@ -210,6 +212,20 @@ describe('client chase', () => {
     );
     renderIt(inst());
     expect(await screen.findByText('Escalated')).toBeInTheDocument();
+  });
+
+  it('lists the reminders already sent, so nobody chases twice (PS-001)', async () => {
+    const sent = {
+      sentAt: '2026-10-16T05:30:00.000Z',
+      channel: 'whatsapp',
+      sentByName: 'Manager X',
+    } as const;
+    expect(reminderLine(sent)).toMatch(/^Reminded 16 Oct 2026 · WhatsApp · Manager X$/);
+    expect(reminderLine({ ...sent, channel: 'email', sentByName: null })).toMatch(/· e-mailed$/);
+    apiFetch.mockResolvedValue(chase({ reminders: [sent] }));
+    renderIt(inst());
+    const list = await screen.findByRole('list', { name: 'Reminders sent' });
+    expect(list).toHaveTextContent('WhatsApp · Manager X');
   });
 
   it('stays out of the way when filed, empty, or the flag is off', async () => {

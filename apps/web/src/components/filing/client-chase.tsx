@@ -8,6 +8,7 @@ import {
   CLIENT_REMINDER_FALLBACK,
   FEATURE_FLAG,
   type ClientReminderChannel,
+  type ClientReminderEntry,
   type ClientReminderFallback,
   type ClientChase as Chase,
   type ClientReminderResult,
@@ -112,6 +113,19 @@ export function useClientReminder(instanceId: string) {
       toast(err instanceof ApiError ? err.message : 'Could not send the reminder.', 'error'),
   });
   return { ...m, toSend };
+}
+
+const SENT_BY: Record<ClientReminderChannel, string> = {
+  email: 'e-mailed',
+  whatsapp: 'WhatsApp',
+  copy: 'text copied',
+};
+
+/** "Reminded 16 Oct 2026 · WhatsApp · Manager X" — one line of the chase history (PS-001). Pure — tested. */
+export function reminderLine(r: ClientReminderEntry): string {
+  return [`Reminded ${formatDate(r.sentAt)}`, SENT_BY[r.channel], r.sentByName]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** "WhatsApp": the same reminder, from the client's phone, whatever the firm's channel (PS-001). */
@@ -309,6 +323,13 @@ export function ClientChase({ instance }: { instance: WorkspaceInstance }): JSX.
               {w.escalationDate && `, escalate ${formatDate(w.escalationDate)}`}
               {w.overdue && <span className="ml-1 font-medium text-danger-600">overdue</span>}
             </li>
+          ))}
+        </ul>
+      )}
+      {chase.data.reminders.length > 0 && (
+        <ul aria-label="Reminders sent" className="space-y-0.5 text-xs text-ink-muted">
+          {chase.data.reminders.map((r, i) => (
+            <li key={`${r.sentAt}-${i}`}>{reminderLine(r)}</li>
           ))}
         </ul>
       )}
