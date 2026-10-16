@@ -2,7 +2,8 @@ import type { WorkItemRef } from './work-links';
 
 /**
  * Staff Workflow WF-304 — Ctrl K search across clients, engagements, filings,
- * tasks and documents (GET /search?q=). The query understands forms and
+ * tasks, documents and notices (GET /search?q=; notices by reference number,
+ * client or form — PS-102, when ff_notices is on). The query understands forms and
  * months: "bharat gstr1 sep" is the client "bharat", the form GSTR-1 and
  * period 2026-09 (the current financial year unless a year is given).
  * Behind ff_filing_runs.
@@ -14,6 +15,7 @@ export const SEARCH_GROUP = {
   filings: 'filings',
   tasks: 'tasks',
   documents: 'documents',
+  notices: 'notices',
 } as const;
 export type SearchGroup = (typeof SEARCH_GROUP)[keyof typeof SEARCH_GROUP];
 
@@ -23,6 +25,7 @@ export const SEARCH_GROUP_LABEL: Record<SearchGroup, string> = {
   filings: 'Filings',
   tasks: 'Tasks',
   documents: 'Documents',
+  notices: 'Notices',
 };
 
 export interface SearchHit {

@@ -12,10 +12,13 @@ export interface LinkedRow {
 
 /**
  * Where a list row opens: the exact filing / task / request when the API sent
- * a `link` and ff_work_links is on, else the engagement (the old behaviour).
+ * a `link` and ff_work_links is on, else the engagement (the old behaviour);
+ * a notice always opens its own page.
  * Pure — tested.
  */
 export function workHrefFor(row: LinkedRow, workLinks: boolean): string {
+  // A notice has its own page whatever ff_work_links says (PS-102).
+  if (row.link?.noticeId) return workItemHref(row.link);
   return workLinks && row.link ? workItemHref(row.link) : `/engagements/${row.engagementId}`;
 }
 

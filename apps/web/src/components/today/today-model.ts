@@ -37,8 +37,12 @@ export function todayDrawerItems(
   return drawerItemsFrom(rows, (i) => `${i.title} · ${i.entityName}`, hrefOf);
 }
 
-/** The row's second line: client, then the filing (form · period · registration) or the engagement. */
+/**
+ * The row's second line: client, then the filing (form · period ·
+ * registration), the notice's type, or the engagement.
+ */
 export function todayContextLine(i: TodayItem): string {
+  if (i.notice) return `${i.entityName} · ${i.notice.typeLabel} · ${i.engagementCode}`;
   const what = i.filing
     ? [i.filing.formLabel, i.filing.periodLabel, i.filing.registrationNumber]
         .filter(Boolean)
@@ -80,4 +84,9 @@ export function stepSelection(current: number, delta: 1 | -1, length: number): n
   if (length === 0) return -1;
   if (current < 0) return 0;
   return Math.min(length - 1, Math.max(0, current + delta));
+}
+
+/** The date cell's lead-in: a notice's row says which date it is (Reply due / Hearing / Appeal by). */
+export function todayDateLead(i: TodayItem): string | null {
+  return i.notice ? i.notice.clockLabel : null;
 }

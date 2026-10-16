@@ -11,6 +11,7 @@ import {
   CalendarCheck,
   ListTodo,
   FileText,
+  Gavel,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -39,6 +40,7 @@ const ICON: Record<SearchGroup, LucideIcon> = {
   filings: CalendarCheck,
   tasks: ListTodo,
   documents: FileText,
+  notices: Gavel,
 };
 
 /** The hits in display order, grouped — the server's order when it answered. Pure — tested. */
@@ -176,7 +178,8 @@ export function GlobalSearch(): JSX.Element {
     router.push(href);
   };
 
-  const loading = enabled && (wide ? grouped.isFetching : entities.isFetching || engagements.isFetching);
+  const loading =
+    enabled && (wide ? grouped.isFetching : entities.isFetching || engagements.isFetching);
   const understood = wide ? understoodLine(grouped.data) : null;
   // Legacy groups are shown unlabelled, as before; the grouped search heads each group.
   const headed = wide;

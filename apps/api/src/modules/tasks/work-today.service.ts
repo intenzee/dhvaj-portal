@@ -5,7 +5,11 @@ import {
   TODAY_DUE_WITHIN_DAYS,
   TODAY_GROUP,
   isPastDate,
+  noticeClock,
+  noticeTypeLabel,
   whatsappNumber,
+  type NoticeStatus,
+  type NoticeStream,
   type EngagementKind,
   type TaskStatus,
   type TodayItem,
@@ -27,7 +31,7 @@ import { CLOSED_ENGAGEMENT_STATUSES } from '../compliance/compliance-calendar-v2
 import { clientPhoneSql } from '../filing-workspace/client-chase';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { WorkReviewsService } from './work-reviews.service';
-import { buildTodayView, reviewToToday } from './work-today';
+import { buildTodayView, reviewToToday, type TodayRows } from './work-today';
 
 interface EngagementCols {
   engagement_id: string;
@@ -87,6 +91,21 @@ interface RequestRow extends EngagementCols, WorkLinkSqlRow {
   period_section: TodayItem['link']['section'] | null;
 }
 
+interface NoticeRow extends EngagementCols {
+  id: string;
+  reference_no: string;
+  status: NoticeStatus;
+  internal_due_on: string | null;
+  reply_due_on: string | null;
+  next_hearing_on: string | null;
+  appeal_due_on: string | null;
+  amount_demanded: string | null;
+  stream: NoticeStream;
+  form: string | null;
+  section: string | null;
+  type_title: string;
+}
+
 interface FilingRow extends EngagementCols, WorkLinkSqlRow, TaskCols {
   workflow_status: string;
 }
@@ -103,14 +122,19 @@ export class WorkTodayService {
     private readonly reviews: WorkReviewsService,
   ) {}
 
-  async today(ctx: RlsContext, engagementId?: string): Promise<TodayView> {
+  /** `opts.notices`: ff_notices is on for the caller's office (adds the Notices group). */
+  async today(
+    ctx: RlsContext,
+    engagementId?: string,
+    opts: { notices?: boolean } = {},
+  ): Promise<TodayView> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{ today: string }>(
         `SELECT to_char(timezone('Asia/Kolkata', now()), 'YYYY-MM-DD') AS today`,
       );
       const today = rows[0]!.today;
       const me = ctx.employeeId;
-      if (!me) return buildTodayView(today, emptyGroups());
+      if (!me) return buildTodayView(today, emptyGroups(opts.notices));
       const eng = engagementId ?? null;
       const tasks = await this.myOpenTasks(client, me, eng, today);
       const view = buildTodayView(
@@ -125,6 +149,9 @@ export class WorkTodayService {
             ...(await this.myRequests(client, me, eng, today, listedWaiting(tasks))),
           ]),
           [TODAY_GROUP.dueSoon]: await this.filingsDueSoon(client, me, eng, today),
+          ...(opts.notices
+            ? { [TODAY_GROUP.notices]: await this.myNotices(client, me, eng, today) }
+            : {}),
         },
         engagementId,
       );
@@ -257,6 +284,71 @@ export class WorkTodayService {
   }
 
   /**
+   * PS-102: open notices I own or review whose clock is running (a reply to
+   * file, a hearing ahead, an appeal window) — dated by the clock, so the
+   * group sorts on the firm's internal reply date, the hearing or the appeal.
+   */
+  private async myNotices(
+    client: PoolClient,
+    me: string,
+    engagementId: string | null,
+    today: string,
+  ): Promise<TodayItem[]> {
+    const { rows } = await client.query<NoticeRow>(
+      `SELECT ${ENGAGEMENT_COLS}, n.id, n.reference_no, n.status,
+              n.internal_due_on::text, n.reply_due_on::text, n.next_hearing_on::text,
+              n.appeal_due_on::text, n.amount_demanded::text,
+              nt.stream, nt.form, nt.section, nt.title AS type_title
+         FROM hsdg.notices n
+         JOIN hsdg.notice_types nt ON nt.id = n.notice_type_id
+         ${ENGAGEMENT_JOIN('n.engagement_id')}
+        WHERE (n.owner_employee_id = $1 OR n.reviewer_employee_id = $1)
+          AND n.status NOT IN ('closed', 'withdrawn', 'appealed')
+          AND ($2::uuid IS NULL OR n.engagement_id = $2)`,
+      [me, engagementId],
+    );
+    return rows.flatMap((r) => {
+      const clock = noticeClock(
+        {
+          status: r.status,
+          internalDueOn: r.internal_due_on,
+          replyDueOn: r.reply_due_on,
+          nextHearingOn: r.next_hearing_on,
+          appealDueOn: r.appeal_due_on,
+        },
+        today,
+      );
+      if (!clock) return [];
+      const typeLabel = noticeTypeLabel({ form: r.form, section: r.section, title: r.type_title });
+      const item: TodayItem = {
+        key: `notice:${r.id}`,
+        kind: 'notice',
+        group: TODAY_GROUP.notices,
+        title: `${r.form ?? r.type_title} · ${r.reference_no}`,
+        ...engagementOf(r),
+        filing: null,
+        internalDate: clock.due,
+        // The department's reply date, while the reply is what's due.
+        statutoryDate: clock.label === 'Reply due' ? r.reply_due_on : null,
+        status: r.status,
+        isOverdue: clock.overdue,
+        blockedByOpenCount: 0,
+        task: null,
+        notice: {
+          id: r.id,
+          referenceNo: r.reference_no,
+          stream: r.stream,
+          typeLabel,
+          clockLabel: clock.label,
+          amountDemanded: r.amount_demanded,
+        },
+        link: { engagementId: r.engagement_id, engagementKind: r.engagement_kind, noticeId: r.id },
+      };
+      return [item];
+    });
+  }
+
+  /**
    * Open filings due internally within a week (or already past), on work I
    * prepare or review (the filing's task) or lead (its stream) — with or
    * without a task. The candidate ids come from my tasks and my streams first,
@@ -329,8 +421,14 @@ function listedWaiting(tasks: TodayItem[]): Set<string> {
   );
 }
 
-function emptyGroups(): Parameters<typeof buildTodayView>[1] {
-  return { prepare: [], review: [], waiting: [], due_soon: [] };
+function emptyGroups(notices = false): TodayRows {
+  return {
+    prepare: [],
+    review: [],
+    waiting: [],
+    due_soon: [],
+    ...(notices ? { notices: [] } : {}),
+  };
 }
 
 function engagementOf(

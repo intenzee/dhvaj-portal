@@ -3,11 +3,14 @@ import type { PoolClient } from 'pg';
 import {
   ENGAGEMENT_KIND_LABEL,
   FILING_STATUS_LABEL,
+  NOTICE_STATUS_LABEL,
   SEARCH_GROUP,
+  noticeTypeLabel,
   periodKeyLabel,
   workItemHref,
   type EngagementKind,
   type FilingStatus,
+  type NoticeStatus,
   type SearchGroup,
   type SearchHit,
   type SearchResponse,
@@ -31,6 +34,7 @@ const LIMIT: Record<SearchGroup, number> = {
   filings: 8,
   tasks: 5,
   documents: 5,
+  notices: 5,
 };
 
 /** Builds a WHERE clause with numbered parameters. */
@@ -126,7 +130,7 @@ export class SearchService {
   async search(
     ctx: RlsContext,
     q: string,
-    opts: { clients: boolean },
+    opts: { clients: boolean; notices?: boolean },
     now: Date = new Date(),
   ): Promise<SearchResponse> {
     const parsed = parseSearchQuery(q, istToday(now));
@@ -146,12 +150,13 @@ export class SearchService {
       filings: await this.filings(client, parsed),
       tasks: await this.tasks(client, parsed),
       documents: hasText ? await this.documents(client, parsed) : [],
+      notices: hasText && opts.notices ? await this.notices(client, parsed) : [],
     }));
 
     // Filings first when the query names a form or a period.
     const order: SearchGroup[] = work
-      ? ['filings', 'tasks', 'documents', 'clients', 'engagements']
-      : ['clients', 'engagements', 'filings', 'tasks', 'documents'];
+      ? ['filings', 'tasks', 'documents', 'notices', 'clients', 'engagements']
+      : ['clients', 'engagements', 'notices', 'filings', 'tasks', 'documents'];
     return {
       q,
       understood,
@@ -358,6 +363,60 @@ export class SearchService {
         id: r.id,
         title: r.title,
         subtitle: [r.entity_name, r.engagement_code].join(' · '),
+        href: workItemHref(link),
+        link,
+      };
+    });
+  }
+
+  /**
+   * PS-102: notices by reference number (DIN), client, or the type's form /
+   * code ("asmt" finds ASMT-10s). Open ones first, newest received first.
+   */
+  private async notices(client: PoolClient, parsed: ParsedSearch): Promise<SearchHit[]> {
+    const w = new Where();
+    w.everyWord(parsed.text, ['n.reference_no', 'ent.legal_name', 'nt.form', 'nt.code']);
+    const { rows } = await client.query<{
+      id: string;
+      reference_no: string;
+      status: NoticeStatus;
+      engagement_id: string;
+      engagement_kind: EngagementKind;
+      engagement_code: string;
+      entity_name: string;
+      form: string | null;
+      section: string | null;
+      type_title: string;
+    }>(
+      `SELECT n.id, n.reference_no, n.status, n.engagement_id, eng.kind AS engagement_kind,
+              eng.engagement_code, ent.legal_name AS entity_name,
+              nt.form, nt.section, nt.title AS type_title
+         FROM hsdg.notices n
+         JOIN hsdg.notice_types nt ON nt.id = n.notice_type_id
+         JOIN hsdg.engagements eng ON eng.id = n.engagement_id
+         JOIN hsdg.entities ent ON ent.id = n.entity_id
+         ${w.sql()}
+        ORDER BY (n.status IN ('closed', 'withdrawn')), n.received_on DESC, n.reference_no
+        LIMIT ${LIMIT.notices}`,
+      w.params,
+    );
+    return rows.map((r) => {
+      const link = {
+        engagementId: r.engagement_id,
+        engagementKind: r.engagement_kind,
+        noticeId: r.id,
+      };
+      return {
+        group: SEARCH_GROUP.notices,
+        id: r.id,
+        title: `${r.form ?? r.type_title} · ${r.reference_no} — ${r.entity_name}`,
+        subtitle: [
+          noticeTypeLabel({ form: null, section: r.section, title: r.type_title }),
+          NOTICE_STATUS_LABEL[r.status],
+          r.engagement_code,
+        ]
+          .filter(Boolean)
+          .join(' · '),
         href: workItemHref(link),
         link,
       };

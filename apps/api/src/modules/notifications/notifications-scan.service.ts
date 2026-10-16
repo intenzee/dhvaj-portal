@@ -1,10 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { NOTIFICATION_TYPE, REMINDER_CHANNEL_SETTING } from '@hsdg/contracts';
+import type { PoolClient } from 'pg';
+import {
+  FEATURE_FLAG,
+  NOTIFICATION_TYPE,
+  REMINDER_CHANNEL_SETTING,
+  isNoticeOpen,
+  type EngagementKind,
+  type NoticeStatus,
+} from '@hsdg/contracts';
+import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AppConfigService } from '../../config/config.module';
 import { NotificationsService } from './notifications.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
+import { inDays, noticeHearingDue, noticeReplyBand } from './notice-reminders';
 
 /** What one sweep produced, by event type. */
 export interface ScanResult {
@@ -18,7 +28,28 @@ export interface ScanResult {
   clientDependencyOverdue: number;
   clientDependencyReminder: number;
   clientDeliveryEnqueued: number;
+  noticeReplyDue: number;
+  noticeHearingDue: number;
   total: number;
+}
+
+interface DueNoticeRow {
+  id: string;
+  engagement_id: string;
+  engagement_code: string;
+  entity_name: string;
+  engagement_kind: EngagementKind;
+  office_code: string;
+  reference_no: string;
+  form: string | null;
+  type_title: string;
+  status: NoticeStatus;
+  internal_due_on: string | null;
+  next_hearing_on: string | null;
+  owner_employee_id: string;
+  reviewer_employee_id: string | null;
+  reply_days_left: number | null;
+  hearing_days_left: number | null;
 }
 
 interface DueComplianceRow {
@@ -87,6 +118,7 @@ export class NotificationsScanService {
     private readonly db: DatabaseService,
     private readonly config: AppConfigService,
     private readonly notifications: NotificationsService,
+    private readonly flags: FeatureFlagsService,
   ) {}
 
   async run(ctx: RlsContext): Promise<ScanResult> {
@@ -106,6 +138,8 @@ export class NotificationsScanService {
         clientDependencyOverdue: 0,
         clientDependencyReminder: 0,
         clientDeliveryEnqueued: 0,
+        noticeReplyDue: 0,
+        noticeHearingDue: 0,
         total: 0,
       };
 
@@ -350,7 +384,11 @@ export class NotificationsScanService {
         }
       }
 
+      await this.scanNotices(client, ctx, result);
+
       result.total =
+        result.noticeReplyDue +
+        result.noticeHearingDue +
         result.internalSlaOverdue +
         result.internalSlaApproaching +
         result.statutoryDeadlineApproaching +
@@ -362,5 +400,78 @@ export class NotificationsScanService {
         result.clientDependencyReminder;
       return result;
     });
+  }
+
+  /**
+   * PS-102 — notices: the owner and reviewer are nudged 7, 3 and 1 days before
+   * the internal reply date while the reply is still to file, and 2 days before
+   * a hearing. One dedup key per notice, date and band, so a moved date nudges
+   * afresh (the trigger clears the old ones) and a re-run never repeats. Only
+   * where ff_notices is on for the engagement's office.
+   */
+  private async scanNotices(
+    client: PoolClient,
+    ctx: RlsContext,
+    result: ScanResult,
+  ): Promise<void> {
+    const { rows } = await client.query<DueNoticeRow>(
+      `WITH today AS (SELECT timezone('Asia/Kolkata', now())::date AS d)
+       SELECT n.id, n.engagement_id, e.engagement_code, e.kind AS engagement_kind,
+              ent.legal_name AS entity_name,
+              o.code AS office_code, n.reference_no, nt.form, nt.title AS type_title, n.status,
+              n.internal_due_on::text, n.next_hearing_on::text,
+              n.owner_employee_id, n.reviewer_employee_id,
+              CASE WHEN n.status IN ('received', 'in_progress')
+                   THEN n.internal_due_on - today.d END AS reply_days_left,
+              n.next_hearing_on - today.d AS hearing_days_left
+         FROM hsdg.notices n
+         CROSS JOIN today
+         JOIN hsdg.notice_types nt ON nt.id = n.notice_type_id
+         JOIN hsdg.engagements e ON e.id = n.engagement_id
+         JOIN hsdg.entities ent ON ent.id = n.entity_id
+         JOIN hsdg.offices o ON o.id = e.office_id
+        WHERE n.status NOT IN ('closed', 'withdrawn', 'appealed', 'order_received')
+          AND ((n.status IN ('received', 'in_progress') AND n.internal_due_on <= today.d + 7)
+               OR n.next_hearing_on BETWEEN today.d AND today.d + 2)`,
+    );
+    for (const row of rows) {
+      if (!isNoticeOpen(row.status)) continue;
+      if (!this.flags.isOnFor(FEATURE_FLAG.notices, row.office_code)) continue;
+      const what = `${row.form ?? row.type_title} ${row.reference_no} · ${row.entity_name}`;
+      const base = {
+        recipientEmployeeIds: [row.owner_employee_id, row.reviewer_employee_id],
+        engagementId: row.engagement_id,
+        objectType: 'notice',
+        objectId: row.id,
+        link: {
+          engagementId: row.engagement_id,
+          engagementKind: row.engagement_kind,
+          noticeId: row.id,
+        },
+      };
+      const band = row.reply_days_left === null ? null : noticeReplyBand(row.reply_days_left);
+      if (band !== null && row.internal_due_on) {
+        result.noticeReplyDue += await this.notifications.emitWith(client, ctx, {
+          ...base,
+          type: NOTIFICATION_TYPE.noticeReplyDue,
+          title: `Reply due ${inDays(row.reply_days_left!)} — ${what}`,
+          body: `The firm's reply date for ${what} is ${row.internal_due_on}.`,
+          dedupKey: `notice_reply_due:${row.id}:${row.internal_due_on}:${band}`,
+        });
+      }
+      if (
+        row.next_hearing_on &&
+        row.hearing_days_left !== null &&
+        noticeHearingDue(row.hearing_days_left)
+      ) {
+        result.noticeHearingDue += await this.notifications.emitWith(client, ctx, {
+          ...base,
+          type: NOTIFICATION_TYPE.noticeHearingDue,
+          title: `Hearing ${inDays(row.hearing_days_left)} — ${what}`,
+          body: `The hearing on ${what} is on ${row.next_hearing_on}.`,
+          dedupKey: `notice_hearing_due:${row.id}:${row.next_hearing_on}`,
+        });
+      }
+    }
   }
 }

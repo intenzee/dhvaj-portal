@@ -22,12 +22,12 @@ export class SearchController {
   @Get()
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
-    summary: 'Search clients, engagements, filings, tasks and documents (WF-304)',
+    summary: 'Search clients, engagements, filings, tasks, documents and notices (WF-304, PS-102)',
     description:
       'Grouped hits, each with the exact place it opens (`href`, `link`). Forms and months in ' +
       'the query are understood: "bharat gstr1 sep" finds Bharat\'s GSTR-1 for Sep of the ' +
       'current financial year, and filings come first. Every group is RLS-scoped; clients ' +
-      'need entity.read.',
+      'need entity.read; notices (by reference, client or form) need ff_notices.',
   })
   find(
     @CurrentPrincipal() principal: Principal,
@@ -37,6 +37,7 @@ export class SearchController {
       throw new NotFoundException();
     return this.search.search(rlsContextFromPrincipal(principal), query.q, {
       clients: principal.permissions.includes(PERMISSION.entityRead),
+      notices: this.flags.isOnFor(FEATURE_FLAG.notices, principal.officeCode),
     });
   }
 }

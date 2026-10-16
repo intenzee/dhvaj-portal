@@ -165,7 +165,13 @@ describe('Today (e2e)', () => {
   it('To prepare lists my filing task with its link, filing and task; the count matches My Work', async () => {
     const { eng, inst, task } = await setup();
     const view = await today(sy);
-    expect(view.groups.map((g) => g.group)).toEqual(['prepare', 'review', 'waiting', 'due_soon']);
+    expect(view.groups.map((g) => g.group)).toEqual([
+      'prepare',
+      'review',
+      'notices',
+      'waiting',
+      'due_soon',
+    ]);
     const row = group(view, 'prepare').find((i) => i.key === `task:${task}`);
     expect(row).toMatchObject({
       kind: 'task',

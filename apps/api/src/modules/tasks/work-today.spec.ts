@@ -51,6 +51,29 @@ describe('buildTodayView (WF-201)', () => {
     expect(view.groups[0]!.total).toBe(4);
   });
 
+  it('adds Notices after To review only when its rows are passed (ff_notices on), earliest clock first (PS-102)', () => {
+    const base = { prepare: [], review: [], waiting: [], due_soon: [] };
+    expect(buildTodayView(TODAY, base).groups.map((g) => g.group)).not.toContain('notices');
+    const notice = (key: string, internalDate: string, isOverdue = false): TodayItem =>
+      item({ key, kind: 'notice', group: 'notices', internalDate, isOverdue });
+    const view = buildTodayView(TODAY, {
+      ...base,
+      notices: [
+        notice('notice:b', '2026-10-20'),
+        notice('notice:a', '2026-10-09', true),
+        notice('notice:c', '2026-10-16'),
+      ],
+    });
+    expect(view.groups.map((g) => g.group)).toEqual([
+      'prepare',
+      'review',
+      'notices',
+      'waiting',
+      'due_soon',
+    ]);
+    expect(view.groups[2]!.items.map((i) => i.key)).toEqual(['notice:a', 'notice:c', 'notice:b']);
+  });
+
   it('a filing already listed above is not repeated under Due this week', () => {
     const view = buildTodayView(TODAY, {
       prepare: [item({ key: 'task:t1', link: onFiling('i1') })],

@@ -39,12 +39,13 @@ export class WorkController {
   @Get('today')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
-    summary: "Today: the caller's day in four groups (WF-201)",
+    summary: "Today: the caller's day in groups (WF-201, PS-102)",
     description:
       'prepare (my todo / in_progress / paused tasks), review (the GET /work/reviews queue), ' +
       'waiting (my blocked tasks + open client requests I am responsible for), due_soon (open ' +
       'filings I prepare, review or lead due internally within 7 days or past, with or without ' +
-      'a task, less those listed above). Each group is overdue first, then by internal date. ' +
+      'a task, less those listed above), notices (open notices I own or review, by their clock ' +
+      'date — only when ff_notices is on). Each group is overdue first, then by internal date. ' +
       '?engagementId= narrows every group to one engagement. Behind ff_today_view.',
   })
   today(
@@ -54,7 +55,9 @@ export class WorkController {
     if (!this.flags.isOnFor(FEATURE_FLAG.todayView, principal.officeCode)) {
       throw new NotFoundException('Today is not switched on for your office yet.');
     }
-    return this.todayView.today(rlsContextFromPrincipal(principal), query.engagementId);
+    return this.todayView.today(rlsContextFromPrincipal(principal), query.engagementId, {
+      notices: this.flags.isOnFor(FEATURE_FLAG.notices, principal.officeCode),
+    });
   }
 
   @Get('tasks')

@@ -66,28 +66,31 @@ export function reviewToToday(r: WorkReviewItem, today: string, me: string): Tod
   };
 }
 
+/** Today's rows by group; `notices` is absent (and the group left out) when ff_notices is off. */
+export type TodayRows = Record<Exclude<TodayGroup, 'notices'>, TodayItem[]> & {
+  notices?: TodayItem[];
+};
+
 /**
- * The four groups, each in Today's order. A filing already on a row above
- * (its task to prepare, review or chase) is not repeated under "Due this week".
+ * The groups, each in Today's order. A filing already on a row above (its
+ * task to prepare, review or chase) is not repeated under "Due this week".
  */
-export function buildTodayView(
-  today: string,
-  rows: Record<TodayGroup, TodayItem[]>,
-  engagementId?: string,
-): TodayView {
+export function buildTodayView(today: string, rows: TodayRows, engagementId?: string): TodayView {
   const keep = (items: TodayItem[]): TodayItem[] =>
     engagementId ? items.filter((i) => i.engagementId === engagementId) : items;
   const listed = new Set<string>();
   for (const g of [TODAY_GROUP.prepare, TODAY_GROUP.review, TODAY_GROUP.waiting] as const) {
     for (const i of keep(rows[g])) if (i.link.instanceId) listed.add(i.link.instanceId);
   }
-  const groups = TODAY_GROUPS.map((group) => {
-    let items = keep(rows[group]);
+  const groups = TODAY_GROUPS.flatMap((group) => {
+    const own = rows[group];
+    if (!own) return [];
+    let items = keep(own);
     if (group === TODAY_GROUP.dueSoon) {
       items = items.filter((i) => !i.link.instanceId || !listed.has(i.link.instanceId));
     }
     items = [...items].sort(compareTodayItems);
-    return { group, items: items.slice(0, TODAY_GROUP_LIMIT), total: items.length };
+    return [{ group, items: items.slice(0, TODAY_GROUP_LIMIT), total: items.length }];
   });
   return { today, groups };
 }
