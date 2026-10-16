@@ -931,6 +931,8 @@ export class ComplianceGeneratorService {
     const ctx = eventContext(event);
     const desired: Desired[] = [];
     for (const v of versions) {
+      // PS-103 — an order on a notice starts only the limitation rule its type names.
+      if (event.event_type === 'notice_order' && v.code !== event.details?.appealRuleCode) continue;
       const scope = v.registration_scope ?? 'entity';
       const needsRegistration = scope !== 'entity' && scope !== 'pan';
       if (needsRegistration && !event.registration_id) continue;

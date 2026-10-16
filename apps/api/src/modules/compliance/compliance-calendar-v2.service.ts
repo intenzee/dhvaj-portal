@@ -157,6 +157,10 @@ const RECURRING_EVENT_TYPES: ReadonlySet<string> = new Set(['agm', 'agm_extensio
 /** One live event of these per year and registration: the AGM is never recorded twice. */
 const ONCE_A_YEAR_EVENT_TYPES: ReadonlySet<string> = new Set(['agm', 'agm_extension']);
 
+/** PS-103 — an order on a notice; recorded, and voided, from the notice only. */
+export const NOTICE_ORDER_EVENT = 'notice_order';
+const FROM_NOTICE = 'This order was recorded on the notice — void or correct it there.';
+
 /** What recording an event takes, besides the engagement. */
 export interface EventInput {
   eventType: string;
@@ -471,6 +475,7 @@ export class ComplianceCalendarV2Service {
       const eng = await this.assertLead(client, engagementId);
       const before = await this.loadEvent(client, engagementId, eventId, true);
       if (before.voided_at) throw new BadRequestException('A voided event cannot be corrected.');
+      if (before.event_type === NOTICE_ORDER_EVENT) throw new BadRequestException(FROM_NOTICE);
       const eventDate = input.eventDate?.slice(0, 10) ?? before.event_date;
       if (before.source_instance_id && eventDate !== before.event_date) {
         throw new BadRequestException(
@@ -570,11 +575,14 @@ export class ComplianceCalendarV2Service {
     engagementId: string,
     eventId: string,
     reason: string,
-    opts: { fromMeeting?: boolean } = {},
+    opts: { fromMeeting?: boolean; fromNotice?: boolean } = {},
   ): Promise<RecordComplianceEventResult> {
     const eng = await this.assertLead(client, engagementId);
     const before = await this.loadEvent(client, engagementId, eventId, true);
     if (before.voided_at) throw new BadRequestException('This event is already voided.');
+    if (before.event_type === NOTICE_ORDER_EVENT && !opts.fromNotice) {
+      throw new BadRequestException(FROM_NOTICE);
+    }
     if (before.source_instance_id && !opts.fromMeeting) {
       // The meeting stays "Held" otherwise: the two go together.
       throw new BadRequestException(

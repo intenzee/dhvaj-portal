@@ -14,6 +14,8 @@ import {
   noticeClock,
   noticeEventEffect,
   type AddNoticeEventRequest,
+  type AppealNoticeRequest,
+  type AppealNoticeResponse,
   type CloseNoticeRequest,
   type CreateNoticeRequest,
   type Notice,
@@ -60,7 +62,7 @@ export const NOTICE_SELECT = `
          n.reviewer_employee_id, rev.full_name AS reviewer_name,
          n.status, n.outcome, n.outcome_amount::text, n.closed_on::text, n.summary,
          n.appeal_instance_id, n.appeal_due_on::text,
-         NULL::uuid AS appeal_engagement_id, NULL::text AS appeal_engagement_code,
+         n.appeal_engagement_id, ae.engagement_code AS appeal_engagement_code,
          n.version, n.created_at, n.updated_at,
          (${CLOCK_DUE_SQL}) AS clock_due_d, (${CLOCK_DUE_SQL})::text AS clock_due,
          hsdg.is_engagement_member(n.engagement_id) AS is_member
@@ -68,6 +70,7 @@ export const NOTICE_SELECT = `
     JOIN hsdg.notice_types nt ON nt.id = n.notice_type_id
     LEFT JOIN hsdg.entities ent ON ent.id = n.entity_id
     LEFT JOIN hsdg.engagements eng ON eng.id = n.engagement_id
+    LEFT JOIN hsdg.engagements ae ON ae.id = n.appeal_engagement_id
     LEFT JOIN hsdg.entity_registrations reg ON reg.id = n.registration_id
     LEFT JOIN hsdg.employees owner ON owner.id = n.owner_employee_id
     LEFT JOIN hsdg.employees rev ON rev.id = n.reviewer_employee_id`;
@@ -516,6 +519,10 @@ export class NoticesService {
         );
       if (input.kind === 'order' && input.occurredOn > istToday(new Date()))
         throw new BadRequestException('An order cannot be dated in the future.');
+      if (input.kind === 'order' && (await this.appeal.orderDate(client, id)))
+        throw new BadRequestException(
+          'An order is already on file — void it first if it was recorded wrongly.',
+        );
       if (input.documentId)
         await this.linkDocument(
           client,
@@ -601,6 +608,11 @@ export class NoticesService {
       const ev = evs[0];
       if (!ev) throw new NotFoundException('Event not found on this notice.');
       if (ev.voided_at) throw new BadRequestException('This event is already voided.');
+      if (ev.kind === 'order' && n.appeal_engagement_id)
+        throw new BadRequestException(
+          `The appeal against this order is open (${n.appeal_engagement_code ?? 'its engagement'}) — ` +
+            'the order cannot be voided.',
+        );
       await client.query(
         `UPDATE hsdg.notice_events
             SET voided_at = now(), voided_by_employee_id = $2, void_reason = $3
@@ -678,6 +690,49 @@ export class NoticesService {
         },
       });
     });
+  }
+
+  /** POST /notices/:id/appeal — the partner chose to appeal: open its Assignment engagement. */
+  async appealNotice(
+    ctx: RlsContext,
+    id: string,
+    input: AppealNoticeRequest,
+  ): Promise<AppealNoticeResponse> {
+    let opened: { id: string; code: string } | null = null;
+    const notice = await this.write(ctx, id, input.version, async (client, n) => {
+      if (n.appeal_engagement_id)
+        throw new ConflictException(
+          `The appeal is already open (${n.appeal_engagement_code ?? 'its engagement'}).`,
+        );
+      if (n.status !== 'order_received' || !n.type_appealable)
+        throw new BadRequestException('Only an order of an appealable type can be appealed.');
+      if (!(await this.appeal.orderDate(client, id)))
+        throw new BadRequestException('Record the order before appealing it.');
+      opened = await this.appeal.openAppeal(client, ctx, n, input);
+      await client.query(
+        `UPDATE hsdg.notices
+            SET appeal_engagement_id = $2, status = 'appealed', version = version + 1,
+                updated_by_employee_id = $3
+          WHERE id = $1`,
+        [id, opened.id, ctx.employeeId ?? null],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'notice.appealed',
+        objectType: 'notice',
+        objectId: id,
+        before: { status: n.status },
+        after: {
+          status: 'appealed',
+          appealEngagementId: opened.id,
+          appealEngagementCode: opened.code,
+          appealDueOn: n.appeal_due_on,
+          note: input.note?.trim() || null,
+        },
+      });
+    });
+    const o = opened as { id: string; code: string } | null;
+    if (!o) throw new Error('The appeal engagement was not opened.');
+    return { notice, engagementId: o.id, engagementCode: o.code };
   }
 
   /** POST /notices/:id/documents — upload the notice, the reply or the order under it. */
