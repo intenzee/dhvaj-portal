@@ -309,10 +309,16 @@ export interface Notice extends NoticeListItem {
   closedOn: string | null;
   summary: string | null;
   appealInstanceId: string | null;
+  /** The Assignment engagement opened when the partner chose "Appeal" (PS-103). */
+  appealEngagementId: string | null;
+  appealEngagementCode: string | null;
   events: NoticeEvent[];
   documents: NoticeDocument[];
-  /** What the caller may do (notice.manage and on the team). */
-  can: { edit: boolean };
+  /**
+   * What the caller may do. edit: notice.manage and on the team. appeal: an
+   * order is on file for an appealable type and no appeal is open yet.
+   */
+  can: { edit: boolean; appeal: boolean };
   createdAt: string;
   updatedAt: string;
 }
@@ -387,4 +393,108 @@ export interface CloseNoticeRequest {
   outcome: NoticeOutcome;
   outcomeAmount?: string | null;
   closedOn: string;
+}
+
+// ── PS-103 · after the order ────────────────────────────────────────────────
+
+/**
+ * POST /notices/:id/appeal — the partner chose to appeal the order. Opens an
+ * Assignment engagement (GST_APPEAL or TAX_APPEAL) on the client, linked to the
+ * notice, with the limitation date as its internal due date; status → appealed.
+ */
+export interface AppealNoticeRequest {
+  version: number;
+  /** Defaults to the notice's engagement partner. */
+  partnerId?: string;
+  /** Defaults to the notice owner. */
+  managerId?: string;
+  note?: string | null;
+}
+export interface AppealNoticeResponse {
+  notice: Notice;
+  engagementId: string;
+  engagementCode: string;
+}
+// "Accept" is POST /notices/:id/close with the outcome.
+
+// ── PS-104 · intake from the PDF ────────────────────────────────────────────
+
+/** Fields notice-extract can suggest from a notice's OCR text. */
+export type NoticeIntakeField =
+  | 'gstin'
+  | 'pan'
+  | 'referenceNo'
+  | 'issuedOn'
+  | 'replyDueOn'
+  | 'section'
+  | 'form'
+  | 'amountDemanded'
+  | 'financialYear'
+  | 'assessmentYear'
+  | 'periodFrom'
+  | 'periodTo';
+
+export interface NoticeIntakeSuggestion {
+  value: string;
+  /** 0–1. The form pre-fills at or above 0.5 and flags anything below 0.8. */
+  confidence: number;
+  /** The text the value was read from, for the person to check. */
+  snippet: string | null;
+}
+
+/** A client (and its open engagements) whose GSTIN / PAN matches the notice. */
+export interface NoticeIntakeClientMatch {
+  entityId: string;
+  entityName: string;
+  matchedOn: 'gstin' | 'pan';
+  registrationId: string | null;
+  engagements: { id: string; code: string; name: string }[];
+}
+
+/**
+ * POST /notices/intake { documentId } — read an uploaded notice PDF
+ * (document_type 'notice') and suggest the form's fields. Nothing is saved;
+ * the person confirms each field and creates the notice with POST /notices
+ * passing the same documentId.
+ */
+export interface NoticeIntakeRequest {
+  documentId: string;
+}
+export interface NoticeIntakeResponse {
+  documentId: string;
+  /** The OCR state of the document; 'pending' → poll again shortly. */
+  ocrStatus: 'pending' | 'done' | 'failed' | 'not_applicable';
+  fields: Partial<Record<NoticeIntakeField, NoticeIntakeSuggestion>>;
+  /** The library code that best fits the form / section read, if any. */
+  noticeTypeCode: NoticeIntakeSuggestion | null;
+  clients: NoticeIntakeClientMatch[];
+}
+
+// ── PS-105 · the partners' report ──────────────────────────────────────────
+
+/** GET /reports/notices?officeId= — scoped by row-level security. */
+export interface NoticesReport {
+  asOf: string;
+  open: {
+    total: number;
+    amountDemanded: string;
+    byStream: { stream: NoticeStream; count: number; amountDemanded: string }[];
+    byStatus: { status: NoticeStatus; count: number }[];
+    byOffice: { officeId: string; officeName: string; count: number; amountDemanded: string }[];
+  };
+  /** Open notices whose clock falls due in the next 7 days (or is overdue). */
+  dueSoon: NoticeListItem[];
+  closed: {
+    count: number;
+    amountDemanded: string;
+    outcomeAmount: string;
+    byOutcome: {
+      outcome: NoticeOutcome;
+      count: number;
+      amountDemanded: string;
+      outcomeAmount: string;
+    }[];
+  };
+  /** Mean days from received_on to the first reply_filed event; null when none. */
+  avgDaysToReply: number | null;
 }
