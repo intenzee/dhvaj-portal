@@ -317,9 +317,12 @@ export interface Notice extends NoticeListItem {
   documents: NoticeDocument[];
   /**
    * What the caller may do. edit: notice.manage and on the team. appeal: an
-   * order is on file for an appealable type and no appeal is open yet.
+   * order is on file for an appealable type, no appeal is open yet, and the
+   * caller leads the engagement (opening one is a lead's call). startAppealClock:
+   * the order was recorded by someone who isn't a lead, so its "Appeal by"
+   * filing waits for the partner or manager (POST /notices/:id/appeal-clock).
    */
-  can: { edit: boolean; appeal: boolean };
+  can: { edit: boolean; appeal: boolean; startAppealClock: boolean };
   createdAt: string;
   updatedAt: string;
 }

@@ -214,12 +214,81 @@ describe('Notices — the appeal clock (e2e)', () => {
     expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
   });
 
-  it('an appealable order is recorded by the engagement partner or manager', async () => {
-    const n = await create(sy, 'GST_DRC07');
-    await order(sy, n, today, 403);
-    const still = (await http().get(`/api/v1/notices/${n.id}`).set(bearer(sy)).expect(200))
+  it('a senior records the order; the appeal clock waits for the partner or manager', async () => {
+    const recorded = await order(sy, await create(sy, 'GST_DRC07'));
+    expect(recorded).toMatchObject({ status: 'order_received', appealDueOn: null });
+    expect(recorded.appealInstanceId).toBeNull();
+    // Starting the clock and opening the appeal are the leads' calls.
+    expect(recorded.can).toMatchObject({ edit: true, appeal: false, startAppealClock: false });
+    await http()
+      .post(`/api/v1/notices/${recorded.id}/appeal-clock`)
+      .set(bearer(sy))
+      .send({ version: recorded.version })
+      .expect(403);
+
+    const waiting = (await http().get(`/api/v1/notices/${recorded.id}`).set(bearer(pa)).expect(200))
       .body as Notice;
-    expect(still).toMatchObject({ status: 'received', events: [] });
+    expect(waiting.can).toMatchObject({ appeal: true, startAppealClock: true });
+    const started = (
+      await http()
+        .post(`/api/v1/notices/${recorded.id}/appeal-clock`)
+        .set(bearer(pa))
+        .send({ version: waiting.version })
+        .expect(200)
+    ).body as Notice;
+    expect(started.appealDueOn).toBe(monthsFrom(today, 3));
+    expect(started.can.startAppealClock).toBe(false);
+    expect((await filing(started.appealInstanceId!)).code).toBe('GST_APPEAL_LIMITATION');
+    await http()
+      .post(`/api/v1/notices/${recorded.id}/appeal-clock`)
+      .set(bearer(pa))
+      .send({ version: started.version })
+      .expect(409);
+
+    // Once the clock runs, voiding the order (and its filing) is a lead's call too.
+    const orderId = started.events.find((e) => e.kind === 'order')!.id;
+    await voidEvent(sy, started, orderId, 403);
+  });
+
+  it('a senior files a notice paper on the engagement route and archives their own stray copy', async () => {
+    const paper = {
+      title: 'Stray notice PDF',
+      classification: 'internal',
+      filename: 'notice.pdf',
+      contentType: 'application/pdf',
+      contentBase64: Buffer.from('%PDF-1.4 test').toString('base64'),
+    };
+    const doc = (
+      await http()
+        .post(`/api/v1/engagements/${eng}/documents`)
+        .set(bearer(sy))
+        .send({ ...paper, documentType: 'notice' })
+        .expect(201)
+    ).body as { id: string };
+    // Anything other than a notice paper still needs engagement.manage.
+    await http()
+      .post(`/api/v1/engagements/${eng}/documents`)
+      .set(bearer(sy))
+      .send({ ...paper, documentType: 'other' })
+      .expect(403);
+    await http()
+      .post(`/api/v1/engagements/${eng}/documents/${doc.id}/archive`)
+      .set(bearer(sy))
+      .send({ version: 1, reason: 'Filed on the wrong engagement' })
+      .expect(201);
+    // Someone else's paper is not theirs to archive.
+    const pas = (
+      await http()
+        .post(`/api/v1/engagements/${eng}/documents`)
+        .set(bearer(pa))
+        .send({ ...paper, documentType: 'notice' })
+        .expect(201)
+    ).body as { id: string };
+    await http()
+      .post(`/api/v1/engagements/${eng}/documents/${pas.id}/archive`)
+      .set(bearer(sy))
+      .send({ version: 1, reason: 'Not mine' })
+      .expect(403);
   });
 
   it('appeal opens the Assignment engagement, due on the limitation date', async () => {

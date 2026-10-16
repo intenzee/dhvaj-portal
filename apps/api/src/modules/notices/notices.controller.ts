@@ -33,6 +33,7 @@ import {
   CreateNoticeDto,
   NoticeDocumentUploadDto,
   NoticeListQueryDto,
+  StartAppealClockDto,
   UpdateNoticeDto,
   UpsertNoticeTypeDto,
   VoidNoticeEventDto,
@@ -139,6 +140,22 @@ export class NoticesController {
   ): Promise<Notice> {
     requireNotices(this.flags, principal);
     return this.notices.close(rlsContextFromPrincipal(principal), id, body);
+  }
+
+  @Post(':id/appeal-clock')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSION.noticeManage)
+  @ApiOperation({
+    summary:
+      'Start the appeal clock an order recorded by a non-lead left waiting: its "Appeal by" filing (PS-103)',
+  })
+  startAppealClock(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: StartAppealClockDto,
+  ): Promise<Notice> {
+    requireNotices(this.flags, principal);
+    return this.notices.startAppealClock(rlsContextFromPrincipal(principal), id, body.version);
   }
 
   @Post(':id/appeal')

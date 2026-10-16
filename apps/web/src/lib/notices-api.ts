@@ -99,12 +99,22 @@ export async function uploadNoticeDocument(input: {
   });
 }
 
-/** Soft-delete a PDF filed on the wrong engagement by the intake (restorable, audited). */
+/**
+ * Archive a PDF the intake filed on the wrong engagement (restorable, audited).
+ * Archive, not delete: the uploader may do it with notice.manage alone; delete
+ * is the managing partner's. A just-uploaded document is at version 1.
+ */
 export const withdrawUpload = (engagementId: string, documentId: string) =>
-  apiFetch(`/engagements/${engagementId}/documents/${documentId}/delete`, {
+  apiFetch(`/engagements/${engagementId}/documents/${documentId}/archive`, {
     method: 'POST',
-    body: { reason: 'Notice PDF filed on the wrong engagement; re-filed on the right one.' },
+    body: {
+      version: 1,
+      reason: 'Notice PDF filed on the wrong engagement; re-filed on the right one.',
+    },
   });
+
+export const startAppealClock = (id: string, version: number) =>
+  apiFetch<Notice>(`/notices/${id}/appeal-clock`, { method: 'POST', body: { version } });
 
 export const noticeDocumentDownloadPath = (engagementId: string, documentId: string) =>
   `/engagements/${engagementId}/documents/${documentId}/download`;

@@ -131,7 +131,7 @@ describe('Notices (e2e)', () => {
     expect(n.ownerId).toBe(emp006);
     expect(n.noticeType.code).toBe('IT_143_2');
     expect(n.amountDemanded).toBe('125000.50');
-    expect(n.can).toEqual({ edit: true, appeal: false });
+    expect(n.can).toEqual({ edit: true, appeal: false, startAppealClock: false });
     expect(n.events).toEqual([]);
 
     const inbox = (await http().get('/api/v1/notifications?limit=100').set(bearer(sy)).expect(200))

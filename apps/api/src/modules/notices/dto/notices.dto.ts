@@ -313,6 +313,14 @@ export class CloseNoticeDto implements CloseNoticeRequest {
   closedOn!: string;
 }
 
+/** POST /notices/:id/appeal-clock — only the version (PS-103). */
+export class StartAppealClockDto {
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
 export class AppealNoticeDto implements AppealNoticeRequest {
   @ApiProperty()
   @IsInt()

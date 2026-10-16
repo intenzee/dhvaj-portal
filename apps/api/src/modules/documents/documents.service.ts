@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -582,10 +583,17 @@ export class DocumentsService {
     engagementId: string,
     documentId: string,
     input: ArchiveDocumentInput,
+    opts: { noticePapersOnly?: boolean } = {},
   ): Promise<DocumentRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectDocument(client, documentId, engagementId);
       if (!before) throw new NotFoundException('Document not found.');
+      if (
+        opts.noticePapersOnly &&
+        (!NOTICE_DOCUMENT_TYPES.includes(before.documentType) ||
+          before.createdById !== ctx.employeeId)
+      )
+        throw new ForbiddenException('You can archive only a notice paper you filed yourself.');
       if (before.status === DOCUMENT_STATUS.archived) {
         throw new BadRequestException('Document is already archived.');
       }

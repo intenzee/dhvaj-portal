@@ -22,6 +22,7 @@ import { formatDate } from '@/lib/format';
 import {
   noticeDocumentDownloadPath,
   noticeKey,
+  startAppealClock,
   uploadNoticeDocument,
   type NoticeDocumentType,
 } from '@/lib/notices-api';
@@ -95,6 +96,21 @@ export function NoticeWorkspace({ notice: n }: { notice: Notice }): JSX.Element 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [appealed, setAppealed] = useState<AppealNoticeResponse | null>(null);
   const close = (): void => setDialog(null);
+  const toast = useToast();
+  const qc = useQueryClient();
+  const clock = useMutation({
+    mutationFn: () => startAppealClock(n.id, n.version),
+    onSuccess: (next) => {
+      qc.setQueryData(noticeKey(n.id), next);
+      toast(
+        next.appealDueOn
+          ? `Appeal clock started: appeal by ${formatDate(next.appealDueOn)}.`
+          : 'Appeal clock started.',
+      );
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not start the appeal clock.', 'error'),
+  });
   const open = isNoticeOpen(n.status) && n.status !== 'appealed';
   const canAct = n.can.edit && open;
   const afterOrder = n.status === 'order_received';
@@ -200,11 +216,18 @@ export function NoticeWorkspace({ notice: n }: { notice: Notice }): JSX.Element 
               <div className="text-ink-muted">
                 {n.appealDueOn
                   ? `The appeal limitation runs to ${formatDate(n.appealDueOn)}.`
-                  : n.noticeType.appealable
-                    ? 'The appeal date appears once the limitation rule has run.'
-                    : 'This notice type is not appealable.'}
+                  : n.can.startAppealClock
+                    ? 'The appeal clock hasn’t started: the order was recorded by someone who doesn’t lead the engagement.'
+                    : n.noticeType.appealable
+                      ? 'The appeal date appears once the engagement partner or manager starts the appeal clock.'
+                      : 'This notice type is not appealable.'}
               </div>
             </div>
+            {n.can.startAppealClock && (
+              <Button variant="secondary" disabled={clock.isPending} onClick={() => clock.mutate()}>
+                Start appeal clock
+              </Button>
+            )}
             {n.can.appeal && <Button onClick={() => setDialog({ kind: 'appeal' })}>Appeal</Button>}
             <Button variant="secondary" onClick={() => setDialog({ kind: 'close', accept: true })}>
               Accept
