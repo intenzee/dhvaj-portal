@@ -88,6 +88,14 @@ export class CreateDocumentDto {
   @IsOptional()
   @IsUUID()
   docRequirementId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'PS-101 — file under a notice of this engagement (documentType notice, reply or order).',
+  })
+  @IsOptional()
+  @IsUUID()
+  noticeId?: string;
 }
 
 export class AddVersionDto {

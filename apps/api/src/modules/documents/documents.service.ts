@@ -45,6 +45,9 @@ import type {
   UpdateDocumentInput,
 } from './documents.types';
 
+/** PS-101 — the papers filed under a notice. */
+export const NOTICE_DOCUMENT_TYPES: readonly DocumentType[] = ['notice', 'reply', 'order'];
+
 interface DocumentRow {
   // Change 6 filing links (DOC_BASE only; absent on the cross-engagement view).
   compliance_instance_id?: string | null;
@@ -189,6 +192,11 @@ export class DocumentsService {
     input: CreateDocumentInput,
   ): Promise<DocumentRecord> {
     const decoded = decodeUpload(input.contentBase64, this.config.get('DOCUMENT_MAX_BYTES'));
+    if (input.noticeId) {
+      if (input.documentType === undefined) input = { ...input, documentType: 'notice' };
+      else if (!NOTICE_DOCUMENT_TYPES.includes(input.documentType))
+        throw new BadRequestException('A paper under a notice is a notice, a reply or an order.');
+    }
     const documentId = randomUUID();
     const reference = this.storage.newReference(engagementId, documentId);
     const contentType = input.contentType ?? 'application/octet-stream';
@@ -199,6 +207,7 @@ export class DocumentsService {
     try {
       const created = await this.db.withRlsContext(ctx, async (client) => {
         await this.requireEngagement(client, engagementId);
+        if (input.noticeId) await this.requireNotice(client, engagementId, input.noticeId);
         await this.validateWorkLink(
           client,
           engagementId,
@@ -211,8 +220,8 @@ export class DocumentsService {
             `INSERT INTO hsdg.documents
                (id, engagement_id, title, document_type, classification, sensitivity,
                 retention_until, created_by_employee_id, task_id, component_instance_id,
-                doc_requirement_id, compliance_instance_id, period_section, slot_code)
-             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8,$9,$10,$11,$12,$13,$14)`,
+                doc_requirement_id, compliance_instance_id, period_section, slot_code, notice_id)
+             VALUES ($1,$2,$3,COALESCE($4,'other'),COALESCE($5,'internal'),COALESCE($6,'normal'),$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
             [
               documentId,
               engagementId,
@@ -228,6 +237,7 @@ export class DocumentsService {
               input.complianceInstanceId ?? null,
               input.periodSection ?? null,
               input.slotCode ?? null,
+              input.noticeId ?? null,
             ],
           );
           const versionId = await this.insertVersion(client, {
@@ -756,6 +766,23 @@ export class DocumentsService {
   }
 
   // ── internals ──────────────────────────────────────────────────────────
+
+  /** PS-101 — the notice is on this engagement, visible, and the caller is on its team. */
+  private async requireNotice(
+    client: PoolClient,
+    engagementId: string,
+    noticeId: string,
+  ): Promise<void> {
+    const { rows } = await client.query<{ engagement_id: string; member: boolean }>(
+      `SELECT engagement_id, hsdg.is_engagement_member(engagement_id) AS member
+         FROM hsdg.notices WHERE id = $1`,
+      [noticeId],
+    );
+    const n = rows[0];
+    if (!n || n.engagement_id !== engagementId)
+      throw new BadRequestException('That notice is not on this engagement.');
+    if (!n.member) throw new NotFoundException('Notice not found.');
+  }
 
   private async requireEngagement(client: PoolClient, engagementId: string): Promise<void> {
     const eng = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [engagementId]);

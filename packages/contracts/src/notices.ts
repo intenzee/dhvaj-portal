@@ -264,6 +264,7 @@ export interface NoticeListQuery {
   /** One status, or 'open' (every status but closed / withdrawn). */
   status?: NoticeStatus | 'open';
   stream?: NoticeStream;
+  /** An employee id, or 'me' for the caller. */
   ownerId?: string;
   /** Clock due on or before this date (YYYY-MM-DD) — "due in 7 / 30 days". */
   dueBefore?: string;

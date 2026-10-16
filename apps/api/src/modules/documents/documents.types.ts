@@ -100,6 +100,11 @@ export interface CreateDocumentInput {
   complianceInstanceId?: string | null;
   periodSection?: string | null;
   slotCode?: string | null;
+  /**
+   * PS-101 — file the document under a notice (the notice, reply or order).
+   * Set only by the notices module (which checks the notice); not on the DTO.
+   */
+  noticeId?: string | null;
   documentType?: DocumentType;
   classification?: DocumentClassification;
   sensitivity?: DocumentSensitivity;
