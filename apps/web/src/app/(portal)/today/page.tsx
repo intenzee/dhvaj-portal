@@ -19,6 +19,7 @@ import { FilingDrawer, useOpenFiling } from '@/components/filing/filing-drawer';
 import {
   stepSelection,
   todayContextLine,
+  todayDateLead,
   todayDrawerItems,
   todayQuery,
   todayRows,
@@ -28,6 +29,7 @@ import {
 const EMPTY: Record<TodayGroup, string> = {
   prepare: 'Nothing to prepare.',
   review: 'Nothing waiting for your review.',
+  notices: 'No notice of yours has a date running.',
   waiting: 'Not waiting on any client.',
   due_soon: 'No other filings due this week.',
 };
@@ -45,7 +47,8 @@ function isTyping(e: KeyboardEvent): boolean {
 
 /**
  * Staff Workflow WF-201 — Today: the day's work in one ordered list. To
- * prepare, to review, waiting on client, due this week — overdue first. A
+ * prepare, to review, notices (PS-102), waiting on client, due this week —
+ * overdue first. A
  * filing opens in the drawer over the list (WF-202); its next move (Start work,
  * Start review …) is a button on the row. j / k move, Enter opens.
  */
@@ -188,6 +191,7 @@ function TodayScreen(): JSX.Element {
                                   item.isOverdue ? 'font-medium text-danger-600' : 'text-ink'
                                 }
                               >
+                                {todayDateLead(item) && `${todayDateLead(item)} `}
                                 {deadlineLabel(item.internalDate)}
                               </span>
                             ) : (
@@ -198,7 +202,8 @@ function TodayScreen(): JSX.Element {
                                 title="Statutory due date"
                                 className="block text-xs text-ink-faint"
                               >
-                                Statutory {formatDate(item.statutoryDate)}
+                                {item.notice ? 'Department' : 'Statutory'}{' '}
+                                {formatDate(item.statutoryDate)}
                               </span>
                             )}
                           </div>

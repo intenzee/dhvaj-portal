@@ -66,6 +66,12 @@ export const NOTIFICATION_TYPE = {
   filingLodged: 'filing_lodged',
   /** Change 3 — a time adjustment over 30 minutes awaits approval (leads). */
   timeAdjustmentPending: 'time_adjustment_pending',
+  /** PS-102 — a notice was recorded (owner and reviewer). */
+  noticeReceived: 'notice_received',
+  /** PS-102 — a notice's internal reply date is 7, 3 or 1 days away (owner and reviewer). */
+  noticeReplyDue: 'notice_reply_due',
+  /** PS-102 — a hearing on a notice is 2 days away (owner and reviewer). */
+  noticeHearingDue: 'notice_hearing_due',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -140,6 +146,9 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   task_returned: A,
   filing_lodged: I,
   time_adjustment_pending: A,
+  notice_received: A,
+  notice_reply_due: A,
+  notice_hearing_due: A,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -181,6 +190,9 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   task_returned: 'Returned with review points',
   filing_lodged: 'Filing lodged',
   time_adjustment_pending: 'Time correction to approve',
+  notice_received: 'Notice received',
+  notice_reply_due: 'Notice reply due',
+  notice_hearing_due: 'Notice hearing coming up',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */

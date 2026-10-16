@@ -5,10 +5,12 @@ import TodayPage from '@/app/(portal)/today/page';
 import {
   stepSelection,
   todayContextLine,
+  todayDateLead,
   todayDrawerItems,
   todayRows,
   todayWorkTask,
 } from '../today-model';
+import { workHrefFor } from '@/lib/work-href';
 
 let search = new URLSearchParams();
 const replace = jest.fn((url: string) => {
@@ -209,7 +211,12 @@ describe('Today page (WF-201)', () => {
         url === '/work/today'
           ? { ...view, groups: [{ group: 'waiting', items: [chase, request], total: 2 }] }
           : url.endsWith('/client-chase/remind')
-            ? { channel: 'copy', fallback: null, text: 'Please send the purchase register.', raised: 0 }
+            ? {
+                channel: 'copy',
+                fallback: null,
+                text: 'Please send the purchase register.',
+                raised: 0,
+              }
             : null,
       ),
     );
@@ -297,6 +304,34 @@ describe('today-model', () => {
   it('the context line names the client and the filing, else the engagement', () => {
     expect(todayContextLine(gst)).toBe('Bharat Textiles · GSTR-1 · Sep 2026 · 19AAACB1234C1Z5');
     expect(todayContextLine(call)).toBe('Bharat Textiles · ENG-1');
+  });
+
+  it('a notice row names its type, leads its date with the clock, and opens the notice (PS-102)', () => {
+    const notice: TodayItem = {
+      ...call,
+      key: 'notice:n1',
+      kind: 'notice',
+      group: 'notices',
+      title: 'ASMT-10 · ZD190926000123',
+      task: null,
+      notice: {
+        id: 'n1',
+        referenceNo: 'ZD190926000123',
+        stream: 'gst',
+        typeLabel: 'ASMT-10 · s.61 · Scrutiny of returns',
+        clockLabel: 'Reply due',
+        amountDemanded: null,
+      },
+      link: { engagementId: 'e1', engagementKind: 'compliance', noticeId: 'n1' },
+    };
+    expect(todayContextLine(notice)).toBe(
+      'Bharat Textiles · ASMT-10 · s.61 · Scrutiny of returns · ENG-1',
+    );
+    expect(todayDateLead(notice)).toBe('Reply due');
+    expect(todayDateLead(gst)).toBeNull();
+    // Its own page even with ff_work_links off.
+    expect(workHrefFor(notice, false)).toBe('/notices/n1');
+    expect(workHrefFor(call, false)).toBe('/engagements/e1');
   });
 
   it('the task the action buttons need, or none', () => {

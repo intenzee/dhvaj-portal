@@ -1,4 +1,5 @@
 import type { EngagementKind } from './engagement-restructure';
+import type { NoticeClockLabel, NoticeStream } from './notices';
 import type { TaskStatus } from './tasks';
 import type { WorkItemRef } from './work-links';
 import type { WorkFilingContext } from './work-queue';
@@ -9,6 +10,9 @@ import type { WorkFilingContext } from './work-queue';
  *
  * - prepare: my tasks in todo / in_progress / paused (the My Work count).
  * - review: the WF-105 queue (GET /work/reviews).
+ * - notices: open notices I own or review whose clock (reply, hearing or
+ *   appeal date — noticeClock) is running, earliest first (PS-102). Present
+ *   only when ff_notices is on for the caller's office.
  * - waiting: my blocked tasks, and open client requests I am responsible for.
  * - due_soon: open filings on work I prepare, review or lead whose internal
  *   date is within a week (or past) — including filings with no task yet —
@@ -17,6 +21,7 @@ import type { WorkFilingContext } from './work-queue';
 export const TODAY_GROUP = {
   prepare: 'prepare',
   review: 'review',
+  notices: 'notices',
   waiting: 'waiting',
   dueSoon: 'due_soon',
 } as const;
@@ -26,6 +31,7 @@ export const TODAY_GROUPS: TodayGroup[] = Object.values(TODAY_GROUP);
 export const TODAY_GROUP_LABEL: Record<TodayGroup, string> = {
   prepare: 'To prepare',
   review: 'To review',
+  notices: 'Notices',
   waiting: 'Waiting on client',
   due_soon: 'Due this week',
 };
@@ -46,6 +52,7 @@ export const TODAY_ITEM_KIND = {
   filing: 'filing',
   reviewPoint: 'review_point',
   signOff: 'sign_off',
+  notice: 'notice',
 } as const;
 export type TodayItemKind = (typeof TODAY_ITEM_KIND)[keyof typeof TODAY_ITEM_KIND];
 
@@ -61,6 +68,18 @@ export interface TodayTask {
   reviewerName: string | null;
   sentForReviewAt: string | null;
   reviewStartedAt: string | null;
+}
+
+/** The notice behind a "Notices" row (PS-102). */
+export interface TodayNotice {
+  id: string;
+  referenceNo: string;
+  stream: NoticeStream;
+  /** noticeTypeLabel — "ASMT-10 · s.61 · Scrutiny of returns". */
+  typeLabel: string;
+  /** What the row's date is: the reply, the hearing or the appeal. */
+  clockLabel: NoticeClockLabel;
+  amountDemanded: string | null;
 }
 
 export interface TodayItem {
@@ -84,6 +103,8 @@ export interface TodayItem {
   blockedByOpenCount: number;
   /** The task, when the row is one (or the filing has one). */
   task: TodayTask | null;
+  /** The notice, on a "Notices" row (its `internalDate` is the clock's date). */
+  notice?: TodayNotice;
   link: WorkItemRef;
   /**
    * Rows waiting on the client of a filing: offer a WhatsApp reminder beside
