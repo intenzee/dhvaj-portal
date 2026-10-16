@@ -33,8 +33,13 @@ import { sortMyTasks, todayIst, useMyTaskColumns } from '@/components/work/my-ta
 import { ReviewQueueTab, reviewFilterOf } from '@/components/work/review-queue-tab';
 import { SectionChips, useUrlSections, withSections } from '@/components/section-filter';
 import { drawerItemsFrom, FilingDrawer, useDrawerOpener } from '@/components/filing/filing-drawer';
+import { noticeColumns, noticeHref } from '@/components/notices/notice-bits';
+import { fetchNotices, noticesKey } from '@/lib/notices-api';
+import { DEFAULT_NOTICE_FILTERS, noticeListPath } from '@/lib/notices';
 
-type Tab = 'tasks' | 'client-dependencies' | 'to-review' | 'new-uploads';
+const myNoticeColumns = noticeColumns({ owner: false });
+
+type Tab = 'tasks' | 'client-dependencies' | 'to-review' | 'new-uploads' | 'notices';
 type TaskScope = 'mine' | 'team';
 
 const depColumns: ColumnDef<MyClientDependency, unknown>[] = [
@@ -74,7 +79,9 @@ function MyWorkInner(): JSX.Element {
         ? 'to-review'
         : initialTab === 'new-uploads'
           ? 'new-uploads'
-          : 'tasks',
+          : initialTab === 'notices'
+            ? 'notices'
+            : 'tasks',
   );
   const [docsForTask, setDocsForTask] = useState<MyTask | null>(null);
 
@@ -201,6 +208,16 @@ function MyWorkInner(): JSX.Element {
           : [],
     [tab, sortedTasks, deps.data, workHref],
   );
+  // PS-102: the notices the caller owns, open ones only (ff_notices).
+  const noticesOn = isOn(FEATURE_FLAG.notices);
+  const myNoticesPath = noticeListPath({ ...DEFAULT_NOTICE_FILTERS, owner: 'me' }, today, {
+    limit: 100,
+  });
+  const myNotices = useQuery({
+    queryKey: [...noticesKey, 'list', myNoticesPath],
+    queryFn: () => fetchNotices(myNoticesPath),
+    enabled: noticesOn && tab === 'notices',
+  });
   const toReview = useQuery({
     queryKey: ['work', 'to-review'],
     queryFn: () =>
@@ -230,6 +247,7 @@ function MyWorkInner(): JSX.Element {
             ['client-dependencies', 'Client Dependencies'],
             ['to-review', 'To Review'],
             ...(workLinks ? ([['new-uploads', 'New client uploads']] as const) : []),
+            ...(noticesOn ? ([['notices', 'Notices']] as const) : []),
           ] as const
         ).map(([key, label]) => (
           <button
@@ -280,9 +298,7 @@ function MyWorkInner(): JSX.Element {
               <span className="text-sm text-ink-muted">Your progress:</span>
               <CompletionBar
                 done={tasks.data.items.filter((t) => t.status === TASK_STATUS.done).length}
-                total={
-                  tasks.data.items.filter((t) => t.status !== TASK_STATUS.cancelled).length
-                }
+                total={tasks.data.items.filter((t) => t.status !== TASK_STATUS.cancelled).length}
               />
             </div>
           )}
@@ -294,13 +310,9 @@ function MyWorkInner(): JSX.Element {
             )}
             {tasks.data && (
               <DataTable
-                columns={
-                  teamScope ? teamTaskColumns : workLinks ? linkedTaskColumns : taskColumns
-                }
+                columns={teamScope ? teamTaskColumns : workLinks ? linkedTaskColumns : taskColumns}
                 data={sortedTasks}
-                empty={
-                  teamScope ? 'No open tasks on your team.' : 'No open tasks assigned to you.'
-                }
+                empty={teamScope ? 'No open tasks on your team.' : 'No open tasks assigned to you.'}
               />
             )}
           </Card>
@@ -308,7 +320,11 @@ function MyWorkInner(): JSX.Element {
       )}
       {tab === 'client-dependencies' && (
         <Card className="p-0">
-          {deps.isLoading && <div className="p-4"><Spinner /></div>}
+          {deps.isLoading && (
+            <div className="p-4">
+              <Spinner />
+            </div>
+          )}
           {deps.data && (
             <DataTable
               columns={depColumns}
@@ -317,6 +333,32 @@ function MyWorkInner(): JSX.Element {
               rowHref={workLinks ? workHref : undefined}
               onRowOpen={openInDrawer}
             />
+          )}
+        </Card>
+      )}
+
+      {tab === 'notices' && noticesOn && (
+        <Card className="p-0">
+          {myNotices.isLoading && (
+            <div className="p-4">
+              <Spinner />
+            </div>
+          )}
+          {myNotices.data && (
+            <DataTable
+              columns={myNoticeColumns}
+              data={myNotices.data.items}
+              empty="No open notices you own."
+              rowHref={noticeHref}
+            />
+          )}
+          {myNotices.data?.nextCursor && (
+            <p className="px-4 py-2 text-xs text-ink-faint">
+              Showing the first {myNotices.data.items.length}.{' '}
+              <Link href="/notices?owner=me" className="text-primary-600 hover:underline">
+                See them all
+              </Link>
+            </p>
           )}
         </Card>
       )}
