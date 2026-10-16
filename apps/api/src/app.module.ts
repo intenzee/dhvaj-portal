@@ -36,6 +36,7 @@ import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-settings.module';
 import { FeatureRolloutsModule } from './modules/feature-rollouts/feature-rollouts.module';
 import { CredentialsModule } from './modules/credentials/credentials.module';
+import { NoticeIntakeModule } from './modules/notice-intake/notice-intake.module';
 
 /**
  * Composition root of the modular monolith.
@@ -114,6 +115,7 @@ import { CredentialsModule } from './modules/credentials/credentials.module';
     WorkflowSettingsModule,
     FeatureRolloutsModule,
     CredentialsModule,
+    NoticeIntakeModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.
