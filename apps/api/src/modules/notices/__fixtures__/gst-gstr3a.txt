@@ -1,0 +1,25 @@
+FORM GSTR-3A
+[See rule 68]
+Notice to return defaulter u/s 46 for not filing return
+
+Reference Number: ZD1901102600234
+Date: 01/10/2026
+
+To
+GSTIN: 19AABCN3456P1ZW
+Name: SAMPLE NILA EXPORTS PRIVATE LIMITED
+Address: 22 Example Road, Kolkata 700001
+
+Tax Period: August 2026
+Type of Return: GSTR-3B
+
+Being a registered taxpayer, you are required to furnish return for the supplies made or
+received and to discharge resultant tax liability for the aforesaid tax period by the due
+date. It has been noticed that you have not filed the said return till date.
+
+You are, therefore, requested to furnish the said return within 15 days failing which the
+tax liability may be assessed under section 62 of the Act, based on the relevant material
+available with this office. Please note that in addition to tax so assessed, you will also
+be liable to pay interest and penalty as per provisions of the Act.
+
+This is a system generated notice and does not require signature.

@@ -1,0 +1,28 @@
+FORM GST DRC-01A
+Intimation of tax ascertained as being payable under section 73(5)/74(5)
+Part A
+
+Reference No.: ZD0712092600456                        Date: 12.09.2026
+
+To
+GSTIN: 07AAACT9012M1Z6
+Name: SAMPLE TARA DISTRIBUTORS LTD
+
+Tax period: F.Y. 2022-23
+Act: CGST/DGST
+
+Sub: Intimation of liability under section 73(5)
+
+Please refer to the above proceedings. In this regard, the amount of tax, interest and
+penalty payable by you under section 73 with reference to the said case as ascertained by
+the undersigned in terms of the available information, is as given below:
+
+Tax: Rs. 4,50,000/-   Interest: Rs. 1,20,500/-   Penalty: Rs. 45,000/-
+Total amount payable: Rs. 6,15,500/-
+
+You are hereby advised to pay the amount of tax as ascertained above alongwith the amount
+of applicable interest in full by 27.09.2026, failing which Show Cause Notice will be issued
+under section 73(1). In case you wish to file any submissions against the above
+ascertainment, the same may be furnished by 27.09.2026 in Part B of this Form.
+
+Proper Officer
