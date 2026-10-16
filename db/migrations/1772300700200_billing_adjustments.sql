@@ -246,26 +246,57 @@ $$;
 -- ── 5. Who decides: the partners who bill the client ───────────────────────
 -- Holders of billing.approve who may bill the client (as ctx_can_bill: the
 -- managing partner firm-wide, a partner of the client's home office), for the
--- write_off_pending notification. Only for a client the caller bills, and
--- read through the caller's RLS: a manager sees the users of their own office,
--- which is the client's home office, so a managing partner seated elsewhere
--- is not notified (they still see the request on Today).
-CREATE OR REPLACE FUNCTION hsdg.billing_approvers(p_entity_id uuid) RETURNS SETOF uuid
-  LANGUAGE sql STABLE SET search_path = hsdg, pg_temp AS $$
-  SELECT DISTINCT emp.id
-    FROM hsdg.users u
-    JOIN hsdg.user_roles ur ON ur.user_id = u.id
-    JOIN hsdg.roles r ON r.id = ur.role_id
-    JOIN hsdg.role_permissions rp ON rp.role_id = r.id
-    JOIN hsdg.permissions p ON p.id = rp.permission_id AND p.slug = 'billing.approve'
-    JOIN hsdg.employees emp ON emp.user_id = u.id
-    JOIN hsdg.entities e ON e.id = p_entity_id
-   WHERE u.is_active
-     AND hsdg.ctx_can_bill(p_entity_id)
-     AND (r.slug = 'managing_partner'
-          OR (r.slug IN ('partner', 'manager') AND u.primary_office_id = e.home_office_id));
+-- write_off_pending notification — wherever they are seated, so the managing
+-- partner hears of a request raised in another office.
+--
+-- The identity tables are FORCE RLS with policies on the caller's context, so
+-- SECURITY DEFINER alone would still see only the caller's office. The inner
+-- function reads them as the 'system' context (the schedulers' firm-wide
+-- read), switched for that call only and put back before it returns (or
+-- raises); it is the owner's alone. The outer one, for
+-- the app, answers only for a client the caller bills.
+CREATE OR REPLACE FUNCTION hsdg.billing_approvers_firmwide(p_entity_id uuid) RETURNS SETOF uuid
+  LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+  SET search_path TO 'hsdg', 'pg_temp'
+AS $$
+DECLARE
+  v_role text := COALESCE(current_setting('hsdg.role', true), '');
+BEGIN
+  PERFORM set_config('hsdg.role', 'system', true);
+  RETURN QUERY
+    SELECT DISTINCT emp.id
+      FROM hsdg.users u
+      JOIN hsdg.user_roles ur ON ur.user_id = u.id
+      JOIN hsdg.roles r ON r.id = ur.role_id
+      JOIN hsdg.role_permissions rp ON rp.role_id = r.id
+      JOIN hsdg.permissions p ON p.id = rp.permission_id AND p.slug = 'billing.approve'
+      JOIN hsdg.employees emp ON emp.user_id = u.id
+      JOIN hsdg.entities e ON e.id = p_entity_id
+     WHERE u.is_active
+       AND (r.slug = 'managing_partner'
+            OR (r.slug IN ('partner', 'manager') AND u.primary_office_id = e.home_office_id));
+  PERFORM set_config('hsdg.role', v_role, true);
+  RETURN;
+EXCEPTION WHEN OTHERS THEN
+  PERFORM set_config('hsdg.role', v_role, true);
+  RAISE;
+END;
 $$;
-REVOKE EXECUTE ON FUNCTION hsdg.billing_approvers(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION hsdg.billing_approvers_firmwide(uuid) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION hsdg.billing_approvers(p_entity_id uuid) RETURNS SETOF uuid
+  LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+  SET search_path TO 'hsdg', 'pg_temp'
+AS $$
+BEGIN
+  -- The caller's context, before the inner call switches it.
+  IF NOT hsdg.ctx_can_bill(p_entity_id) THEN
+    RETURN;
+  END IF;
+  RETURN QUERY SELECT hsdg.billing_approvers_firmwide(p_entity_id);
+END;
+$$;
+REVOKE ALL ON FUNCTION hsdg.billing_approvers(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION hsdg.billing_approvers(uuid) TO hsdg_app;
 
 -- ── 6. Row-level security: the client's billers ────────────────────────────
@@ -292,6 +323,7 @@ GRANT SELECT, INSERT, UPDATE ON hsdg.write_offs TO hsdg_app;
 DROP TABLE IF EXISTS hsdg.write_offs;
 DROP TABLE IF EXISTS hsdg.credit_notes;
 DROP FUNCTION IF EXISTS hsdg.billing_approvers(uuid);
+DROP FUNCTION IF EXISTS hsdg.billing_approvers_firmwide(uuid);
 DROP FUNCTION IF EXISTS hsdg.billing_adjustment_decided();
 DROP FUNCTION IF EXISTS hsdg.billing_adjustment_frozen();
 DROP FUNCTION IF EXISTS hsdg.billing_adjustment_decision_guard();

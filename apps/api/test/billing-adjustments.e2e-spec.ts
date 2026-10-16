@@ -238,6 +238,56 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
     await writeOff(mx, inv, '1').expect(400);
   });
 
+  it('tells the managing partner of a request raised in another office', async () => {
+    // A SOUTH client: Partner B (SOUTH) bills it; the managing partner sits in NORTH.
+    const pb = await token('partner.b@dhvaj.in');
+    const bharat = await findId('/api/v1/entities?search=Bharat&limit=100');
+    const serviceId = await findId('/api/v1/services?search=GST_MONTHLY&limit=100');
+    const entityId = await freshClient(bharat);
+    await superuser((c) =>
+      c.query(
+        `UPDATE hsdg.entities SET home_office_id = (SELECT id FROM hsdg.offices WHERE code = 'SOUTH')
+          WHERE id = $1`,
+        [entityId],
+      ),
+    );
+    const eng = (
+      await http()
+        .post('/api/v1/engagements')
+        .set(bearer(pb))
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2026-27',
+          periodLabel: `P${unique()}`,
+          status: 'accepted',
+        })
+        .expect(201)
+    ).body.id as string;
+    const d = await http()
+      .post(`/api/v1/engagements/${eng}/invoices`)
+      .set(bearer(pb))
+      .send({ dueDate: dateFromToday(15), lines: [{ description: 'Fees', unitAmount: '40000' }] })
+      .expect(201);
+    const inv = d.body.id as string;
+    await http()
+      .post(`/api/v1/engagements/${eng}/invoices/${inv}/status`)
+      .set(bearer(pb))
+      .send({ status: 'issued', issueDate: today })
+      .expect(201);
+
+    const id = (await writeOff(pb, inv, '2500').expect(201)).body.id as string;
+    const about = (items: NotificationItem[]) =>
+      items.filter((n) => n.objectId === id && n.type === 'write_off_pending');
+    expect(about(await inbox(mp))).toHaveLength(1);
+    // Not the requester, and not a NORTH partner who cannot bill a SOUTH client.
+    expect(about(await inbox(pb))).toHaveLength(0);
+    expect(about(await inbox(pa))).toHaveLength(0);
+
+    await decide(mp, 'write-offs', id, 'approve').expect(201);
+    expect(about(await inbox(mp))[0]!.resolvedAt).not.toBeNull();
+  });
+
   it('a credit note carries the invoice GST and takes a CN number on approval', async () => {
     const settings = await http().get('/api/v1/billing/settings').set(bearer(mp)).expect(200);
     await http()
