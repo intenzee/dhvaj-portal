@@ -249,6 +249,7 @@ function SidebarContent({
     workLinks: isOn(FEATURE_FLAG.workLinks),
     todayView: isOn(FEATURE_FLAG.todayView),
     filingRuns: isOn(FEATURE_FLAG.filingRuns),
+    notices: isOn(FEATURE_FLAG.notices),
   });
   const activeHref = activeNavHref(
     sections.flatMap((s) => s.items),

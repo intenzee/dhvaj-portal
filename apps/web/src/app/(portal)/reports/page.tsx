@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
+import { Download, Gavel } from 'lucide-react';
 import {
+  FEATURE_FLAG,
   PERMISSION,
   type ComplianceMisReport,
   type EngagementMisReport,
@@ -15,16 +17,28 @@ import { humanize, formatCount, formatDuration } from '@/lib/format';
 import { downloadCsv } from '@/lib/csv';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { cn } from '@/lib/cn';
 import { WorkflowMeasures } from '@/components/reports/workflow-measures';
 import { WorkflowPractice } from '@/components/reports/workflow-practice';
-import { PageHeader, Card, CardHeader, CardTitle, CardBody, Spinner, EmptyState, Button, Badge } from '@/components/ui';
+import {
+  PageHeader,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardBody,
+  Spinner,
+  EmptyState,
+  Button,
+  Badge,
+} from '@/components/ui';
 
 type Tab = 'engagements' | 'compliance' | 'utilisation' | 'time' | 'workflow';
 
 export default function ReportsPage(): JSX.Element {
   const { principal } = useAuth();
   const [tab, setTab] = useState<Tab>('engagements');
+  const { isOn } = useFeatureFlags();
 
   if (!can(principal, PERMISSION.reportRead)) {
     return (
@@ -48,6 +62,16 @@ export default function ReportsPage(): JSX.Element {
       <PageHeader
         title="Reports & MIS"
         subtitle="Management summaries across the engagements you can see (partners see the whole firm)."
+        actions={
+          isOn(FEATURE_FLAG.notices) ? (
+            <Link
+              href="/reports/notices"
+              className="inline-flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
+            >
+              <Gavel className="h-4 w-4" aria-hidden /> Notices report
+            </Link>
+          ) : undefined
+        }
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -56,7 +80,9 @@ export default function ReportsPage(): JSX.Element {
             onClick={() => setTab(t.id)}
             className={cn(
               'border-b-2 px-3 py-2 text-sm font-medium transition',
-              tab === t.id ? 'border-primary-600 text-primary-700' : 'border-transparent text-ink-muted hover:text-ink',
+              tab === t.id
+                ? 'border-primary-600 text-primary-700'
+                : 'border-transparent text-ink-muted hover:text-ink',
             )}
           >
             {t.label}
@@ -124,12 +150,22 @@ function BarRow({ label, count, max }: { label: string; count: number; max: numb
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
         <div className="h-full rounded-full bg-primary-500" style={{ width: `${pct}%` }} />
       </div>
-      <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums text-ink">{count}</span>
+      <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums text-ink">
+        {count}
+      </span>
     </div>
   );
 }
 
-function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }): JSX.Element {
+function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}): JSX.Element {
   return (
     <Card>
       <CardHeader className="flex items-center justify-between">
@@ -170,7 +206,11 @@ function EngagementsReport(): JSX.Element {
           action={
             <ExportButton
               onClick={() =>
-                downloadCsv('engagements-by-status', ['Status', 'Count'], r.byStatus.map((x) => [humanize(x.status), x.count]))
+                downloadCsv(
+                  'engagements-by-status',
+                  ['Status', 'Count'],
+                  r.byStatus.map((x) => [humanize(x.status), x.count]),
+                )
               }
             />
           }
@@ -180,7 +220,12 @@ function EngagementsReport(): JSX.Element {
           ) : (
             <div>
               {r.byStatus.map((x) => (
-                <BarRow key={x.status} label={humanize(x.status)} count={x.count} max={Math.max(1, ...r.byStatus.map((s) => s.count))} />
+                <BarRow
+                  key={x.status}
+                  label={humanize(x.status)}
+                  count={x.count}
+                  max={Math.max(1, ...r.byStatus.map((s) => s.count))}
+                />
               ))}
             </div>
           )}
@@ -191,7 +236,11 @@ function EngagementsReport(): JSX.Element {
           action={
             <ExportButton
               onClick={() =>
-                downloadCsv('engagements-by-service-line', ['Service line', 'Count'], r.byServiceLine.map((x) => [x.serviceLine, x.count]))
+                downloadCsv(
+                  'engagements-by-service-line',
+                  ['Service line', 'Count'],
+                  r.byServiceLine.map((x) => [x.serviceLine, x.count]),
+                )
               }
             />
           }
@@ -242,7 +291,9 @@ function EngagementsReport(): JSX.Element {
                     <td className="py-2 pr-4 tabular-nums">{p.active}</td>
                     <td className="py-2 pr-4 tabular-nums">{p.total}</td>
                     <td className="py-2 pr-4">
-                      <Badge tone="info">{r.totals.total > 0 ? Math.round((p.total / r.totals.total) * 100) : 0}%</Badge>
+                      <Badge tone="info">
+                        {r.totals.total > 0 ? Math.round((p.total / r.totals.total) * 100) : 0}%
+                      </Badge>
                     </td>
                   </tr>
                 ))}
@@ -309,10 +360,18 @@ function ComplianceReport(): JSX.Element {
                     <td className="py-2 pr-4 font-medium text-ink">{humanize(c.category)}</td>
                     <td className="py-2 pr-4 tabular-nums">{c.open}</td>
                     <td className="py-2 pr-4 tabular-nums">
-                      {c.overdue > 0 ? <span className="font-medium text-danger-600">{c.overdue}</span> : c.overdue}
+                      {c.overdue > 0 ? (
+                        <span className="font-medium text-danger-600">{c.overdue}</span>
+                      ) : (
+                        c.overdue
+                      )}
                     </td>
                     <td className="py-2 pr-4 tabular-nums">
-                      {c.dueSoon > 0 ? <span className="font-medium text-warning-700">{c.dueSoon}</span> : c.dueSoon}
+                      {c.dueSoon > 0 ? (
+                        <span className="font-medium text-warning-700">{c.dueSoon}</span>
+                      ) : (
+                        c.dueSoon
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -357,7 +416,15 @@ function TimeReportView(): JSX.Element {
             onClick={() =>
               downloadCsv(
                 'time-by-person',
-                ['Employee', 'Grade', 'Office', 'Engagements', 'Sessions', 'Total seconds', 'Running'],
+                [
+                  'Employee',
+                  'Grade',
+                  'Office',
+                  'Engagements',
+                  'Sessions',
+                  'Total seconds',
+                  'Running',
+                ],
                 r.rows.map((x) => [
                   x.employeeName,
                   x.gradeName ?? '',
@@ -394,7 +461,9 @@ function TimeReportView(): JSX.Element {
                         {x.employeeName}
                         {x.hasRunning && <Badge tone="success">Running</Badge>}
                       </span>
-                      {x.gradeName && <span className="block text-xs text-ink-faint">{x.gradeName}</span>}
+                      {x.gradeName && (
+                        <span className="block text-xs text-ink-faint">{x.gradeName}</span>
+                      )}
                     </td>
                     <td className="py-2 pr-4">{x.officeCode ?? '—'}</td>
                     <td className="py-2 pr-4 tabular-nums">{x.engagementCount}</td>
@@ -432,7 +501,16 @@ function UtilisationReportView(): JSX.Element {
           onClick={() =>
             downloadCsv(
               'utilisation',
-              ['Employee', 'Grade', 'Office', 'As EP', 'As Manager', 'As Member', 'Open tasks', 'Overdue tasks'],
+              [
+                'Employee',
+                'Grade',
+                'Office',
+                'As EP',
+                'As Manager',
+                'As Member',
+                'Open tasks',
+                'Overdue tasks',
+              ],
               rows.map((r) => [
                 r.employeeName,
                 r.gradeName ?? '',
@@ -469,7 +547,9 @@ function UtilisationReportView(): JSX.Element {
                 <tr key={r.employeeId} className="border-b border-line last:border-0">
                   <td className="py-2 pr-4">
                     <span className="block font-medium text-ink">{r.employeeName}</span>
-                    {r.gradeName && <span className="block text-xs text-ink-faint">{r.gradeName}</span>}
+                    {r.gradeName && (
+                      <span className="block text-xs text-ink-faint">{r.gradeName}</span>
+                    )}
                   </td>
                   <td className="py-2 pr-4">{r.officeCode}</td>
                   <td className="py-2 pr-4 tabular-nums">{r.asEp}</td>
@@ -477,7 +557,11 @@ function UtilisationReportView(): JSX.Element {
                   <td className="py-2 pr-4 tabular-nums">{r.asMember}</td>
                   <td className="py-2 pr-4 tabular-nums">{r.openTasks}</td>
                   <td className="py-2 pr-4 tabular-nums">
-                    {r.overdueTasks > 0 ? <span className="font-medium text-danger-600">{r.overdueTasks}</span> : r.overdueTasks}
+                    {r.overdueTasks > 0 ? (
+                      <span className="font-medium text-danger-600">{r.overdueTasks}</span>
+                    ) : (
+                      r.overdueTasks
+                    )}
                   </td>
                 </tr>
               ))}
