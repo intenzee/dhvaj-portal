@@ -51,6 +51,10 @@ export function todayContextLine(i: TodayItem): string {
       .join(' · ');
     return [i.entityName, type, i.engagementCode].filter(Boolean).join(' · ');
   }
+  if (i.adjustment) {
+    const by = i.adjustment.requestedByName ? `${i.adjustment.requestedByName}: ` : '';
+    return `${i.entityName} · ${by}${i.adjustment.reason}`;
+  }
   const what = i.filing
     ? [i.filing.formLabel, i.filing.periodLabel, i.filing.registrationNumber]
         .filter(Boolean)
@@ -96,5 +100,6 @@ export function stepSelection(current: number, delta: 1 | -1, length: number): n
 
 /** The date cell's lead-in: a notice's row says which date it is (Reply due / Hearing / Appeal by). */
 export function todayDateLead(i: TodayItem): string | null {
+  if (i.adjustment) return 'Asked';
   return i.notice ? i.notice.clockLabel : null;
 }

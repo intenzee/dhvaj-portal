@@ -18,6 +18,7 @@ import {
   type BillingSummary,
   type ClientStatement,
   type GlobalInvoiceRecord,
+  type InvoiceAdjustment,
   type ReceiptRecord,
   type Paginated,
 } from '@hsdg/contracts';
@@ -28,9 +29,14 @@ import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { CommercialService } from '../commercial/commercial.service';
 import { GlobalInvoiceListQueryDto } from '../commercial/dto/commercial.dto';
 import { BillingSettingsService } from './billing-settings.service';
+import { AdjustmentsService } from './adjustments.service';
 import {
+  AdjustmentListQueryDto,
   CreateReceiptDto,
+  DecideAdjustmentDto,
   ReceiptListQueryDto,
+  RequestCreditNoteDto,
+  RequestWriteOffDto,
   ReverseReceiptDto,
   UpdateBillingSettingsDto,
 } from './billing.dto';
@@ -50,6 +56,7 @@ export class BillingController {
     private readonly commercial: CommercialService,
     private readonly flags: FeatureFlagsService,
     private readonly receipts: ReceiptsService,
+    private readonly adjustments: AdjustmentsService,
   ) {}
 
   @Get('settings')
@@ -170,6 +177,73 @@ export class BillingController {
     this.requireOn(principal);
     requireBillingReader(principal);
     return this.receipts.statement(rlsContextFromPrincipal(principal), entityId);
+  }
+
+  // ── PS-205 · credit notes and write-offs ────────────────────────────────
+
+  @Get('adjustments')
+  @ApiOperation({
+    summary:
+      "Credit notes and write-offs: one invoice's, or all pending (billing.manage or report.read)",
+  })
+  listAdjustments(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: AdjustmentListQueryDto,
+  ): Promise<InvoiceAdjustment[]> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    const filter: { invoiceId?: string; status?: AdjustmentListQueryDto['status'] } = {};
+    if (query.invoiceId) filter.invoiceId = query.invoiceId;
+    if (query.status) filter.status = query.status;
+    return this.adjustments.list(rlsContextFromPrincipal(principal), filter);
+  }
+
+  @Post('invoices/:invoiceId/credit-notes')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Ask for a credit note against an issued invoice (a partner approves)' })
+  requestCreditNote(
+    @CurrentPrincipal() principal: Principal,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+    @Body() dto: RequestCreditNoteDto,
+  ): Promise<InvoiceAdjustment> {
+    this.requireOn(principal);
+    return this.adjustments.requestCreditNote(rlsContextFromPrincipal(principal), invoiceId, dto);
+  }
+
+  @Post('invoices/:invoiceId/write-offs')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Ask to write off part of an invoice (a partner approves)' })
+  requestWriteOff(
+    @CurrentPrincipal() principal: Principal,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+    @Body() dto: RequestWriteOffDto,
+  ): Promise<InvoiceAdjustment> {
+    this.requireOn(principal);
+    return this.adjustments.requestWriteOff(rlsContextFromPrincipal(principal), invoiceId, dto);
+  }
+
+  @Post('credit-notes/:id/decision')
+  @RequirePermissions(PERMISSION.billingApprove)
+  @ApiOperation({ summary: 'Approve (numbers it, reduces the balance) or reject a credit note' })
+  decideCreditNote(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: DecideAdjustmentDto,
+  ): Promise<InvoiceAdjustment> {
+    this.requireOn(principal);
+    return this.adjustments.decide(rlsContextFromPrincipal(principal), 'credit_note', id, dto);
+  }
+
+  @Post('write-offs/:id/decision')
+  @RequirePermissions(PERMISSION.billingApprove)
+  @ApiOperation({ summary: 'Approve (reduces the balance) or reject a write-off' })
+  decideWriteOff(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: DecideAdjustmentDto,
+  ): Promise<InvoiceAdjustment> {
+    this.requireOn(principal);
+    return this.adjustments.decide(rlsContextFromPrincipal(principal), 'write_off', id, dto);
   }
 
   private requireOn(principal: Principal): void {

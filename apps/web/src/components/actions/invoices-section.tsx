@@ -33,6 +33,7 @@ import {
   taxRows,
   useBillingSettings,
 } from '@/components/billing/invoice-gst';
+import { InvoiceAdjustments } from '@/components/billing/invoice-adjustments';
 
 /** Format a decimal-string amount as money in the invoice's currency. */
 function money(amount: string | null | undefined, currency = 'INR'): string {
@@ -610,7 +611,7 @@ function InvoiceDetailModal({
             <Fact label="Reverse charge" value={inv.isReverseCharge ? 'Yes' : 'No'} />
             {receipts && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
               <>
-                <Fact label="Received" value={money(inv.amountSettled, inv.currency)} />
+                <Fact label="Received or credited" value={money(inv.amountSettled, inv.currency)} />
                 <Fact label="Balance" value={money(inv.balance, inv.currency)} />
               </>
             )}
@@ -700,6 +701,10 @@ function InvoiceDetailModal({
               </tr>
             </tfoot>
           </table>
+
+          {receipts && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
+            <InvoiceAdjustments invoice={inv} onChanged={refresh} />
+          )}
 
           {isDraft && (
             <div className="flex items-end gap-2 border-t border-line pt-3">

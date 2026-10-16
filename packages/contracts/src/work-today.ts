@@ -13,6 +13,9 @@ import type { WorkFilingContext } from './work-queue';
  * - notices: open notices I own or review whose clock (reply, hearing or
  *   appeal date — noticeClock) is running, earliest first (PS-102). Present
  *   only when ff_notices is on for the caller's office.
+ * - write_offs: write-offs and credit notes someone else asked for, on
+ *   clients I bill, waiting for my decision (PS-205). Present only when
+ *   ff_billing_v2 is on for my office and I hold billing.approve.
  * - waiting: my blocked tasks, and open client requests I am responsible for.
  * - due_soon: open filings on work I prepare, review or lead whose internal
  *   date is within a week (or past) — including filings with no task yet —
@@ -22,6 +25,7 @@ export const TODAY_GROUP = {
   prepare: 'prepare',
   review: 'review',
   notices: 'notices',
+  writeOffs: 'write_offs',
   waiting: 'waiting',
   dueSoon: 'due_soon',
 } as const;
@@ -32,6 +36,7 @@ export const TODAY_GROUP_LABEL: Record<TodayGroup, string> = {
   prepare: 'To prepare',
   review: 'To review',
   notices: 'Notices',
+  write_offs: 'Write-offs to approve',
   waiting: 'Waiting on client',
   due_soon: 'Due this week',
 };
@@ -53,6 +58,8 @@ export const TODAY_ITEM_KIND = {
   reviewPoint: 'review_point',
   signOff: 'sign_off',
   notice: 'notice',
+  writeOff: 'write_off',
+  creditNote: 'credit_note',
 } as const;
 export type TodayItemKind = (typeof TODAY_ITEM_KIND)[keyof typeof TODAY_ITEM_KIND];
 
@@ -82,6 +89,19 @@ export interface TodayNotice {
   amountDemanded: string | null;
 }
 
+/** The request behind a "Write-offs to approve" row (PS-205). */
+export interface TodayAdjustment {
+  id: string;
+  kind: 'write_off' | 'credit_note';
+  invoiceId: string;
+  invoiceNumber: string | null;
+  /** The write-off, or the credit note's total with GST. */
+  amount: string;
+  reason: string;
+  requestedByName: string | null;
+  version: number;
+}
+
 export interface TodayItem {
   /** Unique in the response: `${kind}:${id}`. */
   key: string;
@@ -105,6 +125,8 @@ export interface TodayItem {
   task: TodayTask | null;
   /** The notice, on a "Notices" row (its `internalDate` is the clock's date). */
   notice?: TodayNotice;
+  /** The write-off or credit note, on a "Write-offs to approve" row. */
+  adjustment?: TodayAdjustment;
   link: WorkItemRef;
   /**
    * Rows waiting on the client of a filing: offer a WhatsApp reminder beside

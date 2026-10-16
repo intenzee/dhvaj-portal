@@ -74,6 +74,38 @@ describe('buildTodayView (WF-201)', () => {
     expect(view.groups[2]!.items.map((i) => i.key)).toEqual(['notice:a', 'notice:c', 'notice:b']);
   });
 
+  it('adds Write-offs to approve after Notices only when its rows are passed (PS-205)', () => {
+    const base = { prepare: [], review: [], waiting: [], due_soon: [] };
+    expect(buildTodayView(TODAY, base).groups.map((g) => g.group)).not.toContain('write_offs');
+    const view = buildTodayView(TODAY, {
+      ...base,
+      notices: [],
+      write_offs: [
+        item({
+          key: 'write_off:b',
+          kind: 'write_off',
+          group: 'write_offs',
+          internalDate: '2026-10-14',
+        }),
+        item({
+          key: 'credit_note:a',
+          kind: 'credit_note',
+          group: 'write_offs',
+          internalDate: '2026-10-12',
+        }),
+      ],
+    });
+    expect(view.groups.map((g) => g.group)).toEqual([
+      'prepare',
+      'review',
+      'notices',
+      'write_offs',
+      'waiting',
+      'due_soon',
+    ]);
+    expect(view.groups[3]!.items.map((i) => i.key)).toEqual(['credit_note:a', 'write_off:b']);
+  });
+
   it('a filing already listed above is not repeated under Due this week', () => {
     const view = buildTodayView(TODAY, {
       prepare: [item({ key: 'task:t1', link: onFiling('i1') })],

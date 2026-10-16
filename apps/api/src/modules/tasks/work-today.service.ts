@@ -4,6 +4,7 @@ import {
   CLIENT_REMINDER_CHANNEL,
   TODAY_DUE_WITHIN_DAYS,
   TODAY_GROUP,
+  formatInr,
   isPastDate,
   noticeClock,
   noticeTypeLabel,
@@ -122,11 +123,15 @@ export class WorkTodayService {
     private readonly reviews: WorkReviewsService,
   ) {}
 
-  /** `opts.notices`: ff_notices is on for the caller's office (adds the Notices group). */
+  /**
+   * `opts.notices`: ff_notices is on for the caller's office (adds the Notices
+   * group). `opts.writeOffs`: ff_billing_v2 is on and the caller holds
+   * billing.approve (adds Write-offs to approve, PS-205).
+   */
   async today(
     ctx: RlsContext,
     engagementId?: string,
-    opts: { notices?: boolean } = {},
+    opts: { notices?: boolean; writeOffs?: boolean } = {},
   ): Promise<TodayView> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{ today: string }>(
@@ -134,7 +139,7 @@ export class WorkTodayService {
       );
       const today = rows[0]!.today;
       const me = ctx.employeeId;
-      if (!me) return buildTodayView(today, emptyGroups(opts.notices));
+      if (!me) return buildTodayView(today, emptyGroups(opts));
       const eng = engagementId ?? null;
       const tasks = await this.myOpenTasks(client, me, eng, today);
       const view = buildTodayView(
@@ -151,6 +156,9 @@ export class WorkTodayService {
           [TODAY_GROUP.dueSoon]: await this.filingsDueSoon(client, me, eng, today),
           ...(opts.notices
             ? { [TODAY_GROUP.notices]: await this.myNotices(client, me, eng, today) }
+            : {}),
+          ...(opts.writeOffs
+            ? { [TODAY_GROUP.writeOffs]: await this.writeOffsToApprove(client, me, eng) }
             : {}),
         },
         engagementId,
@@ -349,6 +357,72 @@ export class WorkTodayService {
   }
 
   /**
+   * PS-205: pending write-offs and credit notes on clients I bill (RLS) that
+   * someone else asked for — mine to approve or reject. Dated by the request.
+   */
+  private async writeOffsToApprove(
+    client: PoolClient,
+    me: string,
+    engagementId: string | null,
+  ): Promise<TodayItem[]> {
+    const { rows } = await client.query<
+      EngagementCols & {
+        id: string;
+        kind: 'write_off' | 'credit_note';
+        invoice_id: string;
+        invoice_number: string | null;
+        amount: string;
+        reason: string;
+        requested_by_name: string | null;
+        requested_on: string;
+        version: number;
+      }
+    >(
+      `SELECT ${ENGAGEMENT_COLS}, a.id, a.kind, a.invoice_id, i.invoice_number, a.amount,
+              a.reason, rb.full_name AS requested_by_name, a.version,
+              timezone('Asia/Kolkata', a.created_at)::date::text AS requested_on
+         FROM (SELECT w.id, 'write_off'::text AS kind, w.invoice_id, w.amount, w.reason,
+                      w.requested_by_employee_id, w.version, w.created_at
+                 FROM hsdg.write_offs w WHERE w.status = 'pending'
+               UNION ALL
+               SELECT c.id, 'credit_note', c.invoice_id, c.total, c.reason,
+                      c.requested_by_employee_id, c.version, c.created_at
+                 FROM hsdg.credit_notes c WHERE c.status = 'pending') a
+         JOIN hsdg.invoices i ON i.id = a.invoice_id
+         ${ENGAGEMENT_JOIN('i.engagement_id')}
+         LEFT JOIN hsdg.employees rb ON rb.id = a.requested_by_employee_id
+        WHERE a.requested_by_employee_id IS DISTINCT FROM $1
+          AND ($2::uuid IS NULL OR i.engagement_id = $2)`,
+      [me, engagementId],
+    );
+    return rows.map((r) => ({
+      key: `${r.kind}:${r.id}`,
+      kind: r.kind,
+      group: TODAY_GROUP.writeOffs,
+      title: `${r.kind === 'write_off' ? 'Write off' : 'Credit note'} ${formatInr(r.amount)} on ${r.invoice_number ?? 'an invoice'}`,
+      ...engagementOf(r),
+      filing: null,
+      internalDate: r.requested_on,
+      statutoryDate: null,
+      status: 'pending',
+      isOverdue: false,
+      blockedByOpenCount: 0,
+      task: null,
+      adjustment: {
+        id: r.id,
+        kind: r.kind,
+        invoiceId: r.invoice_id,
+        invoiceNumber: r.invoice_number,
+        amount: r.amount,
+        reason: r.reason,
+        requestedByName: r.requested_by_name,
+        version: r.version,
+      },
+      link: { engagementId: r.engagement_id, engagementKind: r.engagement_kind },
+    }));
+  }
+
+  /**
    * Open filings due internally within a week (or already past), on work I
    * prepare or review (the filing's task) or lead (its stream) — with or
    * without a task. The candidate ids come from my tasks and my streams first,
@@ -421,13 +495,14 @@ function listedWaiting(tasks: TodayItem[]): Set<string> {
   );
 }
 
-function emptyGroups(notices = false): TodayRows {
+function emptyGroups(opts: { notices?: boolean; writeOffs?: boolean }): TodayRows {
   return {
     prepare: [],
     review: [],
     waiting: [],
     due_soon: [],
-    ...(notices ? { notices: [] } : {}),
+    ...(opts.notices ? { notices: [] } : {}),
+    ...(opts.writeOffs ? { write_offs: [] } : {}),
   };
 }
 

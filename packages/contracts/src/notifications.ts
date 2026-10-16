@@ -72,6 +72,10 @@ export const NOTIFICATION_TYPE = {
   noticeReplyDue: 'notice_reply_due',
   /** PS-102 — a hearing on a notice is 2 days away (owner and reviewer). */
   noticeHearingDue: 'notice_hearing_due',
+  /** PS-205: a write-off or credit note waits for a partner's decision. */
+  writeOffPending: 'write_off_pending',
+  /** PS-203: an issued invoice went past its due date unpaid. */
+  invoiceOverdue: 'invoice_overdue',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -149,6 +153,8 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   notice_received: A,
   notice_reply_due: A,
   notice_hearing_due: A,
+  write_off_pending: A,
+  invoice_overdue: A,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -193,6 +199,8 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   notice_received: 'Notice received',
   notice_reply_due: 'Notice reply due',
   notice_hearing_due: 'Notice hearing coming up',
+  write_off_pending: 'Write-off or credit note to approve',
+  invoice_overdue: 'Invoice overdue',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */

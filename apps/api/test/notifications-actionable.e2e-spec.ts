@@ -322,7 +322,7 @@ describe('Actionable notifications (e2e)', () => {
       .expect(200);
     const mine = (await http().get('/api/v1/notifications/preferences').set(bearer(pa)).expect(200))
       .body as { type: string; delivery: string; editable: boolean }[];
-    expect(mine).toHaveLength(36);
+    expect(mine).toHaveLength(38);
     expect(mine.find((p) => p.type === 'ep_changed')).toMatchObject({
       delivery: 'bell',
       editable: true,

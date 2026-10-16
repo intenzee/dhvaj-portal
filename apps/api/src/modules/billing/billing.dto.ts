@@ -17,9 +17,12 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  ADJUSTMENT_STATUSES,
+  GST_RATES,
   GSTIN_REGEX,
   RECEIPT_MODES,
   TDS_SECTIONS,
+  type AdjustmentStatus,
   type ReceiptMode,
   type TdsSection,
 } from '@hsdg/contracts';
@@ -164,4 +167,69 @@ export class ReceiptListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+}
+
+/** PS-205 · POST /billing/invoices/:invoiceId/credit-notes. */
+export class RequestCreditNoteDto {
+  @ApiProperty({ example: '5000.00', description: 'Before tax; GST is added as on the invoice.' })
+  @Matches(AMOUNT, { message: 'taxableValue must be a positive amount with up to two decimals.' })
+  taxableValue!: string;
+
+  @ApiPropertyOptional({ enum: GST_RATES, description: "Defaults to the invoice's highest rate." })
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(GST_RATES)
+  gstRate?: number;
+
+  @ApiProperty({ example: 'Scope reduced: one return not filed' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
+}
+
+/** PS-205 · POST /billing/invoices/:invoiceId/write-offs. */
+export class RequestWriteOffDto {
+  @ApiProperty({ example: '5000.00' })
+  @Matches(AMOUNT, { message: 'amount must be a positive amount with up to two decimals.' })
+  amount!: string;
+
+  @ApiProperty({ example: 'Client wound up; balance not recoverable' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
+}
+
+/** PS-205 · POST /billing/{credit-notes|write-offs}/:id/decision. */
+export class DecideAdjustmentDto {
+  @ApiProperty({ enum: ['approve', 'reject'] })
+  @IsIn(['approve', 'reject'])
+  decision!: 'approve' | 'reject';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(500)
+  note?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  version?: number;
+}
+
+/** PS-205 · GET /billing/adjustments. */
+export class AdjustmentListQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  invoiceId?: string;
+
+  @ApiPropertyOptional({ enum: ADJUSTMENT_STATUSES })
+  @IsOptional()
+  @IsIn(ADJUSTMENT_STATUSES)
+  status?: AdjustmentStatus;
 }
