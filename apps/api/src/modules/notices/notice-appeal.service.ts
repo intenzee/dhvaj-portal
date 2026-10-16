@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type { NoticeStream } from '@hsdg/contracts';
 import type { RlsContext } from '../../database/rls-context';
@@ -20,8 +25,8 @@ export const APPEAL_SERVICE_BY_STREAM: Record<NoticeStream, string> = {
 };
 
 const LEAD_ONLY =
-  'An order on an appealable notice starts the appeal limitation filing — ' +
-  'the engagement partner or manager records it.';
+  'The appeal limitation filing goes on the compliance calendar — ' +
+  'the engagement partner or manager starts its clock.';
 const OPEN_STATUSES_SQL = `status NOT IN ('closed', 'merged', 'cancelled', 'declined', 'withdrawn')`;
 
 /**
@@ -34,6 +39,11 @@ const OPEN_STATUSES_SQL = `status NOT IN ('closed', 'merged', 'cancelled', 'decl
  * notice's appeal_due_on. Voiding the order voids the event (the filing falls
  * away) and clears both fields. "Appeal" opens an Assignment engagement for it.
  * All on the notice's transaction.
+ *
+ * Calendar writes are lead-only, so when someone else on the team (a senior
+ * owning the notice) records the order, the order stands and the clock waits:
+ * the partner or manager starts it with POST /notices/:id/appeal-clock
+ * ({@link startClock}), which runs the same steps on the live order.
  */
 @Injectable()
 export class NoticeAppealService {
@@ -42,21 +52,35 @@ export class NoticeAppealService {
     private readonly engagements: EngagementsService,
   ) {}
 
+  /**
+   * Start the appeal clock for an order just recorded. Returns false when it
+   * waits: no Compliance engagement to keep it on, or the caller isn't its lead
+   * (then `strict` — the explicit "start the clock" — refuses instead).
+   */
   async onOrderRecorded(
     client: PoolClient,
     ctx: RlsContext,
     notice: NoticeRow,
     event: { id: string; occurredOn: string },
-  ): Promise<void> {
-    if (!notice.type_appealable || !notice.type_appeal_rule_code) return;
+    opts: { strict?: boolean } = {},
+  ): Promise<boolean> {
+    if (!notice.type_appealable || !notice.type_appeal_rule_code) return false;
     const engagementId = await this.complianceEngagement(client, notice);
-    // No Compliance engagement to keep the calendar on: the order stands, no clock.
-    if (!engagementId) return;
+    if (!engagementId) {
+      if (opts.strict)
+        throw new BadRequestException(
+          'The client has no open Compliance engagement to keep the appeal date on.',
+        );
+      return false;
+    }
     const { rows: lead } = await client.query<{ lead: boolean }>(
       `SELECT hsdg.is_engagement_lead($1) AS lead`,
       [engagementId],
     );
-    if (!lead[0]?.lead) throw new ForbiddenException(LEAD_ONLY);
+    if (!lead[0]?.lead) {
+      if (opts.strict) throw new ForbiddenException(LEAD_ONLY);
+      return false;
+    }
 
     const recorded = await this.calendar.recordEventWith(client, ctx, engagementId, {
       eventType: NOTICE_ORDER_EVENT,
@@ -80,6 +104,31 @@ export class NoticeAppealService {
     await client.query(
       `UPDATE hsdg.notices SET appeal_instance_id = $2, appeal_due_on = $3 WHERE id = $1`,
       [notice.id, rows[0]?.id ?? null, rows[0]?.due ?? null],
+    );
+    return true;
+  }
+
+  /** POST /notices/:id/appeal-clock — a lead starts the clock an earlier order left waiting. */
+  async startClock(client: PoolClient, ctx: RlsContext, notice: NoticeRow): Promise<void> {
+    if (notice.appeal_instance_id)
+      throw new ConflictException('The appeal clock is already running.');
+    const { rows } = await client.query<{ id: string; d: string; ce: string | null }>(
+      `SELECT id, occurred_on::text AS d, compliance_event_id AS ce FROM hsdg.notice_events
+        WHERE notice_id = $1 AND kind = 'order' AND voided_at IS NULL
+        ORDER BY occurred_on DESC, created_at DESC LIMIT 1`,
+      [notice.id],
+    );
+    const order = rows[0];
+    if (!order) throw new BadRequestException('Record the order first.');
+    if (order.ce) throw new ConflictException('The appeal clock is already running.');
+    if (!notice.type_appealable || !notice.type_appeal_rule_code)
+      throw new BadRequestException('This type of notice has no appeal period.');
+    await this.onOrderRecorded(
+      client,
+      ctx,
+      notice,
+      { id: order.id, occurredOn: order.d },
+      { strict: true },
     );
   }
 

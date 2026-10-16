@@ -49,4 +49,5 @@ export interface NoticeRow {
   updated_at: Date;
   clock_due: string | null;
   is_member: boolean;
+  is_lead: boolean;
 }

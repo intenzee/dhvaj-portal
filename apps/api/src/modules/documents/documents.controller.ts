@@ -16,7 +16,7 @@ import { PERMISSION, ROLE, type FileVersionHistory, type Paginated } from '@hsdg
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
-import { DocumentsService } from './documents.service';
+import { DocumentsService, NOTICE_DOCUMENT_TYPES } from './documents.service';
 import { OnlyOfficeService, type EditorSession } from './onlyoffice/onlyoffice.service';
 import { M365Service, type M365EditorSession, type M365SyncResult } from './m365/m365.service';
 import type { DocumentDetail, DocumentRecord } from './documents.types';
@@ -35,6 +35,21 @@ import {
  * from engagement data, so it could not see documents anyway).
  */
 const DOCUMENT_DELETE_ROLES: readonly string[] = [ROLE.managingPartner];
+
+/**
+ * PS-101 — a notice's papers. Filing a notice, a reply or an order (and
+ * archiving one you filed yourself, e.g. a PDF the intake put on the wrong
+ * engagement) is notice work: notice.manage is enough, without
+ * engagement.manage. RLS still needs a place on the team (migration
+ * 1772300610000). Anything else stays with engagement.manage.
+ */
+const MISSING_MANAGE = `Missing required permission(s): ${PERMISSION.engagementManage}.`;
+
+function noticePapersOnly(principal: Principal): boolean {
+  if (principal.permissions.includes(PERMISSION.engagementManage)) return false;
+  if (principal.permissions.includes(PERMISSION.noticeManage)) return true;
+  throw new ForbiddenException(MISSING_MANAGE);
+}
 
 /** True when the principal may soft-delete / restore documents (managing partner). */
 function canDeleteDocuments(principal: Principal): boolean {
@@ -174,13 +189,22 @@ export class DocumentsController {
   }
 
   @Post(':id/documents')
-  @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'Upload a document (first version); bytes base64-encoded (audited)' })
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary:
+      'Upload a document (first version); bytes base64-encoded (audited). engagement.manage, or notice.manage for a notice / reply / order',
+  })
   create(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: CreateDocumentDto,
   ): Promise<DocumentRecord> {
+    if (
+      noticePapersOnly(principal) &&
+      !dto.noticeId &&
+      !(dto.documentType && NOTICE_DOCUMENT_TYPES.includes(dto.documentType))
+    )
+      throw new ForbiddenException(MISSING_MANAGE);
     return this.documents.create(rlsContextFromPrincipal(principal), id, dto);
   }
 
@@ -211,15 +235,20 @@ export class DocumentsController {
   }
 
   @Post(':id/documents/:docId/archive')
-  @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'Archive a document (reason recorded; audited)' })
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary:
+      'Archive a document (reason recorded; audited). engagement.manage, or notice.manage for a notice paper you filed',
+  })
   archive(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('docId', new ParseUUIDPipe()) docId: string,
     @Body() dto: ArchiveDocumentDto,
   ): Promise<DocumentRecord> {
-    return this.documents.archive(rlsContextFromPrincipal(principal), id, docId, dto);
+    return this.documents.archive(rlsContextFromPrincipal(principal), id, docId, dto, {
+      noticePapersOnly: noticePapersOnly(principal),
+    });
   }
 
   @Post(':id/documents/:docId/restore')

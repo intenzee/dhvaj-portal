@@ -65,7 +65,8 @@ export const NOTICE_SELECT = `
          n.appeal_engagement_id, ae.engagement_code AS appeal_engagement_code,
          n.version, n.created_at, n.updated_at,
          (${CLOCK_DUE_SQL}) AS clock_due_d, (${CLOCK_DUE_SQL})::text AS clock_due,
-         hsdg.is_engagement_member(n.engagement_id) AS is_member
+         hsdg.is_engagement_member(n.engagement_id) AS is_member,
+         hsdg.is_engagement_lead(n.engagement_id) AS is_lead
     FROM hsdg.notices n
     JOIN hsdg.notice_types nt ON nt.id = n.notice_type_id
     LEFT JOIN hsdg.entities ent ON ent.id = n.entity_id
@@ -309,9 +310,19 @@ export class NoticesService {
         edit,
         appeal:
           edit &&
+          row.is_lead &&
           row.status === 'order_received' &&
           row.type_appealable &&
           hasOrder &&
+          !row.appeal_engagement_id,
+        startAppealClock:
+          edit &&
+          row.is_lead &&
+          row.status === 'order_received' &&
+          row.type_appealable &&
+          !!row.type_appeal_rule_code &&
+          hasOrder &&
+          !row.appeal_instance_id &&
           !row.appeal_engagement_id,
       },
       createdAt: row.created_at.toISOString(),
@@ -688,6 +699,25 @@ export class NoticesService {
           outcomeAmount: input.outcomeAmount ?? null,
           closedOn: input.closedOn,
         },
+      });
+    });
+  }
+
+  /** POST /notices/:id/appeal-clock — a lead starts the clock a non-lead's order left waiting. */
+  async startAppealClock(ctx: RlsContext, id: string, version: number): Promise<Notice> {
+    return this.write(ctx, id, version, async (client, n) => {
+      if (n.status !== 'order_received')
+        throw new BadRequestException('The appeal clock runs from an order on file.');
+      await this.appeal.startClock(client, ctx, n);
+      await client.query(
+        `UPDATE hsdg.notices SET version = version + 1, updated_by_employee_id = $2 WHERE id = $1`,
+        [id, ctx.employeeId ?? null],
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'notice.appeal_clock_started',
+        objectType: 'notice',
+        objectId: id,
+        after: { status: n.status },
       });
     });
   }
