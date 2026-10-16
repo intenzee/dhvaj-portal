@@ -24,6 +24,7 @@ export const FEATURE_FLAG_LABEL: Record<FeatureFlag, string> = {
   ff_work_links: 'Staff Workflow 1 — rows open the work, review queue, trimmed sidebar',
   ff_today_view: 'Staff Workflow 2 — Today and the filing drawer',
   ff_filing_runs: 'Staff Workflow 3 — filing runs, client chasing, search',
+  ff_notices: 'Practice Services 1 — notices, their clock on Today, appeal deadlines',
 };
 
 /** One flag on Admin → Rollout. */
