@@ -163,8 +163,8 @@ describe('Billing & Collections (e2e)', () => {
         .set(bearer(pa))
         .expect(200);
       expect(res.body.issued.count).toBeGreaterThanOrEqual(1);
-      // Outstanding is the issued bucket; overdue is a subset of it.
-      expect(res.body.outstanding.count).toBe(res.body.issued.count);
+      // Outstanding is the issued and part-paid buckets (PS-202); overdue is a subset of it.
+      expect(res.body.outstanding.count).toBe(res.body.issued.count + res.body.partiallyPaid.count);
       expect(res.body.overdue.count).toBeLessThanOrEqual(res.body.outstanding.count);
       expect(typeof res.body.currency).toBe('string');
     });

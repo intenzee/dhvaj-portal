@@ -13,7 +13,9 @@ import {
   INVOICE_STATUS,
   PERMISSION,
   amountInWords,
+  fromPaise,
   gstSplit,
+  toPaise,
   type AgingBucket,
   type AgingBucketKey,
   type BillingSummary,
@@ -84,6 +86,7 @@ interface InvoiceRow {
   voided_at: Date | null;
   voided_by_name: string | null;
   has_pdf: boolean;
+  amount_settled: string;
 }
 
 interface LineRow {
@@ -109,7 +112,7 @@ const INVOICE_COLUMNS = `
   i.client_entity_id, i.client_gstin, i.place_of_supply_state, i.is_reverse_charge,
   i.cgst, i.sgst, i.igst, i.amount_in_words, i.financial_year, i.issued_at,
   ie.full_name AS issued_by_name, i.voided_reason, i.voided_at, ve.full_name AS voided_by_name,
-  (i.pdf_storage_reference IS NOT NULL) AS has_pdf`;
+  (i.pdf_storage_reference IS NOT NULL) AS has_pdf, i.amount_settled`;
 
 const INVOICE_JOINS = `
   LEFT JOIN hsdg.employees ce ON ce.id = i.created_by_employee_id
@@ -132,7 +135,8 @@ interface GlobalInvoiceRow extends InvoiceRow {
 const GLOBAL_INVOICE_BASE = `
   SELECT ${INVOICE_COLUMNS},
          eng.engagement_code, i.client_entity_id AS entity_id, ent.legal_name AS entity_name,
-         (i.status = 'issued' AND i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE) AS overdue
+         (i.status IN ('issued', 'partially_paid') AND i.due_date IS NOT NULL
+           AND i.due_date < CURRENT_DATE) AS overdue
   FROM hsdg.invoices i
   ${INVOICE_JOINS}
   LEFT JOIN hsdg.engagements eng ON eng.id = i.engagement_id
@@ -142,6 +146,8 @@ const GLOBAL_INVOICE_BASE = `
 const INVOICE_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
   [INVOICE_STATUS.draft]: [INVOICE_STATUS.issued, INVOICE_STATUS.void],
   [INVOICE_STATUS.issued]: [INVOICE_STATUS.paid, INVOICE_STATUS.void],
+  // PS-202: receipts move an invoice to and from partly paid, never by hand.
+  [INVOICE_STATUS.partially_paid]: [],
   [INVOICE_STATUS.paid]: [],
   [INVOICE_STATUS.void]: [],
 };
@@ -285,7 +291,9 @@ export class CommercialService {
         conds.push(`i.status = $${params.length}`);
       }
       if (filter.overdueOnly) {
-        conds.push(`i.status = 'issued' AND i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE`);
+        conds.push(
+          `i.status IN ('issued', 'partially_paid') AND i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE`,
+        );
       }
       if (filter.search) {
         params.push(`%${filter.search}%`);
@@ -317,6 +325,8 @@ export class CommercialService {
         draft_amt: string;
         issued_cnt: string;
         issued_amt: string;
+        part_cnt: string;
+        part_amt: string;
         paid_cnt: string;
         paid_amt: string;
         void_cnt: string;
@@ -332,15 +342,20 @@ export class CommercialService {
            COALESCE(sum(total) FILTER (WHERE status = 'draft'), 0)       AS draft_amt,
            count(*) FILTER (WHERE status = 'issued')                     AS issued_cnt,
            COALESCE(sum(total) FILTER (WHERE status = 'issued'), 0)      AS issued_amt,
+           count(*) FILTER (WHERE status = 'partially_paid')             AS part_cnt,
+           COALESCE(sum(total) FILTER (WHERE status = 'partially_paid'), 0) AS part_amt,
            count(*) FILTER (WHERE status = 'paid')                       AS paid_cnt,
            COALESCE(sum(total) FILTER (WHERE status = 'paid'), 0)        AS paid_amt,
            count(*) FILTER (WHERE status = 'void')                       AS void_cnt,
            COALESCE(sum(total) FILTER (WHERE status = 'void'), 0)        AS void_amt,
-           count(*) FILTER (WHERE status = 'issued')                     AS outstanding_cnt,
-           COALESCE(sum(total) FILTER (WHERE status = 'issued'), 0)      AS outstanding_amt,
-           count(*) FILTER (WHERE status = 'issued'
+           -- PS-202: outstanding is what is still owed on issued and part-paid invoices.
+           count(*) FILTER (WHERE status IN ('issued', 'partially_paid')) AS outstanding_cnt,
+           COALESCE(sum(total - amount_settled)
+             FILTER (WHERE status IN ('issued', 'partially_paid')), 0)   AS outstanding_amt,
+           count(*) FILTER (WHERE status IN ('issued', 'partially_paid')
              AND due_date IS NOT NULL AND due_date < CURRENT_DATE)       AS overdue_cnt,
-           COALESCE(sum(total) FILTER (WHERE status = 'issued'
+           COALESCE(sum(total - amount_settled)
+             FILTER (WHERE status IN ('issued', 'partially_paid')
              AND due_date IS NOT NULL AND due_date < CURRENT_DATE), 0)   AS overdue_amt,
            (SELECT currency FROM hsdg.invoices
              GROUP BY currency ORDER BY count(*) DESC LIMIT 1)           AS currency
@@ -355,6 +370,7 @@ export class CommercialService {
         currency: r?.currency ?? 'INR',
         draft: bucket(r?.draft_cnt ?? '0', r?.draft_amt ?? '0'),
         issued: bucket(r?.issued_cnt ?? '0', r?.issued_amt ?? '0'),
+        partiallyPaid: bucket(r?.part_cnt ?? '0', r?.part_amt ?? '0'),
         paid: bucket(r?.paid_cnt ?? '0', r?.paid_amt ?? '0'),
         void: bucket(r?.void_cnt ?? '0', r?.void_amt ?? '0'),
         outstanding: bucket(r?.outstanding_cnt ?? '0', r?.outstanding_amt ?? '0'),
@@ -380,9 +396,9 @@ export class CommercialService {
            ELSE 'd90_plus'
          END AS bucket,
          count(*)::text AS cnt,
-         COALESCE(sum(total), 0)::text AS amt
+         COALESCE(sum(total - amount_settled), 0)::text AS amt
        FROM hsdg.invoices
-       WHERE status = 'issued'
+       WHERE status IN ('issued', 'partially_paid')
        GROUP BY bucket`,
     );
     const by = new Map(rows.map((x) => [x.bucket, x]));
@@ -956,6 +972,8 @@ function mapInvoice(row: InvoiceRow): InvoiceRecord {
     voidedAt: row.voided_at?.toISOString() ?? null,
     voidedByName: row.voided_by_name,
     hasPdf: row.has_pdf,
+    amountSettled: row.amount_settled,
+    balance: fromPaise(toPaise(row.total) - toPaise(row.amount_settled)),
   };
 }
 

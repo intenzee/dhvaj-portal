@@ -48,6 +48,7 @@ describe('invoiceActions', () => {
       voidDraft: true,
       voidIssued: false,
       markPaid: false,
+      recordReceipt: false,
     });
     expect(invoiceActions({ status: 'draft' }, []).issue).toBe(false);
   });
@@ -59,7 +60,18 @@ describe('invoiceActions', () => {
       voidDraft: false,
       voidIssued: true,
       markPaid: true,
+      recordReceipt: false,
     });
+  });
+
+  it('records a receipt instead of marking paid once receipts are on (PS-202)', () => {
+    expect(invoiceActions({ status: 'issued' }, manage, true)).toMatchObject({
+      markPaid: false,
+      recordReceipt: true,
+    });
+    expect(invoiceActions({ status: 'partially_paid' }, manage, true).recordReceipt).toBe(true);
+    expect(invoiceActions({ status: 'partially_paid' }, approve, true).voidIssued).toBe(false);
+    expect(invoiceActions({ status: 'issued' }, [], true).recordReceipt).toBe(false);
   });
 
   it('offers nothing on a void or paid invoice', () => {
