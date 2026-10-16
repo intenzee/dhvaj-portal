@@ -1,0 +1,27 @@
+FORM GST DRC-01
+[See rule 142(1)]
+Summary of Show Cause Notice
+
+Reference No.: ZD2915102600987
+Date: 15-Oct-2026
+
+1. GSTIN: 29AAGFR5678K1ZE
+2. Name: SAMPLE RAVI ENTERPRISES
+3. Address: 4th Cross, Example Layout, Bengaluru 560001
+4. Tax Period: April 2023 - March 2024
+5. Act: CGST Act, 2017 / KGST Act, 2017
+6. Section under which SCN is being issued: Section 73
+7. SCN Reference No. as per DIN: CBIC-2026 10 KASR 1A 0000 5678
+
+Details of demand
+Sr  Tax rate   Turnover     Tax Period   Tax       Interest   Penalty   Others   Total
+1   18%        12,00,000    2023-24      2,16,000  48,600     21,600    0        2,86,200
+Total                                     2,16,000  48,600     21,600    0        2,86,200
+
+Brief facts of the case are attached.
+
+Due date for filing reply: 14/11/2026
+Date of personal hearing: 21/11/2026  Time: 11:30 AM
+Venue: Office of the Superintendent, Example Range
+
+Submit your reply in FORM GST DRC-06.
