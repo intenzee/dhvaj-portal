@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { PERMISSION } from '@hsdg/contracts';
+import { FEATURE_FLAG, PERMISSION } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { cn } from '@/lib/cn';
 import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui';
 import { UsersSection } from '@/components/admin/users-section';
@@ -18,6 +19,7 @@ import { ScopeMethodologySection } from '@/components/admin/scope-methodology-se
 import { AuditAreaLibrarySection } from '@/components/admin/audit-area-library-section';
 import { WorkflowSection } from '@/components/admin/workflow-section';
 import { RolloutSection } from '@/components/admin/rollout-section';
+import { NoticeTypesSection } from '@/components/admin/notice-types-section';
 
 type Tab =
   | 'users'
@@ -30,6 +32,7 @@ type Tab =
   | 'scope'
   | 'areas'
   | 'workflow'
+  | 'notice-types'
   | 'rollout';
 
 export default function AdministrationPage(): JSX.Element {
@@ -38,6 +41,7 @@ export default function AdministrationPage(): JSX.Element {
   const setsWorkflow = can(principal, PERMISSION.workflowManage);
   // Partners come here only for the workflow policy.
   const [tab, setTab] = useState<Tab>(administers ? 'users' : 'workflow');
+  const { isOn } = useFeatureFlags();
 
   // Nav already gates the whole section on user.manage or workflow.manage; this
   // is defence in depth (the API enforces every rule regardless of the UI).
@@ -87,6 +91,10 @@ export default function AdministrationPage(): JSX.Element {
       : []),
     // The partners' answers to the Staff Workflow plan's questions.
     ...(setsWorkflow ? [{ id: 'workflow' as const, label: 'Workflow' }] : []),
+    // PS-101: the notice types library the stream leads maintain (ff_notices).
+    ...(setsWorkflow && isOn(FEATURE_FLAG.notices)
+      ? [{ id: 'notice-types' as const, label: 'Notice types' }]
+      : []),
     // Each Staff Workflow phase, office by office (user.manage — MP / admin).
     ...(administers ? [{ id: 'rollout' as const, label: 'Rollout' }] : []),
   ];
@@ -132,6 +140,8 @@ export default function AdministrationPage(): JSX.Element {
             <AuditAreaLibrarySection />
           ) : tab === 'workflow' ? (
             <WorkflowSection />
+          ) : tab === 'notice-types' ? (
+            <NoticeTypesSection />
           ) : tab === 'rollout' ? (
             <RolloutSection />
           ) : tab === 'signals' ? (
