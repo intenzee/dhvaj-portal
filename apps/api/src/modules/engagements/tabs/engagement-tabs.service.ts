@@ -204,7 +204,7 @@ export class EngagementTabsService {
               FROM hsdg.compliance_engagement_years y
              WHERE y.engagement_id = $1 AND y.financial_year = $5) AS budget,
            (SELECT COALESCE(sum(i.total), 0) FROM hsdg.invoices i
-             WHERE i.engagement_id = $1 AND i.status IN ('issued', 'paid')
+             WHERE i.engagement_id = $1 AND i.status IN ('issued', 'partially_paid', 'paid')
                AND i.issue_date BETWEEN $3::date AND $4::date)::text AS invoiced`,
         [engagementId, today, range.from, range.to, fy],
       );

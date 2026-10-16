@@ -4,7 +4,10 @@ import {
   ForbiddenException,
   Get,
   NotFoundException,
+  Param,
+  ParseUUIDPipe,
   Patch,
+  Post,
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -13,7 +16,9 @@ import {
   PERMISSION,
   type BillingSettings,
   type BillingSummary,
+  type ClientStatement,
   type GlobalInvoiceRecord,
+  type ReceiptRecord,
   type Paginated,
 } from '@hsdg/contracts';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
@@ -23,7 +28,13 @@ import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { CommercialService } from '../commercial/commercial.service';
 import { GlobalInvoiceListQueryDto } from '../commercial/dto/commercial.dto';
 import { BillingSettingsService } from './billing-settings.service';
-import { UpdateBillingSettingsDto } from './billing.dto';
+import {
+  CreateReceiptDto,
+  ReceiptListQueryDto,
+  ReverseReceiptDto,
+  UpdateBillingSettingsDto,
+} from './billing.dto';
+import { ReceiptsService } from './receipts.service';
 
 /**
  * Practice Services Phase 2 · Fees to cash (ff_billing_v2). PS-201: the
@@ -38,6 +49,7 @@ export class BillingController {
     private readonly settings: BillingSettingsService,
     private readonly commercial: CommercialService,
     private readonly flags: FeatureFlagsService,
+    private readonly receipts: ReceiptsService,
   ) {}
 
   @Get('settings')
@@ -92,6 +104,72 @@ export class BillingController {
     this.requireOn(principal);
     requireBillingReader(principal);
     return this.commercial.billingSummary(rlsContextFromPrincipal(principal));
+  }
+
+  // ── PS-202 · receipts ───────────────────────────────────────────────────
+
+  @Get('receipts')
+  @ApiOperation({ summary: 'Receipts from the clients you bill (billing.manage or report.read)' })
+  async listReceipts(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: ReceiptListQueryDto,
+  ): Promise<Paginated<ReceiptRecord>> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    const filter: { clientId?: string; from?: string; to?: string } = {};
+    if (query.clientId) filter.clientId = query.clientId;
+    if (query.from) filter.from = query.from;
+    if (query.to) filter.to = query.to;
+    const result = await this.receipts.list(rlsContextFromPrincipal(principal), query, filter);
+    return paginate(result, query);
+  }
+
+  @Get('receipts/:id')
+  @ApiOperation({ summary: 'One receipt with its allocations' })
+  getReceipt(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<ReceiptRecord> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.receipts.get(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post('receipts')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({
+    summary:
+      'Record a receipt (net + TDS) and allocate it; without allocations, oldest open invoice first',
+  })
+  createReceipt(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: CreateReceiptDto,
+  ): Promise<ReceiptRecord> {
+    this.requireOn(principal);
+    return this.receipts.create(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Post('receipts/:id/reverse')
+  @RequirePermissions(PERMISSION.billingApprove)
+  @ApiOperation({ summary: 'Reverse a receipt with a reason; the invoices it paid reopen' })
+  reverseReceipt(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ReverseReceiptDto,
+  ): Promise<ReceiptRecord> {
+    this.requireOn(principal);
+    return this.receipts.reverse(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Get('clients/:entityId/statement')
+  @ApiOperation({ summary: "A client's invoices, receipts, TDS and balance" })
+  statement(
+    @CurrentPrincipal() principal: Principal,
+    @Param('entityId', new ParseUUIDPipe()) entityId: string,
+  ): Promise<ClientStatement> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.receipts.statement(rlsContextFromPrincipal(principal), entityId);
   }
 
   private requireOn(principal: Principal): void {

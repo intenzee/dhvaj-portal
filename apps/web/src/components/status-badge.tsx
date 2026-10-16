@@ -31,6 +31,7 @@ const STATUS_TONE: Record<string, string> = {
   // Invoice lifecycle (§31)
   draft: 'neutral',
   issued: 'info',
+  partially_paid: 'warn',
   paid: 'success',
   void: 'danger',
 };

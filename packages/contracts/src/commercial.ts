@@ -38,6 +38,8 @@ export interface EngagementCommercial {
 export const INVOICE_STATUS = {
   draft: 'draft',
   issued: 'issued',
+  /** PS-202: receipts (and credits) cover part of the total. */
+  partially_paid: 'partially_paid',
   paid: 'paid',
   void: 'void',
 } as const;
@@ -100,6 +102,10 @@ export interface InvoiceRecord {
   voidedByName: string | null;
   /** The issued invoice's PDF is kept; GET /billing/invoices/:id/pdf. */
   hasPdf: boolean;
+  /** PS-202: what posted receipts (and approved credits) have covered. */
+  amountSettled: string;
+  /** total − amountSettled; 0 once paid. */
+  balance: string;
 }
 
 /** An invoice with its lines (the detail view). */
@@ -157,12 +163,14 @@ export interface BillingSummary {
   currency: string;
   draft: BillingBucket;
   issued: BillingBucket;
+  /** PS-202: issued invoices that receipts have covered in part. */
+  partiallyPaid: BillingBucket;
   paid: BillingBucket;
   void: BillingBucket;
   outstanding: BillingBucket;
   overdue: BillingBucket;
   /**
-   * Receivables aging over the outstanding (issued, unpaid) invoices, split by
+   * Receivables aging over the outstanding (issued or part-paid) balances, split by
    * days past the due date. The buckets partition `outstanding`: their counts
    * sum to `outstanding.count`.
    */

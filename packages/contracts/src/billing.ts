@@ -258,3 +258,167 @@ export function formatInr(amount: string | number): string {
   const rest = digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ',');
   return `${neg ? '-' : ''}${rest ? `${rest},${last3}` : last3}.${paise}`;
 }
+
+// ── PS-202 · Receipts, part payments and TDS on our fees ────────────────
+
+export const RECEIPT_MODES = ['bank', 'upi', 'cheque', 'cash', 'adjustment'] as const;
+export type ReceiptMode = (typeof RECEIPT_MODES)[number];
+
+/** The section the client deducted TDS under; professional fees are 194J. */
+export const TDS_SECTIONS = ['194J', '194C', 'other'] as const;
+export type TdsSection = (typeof TDS_SECTIONS)[number];
+
+export const RECEIPT_STATUSES = ['posted', 'reversed'] as const;
+export type ReceiptStatus = (typeof RECEIPT_STATUSES)[number];
+
+export interface ReceiptAllocation {
+  invoiceId: string;
+  invoiceNumber: string | null;
+  /** Decimal string; counts towards the invoice's total (gross of TDS). */
+  amount: string;
+}
+
+/**
+ * Money from a client. gross = net received + TDS the client deducted; the
+ * gross is what settles invoices. What is not allocated is an advance.
+ */
+export interface ReceiptRecord {
+  id: string;
+  clientEntityId: string;
+  clientName: string;
+  receivedOn: string;
+  mode: ReceiptMode;
+  reference: string | null;
+  grossAmount: string;
+  tdsAmount: string;
+  tdsSection: TdsSection | null;
+  netAmount: string;
+  bankAccount: string | null;
+  status: ReceiptStatus;
+  reversedReason: string | null;
+  reversedAt: string | null;
+  recordedByName: string | null;
+  allocations: ReceiptAllocation[];
+  /** gross − allocated; held as an advance. */
+  unallocated: string;
+  /** e.g. { financialYear: '2026-27', quarter: 'Q3' }. */
+  tdsQuarter: TdsQuarter;
+  version: number;
+  createdAt: string;
+}
+
+export interface CreateReceiptInput {
+  clientEntityId: string;
+  receivedOn: string;
+  mode: ReceiptMode;
+  reference?: string | null;
+  /** What reached the bank. */
+  netAmount: string;
+  tdsAmount?: string;
+  tdsSection?: TdsSection | null;
+  bankAccount?: string | null;
+  /** Omit to allocate oldest invoice first; [] keeps it all as an advance. */
+  allocations?: { invoiceId: string; amount: string }[];
+}
+
+export interface ReverseReceiptInput {
+  reason: string;
+  version?: number;
+}
+
+/** An open (issued or partly paid) invoice of a client, for allocation. */
+export interface OpenInvoice {
+  id: string;
+  invoiceNumber: string | null;
+  engagementId: string;
+  issueDate: string | null;
+  dueDate: string | null;
+  total: string;
+  balance: string;
+}
+
+export interface TdsQuarter {
+  financialYear: string;
+  quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4';
+}
+
+export interface StatementLine {
+  date: string;
+  /** marked_paid: an invoice marked paid by hand before receipts existed. */
+  kind: 'invoice' | 'receipt' | 'tds' | 'credit_note' | 'marked_paid';
+  reference: string | null;
+  /** What the client owes more (invoice) … */
+  debit: string;
+  /** … or less (receipt, TDS, credit). */
+  credit: string;
+  /** Running balance after this line. */
+  balance: string;
+  invoiceId: string | null;
+  receiptId: string | null;
+}
+
+/** GET /billing/clients/:entityId/statement. */
+export interface ClientStatement {
+  entityId: string;
+  entityName: string;
+  invoices: OpenInvoice[];
+  receipts: ReceiptRecord[];
+  /** PS-205 fills this; empty until credit notes exist. */
+  credits: { id: string; number: string | null; date: string; amount: string }[];
+  lines: StatementLine[];
+  totals: {
+    invoiced: string;
+    received: string;
+    tds: string;
+    credited: string;
+    /** invoiced − (received + tds + credited) on invoices; >0 the client owes. */
+    balance: string;
+    /** Receipts not allocated to any invoice. */
+    advance: string;
+  };
+  /** TDS the client deducted, which we claim from 26AS, by quarter. */
+  tdsReceivable: (TdsQuarter & { amount: string })[];
+}
+
+/** '2026-10-16' → { financialYear: '2026-27', quarter: 'Q3' }. Pure — tested. */
+export function tdsQuarterOf(isoDate: string): TdsQuarter {
+  const m = Number(isoDate.slice(5, 7));
+  const quarter = m >= 4 && m <= 6 ? 'Q1' : m <= 9 && m >= 7 ? 'Q2' : m >= 10 ? 'Q3' : 'Q4';
+  return { financialYear: financialYearOf(isoDate), quarter };
+}
+
+/**
+ * Spread a receipt's gross over open invoices, oldest due (then issued) first,
+ * never more than each balance. What is left over stays an advance. Amounts are
+ * decimal strings; worked in paise. Pure — tested.
+ */
+export function allocateOldestFirst(
+  gross: string,
+  invoices: Pick<OpenInvoice, 'id' | 'issueDate' | 'dueDate' | 'balance'>[],
+): { allocations: { invoiceId: string; amount: string }[]; unallocated: string } {
+  let left = toPaise(gross);
+  if (left < 0n) throw new Error('A receipt cannot be negative.');
+  const key = (i: { issueDate: string | null; dueDate: string | null }): string =>
+    i.dueDate ?? i.issueDate ?? '9999-12-31';
+  const ordered = [...invoices].sort(
+    (a, b) =>
+      key(a).localeCompare(key(b)) ||
+      (a.issueDate ?? '').localeCompare(b.issueDate ?? '') ||
+      a.id.localeCompare(b.id),
+  );
+  const allocations: { invoiceId: string; amount: string }[] = [];
+  for (const inv of ordered) {
+    if (left <= 0n) break;
+    const balance = toPaise(inv.balance);
+    if (balance <= 0n) continue;
+    const take = balance < left ? balance : left;
+    allocations.push({ invoiceId: inv.id, amount: fromPaise(take) });
+    left -= take;
+  }
+  return { allocations, unallocated: fromPaise(left) };
+}
+
+/** Sum decimal strings exactly. Pure — tested. */
+export function sumAmounts(amounts: (string | number)[]): string {
+  return fromPaise(amounts.reduce<bigint>((s, a) => s + toPaise(a), 0n));
+}

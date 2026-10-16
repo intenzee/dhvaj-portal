@@ -1,11 +1,14 @@
 import {
   INVOICE_NUMBER_MAX,
+  allocateOldestFirst,
   amountInWords,
   financialYearOf,
   formatInr,
   fromPaise,
   gstSplit,
   invoiceNumberFor,
+  sumAmounts,
+  tdsQuarterOf,
   toPaise,
 } from '@hsdg/contracts';
 
@@ -116,5 +119,63 @@ describe('PS-201 money helpers', () => {
       expect(invoiceNumberFor('INV', '2026-27', 1)).toBe('INV/26-27/0001');
       expect(invoiceNumberFor('ABCDE', '2026-27', 9999)).toHaveLength(INVOICE_NUMBER_MAX);
     });
+  });
+});
+
+describe('allocateOldestFirst (PS-202)', () => {
+  const inv = (id: string, dueDate: string | null, balance: string, issueDate = '2026-04-01') => ({
+    id,
+    issueDate,
+    dueDate,
+    balance,
+  });
+
+  it('pays the oldest due first and keeps the rest as an advance', () => {
+    expect(
+      allocateOldestFirst('150000.00', [
+        inv('b', '2026-09-30', '100000.00'),
+        inv('a', '2026-06-30', '30000.50'),
+      ]),
+    ).toEqual({
+      allocations: [
+        { invoiceId: 'a', amount: '30000.50' },
+        { invoiceId: 'b', amount: '100000.00' },
+      ],
+      unallocated: '19999.50',
+    });
+  });
+
+  it('pays part of an invoice when the money runs out', () => {
+    expect(allocateOldestFirst('40000', [inv('a', '2026-06-30', '100000.00')])).toEqual({
+      allocations: [{ invoiceId: 'a', amount: '40000.00' }],
+      unallocated: '0.00',
+    });
+  });
+
+  it('skips settled invoices and falls back to the issue date without a due date', () => {
+    expect(
+      allocateOldestFirst('10', [
+        inv('late', null, '10.00', '2026-08-01'),
+        inv('paid', '2026-05-01', '0.00'),
+        inv('early', null, '10.00', '2026-05-01'),
+      ]).allocations,
+    ).toEqual([{ invoiceId: 'early', amount: '10.00' }]);
+  });
+
+  it('keeps it all as an advance when nothing is open', () => {
+    expect(allocateOldestFirst('500', [])).toEqual({ allocations: [], unallocated: '500.00' });
+  });
+});
+
+describe('tdsQuarterOf (PS-202)', () => {
+  it('puts a date in its financial-year quarter', () => {
+    expect(tdsQuarterOf('2026-04-01')).toEqual({ financialYear: '2026-27', quarter: 'Q1' });
+    expect(tdsQuarterOf('2026-09-30')).toEqual({ financialYear: '2026-27', quarter: 'Q2' });
+    expect(tdsQuarterOf('2026-10-16')).toEqual({ financialYear: '2026-27', quarter: 'Q3' });
+    expect(tdsQuarterOf('2027-03-31')).toEqual({ financialYear: '2026-27', quarter: 'Q4' });
+  });
+
+  it('sums amounts exactly', () => {
+    expect(sumAmounts(['0.10', '0.20', 0.3])).toBe('0.60');
   });
 });

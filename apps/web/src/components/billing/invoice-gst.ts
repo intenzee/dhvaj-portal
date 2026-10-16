@@ -38,17 +38,29 @@ export function taxRows(
       ];
 }
 
-/** Who may do what to an invoice, by permission. Pure — tested. */
+/**
+ * Who may do what to an invoice, by permission. With receipts (ff_billing_v2)
+ * payment is recorded as a receipt, not marked by hand. Pure — tested.
+ */
 export function invoiceActions(
   inv: Pick<InvoiceRecord, 'status'>,
   permissions: readonly string[],
-): { issue: boolean; voidDraft: boolean; voidIssued: boolean; markPaid: boolean } {
+  receipts = false,
+): {
+  issue: boolean;
+  voidDraft: boolean;
+  voidIssued: boolean;
+  markPaid: boolean;
+  recordReceipt: boolean;
+} {
   const has = (p: string): boolean => permissions.includes(p);
+  const open = inv.status === 'issued' || inv.status === 'partially_paid';
   return {
     issue: inv.status === 'draft' && has(PERMISSION.billingManage),
     voidDraft: inv.status === 'draft',
     voidIssued: inv.status === 'issued' && has(PERMISSION.billingApprove),
-    markPaid: inv.status === 'issued',
+    markPaid: inv.status === 'issued' && !receipts,
+    recordReceipt: open && receipts && has(PERMISSION.billingManage),
   };
 }
 

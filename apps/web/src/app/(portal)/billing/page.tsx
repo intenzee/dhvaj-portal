@@ -19,6 +19,8 @@ import { can } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { useBillingSettings } from '@/components/billing/invoice-gst';
 import { BillingSettingsCard } from '@/components/billing/billing-settings';
+import { RecordReceiptModal } from '@/components/billing/record-receipt-modal';
+import { Plus } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import {
   PageHeader,
@@ -29,6 +31,7 @@ import {
   CardBody,
   EmptyState,
   Badge,
+  Button,
 } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
@@ -51,11 +54,14 @@ export default function BillingPage(): JSX.Element {
       </div>
     );
   }
-  return <Billing base={v2 ? '/billing/invoices' : '/invoices'} />;
+  return <Billing v2={v2} />;
 }
 
-function Billing({ base }: { base: string }): JSX.Element {
+function Billing({ v2 }: { v2: boolean }): JSX.Element {
+  const base = v2 ? '/billing/invoices' : '/invoices';
+  const { principal } = useAuth();
   const { settings } = useBillingSettings();
+  const [recording, setRecording] = useState(false);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>('');
   const [overdueOnly, setOverdueOnly] = useState(false);
@@ -93,7 +99,18 @@ function Billing({ base }: { base: string }): JSX.Element {
     },
     {
       header: 'Client',
-      cell: ({ row }) => row.original.entityName ?? <span className="text-ink-faint">—</span>,
+      cell: ({ row }) =>
+        // PS-202: the client's statement of account.
+        v2 && row.original.entityId && row.original.entityName ? (
+          <Link
+            href={`/billing/clients/${row.original.entityId}`}
+            className="text-primary-700 hover:underline"
+          >
+            {row.original.entityName}
+          </Link>
+        ) : (
+          row.original.entityName ?? <span className="text-ink-faint">—</span>
+        ),
     },
     {
       header: 'Engagement',
@@ -132,8 +149,20 @@ function Billing({ base }: { base: string }): JSX.Element {
     <div>
       <PageHeader
         title="Billing & Collections"
-        subtitle="Invoices across everything you can see, with what’s outstanding and overdue. To raise an invoice or record a payment, open the engagement and use its Invoices tab."
+        subtitle={
+          v2
+            ? 'Invoices across the clients you bill, with what’s outstanding and overdue. Raise invoices from the engagement’s Invoices tab; open a client for its statement.'
+            : 'Invoices across everything you can see, with what’s outstanding and overdue. To raise an invoice or record a payment, open the engagement and use its Invoices tab.'
+        }
+        actions={
+          v2 && can(principal, PERMISSION.billingManage) ? (
+            <Button onClick={() => setRecording(true)}>
+              <Plus className="h-4 w-4" /> Record receipt
+            </Button>
+          ) : undefined
+        }
       />
+      {recording && <RecordReceiptModal open onClose={() => setRecording(false)} />}
 
       {summary.data && <SummaryCards s={summary.data} />}
       {summary.data && <AgingPanel s={summary.data} />}

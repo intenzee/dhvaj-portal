@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, FileText, Send, CheckCircle2, Ban, Download } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, Trash2, FileText, Send, CheckCircle2, Ban, Download, Wallet } from 'lucide-react';
 import {
   BILLING_FREQUENCIES,
+  FEATURE_FLAG,
   GST_RATES,
   GST_STATES,
   INVOICE_STATUS,
@@ -17,6 +19,7 @@ import {
 } from '@hsdg/contracts';
 import { apiFetch, ApiError, downloadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { formatDate, humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { Card, EmptyState, Button, Spinner } from '@/components/ui';
@@ -476,6 +479,9 @@ function InvoiceDetailModal({
   const toast = useToast();
   const { principal } = useAuth();
   const { gstMode } = useBillingSettings();
+  const router = useRouter();
+  // PS-202: with ff_billing_v2, payment comes from receipts, not "Mark paid".
+  const receipts = useFeatureFlags().isOn(FEATURE_FLAG.billing);
   const [desc, setDesc] = useState('');
   const [qty, setQty] = useState('1');
   const [unit, setUnit] = useState('0');
@@ -539,7 +545,7 @@ function InvoiceDetailModal({
 
   const inv = invoice.data;
   const isDraft = inv?.status === INVOICE_STATUS.draft;
-  const may = inv ? invoiceActions(inv, principal?.permissions ?? []) : null;
+  const may = inv ? invoiceActions(inv, principal?.permissions ?? [], receipts) : null;
 
   return (
     <Modal
@@ -584,6 +590,11 @@ function InvoiceDetailModal({
               <CheckCircle2 className="h-4 w-4" /> Mark paid
             </Button>
           )}
+          {may?.recordReceipt && inv?.clientEntityId && (
+            <Button onClick={() => router.push(`/billing/clients/${inv.clientEntityId}`)}>
+              <Wallet className="h-4 w-4" /> Record receipt
+            </Button>
+          )}
         </>
       }
     >
@@ -597,6 +608,12 @@ function InvoiceDetailModal({
             <Fact label="Client GSTIN" value={inv.clientGstin ?? 'Unregistered'} />
             <Fact label="Place of supply" value={stateLabel(inv.placeOfSupplyState)} />
             <Fact label="Reverse charge" value={inv.isReverseCharge ? 'Yes' : 'No'} />
+            {receipts && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
+              <>
+                <Fact label="Received" value={money(inv.amountSettled, inv.currency)} />
+                <Fact label="Balance" value={money(inv.balance, inv.currency)} />
+              </>
+            )}
           </div>
           {isDraft && !may?.issue && (
             <p className="text-xs text-ink-faint">Issuing needs the billing.manage permission (partners and managers).</p>
