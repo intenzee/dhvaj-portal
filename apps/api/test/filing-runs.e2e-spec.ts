@@ -514,7 +514,7 @@ describe('Filing runs + client chasing (e2e)', () => {
 
   it('sends by the channel asked for (PS-001), and refuses one the client cannot be reached on', async () => {
     // The firm's channel stays e-mail (off in e2e, so it would fall back to copy).
-    const d = await filing(pa, 'Bharat', { manager: managerX });
+    const d = await filing(pa, 'Bharat', { manager: managerX, team: seniorY });
     const entityId = (
       await su.query<{ entity_id: string }>(
         `SELECT entity_id FROM hsdg.engagements WHERE id = $1`,
@@ -553,6 +553,17 @@ describe('Filing runs + client chasing (e2e)', () => {
     expect((await chase(pa, d.inst).expect(200)).body).toMatchObject({
       channel: 'copy',
       fallback: 'no_email',
+      canWhatsapp: true,
+    });
+    // Senior Y works in another office: on the team, they see the client's phone too.
+    const offices = await su.query<{ same: boolean }>(
+      `SELECT ent.home_office_id = emp.primary_office_id AS same
+         FROM hsdg.entities ent, hsdg.employees emp WHERE ent.id = $1 AND emp.id = $2`,
+      [entityId, seniorY],
+    );
+    expect(offices.rows[0]!.same).toBe(false);
+    expect((await chase(sy, d.inst).expect(200)).body).toMatchObject({
+      clientPhone: '98765 43210',
       canWhatsapp: true,
     });
     const wa = (await remind('whatsapp').expect(200)).body;
