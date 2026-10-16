@@ -1,0 +1,52 @@
+import type { NoticeOutcome, NoticeServedVia, NoticeStatus, NoticeStream } from '@hsdg/contracts';
+
+/** A notice as the service reads it (NOTICE_SELECT). Dates are YYYY-MM-DD text. */
+export interface NoticeRow {
+  id: string;
+  entity_id: string;
+  entity_name: string | null;
+  engagement_id: string;
+  engagement_code: string | null;
+  engagement_kind: string | null;
+  registration_id: string | null;
+  registration_number: string | null;
+  type_id: string;
+  type_code: string;
+  type_stream: NoticeStream;
+  type_form: string | null;
+  type_section: string | null;
+  type_title: string;
+  type_appealable: boolean;
+  type_appeal_rule_code: string | null;
+  reference_no: string;
+  issued_on: string;
+  received_on: string;
+  served_via: NoticeServedVia;
+  financial_year: string | null;
+  assessment_year: string | null;
+  period_from: string | null;
+  period_to: string | null;
+  amount_demanded: string | null;
+  reply_due_on: string | null;
+  internal_due_override: string | null;
+  internal_due_on: string | null;
+  next_hearing_on: string | null;
+  owner_employee_id: string;
+  owner_name: string | null;
+  reviewer_employee_id: string | null;
+  reviewer_name: string | null;
+  status: NoticeStatus;
+  outcome: NoticeOutcome | null;
+  outcome_amount: string | null;
+  closed_on: string | null;
+  summary: string | null;
+  appeal_instance_id: string | null;
+  appeal_due_on: string | null;
+  appeal_engagement_id: string | null;
+  appeal_engagement_code: string | null;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  clock_due: string | null;
+  is_member: boolean;
+}

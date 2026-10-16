@@ -31,6 +31,7 @@ import { NotesModule } from './modules/notes/notes.module';
 import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.module';
 import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module';
 import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspace.module';
+import { NoticesModule } from './modules/notices/notices.module';
 import { SearchModule } from './modules/search/search.module';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-settings.module';
@@ -109,6 +110,7 @@ import { CredentialsModule } from './modules/credentials/credentials.module';
     NotesModule,
     StatutoryAuditModule,
     FilingWorkspaceModule,
+    NoticesModule,
     SearchModule,
     TelemetryModule,
     WorkflowSettingsModule,
