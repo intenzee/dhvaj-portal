@@ -1,0 +1,23 @@
+TDS RECONCILIATION ANALYSIS AND CORRECTION ENABLING SYSTEM (TRACES)
+Income Tax Department
+
+Intimation u/s 200A of the Income-tax Act, 1961
+
+Intimation No.: TDS200A/2627/AAA/7654321
+Date of Intimation: 04/10/2026
+
+TAN: MUMS12345E
+Name of Deductor: SAMPLE SHREE CONSTRUCTIONS
+PAN of Deductor: AAMFS3344N
+Financial Year: 2025-26        Quarter: Q1        Form: 26Q
+Token Number of Statement: 123456789012345
+Date of filing of statement: 31/07/2025
+
+Your TDS statement has been processed. The following defaults have been determined:
+Short Payment                  Rs. 0
+Short Deduction                Rs. 4,200
+Interest on late payment       Rs. 1,540
+Late filing fee u/s 234E       Rs. 6,600
+Total Default (Rs.)            12,340
+
+You may pay the amount and file a correction statement to resolve the default.

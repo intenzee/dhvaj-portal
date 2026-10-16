@@ -1,0 +1,23 @@
+Centralized Processing Centre
+Income Tax Department, Bengaluru
+
+Communication Reference Number: CPC/2526/G5/1987654321
+Date: 02/10/2026
+
+PAN: AKLPS9900Q
+Name: SAMPLE SURESH KUMAR
+Assessment Year: 2025-26
+e-Filing Acknowledgement Number: 452617890123456
+Date of filing: 30/07/2025
+
+Subject: Notice u/s 139(9) of the Income-tax Act, 1961 - Defective return
+
+On processing your return of income for the above Assessment Year, it has been noticed that
+the return is defective for the reasons given below:
+Error code 38 - Tax payer has shown gross receipts of more than Rs. 1,00,00,000 but has not
+filled the balance sheet and profit and loss account.
+
+You are requested to remove the defect within 15 days from the date of this communication,
+failing which the return shall be treated as invalid.
+
+CPC, Bengaluru
