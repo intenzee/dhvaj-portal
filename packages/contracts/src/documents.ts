@@ -20,6 +20,10 @@ export const DOCUMENT_TYPE = {
   acknowledgement: 'acknowledgement',
   certificate: 'certificate',
   other: 'other',
+  /** PS-101: a notice received, the reply filed, the order passed. */
+  notice: 'notice',
+  reply: 'reply',
+  order: 'order',
 } as const;
 export type DocumentType = (typeof DOCUMENT_TYPE)[keyof typeof DOCUMENT_TYPE];
 export const DOCUMENT_TYPES: DocumentType[] = Object.values(DOCUMENT_TYPE);
@@ -42,8 +46,7 @@ export const DOCUMENT_SENSITIVITY = {
   sensitive: 'sensitive',
   highlySensitive: 'highly_sensitive',
 } as const;
-export type DocumentSensitivity =
-  (typeof DOCUMENT_SENSITIVITY)[keyof typeof DOCUMENT_SENSITIVITY];
+export type DocumentSensitivity = (typeof DOCUMENT_SENSITIVITY)[keyof typeof DOCUMENT_SENSITIVITY];
 export const DOCUMENT_SENSITIVITIES: DocumentSensitivity[] = Object.values(DOCUMENT_SENSITIVITY);
 
 /** Lifecycle of the logical document (its version chain is always retained). */

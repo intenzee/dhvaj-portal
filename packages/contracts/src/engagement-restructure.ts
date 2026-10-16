@@ -186,7 +186,21 @@ export type QrmpCategory = (typeof QRMP_CATEGORY)[keyof typeof QRMP_CATEGORY];
  * Daman & Diu / DNH, Puducherry, Andaman & Nicobar, Lakshadweep.
  */
 export const QRMP_CATEGORY_X_STATE_CODES: readonly string[] = [
-  '22', '23', '24', '25', '26', '27', '29', '30', '31', '32', '33', '34', '35', '36', '37',
+  '22',
+  '23',
+  '24',
+  '25',
+  '26',
+  '27',
+  '29',
+  '30',
+  '31',
+  '32',
+  '33',
+  '34',
+  '35',
+  '36',
+  '37',
 ];
 
 /** Derive the QRMP category from a GSTIN's first two digits (state code). */
@@ -324,6 +338,8 @@ export const FEATURE_FLAG = {
   todayView: 'ff_today_view',
   /** Staff Workflow Phase 3: filing runs, client chasing, search, actionable notifications. */
   filingRuns: 'ff_filing_runs',
+  /** Practice Services Phase 1: the notice register, its clock on Today, appeal deadlines. */
+  notices: 'ff_notices',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);
@@ -489,7 +505,13 @@ export interface SaveComplianceProfileInput {
 export interface SaveComplianceProfileResult {
   profile: ComplianceProfileRecord;
   /** Instances regenerated in the client's open Compliance engagements. */
-  regenerated: { engagementId: string; created: number; moved: number; flagged: number; notApplicable: number }[];
+  regenerated: {
+    engagementId: string;
+    created: number;
+    moved: number;
+    flagged: number;
+    notApplicable: number;
+  }[];
 }
 
 /** Event types a manager can record (REG-01, DIR-12, the AGM, …). */
@@ -510,7 +532,8 @@ export const COMPLIANCE_EVENT_TYPE = {
   firstDeductionMonthEnd: 'first_deduction_month_end',
   tdsMonthEnd: 'tds_month_end',
 } as const;
-export type ComplianceEventType = (typeof COMPLIANCE_EVENT_TYPE)[keyof typeof COMPLIANCE_EVENT_TYPE];
+export type ComplianceEventType =
+  (typeof COMPLIANCE_EVENT_TYPE)[keyof typeof COMPLIANCE_EVENT_TYPE];
 export const COMPLIANCE_EVENT_TYPES: ComplianceEventType[] = Object.values(COMPLIANCE_EVENT_TYPE);
 
 export const COMPLIANCE_EVENT_TYPE_LABEL: Record<ComplianceEventType, string> = {

@@ -222,7 +222,7 @@ export const envSchema = z.object({
   // ── Feature flags (Engagement Restructure phases) ─────────────────────────
   // Comma list of enabled flags (ff_engagement_kinds, ff_calendar_v2,
   // ff_gst_tab, ff_compliance_tabs, ff_auto_time, ff_work_links, ff_today_view,
-  // ff_filing_runs), 'all', or 'none'. Unset →
+  // ff_filing_runs, ff_notices), 'all', or 'none'. Unset →
   // 'all' outside production (dev/test cover the new paths) and 'none' in
   // production, so each phase is switched on deliberately per environment.
   FEATURE_FLAGS: z.string().optional(),

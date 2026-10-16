@@ -83,6 +83,8 @@ export const PERMISSION = {
   credentialReveal: 'credential.reveal',
   /** ADR-0035: add, change, remove or import clients' portal logins. */
   credentialManage: 'credential.manage',
+  /** PS-101: record notices, their replies, hearings and orders, and close them. */
+  noticeManage: 'notice.manage',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

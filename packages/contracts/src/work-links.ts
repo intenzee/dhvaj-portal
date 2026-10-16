@@ -29,6 +29,8 @@ export interface WorkItemRef {
   requestId?: string | null;
   /** A statutory-audit task's area of the audit file (hsdg.audit_work_areas.id). */
   auditAreaId?: string | null;
+  /** A notice (hsdg.notices.id, PS-101): opens the notice itself. */
+  noticeId?: string | null;
 }
 
 /**
@@ -90,6 +92,7 @@ const NO_FILING_TAB: Record<EngagementKind, string> = {
  * - otherwise the engagement itself (with `?request=` when it is a request).
  */
 export function workItemHref(ref: WorkItemRef): string {
+  if (ref.noticeId) return `/notices/${ref.noticeId}`;
   const base = `/engagements/${ref.engagementId}`;
   const p = new URLSearchParams();
   const filing = Boolean(ref.instanceId || (ref.stream && ref.periodKey));
