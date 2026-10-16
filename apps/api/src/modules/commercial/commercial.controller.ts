@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  FEATURE_FLAG,
   PERMISSION,
   type EngagementCommercial,
   type InvoiceDetail,
@@ -21,6 +22,7 @@ import {
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
+import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { CommercialService } from './commercial.service';
 import {
   CreateInvoiceDto,
@@ -39,7 +41,10 @@ import {
 @ApiTags('commercial')
 @Controller('engagements')
 export class CommercialController {
-  constructor(private readonly commercial: CommercialService) {}
+  constructor(
+    private readonly commercial: CommercialService,
+    private readonly flags: FeatureFlagsService,
+  ) {}
 
   // ── Commercial configuration ────────────────────────────────────────────
 
@@ -125,13 +130,11 @@ export class CommercialController {
     @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
     @Body() dto: SetInvoiceStatusDto,
   ): Promise<InvoiceDetail> {
-    return this.commercial.setStatus(
-      rlsContextFromPrincipal(principal),
-      id,
-      invoiceId,
-      dto,
-      principal.permissions,
-    );
+    return this.commercial.setStatus(rlsContextFromPrincipal(principal), id, invoiceId, dto, {
+      permissions: principal.permissions,
+      // ff_billing_v2 makes the reason for voiding an issued invoice required.
+      reasonRequired: this.flags.isOnFor(FEATURE_FLAG.billing, principal.officeCode),
+    });
   }
 
   @Get(':id/invoices/:invoiceId/pdf')

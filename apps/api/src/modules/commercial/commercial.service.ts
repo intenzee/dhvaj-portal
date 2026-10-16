@@ -419,8 +419,9 @@ export class CommercialService {
   ): Promise<InvoiceDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       await this.assertEngagementVisible(client, engagementId);
-      const firmState = await this.firmStateCode(client);
-      if (firmState && input.taxAmount !== undefined) throw taxIsWorkedOut();
+      // GST mode: the split worked from the lines wins over a sent taxAmount
+      // (the shipped mobile app always sends one).
+      if (await this.firmStateCode(client)) input = { ...input, taxAmount: undefined };
       const clientGstin =
         input.clientGstin !== undefined
           ? input.clientGstin
@@ -482,7 +483,7 @@ export class CommercialService {
         );
       }
       if (input.taxAmount !== undefined && (await this.firmStateCode(client))) {
-        throw taxIsWorkedOut();
+        input = { ...input, taxAmount: undefined };
       }
       const sets: string[] = [];
       const params: unknown[] = [];
@@ -541,8 +542,9 @@ export class CommercialService {
     engagementId: string,
     invoiceId: string,
     input: SetInvoiceStatusInput,
-    permissions: readonly string[],
+    caller: { permissions: readonly string[]; reasonRequired: boolean },
   ): Promise<InvoiceDetail> {
+    const { permissions } = caller;
     return this.db.withRlsContext(ctx, async (client) => {
       const current = await this.loadInvoiceRow(client, engagementId, invoiceId);
       if (current.status === input.status) {
@@ -573,14 +575,19 @@ export class CommercialService {
               'Voiding an issued invoice needs the billing.approve permission.',
             );
           }
-          if (!reason) throw new BadRequestException('Say why the invoice is being voided.');
+          // Without ff_billing_v2 the shipped mobile app voids with no reason.
+          if (!reason && caller.reasonRequired) {
+            throw new BadRequestException('Say why the invoice is being voided.');
+          }
         }
+        const voidReason =
+          reason ?? (current.status === INVOICE_STATUS.draft ? 'Draft discarded' : NO_REASON);
         await client.query(
           `UPDATE hsdg.invoices
               SET status = 'void', voided_reason = $3,
                   voided_by_employee_id = $4, voided_at = now(), version = version + 1
             WHERE id = $1 AND engagement_id = $2`,
-          [invoiceId, engagementId, reason ?? 'Draft discarded', ctx.employeeId ?? null],
+          [invoiceId, engagementId, voidReason, ctx.employeeId ?? null],
         );
       } else {
         const result = await client.query(
@@ -979,10 +986,8 @@ function mapLine(row: LineRow): InvoiceLineItem {
   };
 }
 
-const taxIsWorkedOut = (): BadRequestException =>
-  new BadRequestException(
-    "Tax is worked out from each line's GST rate once the firm's GST state is set; leave taxAmount out.",
-  );
+/** Stored when a legacy client voids an issued invoice without saying why. */
+const NO_REASON = '(no reason given)';
 
 /** Map invoice/commercial PG violations to clean HTTP errors. */
 export function translateInvoiceError(err: unknown): Error {
