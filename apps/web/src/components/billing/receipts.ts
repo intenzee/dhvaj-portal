@@ -73,6 +73,8 @@ export function statementKindLabel(kind: string): string {
       return 'TDS deducted';
     case 'credit_note':
       return 'Credit note';
+    case 'write_off':
+      return 'Written off';
     case 'marked_paid':
       return 'Marked paid';
     default:

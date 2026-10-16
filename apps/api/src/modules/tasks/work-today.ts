@@ -66,9 +66,14 @@ export function reviewToToday(r: WorkReviewItem, today: string, me: string): Tod
   };
 }
 
-/** Today's rows by group; `notices` is absent (and the group left out) when ff_notices is off. */
-export type TodayRows = Record<Exclude<TodayGroup, 'notices'>, TodayItem[]> & {
+/**
+ * Today's rows by group; `notices` is absent (and the group left out) when
+ * ff_notices is off, and `write_offs` when ff_billing_v2 is off or the caller
+ * cannot approve.
+ */
+export type TodayRows = Record<Exclude<TodayGroup, 'notices' | 'write_offs'>, TodayItem[]> & {
   notices?: TodayItem[];
+  write_offs?: TodayItem[];
 };
 
 /**

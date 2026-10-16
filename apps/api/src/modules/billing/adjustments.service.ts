@@ -1,0 +1,416 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import type { PoolClient } from 'pg';
+import {
+  NOTIFICATION_TYPE,
+  creditNoteSplit,
+  formatInr,
+  fromPaise,
+  toPaise,
+  type AdjustmentKind,
+  type AdjustmentStatus,
+  type DecideAdjustmentInput,
+  type InvoiceAdjustment,
+  type RequestCreditNoteInput,
+  type RequestWriteOffInput,
+} from '@hsdg/contracts';
+import { DatabaseService } from '../../database/database.service';
+import type { RlsContext } from '../../database/rls-context';
+import { AuditService } from '../audit/audit.service';
+import { translateInvoiceError } from '../commercial/commercial.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+interface AdjustmentRow {
+  id: string;
+  kind: AdjustmentKind;
+  invoice_id: string;
+  invoice_number: string | null;
+  engagement_id: string;
+  client_entity_id: string;
+  client_name: string;
+  number: string | null;
+  credit_date: string | null;
+  reason: string;
+  taxable_value: string;
+  gst_rate: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  total: string;
+  status: AdjustmentStatus;
+  requested_by_employee_id: string | null;
+  requested_by_name: string | null;
+  created_at: Date;
+  decided_by_name: string | null;
+  decided_at: Date | null;
+  decision_note: string | null;
+  version: number;
+}
+
+/** Both kinds as one row shape; a write-off is its own taxable value and total. */
+const ADJUSTMENTS = `
+  SELECT * FROM (
+    SELECT c.id, 'credit_note'::text AS kind, c.invoice_id, c.client_entity_id,
+           c.credit_note_number AS number, c.credit_date::text, c.reason, c.taxable_value,
+           c.gst_rate, c.cgst, c.sgst, c.igst, c.total, c.status, c.requested_by_employee_id,
+           c.decided_by_employee_id, c.created_at, c.decided_at, c.decision_note, c.version
+      FROM hsdg.credit_notes c
+    UNION ALL
+    SELECT w.id, 'write_off', w.invoice_id, w.client_entity_id, NULL, NULL, w.reason, w.amount,
+           0, 0, 0, 0, w.amount, w.status, w.requested_by_employee_id, w.decided_by_employee_id,
+           w.created_at, w.decided_at, w.decision_note, w.version
+      FROM hsdg.write_offs w
+  ) a`;
+
+const ADJUSTMENT_BASE = `
+  SELECT a.id, a.kind, a.invoice_id, i.invoice_number, i.engagement_id, a.client_entity_id,
+         e.legal_name AS client_name, a.number, a.credit_date, a.reason, a.taxable_value,
+         a.gst_rate, a.cgst, a.sgst, a.igst, a.total, a.status, a.requested_by_employee_id,
+         rb.full_name AS requested_by_name, a.created_at, db.full_name AS decided_by_name,
+         a.decided_at, a.decision_note, a.version
+    FROM (${ADJUSTMENTS}) a
+    JOIN hsdg.invoices i ON i.id = a.invoice_id
+    JOIN hsdg.entities e ON e.id = a.client_entity_id
+    LEFT JOIN hsdg.employees rb ON rb.id = a.requested_by_employee_id
+    LEFT JOIN hsdg.employees db ON db.id = a.decided_by_employee_id`;
+
+const TABLE: Record<AdjustmentKind, string> = {
+  credit_note: 'hsdg.credit_notes',
+  write_off: 'hsdg.write_offs',
+};
+
+const NOUN: Record<AdjustmentKind, string> = {
+  credit_note: 'Credit note',
+  write_off: 'Write-off',
+};
+
+interface InvoiceFacts {
+  id: string;
+  invoice_number: string | null;
+  engagement_id: string;
+  client_entity_id: string;
+  status: string;
+  total: string;
+  amount_settled: string;
+  place_of_supply_state: string | null;
+  is_reverse_charge: boolean;
+  tax_charged: boolean;
+  top_rate: string | null;
+}
+
+/**
+ * PS-205 · reducing a bill: a credit note (with GST, as on the invoice) or a
+ * write-off. Anyone who bills the client (billing.manage) asks; a partner
+ * (billing.approve) who did not ask decides. Triggers number an approved
+ * credit note, refuse a requester's own decision, and settle the invoice so
+ * only approved reductions move its balance. RLS: the client's billers.
+ */
+@Injectable()
+export class AdjustmentsService {
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  /** Pending requests (the approvers' queue), or one invoice's history. */
+  list(
+    ctx: RlsContext,
+    filter: { invoiceId?: string; status?: AdjustmentStatus },
+  ): Promise<InvoiceAdjustment[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const params: unknown[] = [];
+      const conds: string[] = [];
+      if (filter.invoiceId) {
+        params.push(filter.invoiceId);
+        conds.push(`a.invoice_id = $${params.length}`);
+      }
+      if (filter.status) {
+        params.push(filter.status);
+        conds.push(`a.status = $${params.length}`);
+      }
+      const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+      const { rows } = await client.query<AdjustmentRow>(
+        `${ADJUSTMENT_BASE} ${where} ORDER BY a.created_at DESC LIMIT 200`,
+        params,
+      );
+      return rows.map(toAdjustment);
+    });
+  }
+
+  requestCreditNote(
+    ctx: RlsContext,
+    invoiceId: string,
+    input: RequestCreditNoteInput,
+  ): Promise<InvoiceAdjustment> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const inv = await this.openInvoice(client, invoiceId);
+      const rate = input.gstRate ?? Number(inv.top_rate ?? 0);
+      const firmState = await firmStateCode(client);
+      const split = creditNoteSplit(input.taxableValue, inv.tax_charged ? rate : 0, {
+        firmState,
+        placeOfSupply: inv.place_of_supply_state,
+        charged: inv.tax_charged && !inv.is_reverse_charge,
+      });
+      assertWithinBalance(inv, split.total);
+      const charged = toPaise(split.total) > toPaise(input.taxableValue);
+      let id: string;
+      try {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO hsdg.credit_notes
+             (invoice_id, client_entity_id, reason, taxable_value, gst_rate, cgst, sgst, igst,
+              requested_by_employee_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id`,
+          [
+            inv.id,
+            inv.client_entity_id,
+            input.reason.trim(),
+            fromPaise(toPaise(input.taxableValue)),
+            charged ? rate : 0,
+            split.cgst,
+            split.sgst,
+            split.igst,
+            ctx.employeeId ?? null,
+          ],
+        );
+        id = rows[0]!.id;
+      } catch (err) {
+        throw translateAdjustmentError(err);
+      }
+      return this.afterRequest(client, ctx, 'credit_note', id);
+    });
+  }
+
+  requestWriteOff(
+    ctx: RlsContext,
+    invoiceId: string,
+    input: RequestWriteOffInput,
+  ): Promise<InvoiceAdjustment> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const inv = await this.openInvoice(client, invoiceId);
+      const amount = fromPaise(toPaise(input.amount));
+      assertWithinBalance(inv, amount);
+      let id: string;
+      try {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO hsdg.write_offs
+             (invoice_id, client_entity_id, amount, reason, requested_by_employee_id)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id`,
+          [inv.id, inv.client_entity_id, amount, input.reason.trim(), ctx.employeeId ?? null],
+        );
+        id = rows[0]!.id;
+      } catch (err) {
+        throw translateAdjustmentError(err);
+      }
+      return this.afterRequest(client, ctx, 'write_off', id);
+    });
+  }
+
+  /** Approve or reject someone else's request; approval reduces the balance. */
+  decide(
+    ctx: RlsContext,
+    kind: AdjustmentKind,
+    id: string,
+    input: DecideAdjustmentInput,
+  ): Promise<InvoiceAdjustment> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.load(client, id, kind, true);
+      if (before.status !== 'pending') {
+        throw new BadRequestException(
+          `This ${NOUN[kind].toLowerCase()} is already ${before.status}.`,
+        );
+      }
+      if (input.version !== undefined && input.version !== before.version) {
+        throw new ConflictException(
+          `${NOUN[kind]} was changed by someone else (expected v${input.version}, found v${before.version}).`,
+        );
+      }
+      if (ctx.employeeId && before.requestedById === ctx.employeeId) {
+        throw new ForbiddenException('You asked for this; another partner must decide it.');
+      }
+      const approve = input.decision === 'approve';
+      if (approve) {
+        // The balance may have moved since the request (a receipt came in).
+        const inv = await this.invoiceFacts(client, before.invoiceId);
+        if (!inv || !['issued', 'partially_paid'].includes(inv.status)) {
+          throw new BadRequestException('The invoice is no longer open; reject this request.');
+        }
+        assertWithinBalance(inv, before.total);
+      }
+      try {
+        await client.query(
+          `UPDATE ${TABLE[kind]}
+              SET status = $2, decided_by_employee_id = $3, decided_at = now(),
+                  decision_note = $4, version = version + 1
+            WHERE id = $1`,
+          [
+            id,
+            approve ? 'approved' : 'rejected',
+            ctx.employeeId ?? null,
+            input.note?.trim() || null,
+          ],
+        );
+      } catch (err) {
+        throw translateAdjustmentError(err);
+      }
+      const after = await this.load(client, id, kind);
+      await this.audit.recordWith(client, ctx, {
+        action: `${kind}.${approve ? 'approved' : 'rejected'}`,
+        objectType: kind,
+        objectId: id,
+        before: { status: before.status },
+        after: {
+          status: after.status,
+          invoice: after.invoiceId,
+          total: after.total,
+          ...(after.number ? { number: after.number } : {}),
+        },
+        ...(input.note?.trim() ? { reason: input.note.trim() } : {}),
+      });
+      return after;
+    });
+  }
+
+  // ── helpers ─────────────────────────────────────────────────────────────
+
+  /** Audit the request and ask the client's partners (not the requester) to decide. */
+  private async afterRequest(
+    client: PoolClient,
+    ctx: RlsContext,
+    kind: AdjustmentKind,
+    id: string,
+  ): Promise<InvoiceAdjustment> {
+    const a = await this.load(client, id, kind);
+    await this.audit.recordWith(client, ctx, {
+      action: `${kind}.requested`,
+      objectType: kind,
+      objectId: id,
+      after: { invoice: a.invoiceId, total: a.total, taxable: a.taxableValue },
+      reason: a.reason,
+    });
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.billing_approvers($1) AS t(id) WHERE id IS DISTINCT FROM $2`,
+      [a.clientEntityId, ctx.employeeId ?? null],
+    );
+    await this.notifications.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.writeOffPending,
+      recipientEmployeeIds: rows.map((r) => r.id),
+      title: `${NOUN[kind]} of ${formatInr(a.total)} to approve · ${a.invoiceNumber ?? 'invoice'}`,
+      body: `${a.clientName}: ${a.reason}`,
+      engagementId: a.engagementId,
+      objectType: kind,
+      objectId: id,
+    });
+    return a;
+  }
+
+  private async load(
+    client: PoolClient,
+    id: string,
+    kind: AdjustmentKind,
+    lock = false,
+  ): Promise<InvoiceAdjustment> {
+    if (lock) {
+      await client.query(`SELECT 1 FROM ${TABLE[kind]} WHERE id = $1 FOR UPDATE`, [id]);
+    }
+    const { rows } = await client.query<AdjustmentRow>(
+      `${ADJUSTMENT_BASE} WHERE a.id = $1 AND a.kind = $2`,
+      [id, kind],
+    );
+    if (!rows[0]) throw new NotFoundException(`${NOUN[kind]} not found.`);
+    return toAdjustment(rows[0]);
+  }
+
+  private async invoiceFacts(client: PoolClient, invoiceId: string): Promise<InvoiceFacts | null> {
+    const { rows } = await client.query<InvoiceFacts>(
+      `SELECT i.id, i.invoice_number, i.engagement_id, i.client_entity_id, i.status, i.total,
+              i.amount_settled, i.place_of_supply_state, i.is_reverse_charge,
+              (i.cgst + i.sgst + i.igst) > 0 AS tax_charged,
+              (SELECT max(l.gst_rate)::text FROM hsdg.invoice_line_items l
+                WHERE l.invoice_id = i.id) AS top_rate
+         FROM hsdg.invoices i
+        WHERE i.id = $1`,
+      [invoiceId],
+    );
+    return rows[0] ?? null;
+  }
+
+  /** An issued, unpaid invoice of a client the caller bills. */
+  private async openInvoice(client: PoolClient, invoiceId: string): Promise<InvoiceFacts> {
+    const inv = await this.invoiceFacts(client, invoiceId);
+    if (!inv) throw new NotFoundException('Invoice not found.');
+    if (!['issued', 'partially_paid'].includes(inv.status)) {
+      throw new BadRequestException('Only an issued, unpaid invoice can be reduced.');
+    }
+    return inv;
+  }
+}
+
+/** The request must fit what is still owed (receipts and approved reductions count). */
+function assertWithinBalance(
+  inv: Pick<InvoiceFacts, 'total' | 'amount_settled' | 'invoice_number'>,
+  amount: string,
+): void {
+  const balance = toPaise(inv.total) - toPaise(inv.amount_settled);
+  if (toPaise(amount) > balance) {
+    throw new BadRequestException(
+      `${formatInr(amount)} is more than the ${formatInr(fromPaise(balance))} still owed on ${inv.invoice_number ?? 'the invoice'}.`,
+    );
+  }
+}
+
+async function firmStateCode(client: PoolClient): Promise<string | null> {
+  const { rows } = await client.query<{ state_code: string | null }>(
+    `SELECT state_code FROM hsdg.firm_settings LIMIT 1`,
+  );
+  return rows[0]?.state_code ?? null;
+}
+
+function toAdjustment(r: AdjustmentRow): InvoiceAdjustment {
+  return {
+    id: r.id,
+    kind: r.kind,
+    invoiceId: r.invoice_id,
+    invoiceNumber: r.invoice_number,
+    engagementId: r.engagement_id,
+    clientEntityId: r.client_entity_id,
+    clientName: r.client_name,
+    number: r.number,
+    creditDate: r.credit_date,
+    reason: r.reason,
+    taxableValue: r.taxable_value,
+    gstRate: r.gst_rate,
+    cgst: r.cgst,
+    sgst: r.sgst,
+    igst: r.igst,
+    total: r.total,
+    status: r.status,
+    requestedById: r.requested_by_employee_id,
+    requestedByName: r.requested_by_name,
+    requestedAt: r.created_at.toISOString(),
+    decidedByName: r.decided_by_name,
+    decidedAt: r.decided_at?.toISOString() ?? null,
+    decisionNote: r.decision_note,
+    version: r.version,
+  };
+}
+
+/** The decision guard's 42501 is a self-approval; the rest maps as for invoices. */
+function translateAdjustmentError(err: unknown): Error {
+  const e = err as { code?: string; message?: string };
+  if (e.code === '42501') {
+    return new ForbiddenException(
+      e.message?.startsWith('Someone other')
+        ? 'You asked for this; another partner must decide it.'
+        : "Only the client's home-office partners and managers (or the managing partner) reduce its bills.",
+    );
+  }
+  return translateInvoiceError(err);
+}

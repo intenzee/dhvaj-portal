@@ -45,7 +45,8 @@ export class WorkController {
       'waiting (my blocked tasks + open client requests I am responsible for), due_soon (open ' +
       'filings I prepare, review or lead due internally within 7 days or past, with or without ' +
       'a task, less those listed above), notices (open notices I own or review, by their clock ' +
-      'date — only when ff_notices is on). Each group is overdue first, then by internal date. ' +
+      'date — only when ff_notices is on), write_offs (write-offs and credit notes others asked ' +
+      'for on clients I bill — only with ff_billing_v2 and billing.approve). Each group is overdue first, then by internal date. ' +
       '?engagementId= narrows every group to one engagement. Behind ff_today_view.',
   })
   today(
@@ -57,6 +58,9 @@ export class WorkController {
     }
     return this.todayView.today(rlsContextFromPrincipal(principal), query.engagementId, {
       notices: this.flags.isOnFor(FEATURE_FLAG.notices, principal.officeCode),
+      writeOffs:
+        this.flags.isOnFor(FEATURE_FLAG.billing, principal.officeCode) &&
+        principal.permissions.includes(PERMISSION.billingApprove),
     });
   }
 

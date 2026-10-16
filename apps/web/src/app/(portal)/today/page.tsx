@@ -16,6 +16,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { PRIMARY, TaskActions } from '@/components/tasks/task-actions';
 import { RemindClientButton } from '@/components/filing/client-chase';
 import { FilingDrawer, useOpenFiling } from '@/components/filing/filing-drawer';
+import { DecideAdjustmentButtons } from '@/components/billing/decide-adjustment';
 import {
   stepSelection,
   todayContextLine,
@@ -30,6 +31,7 @@ const EMPTY: Record<TodayGroup, string> = {
   prepare: 'Nothing to prepare.',
   review: 'Nothing waiting for your review.',
   notices: 'No notice of yours has a date running.',
+  write_offs: 'No write-off or credit note waiting for you.',
   waiting: 'Not waiting on any client.',
   due_soon: 'No other filings due this week.',
 };
@@ -47,7 +49,8 @@ function isTyping(e: KeyboardEvent): boolean {
 
 /**
  * Staff Workflow WF-201 — Today: the day's work in one ordered list. To
- * prepare, to review, notices (PS-102), waiting on client, due this week —
+ * prepare, to review, notices (PS-102), write-offs to approve (PS-205),
+ * waiting on client, due this week —
  * overdue first. A
  * filing opens in the drawer over the list (WF-202); its next move (Start work,
  * Start review …) is a button on the row. j / k move, Enter opens.
@@ -212,6 +215,12 @@ function TodayScreen(): JSX.Element {
                           </div>
                           <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                             {task && <TaskActions task={task} ctx={ctx} only={PRIMARY} />}
+                            {item.adjustment && (
+                              <DecideAdjustmentButtons
+                                adjustment={item.adjustment}
+                                listKey={query.queryKey}
+                              />
+                            )}
                             {item.group === 'waiting' && item.link.instanceId && (
                               <RemindClientButton
                                 instanceId={item.link.instanceId}

@@ -2,6 +2,7 @@ import {
   INVOICE_NUMBER_MAX,
   allocateOldestFirst,
   amountInWords,
+  creditNoteSplit,
   financialYearOf,
   formatInr,
   fromPaise,
@@ -177,5 +178,40 @@ describe('tdsQuarterOf (PS-202)', () => {
 
   it('sums amounts exactly', () => {
     expect(sumAmounts(['0.10', '0.20', 0.3])).toBe('0.60');
+  });
+});
+
+describe('creditNoteSplit (PS-205)', () => {
+  it('reuses gstSplit: CGST + SGST within the firm state', () => {
+    expect(
+      creditNoteSplit('5000.00', 18, { firmState: '07', placeOfSupply: '07', charged: true }),
+    ).toEqual({ cgst: '450.00', sgst: '450.00', igst: '0.00', total: '5900.00' });
+  });
+
+  it('IGST when the client is in another state', () => {
+    expect(
+      creditNoteSplit('5000', 18, { firmState: '07', placeOfSupply: '27', charged: true }),
+    ).toEqual({ cgst: '0.00', sgst: '0.00', igst: '900.00', total: '5900.00' });
+  });
+
+  it('rounds each half to the paisa as the invoice does', () => {
+    const s = creditNoteSplit('333.33', 18, {
+      firmState: '07',
+      placeOfSupply: null,
+      charged: true,
+    });
+    const inv = gstSplit([{ taxableValue: '333.33', gstRate: 18 }], '07', null);
+    expect(s).toEqual({ cgst: inv.cgst, sgst: inv.sgst, igst: inv.igst, total: inv.total });
+    expect(s).toMatchObject({ cgst: '30.00', sgst: '30.00', total: '393.33' });
+  });
+
+  it('no tax when the invoice carried none (reverse charge, or no GST settings)', () => {
+    const none = { cgst: '0.00', sgst: '0.00', igst: '0.00', total: '5000.00' };
+    expect(
+      creditNoteSplit('5000', 18, { firmState: '07', placeOfSupply: '07', charged: false }),
+    ).toEqual(none);
+    expect(
+      creditNoteSplit('5000', 18, { firmState: null, placeOfSupply: '07', charged: true }),
+    ).toEqual(none);
   });
 });

@@ -32,7 +32,10 @@ import { Field, Input } from '@/components/form';
 import { RecordReceiptModal } from '@/components/billing/record-receipt-modal';
 import { statementKindLabel } from '@/components/billing/receipts';
 
-/** PS-202 · a client's account with the firm: invoices, receipts, TDS and the balance. */
+/**
+ * PS-202 · a client's account with the firm: invoices, receipts, TDS, approved
+ * credit notes and write-offs (PS-205) and the balance.
+ */
 export default function ClientStatementPage(): JSX.Element {
   const { entityId } = useParams<{ entityId: string }>();
   const { principal } = useAuth();
@@ -65,7 +68,7 @@ export default function ClientStatementPage(): JSX.Element {
     <div>
       <PageHeader
         title={s.entityName}
-        subtitle="Statement of account: every issued invoice, what was received and the TDS deducted."
+        subtitle="Statement of account: every issued invoice, what was received, the TDS deducted and any approved credit."
         back={{ href: '/billing', label: 'Billing & Collections' }}
         actions={
           can(principal, PERMISSION.billingManage) ? (
@@ -76,10 +79,11 @@ export default function ClientStatementPage(): JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Tile label="Invoiced" value={s.totals.invoiced} />
         <Tile label="Received" value={s.totals.received} />
         <Tile label="TDS deducted" value={s.totals.tds} />
+        <Tile label="Credited" value={s.totals.credited} />
         <Tile
           label={owes < 0 ? 'In credit' : 'Balance due'}
           value={String(Math.abs(owes))}

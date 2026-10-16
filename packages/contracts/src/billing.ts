@@ -345,7 +345,7 @@ export interface TdsQuarter {
 export interface StatementLine {
   date: string;
   /** marked_paid: an invoice marked paid by hand before receipts existed. */
-  kind: 'invoice' | 'receipt' | 'tds' | 'credit_note' | 'marked_paid';
+  kind: 'invoice' | 'receipt' | 'tds' | 'credit_note' | 'write_off' | 'marked_paid';
   reference: string | null;
   /** What the client owes more (invoice) … */
   debit: string;
@@ -363,13 +363,21 @@ export interface ClientStatement {
   entityName: string;
   invoices: OpenInvoice[];
   receipts: ReceiptRecord[];
-  /** PS-205 fills this; empty until credit notes exist. */
-  credits: { id: string; number: string | null; date: string; amount: string }[];
+  /** Approved credit notes and write-offs (PS-205), oldest first. */
+  credits: {
+    id: string;
+    kind: AdjustmentKind;
+    invoiceId: string;
+    number: string | null;
+    date: string;
+    amount: string;
+  }[];
   lines: StatementLine[];
   totals: {
     invoiced: string;
     received: string;
     tds: string;
+    /** Approved credit notes and write-offs. */
     credited: string;
     /** invoiced − (received + tds + credited) on invoices; >0 the client owes. */
     balance: string;
@@ -421,4 +429,90 @@ export function allocateOldestFirst(
 /** Sum decimal strings exactly. Pure — tested. */
 export function sumAmounts(amounts: (string | number)[]): string {
   return fromPaise(amounts.reduce<bigint>((s, a) => s + toPaise(a), 0n));
+}
+
+// ── PS-205 · Credit notes and write-offs, with a partner's approval ──────
+
+export const ADJUSTMENT_KINDS = ['credit_note', 'write_off'] as const;
+export type AdjustmentKind = (typeof ADJUSTMENT_KINDS)[number];
+
+/** A write-off is never void; an approved credit note may be voided. */
+export const ADJUSTMENT_STATUSES = ['pending', 'approved', 'rejected', 'void'] as const;
+export type AdjustmentStatus = (typeof ADJUSTMENT_STATUSES)[number];
+
+/**
+ * A request to reduce what a client owes on an invoice. Asked for with
+ * billing.manage, decided by someone else with billing.approve; only an
+ * approved one counts against the invoice's balance.
+ */
+export interface InvoiceAdjustment {
+  id: string;
+  kind: AdjustmentKind;
+  invoiceId: string;
+  invoiceNumber: string | null;
+  engagementId: string;
+  clientEntityId: string;
+  clientName: string;
+  /** CN/26-27/0001 once a credit note is approved; null otherwise. */
+  number: string | null;
+  /** The credit note's date (approval day, IST); null until then. */
+  creditDate: string | null;
+  reason: string;
+  /** Before tax; a write-off's amount. */
+  taxableValue: string;
+  gstRate: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  /** What comes off the balance. */
+  total: string;
+  status: AdjustmentStatus;
+  requestedById: string | null;
+  requestedByName: string | null;
+  requestedAt: string;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  version: number;
+}
+
+/** POST /billing/invoices/:invoiceId/credit-notes. */
+export interface RequestCreditNoteInput {
+  /** Before tax; GST is added as on the invoice. */
+  taxableValue: string;
+  /** Defaults to the invoice's highest line rate. */
+  gstRate?: number;
+  reason: string;
+}
+
+/** POST /billing/invoices/:invoiceId/write-offs. */
+export interface RequestWriteOffInput {
+  amount: string;
+  reason: string;
+}
+
+/** POST /billing/{credit-notes|write-offs}/:id/decision. */
+export interface DecideAdjustmentInput {
+  decision: 'approve' | 'reject';
+  note?: string | null;
+  version?: number;
+}
+
+/**
+ * The GST on a credit note, worked as on its invoice (gstSplit): CGST + SGST
+ * when the place of supply is the firm's state, else IGST. No tax when the
+ * invoice carried none — reverse charge, or billed before GST invoicing.
+ * Pure — tested.
+ */
+export function creditNoteSplit(
+  taxableValue: string,
+  gstRate: string | number,
+  invoice: { firmState: string | null; placeOfSupply: string | null; charged: boolean },
+): { cgst: string; sgst: string; igst: string; total: string } {
+  if (!invoice.charged || !invoice.firmState) {
+    const total = fromPaise(toPaise(taxableValue));
+    return { cgst: '0.00', sgst: '0.00', igst: '0.00', total };
+  }
+  const s = gstSplit([{ taxableValue, gstRate }], invoice.firmState, invoice.placeOfSupply);
+  return { cgst: s.cgst, sgst: s.sgst, igst: s.igst, total: s.total };
 }

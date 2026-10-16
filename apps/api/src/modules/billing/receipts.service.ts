@@ -242,7 +242,7 @@ export class ReceiptsService {
     });
   }
 
-  /** Invoices, receipts and the running balance for one client. */
+  /** Invoices, receipts, credits and the running balance for one client. */
   statement(ctx: RlsContext, entityId: string): Promise<ClientStatement> {
     return this.db.withRlsContext(ctx, async (client) => {
       const entityName = await this.assertClient(client, entityId);
@@ -260,6 +260,31 @@ export class ReceiptsService {
       );
       const receipts = await this.withAllocations(client, receiptRows.rows);
       const posted = receipts.filter((r) => r.status === 'posted');
+      // PS-205: approved credit notes and write-offs, dated the day they were approved.
+      const credits = await client.query<{
+        id: string;
+        kind: 'credit_note' | 'write_off';
+        invoice_id: string;
+        invoice_number: string | null;
+        number: string | null;
+        date: string;
+        amount: string;
+      }>(
+        `SELECT a.id, a.kind, a.invoice_id, i.invoice_number, a.number, a.date, a.amount
+           FROM (SELECT c.id, 'credit_note'::text AS kind, c.invoice_id,
+                        c.credit_note_number AS number, c.credit_date::text AS date,
+                        c.total AS amount, c.decided_at
+                   FROM hsdg.credit_notes c
+                  WHERE c.client_entity_id = $1 AND c.status = 'approved'
+                 UNION ALL
+                 SELECT w.id, 'write_off', w.invoice_id, NULL,
+                        timezone('Asia/Kolkata', w.decided_at)::date::text, w.amount, w.decided_at
+                   FROM hsdg.write_offs w
+                  WHERE w.client_entity_id = $1 AND w.status = 'approved') a
+           JOIN hsdg.invoices i ON i.id = a.invoice_id
+          ORDER BY a.date, a.decided_at`,
+        [entityId],
+      );
 
       type Entry = Omit<StatementLine, 'balance'> & { order: number };
       const entries: Entry[] = [];
@@ -312,6 +337,21 @@ export class ReceiptsService {
           });
         }
       }
+      for (const c of credits.rows) {
+        entries.push({
+          date: c.date,
+          kind: c.kind,
+          reference:
+            c.kind === 'credit_note'
+              ? `${c.number} on ${c.invoice_number ?? 'invoice'}`
+              : `on ${c.invoice_number ?? 'invoice'}`,
+          debit: '0.00',
+          credit: c.amount,
+          invoiceId: c.invoice_id,
+          receiptId: null,
+          order: 4,
+        });
+      }
       entries.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
       let running = 0n;
       const lines: StatementLine[] = entries.map(({ order: _order, ...e }) => {
@@ -332,13 +372,20 @@ export class ReceiptsService {
         entityName,
         invoices: invoices.rows.map(toOpenInvoice),
         receipts,
-        credits: [],
+        credits: credits.rows.map((c) => ({
+          id: c.id,
+          kind: c.kind,
+          invoiceId: c.invoice_id,
+          number: c.number,
+          date: c.date,
+          amount: c.amount,
+        })),
         lines,
         totals: {
           invoiced: sumAmounts(invoices.rows.map((i) => i.total)),
           received: sumAmounts([...posted.map((r) => r.netAmount), ...markedPaid]),
           tds: sumAmounts(posted.map((r) => r.tdsAmount)),
-          credited: '0.00',
+          credited: sumAmounts(credits.rows.map((c) => c.amount)),
           balance: fromPaise(running),
           advance: sumAmounts(posted.map((r) => r.unallocated)),
         },
