@@ -17,6 +17,7 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
+import { OpenNoticesWidget } from '@/components/notices/open-notices-widget';
 import { planningTeam, taskContextFor } from '@/lib/engagement-context';
 import { useUrlState } from '@/lib/url-state';
 import { useWorkLinkFocus } from '@/lib/work-focus';
@@ -34,12 +35,7 @@ import {
 } from '@/components/engagement/overview-widgets';
 import { engagementAbilities } from '@/lib/engagement-permissions';
 import { formatDate, humanize } from '@/lib/format';
-import type {
-  EngagementDetail,
-  MyTask,
-  ComplianceRow,
-  MyClientDependency,
-} from '@/lib/types';
+import type { EngagementDetail, MyTask, ComplianceRow, MyClientDependency } from '@/lib/types';
 import {
   PageHeader,
   Spinner,
@@ -395,13 +391,15 @@ export default function EngagementDetailPage(): JSX.Element {
           className="mb-4 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700"
         >
           This engagement has no {STREAM_LABEL[missingTab as Stream] ?? humanize(missingTab)} tab
-          {layout === 'compliance' && pageFy ? ` in FY ${pageFy}` : ''}, so the link opened Overview.
+          {layout === 'compliance' && pageFy ? ` in FY ${pageFy}` : ''}, so the link opened
+          Overview.
         </p>
       )}
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
       {tab === 'overview' && (
         <div className="space-y-4">
+          <OpenNoticesWidget engagementId={e.id} />
           {layout !== 'legacy' && tabs && <OverviewWidgets engagementId={e.id} tabs={tabs} />}
           {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} />}
           <Card>
@@ -670,7 +668,11 @@ export default function EngagementDetailPage(): JSX.Element {
                   </thead>
                   <tbody>
                     {deps.data.items.map((d) => (
-                      <tr key={d.id} data-request-id={d.id} className="border-b border-line last:border-0">
+                      <tr
+                        key={d.id}
+                        data-request-id={d.id}
+                        className="border-b border-line last:border-0"
+                      >
                         <td className="px-4 py-2.5 text-ink">{d.requestedInfo}</td>
                         <td className="px-4 py-2.5">
                           <StatusBadge status={d.status} />

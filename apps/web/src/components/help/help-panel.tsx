@@ -81,6 +81,7 @@ export function HelpPanel({
   const sections = visibleNavSections(principal, {
     workLinks: isOn(FEATURE_FLAG.workLinks),
     todayView: isOn(FEATURE_FLAG.todayView),
+    notices: isOn(FEATURE_FLAG.notices),
   });
 
   return (

@@ -39,13 +39,19 @@ describe('visibleNav', () => {
 
   it('shows engagement items to a user with engagement.read', () => {
     const labels = visibleNav(principal([PERMISSION.engagementRead])).map((i) => i.label);
-    expect(labels).toEqual(expect.arrayContaining(['Engagements', 'My Work', 'Reviews & Sign-offs']));
+    expect(labels).toEqual(
+      expect.arrayContaining(['Engagements', 'My Work', 'Reviews & Sign-offs']),
+    );
     expect(labels).not.toContain('Administration');
   });
 
   it('shows Administration to a partner who sets the workflow policy, without user.manage', () => {
-    expect(visibleNav(principal([PERMISSION.workflowManage])).map((i) => i.label)).toContain('Administration');
-    expect(visibleNav(principal([PERMISSION.userManage])).map((i) => i.label)).toContain('Administration');
+    expect(visibleNav(principal([PERMISSION.workflowManage])).map((i) => i.label)).toContain(
+      'Administration',
+    );
+    expect(visibleNav(principal([PERMISSION.userManage])).map((i) => i.label)).toContain(
+      'Administration',
+    );
   });
 });
 
@@ -57,9 +63,13 @@ describe('visibleNavSections', () => {
   });
 
   it('groups client work under its own heading', () => {
-    const sections = visibleNavSections(principal([PERMISSION.engagementRead, PERMISSION.entityRead]));
+    const sections = visibleNavSections(
+      principal([PERMISSION.engagementRead, PERMISSION.entityRead]),
+    );
     const clientWork = sections.find((s) => s.title === 'Client work');
-    expect(clientWork?.items.map((i) => i.label)).toEqual(expect.arrayContaining(['Engagements', 'Clients']));
+    expect(clientWork?.items.map((i) => i.label)).toEqual(
+      expect.arrayContaining(['Engagements', 'Clients']),
+    );
   });
 
   it('gives every item a plain-language hint', () => {
@@ -100,19 +110,23 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
     roles,
     effectiveRole,
   });
-  const labels = (p: Principal, workLinks = true) => visibleNav(p, { workLinks }).map((i) => i.label);
+  const labels = (p: Principal, workLinks = true) =>
+    visibleNav(p, { workLinks }).map((i) => i.label);
 
-  it.each(['article', 'senior'] as RoleSlug[])('a %s sees at most 7 items: the client work', (role) => {
-    expect(labels(as([role]))).toEqual([
-      'Home',
-      'My Work',
-      'Notifications',
-      'Engagements',
-      'Clients',
-      'Compliance',
-      'Documents',
-    ]);
-  });
+  it.each(['article', 'senior'] as RoleSlug[])(
+    'a %s sees at most 7 items: the client work',
+    (role) => {
+      expect(labels(as([role]))).toEqual([
+        'Home',
+        'My Work',
+        'Notifications',
+        'Engagements',
+        'Clients',
+        'Compliance',
+        'Documents',
+      ]);
+    },
+  );
 
   it.each(['manager', 'partner', 'managing_partner', 'admin'] as RoleSlug[])(
     'a %s keeps the back-office, minus the lists folded into My Work',
@@ -123,7 +137,9 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
       expect(off.filter((l) => !on.includes(l)).sort()).toEqual(
         ['Client Dependencies', 'Reviews & Sign-offs', 'Tasks'].sort(),
       );
-      expect(on).toEqual(expect.arrayContaining(['Services', 'Resource Management', 'Reports & MIS']));
+      expect(on).toEqual(
+        expect.arrayContaining(['Services', 'Resource Management', 'Reports & MIS']),
+      );
     },
   );
 
@@ -136,7 +152,12 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
   });
 
   it('never shows what the permissions hide', () => {
-    expect(labels(as(['senior'], [PERMISSION.engagementRead]))).toEqual(['Home', 'My Work', 'Engagements', 'Documents']);
+    expect(labels(as(['senior'], [PERMISSION.engagementRead]))).toEqual([
+      'Home',
+      'My Work',
+      'Engagements',
+      'Documents',
+    ]);
   });
 
   it('with the flag off nothing changes for anyone', () => {
@@ -164,10 +185,13 @@ describe('Today (WF-201)', () => {
     expect(visibleNav(p).map((i) => i.label)).not.toContain('Today');
   });
 
-  it.each(['article', 'senior'] as RoleSlug[])('a %s lands on Today; Home stays in the sidebar', (role) => {
-    expect(landingPath(as([role]), { todayView: true })).toBe('/today');
-    expect(visibleNav(as([role]), { todayView: true }).map((i) => i.label)).toContain('Home');
-  });
+  it.each(['article', 'senior'] as RoleSlug[])(
+    'a %s lands on Today; Home stays in the sidebar',
+    (role) => {
+      expect(landingPath(as([role]), { todayView: true })).toBe('/today');
+      expect(visibleNav(as([role]), { todayView: true }).map((i) => i.label)).toContain('Home');
+    },
+  );
 
   it('everyone else, or anyone with the flag off, lands on Home', () => {
     expect(landingPath(as(['manager']), { todayView: true })).toBe('/');
@@ -217,5 +241,27 @@ describe('foldedHref', () => {
     expect(foldedHref('/reviews?filter=signoff', false)).toBe('/reviews?filter=signoff');
     expect(foldedHref('/engagements/new', true)).toBe('/engagements/new');
     expect(foldedHref('/my-work?tab=tasks', true)).toBe('/my-work?tab=tasks');
+  });
+});
+
+describe('Notices (PS-102)', () => {
+  it('shows only with ff_notices on, to readers and to notice managers', () => {
+    expect(visibleNav(principal([PERMISSION.engagementRead])).map((i) => i.label)).not.toContain(
+      'Notices',
+    );
+    expect(
+      visibleNav(principal([PERMISSION.engagementRead]), { notices: true }).map((i) => i.label),
+    ).toContain('Notices');
+    expect(
+      visibleNav(principal([PERMISSION.noticeManage]), { notices: true }).map((i) => i.label),
+    ).toContain('Notices');
+    expect(visibleNav(principal([]), { notices: true }).map((i) => i.label)).not.toContain(
+      'Notices',
+    );
+  });
+
+  it('marks Notices current on a notice', () => {
+    const items = visibleNav(principal([PERMISSION.engagementRead]), { notices: true });
+    expect(activeNavHref(items, '/notices/abc')).toBe('/notices');
   });
 });
