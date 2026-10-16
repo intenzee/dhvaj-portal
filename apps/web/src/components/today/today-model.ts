@@ -42,7 +42,15 @@ export function todayDrawerItems(
  * registration), the notice's type, or the engagement.
  */
 export function todayContextLine(i: TodayItem): string {
-  if (i.notice) return `${i.entityName} · ${i.notice.typeLabel} · ${i.engagementCode}`;
+  if (i.notice) {
+    // The title already leads with part of the type ("Scrutiny assessment · ref"): don't say it twice.
+    const named = new Set(i.title.split(' · '));
+    const type = i.notice.typeLabel
+      .split(' · ')
+      .filter((p) => !named.has(p))
+      .join(' · ');
+    return [i.entityName, type, i.engagementCode].filter(Boolean).join(' · ');
+  }
   const what = i.filing
     ? [i.filing.formLabel, i.filing.periodLabel, i.filing.registrationNumber]
         .filter(Boolean)

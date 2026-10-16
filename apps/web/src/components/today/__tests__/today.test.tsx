@@ -324,9 +324,8 @@ describe('today-model', () => {
       },
       link: { engagementId: 'e1', engagementKind: 'compliance', noticeId: 'n1' },
     };
-    expect(todayContextLine(notice)).toBe(
-      'Bharat Textiles · ASMT-10 · s.61 · Scrutiny of returns · ENG-1',
-    );
+    // The title already says ASMT-10, so the context line doesn't repeat it.
+    expect(todayContextLine(notice)).toBe('Bharat Textiles · s.61 · Scrutiny of returns · ENG-1');
     expect(todayDateLead(notice)).toBe('Reply due');
     expect(todayDateLead(gst)).toBeNull();
     // Its own page even with ff_work_links off.
