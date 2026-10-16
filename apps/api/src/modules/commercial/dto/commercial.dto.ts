@@ -126,7 +126,11 @@ export class CreateInvoiceDto extends InvoiceGstDto {
   @IsDateString()
   dueDate?: string | null;
 
-  @ApiPropertyOptional({ example: '1800.00', description: 'Tax amount as a decimal string.' })
+  @ApiPropertyOptional({
+    example: '1800.00',
+    description:
+      "Tax amount as a decimal string. Ignored once the firm's GST state is set: the CGST/SGST/IGST split is worked from the lines.",
+  })
   @IsOptional()
   @IsNumberString()
   taxAmount?: string;
@@ -162,7 +166,11 @@ export class UpdateInvoiceDto extends InvoiceGstDto {
   @IsDateString()
   dueDate?: string | null;
 
-  @ApiPropertyOptional({ example: '1800.00' })
+  @ApiPropertyOptional({
+    example: '1800.00',
+    description:
+      "Ignored once the firm's GST state is set: the CGST/SGST/IGST split is worked from the lines.",
+  })
   @IsOptional()
   @IsNumberString()
   taxAmount?: string;
@@ -190,7 +198,10 @@ export class SetInvoiceStatusDto {
   @IsDateString()
   issueDate?: string;
 
-  @ApiPropertyOptional({ description: 'Why — required to void an issued invoice.' })
+  @ApiPropertyOptional({
+    description:
+      'Why. Required to void an issued invoice while ff_billing_v2 is on; otherwise stored as "(no reason given)".',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)

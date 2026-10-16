@@ -5,6 +5,7 @@ import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
 import { dateFromToday } from './date.helper';
+import { FeatureFlagsService } from '../src/common/feature-flags/feature-flags.service';
 
 /**
  * PS-201 · GST-correct invoices and a billing permission.
@@ -182,15 +183,23 @@ describe('PS-201 GST invoices (e2e)', () => {
         .expect(400);
     });
 
-    it('charges IGST inter-state and refuses a hand-entered tax', async () => {
+    it('charges IGST inter-state and ignores a hand-entered tax', async () => {
       const eng = await engagement();
       const d = await draft(eng, { clientGstin: '27AAACB1234C1Z5' });
       expect(d).toMatchObject({ placeOfSupplyState: '27', cgst: '0.00', igst: '19350.27' });
-      await http()
+      // The shipped mobile app always sends taxAmount: the worked split wins.
+      const created = await http()
         .post(`/api/v1/engagements/${eng}/invoices`)
         .set(bearer(pa))
-        .send({ taxAmount: '100.00', lines: [{ description: 'X', unitAmount: '1' }] })
-        .expect(400);
+        .send({ taxAmount: '100.00', lines: [{ description: 'X', unitAmount: '1000' }] })
+        .expect(201);
+      expect(created.body.taxAmount).toBe('180.00');
+      const edited = await http()
+        .patch(`/api/v1/engagements/${eng}/invoices/${created.body.id as string}`)
+        .set(bearer(pa))
+        .send({ taxAmount: '5.00', notes: 'edited', version: created.body.version })
+        .expect(200);
+      expect(edited.body).toMatchObject({ taxAmount: '180.00', notes: 'edited' });
     });
   });
 
@@ -242,6 +251,23 @@ describe('PS-201 GST invoices (e2e)', () => {
         voidedReason: 'Raised on the wrong engagement',
         voidedByName: 'Partner A',
       });
+    });
+
+    it('lets the shipped mobile app void without a reason while ff_billing_v2 is off', async () => {
+      const eng = await engagement();
+      const d = await draft(eng);
+      await issue(pa, eng, d.id as string).expect(201);
+      const path = `/api/v1/engagements/${eng}/invoices/${d.id as string}/status`;
+      const flags = app.get(FeatureFlagsService);
+      flags.setRules(new Map([['ff_billing_v2', { mode: 'off', officeCodes: new Set<string>() }]]));
+      try {
+        const mx = await token('manager.x@dhvaj.in');
+        await http().post(path).set(bearer(mx)).send({ status: 'void' }).expect(403);
+        const voided = await http().post(path).set(bearer(pa)).send({ status: 'void' }).expect(201);
+        expect(voided.body).toMatchObject({ status: 'void', voidedReason: '(no reason given)' });
+      } finally {
+        flags.setRules(new Map());
+      }
     });
   });
 
