@@ -1,0 +1,21 @@
+Income Tax Department
+Centralized Processing Centre
+
+Intimation under section 245 of the Income-tax Act, 1961
+
+Communication Reference No.: CPC/2627/A6/2345678901
+Date: 11-Oct-2026
+
+PAN: AABCG2233L
+Name: SAMPLE GREEN LEAF FOODS PRIVATE LIMITED
+Assessment Year: 2026-27
+
+This is to inform you that a refund of Rs. 12,000 has been determined for the Assessment Year
+2026-27. However, the following demand is outstanding against you:
+
+Assessment Year   Section   Demand ID        Outstanding demand
+2021-22           143(1)    2022202137012345  Rs. 45,670
+
+It is proposed to adjust the above outstanding demand of Rs. 45,670 against the refund. You are
+requested to submit your response within 30 days of receipt of this intimation. In case no
+response is received, the refund will be adjusted against the outstanding demand.
