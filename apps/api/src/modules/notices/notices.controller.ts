@@ -16,6 +16,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   FEATURE_FLAG,
   PERMISSION,
+  type AppealNoticeResponse,
   type Notice,
   type NoticeListResponse,
   type NoticeType,
@@ -27,6 +28,7 @@ import { NoticesService } from './notices.service';
 import { NoticeTypesService } from './notice-types.service';
 import {
   AddNoticeEventDto,
+  AppealNoticeDto,
   CloseNoticeDto,
   CreateNoticeDto,
   NoticeDocumentUploadDto,
@@ -137,6 +139,19 @@ export class NoticesController {
   ): Promise<Notice> {
     requireNotices(this.flags, principal);
     return this.notices.close(rlsContextFromPrincipal(principal), id, body);
+  }
+
+  @Post(':id/appeal')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSION.noticeManage)
+  @ApiOperation({ summary: 'Appeal the order: open its Assignment engagement (PS-103)' })
+  appeal(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AppealNoticeDto,
+  ): Promise<AppealNoticeResponse> {
+    requireNotices(this.flags, principal);
+    return this.notices.appealNotice(rlsContextFromPrincipal(principal), id, body);
   }
 
   @Post(':id/documents')

@@ -161,116 +161,123 @@ export class EngagementsService {
   }
 
   async createEngagement(ctx: RlsContext, input: CreateEngagementInput): Promise<EngagementDetail> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      // The client must be one the caller can see (office or via engagement).
-      const entity = await client.query<{ id: string; home_office_id: string }>(
-        `SELECT id, home_office_id FROM hsdg.entities WHERE id = $1`,
-        [input.entityId],
+    return this.db.withRlsContext(ctx, (client) => this.createEngagementWith(client, ctx, input));
+  }
+
+  /** createEngagement on the caller's transaction (a notice's appeal opens one, PS-103). */
+  async createEngagementWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    input: CreateEngagementInput,
+  ): Promise<EngagementDetail> {
+    // The client must be one the caller can see (office or via engagement).
+    const entity = await client.query<{ id: string; home_office_id: string }>(
+      `SELECT id, home_office_id FROM hsdg.entities WHERE id = $1`,
+      [input.entityId],
+    );
+    if (!entity.rows[0]) {
+      throw new BadRequestException('Entity not found or not accessible.');
+    }
+    const officeId = input.officeCode
+      ? await this.resolveOfficeId(client, input.officeCode)
+      : entity.rows[0].home_office_id;
+
+    // Default accountability to the creator, but only into a role their grade
+    // allows: a partner becomes the EP, a manager becomes the manager. RLS
+    // then requires the EP/manager to be the caller unless they are firm-wide,
+    // and the grade trigger rejects a non-partner EP / non-manager manager.
+    let epId = input.engagementPartnerEmployeeId ?? null;
+    let managerId = input.engagementManagerEmployeeId ?? null;
+    if (ctx.employeeId && (epId === null || managerId === null)) {
+      const grade = await this.callerGradeClass(client, ctx.employeeId);
+      if (epId === null && grade === 'partner') epId = ctx.employeeId;
+      if (managerId === null && grade === 'manager') managerId = ctx.employeeId;
+    }
+
+    // Kind, service, streams and years in scope; independence rules (Change 1).
+    const plan = await this.kinds.planCreate(client, input);
+    const status = input.status ?? 'prospect';
+
+    let id: string;
+    try {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO hsdg.engagements
+           (entity_id, service_id, financial_year, period_label, office_id,
+            engagement_partner_id, engagement_manager_id, status,
+            predecessor_engagement_id, planned_start_date, planned_end_date, accepted_at,
+            engagement_type, priority, confidentiality, currency, billing_model,
+            mandate_letter_reference, mandate_letter_date, kind)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+            COALESCE($13,'recurring_compliance'),COALESCE($14,'normal'),
+            COALESCE($15,'normal'),COALESCE($16,'INR'),$17,$18,$19,$20)
+         RETURNING id`,
+        [
+          input.entityId,
+          plan.serviceId,
+          plan.financialYear,
+          input.periodLabel ?? 'FY',
+          officeId,
+          epId,
+          managerId,
+          status,
+          input.predecessorEngagementId ?? null,
+          input.plannedStartDate ?? null,
+          input.plannedEndDate ?? null,
+          isAccepted(input.status) ? new Date() : null,
+          input.engagementType ?? null,
+          input.priority ?? null,
+          input.confidentiality ?? null,
+          input.currency ?? null,
+          input.billingModel ?? null,
+          input.mandateLetterReference ?? null,
+          input.mandateLetterDate ?? null,
+          plan.kind,
+        ],
       );
-      if (!entity.rows[0]) {
-        throw new BadRequestException('Entity not found or not accessible.');
-      }
-      const officeId = input.officeCode
-        ? await this.resolveOfficeId(client, input.officeCode)
-        : entity.rows[0].home_office_id;
+      id = rows[0]!.id;
+    } catch (err) {
+      throw translatePgError(err);
+    }
+    await this.kinds.completeCreate(
+      client,
+      ctx,
+      id,
+      officeId,
+      serviceStatusFromEngagement(status),
+      plan,
+      input.streamLeads,
+      input.acknowledgedIndependenceRules,
+    );
 
-      // Default accountability to the creator, but only into a role their grade
-      // allows: a partner becomes the EP, a manager becomes the manager. RLS
-      // then requires the EP/manager to be the caller unless they are firm-wide,
-      // and the grade trigger rejects a non-partner EP / non-manager manager.
-      let epId = input.engagementPartnerEmployeeId ?? null;
-      let managerId = input.engagementManagerEmployeeId ?? null;
-      if (ctx.employeeId && (epId === null || managerId === null)) {
-        const grade = await this.callerGradeClass(client, ctx.employeeId);
-        if (epId === null && grade === 'partner') epId = ctx.employeeId;
-        if (managerId === null && grade === 'manager') managerId = ctx.employeeId;
-      }
-
-      // Kind, service, streams and years in scope; independence rules (Change 1).
-      const plan = await this.kinds.planCreate(client, input);
-      const status = input.status ?? 'prospect';
-
-      let id: string;
-      try {
-        const { rows } = await client.query<{ id: string }>(
-          `INSERT INTO hsdg.engagements
-             (entity_id, service_id, financial_year, period_label, office_id,
-              engagement_partner_id, engagement_manager_id, status,
-              predecessor_engagement_id, planned_start_date, planned_end_date, accepted_at,
-              engagement_type, priority, confidentiality, currency, billing_model,
-              mandate_letter_reference, mandate_letter_date, kind)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-              COALESCE($13,'recurring_compliance'),COALESCE($14,'normal'),
-              COALESCE($15,'normal'),COALESCE($16,'INR'),$17,$18,$19,$20)
-           RETURNING id`,
-          [
-            input.entityId,
-            plan.serviceId,
-            plan.financialYear,
-            input.periodLabel ?? 'FY',
-            officeId,
-            epId,
-            managerId,
-            status,
-            input.predecessorEngagementId ?? null,
-            input.plannedStartDate ?? null,
-            input.plannedEndDate ?? null,
-            isAccepted(input.status) ? new Date() : null,
-            input.engagementType ?? null,
-            input.priority ?? null,
-            input.confidentiality ?? null,
-            input.currency ?? null,
-            input.billingModel ?? null,
-            input.mandateLetterReference ?? null,
-            input.mandateLetterDate ?? null,
-            plan.kind,
-          ],
-        );
-        id = rows[0]!.id;
-      } catch (err) {
-        throw translatePgError(err);
-      }
-      await this.kinds.completeCreate(
-        client,
-        ctx,
-        id,
-        officeId,
-        serviceStatusFromEngagement(status),
-        plan,
-        input.streamLeads,
-        input.acknowledgedIndependenceRules,
-      );
-
-      // When the primary service is Statutory Audit, provision its versioned
-      // workflow shell now (§5, §36) — the AFTER-INSERT trigger has already
-      // created the primary engagement_services row. Without this, an engagement
-      // created with Statutory Audit as its primary service would have no audit
-      // file in the Work tab (provisioning previously fired only in addService).
-      // Idempotent and atomic with this transaction.
-      const { rows: primary } = await client.query<{ id: string; code: string }>(
-        `SELECT es.id, s.code
-           FROM hsdg.engagement_services es
-           JOIN hsdg.services s ON s.id = es.service_id
-          WHERE es.engagement_id = $1 AND es.is_primary
-          LIMIT 1`,
-        [id],
-      );
-      if (primary[0]?.code === STATUTORY_AUDIT_SERVICE_CODE) {
-        await this.statutoryAudit.provision(client, ctx, {
-          engagementServiceId: primary[0].id,
-          engagementId: id,
-        });
-      }
-
-      const detail = await selectEngagementDetail(client, id);
-      await this.audit.recordWith(client, ctx, {
-        action: 'engagement.created',
-        objectType: 'engagement',
-        objectId: id,
-        after: detail,
+    // When the primary service is Statutory Audit, provision its versioned
+    // workflow shell now (§5, §36) — the AFTER-INSERT trigger has already
+    // created the primary engagement_services row. Without this, an engagement
+    // created with Statutory Audit as its primary service would have no audit
+    // file in the Work tab (provisioning previously fired only in addService).
+    // Idempotent and atomic with this transaction.
+    const { rows: primary } = await client.query<{ id: string; code: string }>(
+      `SELECT es.id, s.code
+         FROM hsdg.engagement_services es
+         JOIN hsdg.services s ON s.id = es.service_id
+        WHERE es.engagement_id = $1 AND es.is_primary
+        LIMIT 1`,
+      [id],
+    );
+    if (primary[0]?.code === STATUTORY_AUDIT_SERVICE_CODE) {
+      await this.statutoryAudit.provision(client, ctx, {
+        engagementServiceId: primary[0].id,
+        engagementId: id,
       });
-      return detail!;
+    }
+
+    const detail = await selectEngagementDetail(client, id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'engagement.created',
+      objectType: 'engagement',
+      objectId: id,
+      after: detail,
     });
+    return detail!;
   }
 
   async updateEngagement(

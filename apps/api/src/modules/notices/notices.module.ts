@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { ComplianceModule } from '../compliance/compliance.module';
+import { EngagementsModule } from '../engagements/engagements.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { NoticesController, NoticeTypesController } from './notices.controller';
@@ -9,7 +11,7 @@ import { NoticeAppealService } from './notice-appeal.service';
 
 /** Practice Services PS-101 — the notice register (and PS-103's appeal seam). */
 @Module({
-  imports: [AuditModule, DocumentsModule, NotificationsModule],
+  imports: [AuditModule, DocumentsModule, NotificationsModule, ComplianceModule, EngagementsModule],
   controllers: [NoticesController, NoticeTypesController],
   providers: [NoticesService, NoticeTypesService, NoticeAppealService],
   exports: [NoticesService],

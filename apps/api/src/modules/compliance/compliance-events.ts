@@ -63,6 +63,16 @@ export function validateEventDetails(
         details: clean({ chargeHolder: text('chargeHolder', 160), amount }),
       };
     }
+    case 'notice_order': {
+      // PS-103 — recorded by the notices module, never from the calendar UI. The
+      // rule code gates which limitation rule the order starts.
+      const noticeId = text('noticeId', 36);
+      const appealRuleCode = text('appealRuleCode', 60);
+      if (!noticeId || !appealRuleCode || !/^[A-Z0-9_]{2,60}$/.test(appealRuleCode)) {
+        return { error: 'An order event names its notice and the limitation rule.' };
+      }
+      return { details: { noticeId, appealRuleCode } };
+    }
     default:
       return { details: {} };
   }
