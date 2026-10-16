@@ -4,6 +4,7 @@ import { Client } from 'pg';
 import type { Notice, NoticeListResponse, NoticeType, NotificationItem } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { freshClient } from './fresh-client.helper';
+import { FeatureFlagsService } from '../src/common/feature-flags/feature-flags.service';
 
 /**
  * Practice Services PS-101 — the notice register's API: record, list, change
@@ -455,5 +456,28 @@ describe('Notices (e2e)', () => {
       .expect(409);
     // An inactive type takes no new notices.
     await create(sy, { noticeTypeCode: code }, 400);
+  });
+
+  it('is behind ff_notices: the register and the type library are 404 when the firm has it off', async () => {
+    const flags = app.get(FeatureFlagsService);
+    flags.setRules(new Map([['ff_notices', { mode: 'off', officeCodes: new Set<string>() }]]));
+    try {
+      await http().get('/api/v1/notices').set(bearer(pa)).expect(404);
+      await http().get('/api/v1/notice-types').set(bearer(pa)).expect(404);
+      await http()
+        .post('/api/v1/notices')
+        .set(bearer(pa))
+        .send({
+          engagementId: eng,
+          noticeTypeCode: 'IT_143_2',
+          referenceNo: 'OFF/1',
+          issuedOn: today,
+          receivedOn: today,
+        })
+        .expect(404);
+    } finally {
+      flags.setRules(new Map());
+    }
+    await http().get('/api/v1/notices').set(bearer(pa)).expect(200);
   });
 });

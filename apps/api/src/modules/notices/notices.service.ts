@@ -688,6 +688,7 @@ export class NoticesService {
           WHERE id = $1`,
         [id, input.outcome, input.outcomeAmount ?? null, input.closedOn, ctx.employeeId ?? null],
       );
+      await this.appeal.onClosed(client, ctx, n, input.outcome);
       await this.audit.recordWith(client, ctx, {
         action: 'notice.closed',
         objectType: 'notice',

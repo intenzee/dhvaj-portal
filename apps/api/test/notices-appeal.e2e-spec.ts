@@ -339,6 +339,23 @@ describe('Notices — the appeal clock (e2e)', () => {
     await voidEvent(pa, n, ev.id, 400);
   });
 
+  it('closing without an appeal takes the "Appeal by" filing off the calendar', async () => {
+    const n = await order(pa, await create(pa, 'GST_DRC07'));
+    const instanceId = n.appealInstanceId!;
+    const close = (t: string, expected: number) =>
+      http()
+        .post(`/api/v1/notices/${n.id}/close`)
+        .set(bearer(t))
+        .send({ version: n.version, outcome: 'demand_confirmed', closedOn: today })
+        .expect(expected);
+    // The clock is on the leads' calendar: a senior can't drop it by closing.
+    await close(sy, 403);
+    expect(await filing(instanceId)).toMatchObject({ voided: false });
+    const closed = (await close(pa, 200)).body as Notice;
+    expect(closed.status).toBe('closed');
+    expect(await filing(instanceId)).toMatchObject({ status: 'not_applicable', voided: true });
+  });
+
   it('only an order of an appealable type can be appealed', async () => {
     const n = await order(sy, await create(sy, 'IT_143_2'));
     await http()

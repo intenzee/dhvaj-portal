@@ -108,6 +108,47 @@ export class NoticeAppealService {
     return true;
   }
 
+  /**
+   * The notice closes without an appeal (accepted, dropped, settled): its
+   * "Appeal by" filing would otherwise sit on the calendar and go overdue, so
+   * the order's event is voided and the filing falls away. An appeal that was
+   * opened keeps its filing — the appeal engagement works it.
+   */
+  async onClosed(
+    client: PoolClient,
+    ctx: RlsContext,
+    notice: NoticeRow,
+    outcome: string,
+  ): Promise<void> {
+    if (notice.appeal_engagement_id) return;
+    const { rows } = await client.query<{ ce: string; engagement_id: string }>(
+      `SELECT ce.id AS ce, ce.engagement_id
+         FROM hsdg.notice_events e
+         JOIN hsdg.compliance_events ce ON ce.id = e.compliance_event_id
+        WHERE e.notice_id = $1 AND e.kind = 'order' AND e.voided_at IS NULL
+          AND ce.voided_at IS NULL`,
+      [notice.id],
+    );
+    for (const r of rows) {
+      const { rows: lead } = await client.query<{ lead: boolean }>(
+        `SELECT hsdg.is_engagement_lead($1) AS lead`,
+        [r.engagement_id],
+      );
+      if (!lead[0]?.lead)
+        throw new ForbiddenException(
+          'The appeal clock is running on the compliance calendar — the engagement partner or manager closes this notice.',
+        );
+      await this.calendar.voidEventWith(
+        client,
+        ctx,
+        r.engagement_id,
+        r.ce,
+        `Notice closed without an appeal (${outcome.replace(/_/g, ' ')})`,
+        { fromNotice: true },
+      );
+    }
+  }
+
   /** POST /notices/:id/appeal-clock — a lead starts the clock an earlier order left waiting. */
   async startClock(client: PoolClient, ctx: RlsContext, notice: NoticeRow): Promise<void> {
     if (notice.appeal_instance_id)
