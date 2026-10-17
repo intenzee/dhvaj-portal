@@ -200,7 +200,11 @@ describe('Automatic time (e2e)', () => {
         WHERE id = $1`,
       [entry.id],
     );
-    expect(await closer.run()).not.toBeNull();
+    // Run "at" today's IST midnight: the office day-end not reached, so only the
+    // idle rule applies, whatever the clock says (CI after 20:00 IST closed it).
+    const istToday = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+    const runAt = new Date(`${istToday}T00:00:00+05:30`);
+    expect(await closer.run(runAt)).not.toBeNull();
     expect((await openEntryOf(a)).id).toBe(entry.id);
     expect(await statusOf(a)).toBe('in_progress');
 
@@ -213,7 +217,7 @@ describe('Automatic time (e2e)', () => {
       [entry.id],
     );
     const lastBeat = hb.rows[0]!.last_heartbeat_at;
-    const res = await closer.run();
+    const res = await closer.run(runAt);
     expect(res).not.toBeNull();
     expect(res!.idle).toBeGreaterThanOrEqual(1);
 

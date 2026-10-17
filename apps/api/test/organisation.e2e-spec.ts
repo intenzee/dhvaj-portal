@@ -52,6 +52,8 @@ describe('Organisation & People (e2e)', () => {
       expect(res.body.total).toBeGreaterThanOrEqual(8); // total ignores the limit
     });
 
+    // A Partner also sees whoever shares an engagement with them, so these two
+    // hold only while no suite leaves Partner A and Partner B on one team.
     it('scopes a Partner to their office', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/employees?limit=100')
