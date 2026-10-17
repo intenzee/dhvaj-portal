@@ -14,6 +14,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   FEATURE_FLAG,
   PERMISSION,
+  type BillableTimeReport,
   type BillingSettings,
   type BillingSummary,
   type ClientStatement,
@@ -24,6 +25,7 @@ import {
   type InvoiceDetail,
   type InvoiceReminderRecord,
   type InvoiceReminderResult,
+  type InvoiceTimeEntry,
   type ReceiptRecord,
   type Paginated,
   type SetAsideFeesResult,
@@ -42,9 +44,11 @@ import { BillingSettingsService } from './billing-settings.service';
 import { AdjustmentsService } from './adjustments.service';
 import {
   AdjustmentListQueryDto,
+  BillableTimeQueryDto,
   CreateFeeMilestoneDto,
   CreateReceiptDto,
   DecideAdjustmentDto,
+  DraftFromTimeDto,
   DraftFromUnbilledDto,
   FeeWaiversQueryDto,
   ImportTdsCreditsDto,
@@ -63,6 +67,7 @@ import {
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesService } from './receivables.service';
 import { TdsCreditsService } from './tds-credits.service';
+import { TimeBillingService } from './time-billing.service';
 import { UnbilledService } from './unbilled.service';
 
 /**
@@ -83,6 +88,7 @@ export class BillingController {
     private readonly receivables: ReceivablesService,
     private readonly unbilled: UnbilledService,
     private readonly tds: TdsCreditsService,
+    private readonly time: TimeBillingService,
   ) {}
 
   @Get('settings')
@@ -401,6 +407,52 @@ export class BillingController {
   ): Promise<FeeMilestone> {
     this.requireOn(principal);
     return this.unbilled.cancelMilestone(rlsContextFromPrincipal(principal), id);
+  }
+
+  // ── PS-206 (fix) · time billed once ─────────────────────────────────────
+
+  @Get('engagements/:engagementId/time')
+  @ApiOperation({
+    summary:
+      "The engagement's stopped, billable time (?from=&to=, IST): unbilled, or on which live invoice",
+  })
+  billableTime(
+    @CurrentPrincipal() principal: Principal,
+    @Param('engagementId', new ParseUUIDPipe()) engagementId: string,
+    @Query() query: BillableTimeQueryDto,
+  ): Promise<BillableTimeReport> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.time.report(rlsContextFromPrincipal(principal), engagementId, {
+      ...(query.from ? { from: query.from } : {}),
+      ...(query.to ? { to: query.to } : {}),
+    });
+  }
+
+  @Post('engagements/:engagementId/time/draft')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({
+    summary:
+      'Put the chosen time on a new draft: a line per stream at the hourly rate typed; never twice',
+  })
+  draftFromTime(
+    @CurrentPrincipal() principal: Principal,
+    @Param('engagementId', new ParseUUIDPipe()) engagementId: string,
+    @Body() dto: DraftFromTimeDto,
+  ): Promise<InvoiceDetail> {
+    this.requireOn(principal);
+    return this.time.draft(rlsContextFromPrincipal(principal), engagementId, dto);
+  }
+
+  @Get('invoices/:invoiceId/time')
+  @ApiOperation({ summary: 'The time entries each line of an invoice covers' })
+  invoiceTime(
+    @CurrentPrincipal() principal: Principal,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+  ): Promise<InvoiceTimeEntry[]> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.time.invoiceTime(rlsContextFromPrincipal(principal), invoiceId);
   }
 
   @Post('tds-credits/import')
