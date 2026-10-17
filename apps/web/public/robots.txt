@@ -1,0 +1,3 @@
+# The DHVAJ portal is private: staff sign in from the link on dhvaj.in.
+User-agent: *
+Disallow: /
