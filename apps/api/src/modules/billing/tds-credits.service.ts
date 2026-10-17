@@ -9,18 +9,23 @@ import {
 import type { PoolClient } from 'pg';
 import {
   canRemindBy,
+  formatInr,
   fromPaise,
   reminderChannelFor,
   sumAmounts,
   tdsQuarterLabel,
   tdsQuarterOf,
   tdsReminderText,
-  TDS_PDF_PASSWORD_CODE,
+  tdsSectionKind,
+  TDS_FILE_PASSWORD_CODE,
+  TDS_REMINDER_GAP_DAYS,
   toPaise,
   whatsappUrl,
   type ImportTdsCreditsInput,
   type RemindTdsInput,
+  type TdsAwaitedLine,
   type TdsBookedLine,
+  type TdsCheck,
   type TdsClientMismatch,
   type TdsCreditLine,
   type TdsImportBatch,
@@ -34,18 +39,22 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { istToday } from '../compliance/compliance-profile';
 import { clientPhoneSql } from '../filing-workspace/client-chase';
 import { NotificationsService } from '../notifications/notifications.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { CLIENT_EMAIL_SQL } from './receivables.service';
+import { awaitedFor, bookedChecks, creditChecks, longDate } from './tds-checks';
 import { TdsParseError, parseTdsText } from './tds-parsers';
 import { TdsPdfReader } from './tds-pdf-reader';
 import { matchTds, quarterIndex, type MatchCredit, type MatchReceipt } from './tds-match';
+import { isZip, readTdsZip } from './tds-zip';
 
 /** The largest file taken: a year's 26AS text is tens of kilobytes. */
 export const TDS_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 /** The e-mail's type on the client delivery queue. */
 const TDS_REMINDER_DELIVERY = 'tds_missing_from_26as';
+const CHANNEL_WORDS = { email: 'e-mail', whatsapp: 'WhatsApp', copy: 'a copied message' } as const;
 
 type Quarter = TdsQuarter['quarter'];
 
@@ -56,8 +65,10 @@ interface CreditRow {
   section: string;
   transaction_date: string;
   amount_paid: string;
+  tax_deducted: string;
   tds_deposited: string;
   booking_status: string | null;
+  remarks: string | null;
   client_id: string | null;
   client_name: string | null;
 }
@@ -71,6 +82,8 @@ interface ReceiptRow {
   gross_amount: string;
   tds_amount: string;
   tds_section: TdsSection | null;
+  /** The fee before GST it settled, when fully allocated to invoices. */
+  taxable: string | null;
 }
 
 /**
@@ -95,21 +108,24 @@ export class TdsCreditsService {
         'Your sign-in is not linked to a staff record, so the import cannot be credited to you. Ask an administrator to link it under Administration → People.',
       );
     }
-    const bytes = Buffer.from(input.contentBase64, 'base64');
+    let bytes: Buffer = Buffer.from(input.contentBase64, 'base64');
     if (bytes.length === 0) throw new BadRequestException('The file is empty.');
     if (bytes.length > TDS_IMPORT_MAX_BYTES) {
       throw new BadRequestException('The file is larger than a 26AS or Form 16A can be.');
     }
+    const password = input.password || undefined;
+    // TRACES sends the 26AS text in a ZIP: the statement is the file inside.
+    if (isZip(bytes)) bytes = this.unzip(bytes, password);
     const isPdf = bytes.subarray(0, 5).toString('latin1') === '%PDF-';
     let text: string;
     if (isPdf) {
-      const read = await this.pdf.read(bytes, input.password || undefined);
+      const read = await this.pdf.read(bytes, password);
       if (read.kind === 'password') {
         throw new BadRequestException({
           message: read.wrong
             ? 'That password does not open this PDF. TRACES uses the date of birth or incorporation of the PAN holder, as DDMMYYYY.'
             : 'This PDF is password-protected. Enter its password — TRACES uses the date of birth or incorporation of the PAN holder, as DDMMYYYY.',
-          reason: TDS_PDF_PASSWORD_CODE,
+          reason: TDS_FILE_PASSWORD_CODE,
           wrongPassword: read.wrong,
         });
       }
@@ -132,6 +148,9 @@ export class TdsCreditsService {
     const financialYear = parsed.financialYear!;
     const sha = createHash('sha256').update(bytes).digest('hex');
     const tdsTotal = sumAmounts(parsed.credits.map((c) => c.tdsDeposited));
+    // A Form 16A, or a 26AS that does not say: as on the day it is imported.
+    const asOn = parsed.asOn ?? istToday();
+    const warnings = [...parsed.warnings];
 
     return this.db.withRlsContext(ctx, async (client) => {
       // One import of a year at a time, so supersession is in file order.
@@ -147,24 +166,50 @@ export class TdsCreditsService {
           `This file is for PAN ${parsed.pan}; the firm's GSTIN is under PAN ${firmPan}.`,
         );
       }
-      const { rows: latest } = await client.query<{ file_sha256: string; created_at: Date }>(
-        `SELECT file_sha256, created_at FROM hsdg.firm_tds_import_batches
-          WHERE financial_year = $1 ORDER BY created_at DESC LIMIT 1`,
-        [financialYear],
+      // The same statement again, whenever it was first imported.
+      const { rows: seen } = await client.query<{
+        created_at: Date;
+        file_name: string;
+        financial_year: string;
+      }>(
+        `SELECT created_at, file_name, financial_year FROM hsdg.firm_tds_import_batches
+          WHERE file_sha256 = $1 ORDER BY created_at LIMIT 1`,
+        [sha],
       );
-      if (latest[0]?.file_sha256 === sha) {
+      if (seen[0]) {
         throw new ConflictException(
-          `This file is already the latest import for ${financialYear} (${latest[0].created_at
-            .toISOString()
-            .slice(0, 10)}).`,
+          `This file was imported on ${longDate(istToday(seen[0].created_at))} (${seen[0].file_name}, ${seen[0].financial_year}); there is nothing new in it.`,
         );
+      }
+      if (parsed.source === '26as_text') {
+        const { rows: active } = await client.query<{
+          as_on: string | null;
+          tds_total: string;
+          created_at: Date;
+        }>(
+          `SELECT as_on::text, tds_total::text, created_at FROM hsdg.firm_tds_import_batches
+            WHERE financial_year = $1 AND source = '26as_text'
+            ORDER BY created_at DESC LIMIT 1`,
+          [financialYear],
+        );
+        const prev = active[0];
+        if (prev?.as_on && prev.as_on > asOn) {
+          throw new ConflictException(
+            `This 26AS is as on ${longDate(asOn)}, older than the one imported on ${longDate(istToday(prev.created_at))} (as on ${longDate(prev.as_on)}). Download a fresh 26AS from TRACES.`,
+          );
+        }
+        if (prev && toPaise(tdsTotal) < toPaise(prev.tds_total)) {
+          warnings.push(
+            `This 26AS shows ₹${formatInr(tdsTotal)} of TDS for ${financialYear}, less than the ₹${formatInr(prev.tds_total)} in the one it replaces: a deductor may have revised a return downwards. Check before claiming the credit.`,
+          );
+        }
       }
 
       const { rows: batch } = await client.query<{ id: string }>(
         `INSERT INTO hsdg.firm_tds_import_batches
            (source, file_name, file_sha256, pan, financial_year, credits_count, tds_total,
-            imported_by_employee_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            imported_by_employee_id, as_on)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id`,
         [
           parsed.source,
@@ -175,6 +220,7 @@ export class TdsCreditsService {
           parsed.credits.length,
           tdsTotal,
           ctx.employeeId,
+          asOn,
         ],
       );
       const batchId = batch[0]!.id;
@@ -184,12 +230,14 @@ export class TdsCreditsService {
         `INSERT INTO hsdg.firm_tds_credits
            (import_batch_id, deductor_tan, deductor_name, section, transaction_date,
             amount_paid, tax_deducted, tds_deposited, booking_status, booking_date,
-            quarter, financial_year)
+            quarter, financial_year, remarks)
          SELECT $1, t.tan, t.name, t.section, t.d, t.paid, t.deducted, t.deposited, t.status,
-                t.booked, t.quarter, $2
+                t.booked, t.quarter, $2, t.remarks
            FROM unnest($3::text[], $4::text[], $5::text[], $6::date[], $7::numeric[],
-                       $8::numeric[], $9::numeric[], $10::text[], $11::date[], $12::text[])
-             AS t(tan, name, section, d, paid, deducted, deposited, status, booked, quarter)`,
+                       $8::numeric[], $9::numeric[], $10::text[], $11::date[], $12::text[],
+                       $13::text[])
+             AS t(tan, name, section, d, paid, deducted, deposited, status, booked, quarter,
+                  remarks)`,
         [
           batchId,
           financialYear,
@@ -203,6 +251,7 @@ export class TdsCreditsService {
           cs.map((c) => c.bookingStatus),
           cs.map((c) => c.bookingDate),
           cs.map((c) => tdsQuarterOf(c.transactionDate).quarter),
+          cs.map((c) => c.remarks),
         ],
       );
       const { rows: applied } = await client.query<{ n: number }>(
@@ -222,8 +271,9 @@ export class TdsCreditsService {
           credits: cs.length,
           deductors,
           tdsTotal,
+          asOn,
           superseded,
-          warnings: parsed.warnings.length,
+          warnings: warnings.length,
         },
       });
       return {
@@ -235,9 +285,39 @@ export class TdsCreditsService {
         deductors,
         tdsTotal,
         superseded,
-        warnings: parsed.warnings,
+        asOn: parsed.source === '26as_text' ? asOn : null,
+        warnings,
       };
     });
+  }
+
+  /** The statement inside the ZIP TRACES sends; what is wrong said in words. */
+  private unzip(zip: Buffer, password: string | undefined): Buffer {
+    const read = readTdsZip(zip, password);
+    switch (read.kind) {
+      case 'file':
+        return read.bytes;
+      case 'password':
+        throw new BadRequestException({
+          message: read.wrong
+            ? "That password does not open this ZIP. TRACES uses the date of birth or incorporation of the PAN holder, as DDMMYYYY; a deductor's Form 16A ZIP, its TAN."
+            : 'This ZIP is password-protected. Enter its password — TRACES uses the date of birth or incorporation of the PAN holder, as DDMMYYYY.',
+          reason: TDS_FILE_PASSWORD_CODE,
+          wrongPassword: read.wrong,
+        });
+      case 'aes':
+        throw new BadRequestException(
+          'This ZIP is AES-encrypted, which is not read here. Unzip it on your computer and import the .txt file inside.',
+        );
+      case 'empty':
+        throw new BadRequestException('The ZIP holds no .txt or .pdf file to import.');
+      case 'too_large':
+        throw new BadRequestException(
+          'The file in the ZIP is larger than a 26AS or Form 16A can be.',
+        );
+      default:
+        throw new BadRequestException('This ZIP cannot be read. Download it from TRACES again.');
+    }
   }
 
   match(ctx: RlsContext, financialYear: string, quarter: Quarter | null): Promise<TdsMatchReport> {
@@ -267,10 +347,34 @@ export class TdsCreditsService {
       if (report.imports.length === 0) {
         throw new BadRequestException(`Import the 26AS for ${input.financialYear} first.`);
       }
-      const missing = report.clients.find((m) => m.clientId === input.clientId)?.missing ?? [];
+      const row = report.clients.find((m) => m.clientId === input.clientId);
+      const missing = row?.missing ?? [];
       if (missing.length === 0) {
+        const awaited = row?.awaited[0];
         throw new BadRequestException(
-          "None of this client's TDS is missing from the 26AS for that period.",
+          awaited
+            ? `None of this client's TDS is late for that period: what is not in the 26AS yet is awaited (${awaited.reason}).`
+            : "None of this client's TDS is missing from the 26AS for that period.",
+        );
+      }
+      const { rows: last } = await client.query<{
+        channel: keyof typeof CHANNEL_WORDS;
+        created_at: Date;
+        by_name: string | null;
+      }>(
+        `SELECT t.channel, t.created_at, e.full_name AS by_name
+           FROM hsdg.tds_reminders t
+           LEFT JOIN hsdg.employees e ON e.id = t.sent_by_employee_id
+          WHERE t.client_entity_id = $1 AND t.financial_year = $2
+            AND t.quarter IS NOT DISTINCT FROM $3
+            AND t.created_at > now() - make_interval(days => $4)
+          ORDER BY t.created_at DESC LIMIT 1`,
+        [input.clientId, input.financialYear, quarter, TDS_REMINDER_GAP_DAYS],
+      );
+      if (last[0] && !input.force) {
+        const l = last[0];
+        throw new ConflictException(
+          `${c.name} was reminded of this on ${longDate(istToday(l.created_at))} by ${CHANNEL_WORDS[l.channel]}${l.by_name ? ` (${l.by_name})` : ''}. Give them ${TDS_REMINDER_GAP_DAYS} days, or send again anyway.`,
         );
       }
 
@@ -335,6 +439,7 @@ export class TdsCreditsService {
           quarter,
           tdsAmount,
           receipts: missing.length,
+          ...(last[0] ? { repeatWithinDays: TDS_REMINDER_GAP_DAYS } : {}),
         },
       });
       const common = {
@@ -355,7 +460,9 @@ export class TdsCreditsService {
   /**
    * The year's credits and booked TDS — with a quarter either side, so a
    * deduction booked across the year's edge still finds its pair — matched,
-   * then cut to the period asked for.
+   * then cut to the period asked for. Booked TDS not in the 26AS is late
+   * (missing) or not yet (awaited) by the 26AS's as-on date; every line
+   * carries what a senior would query.
    */
   private async compute(
     client: PoolClient,
@@ -364,14 +471,18 @@ export class TdsCreditsService {
   ): Promise<TdsMatchReport> {
     const start = Number(financialYear.slice(0, 4));
     const window = [`${start}-01-01`, `${start + 1}-06-30`];
+    const today = istToday();
     const { rows: settings } = await client.query<{ tolerance: string }>(
       `SELECT tds_match_tolerance::text AS tolerance FROM hsdg.firm_settings LIMIT 1`,
     );
     const tolerance = settings[0]?.tolerance ?? '1.00';
 
+    // The client a TAN is on: an active registration first, then a client
+    // the caller bills, then the oldest — the same answer every time.
     const { rows: creditRows } = await client.query<CreditRow>(
       `SELECT c.id, c.deductor_tan, c.deductor_name, c.section, c.transaction_date::text,
-              c.amount_paid::text, c.tds_deposited::text, c.booking_status,
+              c.amount_paid::text, c.tax_deducted::text, c.tds_deposited::text,
+              c.booking_status, c.remarks,
               owner.entity_id AS client_id, owner.legal_name AS client_name
          FROM hsdg.firm_tds_credits c
          LEFT JOIN LATERAL (
@@ -380,22 +491,71 @@ export class TdsCreditsService {
              JOIN hsdg.entities e ON e.id = r.entity_id
             WHERE r.registration_type = 'tan'
               AND upper(replace(r.registration_number, ' ', '')) = c.deductor_tan
+            ORDER BY COALESCE(r.status = 'active', false) DESC,
+                     hsdg.ctx_can_bill(r.entity_id) DESC, r.created_at, r.id
             LIMIT 1) owner ON true
-        WHERE c.superseded_by_batch_id IS NULL AND c.tds_deposited > 0
+        WHERE c.superseded_by_batch_id IS NULL
           AND c.transaction_date BETWEEN $1::date AND $2::date
         ORDER BY c.transaction_date, c.id`,
       window,
     );
     const { rows: receiptRows } = await client.query<ReceiptRow>(
       `SELECT r.id, r.client_entity_id, e.legal_name AS client_name, r.received_on::text,
-              r.reference, r.gross_amount::text, r.tds_amount::text, r.tds_section
+              r.reference, r.gross_amount::text, r.tds_amount::text, r.tds_section,
+              CASE WHEN a.allocated = r.gross_amount THEN a.taxable::text END AS taxable
          FROM hsdg.receipts r
          JOIN hsdg.entities e ON e.id = r.client_entity_id
+         LEFT JOIN LATERAL (
+           SELECT sum(x.amount) AS allocated,
+                  round(sum(x.amount * i.subtotal / NULLIF(i.total, 0)), 2) AS taxable
+             FROM hsdg.receipt_allocations x
+             JOIN hsdg.invoices i ON i.id = x.invoice_id
+            WHERE x.receipt_id = r.id) a ON true
         WHERE r.status = 'posted' AND r.tds_amount > 0
           AND r.received_on BETWEEN $1::date AND $2::date
         ORDER BY r.received_on, r.id`,
       window,
     );
+    const { rows: batchRows } = await client.query<{
+      id: string;
+      source: TdsImportBatch['source'];
+      file_name: string;
+      financial_year: string;
+      pan: string | null;
+      credits_count: number;
+      superseded_count: number | null;
+      as_on: string | null;
+      by_name: string | null;
+      created_at: Date;
+    }>(
+      `SELECT b.id, b.source, b.file_name, b.financial_year, b.pan, b.credits_count,
+              b.superseded_count, b.as_on::text, e.full_name AS by_name, b.created_at
+         FROM hsdg.firm_tds_import_batches b
+         LEFT JOIN hsdg.employees e ON e.id = b.imported_by_employee_id
+        WHERE b.financial_year = $1
+        ORDER BY b.created_at DESC
+        LIMIT 10`,
+      [financialYear],
+    );
+    const imports: TdsImportBatch[] = batchRows.map((b) => ({
+      id: b.id,
+      source: b.source,
+      fileName: b.file_name,
+      financialYear: b.financial_year,
+      pan: b.pan,
+      credits: b.credits_count,
+      superseded: b.superseded_count ?? 0,
+      asOn: b.source === '26as_text' ? b.as_on : null,
+      importedByName: b.by_name,
+      importedAt: b.created_at.toISOString(),
+    }));
+    const { rows: latest26as } = await client.query<{ as_on: string | null }>(
+      `SELECT as_on::text FROM hsdg.firm_tds_import_batches
+        WHERE financial_year = $1 AND source = '26as_text'
+        ORDER BY created_at DESC LIMIT 1`,
+      [financialYear],
+    );
+    const asOn = latest26as[0]?.as_on ?? null;
 
     const qi = (iso: string): number => {
       const q = tdsQuarterOf(iso);
@@ -405,8 +565,28 @@ export class TdsCreditsService {
       const q = tdsQuarterOf(iso);
       return q.financialYear === financialYear && (!quarter || q.quarter === quarter);
     };
+
+    // A reversal (a negative row) cancels the row it reverses: the same TAN,
+    // quarter and amount. Neither is matched.
+    const reversed = new Set<string>();
+    const negatives = creditRows.filter((c) => toPaise(c.tds_deposited) < 0n);
+    for (const n of negatives) {
+      const pair = creditRows.find(
+        (c) =>
+          !reversed.has(c.id) &&
+          c.deductor_tan === n.deductor_tan &&
+          toPaise(c.tds_deposited) === -toPaise(n.tds_deposited) &&
+          qi(c.transaction_date) === qi(n.transaction_date),
+      );
+      if (pair) {
+        reversed.add(pair.id);
+        reversed.add(n.id);
+      }
+    }
+    const live = creditRows.filter((c) => !reversed.has(c.id) && toPaise(c.tds_deposited) > 0n);
+
     const outcome = matchTds(
-      creditRows.map<MatchCredit>((c) => ({
+      live.map<MatchCredit>((c) => ({
         id: c.id,
         clientId: c.client_id,
         quarterIndex: qi(c.transaction_date),
@@ -432,12 +612,23 @@ export class TdsCreditsService {
         deductorTan: c.deductor_tan,
         deductorName: c.deductor_name,
         section: c.section,
+        sectionKind: tdsSectionKind(c.section),
         transactionDate: c.transaction_date,
         amountPaid: c.amount_paid,
+        taxDeducted: c.tax_deducted,
         tdsDeposited: c.tds_deposited,
         bookingStatus: c.booking_status,
+        remarks: c.remarks,
         financialYear: q.financialYear,
         quarter: q.quarter,
+        checks: creditChecks({
+          section: c.section,
+          amountPaid: c.amount_paid,
+          taxDeducted: c.tax_deducted,
+          tdsDeposited: c.tds_deposited,
+          bookingStatus: c.booking_status,
+          remarks: c.remarks,
+        }),
       };
     };
     const bookedLine = (r: ReceiptRow): TdsBookedLine => {
@@ -451,6 +642,7 @@ export class TdsCreditsService {
         tdsSection: r.tds_section,
         financialYear: q.financialYear,
         quarter: q.quarter,
+        checks: bookedChecks({ tdsAmount: r.tds_amount, taxable: r.taxable }),
       };
     };
     const clientName = new Map<string, string>();
@@ -480,14 +672,25 @@ export class TdsCreditsService {
     const notBooked = outcome.notBooked
       .map((id) => credits.get(id)!)
       .filter((c) => inScope(c.transaction_date));
-    const missing = outcome.missing
-      .map((id) => receipts.get(id)!)
-      .filter((r) => inScope(r.received_on));
+    // Not in the 26AS: late once a 26AS old enough lacks it, else awaited.
+    const late: ReceiptRow[] = [];
+    const awaited = new Map<string, TdsAwaitedLine>();
+    for (const id of outcome.missing) {
+      const r = receipts.get(id)!;
+      if (!inScope(r.received_on)) continue;
+      const q = tdsQuarterOf(r.received_on);
+      const wait = awaitedFor(q.financialYear, q.quarter, asOn, today);
+      if (wait) awaited.set(r.id, { ...bookedLine(r), ...wait });
+      else late.push(r);
+    }
+    const awaitedOf = (clientId: string): TdsAwaitedLine[] =>
+      [...awaited.values()].filter((a) => receipts.get(a.receiptId)!.client_entity_id === clientId);
 
     const clientIds = [
       ...new Set([
         ...notBooked.flatMap((c) => (c.client_id ? [c.client_id] : [])),
-        ...missing.map((r) => r.client_entity_id),
+        ...late.map((r) => r.client_entity_id),
+        ...[...awaited.keys()].map((id) => receipts.get(id)!.client_entity_id),
       ]),
     ];
     const tans = new Map<string, string[]>();
@@ -526,7 +729,8 @@ export class TdsCreditsService {
     const clients: TdsClientMismatch[] = clientIds
       .map((id) => {
         const nb = notBooked.filter((c) => c.client_id === id).map(creditLine);
-        const ms = missing.filter((r) => r.client_entity_id === id).map(bookedLine);
+        const ms = late.filter((r) => r.client_entity_id === id).map(bookedLine);
+        const aw = awaitedOf(id);
         return {
           clientId: id,
           clientName: clientName.get(id) ?? '',
@@ -535,6 +739,8 @@ export class TdsCreditsService {
           notBookedTotal: sumAmounts(nb.map((c) => c.tdsDeposited)),
           missing: ms,
           missingTotal: sumAmounts(ms.map((r) => r.tdsAmount)),
+          awaited: aw,
+          awaitedTotal: sumAmounts(aw.map((r) => r.tdsAmount)),
           lastReminder: lastReminder.get(id) ?? null,
         };
       })
@@ -542,48 +748,49 @@ export class TdsCreditsService {
         (a, b) =>
           Number(toPaise(b.missingTotal) - toPaise(a.missingTotal)) ||
           Number(toPaise(b.notBookedTotal) - toPaise(a.notBookedTotal)) ||
+          Number(toPaise(b.awaitedTotal) - toPaise(a.awaitedTotal)) ||
           a.clientName.localeCompare(b.clientName),
       );
     const unknownDeductors = notBooked.filter((c) => !c.client_id).map(creditLine);
 
-    const { rows: batchRows } = await client.query<{
-      id: string;
-      source: TdsImportBatch['source'];
-      file_name: string;
-      financial_year: string;
-      pan: string | null;
-      credits_count: number;
-      superseded_count: number | null;
-      by_name: string | null;
-      created_at: Date;
-    }>(
-      `SELECT b.id, b.source, b.file_name, b.financial_year, b.pan, b.credits_count,
-              b.superseded_count, e.full_name AS by_name, b.created_at
-         FROM hsdg.firm_tds_import_batches b
-         LEFT JOIN hsdg.employees e ON e.id = b.imported_by_employee_id
-        WHERE b.financial_year = $1
-        ORDER BY b.created_at DESC
-        LIMIT 10`,
-      [financialYear],
+    // The period's flags, risks and notes, by client.
+    const byClient = new Map<
+      string,
+      { clientId: string | null; clientName: string; checks: TdsCheck[] }
+    >();
+    const addChecks = (clientId: string | null, name: string, checks: TdsCheck[]): void => {
+      if (!checks.length) return;
+      const key = clientId ?? '';
+      let entry = byClient.get(key);
+      if (!entry) byClient.set(key, (entry = { clientId, clientName: name, checks: [] }));
+      for (const c of checks) {
+        if (!entry.checks.some((x) => x.message === c.message)) entry.checks.push(c);
+      }
+    };
+    for (const m of matched) {
+      for (const c of m.credits)
+        if (inScope(c.transactionDate)) addChecks(m.clientId, m.clientName, c.checks);
+      for (const r of m.receipts)
+        if (inScope(r.receivedOn)) addChecks(m.clientId, m.clientName, r.checks);
+    }
+    for (const row of clients) {
+      for (const c of row.notBooked) addChecks(row.clientId, row.clientName, c.checks);
+      for (const r of [...row.missing, ...row.awaited])
+        addChecks(row.clientId, row.clientName, r.checks);
+    }
+    for (const c of unknownDeductors) addChecks(null, 'TANs on no client', c.checks);
+    const checks = [...byClient.values()].sort(
+      (a, b) =>
+        Number(a.clientId === null) - Number(b.clientId === null) ||
+        a.clientName.localeCompare(b.clientName),
     );
-    const imports: TdsImportBatch[] = batchRows.map((b) => ({
-      id: b.id,
-      source: b.source,
-      fileName: b.file_name,
-      financialYear: b.financial_year,
-      pan: b.pan,
-      credits: b.credits_count,
-      superseded: b.superseded_count ?? 0,
-      importedByName: b.by_name,
-      importedAt: b.created_at.toISOString(),
-    }));
 
     const scopedCredits = creditRows.filter((c) => inScope(c.transaction_date));
     const scopedReceipts = receiptRows.filter((r) => inScope(r.received_on));
     const notes: string[] = [];
-    if (imports.length === 0) {
+    if (!asOn) {
       notes.push(
-        `No 26AS imported for ${financialYear} yet: until one is, all the TDS booked shows as missing.`,
+        `No 26AS imported for ${financialYear} yet: until one is, TDS whose return is long past due shows as missing.`,
       );
     }
     const pending = matched
@@ -600,12 +807,36 @@ export class TdsCreditsService {
         `${noTan} client${noTan === 1 ? ' has' : 's have'} no TAN on file; add it under the client's registrations so their TDS can match.`,
       );
     }
+    const unpaired = negatives.filter((n) => !reversed.has(n.id) && inScope(n.transaction_date));
+    if (unpaired.length) {
+      notes.push(
+        `${unpaired.length} reversal${unpaired.length === 1 ? '' : 's'} in the 26AS cancel${unpaired.length === 1 ? 's' : ''} no credit of the same amount: see ${unpaired.map((n) => n.deductor_name).join(', ')} on TRACES.`,
+      );
+    }
+    const seenTans = [...new Set(creditRows.map((c) => c.deductor_tan))];
+    if (seenTans.length) {
+      const { rows: shared } = await client.query<{ tan: string }>(
+        `SELECT upper(replace(registration_number, ' ', '')) AS tan
+           FROM hsdg.entity_registrations
+          WHERE registration_type = 'tan'
+            AND upper(replace(registration_number, ' ', '')) = ANY($1::text[])
+          GROUP BY 1 HAVING count(DISTINCT entity_id) > 1
+          ORDER BY 1`,
+        [seenTans],
+      );
+      if (shared.length) {
+        notes.push(
+          `${shared.map((t) => t.tan).join(', ')} ${shared.length === 1 ? 'is' : 'are'} on more than one client: the credit goes to the active registration, then a client you bill, then the oldest. Take the TAN off the client it does not belong to.`,
+        );
+      }
+    }
 
     return {
       financialYear,
       quarter,
       tolerance,
       pan: imports[0]?.pan ?? null,
+      asOn,
       imports,
       matched,
       clients,
@@ -613,10 +844,17 @@ export class TdsCreditsService {
       totals: {
         credited: sumAmounts(scopedCredits.map((c) => c.tds_deposited)),
         booked: sumAmounts(scopedReceipts.map((r) => r.tds_amount)),
-        matched: sumAmounts(matched.flatMap((m) => m.credits.map((c) => c.tdsDeposited))),
+        // Only the period's own lines of a group that reaches across its edge.
+        matched: sumAmounts(
+          matched.flatMap((m) =>
+            m.credits.filter((c) => inScope(c.transactionDate)).map((c) => c.tdsDeposited),
+          ),
+        ),
         notBooked: sumAmounts(notBooked.map((c) => c.tds_deposited)),
-        missing: sumAmounts(missing.map((r) => r.tds_amount)),
+        missing: sumAmounts(late.map((r) => r.tds_amount)),
+        awaited: sumAmounts([...awaited.values()].map((r) => r.tdsAmount)),
       },
+      checks,
       notes,
     };
   }

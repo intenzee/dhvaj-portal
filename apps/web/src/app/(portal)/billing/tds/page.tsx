@@ -7,8 +7,10 @@ import { BellRing, Copy, MessageCircle, Upload } from 'lucide-react';
 import {
   FEATURE_FLAG,
   PERMISSION,
-  TDS_PDF_PASSWORD_CODE,
+  TDS_FILE_PASSWORD_CODE,
+  tdsQuarterLabel,
   type RemindTdsInput,
+  type TdsCheck,
   type TdsClientMismatch,
   type TdsCreditLine,
   type TdsImportResult,
@@ -27,10 +29,13 @@ import { Badge, Button, Card, EmptyState, PageHeader, Spinner } from '@/componen
 import { Input, Select } from '@/components/form';
 import { fallbackNote } from '@/components/filing/client-chase';
 import {
+  CHECK_LEVEL,
   MATCH_KIND_LABEL,
   bookingNote,
   financialYearsFor,
   importSummary,
+  remindConfirmText,
+  sortChecks,
   tdsReminderLine,
 } from '@/components/billing/tds';
 
@@ -40,8 +45,10 @@ const todayIst = (): string => new Date().toLocaleDateString('en-CA', { timeZone
 
 /**
  * PS-204 · the firm's 26AS against the TDS booked on receipts: matched, in the
- * 26AS but not booked, and booked but missing — by client, with a reminder to
- * file or correct the TDS return. Imports the TRACES text export or a Form 16A.
+ * 26AS but not booked, booked but missing, and booked but not due in the 26AS
+ * yet (awaited) — by client, with what to query and a reminder to file or
+ * correct the TDS return. Imports the TRACES text export (or its ZIP) or a
+ * Form 16A.
  */
 export default function TdsPage(): JSX.Element {
   const { principal } = useAuth();
@@ -123,15 +130,17 @@ export default function TdsPage(): JSX.Element {
       )}
       {r && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <Tile label="In the 26AS" value={r.totals.credited} />
             <Tile label="Booked on receipts" value={r.totals.booked} />
             <Tile label="Matched" value={r.totals.matched} tone="success" />
             <Tile label="In 26AS, not booked" value={r.totals.notBooked} tone="warn" />
             <Tile label="Booked, missing from 26AS" value={r.totals.missing} tone="danger" />
+            <Tile label="Booked, not in 26AS yet" value={r.totals.awaited} />
           </div>
           <p className="text-xs text-ink-faint">
-            Amounts within {formatMoney(r.tolerance, 'INR')} match.
+            {r.asOn ? `26AS as on ${formatDate(r.asOn)}. ` : ''}Amounts within{' '}
+            {formatMoney(r.tolerance, 'INR')} match.
             {r.imports[0]
               ? ` Last import: ${r.imports[0].fileName}, ${formatDate(r.imports[0].importedAt)}${
                   r.imports[0].importedByName ? ` by ${r.imports[0].importedByName}` : ''
@@ -146,6 +155,35 @@ export default function TdsPage(): JSX.Element {
             </ul>
           )}
 
+          {r.checks.length > 0 && (
+            <Card className="p-0">
+              <div className="border-b border-line px-4 py-3">
+                <h2 className="text-sm font-semibold text-ink">To query before claiming</h2>
+                <p className="text-xs text-ink-faint">
+                  Rates, sections and TRACES statuses that put the credit at risk or need the
+                  client to correct their return.
+                </p>
+              </div>
+              <ul className="divide-y divide-line text-sm">
+                {r.checks.map((g) => (
+                  <li key={g.clientId ?? ''} className="space-y-1 px-4 py-2">
+                    {g.clientId ? (
+                      <Link
+                        href={`/billing/clients/${g.clientId}`}
+                        className="font-medium text-ink hover:underline"
+                      >
+                        {g.clientName}
+                      </Link>
+                    ) : (
+                      <span className="font-medium text-ink">{g.clientName}</span>
+                    )}
+                    <Checks checks={g.checks} />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           <section className="space-y-3">
             <h2 className="text-sm font-semibold text-ink">Mismatches by client</h2>
             {r.clients.length === 0 ? (
@@ -155,7 +193,7 @@ export default function TdsPage(): JSX.Element {
             ) : (
               r.clients.map((c) => (
                 <ClientMismatch
-                  key={c.clientId}
+                  key={`${c.clientId}|${year}|${quarter}`}
                   c={c}
                   year={year}
                   quarter={quarter || null}
@@ -234,8 +272,11 @@ export default function TdsPage(): JSX.Element {
               <ul className="mt-1 space-y-0.5">
                 {r.imports.map((b) => (
                   <li key={b.id}>
-                    {formatDate(b.importedAt)} · {b.source === '26as_text' ? '26AS' : 'Form 16A'} ·{' '}
-                    {b.fileName} · {b.credits} rows
+                    {formatDate(b.importedAt)} ·{' '}
+                    {b.source === '26as_text'
+                      ? `26AS${b.asOn ? ` as on ${formatDate(b.asOn)}` : ''}`
+                      : 'Form 16A'}{' '}
+                    · {b.fileName} · {b.credits} rows
                     {b.superseded ? ` · replaced ${b.superseded}` : ''}
                     {b.importedByName ? ` · ${b.importedByName}` : ''}
                   </li>
@@ -276,6 +317,22 @@ function Tile({
   );
 }
 
+function Checks({ checks }: { checks: TdsCheck[] }): JSX.Element | null {
+  if (checks.length === 0) return null;
+  return (
+    <ul className="space-y-1">
+      {sortChecks(checks).map((k) => (
+        <li key={k.message} className="flex items-start gap-2 text-xs text-ink-muted">
+          <Badge tone={CHECK_LEVEL[k.level].tone} className="shrink-0">
+            {CHECK_LEVEL[k.level].label}
+          </Badge>
+          <span>{k.message}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function CreditList({ credits }: { credits: TdsCreditLine[] }): JSX.Element {
   return (
     <ul className="divide-y divide-line text-sm">
@@ -289,6 +346,11 @@ function CreditList({ credits }: { credits: TdsCreditLine[] }): JSX.Element {
                 {c.deductorTan} · {c.section} · {formatDate(c.transactionDate)} · {c.quarter}
                 {note ? ` · ${note}` : ''}
               </span>
+              {c.checks.length > 0 && (
+                <span className="mt-1 block">
+                  <Checks checks={c.checks} />
+                </span>
+              )}
             </span>
             <span className="tabular-nums">{formatMoney(c.tdsDeposited, 'INR')}</span>
           </li>
@@ -323,8 +385,15 @@ function ClientMismatch({
   const qc = useQueryClient();
   const toast = useToast();
   const [toSend, setToSend] = useState<ToSend | null>(null);
+  // The firm's channel may e-mail the client: say what goes before it does.
+  const [confirming, setConfirming] = useState(false);
+  // Reminded within the week: what the server said, and the channel to repeat.
+  const [repeat, setRepeat] = useState<{
+    message: string;
+    channel: RemindTdsInput['channel'] | null;
+  } | null>(null);
   const remind = useMutation({
-    mutationFn: (channel: RemindTdsInput['channel'] | void) =>
+    mutationFn: ({ channel, force }: { channel?: RemindTdsInput['channel']; force?: boolean }) =>
       apiFetch<TdsReminderResult>('/billing/tds-credits/remind', {
         method: 'POST',
         body: {
@@ -332,8 +401,13 @@ function ClientMismatch({
           financialYear: year,
           ...(quarter ? { quarter } : {}),
           ...(channel ? { channel } : {}),
+          ...(force ? { force: true } : {}),
         },
       }),
+    onMutate: () => {
+      setConfirming(false);
+      setRepeat(null);
+    },
     onSuccess: async (res) => {
       if (res.channel === 'email') {
         setToSend(null);
@@ -347,9 +421,18 @@ function ClientMismatch({
       }
       void qc.invalidateQueries({ queryKey: ['billing', 'tds'] });
     },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not send it.', 'error'),
+    onError: (e, { channel }) => {
+      if (e instanceof ApiError && e.status === 409) {
+        setRepeat({ message: e.message, channel: channel ?? null });
+        return;
+      }
+      toast(e instanceof ApiError ? e.message : 'Could not send it.', 'error');
+    },
   });
   const last = tdsReminderLine(c.lastReminder);
+  const period = quarter ? tdsQuarterLabel(year, quarter) : year;
+  const sending = (channel: RemindTdsInput['channel'] | undefined): boolean =>
+    remind.isPending && remind.variables?.channel === channel;
   const note = toSend?.channel === 'copy' ? fallbackNote(toSend.fallback) : null;
 
   return (
@@ -375,16 +458,20 @@ function ClientMismatch({
               size="sm"
               variant="secondary"
               disabled={remind.isPending}
-              onClick={() => remind.mutate()}
+              aria-expanded={confirming}
+              onClick={() => {
+                setRepeat(null);
+                setConfirming((v) => !v);
+              }}
             >
               <BellRing className="h-4 w-4" />{' '}
-              {remind.isPending && !remind.variables ? 'Sending…' : 'Ask to file or correct'}
+              {sending(undefined) ? 'Sending…' : 'Ask to file or correct'}
             </Button>
             <Button
               size="sm"
               variant="ghost"
               disabled={remind.isPending}
-              onClick={() => remind.mutate('whatsapp')}
+              onClick={() => remind.mutate({ channel: 'whatsapp' })}
             >
               <MessageCircle className="h-4 w-4" /> WhatsApp
             </Button>
@@ -392,13 +479,40 @@ function ClientMismatch({
               size="sm"
               variant="ghost"
               disabled={remind.isPending}
-              onClick={() => remind.mutate('copy')}
+              onClick={() => remind.mutate({ channel: 'copy' })}
             >
               <Copy className="h-4 w-4" /> Copy text
             </Button>
           </div>
         )}
       </div>
+      {confirming && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface-sunken px-4 py-3 text-sm">
+          <p className="min-w-0 flex-1 text-ink">{remindConfirmText(c, period)}</p>
+          <Button size="sm" disabled={remind.isPending} onClick={() => remind.mutate({})}>
+            Send
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+        </div>
+      )}
+      {repeat && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-warning-200 bg-warning-50 px-4 py-3 text-sm">
+          <p className="min-w-0 flex-1 text-warning-700">{repeat.message}</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={remind.isPending}
+            onClick={() => remind.mutate({ channel: repeat.channel ?? undefined, force: true })}
+          >
+            Send again anyway
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setRepeat(null)}>
+            Cancel
+          </Button>
+        </div>
+      )}
       {c.missing.length > 0 && (
         <div>
           <p className="px-4 pt-2 text-xs font-medium uppercase tracking-wide text-danger-700">
@@ -413,6 +527,32 @@ function ClientMismatch({
                   <span className="block text-xs text-ink-faint">
                     {b.tdsSection && b.tdsSection !== 'other' ? `${b.tdsSection} · ` : ''}
                     {b.quarter} · gross {formatMoney(b.grossAmount, 'INR')}
+                  </span>
+                  {b.checks.length > 0 && (
+                    <span className="mt-1 block">
+                      <Checks checks={b.checks} />
+                    </span>
+                  )}
+                </span>
+                <span className="tabular-nums">{formatMoney(b.tdsAmount, 'INR')}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {c.awaited.length > 0 && (
+        <div className={c.missing.length > 0 ? 'border-t border-line' : ''}>
+          <p className="px-4 pt-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
+            Booked, not in the 26AS yet · {formatMoney(c.awaitedTotal, 'INR')}
+          </p>
+          <ul className="divide-y divide-line text-sm text-ink-muted">
+            {c.awaited.map((b) => (
+              <li key={b.receiptId} className="flex items-center gap-3 px-4 py-2">
+                <span className="flex-1">
+                  Receipt of {formatDate(b.receivedOn)}
+                  {b.reference ? ` · ${b.reference}` : ''}
+                  <span className="block text-xs text-ink-faint">
+                    {b.quarter} · {b.reason}
                   </span>
                 </span>
                 <span className="tabular-nums">{formatMoney(b.tdsAmount, 'INR')}</span>
@@ -464,7 +604,7 @@ function ImportButton(): JSX.Element {
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<TdsImportResult | null>(null);
-  // A TRACES PDF waiting for its password (held only in this form, never kept).
+  // A TRACES PDF or ZIP waiting for its password (held only in this form, never kept).
   const [locked, setLocked] = useState<{ file: File; wrong: boolean } | null>(null);
   const [password, setPassword] = useState('');
   const upload = useMutation({
@@ -486,7 +626,7 @@ function ImportButton(): JSX.Element {
       void qc.invalidateQueries({ queryKey: ['billing', 'tds'] });
     },
     onError: (e, { file }) => {
-      if (e instanceof ApiError && e.body?.reason === TDS_PDF_PASSWORD_CODE) {
+      if (e instanceof ApiError && e.body?.reason === TDS_FILE_PASSWORD_CODE) {
         setLocked({ file, wrong: e.body.wrongPassword === true });
         setPassword('');
         return;
@@ -499,9 +639,9 @@ function ImportButton(): JSX.Element {
       <input
         ref={input}
         type="file"
-        accept=".txt,.pdf,text/plain,application/pdf"
+        accept=".txt,.zip,.pdf,text/plain,application/zip,application/x-zip-compressed,application/pdf"
         className="hidden"
-        aria-label="26AS or Form 16A file"
+        aria-label="26AS (text or ZIP) or Form 16A file"
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
@@ -525,7 +665,7 @@ function ImportButton(): JSX.Element {
               {locked.wrong
                 ? 'That password did not open it. Try again'
                 : `${locked.file.name} is password-protected`}{' '}
-              — TRACES uses the date of birth or incorporation, as DDMMYYYY.
+              — TRACES uses the PAN holder’s date of birth or incorporation, as DDMMYYYY.
             </span>
             <Input
               type="password"
@@ -534,7 +674,7 @@ function ImportButton(): JSX.Element {
               autoFocus
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              aria-label="PDF password"
+              aria-label="File password"
               className="w-40"
             />
           </label>

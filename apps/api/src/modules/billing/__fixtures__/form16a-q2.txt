@@ -10,9 +10,19 @@ CIT (TDS) Assessment Year Period
 The Commissioner of Income Tax (TDS) 2027-28 From 01-Jul-2026 To 30-Sep-2026
 Summary of payment
 Sr. No. Amount paid/credited Nature of payment Deductee Reference No. Date of payment/credit
-1 30,000.00 194J ALPHA-REF-1 10-08-2026
-2 20,000.00 194J 10-09-2026
+1 30,000.00 194JB ALPHA-REF-1 10-08-2026
+2 20,000.00 194JB 10-09-2026
 Summary of tax deducted at source in respect of deductee
 Quarter Receipt Numbers of Original Quarterly Statements of TDS Amount of Tax Deducted in respect of Deductee Amount of Tax Deposited / Remitted in respect of Deductee
 Q2 QWERTYUI 5,000.00 5,000.00
 Total (Rs.) 5,000.00 5,000.00
+I. DETAILS OF TAX DEDUCTED AND DEPOSITED IN THE CENTRAL GOVERNMENT ACCOUNT THROUGH CHALLAN
+Sr. No. Tax Deposited in respect of the deductee (Rs.) BSR Code of the Bank Branch Date on which Tax deposited (dd/mm/yyyy) Challan Serial Number Status of matching with OLTAS
+1 3,000.00 0510308 07/09/2026 12345 F
+2 2,000.00 0510308 07/10/2026 23456 F
+Total (Rs.) 5,000.00
+Verification
+I, A. SAMPLE, son / daughter of B. SAMPLE in the capacity of DIRECTOR (designation) do hereby certify that a sum of Rs. 5,000.00 [Rs. Five Thousand Only (in words)] has been deducted and deposited to the credit of the Central Government. I further certify that the information given above is true, complete and correct and is based on the books of account, documents, TDS statements, TDS deposited and other available records.
+Place NEW DELHI
+Date 20-Nov-2026 (Signature of person responsible for deduction of Tax)
+Designation: DIRECTOR Full Name: A. SAMPLE

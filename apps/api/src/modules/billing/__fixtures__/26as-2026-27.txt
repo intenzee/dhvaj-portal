@@ -1,28 +1,48 @@
-Annual Tax Statement under Section 203AA of the Income Tax Act, 1961
-Data updated till^15-Oct-2026
-Permanent Account Number (PAN)^AAAFZ9999Q^Current Status of PAN^Active and Operative^Financial Year^2026-27^Assessment Year^2027-28
-Name of Assessee^EXAMPLE AND CO CHARTERED ACCOUNTANTS
-Address of Assessee^1 SAMPLE ROAD, NEW DELHI, DELHI, 110001
+^Annual Tax Statement^
 
-PART-I - Details of Tax Deducted at Source
+File Creation Date^Permanent Account Number (PAN)^Current Status of PAN^Financial Year^Assessment Year^Name of Assessee^Address Line 1^Address Line 2^Address Line 3^Address Line 4^Address Line 5^Statecode^Pin Code
+20-11-2026^AAAFZ9999Q^ACTIVE^2026-2027^2027-2028^EXAMPLE AND CO CHARTERED ACCOUNTANTS^1 SAMPLE ROAD^^^NEW DELHI^^DELHI^110001
+
+^PART-I - Details of Tax Deducted at Source^
 Sr. No.^Name of Deductor^TAN of Deductor^^^^^Total Amount Paid / Credited(Rs.)^Total Tax Deducted(Rs.)^Total TDS Deposited(Rs.)
-1^ALPHA WIDGETS PRIVATE LIMITED^DELA00001A^^^^^1,50,000.00^15,000.00^15,000.00
+1^ALPHA WIDGETS PRIVATE LIMITED^DELA00001A^^^^^150000.00^15000.00^15000.00^
 ^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
-^1^194J^15-Jun-2026^F^31-Jul-2026^-^1,00,000.00^10,000.00^10,000.00
-^2^194J^10-Sep-2026^F^31-Oct-2026^-^50,000.00^5,000.00^5,000.00
-2^BETA TRADING LLP^MUMB00002B^^^^^40,000.00^4,000.00^4,000.00
+^1^194JB^15-Jun-2026^F^31-Jul-2026^-^100000.00^10000.00^10000.00^
+^2^194JB^10-Sep-2026^F^31-Oct-2026^-^50000.00^5000.00^5000.00^
+2^BETA TRADING LLP^MUMB00002B^^^^^40000.00^4000.00^4000.00^
 ^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
-^1^194JB^05-Aug-2026^U^-^-^40,000.00^4,000.00^4,000.00
-3^GAMMA FOODS LIMITED^BLRG00003C^^^^^20,000.00^2,000.00^2,500.00
+^1^194JB^05-Aug-2026^U^-^-^40000.00^4000.00^4000.00^
+3^GAMMA FOODS LIMITED^BLRG00003C^^^^^20000.00^2000.00^2500.00^
 ^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
-^1^194J^20-May-2026^F^31-Jul-2026^-^20,000.00^2,000.00^2,000.00
-^2^194J^31-Feb-2026^F^31-Jul-2026^-^1.00^0.10^0.10
+^1^194J^20-May-2026^F^31-Jul-2026^-^20000.00^2000.00^2000.00^
+^2^194J^31-Feb-2026^F^31-Jul-2026^-^1.00^0.10^0.10^
+4^DELTA MUNICIPAL CORPORATION^DELD00004D^^^^^30000.00^600.00^600.00^
+^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
+^1^194JA^12-Jul-2026^P^30-Oct-2026^-^30000.00^600.00^600.00^
+5^EPSILON HOSPITALS LIMITED^CHNE00005E^^^^^25000.00^1250.00^1250.00^
+^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
+^1^194JB^01-Aug-2026^O^31-Oct-2026^F^25000.00^1250.00^1250.00^
+6^ZETA SOFTWARE PRIVATE LIMITED^PNEZ00006F^^^^^0.00^0.00^0.00^
+^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
+^1^1027^18-Sep-2026^F^31-Oct-2026^B^50000.00^5000.00^5000.00^
+^2^1027^18-Sep-2026^F^31-Oct-2026^B^-50000.00^-5000.00^-5000.00^
 
-PART-II - Details of Tax Deducted at Source for 15G / 15H
-Sr. No.^Name of Deductor^TAN of Deductor^^^^^Total Amount Paid / Credited(Rs.)^Total Tax Deducted(Rs.)^Total TDS Deposited(Rs.)
-1^SHOULD NOT BE READ^DELS00009Z^^^^^9,000.00^0.00^0.00
-^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
-^1^194A^01-Apr-2026^F^-^-^9,000.00^0.00^0.00
+^PART-II - Details of Tax Deducted at Source for 15G / 15H^
+Sr. No.^Name of Deductor^TAN of Deductor^^^^Total Amount Paid / Credited(Rs.)^Total Tax Deducted(Rs.)^Total TDS Deposited(Rs.)
+^^^*********** No Transactions Present **********^
 
-PART-III - Details of Transactions under Proviso to section 194B/First Proviso to sub-section (1) of section 194R/ Proviso to sub-section(1) of section 194S/Sub-section (2) of section 194BA
-No Transactions Present
+^PART-III - Details of Transactions under Proviso to section 194B/First Proviso to sub-section (1) of section 194R/ Proviso to sub-section(1) of section 194S/Sub-section (2) of section 194BA^
+^^^*********** No Transactions Present **********^
+
+^PART-VI - Details of Tax Collected at Source^
+Sr. No.^Name of Collector^TAN of Collector^^^^^Total Amount Paid/ Debited(Rs.)^Total Tax Collected(Rs.)^Total TCS Deposited(Rs.)
+1^SHOULD NOT BE READ^DELS00009Z^^^^^9000.00^90.00^90.00^
+^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid/ Debited(Rs.)^Tax Collected(Rs.)^TCS Deposited(Rs.)
+^1^206C^01-Apr-2026^F^-^-^9000.00^90.00^90.00^
+
+^PART-VII - Details of Paid Refund (For which source is CPC TDS. For other details refer AST)^
+^^^*********** No Transactions Present **********^
+
+^PART-X - Details of Defaults ( Processing of Statements ) ( Amount in Rs. )^
+Sr. No.^Financial Year^Short Payment^Short Deduction/ Collection^Interest on TDS/ TCS Payments Default^Interest on TDS/ TCS Deduction/ Collection Default^Late Filing Fee u/s 234E^Interest u/s 220(2)^Total Default
+1^2026-27^0.00^0.00^120.00^0.00^0.00^0.00^120.00^
