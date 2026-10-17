@@ -910,7 +910,15 @@ export interface ImportTdsCreditsInput {
   filename: string;
   contentBase64: string;
   contentType?: string;
+  /**
+   * Opens a TRACES PDF: the PAN holder's date of birth or incorporation,
+   * DDMMYYYY. Used to read the file; never stored.
+   */
+  password?: string;
 }
+
+/** The 400's `code` when a PDF needs its password (or was given a wrong one). */
+export const TDS_PDF_PASSWORD_CODE = 'TDS_PDF_PASSWORD';
 
 export interface TdsImportResult {
   batchId: string;

@@ -5,6 +5,7 @@ import type { TdsMatchReport } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
+import { TdsPdfReader } from '../src/modules/billing/tds-pdf-reader';
 
 /**
  * PS-204 · TDS on our fees against the firm's 26AS.
@@ -423,6 +424,71 @@ describe('PS-204 TDS credits against the 26AS (e2e)', () => {
           was.state_code,
         ]),
       );
+    }
+  });
+
+  it('opens a password-protected TRACES PDF, and keeps the password nowhere', async () => {
+    // pdf.js does not run under jest's VM: stand in for it, password-aware.
+    const PASSWORD = '01012000';
+    const text = [
+      'FORM NO. 16A',
+      'PAN of the deductor TAN of the deductor PAN of the deductee',
+      `AAAFX0001X ${tanX} ${PAN}`,
+      'CIT (TDS) Assessment Year Period',
+      'The Commissioner of Income Tax (TDS) 2027-28 From 01-Oct-2026 To 31-Dec-2026',
+      'Summary of payment',
+      '1 640.00 194J 05-10-2026',
+      'Summary of tax deducted at source in respect of deductee',
+      'Q3 ZXCVBNMA 64.00 64.00',
+    ].join('\n');
+    const read = jest
+      .spyOn(app.get(TdsPdfReader), 'read')
+      .mockImplementation(async (_bytes, password) =>
+        password === undefined
+          ? { kind: 'password', wrong: false }
+          : password === PASSWORD
+            ? { kind: 'text', text }
+            : { kind: 'password', wrong: true },
+      );
+    const pdf = (password?: string) =>
+      http()
+        .post('/api/v1/billing/tds-credits/import')
+        .set(bearer(pa))
+        .send({
+          filename: 'Form16A-Q3.pdf',
+          contentBase64: Buffer.from('%PDF-1.7 locked q3').toString('base64'),
+          ...(password !== undefined ? { password } : {}),
+        });
+    try {
+      const need = await pdf().expect(400);
+      expect(need.body).toMatchObject({ reason: 'TDS_PDF_PASSWORD', wrongPassword: false });
+      expect(need.body.message).toMatch(/DDMMYYYY/);
+      const wrong = await pdf('31121999').expect(400);
+      expect(wrong.body).toMatchObject({ reason: 'TDS_PDF_PASSWORD', wrongPassword: true });
+
+      const ok = await pdf(PASSWORD).expect(201);
+      expect(ok.body).toMatchObject({ source: 'form16a_pdf', credits: 1, tdsTotal: '64.00' });
+      const rep = await report(pa, 'Q3');
+      expect(rep.clients.find((c) => c.clientId === x)?.notBooked).toEqual([
+        expect.objectContaining({ tdsDeposited: '64.00', quarter: 'Q3' }),
+      ]);
+
+      // Not on the batch, not in the audit trail.
+      const leaked = await superuser((c) =>
+        c.query(
+          `SELECT 1 FROM hsdg.firm_tds_import_batches b WHERE b.id = $1 AND b::text LIKE $2
+           UNION ALL
+           SELECT 1 FROM hsdg.audit_events a WHERE a.object_id = $3 AND a::text LIKE $2`,
+          [ok.body.batchId, `%${PASSWORD}%`, ok.body.batchId],
+        ),
+      );
+      expect(leaked.rows).toEqual([]);
+
+      read.mockResolvedValueOnce({ kind: 'unreadable' });
+      const scan = await pdf().expect(400);
+      expect(scan.body.message).toMatch(/scan or photo/);
+    } finally {
+      read.mockRestore();
     }
   });
 });

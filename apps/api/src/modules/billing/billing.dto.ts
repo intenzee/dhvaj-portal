@@ -372,6 +372,14 @@ export class ImportTdsCreditsDto {
   @ApiProperty({ description: 'File bytes, base64-encoded.' })
   @IsBase64()
   contentBase64!: string;
+
+  @ApiPropertyOptional({
+    description: "A TRACES PDF's password (DDMMYYYY). Used to read the file; never stored.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  password?: string;
 }
 
 /** PS-204: the year (and quarter) to match. */

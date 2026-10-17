@@ -15,6 +15,7 @@ import {
   tdsQuarterLabel,
   tdsQuarterOf,
   tdsReminderText,
+  TDS_PDF_PASSWORD_CODE,
   toPaise,
   whatsappUrl,
   type ImportTdsCreditsInput,
@@ -33,12 +34,12 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
-import { pdfTextLayer } from '../documents/ocr/pdf-text';
 import { clientPhoneSql } from '../filing-workspace/client-chase';
 import { NotificationsService } from '../notifications/notifications.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { CLIENT_EMAIL_SQL } from './receivables.service';
 import { TdsParseError, parseTdsText } from './tds-parsers';
+import { TdsPdfReader } from './tds-pdf-reader';
 import { matchTds, quarterIndex, type MatchCredit, type MatchReceipt } from './tds-match';
 
 /** The largest file taken: a year's 26AS text is tens of kilobytes. */
@@ -85,10 +86,15 @@ export class TdsCreditsService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly pdf: TdsPdfReader,
   ) {}
 
   async import(ctx: RlsContext, input: ImportTdsCreditsInput): Promise<TdsImportResult> {
-    if (!ctx.employeeId) throw new ForbiddenException('Only staff can import the 26AS.');
+    if (!ctx.employeeId) {
+      throw new ForbiddenException(
+        'Your sign-in is not linked to a staff record, so the import cannot be credited to you. Ask an administrator to link it under Administration → People.',
+      );
+    }
     const bytes = Buffer.from(input.contentBase64, 'base64');
     if (bytes.length === 0) throw new BadRequestException('The file is empty.');
     if (bytes.length > TDS_IMPORT_MAX_BYTES) {
@@ -97,13 +103,22 @@ export class TdsCreditsService {
     const isPdf = bytes.subarray(0, 5).toString('latin1') === '%PDF-';
     let text: string;
     if (isPdf) {
-      const layer = await pdfTextLayer(bytes);
-      if (!layer) {
+      const read = await this.pdf.read(bytes, input.password || undefined);
+      if (read.kind === 'password') {
+        throw new BadRequestException({
+          message: read.wrong
+            ? 'That password does not open this PDF. TRACES uses the date of birth or incorporation of the PAN holder, as DDMMYYYY.'
+            : 'This PDF is password-protected. Enter its password — TRACES uses the date of birth or incorporation of the PAN holder, as DDMMYYYY.',
+          reason: TDS_PDF_PASSWORD_CODE,
+          wrongPassword: read.wrong,
+        });
+      }
+      if (read.kind === 'unreadable') {
         throw new BadRequestException(
-          'This PDF has no text to read (a scan, or password-protected). Import the Form 16A as TRACES issues it, or the 26AS text export.',
+          'This PDF has no text to read (a scan or photo). Import the Form 16A as TRACES issues it, or the 26AS text export.',
         );
       }
-      text = layer;
+      text = read.text;
     } else {
       text = bytes.toString('utf8');
     }
