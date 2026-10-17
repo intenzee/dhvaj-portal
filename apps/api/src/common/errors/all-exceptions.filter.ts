@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { CORRELATION_ID_HEADER } from '../logging/logger.config';
+import { CORRELATION_ID_HEADER, loggableUrl } from '../logging/logger.config';
 import { ErrorResponse } from './error-response';
 
 /**
@@ -37,12 +37,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       // Unexpected: log the full error, return a generic message.
       this.logger.error(
-        `Unhandled exception [${correlationId}] ${request.method} ${request.url}`,
+        `Unhandled exception [${correlationId}] ${request.method} ${loggableUrl(request.url)}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
     } else {
       this.logger.warn(
-        `Handled ${status} [${correlationId}] ${request.method} ${request.url} — ${message}`,
+        `Handled ${status} [${correlationId}] ${request.method} ${loggableUrl(request.url)} — ${message}`,
       );
     }
 

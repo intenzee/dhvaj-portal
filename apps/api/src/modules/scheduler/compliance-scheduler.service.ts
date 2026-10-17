@@ -71,10 +71,15 @@ export class ComplianceSchedulerService implements OnModuleInit {
     );
   }
 
-  /** Register a config-driven cron job. Expressions are validated by CronJob. */
+  /**
+   * Register a config-driven cron job. Expressions are validated by CronJob.
+   * With several API instances each tick runs on one of them (advisory lock).
+   */
   private register(name: string, cron: string, handler: () => Promise<void>): void {
     const job = new CronJob(cron, () => {
-      void handler();
+      void this.db.runExclusive(name, handler).catch((err: Error) => {
+        this.logger.error(`Scheduled job ${name} failed: ${err.message}`, err.stack);
+      });
     });
     this.registry.addCronJob(
       name,

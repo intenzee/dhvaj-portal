@@ -31,8 +31,13 @@ export class TimeCloserScheduler implements OnModuleInit {
 
   onModuleInit(): void {
     if (!this.config.get('SCHEDULER_ENABLED')) return;
+    // One instance runs each tick (advisory lock), however many are up.
     const job = new CronJob(this.config.get('SCHEDULER_TIME_CLOSER_CRON'), () => {
-      void this.run();
+      void this.db
+        .runExclusive('time-stale-closer', () => this.run())
+        .catch((err: Error) => {
+          this.logger.error(`Scheduled run failed: ${err.message}`, err.stack);
+        });
     });
     this.registry.addCronJob(
       'time-stale-closer',

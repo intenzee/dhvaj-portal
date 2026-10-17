@@ -1,5 +1,6 @@
 import { Controller, ForbiddenException, Get, Headers, NotFoundException } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { timingSafeEqual } from 'node:crypto';
 import { AppConfigService } from '../../config/config.module';
 import { Public } from '../auth/auth.decorators';
@@ -17,6 +18,7 @@ import { istToday } from '../engagements/time/auto-time';
  */
 @ApiExcludeController()
 @Public()
+@Throttle({ default: { limit: 5, ttl: 60_000 } })
 @Controller('internal/cron')
 export class CronController {
   constructor(

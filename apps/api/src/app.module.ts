@@ -82,9 +82,10 @@ import { NoticeIntakeModule } from './modules/notice-intake/notice-intake.module
       imports: [AppConfigModule],
       inject: [AppConfigService],
       useFactory: (config: AppConfigService) => ({
-        // Rate limit is effectively disabled under test to keep the suite
-        // deterministic; real environments get a sane per-IP ceiling.
-        throttlers: [{ ttl: 60_000, limit: config.isTest ? 1_000_000 : 100 }],
+        // Per client address (see TRUST_PROXY). Skipped under test to keep the
+        // suite deterministic, including the tighter per-route limits.
+        throttlers: [{ ttl: 60_000, limit: config.get('RATE_LIMIT_PER_MINUTE') }],
+        skipIf: () => config.isTest,
       }),
     }),
     ScheduleModule.forRoot(),

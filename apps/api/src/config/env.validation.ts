@@ -14,6 +14,15 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().max(65535).default(3001),
   API_GLOBAL_PREFIX: z.string().default('api'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  // Express `trust proxy`: how many reverse proxies sit in front of the API
+  // (Render/Vercel/a load balancer: usually 1), `true`, `false`, or a comma list
+  // of proxy addresses/subnets. Unset ⇒ not trusted. Behind a proxy it must be
+  // set so the rate limiter and the logs see the client's address, not the
+  // proxy's (otherwise every user shares one rate-limit bucket).
+  TRUST_PROXY: z.string().optional(),
+  // Requests per minute per client address across the API. The public routes
+  // (client upload links, the cron trigger) have their own, tighter limits.
+  RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(300),
 
   // Logging
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
@@ -222,7 +231,7 @@ export const envSchema = z.object({
   // ── Feature flags (Engagement Restructure phases) ─────────────────────────
   // Comma list of enabled flags (ff_engagement_kinds, ff_calendar_v2,
   // ff_gst_tab, ff_compliance_tabs, ff_auto_time, ff_work_links, ff_today_view,
-  // ff_filing_runs, ff_notices), 'all', or 'none'. Unset →
+  // ff_filing_runs, ff_notices, ff_billing_v2), 'all', or 'none'. Unset →
   // 'all' outside production (dev/test cover the new paths) and 'none' in
   // production, so each phase is switched on deliberately per environment.
   FEATURE_FLAGS: z.string().optional(),
@@ -317,5 +326,215 @@ export function validateEnv(raw: Record<string, unknown>): Env {
       .join('\n');
     throw new Error(`Invalid environment configuration. Refusing to start:\n${issues}`);
   }
+  if (parsed.data.NODE_ENV === 'production') {
+    const problems = productionConfigProblems(parsed.data, raw);
+    if (problems.length > 0) {
+      throw new Error(
+        `Unsafe production configuration. Refusing to start:\n${problems.map((p) => `  - ${p}`).join('\n')}`,
+      );
+    }
+  }
   return parsed.data;
+}
+
+/** Secrets that ship in this repo (examples, CI, tests) — never valid in production. */
+const KNOWN_DEV_SECRETS = new Set([
+  'dev-only-change-me-in-real-environments',
+  'ci-only-secret-at-least-16-chars',
+  'test-only-secret-at-least-16-chars',
+  'a-sufficiently-long-secret',
+  'dev-onlyoffice-shared-secret-change-me',
+]);
+
+const MIN_PROD_SECRET_LENGTH = 32;
+
+function weakSecret(value: string | undefined): boolean {
+  return !value || value.length < MIN_PROD_SECRET_LENGTH || KNOWN_DEV_SECRETS.has(value);
+}
+
+function isSet(raw: Record<string, unknown>, key: string): boolean {
+  const v = raw[key];
+  return typeof v === 'string' && v.trim() !== '';
+}
+
+function isLocalHost(hostname: string): boolean {
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+}
+
+/**
+ * Production-only fail-fast rules: settings whose defaults are fine for a laptop
+ * but unsafe (or silently broken) with real client data. Pure — tested.
+ *
+ * A production API with AUTH_PROVIDER=dev is the synthetic-data demo (nobody
+ * can mint a sign-in token there); the rules that only matter once real client
+ * data is held (credential vault key, durable storage, client-facing links) are
+ * enforced when AUTH_PROVIDER=entra.
+ */
+export function productionConfigProblems(env: Env, raw: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+
+  // CORS: an explicit allowlist of https origins (no wildcard, no paths).
+  if (!isSet(raw, 'CORS_ORIGINS')) {
+    problems.push('CORS_ORIGINS must be set to the web app origin(s) (https://…).');
+  } else {
+    for (const origin of env.CORS_ORIGINS.split(',')
+      .map((o) => o.trim())
+      .filter(Boolean)) {
+      let ok = false;
+      try {
+        const u = new URL(origin);
+        ok = u.protocol === 'https:' && origin === `${u.protocol}//${u.host}`;
+      } catch {
+        ok = false;
+      }
+      if (!ok)
+        problems.push(
+          `CORS_ORIGINS entry "${origin}" must be an https origin, e.g. https://portal.example.com.`,
+        );
+    }
+  }
+
+  if (weakSecret(env.AUTH_JWT_SECRET)) {
+    problems.push(
+      `AUTH_JWT_SECRET must be a unique random value of at least ${MIN_PROD_SECRET_LENGTH} characters.`,
+    );
+  }
+
+  // Database: the runtime role, over TLS (a same-host database excepted).
+  let dbUrl: URL | null = null;
+  try {
+    dbUrl = new URL(env.DATABASE_URL);
+  } catch {
+    dbUrl = null;
+  }
+  if (dbUrl) {
+    const user = decodeURIComponent(dbUrl.username);
+    const privileged = new Set(['postgres', 'hsdg_migrator']);
+    for (const key of ['DATABASE_MIGRATE_URL', 'DATABASE_ADMIN_URL']) {
+      if (!isSet(raw, key)) continue;
+      try {
+        privileged.add(decodeURIComponent(new URL(String(raw[key])).username));
+      } catch {
+        /* not a URL — not ours to validate */
+      }
+    }
+    if (privileged.has(user)) {
+      problems.push(
+        `DATABASE_URL connects as "${user}"; the API must use the least-privilege app role (hsdg_app).`,
+      );
+    }
+    if (!env.DATABASE_SSL && !isLocalHost(dbUrl.hostname)) {
+      problems.push('DATABASE_SSL must be true for a database on another host.');
+    }
+  }
+
+  if (env.AUTH_PROVIDER === 'entra' && (!env.AUTH_ENTRA_TENANT_ID || !env.AUTH_ENTRA_CLIENT_ID)) {
+    problems.push('AUTH_PROVIDER=entra requires AUTH_ENTRA_TENANT_ID and AUTH_ENTRA_CLIENT_ID.');
+  }
+
+  // Storage and Microsoft 365.
+  if (env.M365_ENABLED || env.STORAGE_PROVIDER === 'sharepoint') {
+    const missing: string[] = (
+      ['M365_TENANT_ID', 'M365_CLIENT_ID', 'M365_CLIENT_SECRET'] as const
+    ).filter((k) => !env[k]);
+    if (!env.M365_SITE_URL && !env.M365_SITE_ID && !env.M365_DRIVE_ID) {
+      missing.push('M365_SITE_URL');
+    }
+    if (missing.length > 0) {
+      const why =
+        env.STORAGE_PROVIDER === 'sharepoint' ? 'STORAGE_PROVIDER=sharepoint' : 'M365_ENABLED';
+      problems.push(
+        `${why} requires ${missing.join(', ')} (site: one of M365_SITE_URL / M365_SITE_ID / M365_DRIVE_ID).`,
+      );
+    }
+  }
+  if (
+    env.STORAGE_PROVIDER === 'azure_blob' &&
+    (!env.STORAGE_AZURE_CONNECTION_STRING || !env.STORAGE_AZURE_CONTAINER)
+  ) {
+    problems.push(
+      'STORAGE_PROVIDER=azure_blob requires STORAGE_AZURE_CONNECTION_STRING and STORAGE_AZURE_CONTAINER.',
+    );
+  }
+
+  if (env.ONLYOFFICE_ENABLED && weakSecret(env.ONLYOFFICE_JWT_SECRET)) {
+    problems.push(
+      `ONLYOFFICE_ENABLED requires a unique ONLYOFFICE_JWT_SECRET of at least ${MIN_PROD_SECRET_LENGTH} characters.`,
+    );
+  }
+  if (env.DOC_AI_ENABLED && (!env.DOC_AI_ENDPOINT || !env.DOC_AI_KEY)) {
+    problems.push('DOC_AI_ENABLED requires DOC_AI_ENDPOINT and DOC_AI_KEY.');
+  }
+
+  // Links sent to clients must point at the real web app.
+  const needsWebUrl = env.AUTH_PROVIDER === 'entra' || env.CLIENT_UPLOAD_ENABLED;
+  if (needsWebUrl) {
+    let ok = false;
+    try {
+      ok = isSet(raw, 'WEB_PUBLIC_URL') && new URL(env.WEB_PUBLIC_URL).protocol === 'https:';
+    } catch {
+      ok = false;
+    }
+    if (!ok)
+      problems.push(
+        'WEB_PUBLIC_URL must be set to the web app’s https URL (it goes into links sent to clients).',
+      );
+  }
+
+  // Real client data (Entra sign-in): durable document storage. (The vault key,
+  // CREDENTIALS_KEYS, stays optional: without it only client logins are off.)
+  if (env.AUTH_PROVIDER === 'entra') {
+    if (env.STORAGE_PROVIDER === 'local' && !env.STORAGE_LOCAL_DIR) {
+      problems.push(
+        'STORAGE_PROVIDER=local without STORAGE_LOCAL_DIR keeps documents in a temp dir that a redeploy wipes; ' +
+          'use sharepoint (or point STORAGE_LOCAL_DIR at a persistent disk).',
+      );
+    }
+  }
+
+  return problems;
+}
+
+/**
+ * Production settings that are allowed but worth a loud line in the boot log.
+ * Pure — tested.
+ */
+export function productionConfigWarnings(env: Env): string[] {
+  const warnings: string[] = [];
+  if (env.AUTH_PROVIDER === 'dev') {
+    warnings.push(
+      'AUTH_PROVIDER=dev in production: demo posture — no one can sign in except with tokens signed by AUTH_JWT_SECRET. Synthetic data only.',
+    );
+  }
+  if (!env.TRUST_PROXY) {
+    warnings.push(
+      'TRUST_PROXY is not set: behind a load balancer every request looks like it comes from the proxy, so all users share one rate-limit bucket.',
+    );
+  }
+  if (!env.SCHEDULER_ENABLED && !env.CRON_SECRET) {
+    warnings.push(
+      'Neither SCHEDULER_ENABLED nor CRON_SECRET is set: deadline sweeps, reminders and the outbox drain never run.',
+    );
+  }
+  if (!env.CREDENTIALS_KEYS || env.CREDENTIALS_KEYS.trim() === '') {
+    warnings.push(
+      'CREDENTIALS_KEYS is not set: clients’ portal logins can be neither saved nor shown (see docs/DEPLOY.md).',
+    );
+  }
+  if (env.STORAGE_PROVIDER === 'local' && !env.STORAGE_LOCAL_DIR) {
+    warnings.push(
+      'STORAGE_PROVIDER=local without STORAGE_LOCAL_DIR: uploaded documents are lost on redeploy.',
+    );
+  }
+  return warnings;
+}
+
+/** Express `trust proxy` value from TRUST_PROXY (undefined ⇒ leave Express's default). Pure — tested. */
+export function trustProxySetting(raw: string | undefined): boolean | number | string | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v;
 }

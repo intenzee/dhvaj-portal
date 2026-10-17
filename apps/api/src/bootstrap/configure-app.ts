@@ -6,6 +6,7 @@ import { API_VERSION } from '@hsdg/contracts';
 import { buildValidationPipe } from '../common/validation';
 import { AllExceptionsFilter } from '../common/errors/all-exceptions.filter';
 import { AppConfigService } from '../config/config.module';
+import { productionConfigWarnings, trustProxySetting } from '../config/env.validation';
 import { setupSwagger } from './swagger';
 
 /**
@@ -24,6 +25,17 @@ export function configureApp(app: NestExpressApplication): {
   const config = app.get(AppConfigService);
   const logger = app.get(Logger);
   const globalPrefix = config.get('API_GLOBAL_PREFIX');
+
+  // Behind Render/Vercel/a load balancer the socket peer is the proxy; trusting
+  // the configured hops makes req.ip the client (rate limiting, logs).
+  const trustProxy = trustProxySetting(config.get('TRUST_PROXY'));
+  if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
+
+  if (config.isProduction) {
+    for (const warning of productionConfigWarnings(config.all)) {
+      logger.warn(warning, 'Config');
+    }
+  }
 
   // Documents are uploaded base64-encoded in JSON, so raise the body ceiling to
   // clear the largest allowed file (default parsers cap JSON at 100 kB).
