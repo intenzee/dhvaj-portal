@@ -1,6 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Client } from 'pg';
+import { FeatureFlagsService } from '../src/common/feature-flags/feature-flags.service';
 import type { NotificationItem, TodayView } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
@@ -500,5 +501,132 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
         }
       }),
     ).rejects.toThrow(/left to credit/);
+  });
+  it('voids an approved credit note: another partner, a reason, the number kept, the balance back', async () => {
+    const { eng } = await client();
+    const inv = await invoice(eng, '10000.00');
+    const [line] = (await getInvoice(eng, inv)).lines as { id: string }[];
+    const askCredit = async (t: string, taxable: string): Promise<string> =>
+      (
+        await http()
+          .post(`/api/v1/billing/invoices/${inv}/credit-notes`)
+          .set(bearer(t))
+          .send({
+            lines: [{ invoiceLineId: line!.id, taxableValue: taxable }],
+            reason: 'Scope cut',
+          })
+          .expect(201)
+      ).body.id as string;
+    const pdf = (t: string, id: string) =>
+      http()
+        .get(`/api/v1/billing/credit-notes/${id}/pdf`)
+        .set(bearer(t))
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        });
+    const voidIt = (t: string, id: string, body: Record<string, unknown>) =>
+      http().post(`/api/v1/billing/credit-notes/${id}/void`).set(bearer(t)).send(body);
+
+    // Partner A asks, the managing partner approves.
+    const cn = await askCredit(pa, '1000');
+    await pdf(pa, cn).expect(404);
+    const approved = await decide(mp, 'credit-notes', cn, 'approve').expect(201);
+    const number = approved.body.number as string;
+    const total = approved.body.total as string;
+    const credited = await getInvoice(eng, inv);
+    expect(credited).toMatchObject({
+      status: 'partially_paid',
+      amountReceived: '0.00',
+      amountCredited: total,
+      amountWrittenOff: '0.00',
+    });
+
+    // Its PDF, kept as issued (CGST rule 53).
+    const file = await pdf(pa, cn).expect(200);
+    expect(file.headers['content-type']).toContain('application/pdf');
+    const text = (file.body as Buffer).toString('latin1');
+    expect(text.startsWith('%PDF-')).toBe(true);
+    expect(text).toContain('(CREDIT NOTE)');
+    expect(text).toContain(number);
+    const { rows: kept } = await superuser((c) =>
+      c.query<{ ref: string | null }>(
+        `SELECT pdf_storage_reference AS ref FROM hsdg.credit_notes WHERE id = $1`,
+        [cn],
+      ),
+    );
+    expect(kept[0]!.ref).toBeTruthy();
+
+    // A write-off shows apart from the credit.
+    const wo = await writeOff(mx, inv, '500').expect(201);
+    await decide(pa, 'write-offs', wo.body.id as string, 'approve').expect(201);
+    expect(await getInvoice(eng, inv)).toMatchObject({
+      amountCredited: total,
+      amountWrittenOff: '500.00',
+    });
+
+    // Not without billing.approve, a reason, or by the one who asked.
+    await voidIt(mx, cn, { reason: 'Wrong invoice' }).expect(403);
+    await voidIt(mp, cn, { reason: '  ' }).expect(400);
+    const own = await voidIt(pa, cn, { reason: 'Wrong invoice' }).expect(403);
+    expect(own.body.message).toMatch(/another partner must void it/);
+    await expect(
+      superuser((c) => c.query(`UPDATE hsdg.credit_notes SET status = 'void' WHERE id = $1`, [cn])),
+    ).rejects.toThrow(/Say why/);
+
+    const voided = await voidIt(mp, cn, { reason: 'Raised against the wrong invoice' }).expect(201);
+    expect(voided.body).toMatchObject({
+      status: 'void',
+      number,
+      voidReason: 'Raised against the wrong invoice',
+      voidedByName: expect.any(String),
+    });
+    expect(await getInvoice(eng, inv)).toMatchObject({
+      amountCredited: '0.00',
+      amountWrittenOff: '500.00',
+    });
+    await voidIt(mp, cn, { reason: 'Again' }).expect(400);
+    const voidPdf = await pdf(pa, cn).expect(200);
+    expect((voidPdf.body as Buffer).toString('latin1')).toContain('VOID - cancelled on');
+
+    // The number is never reused: the next note takes the next one.
+    const next = await askCredit(mx, '100');
+    const nextNo = (await decide(pa, 'credit-notes', next, 'approve').expect(201)).body
+      .number as string;
+    expect(nextNo).not.toBe(number);
+    expect(Number(nextNo.split('/').pop())).toBeGreaterThan(Number(number.split('/').pop()));
+
+    // Once the GSTR-1 covering its date is filed, it is on the GSTN: no void.
+    const settings = await http().get('/api/v1/billing/settings').set(bearer(mp)).expect(200);
+    const [y, m] = today.split('-').map(Number) as [number, number];
+    const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    await http()
+      .patch('/api/v1/billing/settings')
+      .set(bearer(mp))
+      .send({ version: settings.body.version, gstFiledThrough: `${today.slice(0, 8)}15` })
+      .expect(400);
+    await http()
+      .patch('/api/v1/billing/settings')
+      .set(bearer(mp))
+      .send({ version: settings.body.version, gstFiledThrough: monthEnd })
+      .expect(200);
+    try {
+      const filed = await voidIt(mp, next, { reason: 'Changed our minds' }).expect(400);
+      expect(filed.body.message).toMatch(/GST return through .* is filed.*debit note or amend/);
+    } finally {
+      await superuser((c) => c.query(`UPDATE hsdg.firm_settings SET gst_filed_through = NULL`));
+    }
+
+    // Behind ff_billing_v2.
+    const flags = app.get(FeatureFlagsService);
+    flags.setRules(new Map([['ff_billing_v2', { mode: 'off', officeCodes: new Set<string>() }]]));
+    try {
+      await pdf(pa, next).expect(404);
+      await voidIt(pa, next, { reason: 'Flag off' }).expect(404);
+    } finally {
+      flags.setRules(new Map());
+    }
   });
 });

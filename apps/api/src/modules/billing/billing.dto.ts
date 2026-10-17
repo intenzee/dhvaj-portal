@@ -100,6 +100,16 @@ export class UpdateBillingSettingsDto {
     message: 'tdsMatchTolerance must be between 0 and 1000 rupees.',
   })
   tdsMatchTolerance?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-09-30',
+    description:
+      'The last day of the latest month (or quarter) whose GSTR-1 is filed; a credit note dated on or before it cannot be voided (PS-205).',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'gstFiledThrough must be a date (YYYY-MM-DD).' })
+  gstFiledThrough?: string | null;
 }
 
 /** PS-202 · one invoice's share of a receipt. */
@@ -253,6 +263,21 @@ export class DecideAdjustmentDto {
   @IsString()
   @MaxLength(500)
   note?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  version?: number;
+}
+
+/** PS-205 · POST /billing/credit-notes/:id/void. */
+export class VoidCreditNoteDto {
+  @ApiProperty({ example: 'Raised against the wrong invoice' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
 
   @ApiPropertyOptional()
   @IsOptional()

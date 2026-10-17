@@ -2,13 +2,16 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
   NOTIFICATION_TYPE,
+  amountInWords,
   creditNoteLines,
+  creditNoteVoidBlock,
   formatInr,
   fromPaise,
   toPaise,
@@ -20,12 +23,15 @@ import {
   type InvoiceAdjustment,
   type RequestCreditNoteInput,
   type RequestWriteOffInput,
+  type VoidCreditNoteInput,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { translateInvoiceError } from '../commercial/commercial.service';
+import { STORAGE_PROVIDER, type StorageProvider } from '../documents/storage/storage-provider';
 import { NotificationsService } from '../notifications/notifications.service';
+import { renderCreditNotePdf, type CreditNotePdfData } from './credit-note-pdf';
 
 interface AdjustmentRow {
   id: string;
@@ -52,6 +58,9 @@ interface AdjustmentRow {
   decided_at: Date | null;
   decision_note: string | null;
   version: number;
+  void_reason: string | null;
+  voided_at: Date | null;
+  voided_by_name: string | null;
   lines: CreditNoteLine[];
 }
 
@@ -61,12 +70,13 @@ const ADJUSTMENTS = `
     SELECT c.id, 'credit_note'::text AS kind, c.invoice_id, c.client_entity_id,
            c.credit_note_number AS number, c.credit_date::text, c.reason, c.taxable_value,
            c.gst_rate, c.cgst, c.sgst, c.igst, c.total, c.status, c.requested_by_employee_id,
-           c.decided_by_employee_id, c.created_at, c.decided_at, c.decision_note, c.version
+           c.decided_by_employee_id, c.created_at, c.decided_at, c.decision_note, c.version,
+           c.void_reason, c.voided_at, c.voided_by_employee_id
       FROM hsdg.credit_notes c
     UNION ALL
     SELECT w.id, 'write_off', w.invoice_id, w.client_entity_id, NULL, NULL, w.reason, w.amount,
            0, 0, 0, 0, w.amount, w.status, w.requested_by_employee_id, w.decided_by_employee_id,
-           w.created_at, w.decided_at, w.decision_note, w.version
+           w.created_at, w.decided_at, w.decision_note, w.version, NULL, NULL, NULL
       FROM hsdg.write_offs w
   ) a`;
 
@@ -75,7 +85,8 @@ const ADJUSTMENT_BASE = `
          e.legal_name AS client_name, a.number, a.credit_date, a.reason, a.taxable_value,
          a.gst_rate, a.cgst, a.sgst, a.igst, a.total, a.status, a.requested_by_employee_id,
          rb.full_name AS requested_by_name, a.created_at, db.full_name AS decided_by_name,
-         a.decided_at, a.decision_note, a.version,
+         a.decided_at, a.decision_note, a.version, a.void_reason, a.voided_at,
+         vb.full_name AS voided_by_name,
          COALESCE((
            SELECT json_agg(json_build_object(
                     'invoiceLineId', cl.invoice_line_id, 'description', cl.description,
@@ -89,7 +100,8 @@ const ADJUSTMENT_BASE = `
     JOIN hsdg.invoices i ON i.id = a.invoice_id
     JOIN hsdg.entities e ON e.id = a.client_entity_id
     LEFT JOIN hsdg.employees rb ON rb.id = a.requested_by_employee_id
-    LEFT JOIN hsdg.employees db ON db.id = a.decided_by_employee_id`;
+    LEFT JOIN hsdg.employees db ON db.id = a.decided_by_employee_id
+    LEFT JOIN hsdg.employees vb ON vb.id = a.voided_by_employee_id`;
 
 const TABLE: Record<AdjustmentKind, string> = {
   credit_note: 'hsdg.credit_notes',
@@ -128,6 +140,7 @@ export class AdjustmentsService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
   /** Pending requests (the approvers' queue), or one invoice's history. */
@@ -291,6 +304,8 @@ export class AdjustmentsService {
       } catch (err) {
         throw translateAdjustmentError(err);
       }
+      // An approved credit note is a tax document: keep its PDF as issued.
+      if (approve && kind === 'credit_note') await this.storePdf(client, id);
       const after = await this.load(client, id, kind);
       await this.audit.recordWith(client, ctx, {
         action: `${kind}.${approve ? 'approved' : 'rejected'}`,
@@ -309,7 +324,204 @@ export class AdjustmentsService {
     });
   }
 
+  /**
+   * Void an approved credit note: a partner other than its requester, with a
+   * reason, while the GST return for its date is not yet filed. The number
+   * stays used (never reissued) and the invoice's balance comes back through
+   * settle_invoice; the database holds the same rules.
+   */
+  voidCreditNote(
+    ctx: RlsContext,
+    id: string,
+    input: VoidCreditNoteInput,
+  ): Promise<InvoiceAdjustment> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.load(client, id, 'credit_note', true);
+      if (before.status !== 'approved') {
+        throw new BadRequestException(
+          `Only an approved credit note can be voided; this one is ${before.status}.`,
+        );
+      }
+      if (input.version !== undefined && input.version !== before.version) {
+        throw new ConflictException(
+          `Credit note was changed by someone else (expected v${input.version}, found v${before.version}).`,
+        );
+      }
+      if (ctx.employeeId && before.requestedById === ctx.employeeId) {
+        throw new ForbiddenException(
+          'You asked for this credit note; another partner must void it.',
+        );
+      }
+      const inv = await this.invoiceFacts(client, before.invoiceId);
+      if (inv?.status === 'void') {
+        throw new BadRequestException('The invoice is void; its credit notes stay as they are.');
+      }
+      const filed = await gstFiledThrough(client);
+      const blocked = creditNoteVoidBlock(before, filed);
+      if (blocked) throw new BadRequestException(blocked);
+      const reason = input.reason.trim();
+      try {
+        await client.query(
+          `UPDATE hsdg.credit_notes
+              SET status = 'void', void_reason = $2, voided_by_employee_id = $3,
+                  version = version + 1
+            WHERE id = $1`,
+          [id, reason, ctx.employeeId ?? null],
+        );
+      } catch (err) {
+        throw translateVoidError(err);
+      }
+      const after = await this.load(client, id, 'credit_note');
+      await this.audit.recordWith(client, ctx, {
+        action: 'credit_note.voided',
+        objectType: 'credit_note',
+        objectId: id,
+        before: { status: before.status },
+        after: {
+          status: after.status,
+          number: after.number,
+          invoice: after.invoiceId,
+          total: after.total,
+          creditDate: after.creditDate,
+          // The GST position the void was made in, for whoever reviews it.
+          gstFiledThrough: filed ?? 'not recorded',
+        },
+        reason,
+      });
+      return after;
+    });
+  }
+
+  /** The credit note's PDF: as kept at approval, or (void, or older notes) drawn now. */
+  creditNotePdf(ctx: RlsContext, id: string): Promise<{ filename: string; data: Buffer }> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const note = await this.load(client, id, 'credit_note');
+      if ((note.status !== 'approved' && note.status !== 'void') || !note.number) {
+        throw new NotFoundException('Only an approved credit note has a PDF.');
+      }
+      const filename = `${note.number.replace(/\//g, '-')}.pdf`;
+      const { rows } = await client.query<{ ref: string | null }>(
+        `SELECT pdf_storage_reference AS ref FROM hsdg.credit_notes WHERE id = $1`,
+        [id],
+      );
+      if (note.status === 'approved' && rows[0]?.ref) {
+        return { filename, data: await this.storage.read(rows[0].ref) };
+      }
+      return { filename, data: renderCreditNotePdf(await this.pdfData(client, note)) };
+    });
+  }
+
   // ── helpers ─────────────────────────────────────────────────────────────
+
+  private async storePdf(client: PoolClient, id: string): Promise<void> {
+    const note = await this.load(client, id, 'credit_note');
+    const pdf = renderCreditNotePdf(await this.pdfData(client, note));
+    const reference = this.storage.newReference(note.engagementId, id);
+    await this.storage.write(reference, pdf, 'application/pdf');
+    await client.query(`UPDATE hsdg.credit_notes SET pdf_storage_reference = $2 WHERE id = $1`, [
+      id,
+      reference,
+    ]);
+  }
+
+  /** What rule 53 asks the credit note to show, from the note, its invoice and the firm. */
+  private async pdfData(client: PoolClient, note: InvoiceAdjustment): Promise<CreditNotePdfData> {
+    const { rows: firmRows } = await client.query<{
+      firm_name: string;
+      address: string | null;
+      gstin: string | null;
+      state_code: string | null;
+      sac_default: string;
+    }>(`SELECT firm_name, address, gstin, state_code, sac_default FROM hsdg.firm_settings LIMIT 1`);
+    const firm = firmRows[0];
+    const { rows: invRows } = await client.query<{
+      invoice_number: string | null;
+      issue_date: string | null;
+      client_gstin: string | null;
+      place_of_supply_state: string | null;
+      is_reverse_charge: boolean;
+      legal_name: string;
+      pan: string | null;
+    }>(
+      `SELECT i.invoice_number, i.issue_date::text, i.client_gstin, i.place_of_supply_state,
+              i.is_reverse_charge, e.legal_name, e.pan
+         FROM hsdg.invoices i JOIN hsdg.entities e ON e.id = i.client_entity_id
+        WHERE i.id = $1`,
+      [note.invoiceId],
+    );
+    const inv = invRows[0];
+    if (!inv) throw new NotFoundException('Invoice not found.');
+    // Registered, then business, then any address; primary first.
+    const { rows: addrRows } = await client.query<{ address: string }>(
+      `SELECT concat_ws(', ', a.line1, NULLIF(a.line2, ''), NULLIF(a.city, ''),
+                        NULLIF(concat_ws(' ', NULLIF(a.state, ''), a.pincode), '')) AS address
+         FROM hsdg.entity_addresses a
+        WHERE a.entity_id = $1
+        ORDER BY (a.address_type = 'registered') DESC, (a.address_type = 'business') DESC,
+                 a.is_primary DESC, a.created_at
+        LIMIT 1`,
+      [note.clientEntityId],
+    );
+    const { rows: sacRows } = await client.query<{ id: string; sac_code: string | null }>(
+      `SELECT id, sac_code FROM hsdg.invoice_line_items WHERE invoice_id = $1`,
+      [note.invoiceId],
+    );
+    const sac = new Map(sacRows.map((r) => [r.id, r.sac_code]));
+    const firmState = firm?.state_code ?? null;
+    const pos = inv.place_of_supply_state;
+    const intraState =
+      toPaise(note.igst) > 0n
+        ? false
+        : toPaise(note.cgst) > 0n || !pos || !firmState || pos === firmState;
+    return {
+      firm: {
+        name: firm?.firm_name ?? '',
+        address: firm?.address ?? null,
+        gstin: firm?.gstin ?? null,
+        stateCode: firmState,
+      },
+      client: {
+        name: inv.legal_name,
+        gstin: inv.client_gstin,
+        pan: inv.pan,
+        address: addrRows[0]?.address ?? null,
+        stateCode: inv.client_gstin?.slice(0, 2) ?? pos,
+      },
+      creditNoteNumber: note.number!,
+      creditDate: note.creditDate!,
+      invoiceNumber: inv.invoice_number ?? '',
+      invoiceDate: inv.issue_date,
+      placeOfSupplyState: pos,
+      isReverseCharge: inv.is_reverse_charge,
+      reason: note.reason,
+      intraState,
+      lines: note.lines.map((l) => ({
+        description: l.description,
+        sacCode: sac.get(l.invoiceLineId) ?? firm?.sac_default ?? null,
+        taxableValue: l.taxableValue,
+        gstRate: l.gstRate,
+        cgst: l.cgst,
+        sgst: l.sgst,
+        igst: l.igst,
+        total: l.total,
+      })),
+      taxableValue: note.taxableValue,
+      cgst: note.cgst,
+      sgst: note.sgst,
+      igst: note.igst,
+      total: note.total,
+      amountInWords: amountInWords(note.total),
+      voided:
+        note.status === 'void' && note.voidedAt
+          ? {
+              on: new Date(note.voidedAt).toLocaleDateString('en-CA', {
+                timeZone: 'Asia/Kolkata',
+              }),
+              reason: note.voidReason ?? '',
+            }
+          : null,
+    };
+  }
 
   /** Audit the request and ask the client's partners (not the requester) to decide. */
   private async afterRequest(
@@ -395,6 +607,13 @@ function assertWithinBalance(
   }
 }
 
+async function gstFiledThrough(client: PoolClient): Promise<string | null> {
+  const { rows } = await client.query<{ through: string | null }>(
+    `SELECT gst_filed_through::text AS through FROM hsdg.firm_settings LIMIT 1`,
+  );
+  return rows[0]?.through ?? null;
+}
+
 async function firmStateCode(client: PoolClient): Promise<string | null> {
   const { rows } = await client.query<{ state_code: string | null }>(
     `SELECT state_code FROM hsdg.firm_settings LIMIT 1`,
@@ -428,6 +647,9 @@ function toAdjustment(r: AdjustmentRow): InvoiceAdjustment {
     decidedAt: r.decided_at?.toISOString() ?? null,
     decisionNote: r.decision_note,
     version: r.version,
+    voidReason: r.void_reason,
+    voidedAt: r.voided_at?.toISOString() ?? null,
+    voidedByName: r.voided_by_name,
     lines: r.lines,
   };
 }
@@ -441,6 +663,14 @@ function translateAdjustmentError(err: unknown): Error {
         ? 'You asked for this; another partner must decide it.'
         : "Only the client's home-office partners and managers (or the managing partner) reduce its bills.",
     );
+  }
+  return translateInvoiceError(err);
+}
+
+/** The void guard's 42501 is the requester voiding their own note. */
+function translateVoidError(err: unknown): Error {
+  if ((err as { code?: string }).code === '42501') {
+    return new ForbiddenException('You asked for this credit note; another partner must void it.');
   }
   return translateInvoiceError(err);
 }

@@ -104,6 +104,12 @@ export interface InvoiceRecord {
   hasPdf: boolean;
   /** PS-202: what posted receipts (and approved credits) have covered. */
   amountSettled: string;
+  /** PS-205: the parts of amountSettled — receipts allocated (gross, so TDS deducted included) … */
+  amountReceived: string;
+  /** … approved credit notes (with their GST) … */
+  amountCredited: string;
+  /** … and approved write-offs. */
+  amountWrittenOff: string;
   /** total − amountSettled; 0 once paid. */
   balance: string;
 }

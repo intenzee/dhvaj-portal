@@ -34,6 +34,12 @@ export interface BillingSettings {
   autoInvoiceReminders: boolean;
   /** Rupees a 26AS credit may differ from the TDS booked and still match (PS-204). */
   tdsMatchTolerance: string;
+  /**
+   * The last day of the latest period whose GSTR-1 the firm has filed; null
+   * until a partner sets it. A credit note dated on or before it is on the
+   * GSTN and cannot be voided (PS-205).
+   */
+  gstFiledThrough: string | null;
   version: number;
   updatedAt: string;
 }
@@ -47,6 +53,7 @@ export interface UpdateBillingSettingsInput {
   invoiceReminderDays?: number[];
   autoInvoiceReminders?: boolean;
   tdsMatchTolerance?: string;
+  gstFiledThrough?: string | null;
   version: number;
 }
 
@@ -641,6 +648,10 @@ export interface InvoiceAdjustment {
   decidedAt: string | null;
   decisionNote: string | null;
   version: number;
+  /** A voided credit note: why, when and by whom. Its number stays used. */
+  voidReason: string | null;
+  voidedAt: string | null;
+  voidedByName: string | null;
 }
 
 /** One invoice line a credit note reduces, before tax. */
@@ -679,6 +690,30 @@ export interface DecideAdjustmentInput {
   decision: 'approve' | 'reject';
   note?: string | null;
   version?: number;
+}
+
+/** POST /billing/credit-notes/:id/void — billing.approve, not the requester. */
+export interface VoidCreditNoteInput {
+  reason: string;
+  version?: number;
+}
+
+/**
+ * Why an approved credit note cannot be voided, or null when it can: once
+ * the GSTR-1 covering its date is filed the note is on the GSTN, and is
+ * undone by a debit note or an amendment in a later return. Pure — tested.
+ */
+export function creditNoteVoidBlock(
+  note: { creditDate: string | null; number: string | null },
+  gstFiledThrough: string | null,
+): string | null {
+  if (!gstFiledThrough || !note.creditDate || note.creditDate > gstFiledThrough) return null;
+  const dmy = (iso: string): string => iso.split('-').reverse().join('-');
+  return (
+    `${note.number ? `Credit note ${note.number}` : 'This credit note'} is dated ` +
+    `${dmy(note.creditDate)} and the GST return through ${dmy(gstFiledThrough)} is filed, ` +
+    `so it is on the GSTN. Raise a debit note or amend it in the next GSTR-1 instead of voiding it.`
+  );
 }
 
 /**

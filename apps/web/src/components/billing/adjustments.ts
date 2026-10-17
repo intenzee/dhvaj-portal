@@ -9,6 +9,7 @@ import {
   type InvoiceAdjustment,
   type InvoiceDetail,
 } from '@hsdg/contracts';
+import { formatDate } from '@/lib/format';
 
 /** "Write-off" / "Credit note". */
 export function adjustmentKindLabel(kind: AdjustmentKind): string {
@@ -26,6 +27,33 @@ export function adjustmentStatusLabel(status: AdjustmentStatus): string {
     default:
       return 'Void';
   }
+}
+
+/**
+ * Whether this person may void a credit note: an approved one on a live
+ * invoice, with billing.approve, and not the one who asked for it (the API
+ * also refuses once its GST return is filed). Pure — tested.
+ */
+export function mayVoidCreditNote(
+  a: Pick<InvoiceAdjustment, 'kind' | 'status' | 'requestedById'>,
+  me: { employeeId: string | null; canApprove: boolean },
+  invoiceStatus: string,
+): boolean {
+  return (
+    a.kind === 'credit_note' &&
+    a.status === 'approved' &&
+    invoiceStatus !== 'void' &&
+    me.canApprove &&
+    (me.employeeId === null || a.requestedById !== me.employeeId)
+  );
+}
+
+/** "Voided by Asha Rao, 20 Oct 2026: raised against the wrong invoice". */
+export function voidLine(
+  a: Pick<InvoiceAdjustment, 'voidedByName' | 'voidedAt' | 'voidReason'>,
+): string {
+  const who = [a.voidedByName, a.voidedAt ? formatDate(a.voidedAt) : null].filter(Boolean);
+  return `Voided${who.length ? ` by ${who.join(', ')}` : ''}${a.voidReason ? `: ${a.voidReason}` : ''}`;
 }
 
 /**
