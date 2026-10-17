@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBase64,
   IsBoolean,
   IsDateString,
   IsIn,
@@ -89,6 +90,16 @@ export class UpdateBillingSettingsDto {
   @IsOptional()
   @IsBoolean()
   autoInvoiceReminders?: boolean;
+
+  @ApiPropertyOptional({
+    example: '1.00',
+    description: 'Rupees a 26AS credit may differ from the TDS booked and still match (PS-204).',
+  })
+  @IsOptional()
+  @Matches(/^(1000(\.0{1,2})?|\d{1,3}(\.\d{1,2})?)$/, {
+    message: 'tdsMatchTolerance must be between 0 and 1000 rupees.',
+  })
+  tdsMatchTolerance?: string;
 }
 
 /** PS-202 · one invoice's share of a receipt. */
@@ -339,4 +350,53 @@ export class CreateFeeMilestoneDto {
   @ApiProperty({ example: '2026-11-30', description: 'Billable from this date.' })
   @IsDateString({ strict: true })
   dueOn!: string;
+}
+
+const FINANCIAL_YEAR = /^\d{4}-\d{2}$/;
+const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
+
+/** PS-204: a 26AS text export or a Form 16A, as TRACES gives it. */
+export class ImportTdsCreditsDto {
+  @ApiProperty({ example: 'AAAFZ9999Q-2027.txt' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(400)
+  filename!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  contentType?: string;
+
+  @ApiProperty({ description: 'File bytes, base64-encoded.' })
+  @IsBase64()
+  contentBase64!: string;
+}
+
+/** PS-204: the year (and quarter) to match. */
+export class TdsMatchQueryDto {
+  @ApiProperty({ example: '2026-27' })
+  @Matches(FINANCIAL_YEAR, { message: 'financialYear must look like 2026-27.' })
+  financialYear!: string;
+
+  @ApiPropertyOptional({ enum: QUARTERS, description: 'Omit for the whole year.' })
+  @IsOptional()
+  @IsIn(QUARTERS)
+  quarter?: (typeof QUARTERS)[number];
+}
+
+/** PS-204: ask a client to file or correct their TDS return. */
+export class RemindTdsDto extends TdsMatchQueryDto {
+  @ApiProperty()
+  @IsUUID()
+  clientId!: string;
+
+  @ApiPropertyOptional({
+    enum: ['email', 'whatsapp', 'copy'],
+    description: "Omit for the firm's reminder channel.",
+  })
+  @IsOptional()
+  @IsIn(['email', 'whatsapp', 'copy'])
+  channel?: 'email' | 'whatsapp' | 'copy';
 }

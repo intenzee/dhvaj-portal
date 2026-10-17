@@ -1,0 +1,18 @@
+FORM NO. 16A
+[See rule 31(1)(b)]
+Certificate under section 203 of the Income-tax Act, 1961 for tax deducted at source
+Certificate No. ABCDEFG Last updated on 20-Nov-2026
+Name and address of the deductor Name and address of the deductee
+ALPHA WIDGETS PRIVATE LIMITED  EXAMPLE AND CO CHARTERED ACCOUNTANTS
+PAN of the deductor TAN of the deductor PAN of the deductee
+AAACA0001A DELA00001A AAAFZ9999Q
+CIT (TDS) Assessment Year Period
+The Commissioner of Income Tax (TDS) 2027-28 From 01-Jul-2026 To 30-Sep-2026
+Summary of payment
+Sr. No. Amount paid/credited Nature of payment Deductee Reference No. Date of payment/credit
+1 30,000.00 194J ALPHA-REF-1 10-08-2026
+2 20,000.00 194J 10-09-2026
+Summary of tax deducted at source in respect of deductee
+Quarter Receipt Numbers of Original Quarterly Statements of TDS Amount of Tax Deducted in respect of Deductee Amount of Tax Deposited / Remitted in respect of Deductee
+Q2 QWERTYUI 5,000.00 5,000.00
+Total (Rs.) 5,000.00 5,000.00

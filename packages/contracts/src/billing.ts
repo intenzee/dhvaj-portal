@@ -32,6 +32,8 @@ export interface BillingSettings {
   invoiceReminderDays: number[];
   /** Automatic reminder e-mails to clients; off until the partners decide. */
   autoInvoiceReminders: boolean;
+  /** Rupees a 26AS credit may differ from the TDS booked and still match (PS-204). */
+  tdsMatchTolerance: string;
   version: number;
   updatedAt: string;
 }
@@ -44,6 +46,7 @@ export interface UpdateBillingSettingsInput {
   invoiceTermsDays?: number;
   invoiceReminderDays?: number[];
   autoInvoiceReminders?: boolean;
+  tdsMatchTolerance?: string;
   version: number;
 }
 
@@ -894,4 +897,220 @@ export interface CreateFeeMilestoneInput {
   description: string;
   amount: string;
   dueOn: string;
+}
+
+// ── PS-204 · TDS on our fees against the firm's 26AS ─────────────────────
+
+/** The 26AS text export from TRACES (a year), or a Form 16A PDF (a deductor's quarter). */
+export const TDS_IMPORT_SOURCES = ['26as_text', 'form16a_pdf'] as const;
+export type TdsImportSource = (typeof TDS_IMPORT_SOURCES)[number];
+
+/** POST /billing/tds-credits/import — the file as downloaded from TRACES. */
+export interface ImportTdsCreditsInput {
+  filename: string;
+  contentBase64: string;
+  contentType?: string;
+}
+
+export interface TdsImportResult {
+  batchId: string;
+  source: TdsImportSource;
+  financialYear: string;
+  pan: string | null;
+  credits: number;
+  deductors: number;
+  tdsTotal: string;
+  /** Rows of earlier imports this file replaced. */
+  superseded: number;
+  /** Rows skipped or totals that did not add up, said in words. */
+  warnings: string[];
+}
+
+export interface TdsImportBatch {
+  id: string;
+  source: TdsImportSource;
+  fileName: string;
+  financialYear: string;
+  pan: string | null;
+  credits: number;
+  superseded: number;
+  importedByName: string | null;
+  importedAt: string;
+}
+
+/** A Part I row of the 26AS: TDS a deductor deposited against the firm's PAN. */
+export interface TdsCreditLine {
+  id: string;
+  deductorTan: string;
+  deductorName: string;
+  section: string;
+  transactionDate: string;
+  amountPaid: string;
+  tdsDeposited: string;
+  /** F final, P provisional, U unmatched (the credit is not yet available), O overbooked. */
+  bookingStatus: string | null;
+  financialYear: string;
+  quarter: TdsQuarter['quarter'];
+}
+
+/** TDS a client deducted, as booked on a posted receipt (PS-202). */
+export interface TdsBookedLine {
+  receiptId: string;
+  receivedOn: string;
+  reference: string | null;
+  grossAmount: string;
+  tdsAmount: string;
+  tdsSection: TdsSection | null;
+  financialYear: string;
+  quarter: TdsQuarter['quarter'];
+}
+
+/**
+ * exact / tolerance: one credit, one receipt. split: one receipt, deposited
+ * as several credits. combined: several receipts in one credit.
+ * quarter_total: the client's quarter agrees in total only. other_quarter:
+ * one to one, but the deductor booked it in the next or previous quarter.
+ */
+export const TDS_MATCH_KINDS = [
+  'exact',
+  'tolerance',
+  'split',
+  'combined',
+  'quarter_total',
+  'other_quarter',
+] as const;
+export type TdsMatchKind = (typeof TDS_MATCH_KINDS)[number];
+
+export interface TdsMatchedGroup {
+  kind: TdsMatchKind;
+  clientId: string;
+  clientName: string;
+  credits: TdsCreditLine[];
+  receipts: TdsBookedLine[];
+  /** Credited − booked; within the tolerance. */
+  difference: string;
+}
+
+/** One client's mismatches. */
+export interface TdsClientMismatch {
+  clientId: string;
+  clientName: string;
+  /** The client's TANs on file; none means nothing of theirs can match. */
+  tans: string[];
+  /** In the 26AS, but no receipt books it. */
+  notBooked: TdsCreditLine[];
+  notBookedTotal: string;
+  /** Booked on a receipt, but missing from the 26AS: ask the client to file or correct. */
+  missing: TdsBookedLine[];
+  missingTotal: string;
+  lastReminder: {
+    channel: 'email' | 'whatsapp' | 'copy';
+    at: string;
+    byName: string | null;
+  } | null;
+}
+
+/** GET /billing/tds-credits/match?financialYear=2026-27&quarter=Q2 */
+export interface TdsMatchReport {
+  financialYear: string;
+  /** null: the whole year. */
+  quarter: TdsQuarter['quarter'] | null;
+  /** Rupees, from the billing settings. */
+  tolerance: string;
+  /** The firm's PAN, as the latest import gave it. */
+  pan: string | null;
+  /** This year's imports, newest first. */
+  imports: TdsImportBatch[];
+  matched: TdsMatchedGroup[];
+  /** Clients with a mismatch, the largest missing TDS first. */
+  clients: TdsClientMismatch[];
+  /** Credits from a TAN on no client: add the TAN, or it is not a client's. */
+  unknownDeductors: TdsCreditLine[];
+  totals: {
+    credited: string;
+    booked: string;
+    matched: string;
+    notBooked: string;
+    missing: string;
+  };
+  notes: string[];
+}
+
+/** POST /billing/tds-credits/remind — omit `channel` for the firm's own. */
+export interface RemindTdsInput {
+  clientId: string;
+  financialYear: string;
+  quarter?: TdsQuarter['quarter'];
+  channel?: 'email' | 'whatsapp' | 'copy';
+}
+
+interface TdsReminderBase {
+  clientId: string;
+  client: string;
+  text: string;
+  tdsAmount: string;
+  receipts: number;
+}
+
+export type TdsReminderResult = TdsReminderBase &
+  (
+    | { channel: 'email'; to: string }
+    | { channel: 'whatsapp'; waUrl: string }
+    | { channel: 'copy'; fallback: 'no_email' | 'no_phone' | null }
+  );
+
+/** '2026-27', 'Q2' → 'Q2 (July–September 2026) of 2026-27'. Pure — tested. */
+export function tdsQuarterLabel(financialYear: string, quarter: TdsQuarter['quarter']): string {
+  const start = Number(financialYear.slice(0, 4));
+  const span: Record<TdsQuarter['quarter'], string> = {
+    Q1: `April–June ${start}`,
+    Q2: `July–September ${start}`,
+    Q3: `October–December ${start}`,
+    Q4: `January–March ${start + 1}`,
+  };
+  return `${quarter} (${span[quarter]}) of ${financialYear}`;
+}
+
+/**
+ * The client's reminder to file or correct their TDS return for deductions
+ * missing from the firm's 26AS (e-mail, WhatsApp or pasted). Pure — tested.
+ */
+export function tdsReminderText(r: {
+  clientName: string;
+  firmName: string;
+  pan: string | null;
+  financialYear: string;
+  quarter: TdsQuarter['quarter'] | null;
+  lines: {
+    receivedOn: string;
+    tdsAmount: string;
+    tdsSection: string | null;
+    reference: string | null;
+  }[];
+}): string {
+  const when = r.quarter
+    ? tdsQuarterLabel(r.financialYear, r.quarter)
+    : `the year ${r.financialYear}`;
+  const ours = r.pan ? `our Form 26AS (PAN ${r.pan})` : 'our Form 26AS';
+  const quote = r.pan ? `our PAN ${r.pan}` : 'our PAN';
+  const total = sumAmounts(r.lines.map((l) => l.tdsAmount));
+  const several = r.lines.length > 1;
+  return [
+    `Dear ${r.clientName},`,
+    '',
+    `We have matched the TDS deducted from our fees with ${ours} for ${when}. ${
+      several ? 'These deductions do' : 'This deduction does'
+    } not appear in it yet:`,
+    '',
+    ...r.lines.map(
+      (l) =>
+        `• Payment of ${formatIsoDate(l.receivedOn)}${l.reference ? ` (${l.reference})` : ''}: TDS ₹${formatInr(l.tdsAmount)}${l.tdsSection && l.tdsSection !== 'other' ? ` under section ${l.tdsSection}` : ''}`,
+    ),
+    ...(several ? [`Total: ₹${formatInr(total)}`] : []),
+    '',
+    `Please file your TDS return (Form 26Q) for the quarter, or correct it if it is filed, quoting ${quote}, so the credit reaches us. If you have filed it recently, please share the acknowledgement.`,
+    '',
+    'Thank you,',
+    r.firmName,
+  ].join('\n');
 }

@@ -25,6 +25,9 @@ import {
   type InvoiceReminderResult,
   type ReceiptRecord,
   type Paginated,
+  type TdsImportResult,
+  type TdsMatchReport,
+  type TdsReminderResult,
   type UnbilledReport,
 } from '@hsdg/contracts';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
@@ -41,18 +44,22 @@ import {
   CreateReceiptDto,
   DecideAdjustmentDto,
   DraftFromUnbilledDto,
+  ImportTdsCreditsDto,
   ReceiptListQueryDto,
   RequestCreditNoteDto,
   RemindInvoiceDto,
+  RemindTdsDto,
   RestoreFeeDto,
   RequestWriteOffDto,
   ReverseReceiptDto,
   SetAsideFeesDto,
+  TdsMatchQueryDto,
   UnbilledQueryDto,
   UpdateBillingSettingsDto,
 } from './billing.dto';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesService } from './receivables.service';
+import { TdsCreditsService } from './tds-credits.service';
 import { UnbilledService } from './unbilled.service';
 
 /**
@@ -72,6 +79,7 @@ export class BillingController {
     private readonly adjustments: AdjustmentsService,
     private readonly receivables: ReceivablesService,
     private readonly unbilled: UnbilledService,
+    private readonly tds: TdsCreditsService,
   ) {}
 
   @Get('settings')
@@ -364,6 +372,52 @@ export class BillingController {
   ): Promise<FeeMilestone> {
     this.requireOn(principal);
     return this.unbilled.cancelMilestone(rlsContextFromPrincipal(principal), id);
+  }
+
+  @Post('tds-credits/import')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({
+    summary:
+      "Import the firm's 26AS (TRACES text export) or a Form 16A; replaces what it covers (PS-204)",
+  })
+  importTdsCredits(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: ImportTdsCreditsDto,
+  ): Promise<TdsImportResult> {
+    this.requireOn(principal);
+    return this.tds.import(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Get('tds-credits/match')
+  @ApiOperation({
+    summary:
+      'The 26AS against the TDS booked on receipts: matched, in 26AS but not booked, booked but missing — by client',
+  })
+  matchTdsCredits(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: TdsMatchQueryDto,
+  ): Promise<TdsMatchReport> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.tds.match(
+      rlsContextFromPrincipal(principal),
+      query.financialYear,
+      query.quarter ?? null,
+    );
+  }
+
+  @Post('tds-credits/remind')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({
+    summary:
+      'Ask a client to file or correct their TDS return for deductions missing from the 26AS; logged',
+  })
+  remindTds(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: RemindTdsDto,
+  ): Promise<TdsReminderResult> {
+    this.requireOn(principal);
+    return this.tds.remind(rlsContextFromPrincipal(principal), dto);
   }
 
   private requireOn(principal: Principal): void {
