@@ -22,5 +22,8 @@ export async function createTestApp(): Promise<INestApplication> {
   app.useGlobalPipes(buildValidationPipe());
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
+  // Listening once: supertest otherwise opens (and closes) a server per request,
+  // which under load resets connections (read ECONNRESET / socket hang up).
+  await app.listen(0, '127.0.0.1');
   return app;
 }

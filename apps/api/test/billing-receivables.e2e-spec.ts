@@ -5,7 +5,7 @@ import type { NotificationItem, ReceivablesReport } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
-import { dateFromToday } from './date.helper';
+import { istDateFromToday } from './date.helper';
 
 /**
  * PS-203 · Receivables ageing and payment reminders.
@@ -29,7 +29,7 @@ describe('PS-203 receivables and payment reminders (e2e)', () => {
   };
   const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
   const unique = (): string => `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-  const today = dateFromToday(0);
+  const today = istDateFromToday(0);
 
   const superuser = async <T>(fn: (c: Client) => Promise<T>): Promise<T> => {
     const c = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
@@ -71,7 +71,7 @@ describe('PS-203 receivables and payment reminders (e2e)', () => {
       .post(`/api/v1/engagements/${eng}/invoices`)
       .set(bearer(pa))
       .send({
-        dueDate: dateFromToday(15),
+        dueDate: istDateFromToday(15),
         lines: [{ description: 'Professional fees', unitAmount: amount }],
       })
       .expect(201);
@@ -86,8 +86,8 @@ describe('PS-203 receivables and payment reminders (e2e)', () => {
       await c.query(`SET session_replication_role = replica`);
       await c.query(`UPDATE hsdg.invoices SET issue_date = $2, due_date = $3 WHERE id = $1`, [
         id,
-        dateFromToday(-daysPastDue - 15),
-        dateFromToday(-daysPastDue),
+        istDateFromToday(-daysPastDue - 15),
+        istDateFromToday(-daysPastDue),
       ]);
     });
     return id;
@@ -207,7 +207,7 @@ describe('PS-203 receivables and payment reminders (e2e)', () => {
       await c.query(`SET session_replication_role = replica`);
       await c.query(`UPDATE hsdg.invoices SET due_date = $2 WHERE id = $1`, [
         inv,
-        dateFromToday(-31),
+        istDateFromToday(-31),
       ]);
     });
     await scan();
