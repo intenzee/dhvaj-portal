@@ -21,6 +21,7 @@ interface SettingsRow {
   invoice_reminder_days: number[];
   auto_invoice_reminders: boolean;
   tds_match_tolerance: string;
+  billing_from: string | null;
   version: number;
   updated_at: Date;
 }
@@ -35,12 +36,13 @@ const COLUMNS = {
   invoiceReminderDays: 'invoice_reminder_days',
   autoInvoiceReminders: 'auto_invoice_reminders',
   tdsMatchTolerance: 'tds_match_tolerance',
+  billingFrom: 'billing_from',
 } as const satisfies Record<Exclude<keyof UpdateBillingSettingsInput, 'version'>, string>;
 
 /**
  * PS-201 · who the firm is on its tax invoices: GSTIN and state, the default
  * SAC, the number prefix and payment terms; and (PS-203) the automatic
- * payment reminders, and (PS-204) the 26AS match tolerance. One row, firm_settings; anyone
+ * payment reminders, (PS-204) the 26AS match tolerance, and (PS-206) the billing go-live. One row, firm_settings; anyone
  * signed in reads it, partners change it (RLS) and the API asks billing.approve.
  */
 @Injectable()
@@ -119,7 +121,7 @@ export class BillingSettingsService {
     const { rows } = await client.query<SettingsRow>(
       `SELECT firm_name, address, gstin, state_code, sac_default, invoice_prefix,
               invoice_terms_days, invoice_reminder_days, auto_invoice_reminders,
-              tds_match_tolerance::text, version,
+              tds_match_tolerance::text, billing_from::text, version,
               updated_at
          FROM hsdg.firm_settings LIMIT 1`,
     );
@@ -136,6 +138,7 @@ export class BillingSettingsService {
       invoiceReminderDays: r.invoice_reminder_days,
       autoInvoiceReminders: r.auto_invoice_reminders,
       tdsMatchTolerance: r.tds_match_tolerance,
+      billingFrom: r.billing_from,
       version: r.version,
       updatedAt: r.updated_at.toISOString(),
     };
