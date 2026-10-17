@@ -5,6 +5,7 @@ import {
   toPaise,
   type AdjustmentKind,
   type AdjustmentStatus,
+  type CreditableLine,
   type CreditNoteLine,
   type InvoiceAdjustment,
   type InvoiceDetail,
@@ -67,16 +68,40 @@ export function adjustmentPreview(
   return { ok: true, taxable, ...split };
 }
 
-/** Before tax, what pending and approved credit notes already take off each invoice line. Pure — tested. */
-export function creditedByLine(adjustments: readonly InvoiceAdjustment[]): Map<string, string> {
-  const paise = new Map<string, bigint>();
+/** What pending and approved credit notes already take off an invoice line, and the GST they reverse. */
+export type CreditedSoFar = Pick<
+  CreditableLine,
+  'credited' | 'creditedCgst' | 'creditedSgst' | 'creditedIgst'
+>;
+
+/** CreditedSoFar for each invoice line. Pure — tested. */
+export function creditedByLine(
+  adjustments: readonly InvoiceAdjustment[],
+): Map<string, CreditedSoFar> {
+  const sums = new Map<string, [bigint, bigint, bigint, bigint]>();
   for (const a of adjustments) {
     if (a.kind !== 'credit_note' || (a.status !== 'pending' && a.status !== 'approved')) continue;
     for (const l of a.lines) {
-      paise.set(l.invoiceLineId, (paise.get(l.invoiceLineId) ?? 0n) + toPaise(l.taxableValue));
+      const [v, c, s, i] = sums.get(l.invoiceLineId) ?? [0n, 0n, 0n, 0n];
+      sums.set(l.invoiceLineId, [
+        v + toPaise(l.taxableValue),
+        c + toPaise(l.cgst ?? '0'),
+        s + toPaise(l.sgst ?? '0'),
+        i + toPaise(l.igst ?? '0'),
+      ]);
     }
   }
-  return new Map([...paise].map(([id, p]) => [id, fromPaise(p)]));
+  return new Map(
+    [...sums].map(([id, [v, c, s, i]]) => [
+      id,
+      {
+        credited: fromPaise(v),
+        creditedCgst: fromPaise(c),
+        creditedSgst: fromPaise(s),
+        creditedIgst: fromPaise(i),
+      },
+    ]),
+  );
 }
 
 /**
@@ -91,7 +116,7 @@ export function creditNotePreview(
     'balance' | 'cgst' | 'sgst' | 'igst' | 'placeOfSupplyState' | 'isReverseCharge' | 'lines'
   >,
   firmState: string | null,
-  credited: Map<string, string>,
+  credited: Map<string, CreditedSoFar>,
 ):
   | { ok: true; lines: CreditNoteLine[]; taxable: string; total: string }
   | { ok: false; error: string } {
@@ -105,7 +130,11 @@ export function creditNotePreview(
       description: l.description,
       taxableValue: l.taxableValue,
       gstRate: l.gstRate,
-      credited: credited.get(l.id) ?? '0',
+      credited: '0',
+      creditedCgst: '0',
+      creditedSgst: '0',
+      creditedIgst: '0',
+      ...credited.get(l.id),
     })),
     {
       firmState,
