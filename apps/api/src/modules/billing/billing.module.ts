@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { CommercialModule } from '../commercial/commercial.module';
+import { StorageModule } from '../documents/storage/storage.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AdjustmentsService } from './adjustments.service';
 import { BillingController } from './billing.controller';
@@ -15,7 +16,7 @@ import { UnbilledService } from './unbilled.service';
 
 /** Practice Services Phase 2 · Fees to cash (PS-201 onwards). */
 @Module({
-  imports: [AuditModule, CommercialModule, NotificationsModule],
+  imports: [AuditModule, CommercialModule, NotificationsModule, StorageModule],
   controllers: [BillingController, ReceivablesController],
   providers: [
     BillingSettingsService,

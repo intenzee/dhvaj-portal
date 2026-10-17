@@ -58,6 +58,7 @@ describe('PS-203 receivables on the web', () => {
       autoInvoiceReminders: false,
       tdsMatchTolerance: '1.00',
       billingFrom: null,
+      gstFiledThrough: null,
       version: 3,
       updatedAt: '2026-10-01T00:00:00.000Z',
     };

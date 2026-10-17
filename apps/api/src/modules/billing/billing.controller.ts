@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
@@ -63,6 +64,7 @@ import {
   TdsMatchQueryDto,
   UnbilledQueryDto,
   UpdateBillingSettingsDto,
+  VoidCreditNoteDto,
 } from './billing.dto';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesService } from './receivables.service';
@@ -264,6 +266,36 @@ export class BillingController {
   ): Promise<InvoiceAdjustment> {
     this.requireOn(principal);
     return this.adjustments.decide(rlsContextFromPrincipal(principal), 'credit_note', id, dto);
+  }
+
+  @Post('credit-notes/:id/void')
+  @RequirePermissions(PERMISSION.billingApprove)
+  @ApiOperation({
+    summary:
+      'Void an approved credit note with a reason (not its requester; refused once its GST return is filed). The number stays used and the balance comes back.',
+  })
+  voidCreditNote(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: VoidCreditNoteDto,
+  ): Promise<InvoiceAdjustment> {
+    this.requireOn(principal);
+    return this.adjustments.voidCreditNote(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Get('credit-notes/:id/pdf')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'An approved (or voided) credit note as a PDF (CGST rule 53)' })
+  async creditNotePdf(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<StreamableFile> {
+    this.requireOn(principal);
+    const pdf = await this.adjustments.creditNotePdf(rlsContextFromPrincipal(principal), id);
+    return new StreamableFile(pdf.data, {
+      type: 'application/pdf',
+      disposition: `inline; filename="${pdf.filename}"`,
+    });
   }
 
   @Post('write-offs/:id/decision')

@@ -91,6 +91,7 @@ describe('PS-204 TDS against 26AS', () => {
       autoInvoiceReminders: false,
       tdsMatchTolerance: '1.00',
       billingFrom: null,
+      gstFiledThrough: null,
       version: 3,
       updatedAt: '2026-10-01T00:00:00.000Z',
     };

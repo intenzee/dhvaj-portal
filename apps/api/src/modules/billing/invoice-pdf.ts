@@ -32,8 +32,8 @@ export interface InvoicePdfData {
   notes: string | null;
 }
 
-const A4 = { w: 595, h: 842 };
-const MARGIN = 48;
+export const A4 = { w: 595, h: 842 };
+export const MARGIN = 48;
 
 /** Helvetica advance widths (per 1000 em) for the characters we right-align. */
 const WIDTHS: Record<string, number> = { '.': 278, ',': 278, '-': 333, ' ': 278, '%': 889 };
@@ -53,7 +53,7 @@ function ascii(s: string): string {
 
 const esc = (s: string): string => ascii(s).replace(/[\\()]/g, (c) => `\\${c}`);
 
-class Page {
+export class Page {
   readonly ops: string[] = [];
   text(x: number, y: number, s: string, size = 9, bold = false): void {
     this.ops.push(
@@ -69,7 +69,7 @@ class Page {
 }
 
 /** Break text into lines of at most `max` characters on word boundaries. */
-function wrap(s: string, max: number): string[] {
+export function wrap(s: string, max: number): string[] {
   const out: string[] = [];
   for (const para of s.split(/\r?\n/)) {
     let line = '';
@@ -90,10 +90,10 @@ function wrap(s: string, max: number): string[] {
   return out;
 }
 
-const stateLabel = (code: string | null): string =>
+export const stateLabel = (code: string | null): string =>
   code ? `${GST_STATES[code] ?? 'State'} (${code})` : '-';
 
-const dmy = (iso: string | null): string => (iso ? iso.split('-').reverse().join('-') : '-');
+export const dmy = (iso: string | null): string => (iso ? iso.split('-').reverse().join('-') : '-');
 
 export function renderInvoicePdf(d: InvoicePdfData): Buffer {
   const pages: Page[] = [];
@@ -238,7 +238,7 @@ export function renderInvoicePdf(d: InvoicePdfData): Buffer {
 }
 
 /** Objects: 1 catalog, 2 pages, 3–4 fonts, then a page and its content per page. */
-function assemble(pages: Page[]): Buffer {
+export function assemble(pages: Page[]): Buffer {
   const objects: string[] = [];
   const pageIds = pages.map((_, i) => 5 + i * 2);
   objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';

@@ -37,6 +37,7 @@ export function settingsChanges(
     autoInvoiceReminders?: boolean;
     tdsMatchTolerance?: string;
     billingFrom?: string;
+    gstFiledThrough?: string;
   },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { version: before.version };
@@ -69,7 +70,25 @@ export function settingsChanges(
     const from = form.billingFrom || null;
     if (from !== before.billingFrom) out.billingFrom = from;
   }
+  if (form.gstFiledThrough !== undefined) {
+    const through = form.gstFiledThrough.trim() || null;
+    if (through !== before.gstFiledThrough && isMonthEnd(through)) out.gstFiledThrough = through;
+  }
   return out;
+}
+
+/**
+ * A GSTR-1 covers a month (or a quarter), so "filed through" is the last day
+ * of one: '2026-09-30' → true, '2026-09-29' → false; blank (not set) is fine.
+ * Pure — tested.
+ */
+export function isMonthEnd(iso: string | null): boolean {
+  if (iso === null) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso) return false;
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.getUTCDate() === 1;
 }
 
 /** '1' → '1.00': rupees from 0 to 1,000, to the paisa; else null. Pure — tested. */
@@ -84,6 +103,7 @@ export function parseTolerance(text: string): string | null {
  * PS-203 · whether clients are e-mailed payment reminders, and on which days;
  * PS-204 · how near a 26AS credit must be to the TDS booked to match;
  * PS-206 · the billing go-live, before which no fixed fee is listed unbilled.
+ * PS-205 · the GSTR-1 periods filed, which close their credit notes to a void.
  */
 export function BillingSettingsCard({ settings }: { settings: BillingSettings }): JSX.Element {
   const { principal } = useAuth();
@@ -100,9 +120,11 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
     autoInvoiceReminders: settings.autoInvoiceReminders,
     tdsMatchTolerance: settings.tdsMatchTolerance,
     billingFrom: settings.billingFrom ?? '',
+    gstFiledThrough: settings.gstFiledThrough ?? '',
   });
   const reminderDays = parseReminderDays(form.invoiceReminderDays);
   const tolerance = parseTolerance(form.tdsMatchTolerance);
+  const filedOk = isMonthEnd(form.gstFiledThrough.trim() || null);
   const save = useMutation({
     mutationFn: () =>
       apiFetch<BillingSettings>('/billing/settings', {
@@ -152,6 +174,10 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
             <Item
               label="Unbilled fees from"
               value={settings.billingFrom ? formatDate(settings.billingFrom) : 'Every period'}
+            />
+            <Item
+              label="GSTR-1 filed through"
+              value={settings.gstFiledThrough ? formatDate(settings.gstFiledThrough) : 'Not recorded'}
             />
             {!settings.stateCode && (
               <p className="col-span-full text-xs text-warning-700">
@@ -229,6 +255,20 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
               >
                 <Input type="date" value={form.billingFrom} onChange={set('billingFrom')} />
               </Field>
+              <Field
+                label="GSTR-1 filed through"
+                hint={
+                  filedOk
+                    ? 'Credit notes up to this date are on the GSTN and cannot be voided.'
+                    : 'The last day of a month (or quarter).'
+                }
+              >
+                <Input
+                  type="date"
+                  value={form.gstFiledThrough}
+                  onChange={set('gstFiledThrough')}
+                />
+              </Field>
             </div>
             <div className="col-span-full flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setEditing(false)}>
@@ -236,7 +276,7 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
               </Button>
               <Button
                 onClick={() => save.mutate()}
-                disabled={save.isPending || !reminderDays || !tolerance}
+                disabled={save.isPending || !reminderDays || !tolerance || !filedOk}
               >
                 Save
               </Button>

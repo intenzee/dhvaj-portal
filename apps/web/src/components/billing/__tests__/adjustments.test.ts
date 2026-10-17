@@ -4,6 +4,8 @@ import {
   adjustmentPreview,
   creditNotePreview,
   creditedByLine,
+  mayVoidCreditNote,
+  voidLine,
 } from '../adjustments';
 import { statementKindLabel } from '../receipts';
 
@@ -118,5 +120,30 @@ describe('PS-205 credit notes per invoice line', () => {
       error: expect.stringMatching(/left to credit/),
     });
     expect(creditNotePreview({}, inv, '07', new Map())).toMatchObject({ ok: false });
+  });
+});
+
+describe('PS-205 voiding a credit note', () => {
+  const note = { kind: 'credit_note', status: 'approved', requestedById: 'e1' } as const;
+  const partner = { employeeId: 'e2', canApprove: true };
+
+  it('lets a partner other than the requester void an approved note on a live invoice', () => {
+    expect(mayVoidCreditNote(note, partner, 'issued')).toBe(true);
+    expect(mayVoidCreditNote(note, { employeeId: 'e1', canApprove: true }, 'issued')).toBe(false);
+    expect(mayVoidCreditNote(note, { employeeId: 'e2', canApprove: false }, 'issued')).toBe(false);
+    expect(mayVoidCreditNote(note, partner, 'void')).toBe(false);
+    expect(mayVoidCreditNote({ ...note, status: 'pending' }, partner, 'issued')).toBe(false);
+    expect(mayVoidCreditNote({ ...note, kind: 'write_off' }, partner, 'issued')).toBe(false);
+  });
+
+  it('says who voided it, when and why', () => {
+    expect(
+      voidLine({
+        voidedByName: 'Asha Rao',
+        voidedAt: '2026-10-20T05:00:00Z',
+        voidReason: 'Wrong invoice',
+      }),
+    ).toMatch(/^Voided by Asha Rao, .*2026: Wrong invoice$/);
+    expect(voidLine({ voidedByName: null, voidedAt: null, voidReason: null })).toBe('Voided');
   });
 });

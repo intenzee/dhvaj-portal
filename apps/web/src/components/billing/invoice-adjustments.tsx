@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MinusCircle } from 'lucide-react';
+import { Ban, Download, MinusCircle } from 'lucide-react';
 import {
   PERMISSION,
   type AdjustmentKind,
   type InvoiceAdjustment,
   type InvoiceDetail,
 } from '@hsdg/contracts';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch, ApiError, downloadFile } from '@/lib/api';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -23,6 +23,8 @@ import {
   adjustmentStatusLabel,
   creditNotePreview,
   creditedByLine,
+  mayVoidCreditNote,
+  voidLine,
 } from './adjustments';
 
 /**
@@ -46,6 +48,8 @@ export function InvoiceAdjustments({
   const [amount, setAmount] = useState('');
   const [lineAmounts, setLineAmounts] = useState<Record<string, string>>({});
   const [reason, setReason] = useState('');
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [voidReason, setVoidReason] = useState('');
 
   const key = ['billing', 'adjustments', invoice.id] as const;
   const list = useQuery({
@@ -95,6 +99,28 @@ export function InvoiceAdjustments({
       toast(e instanceof ApiError ? e.message : 'Could not send the request.', 'error'),
   });
 
+  const voidNote = useMutation({
+    mutationFn: (a: InvoiceAdjustment) =>
+      apiFetch<InvoiceAdjustment>(`/billing/credit-notes/${a.id}/void`, {
+        method: 'POST',
+        body: { reason: voidReason.trim(), version: a.version },
+      }),
+    onSuccess: (a) => {
+      toast(`Credit note ${a.number ?? ''} voided; ${formatMoney(a.total, 'INR')} is due again.`);
+      setVoidingId(null);
+      setVoidReason('');
+      void qc.invalidateQueries({ queryKey: key });
+      void qc.invalidateQueries({ queryKey: ['billing'] });
+      onChanged();
+    },
+    onError: (e) =>
+      toast(e instanceof ApiError ? e.message : 'Could not void the credit note.', 'error'),
+  });
+  const me = {
+    employeeId: principal?.employeeId ?? null,
+    canApprove: can(principal, PERMISSION.billingApprove),
+  };
+
   const rows = list.data ?? [];
   if (!mayAsk && rows.length === 0) return null;
 
@@ -138,8 +164,70 @@ export function InvoiceAdjustments({
           <div className="mt-0.5 text-xs text-ink-muted">
             {a.requestedByName ?? 'Someone'} asked {formatDate(a.requestedAt)}: {a.reason}
             {a.decidedByName &&
-              ` · ${a.status === 'approved' ? 'approved' : 'rejected'} by ${a.decidedByName}${a.decisionNote ? ` (${a.decisionNote})` : ''}`}
+              ` · ${a.status === 'rejected' ? 'rejected' : 'approved'} by ${a.decidedByName}${a.decisionNote ? ` (${a.decisionNote})` : ''}`}
           </div>
+          {a.status === 'void' && (
+            <div className="mt-0.5 text-xs text-ink-muted">
+              {voidLine(a)}. The number stays used.
+            </div>
+          )}
+          {a.kind === 'credit_note' && a.number && (a.status === 'approved' || a.status === 'void') && (
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  void downloadFile(
+                    `/billing/credit-notes/${a.id}/pdf`,
+                    `${a.number!.replace(/\//g, '-')}.pdf`,
+                  ).catch(() => toast('Could not download the PDF.', 'error'))
+                }
+              >
+                <Download className="h-4 w-4" /> {a.status === 'void' ? 'PDF (void)' : 'PDF'}
+              </Button>
+              {mayVoidCreditNote(a, me, invoice.status) && voidingId !== a.id && (
+                <Button size="sm" variant="ghost" onClick={() => setVoidingId(a.id)}>
+                  <Ban className="h-4 w-4" /> Void
+                </Button>
+              )}
+            </div>
+          )}
+          {voidingId === a.id && (
+            <div className="mt-2 space-y-2 rounded-md bg-surface-sunken p-3">
+              <p className="text-xs text-ink-muted">
+                Voiding brings {formatMoney(a.total, 'INR')} back onto the invoice. The number{' '}
+                {a.number} is not reused. Once the GSTR-1 for its month is filed, raise a debit
+                note or amend it in the next return instead.
+              </p>
+              <Field label="Why is it void?">
+                <Input
+                  autoFocus
+                  value={voidReason}
+                  maxLength={500}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                />
+              </Field>
+              <div className="flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setVoidingId(null);
+                    setVoidReason('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!voidReason.trim() || voidNote.isPending}
+                  onClick={() => voidNote.mutate(a)}
+                >
+                  Void credit note
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       ))}
       {asking && (
