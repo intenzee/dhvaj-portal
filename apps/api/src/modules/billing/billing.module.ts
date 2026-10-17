@@ -8,6 +8,7 @@ import { BillingSettingsService } from './billing-settings.service';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesController } from './receivables.controller';
 import { ReceivablesService } from './receivables.service';
+import { TdsPdfReader } from './tds-pdf-reader';
 import { TdsCreditsService } from './tds-credits.service';
 import { UnbilledService } from './unbilled.service';
 
@@ -22,6 +23,7 @@ import { UnbilledService } from './unbilled.service';
     ReceivablesService,
     UnbilledService,
     TdsCreditsService,
+    TdsPdfReader,
   ],
 })
 export class BillingModule {}

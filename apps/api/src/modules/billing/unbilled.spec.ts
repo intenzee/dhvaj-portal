@@ -43,10 +43,37 @@ describe('PS-206 dueFeeItems', () => {
     expect(ended.map((i) => i.key)).toEqual(['retainer:2026-07', 'retainer:2026-08']);
   });
 
-  it('looks back twelve months at most', () => {
-    const items = dueFeeItems(terms({ startDate: '2020-01-01' }), '2026-10-17');
-    expect(items[0]!.key).toBe('retainer:2025-10');
-    expect(items).toHaveLength(13);
+  it('never lets an old unbilled fee drop off; the billing go-live is where the list starts', () => {
+    const items = dueFeeItems(terms({ startDate: '2024-04-01' }), '2026-10-17');
+    expect(items[0]!.key).toBe('retainer:2024-04');
+    expect(items).toHaveLength(31);
+    const live = dueFeeItems(terms({ startDate: '2024-04-01' }), '2026-10-17', '2026-04-01');
+    expect(live[0]!.key).toBe('retainer:2026-04');
+    expect(live).toHaveLength(7);
+    // A go-live before the fee began changes nothing.
+    expect(dueFeeItems(terms({}), '2026-10-17', '2025-01-01')).toHaveLength(4);
+  });
+
+  it('an FY 2024-25 year fee still unbilled stays listed after 1 April 2026; the go-live drops it', () => {
+    const fy = terms({
+      frequency: 'annual',
+      retainerAmount: null,
+      years: [
+        {
+          id: 'y1',
+          financialYear: '2024-25',
+          feeAmount: '60000.00',
+          billingModel: null,
+          closed: true,
+        },
+      ],
+    });
+    expect(dueFeeItems(fy, '2026-10-17').map((i) => i.label)).toEqual(['FY 2024-25']);
+    expect(dueFeeItems(fy, '2026-10-17', '2025-04-01')).toEqual([]);
+    const quarterly = { ...fy, frequency: 'quarterly' as const };
+    expect(dueFeeItems(quarterly, '2026-10-17', '2025-01-01').map((i) => i.key)).toEqual([
+      'year:y1:2024-25:Q4',
+    ]);
   });
 
   it('nothing without a start, an amount, or a fixed fee', () => {
