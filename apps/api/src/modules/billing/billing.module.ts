@@ -8,11 +8,18 @@ import { BillingSettingsService } from './billing-settings.service';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesController } from './receivables.controller';
 import { ReceivablesService } from './receivables.service';
+import { UnbilledService } from './unbilled.service';
 
 /** Practice Services Phase 2 · Fees to cash (PS-201 onwards). */
 @Module({
   imports: [AuditModule, CommercialModule, NotificationsModule],
   controllers: [BillingController, ReceivablesController],
-  providers: [BillingSettingsService, ReceiptsService, AdjustmentsService, ReceivablesService],
+  providers: [
+    BillingSettingsService,
+    ReceiptsService,
+    AdjustmentsService,
+    ReceivablesService,
+    UnbilledService,
+  ],
 })
 export class BillingModule {}

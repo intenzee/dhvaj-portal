@@ -160,6 +160,9 @@ function Billing({ v2 }: { v2: boolean }): JSX.Element {
               <Link href="/billing/receivables">
                 <Button variant="secondary">Receivables by age</Button>
               </Link>
+              <Link href="/billing/unbilled">
+                <Button variant="secondary">Unbilled fees</Button>
+              </Link>
               {can(principal, PERMISSION.billingManage) && (
                 <Button onClick={() => setRecording(true)}>
                   <Plus className="h-4 w-4" /> Record receipt

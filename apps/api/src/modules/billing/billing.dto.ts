@@ -271,3 +271,26 @@ export class RemindInvoiceDto {
   @IsIn(['email', 'whatsapp', 'copy'])
   channel?: 'email' | 'whatsapp' | 'copy';
 }
+
+/** PS-206: whose unbilled fees to list. */
+export class UnbilledQueryDto {
+  @ApiPropertyOptional({ description: "Only this engagement partner's engagements." })
+  @IsOptional()
+  @IsUUID()
+  partnerId?: string;
+}
+
+/** PS-206: the due fee periods to put on one draft invoice. */
+export class DraftFromUnbilledDto {
+  @ApiProperty()
+  @IsUUID()
+  engagementId!: string;
+
+  @ApiProperty({ type: [String], example: ['retainer:2026-09'] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(60)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  keys!: string[];
+}

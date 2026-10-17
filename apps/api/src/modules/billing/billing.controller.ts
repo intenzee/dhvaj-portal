@@ -19,10 +19,12 @@ import {
   type ClientStatement,
   type GlobalInvoiceRecord,
   type InvoiceAdjustment,
+  type InvoiceDetail,
   type InvoiceReminderRecord,
   type InvoiceReminderResult,
   type ReceiptRecord,
   type Paginated,
+  type UnbilledReport,
 } from '@hsdg/contracts';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { paginate } from '../../common/pagination/pagination.dto';
@@ -36,15 +38,18 @@ import {
   AdjustmentListQueryDto,
   CreateReceiptDto,
   DecideAdjustmentDto,
+  DraftFromUnbilledDto,
   ReceiptListQueryDto,
   RequestCreditNoteDto,
   RemindInvoiceDto,
   RequestWriteOffDto,
   ReverseReceiptDto,
+  UnbilledQueryDto,
   UpdateBillingSettingsDto,
 } from './billing.dto';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesService } from './receivables.service';
+import { UnbilledService } from './unbilled.service';
 
 /**
  * Practice Services Phase 2 · Fees to cash (ff_billing_v2). PS-201: the
@@ -62,6 +67,7 @@ export class BillingController {
     private readonly receipts: ReceiptsService,
     private readonly adjustments: AdjustmentsService,
     private readonly receivables: ReceivablesService,
+    private readonly unbilled: UnbilledService,
   ) {}
 
   @Get('settings')
@@ -274,6 +280,30 @@ export class BillingController {
     this.requireOn(principal);
     requireBillingReader(principal);
     return this.receivables.reminders(rlsContextFromPrincipal(principal), invoiceId);
+  }
+
+  @Get('unbilled')
+  @ApiOperation({
+    summary: 'Fixed fees due and on no invoice, per engagement (PS-206; time joins in PS-302)',
+  })
+  unbilledFees(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: UnbilledQueryDto,
+  ): Promise<UnbilledReport> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.unbilled.report(rlsContextFromPrincipal(principal), query.partnerId ?? null);
+  }
+
+  @Post('unbilled/draft')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Put the chosen due fee periods on a new draft invoice' })
+  draftFromUnbilled(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: DraftFromUnbilledDto,
+  ): Promise<InvoiceDetail> {
+    this.requireOn(principal);
+    return this.unbilled.draft(rlsContextFromPrincipal(principal), dto);
   }
 
   private requireOn(principal: Principal): void {

@@ -793,3 +793,50 @@ export function creditNoteLines(
     total: fromPaise(taxable + cgst + sgst + igst),
   };
 }
+
+// ── PS-206 · Unbilled fixed fees into a draft invoice ──────────────────────
+
+/** Where a fixed fee comes from: the retainer, or a compliance year's fee. */
+export const UNBILLED_SOURCES = ['retainer', 'year_fee'] as const;
+export type UnbilledSource = (typeof UNBILLED_SOURCES)[number];
+
+/** One fixed-fee period that is due and on no live invoice. */
+export interface UnbilledItem {
+  /** Stable per engagement: `retainer:2026-09`, `year:<id>:2026-27:Q2`, … */
+  key: string;
+  source: UnbilledSource;
+  /** "September 2026", "Q2 2026-27 (Jul–Sep 2026)", "FY 2026-27", "Fixed fee". */
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: string;
+  /** Days since the period ended; 0 while it is running. */
+  ageDays: number;
+}
+
+/** An engagement's unbilled fixed fees. */
+export interface UnbilledEngagement {
+  engagementId: string;
+  engagementCode: string;
+  serviceName: string;
+  clientId: string;
+  clientName: string;
+  partnerId: string | null;
+  partnerName: string | null;
+  items: UnbilledItem[];
+  total: string;
+}
+
+export interface UnbilledReport {
+  asOf: string;
+  engagements: UnbilledEngagement[];
+  total: string;
+  /** What the report leaves out, said once: time (PS-302), milestone/event fees. */
+  notes: string[];
+}
+
+/** POST /billing/unbilled/draft — the chosen periods onto one draft invoice. */
+export interface DraftFromUnbilledInput {
+  engagementId: string;
+  keys: string[];
+}

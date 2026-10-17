@@ -433,54 +433,64 @@ export class CommercialService {
     engagementId: string,
     input: CreateInvoiceInput,
   ): Promise<InvoiceDetail> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      await this.assertEngagementVisible(client, engagementId);
-      // GST mode: the split worked from the lines wins over a sent taxAmount
-      // (the shipped mobile app always sends one).
-      if (await this.firmStateCode(client)) input = { ...input, taxAmount: undefined };
-      const clientGstin =
-        input.clientGstin !== undefined
-          ? input.clientGstin
-          : await this.soleClientGstin(client, engagementId);
-      const placeOfSupply = input.placeOfSupplyState ?? clientGstin?.slice(0, 2) ?? null;
-      let id: string;
-      try {
-        const { rows } = await client.query<{ id: string }>(
-          `INSERT INTO hsdg.invoices
-             (engagement_id, currency, due_date, tax_amount, notes, created_by_employee_id,
-              client_gstin, place_of_supply_state, is_reverse_charge)
-           VALUES ($1, COALESCE($2,'INR'), $3::date, COALESCE($4::numeric,0), $5, $6, $7, $8,
-                   COALESCE($9, false))
-           RETURNING id`,
-          [
-            engagementId,
-            input.currency ?? null,
-            input.dueDate ?? null,
-            input.taxAmount ?? null,
-            input.notes ?? null,
-            ctx.employeeId ?? null,
-            clientGstin,
-            placeOfSupply,
-            input.isReverseCharge ?? null,
-          ],
-        );
-        id = rows[0]!.id;
-        for (const [i, line] of (input.lines ?? []).entries()) {
-          await this.insertLine(client, engagementId, id, line, i);
-        }
-        await this.retax(client, id);
-      } catch (err) {
-        throw translateInvoiceError(err);
+    return this.db.withRlsContext(ctx, (client) =>
+      this.createInvoiceWith(client, ctx, engagementId, input),
+    );
+  }
+
+  /** createInvoice inside the caller's transaction (PS-206 drafts from unbilled fees). */
+  async createInvoiceWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    input: CreateInvoiceInput,
+  ): Promise<InvoiceDetail> {
+    await this.assertEngagementVisible(client, engagementId);
+    // GST mode: the split worked from the lines wins over a sent taxAmount
+    // (the shipped mobile app always sends one).
+    if (await this.firmStateCode(client)) input = { ...input, taxAmount: undefined };
+    const clientGstin =
+      input.clientGstin !== undefined
+        ? input.clientGstin
+        : await this.soleClientGstin(client, engagementId);
+    const placeOfSupply = input.placeOfSupplyState ?? clientGstin?.slice(0, 2) ?? null;
+    let id: string;
+    try {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO hsdg.invoices
+           (engagement_id, currency, due_date, tax_amount, notes, created_by_employee_id,
+            client_gstin, place_of_supply_state, is_reverse_charge)
+         VALUES ($1, COALESCE($2,'INR'), $3::date, COALESCE($4::numeric,0), $5, $6, $7, $8,
+                 COALESCE($9, false))
+         RETURNING id`,
+        [
+          engagementId,
+          input.currency ?? null,
+          input.dueDate ?? null,
+          input.taxAmount ?? null,
+          input.notes ?? null,
+          ctx.employeeId ?? null,
+          clientGstin,
+          placeOfSupply,
+          input.isReverseCharge ?? null,
+        ],
+      );
+      id = rows[0]!.id;
+      for (const [i, line] of (input.lines ?? []).entries()) {
+        await this.insertLine(client, engagementId, id, line, i);
       }
-      const detail = await this.selectInvoiceDetail(client, engagementId, id);
-      await this.audit.recordWith(client, ctx, {
-        action: 'invoice.created',
-        objectType: 'invoice',
-        objectId: id,
-        after: { engagementId, lines: detail.lines.length, total: detail.total },
-      });
-      return detail;
+      await this.retax(client, id);
+    } catch (err) {
+      throw translateInvoiceError(err);
+    }
+    const detail = await this.selectInvoiceDetail(client, engagementId, id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'invoice.created',
+      objectType: 'invoice',
+      objectId: id,
+      after: { engagementId, lines: detail.lines.length, total: detail.total },
     });
+    return detail;
   }
 
   /** Amend a DRAFT invoice header (tax/due/notes/currency). Optimistic-locked. */
