@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION } from '@hsdg/contracts';
 import { CurrentPrincipal, Public, RequirePermissions } from '../../auth/auth.decorators';
@@ -66,6 +67,9 @@ export class ClientUploadLinksController {
  * it can only submit a file against the token's dependency.
  */
 @ApiTags('client-upload-public')
+// Unauthenticated: a tight per-address limit so link tokens cannot be guessed
+// at speed and one client cannot flood uploads.
+@Throttle({ default: { limit: 20, ttl: 60_000 } })
 @Controller('client-upload')
 export class ClientUploadPublicController {
   constructor(private readonly service: ClientUploadService) {}

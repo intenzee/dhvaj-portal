@@ -102,6 +102,36 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Run `work` only if no other API instance is running the job `name` right
+   * now (a session advisory lock on a dedicated connection). With several
+   * instances each firing the same cron, exactly one does the work; the others
+   * skip. Resolves to `{ ran: false }` when the lock was held elsewhere.
+   */
+  async runExclusive<T>(
+    name: string,
+    work: () => Promise<T>,
+  ): Promise<{ ran: true; result: T } | { ran: false }> {
+    const client = await this.pool.connect();
+    let locked = false;
+    try {
+      const { rows } = await client.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_lock(hashtext('hsdg-job:' || $1)) AS locked`,
+        [name],
+      );
+      locked = rows[0]?.locked === true;
+      if (!locked) return { ran: false };
+      return { ran: true, result: await work() };
+    } finally {
+      if (locked) {
+        await client
+          .query(`SELECT pg_advisory_unlock(hashtext('hsdg-job:' || $1))`, [name])
+          .catch(() => undefined);
+      }
+      client.release();
+    }
+  }
+
   private async applyContext(client: PoolClient, context: RlsContext): Promise<void> {
     // All settings in ONE round-trip. Parameterised set_config() calls (not
     // string interpolation) so context values can never be used for SQL
@@ -148,11 +178,16 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       current_user: string;
       is_superuser: boolean;
       is_bypassrls: boolean;
+      owns_schema: boolean;
     }>(
       `SELECT
          current_user,
          rolsuper   AS is_superuser,
-         rolbypassrls AS is_bypassrls
+         rolbypassrls AS is_bypassrls,
+         EXISTS (
+           SELECT 1 FROM pg_namespace n
+           WHERE n.nspname = 'hsdg' AND pg_has_role(current_user, n.nspowner, 'MEMBER')
+         ) AS owns_schema
        FROM pg_roles
        WHERE rolname = current_user`,
     );
@@ -167,6 +202,15 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         `Refusing to start: application connected as "${role.current_user}" ` +
           `which is superuser=${role.is_superuser} bypassrls=${role.is_bypassrls}. ` +
           `The API must use a least-privilege role that RLS applies to.`,
+      );
+    }
+
+    // The schema owner (the migrator) can ALTER/DISABLE the policies and, on any
+    // table not FORCE'd, is exempt from them — never the runtime role.
+    if (role.owns_schema) {
+      throw new InternalServerErrorException(
+        `Refusing to start: application connected as "${role.current_user}", which owns ` +
+          `(or is a member of the owner of) the hsdg schema. Use the hsdg_app role.`,
       );
     }
 
