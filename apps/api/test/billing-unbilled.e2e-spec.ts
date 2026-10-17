@@ -552,54 +552,65 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
         [eng, paEmp, pbEmp],
       );
     });
-    const due = (
-      await addMilestone(mp, eng, {
-        kind: 'milestone',
-        description: 'Due diligence report',
-        amount: '40000.00',
-        dueOn: '2026-02-01',
-      }).expect(201)
-    ).body as FeeMilestone;
-    const key = `milestone:${due.id}`;
+    // Both come off the team afterwards: sharing an engagement lets each see the
+    // other (employees_select), and organisation.e2e checks the offices apart.
+    try {
+      const due = (
+        await addMilestone(mp, eng, {
+          kind: 'milestone',
+          description: 'Due diligence report',
+          amount: '40000.00',
+          dueOn: '2026-02-01',
+        }).expect(201)
+      ).body as FeeMilestone;
+      const key = `milestone:${due.id}`;
 
-    // Partner A sees the milestone and drafts it.
-    expect((await rowOf(eng, pa))!.items.map((i) => i.key)).toEqual([key]);
-    const made = (await draft(pa, eng, [key]).expect(201)).body as InvoiceDetail;
-    expect(made).toMatchObject({ status: 'draft', subtotal: '40000.00' });
+      // Partner A sees the milestone and drafts it.
+      expect((await rowOf(eng, pa))!.items.map((i) => i.key)).toEqual([key]);
+      const made = (await draft(pa, eng, [key]).expect(201)).body as InvoiceDetail;
+      expect(made).toMatchObject({ status: 'draft', subtotal: '40000.00' });
 
-    // Partner B is on the team but bills another office's clients: nothing.
-    await http()
-      .post(`/api/v1/engagements/${eng}/invoices/${made.id}/status`)
-      .set(bearer(pa))
-      .send({ status: 'void' })
-      .expect(201);
-    expect(await rowOf(eng, pb)).toBeUndefined();
-    await draft(pb, eng, [key]).expect(400);
-    await expect(
-      superuser(async (c) => {
-        await c.query('BEGIN');
-        try {
-          await c.query(
-            `SELECT set_config('hsdg.user_id', u.id::text, true), set_config('hsdg.role', 'partner', true),
-                    set_config('hsdg.office_id', e.primary_office_id::text, true),
-                    set_config('hsdg.employee_id', $1::text, true)
-               FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id WHERE e.id = $1::uuid`,
-            [pbEmp],
-          );
-          await c.query('SET LOCAL ROLE hsdg_app');
-          await c.query(
-            `INSERT INTO hsdg.fee_billings
-               (engagement_id, client_entity_id, period_key, period_start, period_end, amount,
-                label, skip_reason, skip_kind, external_invoice_number, external_invoice_date)
-             SELECT $1, e.entity_id, $2, current_date, current_date, 1, 'x', 'Billed by hand',
-                    'billed_outside', 'X/1', current_date
-               FROM hsdg.engagements e WHERE e.id = $1`,
-            [eng, key],
-          );
-        } finally {
-          await c.query('ROLLBACK');
-        }
-      }),
-    ).rejects.toThrow(/row-level security/);
+      // Partner B is on the team but bills another office's clients: nothing.
+      await http()
+        .post(`/api/v1/engagements/${eng}/invoices/${made.id}/status`)
+        .set(bearer(pa))
+        .send({ status: 'void' })
+        .expect(201);
+      expect(await rowOf(eng, pb)).toBeUndefined();
+      await draft(pb, eng, [key]).expect(400);
+      await expect(
+        superuser(async (c) => {
+          await c.query('BEGIN');
+          try {
+            await c.query(
+              `SELECT set_config('hsdg.user_id', u.id::text, true), set_config('hsdg.role', 'partner', true),
+                      set_config('hsdg.office_id', e.primary_office_id::text, true),
+                      set_config('hsdg.employee_id', $1::text, true)
+                 FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id WHERE e.id = $1::uuid`,
+              [pbEmp],
+            );
+            await c.query('SET LOCAL ROLE hsdg_app');
+            await c.query(
+              `INSERT INTO hsdg.fee_billings
+                 (engagement_id, client_entity_id, period_key, period_start, period_end, amount,
+                  label, skip_reason, skip_kind, external_invoice_number, external_invoice_date)
+               SELECT $1, e.entity_id, $2, current_date, current_date, 1, 'x', 'Billed by hand',
+                      'billed_outside', 'X/1', current_date
+                 FROM hsdg.engagements e WHERE e.id = $1`,
+              [eng, key],
+            );
+          } finally {
+            await c.query('ROLLBACK');
+          }
+        }),
+      ).rejects.toThrow(/row-level security/);
+    } finally {
+      await superuser((c) =>
+        c.query(
+          `DELETE FROM hsdg.engagement_team WHERE engagement_id = $1 AND employee_id = ANY($2::uuid[])`,
+          [eng, [paEmp, pbEmp]],
+        ),
+      );
+    }
   });
 });
