@@ -71,29 +71,33 @@ export default function LoginPage(): JSX.Element {
 
           {error && <p className="mt-3 text-sm text-danger-600">{error}</p>}
 
-          <div className="mt-6">
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
-              <span>{entraEnabled ? 'Developer sign-in (local only)' : 'Developer sign-in'}</span>
-              <span className="h-px flex-1 bg-line-strong" />
+          {/* A production build with Microsoft sign-in shows only that: the API
+              refuses developer sign-in there, and the personas aren't real staff. */}
+          {!(entraEnabled && process.env.NODE_ENV === 'production') && (
+            <div className="mt-6">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
+                <span>{entraEnabled ? 'Developer sign-in (local only)' : 'Developer sign-in'}</span>
+                <span className="h-px flex-1 bg-line-strong" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {SEEDED.map((u) => (
+                  <button
+                    key={u.email}
+                    onClick={() => void run(() => login(u.email), 'Sign-in failed. Is the API running?')}
+                    disabled={busy}
+                    className="rounded-lg border border-line-strong px-3 py-2 text-left text-xs transition hover:border-primary-300 hover:bg-primary-50 disabled:opacity-50"
+                  >
+                    <div className="font-medium text-ink">{u.label}</div>
+                    <div className="text-ink-faint">{u.email}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-ink-faint">
+                Developer sign-in is disabled in production; there, sign-in goes through Microsoft
+                Entra SSO with MFA.
+              </p>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {SEEDED.map((u) => (
-                <button
-                  key={u.email}
-                  onClick={() => void run(() => login(u.email), 'Sign-in failed. Is the API running?')}
-                  disabled={busy}
-                  className="rounded-lg border border-line-strong px-3 py-2 text-left text-xs transition hover:border-primary-300 hover:bg-primary-50 disabled:opacity-50"
-                >
-                  <div className="font-medium text-ink">{u.label}</div>
-                  <div className="text-ink-faint">{u.email}</div>
-                </button>
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-ink-faint">
-              Developer sign-in is disabled in production; there, sign-in goes through Microsoft
-              Entra SSO with MFA.
-            </p>
-          </div>
+          )}
         </CardBody>
       </Card>
     </div>
