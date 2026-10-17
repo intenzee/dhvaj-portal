@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -20,7 +21,6 @@ import {
 } from 'class-validator';
 import {
   ADJUSTMENT_STATUSES,
-  GST_RATES,
   GSTIN_REGEX,
   RECEIPT_MODES,
   TDS_SECTIONS,
@@ -189,16 +189,24 @@ export class ReceiptListQueryDto extends PaginationQueryDto {
 }
 
 /** PS-205 · POST /billing/invoices/:invoiceId/credit-notes. */
-export class RequestCreditNoteDto {
-  @ApiProperty({ example: '5000.00', description: 'Before tax; GST is added as on the invoice.' })
+export class CreditNoteLineDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  invoiceLineId!: string;
+
+  @ApiProperty({ example: '5000.00', description: "Before tax; the line's GST rate is added." })
   @Matches(AMOUNT, { message: 'taxableValue must be a positive amount with up to two decimals.' })
   taxableValue!: string;
+}
 
-  @ApiPropertyOptional({ enum: GST_RATES, description: "Defaults to the invoice's highest rate." })
-  @IsOptional()
-  @Type(() => Number)
-  @IsIn(GST_RATES)
-  gstRate?: number;
+export class RequestCreditNoteDto {
+  @ApiProperty({ type: [CreditNoteLineDto], description: 'The invoice lines it reduces.' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreditNoteLineDto)
+  lines!: CreditNoteLineDto[];
 
   @ApiProperty({ example: 'Scope reduced: one return not filed' })
   @IsString()

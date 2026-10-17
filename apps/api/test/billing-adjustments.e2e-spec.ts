@@ -299,10 +299,14 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
     const inv = await invoice(eng, '100000.00');
     expect(await getInvoice(eng, inv)).toMatchObject({ total: '118000.00' });
 
+    const [line] = (await getInvoice(eng, inv)).lines as { id: string }[];
     const req = await http()
       .post(`/api/v1/billing/invoices/${inv}/credit-notes`)
       .set(bearer(mx))
-      .send({ taxableValue: '5000', reason: 'One return dropped from scope' })
+      .send({
+        lines: [{ invoiceLineId: line!.id, taxableValue: '5000' }],
+        reason: 'One return dropped from scope',
+      })
       .expect(201);
     expect(req.body).toMatchObject({
       kind: 'credit_note',
@@ -388,5 +392,109 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
     expect(b.approvers).toEqual([]);
     expect(b.roleAfter).toBe('partner');
     expect(b.after).toBe(b.before);
+  });
+
+  it("splits a credit note's GST per invoice line, at each line's rate, within what is left of it", async () => {
+    const settings = await http().get('/api/v1/billing/settings').set(bearer(mp)).expect(200);
+    await http()
+      .patch('/api/v1/billing/settings')
+      .set(bearer(mp))
+      .send({ version: settings.body.version, gstin: '07AAAFD1234K1Z5' })
+      .expect(200);
+    const { eng } = await client();
+    const d = await http()
+      .post(`/api/v1/engagements/${eng}/invoices`)
+      .set(bearer(pa))
+      .send({
+        dueDate: dateFromToday(15),
+        lines: [
+          { description: 'GST returns', unitAmount: '10000.00', gstRate: 18 },
+          { description: 'Courier and filing', unitAmount: '2000.00', gstRate: 5 },
+        ],
+      })
+      .expect(201);
+    const inv = d.body.id as string;
+    await http()
+      .post(`/api/v1/engagements/${eng}/invoices/${inv}/status`)
+      .set(bearer(pa))
+      .send({ status: 'issued', issueDate: today })
+      .expect(201);
+    const detail = await getInvoice(eng, inv);
+    expect(detail).toMatchObject({ total: '13900.00' });
+    const [fees, courier] = detail.lines as { id: string; description: string }[];
+    const credit = (lines: { invoiceLineId: string; taxableValue: string }[]) =>
+      http()
+        .post(`/api/v1/billing/invoices/${inv}/credit-notes`)
+        .set(bearer(mx))
+        .send({ lines, reason: 'Courier not used; one return dropped' });
+
+    const req = await credit([
+      { invoiceLineId: fees!.id, taxableValue: '1000' },
+      { invoiceLineId: courier!.id, taxableValue: '2000' },
+    ]).expect(201);
+    expect(req.body).toMatchObject({
+      taxableValue: '3000.00',
+      gstRate: null,
+      cgst: '140.00',
+      sgst: '140.00',
+      igst: '0.00',
+      total: '3280.00',
+      lines: [
+        {
+          invoiceLineId: fees!.id,
+          gstRate: '18.00',
+          cgst: '90.00',
+          sgst: '90.00',
+          total: '1180.00',
+        },
+        {
+          invoiceLineId: courier!.id,
+          gstRate: '5.00',
+          cgst: '50.00',
+          sgst: '50.00',
+          total: '2100.00',
+        },
+      ],
+    });
+
+    // The courier line is fully credited (pending counts); the fees line has 9,000 left.
+    await credit([{ invoiceLineId: courier!.id, taxableValue: '0.01' }]).expect(400);
+    const over = await credit([{ invoiceLineId: fees!.id, taxableValue: '9000.01' }]).expect(400);
+    expect(over.body.message).toMatch(/left to credit/);
+    // Not a line of this invoice; the same line twice.
+    const otherEng = (await client()).eng;
+    const otherInv = await invoice(otherEng, '500.00');
+    const [foreign] = (await getInvoice(otherEng, otherInv)).lines as { id: string }[];
+    await credit([{ invoiceLineId: foreign!.id, taxableValue: '10' }]).expect(400);
+    await credit([
+      { invoiceLineId: fees!.id, taxableValue: '10' },
+      { invoiceLineId: fees!.id, taxableValue: '10' },
+    ]).expect(400);
+
+    // A rejected note frees its lines.
+    await decide(pa, 'credit-notes', req.body.id as string, 'reject').expect(201);
+    await credit([{ invoiceLineId: courier!.id, taxableValue: '2000' }]).expect(201);
+
+    // The database refuses a line beyond what is left, whatever the API says.
+    await expect(
+      superuser(async (c) => {
+        await c.query('BEGIN');
+        try {
+          const { rows } = await c.query<{ id: string }>(
+            `INSERT INTO hsdg.credit_notes (invoice_id, client_entity_id, reason, taxable_value)
+             SELECT id, client_entity_id, 'direct', 1 FROM hsdg.invoices WHERE id = $1
+             RETURNING id`,
+            [inv],
+          );
+          await c.query(
+            `INSERT INTO hsdg.credit_note_lines (credit_note_id, invoice_line_id, description, taxable_value)
+             VALUES ($1, $2, 'x', 1)`,
+            [rows[0]!.id, courier!.id],
+          );
+        } finally {
+          await c.query('ROLLBACK');
+        }
+      }),
+    ).rejects.toThrow(/left to credit/);
   });
 });

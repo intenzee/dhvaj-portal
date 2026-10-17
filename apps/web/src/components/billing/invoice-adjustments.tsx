@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MinusCircle } from 'lucide-react';
 import {
-  GST_RATES,
   PERMISSION,
   type AdjustmentKind,
   type InvoiceAdjustment,
@@ -22,7 +21,8 @@ import {
   adjustmentKindLabel,
   adjustmentPreview,
   adjustmentStatusLabel,
-  topGstRate,
+  creditNotePreview,
+  creditedByLine,
 } from './adjustments';
 
 /**
@@ -44,7 +44,7 @@ export function InvoiceAdjustments({
   const [asking, setAsking] = useState(false);
   const [kind, setKind] = useState<AdjustmentKind>('write_off');
   const [amount, setAmount] = useState('');
-  const [rate, setRate] = useState(String(topGstRate(invoice.lines)));
+  const [lineAmounts, setLineAmounts] = useState<Record<string, string>>({});
   const [reason, setReason] = useState('');
 
   const key = ['billing', 'adjustments', invoice.id] as const;
@@ -54,10 +54,15 @@ export function InvoiceAdjustments({
   });
   const open = invoice.status === 'issued' || invoice.status === 'partially_paid';
   const mayAsk = open && can(principal, PERMISSION.billingManage);
-  const preview = adjustmentPreview(kind, amount, invoice, {
-    firmState: settings?.stateCode ?? null,
-    rate: Number(rate),
-  });
+  const credited = creditedByLine(list.data ?? []);
+  const preview =
+    kind === 'write_off'
+      ? adjustmentPreview(kind, amount, invoice, { firmState: null, rate: 0 })
+      : creditNotePreview(lineAmounts, invoice, settings?.stateCode ?? null, credited);
+  const touched =
+    kind === 'write_off'
+      ? amount.trim() !== ''
+      : Object.values(lineAmounts).some((v) => v.trim() !== '');
 
   const ask = useMutation({
     mutationFn: () =>
@@ -68,7 +73,12 @@ export function InvoiceAdjustments({
           })
         : apiFetch<InvoiceAdjustment>(`/billing/invoices/${invoice.id}/credit-notes`, {
             method: 'POST',
-            body: { taxableValue: amount.trim(), gstRate: Number(rate), reason: reason.trim() },
+            body: {
+              lines: Object.entries(lineAmounts)
+                .filter(([, v]) => v.trim() !== '')
+                .map(([invoiceLineId, v]) => ({ invoiceLineId, taxableValue: v.trim() })),
+              reason: reason.trim(),
+            },
           }),
     onSuccess: (a) => {
       toast(
@@ -76,6 +86,7 @@ export function InvoiceAdjustments({
       );
       setAsking(false);
       setAmount('');
+      setLineAmounts({});
       setReason('');
       void qc.invalidateQueries({ queryKey: key });
       onChanged();
@@ -112,7 +123,8 @@ export function InvoiceAdjustments({
             <span className="tabular-nums">{formatMoney(a.total, 'INR')}</span>
             {a.kind === 'credit_note' && a.total !== a.taxableValue && (
               <span className="text-xs text-ink-faint">
-                {formatMoney(a.taxableValue, 'INR')} + GST {Number(a.gstRate)}%
+                {formatMoney(a.taxableValue, 'INR')} +{' '}
+                {a.gstRate !== null ? `GST ${Number(a.gstRate)}%` : 'GST at each line’s rate'}
               </span>
             )}
             <Badge
@@ -139,31 +151,54 @@ export function InvoiceAdjustments({
                 <option value="credit_note">Credit note (GST)</option>
               </Select>
             </Field>
-            <Field label={kind === 'write_off' ? 'Amount' : 'Taxable value'}>
-              <Input
-                autoFocus
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
-            </Field>
-            {kind === 'credit_note' && (
-              <Field label="GST rate">
-                <Select value={rate} onChange={(e) => setRate(e.target.value)}>
-                  {GST_RATES.map((r) => (
-                    <option key={r} value={String(r)}>
-                      {r}%
-                    </option>
-                  ))}
-                </Select>
+            {kind === 'write_off' && (
+              <Field label="Amount">
+                <Input
+                  autoFocus
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
               </Field>
             )}
           </div>
+          {kind === 'credit_note' && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-ink-muted">
+                Credit each line before tax; its GST rate is added as on the invoice.
+              </p>
+              {invoice.lines.map((l) => {
+                const left = Number(l.taxableValue) - Number(credited.get(l.id) ?? 0);
+                return (
+                  <div key={l.id} className="grid grid-cols-[1fr_auto_8rem] items-center gap-3">
+                    <span className="truncate text-sm text-ink" title={l.description}>
+                      {l.description}
+                      <span className="block text-xs text-ink-faint">
+                        GST {Number(l.gstRate)}% · {formatMoney(String(left.toFixed(2)), 'INR')}{' '}
+                        left to credit
+                      </span>
+                    </span>
+                    <span className="text-xs text-ink-faint tabular-nums">
+                      of {formatMoney(l.taxableValue, 'INR')}
+                    </span>
+                    <Input
+                      aria-label={`Credit on ${l.description}`}
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      disabled={left <= 0}
+                      value={lineAmounts[l.id] ?? ''}
+                      onChange={(e) => setLineAmounts((m) => ({ ...m, [l.id]: e.target.value }))}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <Field label="Why?" hint="The partner sees this when deciding.">
             <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
           </Field>
           <div className="flex items-center justify-end gap-3 text-sm">
-            {amount.trim() &&
+            {touched &&
               (preview.ok ? (
                 <span className="text-ink-muted">
                   Comes off the balance:{' '}

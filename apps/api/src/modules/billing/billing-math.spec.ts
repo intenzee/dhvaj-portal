@@ -2,6 +2,7 @@ import {
   INVOICE_NUMBER_MAX,
   allocateOldestFirst,
   amountInWords,
+  creditNoteLines,
   creditNoteSplit,
   financialYearOf,
   formatInr,
@@ -213,5 +214,87 @@ describe('creditNoteSplit (PS-205)', () => {
     expect(
       creditNoteSplit('5000', 18, { firmState: null, placeOfSupply: '07', charged: true }),
     ).toEqual(none);
+  });
+});
+
+describe('creditNoteLines (PS-205, per line)', () => {
+  const lines = [
+    {
+      id: 'a',
+      description: 'GST returns',
+      taxableValue: '10000.00',
+      gstRate: '18.00',
+      credited: '0',
+    },
+    {
+      id: 'b',
+      description: 'Courier',
+      taxableValue: '2000.00',
+      gstRate: '5.00',
+      credited: '500.00',
+    },
+  ];
+  const intra = { firmState: '07', placeOfSupply: '07', charged: true };
+
+  it('taxes each line at its own rate and sums them', () => {
+    const r = creditNoteLines(
+      [
+        { invoiceLineId: 'a', taxableValue: '1000' },
+        { invoiceLineId: 'b', taxableValue: '1500' },
+      ],
+      lines,
+      intra,
+    );
+    expect(r).toMatchObject({
+      ok: true,
+      taxableValue: '2500.00',
+      gstRate: null,
+      cgst: '127.50',
+      sgst: '127.50',
+      igst: '0.00',
+      total: '2755.00',
+    });
+  });
+
+  it('keeps the one rate when every line shares it, and goes IGST out of state', () => {
+    const r = creditNoteLines([{ invoiceLineId: 'a', taxableValue: '1000' }], lines, {
+      ...intra,
+      placeOfSupply: '27',
+    });
+    expect(r).toMatchObject({ ok: true, gstRate: '18.00', igst: '180.00', cgst: '0.00' });
+  });
+
+  it('adds no tax when the invoice charged none', () => {
+    const r = creditNoteLines([{ invoiceLineId: 'a', taxableValue: '1000' }], lines, {
+      ...intra,
+      charged: false,
+    });
+    expect(r).toMatchObject({ ok: true, gstRate: '0.00', total: '1000.00' });
+  });
+
+  it("refuses more than is left of a line, another invoice's line, a repeat or nothing", () => {
+    expect(
+      creditNoteLines([{ invoiceLineId: 'b', taxableValue: '1500.01' }], lines, intra),
+    ).toEqual({
+      ok: false,
+      error: expect.stringMatching(/left to credit/),
+    });
+    expect(creditNoteLines([{ invoiceLineId: 'z', taxableValue: '1' }], lines, intra).ok).toBe(
+      false,
+    );
+    expect(
+      creditNoteLines(
+        [
+          { invoiceLineId: 'a', taxableValue: '1' },
+          { invoiceLineId: 'a', taxableValue: '1' },
+        ],
+        lines,
+        intra,
+      ).ok,
+    ).toBe(false);
+    expect(creditNoteLines([{ invoiceLineId: 'a', taxableValue: '0' }], lines, intra).ok).toBe(
+      false,
+    );
+    expect(creditNoteLines([], lines, intra).ok).toBe(false);
   });
 });
