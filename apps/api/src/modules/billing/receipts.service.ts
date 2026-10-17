@@ -341,10 +341,11 @@ export class ReceiptsService {
         entries.push({
           date: c.date,
           kind: c.kind,
+          // A write-off has no number of its own: the invoice it came off.
           reference:
             c.kind === 'credit_note'
               ? `${c.number} on ${c.invoice_number ?? 'invoice'}`
-              : `on ${c.invoice_number ?? 'invoice'}`,
+              : (c.invoice_number ?? 'invoice'),
           debit: '0.00',
           credit: c.amount,
           invoiceId: c.invoice_id,
