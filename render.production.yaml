@@ -1,0 +1,155 @@
+# ─────────────────────────────────────────────────────────────────────────
+# DHVAJ portal — Render blueprint for PRODUCTION (real client data).
+#
+# Not the demo: render.yaml is the free synthetic-data demo. Create this one as
+# a separate Blueprint in Render (New → Blueprint, "Blueprint file path" =
+# render.production.yaml). Its services are named dhvaj-api / dhvaj-web, so the
+# two never touch each other.
+#
+#   • dhvaj-api — the NestJS API. On boot scripts/deploy/start.mjs provisions
+#                 the two DB roles, migrates, and on the very first boot creates
+#                 the firm's first office and its owner (SEED_MODE=production,
+#                 BOOTSTRAP_*) — never demo data — then serves as hsdg_app.
+#   • dhvaj-web — the Next.js portal, Microsoft (Entra) sign-in only.
+#
+# Paid, always-on instances; deploys are MANUAL (autoDeploy: false) so each
+# release follows docs/DEPLOY.md §2: CI green, pg_dump, then deploy.
+#
+# The database is not defined here: use a paid managed Postgres 16 with
+# point-in-time recovery (Render Postgres or Neon, same region) and paste its
+# owner connection string into DATABASE_ADMIN_URL. Use the EXTERNAL (TLS)
+# string: the API refuses a remote database without verified TLS.
+#
+# Every `sync: false` value is entered in the Render dashboard, never here.
+# docs/DEPLOY.md §1 explains each one; the API refuses to boot (and says why)
+# when a production rule is broken.
+# ─────────────────────────────────────────────────────────────────────────
+services:
+  - type: web
+    name: dhvaj-api
+    runtime: docker
+    repo: https://github.com/intenzee/hsdg
+    branch: main
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: .
+    dockerCommand: node scripts/deploy/start.mjs
+    plan: starter
+    region: singapore
+    healthCheckPath: /api/v1/health/live
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: LOG_PRETTY
+        value: 'false'
+      # Behind Render's proxy: rate limits and logs see the client's address.
+      - key: TRUST_PROXY
+        value: '1'
+      - key: SWAGGER_ENABLED
+        value: 'false'
+
+      # ── Database ──────────────────────────────────────────────────────────
+      # The managed Postgres owner string (external, TLS). The deploy derives
+      # the migrator and app URLs from it; the API itself runs as hsdg_app.
+      - key: DATABASE_ADMIN_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: 'true'
+      - key: DB_MIGRATOR_PASSWORD
+        generateValue: true
+      - key: DB_APP_PASSWORD
+        generateValue: true
+
+      # ── First boot: the firm's first office and its owner ─────────────────
+      # Read only while the database has no office; safe to delete afterwards.
+      # BOOTSTRAP_OWNER_EMAIL must be the owner's Microsoft sign-in (UPN).
+      # Optional: BOOTSTRAP_OWNER_EMPLOYEE_CODE (EMP001), BOOTSTRAP_OWNER_JOINED
+      # (YYYY-MM-DD, default today), BOOTSTRAP_OWNER_MEMBERSHIP_NO (ICAI no.).
+      - key: SEED_MODE
+        value: production
+      - key: BOOTSTRAP_OWNER_EMAIL
+        sync: false
+      - key: BOOTSTRAP_OWNER_NAME
+        sync: false
+      - key: BOOTSTRAP_OFFICE_CODE
+        sync: false
+      - key: BOOTSTRAP_OFFICE_NAME
+        sync: false
+
+      # ── Sign-in: Microsoft Entra ID ───────────────────────────────────────
+      # The API app registration's tenant (directory) id and client id. A user
+      # signs in only if a portal user has their UPN as email (Admin → Users).
+      - key: AUTH_PROVIDER
+        value: entra
+      - key: AUTH_ENTRA_TENANT_ID
+        sync: false
+      - key: AUTH_ENTRA_CLIENT_ID
+        sync: false
+      - key: AUTH_JWT_SECRET
+        generateValue: true
+      # The portal's https address (custom domain), and the same as the only
+      # allowed browser origin.
+      - key: WEB_PUBLIC_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+      # ── Documents: SharePoint (durable; local disk is wiped on redeploy) ──
+      - key: STORAGE_PROVIDER
+        value: sharepoint
+      - key: M365_ENABLED
+        value: 'true'
+      - key: M365_TENANT_ID
+        sync: false
+      - key: M365_CLIENT_ID
+        sync: false
+      - key: M365_CLIENT_SECRET
+        sync: false
+      - key: M365_SITE_URL
+        sync: false
+
+      # ── Client-login vault (docs/DEPLOY.md §6) ────────────────────────────
+      # Generate once; keep one offline copy. Losing it loses every sealed login.
+      - key: CREDENTIALS_KEYS
+        sync: false
+
+      # ── Scheduled jobs (one instance runs each tick: advisory lock) ───────
+      - key: SCHEDULER_ENABLED
+        value: 'true'
+
+      # ── Features (docs/DEPLOY.md §4) ──────────────────────────────────────
+      # The master switch: unset = none. A flag listed here is on for every
+      # office unless Admin → Rollout pilots it, so add them in the §4 order.
+      - key: FEATURE_FLAGS
+        sync: false
+
+  - type: web
+    name: dhvaj-web
+    runtime: docker
+    repo: https://github.com/intenzee/hsdg
+    branch: main
+    dockerfilePath: apps/web/Dockerfile
+    dockerContext: .
+    plan: starter
+    region: singapore
+    autoDeploy: false
+    envVars:
+      # All baked into the browser bundle AT BUILD TIME (passed to the Docker
+      # build): change one, then redeploy the web service.
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      # The SPA app registration: tenant id, its client id, and the API scope,
+      # e.g. api://<api-client-id>/access_as_user. With these set, the sign-in
+      # page offers Microsoft only.
+      - key: NEXT_PUBLIC_ENTRA_TENANT_ID
+        sync: false
+      - key: NEXT_PUBLIC_ENTRA_CLIENT_ID
+        sync: false
+      - key: NEXT_PUBLIC_ENTRA_API_SCOPE
+        sync: false
+      - key: NEXT_PUBLIC_M365_ENABLED
+        value: 'true'
+      - key: NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED
+        value: 'false'

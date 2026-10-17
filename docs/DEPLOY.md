@@ -4,8 +4,54 @@ For the free synthetic-data demo (Render + Neon, dev-persona sign-in) see
 [`/DEPLOY.md`](../DEPLOY.md). This page is for a deploy that holds **real client
 data**: PAN/GSTIN, sealed client portal logins, invoices.
 
-Never deploy from a laptop. Render auto-deploys `main` (see `render.yaml`); the
-Azure workflow (`.github/workflows/deploy.yml`) runs only by hand.
+Never deploy from a laptop. Render auto-deploys `main` to the demo (see
+`render.yaml`); production is its own Blueprint, `render.production.yaml`,
+deployed by hand (§0). The Azure workflow (`.github/workflows/deploy.yml`) runs
+only by hand.
+
+---
+
+## 0. First go-live (once)
+
+1. **Microsoft sign-in: two app registrations** in the firm's tenant
+   (entra.microsoft.com → App registrations). These are separate from the
+   SharePoint app in `microsoft-365-sharepoint-provisioning.md`.
+   - **DHVAJ Portal API**: Expose an API → Application ID URI
+     `api://<its client id>` → add the scope `access_as_user` (admins and users
+     may consent). Its tenant and client ids are `AUTH_ENTRA_TENANT_ID` /
+     `AUTH_ENTRA_CLIENT_ID`.
+   - **DHVAJ Portal Web**: Authentication → add a **Single-page application**
+     platform with the redirect URI `https://<portal domain>` (exactly the web
+     address, no path). API permissions → My APIs → DHVAJ Portal API →
+     `access_as_user` → **Grant admin consent**. Its ids go into
+     `NEXT_PUBLIC_ENTRA_TENANT_ID` / `NEXT_PUBLIC_ENTRA_CLIENT_ID`, and
+     `NEXT_PUBLIC_ENTRA_API_SCOPE` = `api://<API client id>/access_as_user`.
+   - **MFA:** a Conditional Access policy requiring MFA for the Web app. The
+     portal reads MFA from the token (`amr`); revealing a client's portal
+     login needs it.
+2. **Database:** a paid managed Postgres 16 with point-in-time recovery, in the
+   same region as the services (Render Postgres or Neon, Singapore). Copy the
+   owner's **external** (TLS) connection string.
+3. **Render:** New → Blueprint → this repo, Blueprint file path
+   `render.production.yaml`. Fill in every value it asks for (§1 explains
+   each). Then add the custom domains (Settings → Custom Domains) for the web
+   and the API, and set `WEB_PUBLIC_URL`, `CORS_ORIGINS` (API) and
+   `NEXT_PUBLIC_API_URL` (web) to them; redeploy the web after any
+   `NEXT_PUBLIC_*` change.
+4. **First boot** (`SEED_MODE=production`): with no office in the database,
+   `start.mjs` creates the first office (`BOOTSTRAP_OFFICE_CODE`/`_NAME`) and
+   the owner (`BOOTSTRAP_OWNER_EMAIL`/`_NAME`) as managing partner + admin, with
+   a partner-grade employee record. Nothing else, and never the demo: under
+   Entra sign-in `start.mjs` refuses `SEED_MODE=demo`. The email **must be the
+   owner's Microsoft sign-in name (UPN)**. Missing values stop the boot and are
+   named in the log; nothing is half-written. Once the office exists the
+   `BOOTSTRAP_*` values are no longer read.
+5. **Sign in as the owner** with Microsoft, then in Admin add the other offices,
+   every staff member (Users: email = their UPN, roles, office; People: the
+   employee record), and the clients. Anyone without a portal user is refused
+   at sign-in ("not a known user"), and a deactivated user is refused too.
+6. Then: the vault key (§6), features (§4), billing (§3), and the smoke tests
+   (§5). Back up (§2) before the first real data goes in, and test a restore.
 
 ---
 
@@ -66,8 +112,11 @@ Three roles:
 - `hsdg_app`, the runtime role, which is subject to RLS (FORCE ROW LEVEL SECURITY on every tenant table).
 
 `scripts/deploy/start.mjs` creates both roles from `DATABASE_ADMIN_URL`,
-`DB_MIGRATOR_PASSWORD` and `DB_APP_PASSWORD`, then migrates, seeds, and starts
-the API as `hsdg_app`.
+`DB_MIGRATOR_PASSWORD` and `DB_APP_PASSWORD`, then migrates, seeds the first
+boot by `SEED_MODE` (`production`: the first office and owner from
+`BOOTSTRAP_*`, §0; `demo`: the synthetic firm; `none`), and starts the API as
+`hsdg_app`. `SEED_MODE` defaults to `production` under `AUTH_PROVIDER=entra`
+and to `demo` otherwise.
 
 ---
 
@@ -183,3 +232,4 @@ hosts, use `CRON_SECRET` with an external daily call instead.
 - Charge-out rate cards (PS-302): "Bill from time" takes the hourly rate typed per draft.
 - Real 26AS/Form 16A samples to confirm the TDS parsers against the firm's own files (the layout is built from TRACES's published format and made-up data).
 - Unbilled fees are listed to the engagement's team and the firm-wide roles; an office partner who is not on an engagement's team does not see its unbilled fees.
+- The demo seed (`db/seeds/demo_data.sql`) no longer loads on a fresh database: it gives one client two open Compliance engagements, which `engagements_one_open_compliance` forbids. Production (`SEED_MODE=production`) does not use it; the demo blueprint's first boot fails cleanly (nothing is written) until it is updated.

@@ -22,9 +22,21 @@ COPY apps/web/package.json apps/web/
 
 RUN npm ci
 
-# Public API base URL is compiled into the client bundle at build time.
+# Public settings are compiled into the client bundle at build time: the API
+# base URL, Microsoft (Entra) sign-in, and the feature switches the UI reads.
+# Unset ones stay empty (Entra off ⇒ developer sign-in only).
 ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG NEXT_PUBLIC_ENTRA_TENANT_ID
+ARG NEXT_PUBLIC_ENTRA_CLIENT_ID
+ARG NEXT_PUBLIC_ENTRA_API_SCOPE
+ARG NEXT_PUBLIC_M365_ENABLED
+ARG NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_ENTRA_TENANT_ID=${NEXT_PUBLIC_ENTRA_TENANT_ID} \
+    NEXT_PUBLIC_ENTRA_CLIENT_ID=${NEXT_PUBLIC_ENTRA_CLIENT_ID} \
+    NEXT_PUBLIC_ENTRA_API_SCOPE=${NEXT_PUBLIC_ENTRA_API_SCOPE} \
+    NEXT_PUBLIC_M365_ENABLED=${NEXT_PUBLIC_M365_ENABLED} \
+    NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED=${NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED}
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Sources, then build. Contracts builds before the app (workspace order); the web
