@@ -102,10 +102,12 @@ The firm prepares:
    - reminder days;
    - 26AS match tolerance.
 2. **Invoice series.** Rule 46 needs one consecutive series per financial year. If invoices for this FY were already raised outside the portal, give the portal its own prefix (e.g. `DHV`) so numbers never collide with the old series.
-3. **Fees already billed elsewhere.** Go to Billing → Unbilled → **Set aside** each retainer, year fee or milestone period already invoiced in Tally/by hand. Otherwise it shows as unbilled and could be invoiced twice.
-4. **Time already billed by hand.** "Bill from time" lists every stopped, billable entry not yet on a portal invoice. Bill by date range from the cut-over date, or untick earlier entries.
-5. **GSTR-1 filed through** (Billing → Settings): the last day of the latest month (or quarter) whose GSTR-1 is filed. A credit note dated on or before it can no longer be voided; it is corrected by a debit note or an amendment instead. Update it after each filing.
-6. **Who approves.** Credit notes and write-offs need `billing.approve` (partners), and someone other than the requester.
+3. **Billing go-live** (Billing → Settings → **Unbilled fees from**): the first day the portal bills. Fixed fees for periods before it are not listed as unbilled. Leave it blank only if every earlier period is to be billed here.
+4. **Fees already billed elsewhere after go-live.** Go to Billing → Unbilled → **Set aside** each retainer, year fee or milestone period already invoiced in Tally/by hand ("billed elsewhere", with the bill's number). Otherwise it shows as unbilled and could be invoiced twice. **Not billing** a fee at all (a waiver) needs a reason and **another partner's approval**: it stays listed, marked pending, until approved under "Waivers to decide".
+5. **Time already billed by hand.** "Bill from time" lists every stopped, billable entry not yet on a portal invoice. Bill by date range from the cut-over date, or untick earlier entries.
+6. **GSTR-1 filed through** (Billing → Settings): the last day of the latest month (or quarter) whose GSTR-1 is filed. A credit note dated on or before it can no longer be voided; it is corrected by a debit note or an amendment instead. Update it after each filing.
+7. **Who approves.** Credit notes, write-offs, fee waivers and credit-note voids need `billing.approve` (partners), and someone other than the requester.
+8. **26AS.** Import the firm's latest 26AS for the current and previous year (Billing → TDS: the TRACES "View As Text" export, or the ZIP as downloaded, with its DDMMYYYY password). A deduction not yet in the 26AS shows as *awaited* until a 26AS as on 15 days past that quarter's 26Q due date still lacks it; only then can the client be reminded. Re-import after each quarter's due date.
 
 ---
 
@@ -179,4 +181,5 @@ hosts, use `CRON_SECRET` with an external daily call instead.
 - A full Content-Security-Policy for the web, tested against the PDF/Office viewers.
 - The notification digest scheduler: put it under the same advisory lock if more than one API instance runs.
 - Charge-out rate cards (PS-302): "Bill from time" takes the hourly rate typed per draft.
-- Real 26AS/Form 16A samples to confirm the TDS parsers against the firm's own files.
+- Real 26AS/Form 16A samples to confirm the TDS parsers against the firm's own files (the layout is built from TRACES's published format and made-up data).
+- Unbilled fees are listed to the engagement's team and the firm-wide roles; an office partner who is not on an engagement's team does not see its unbilled fees.
