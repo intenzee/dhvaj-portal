@@ -15,6 +15,8 @@ const securityHeaders = [
   { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  // A private portal: no page (client upload links included) is indexed.
+  { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
 ];
 
 /** @type {import('next').NextConfig} */

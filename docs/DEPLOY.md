@@ -21,8 +21,8 @@ only by hand.
      may consent). Its tenant and client ids are `AUTH_ENTRA_TENANT_ID` /
      `AUTH_ENTRA_CLIENT_ID`.
    - **DHVAJ Portal Web**: Authentication → add a **Single-page application**
-     platform with the redirect URI `https://<portal domain>` (exactly the web
-     address, no path). API permissions → My APIs → DHVAJ Portal API →
+     platform with the redirect URI `https://portal.dhvaj.in` (exactly the web
+     address, no path or trailing slash). API permissions → My APIs → DHVAJ Portal API →
      `access_as_user` → **Grant admin consent**. Its ids go into
      `NEXT_PUBLIC_ENTRA_TENANT_ID` / `NEXT_PUBLIC_ENTRA_CLIENT_ID`, and
      `NEXT_PUBLIC_ENTRA_API_SCOPE` = `api://<API client id>/access_as_user`.
@@ -34,10 +34,15 @@ only by hand.
    owner's **external** (TLS) connection string.
 3. **Render:** New → Blueprint → this repo, Blueprint file path
    `render.production.yaml`. Fill in every value it asks for (§1 explains
-   each). Then add the custom domains (Settings → Custom Domains) for the web
-   and the API, and set `WEB_PUBLIC_URL`, `CORS_ORIGINS` (API) and
-   `NEXT_PUBLIC_API_URL` (web) to them; redeploy the web after any
-   `NEXT_PUBLIC_*` change.
+   each). The blueprint already uses the firm's domains:
+   - **portal.dhvaj.in** → `dhvaj-web` (Settings → Custom Domains → add it),
+   - **api.dhvaj.in** → `dhvaj-api` (same),
+   - at the dhvaj.in DNS provider, a **CNAME** for each — `portal` →
+     `dhvaj-web.onrender.com`, `api` → `dhvaj-api.onrender.com` (Render shows
+     the exact targets); Render issues the TLS certificates itself.
+   Other names? Change `WEB_PUBLIC_URL`, `CORS_ORIGINS` (API) and
+   `NEXT_PUBLIC_API_URL` (web) to match, and the SPA redirect URI (step 1);
+   redeploy the web after any `NEXT_PUBLIC_*` change.
 4. **First boot** (`SEED_MODE=production`): with no office in the database,
    `start.mjs` creates the first office (`BOOTSTRAP_OFFICE_CODE`/`_NAME`) and
    the owner (`BOOTSTRAP_OWNER_EMAIL`/`_NAME`) as managing partner + admin, with
@@ -52,6 +57,29 @@ only by hand.
    at sign-in ("not a known user"), and a deactivated user is refused too.
 6. Then: the vault key (§6), features (§4), billing (§3), and the smoke tests
    (§5). Back up (§2) before the first real data goes in, and test a restore.
+7. **The link on dhvaj.in.** A button or menu item on the firm's website that
+   opens the portal in a new tab. Signed-out visitors land on the Microsoft
+   sign-in; nothing else is public. The portal cannot be embedded in a page
+   (it sends `X-Frame-Options: SAMEORIGIN`) — link to it, don't iframe it:
+   ```html
+   <a href="https://portal.dhvaj.in" target="_blank" rel="noopener">Staff portal</a>
+   ```
+   The portal asks search engines not to index it (`robots.txt`,
+   `X-Robots-Tag: noindex`), so the website link is how people find it.
+8. **Retire the demo.** The free demo (`render.yaml`: `hsdg-api` / `hsdg-web`
+   and its Neon database) holds only synthetic data and lets anyone pick a
+   persona. Once production is live, suspend or delete those two services and
+   the Neon project so no one uses the demo by mistake.
+
+### Starting clean after a trial run
+
+If the firm tries production out first and wants the trial entries gone before
+real use, start from an empty database rather than deleting rows: create a new
+database (or drop and recreate the `hsdg` schema and `public.pgmigrations` as
+the owner), point `DATABASE_ADMIN_URL` at it, keep the `BOOTSTRAP_*` values,
+and redeploy the API. The first boot migrates and creates the office and owner
+again. Documents uploaded during the trial stay in SharePoint: remove the trial
+folder there too. Back up (`pg_dump -Fc`) first, as always.
 
 ---
 

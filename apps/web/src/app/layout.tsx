@@ -13,6 +13,8 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'Dhvaj Portal',
   description: 'Dhvaj practice-management and professional-work operating system.',
+  // A private staff portal (and client upload links): never in search results.
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }): JSX.Element {

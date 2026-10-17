@@ -89,12 +89,12 @@ services:
         sync: false
       - key: AUTH_JWT_SECRET
         generateValue: true
-      # The portal's https address (custom domain), and the same as the only
-      # allowed browser origin.
+      # The portal's address — the link on dhvaj.in opens it — and the only
+      # browser origin allowed to call the API. Custom domains (docs/DEPLOY.md §0).
       - key: WEB_PUBLIC_URL
-        sync: false
+        value: https://portal.dhvaj.in
       - key: CORS_ORIGINS
-        sync: false
+        value: https://portal.dhvaj.in
 
       # ── Documents: SharePoint (durable; local disk is wiped on redeploy) ──
       - key: STORAGE_PROVIDER
@@ -138,8 +138,9 @@ services:
     envVars:
       # All baked into the browser bundle AT BUILD TIME (passed to the Docker
       # build): change one, then redeploy the web service.
+      # The API on its custom domain (docs/DEPLOY.md §0).
       - key: NEXT_PUBLIC_API_URL
-        sync: false
+        value: https://api.dhvaj.in/api/v1
       # The SPA app registration: tenant id, its client id, and the API scope,
       # e.g. api://<api-client-id>/access_as_user. With these set, the sign-in
       # page offers Microsoft only.
