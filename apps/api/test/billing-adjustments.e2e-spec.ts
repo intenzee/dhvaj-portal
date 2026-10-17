@@ -501,4 +501,157 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
       }),
     ).rejects.toThrow(/left to credit/);
   });
+
+  /** The firm in Delhi (07), so tax is worked. */
+  const firmInDelhi = async () => {
+    const settings = await http().get('/api/v1/billing/settings').set(bearer(mp)).expect(200);
+    await http()
+      .patch('/api/v1/billing/settings')
+      .set(bearer(mp))
+      .send({ version: settings.body.version, gstin: '07AAAFD1234K1Z5' })
+      .expect(200);
+  };
+
+  it('two notes crediting a paise-valued invoice in full reverse exactly the GST it charged', async () => {
+    await firmInDelhi();
+    const { eng } = await client();
+    const d = await http()
+      .post(`/api/v1/engagements/${eng}/invoices`)
+      .set(bearer(pa))
+      .send({
+        dueDate: dateFromToday(15),
+        lines: [
+          { description: 'Return A', unitAmount: '333.33', gstRate: 18 },
+          { description: 'Return B', unitAmount: '333.33', gstRate: 18 },
+          { description: 'Courier', unitAmount: '99.99', gstRate: 5 },
+        ],
+      })
+      .expect(201);
+    const inv = d.body.id as string;
+    await http()
+      .post(`/api/v1/engagements/${eng}/invoices/${inv}/status`)
+      .set(bearer(pa))
+      .send({ status: 'issued', issueDate: today })
+      .expect(201);
+    const detail = await getInvoice(eng, inv);
+    const [a, b, c] = detail.lines as { id: string }[];
+    const credit = (lines: { invoiceLineId: string; taxableValue: string }[]) =>
+      http()
+        .post(`/api/v1/billing/invoices/${inv}/credit-notes`)
+        .set(bearer(mx))
+        .send({ lines, reason: 'Engagement withdrawn' })
+        .expect(201);
+
+    const first = await credit([{ invoiceLineId: a!.id, taxableValue: '333.33' }]);
+    await decide(pa, 'credit-notes', first.body.id as string, 'approve').expect(201);
+    const last = await credit([
+      { invoiceLineId: b!.id, taxableValue: '333.33' },
+      { invoiceLineId: c!.id, taxableValue: '99.99' },
+    ]);
+    await decide(pa, 'credit-notes', last.body.id as string, 'approve').expect(201);
+
+    const paise = (v: unknown) => Math.round(Number(v) * 100);
+    expect(paise(first.body.cgst) + paise(last.body.cgst)).toBe(paise(detail.cgst));
+    expect(paise(first.body.sgst) + paise(last.body.sgst)).toBe(paise(detail.sgst));
+    expect(paise(first.body.total) + paise(last.body.total)).toBe(paise(detail.total));
+    expect(await getInvoice(eng, inv)).toMatchObject({ status: 'paid', balance: '0.00' });
+  });
+
+  it('refuses a GST credit note after the CGST s.34 date, at request and at approval; a write-off still goes', async () => {
+    await firmInDelhi();
+    const { eng } = await client();
+    const inv = await invoice(eng, '10000.00');
+    const [line] = (await getInvoice(eng, inv)).lines as { id: string }[];
+    const credit = () =>
+      http()
+        .post(`/api/v1/billing/invoices/${inv}/credit-notes`)
+        .set(bearer(mx))
+        .send({
+          lines: [{ invoiceLineId: line!.id, taxableValue: '1000' }],
+          reason: 'Late dispute',
+        });
+    // Asked in time, then the date passes before a partner decides.
+    const pending = await credit().expect(201);
+    await superuser(async (cl) => {
+      await cl.query('BEGIN');
+      await cl.query(`SET LOCAL session_replication_role = replica`);
+      await cl.query(`UPDATE hsdg.invoices SET issue_date = '2024-05-10' WHERE id = $1`, [inv]);
+      await cl.query('COMMIT');
+    });
+
+    const late = await decide(pa, 'credit-notes', pending.body.id as string, 'approve').expect(400);
+    expect(late.body.message).toMatch(/section 34 of the CGST Act.*30 Nov 2025.*write-off/);
+    await decide(pa, 'credit-notes', pending.body.id as string, 'reject').expect(201);
+    const refused = await credit().expect(400);
+    expect(refused.body.message).toMatch(/section 34/);
+    await writeOff(mx, inv, '1000.00').expect(201);
+  });
+
+  it('defaults the place of supply from the address, else the firm; asks for it when GSTINs are in several states', async () => {
+    await firmInDelhi();
+    // An unregistered client with its office in Maharashtra: IGST.
+    const mumbai = await client();
+    await superuser((cl) =>
+      cl.query(`UPDATE hsdg.entity_registrations SET status = 'cancelled' WHERE entity_id = $1;`, [
+        mumbai.entityId,
+      ]),
+    );
+    await superuser((cl) =>
+      cl.query(
+        `INSERT INTO hsdg.entity_addresses (entity_id, address_type, line1, state, is_primary)
+         VALUES ($1, 'registered', '4 Nariman Point', 'Maharashtra', true)`,
+        [mumbai.entityId],
+      ),
+    );
+    const m = await http()
+      .post(`/api/v1/engagements/${mumbai.eng}/invoices`)
+      .set(bearer(pa))
+      .send({ lines: [{ description: 'Advice', unitAmount: '1000.00' }] })
+      .expect(201);
+    expect(m.body).toMatchObject({ placeOfSupplyState: '27', igst: '180.00', cgst: '0.00' });
+
+    // No GSTIN and no address: the firm's own state (IGST Act s.12(2)(b)(ii)).
+    const none = await client();
+    const n = await http()
+      .post(`/api/v1/engagements/${none.eng}/invoices`)
+      .set(bearer(pa))
+      .send({ lines: [{ description: 'Advice', unitAmount: '1000.00' }] })
+      .expect(201);
+    expect(n.body).toMatchObject({ placeOfSupplyState: '07', cgst: '90.00' });
+
+    // GSTINs in Delhi and Karnataka, none picked: issuing asks for the place of supply.
+    const two = await client();
+    const tag = Math.random()
+      .toString(36)
+      .replace(/[^a-z]/g, '')
+      .toUpperCase()
+      .padEnd(5, 'Q');
+    await superuser((cl) =>
+      cl.query(
+        `INSERT INTO hsdg.entity_registrations (entity_id, registration_type, registration_number, state_code, status)
+         VALUES ($1, 'gstin', $2, '07', 'active'), ($1, 'gstin', $3, '29', 'active')`,
+        [two.entityId, `07${tag.slice(0, 5)}1234C1Z5`, `29${tag.slice(0, 5)}1234C1Z5`],
+      ),
+    );
+    const t = await http()
+      .post(`/api/v1/engagements/${two.eng}/invoices`)
+      .set(bearer(pa))
+      .send({ lines: [{ description: 'Advice', unitAmount: '1000.00' }] })
+      .expect(201);
+    expect(t.body.placeOfSupplyState).toBeNull();
+    const issue = () =>
+      http()
+        .post(`/api/v1/engagements/${two.eng}/invoices/${t.body.id as string}/status`)
+        .set(bearer(pa))
+        .send({ status: 'issued', issueDate: today });
+    const asked = await issue().expect(400);
+    expect(asked.body.message).toMatch(/Set the place of supply/);
+    await http()
+      .patch(`/api/v1/engagements/${two.eng}/invoices/${t.body.id as string}`)
+      .set(bearer(pa))
+      .send({ placeOfSupplyState: '29', version: t.body.version })
+      .expect(200);
+    const issued = await issue().expect(201);
+    expect(issued.body).toMatchObject({ placeOfSupplyState: '29', igst: '180.00' });
+  });
 });
