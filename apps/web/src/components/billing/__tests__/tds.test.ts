@@ -1,5 +1,12 @@
 import { parseTolerance, settingsChanges } from '../billing-settings';
-import { bookingNote, financialYearsFor, importSummary, tdsReminderLine } from '../tds';
+import {
+  bookingNote,
+  financialYearsFor,
+  importSummary,
+  remindConfirmText,
+  sortChecks,
+  tdsReminderLine,
+} from '../tds';
 
 describe('PS-204 TDS against 26AS', () => {
   it('offers the year today falls in, then the ones before', () => {
@@ -35,14 +42,34 @@ describe('PS-204 TDS against 26AS', () => {
       deductors: 3,
       tdsTotal: '17480.40',
       superseded: 1,
+      asOn: null,
       warnings: [],
     };
+    expect(importSummary({ ...r, asOn: '2026-11-20' })).toMatch(/^26AS for 2026-27 as on 20 Nov 2026: /);
     expect(importSummary(r)).toMatch(
       /^26AS for 2026-27: 6 credits from 3 deductors, .*17,480\.40 of TDS\. It replaced 1 row of earlier imports\.$/,
     );
     expect(
       importSummary({ ...r, source: 'form16a_pdf', credits: 1, deductors: 1, superseded: 0 }),
     ).toMatch(/^Form 16A \(2026-27\): 1 credit from 1 deductor, .* of TDS\.$/);
+  });
+
+  it('puts risks before queries before notes', () => {
+    const c = (level: 'flag' | 'risk' | 'note') => ({ code: 'rate_2' as const, level, message: level });
+    expect(sortChecks([c('note'), c('flag'), c('risk')]).map((x) => x.level)).toEqual([
+      'risk',
+      'flag',
+      'note',
+    ]);
+  });
+
+  it('says what a reminder asks before it goes', () => {
+    const missing = [{ receiptId: 'r' }] as unknown as Parameters<
+      typeof remindConfirmText
+    >[0]['missing'];
+    expect(
+      remindConfirmText({ clientName: 'Y LLP', missing, missingTotal: '2500.00' }, 'Q2 2025-26'),
+    ).toMatch(/^Ask Y LLP to file or correct their TDS return for Q2 2025-26: .*2,500\.00 on 1 receipt is not in our 26AS\./);
   });
 
   it('reads the match tolerance and sends it only when it changed', () => {

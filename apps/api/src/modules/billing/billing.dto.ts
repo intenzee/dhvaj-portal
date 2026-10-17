@@ -407,4 +407,9 @@ export class RemindTdsDto extends TdsMatchQueryDto {
   @IsOptional()
   @IsIn(['email', 'whatsapp', 'copy'])
   channel?: 'email' | 'whatsapp' | 'copy';
+
+  @ApiPropertyOptional({ description: 'Send although the client was reminded in the last 7 days.' })
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
 }

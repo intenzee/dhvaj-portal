@@ -18,6 +18,8 @@ export interface ParsedTdsCredit {
   tdsDeposited: string;
   bookingStatus: string | null;
   bookingDate: string | null;
+  /** 26AS "Remarks" (A, B, F, G…); null when blank or a dash. */
+  remarks: string | null;
 }
 
 export interface ParsedTdsFile {
@@ -26,6 +28,8 @@ export interface ParsedTdsFile {
   pan: string | null;
   /** As the file states it, else from the transaction dates. */
   financialYear: string | null;
+  /** The date the statement is as on: a 26AS's File Creation Date (or "Data updated till"). */
+  asOn: string | null;
   credits: ParsedTdsCredit[];
   warnings: string[];
 }
@@ -93,11 +97,11 @@ export function parseTracesDate(raw: string | undefined): string | null {
   return date.toISOString().slice(0, 10);
 }
 
-/** '1,00,000.00' → '100000.00'; a dash or blank is zero; else null. */
+/** '1,00,000.00' → '100000.00'; '-500.00' (a reversal) stays signed; a dash or blank is zero; else null. */
 export function parseTracesAmount(raw: string | undefined): string | null {
   const s = (raw ?? '').replace(/[,\s₹]/g, '');
   if (s === '' || s === '-') return '0.00';
-  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
   return fromPaise(toPaise(s));
 }
 
@@ -105,23 +109,36 @@ function sum(amounts: string[]): string {
   return fromPaise(amounts.reduce((t, a) => t + toPaise(a), 0n));
 }
 
-/** 'Assessment Year 2027-28' → '2026-27'. */
-function yearBefore(ay: string): string | null {
-  const m = /^(\d{4})-(\d{2,4})$/.exec(ay.trim());
+/** '2026-27' or '2026-2027' → '2026-27'; else null. */
+export function normaliseYear(raw: string | undefined): string | null {
+  const m = /^(\d{4})-(\d{2}|\d{4})$/.exec((raw ?? '').trim());
   if (!m) return null;
-  const start = Number(m[1]) - 1;
+  const start = Number(m[1]);
+  const end = m[2]!.length === 4 ? Number(m[2]) : Number(m[1]!.slice(0, 2) + m[2]);
+  if (end !== start + 1) return null;
+  return `${start}-${String(end % 100).padStart(2, '0')}`;
+}
+
+/** 'Assessment Year 2027-28' (or 2027-2028) → '2026-27'. */
+function yearBefore(ay: string): string | null {
+  const year = normaliseYear(ay);
+  if (!year) return null;
+  const start = Number(year.slice(0, 4)) - 1;
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
 // ── 26AS, the text export ("Export as Text") ────────────────────────────
 
 /**
- * The caret-separated text TRACES exports: a header (PAN, financial year),
- * then PART-I — a summary line per deductor (Sr. No., name, TAN, totals)
- * followed by its transactions (blank first cell, Sr. No., section,
- * transaction date, booking status and date, remarks, amount paid, tax
- * deducted, TDS deposited). Columns are found by their headings, not their
- * place, so an added column does not shift the amounts.
+ * The caret-separated text TRACES exports ("View As Text"): a header — a row
+ * of labels (File Creation Date, PAN, Financial Year as 2026-2027…) over a
+ * row of values — then the parts. PART-I (PART A before AY 2023-24) is the
+ * TDS: a summary line per deductor (Sr. No., name, TAN, totals) followed by
+ * its transactions (blank first cell, Sr. No., section, transaction date,
+ * booking status and date, remarks, amount paid, tax deducted, TDS
+ * deposited; a reversal is negative). Every other part ends it; PART-X (PART
+ * G before) lists defaults, said as a warning. Columns are found by their
+ * headings, not their place, so an added column does not shift the amounts.
  */
 export const traces26asText: TdsCreditParser = {
   source: '26as_text',
@@ -137,10 +154,15 @@ export const traces26asText: TdsCreditParser = {
     const warnings: string[] = [];
     let pan: string | null = null;
     let financialYear: string | null = null;
+    let asOn: string | null = null;
     const credits: ParsedTdsCredit[] = [];
+    /** The header's label row, waiting for its value row. */
+    let labels: string[] | null = null;
 
     let inPart1 = false;
     let sawPart1 = false;
+    let inDefaults = false;
+    let defaultsListed = false;
     let deductorCols: { name: number; tan: number; deposited: number } | null = null;
     let rowCols: {
       section: number;
@@ -150,6 +172,7 @@ export const traces26asText: TdsCreditParser = {
       paid: number;
       deducted: number;
       deposited: number;
+      remarks: number;
     } | null = null;
     let deductor: { name: string; tan: string; stated: string | null; rows: string[] } | null =
       null;
@@ -170,28 +193,58 @@ export const traces26asText: TdsCreditParser = {
     lines.forEach((line, i) => {
       const cells = line.split('^').map((c) => c.trim());
       const first = cells.find((c) => c !== '') ?? '';
+      if (!first || /No Transactions Present/i.test(first)) return;
 
-      // Header facts, wherever they sit.
+      // The header: a row of labels over a row of values.
+      if (labels) {
+        const at = (re: RegExp): string | undefined => cells[labels!.findIndex((l) => re.test(l))];
+        const panValue = at(/Permanent Account Number/i) ?? '';
+        pan ??= PAN_RE.test(panValue) ? panValue : null;
+        financialYear ??= normaliseYear(at(/^Financial Year$/i));
+        financialYear ??= yearBefore(at(/^Assessment Year$/i) ?? '');
+        asOn ??= parseTracesDate(at(/^File Creation Date$/i));
+        labels = null;
+        return;
+      }
       const panAt = find(cells, /Permanent Account Number/i);
       if (panAt >= 0 && !pan) {
-        pan = cells.slice(panAt + 1).find((c) => PAN_RE.test(c)) ?? null;
+        const inline = cells.slice(panAt + 1).find((c) => PAN_RE.test(c));
+        if (!inline) {
+          labels = cells;
+          return;
+        }
+        pan = inline;
       }
+      // Older and made-up layouts: label^value pairs on a line.
       const fyAt = find(cells, /^Financial Year$/i);
-      if (fyAt >= 0 && !financialYear && /^\d{4}-\d{2}$/.test(cells[fyAt + 1] ?? '')) {
-        financialYear = cells[fyAt + 1]!;
-      }
+      if (fyAt >= 0 && !financialYear) financialYear = normaliseYear(cells[fyAt + 1]);
       const ayAt = find(cells, /^Assessment Year$/i);
       if (ayAt >= 0 && !financialYear) financialYear = yearBefore(cells[ayAt + 1] ?? '');
+      const asOnAt = find(cells, /^(Data updated till|File Creation Date)$/i);
+      if (asOnAt >= 0 && !asOn) asOn = parseTracesDate(cells[asOnAt + 1]);
 
-      if (/^PART[\s-]*[IVX]+\b/i.test(first)) {
+      // PART-I … PART-X; before AY 2023-24, PART A, A1, A2, B … G.
+      const part = /^PART[\s-]*([IVX]+|[A-H]\d?)\b/i.exec(first);
+      if (part) {
         closeDeductor();
+        const name = part[1]!.toUpperCase();
         inPart1 =
-          /^PART[\s-]*I\b/i.test(first) &&
+          (name === 'I' || name === 'A') &&
           /Tax Deducted at Source/i.test(line) &&
           !/15G|15H/i.test(line);
         if (inPart1) sawPart1 = true;
+        inDefaults = name === 'X' || (name === 'G' && /Default/i.test(line));
         deductorCols = null;
         rowCols = null;
+        return;
+      }
+      if (inDefaults) {
+        if (!defaultsListed && /^\d+$/.test(cells[0] ?? '')) {
+          defaultsListed = true;
+          warnings.push(
+            "This 26AS lists defaults against the firm's own TDS returns (short payment or deduction, interest, fees): see them on TRACES.",
+          );
+        }
         return;
       }
       if (!inPart1) return;
@@ -213,6 +266,7 @@ export const traces26asText: TdsCreditParser = {
           paid: find(cells, /^Amount Paid/i),
           deducted: find(cells, /^Tax Deducted/i),
           deposited: find(cells, /^TDS Deposited/i),
+          remarks: find(cells, /^Remarks/i),
         };
         return;
       }
@@ -247,6 +301,7 @@ export const traces26asText: TdsCreditParser = {
           return;
         }
         const status = (rowCols.status >= 0 ? cells[rowCols.status] : '')?.toUpperCase() ?? '';
+        const remark = (rowCols.remarks >= 0 ? cells[rowCols.remarks] : '')?.toUpperCase() ?? '';
         deductor.rows.push(deposited);
         credits.push({
           deductorTan: deductor.tan,
@@ -258,6 +313,7 @@ export const traces26asText: TdsCreditParser = {
           tdsDeposited: deposited,
           bookingStatus: /^[A-Z]$/.test(status) ? status : null,
           bookingDate: rowCols.bookedOn >= 0 ? parseTracesDate(cells[rowCols.bookedOn]) : null,
+          remarks: remark && remark !== '-' ? remark.slice(0, 20) : null,
         });
       }
     });
@@ -266,7 +322,7 @@ export const traces26asText: TdsCreditParser = {
     if (!sawPart1) {
       throw new TdsParseError('This 26AS has no Part I (TDS deducted at source).');
     }
-    return { source: '26as_text', pan, financialYear, credits, warnings };
+    return { source: '26as_text', pan, financialYear, asOn, credits, warnings };
   },
 };
 
@@ -333,8 +389,9 @@ export const form16aText: TdsCreditParser = {
     }
 
     const payments: { amount: string; section: string; date: string }[] = [];
+    // Section 194J, 194JB, 194J(b), or a 2025-Act payment code such as 1027.
     const paymentRe =
-      /^\s*\d+\s+([\d,]+\.\d{2})\s+(\d{3}[A-Z]{0,3})\s+(?:\S+\s+)?(\d{2}[-/]\d{2}[-/]\d{4})\s*$/gm;
+      /^\s*\d+\s+([\d,]+\.\d{2})\s+(\d{4}|\d{3}[A-Z]{0,3}(?:\([A-Za-z]{1,2}\))?)\s+(?:\S+\s+)?(\d{2}[-/]\d{2}[-/]\d{4})\s*$/gm;
     for (const m of text.matchAll(paymentRe)) {
       const date = parseTracesDate(m[3]);
       const amount = parseTracesAmount(m[1]);
@@ -365,13 +422,14 @@ export const form16aText: TdsCreditParser = {
         tdsDeposited: deposited,
         bookingStatus: null,
         bookingDate: null,
+        remarks: null,
       });
       if (inQuarter.length === 0) {
         warnings.push(`${m[1]}: no payment rows read; dated the quarter's last day.`);
       }
     }
     if (!financialYear) throw new TdsParseError('No assessment year found in this Form 16A.');
-    return { source: 'form16a_pdf', pan, financialYear, credits, warnings };
+    return { source: 'form16a_pdf', pan, financialYear, asOn: null, credits, warnings };
   },
 };
 
@@ -403,7 +461,7 @@ export function parseTdsText(text: string): ParsedTdsFile {
   const parser = TDS_PARSERS.find((p) => p.accepts(text));
   if (!parser) {
     throw new TdsParseError(
-      'Not a 26AS text export or a Form 16A. Download the 26AS from TRACES with "Export as Text".',
+      'Not a 26AS text export or a Form 16A. Download the 26AS from TRACES with "View As Text" (or "Export as Text") and import the ZIP or the text file in it.',
     );
   }
   const parsed = parser.parse(text);

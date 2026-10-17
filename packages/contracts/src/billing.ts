@@ -917,8 +917,13 @@ export interface ImportTdsCreditsInput {
   password?: string;
 }
 
-/** The 400's `code` when a PDF needs its password (or was given a wrong one). */
-export const TDS_PDF_PASSWORD_CODE = 'TDS_PDF_PASSWORD';
+/**
+ * The 400's `reason` when a file needs its password, or was given a wrong
+ * one: a TRACES PDF, or the ZIP the 26AS text export arrives in.
+ */
+export const TDS_FILE_PASSWORD_CODE = 'TDS_PDF_PASSWORD';
+/** @deprecated The PDF-only name of TDS_FILE_PASSWORD_CODE. */
+export const TDS_PDF_PASSWORD_CODE = TDS_FILE_PASSWORD_CODE;
 
 export interface TdsImportResult {
   batchId: string;
@@ -930,6 +935,8 @@ export interface TdsImportResult {
   tdsTotal: string;
   /** Rows of earlier imports this file replaced. */
   superseded: number;
+  /** The date the statement is as on (a 26AS's creation date); null for a Form 16A. */
+  asOn: string | null;
   /** Rows skipped or totals that did not add up, said in words. */
   warnings: string[];
 }
@@ -942,8 +949,82 @@ export interface TdsImportBatch {
   pan: string | null;
   credits: number;
   superseded: number;
+  /** The date the statement is as on; null for a Form 16A. */
+  asOn: string | null;
   importedByName: string | null;
   importedAt: string;
+}
+
+/**
+ * What a 26AS section code says the payment was. Sections changed names:
+ * 194J was split in 2020 into 194J(a) technical (2%) and 194J(b) professional
+ * (10%), and the Income-tax Act 2025 numbers payments (1026, 1027, 1028…).
+ */
+export const TDS_SECTION_KINDS = [
+  'professional_10',
+  'technical_2',
+  'director',
+  'contract',
+  'commission',
+  'other',
+] as const;
+export type TdsSectionKind = (typeof TDS_SECTION_KINDS)[number];
+
+/** '194JB', '194J(b)', '1027' → 'professional_10'; '194C' → 'contract'… Pure — tested. */
+export function tdsSectionKind(section: string): TdsSectionKind {
+  const s = section.toUpperCase().replace(/[\s().]/g, '');
+  if (s === '194J' || s === '194JB' || s === '1027') return 'professional_10';
+  if (s === '194JA' || s === '1026') return 'technical_2';
+  if (s === '194JBA' || s === '1028') return 'director';
+  if (s === '194C' || s === '1023' || s === '1024') return 'contract';
+  if (s === '194H' || s === '1006') return 'commission';
+  return 'other';
+}
+
+/** A quarter's TDS return (Form 26Q) is due: Q1 31 Jul, Q2 31 Oct, Q3 31 Jan, Q4 31 May. Pure — tested. */
+export function tdsReturnDueDate(financialYear: string, quarter: TdsQuarter['quarter']): string {
+  const y = Number(financialYear.slice(0, 4));
+  return { Q1: `${y}-07-31`, Q2: `${y}-10-31`, Q3: `${y + 1}-01-31`, Q4: `${y + 1}-05-31` }[
+    quarter
+  ];
+}
+
+/** Days after the return's due date a credit can fairly be expected in the 26AS. */
+export const TDS_26AS_LAG_DAYS = 15;
+
+/** The return's due date and TDS_26AS_LAG_DAYS: before a 26AS as on this date, a missing credit is only awaited. Pure — tested. */
+export function tdsExpectedBy(financialYear: string, quarter: TdsQuarter['quarter']): string {
+  const due = tdsReturnDueDate(financialYear, quarter);
+  const d = new Date(`${due}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + TDS_26AS_LAG_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * What a senior would query on a line. flag: the client deducted wrongly
+ * (rate or section); risk: the credit may not be ours to claim yet; note: for
+ * information.
+ */
+export const TDS_CHECK_CODES = [
+  'rate_2',
+  'rate_20',
+  'tds_on_gst',
+  'unusual_rate',
+  'wrong_section',
+  'director_section',
+  'lower_deduction_certificate',
+  'short_deposit',
+  'status_unmatched',
+  'status_overbooked',
+  'status_provisional',
+  'booked_rate',
+] as const;
+export type TdsCheckCode = (typeof TDS_CHECK_CODES)[number];
+
+export interface TdsCheck {
+  code: TdsCheckCode;
+  level: 'flag' | 'risk' | 'note';
+  message: string;
 }
 
 /** A Part I row of the 26AS: TDS a deductor deposited against the firm's PAN. */
@@ -952,13 +1033,18 @@ export interface TdsCreditLine {
   deductorTan: string;
   deductorName: string;
   section: string;
+  sectionKind: TdsSectionKind;
   transactionDate: string;
   amountPaid: string;
+  taxDeducted: string;
   tdsDeposited: string;
   /** F final, P provisional, U unmatched (the credit is not yet available), O overbooked. */
   bookingStatus: string | null;
+  /** 26AS remarks: A challan rectified, B statement rectified, F a s.197 certificate, G reprocessed. */
+  remarks: string | null;
   financialYear: string;
   quarter: TdsQuarter['quarter'];
+  checks: TdsCheck[];
 }
 
 /** TDS a client deducted, as booked on a posted receipt (PS-202). */
@@ -971,6 +1057,15 @@ export interface TdsBookedLine {
   tdsSection: TdsSection | null;
   financialYear: string;
   quarter: TdsQuarter['quarter'];
+  checks: TdsCheck[];
+}
+
+/** Booked TDS not in the 26AS yet, but not late: the return is not due, or the 26AS is older. */
+export interface TdsAwaitedLine extends TdsBookedLine {
+  /** The 26AS should carry it by this date (TDS_26AS_LAG_DAYS after the return's due date). */
+  expectedBy: string;
+  /** "Return due 31 Oct 2026", or "Your 26AS is as on 20 Oct 2026 — import a newer one after 15 Nov 2026". */
+  reason: string;
 }
 
 /**
@@ -1011,6 +1106,9 @@ export interface TdsClientMismatch {
   /** Booked on a receipt, but missing from the 26AS: ask the client to file or correct. */
   missing: TdsBookedLine[];
   missingTotal: string;
+  /** Booked, not in the 26AS yet, and not late: no reminder. */
+  awaited: TdsAwaitedLine[];
+  awaitedTotal: string;
   lastReminder: {
     channel: 'email' | 'whatsapp' | 'copy';
     at: string;
@@ -1027,6 +1125,8 @@ export interface TdsMatchReport {
   tolerance: string;
   /** The firm's PAN, as the latest import gave it. */
   pan: string | null;
+  /** The latest 26AS of the year is as on this date; null before one is imported. */
+  asOn: string | null;
   /** This year's imports, newest first. */
   imports: TdsImportBatch[];
   matched: TdsMatchedGroup[];
@@ -1040,7 +1140,10 @@ export interface TdsMatchReport {
     matched: string;
     notBooked: string;
     missing: string;
+    awaited: string;
   };
+  /** The flags, risks and notes on the period's lines, by client (null: a TAN on no client). */
+  checks: { clientId: string | null; clientName: string; checks: TdsCheck[] }[];
   notes: string[];
 }
 
@@ -1050,7 +1153,12 @@ export interface RemindTdsInput {
   financialYear: string;
   quarter?: TdsQuarter['quarter'];
   channel?: 'email' | 'whatsapp' | 'copy';
+  /** Send although the client was reminded of the same period within TDS_REMINDER_GAP_DAYS. */
+  force?: boolean;
 }
+
+/** A client is not reminded of the same period again within this many days, unless forced. */
+export const TDS_REMINDER_GAP_DAYS = 7;
 
 interface TdsReminderBase {
   clientId: string;
