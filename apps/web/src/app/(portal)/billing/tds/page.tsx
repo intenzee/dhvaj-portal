@@ -7,6 +7,7 @@ import { BellRing, Copy, MessageCircle, Upload } from 'lucide-react';
 import {
   FEATURE_FLAG,
   PERMISSION,
+  TDS_PDF_PASSWORD_CODE,
   type RemindTdsInput,
   type TdsClientMismatch,
   type TdsCreditLine,
@@ -23,7 +24,7 @@ import { useFeatureFlags } from '@/lib/feature-flags';
 import { blobToBase64 } from '@/lib/file-kind';
 import { useToast } from '@/lib/toast';
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner } from '@/components/ui';
-import { Select } from '@/components/form';
+import { Input, Select } from '@/components/form';
 import { fallbackNote } from '@/components/filing/client-chase';
 import {
   MATCH_KIND_LABEL,
@@ -463,23 +464,35 @@ function ImportButton(): JSX.Element {
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<TdsImportResult | null>(null);
+  // A TRACES PDF waiting for its password (held only in this form, never kept).
+  const [locked, setLocked] = useState<{ file: File; wrong: boolean } | null>(null);
+  const [password, setPassword] = useState('');
   const upload = useMutation({
-    mutationFn: async (file: File) =>
+    mutationFn: async ({ file, password }: { file: File; password?: string }) =>
       apiFetch<TdsImportResult>('/billing/tds-credits/import', {
         method: 'POST',
         body: {
           filename: file.name,
           contentType: file.type || undefined,
           contentBase64: await blobToBase64(file),
+          password: password || undefined,
         },
       }),
     onSuccess: (res) => {
       setResult(res);
+      setLocked(null);
+      setPassword('');
       toast(importSummary(res));
       void qc.invalidateQueries({ queryKey: ['billing', 'tds'] });
     },
-    onError: (e) =>
-      toast(e instanceof ApiError ? e.message : 'Could not import the file.', 'error'),
+    onError: (e, { file }) => {
+      if (e instanceof ApiError && e.body?.reason === TDS_PDF_PASSWORD_CODE) {
+        setLocked({ file, wrong: e.body.wrongPassword === true });
+        setPassword('');
+        return;
+      }
+      toast(e instanceof ApiError ? e.message : 'Could not import the file.', 'error');
+    },
   });
   return (
     <>
@@ -492,12 +505,55 @@ function ImportButton(): JSX.Element {
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
-          if (file) upload.mutate(file);
+          setLocked(null);
+          if (file) upload.mutate({ file });
         }}
       />
       <Button size="sm" disabled={upload.isPending} onClick={() => input.current?.click()}>
         <Upload className="h-4 w-4" /> {upload.isPending ? 'Importing…' : 'Import 26AS or Form 16A'}
       </Button>
+      {locked && (
+        <form
+          className="flex basis-full flex-wrap items-end gap-2 rounded-md border border-line bg-surface-sunken px-3 py-2 text-xs"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (password.trim()) upload.mutate({ file: locked.file, password: password.trim() });
+          }}
+        >
+          <label className="flex flex-col gap-1">
+            <span className={locked.wrong ? 'text-danger-700' : 'text-ink-muted'}>
+              {locked.wrong
+                ? 'That password did not open it. Try again'
+                : `${locked.file.name} is password-protected`}{' '}
+              — TRACES uses the date of birth or incorporation, as DDMMYYYY.
+            </span>
+            <Input
+              type="password"
+              autoComplete="off"
+              inputMode="numeric"
+              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-label="PDF password"
+              className="w-40"
+            />
+          </label>
+          <Button size="sm" type="submit" disabled={upload.isPending || !password.trim()}>
+            Open and import
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            type="button"
+            onClick={() => {
+              setLocked(null);
+              setPassword('');
+            }}
+          >
+            Cancel
+          </Button>
+        </form>
+      )}
       {result && result.warnings.length > 0 && (
         <div className="basis-full rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700">
           <p className="font-medium">{importSummary(result)}</p>
