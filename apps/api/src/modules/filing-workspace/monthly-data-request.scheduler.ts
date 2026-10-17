@@ -79,8 +79,13 @@ export class MonthlyDataRequestScheduler implements OnModuleInit {
 
   onModuleInit(): void {
     if (!this.config.get('SCHEDULER_ENABLED')) return;
+    // One instance runs each tick (advisory lock), however many are up.
     const job = new CronJob(this.config.get('SCHEDULER_GST_DATA_REQUEST_CRON'), () => {
-      void this.run();
+      void this.db
+        .runExclusive('gst-monthly-data-request', () => this.run())
+        .catch((err: Error) => {
+          this.logger.error(`Scheduled run failed: ${err.message}`, err.stack);
+        });
     });
     this.registry.addCronJob(
       'gst-monthly-data-request',

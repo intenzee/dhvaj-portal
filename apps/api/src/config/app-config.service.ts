@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Env } from './env.validation';
+import { envSchema, type Env } from './env.validation';
 
 /**
  * Typed configuration access across the app.
@@ -17,6 +17,13 @@ export class AppConfigService {
 
   get<K extends keyof Env>(key: K): Env[K] {
     return this.config.get(key, { infer: true });
+  }
+
+  /** Every validated value (for whole-config checks such as the boot warnings). */
+  get all(): Env {
+    return Object.fromEntries(
+      (Object.keys(envSchema.shape) as (keyof Env)[]).map((k) => [k, this.get(k)]),
+    ) as Env;
   }
 
   get isProduction(): boolean {
