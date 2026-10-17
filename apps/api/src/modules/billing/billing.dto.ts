@@ -25,10 +25,13 @@ import {
   FEE_MILESTONE_KINDS,
   GSTIN_REGEX,
   RECEIPT_MODES,
+  SET_ASIDE_KINDS,
   TDS_SECTIONS,
   type AdjustmentStatus,
   type FeeMilestoneKind,
+  type FeeWaiverStatus,
   type ReceiptMode,
+  type SetAsideKind,
   type TdsSection,
 } from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../common/pagination/pagination.dto';
@@ -100,6 +103,15 @@ export class UpdateBillingSettingsDto {
     message: 'tdsMatchTolerance must be between 0 and 1000 rupees.',
   })
   tdsMatchTolerance?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-04-01',
+    nullable: true,
+    description: 'The day billing started in the app; the unbilled list starts there (PS-206).',
+  })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  billingFrom?: string | null;
 }
 
 /** PS-202 · one invoice's share of a receipt. */
@@ -308,13 +320,39 @@ export class DraftFromUnbilledDto {
   keys!: string[];
 }
 
-/** PS-206: due periods billed outside the app, or not billed. */
+/**
+ * PS-206: due periods billed outside the app (the outside invoice named), or
+ * not billed (a waiver a partner decides; the reason is checked by the service).
+ */
 export class SetAsideFeesDto extends DraftFromUnbilledDto {
-  @ApiProperty({ example: 'Billed in Tally before the switch' })
+  @ApiProperty({ enum: SET_ASIDE_KINDS })
+  @IsIn(SET_ASIDE_KINDS)
+  kind!: SetAsideKind;
+
+  @ApiPropertyOptional({ example: 'Client relationship: first year fee waived by the MP' })
+  @IsOptional()
   @IsString()
-  @Matches(/\S.*\S.*\S/, { message: 'Say why, in a few words.' })
   @MaxLength(500)
-  reason!: string;
+  reason?: string;
+
+  @ApiPropertyOptional({ example: 'TALLY/1234', description: 'billed_outside: its number.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  externalInvoiceNumber?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-31', description: 'billed_outside: its date.' })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  externalInvoiceDate?: string;
+}
+
+/** PS-206: waivers, by status. */
+export class FeeWaiversQueryDto {
+  @ApiPropertyOptional({ enum: ['pending', 'approved', 'rejected'] })
+  @IsOptional()
+  @IsIn(['pending', 'approved', 'rejected'])
+  status?: FeeWaiverStatus;
 }
 
 /** PS-206: list a set-aside period again. */

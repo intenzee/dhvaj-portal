@@ -27,6 +27,7 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
   let pa: string;
   let pb: string;
   let sy: string;
+  let mx: string;
 
   const http = () => request(app.getHttpServer());
   const token = async (email: string): Promise<string> => {
@@ -65,11 +66,38 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
     (await unbilled(t)).engagements.find((e) => e.engagementId === eng);
   const draft = (t: string, engagementId: string, keys: string[]) =>
     http().post('/api/v1/billing/unbilled/draft').set(bearer(t)).send({ engagementId, keys });
-  const setAside = (t: string, engagementId: string, keys: string[], reason = 'Billed in Tally') =>
+  /** Billed outside the app, naming the outside invoice. */
+  const setAside = (
+    t: string,
+    engagementId: string,
+    keys: string[],
+    extra: Record<string, string> = {},
+  ) =>
     http()
       .post('/api/v1/billing/unbilled/set-aside')
       .set(bearer(t))
-      .send({ engagementId, keys, reason });
+      .send({
+        engagementId,
+        keys,
+        kind: 'billed_outside',
+        externalInvoiceNumber: 'TALLY/0412',
+        externalInvoiceDate: '2026-04-30',
+        ...extra,
+      });
+  /** Not billing them: a waiver for a partner to decide. */
+  const waive = (t: string, engagementId: string, keys: string[], reason: string) =>
+    http()
+      .post('/api/v1/billing/unbilled/set-aside')
+      .set(bearer(t))
+      .send({ engagementId, keys, kind: 'not_billing', reason });
+  const decideWaiver = (t: string, id: string, decision: 'approve' | 'reject') =>
+    http()
+      .post(`/api/v1/billing/fee-waivers/${id}/decision`)
+      .set(bearer(t))
+      .send({
+        decision,
+        note: decision === 'reject' ? 'Bill it; the client agreed the fee' : null,
+      });
   const restore = (t: string, engagementId: string, key: string) =>
     http().post('/api/v1/billing/unbilled/restore').set(bearer(t)).send({ engagementId, key });
   const milestones = async (eng: string): Promise<FeeMilestone[]> =>
@@ -120,7 +148,19 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
     sy = await token('senior.y@dhvaj.in');
+    mx = await token('manager.x@dhvaj.in');
   });
+
+  const employeeOf = async (email: string): Promise<string> =>
+    (
+      await superuser((c) =>
+        c.query<{ id: string }>(
+          `SELECT e.id FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id
+            WHERE u.email = $1`,
+          [email],
+        ),
+      )
+    ).rows[0]!.id;
 
   afterAll(async () => {
     await app?.close();
@@ -258,12 +298,14 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
     await expect(insert(made.id, made.lines[0]!.id, 'x:2')).rejects.toThrow(/draft invoice only/);
   });
 
-  it('sets a period aside as billed outside the app, with a reason, and restores it', async () => {
+  it('sets a period aside as billed outside the app, naming the outside invoice, and restores it', async () => {
     const { eng, asOf } = await retainer();
     const old = `retainer:${monthOf(asOf, -2)}`;
-    await setAside(pa, eng, [old], 'ab').expect(400);
+    await setAside(pa, eng, [old], { externalInvoiceNumber: '' }).expect(400);
+    await setAside(pa, eng, [old], { externalInvoiceDate: '2999-01-01' }).expect(400);
+    await setAside(pa, eng, [old], { kind: 'skipped' }).expect(400);
     await setAside(sy, eng, [old]).expect(403);
-    await setAside(pa, eng, [old], 'Billed in Tally before the switch').expect(201);
+    await setAside(pa, eng, [old], { reason: 'Billed in Tally before the switch' }).expect(201);
 
     const row = (await rowOf(eng))!;
     expect(row.items.map((i) => i.key)).not.toContain(old);
@@ -271,6 +313,9 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
       expect.objectContaining({
         key: old,
         amount: '20000.00',
+        kind: 'billed_outside',
+        externalInvoiceNumber: 'TALLY/0412',
+        externalInvoiceDate: '2026-04-30',
         reason: 'Billed in Tally before the switch',
         label: expect.stringMatching(/\d{4}$/),
         byName: expect.any(String),
@@ -361,7 +406,7 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
       .send({ status: 'void' })
       .expect(201);
     expect((await milestones(eng)).find((m) => m.id === due.id)!.status).toBe('due');
-    await setAside(pa, eng, [key], 'Waived by the partner').expect(201);
+    await setAside(pa, eng, [key]).expect(201);
     expect((await milestones(eng)).find((m) => m.id === due.id)!.status).toBe('set_aside');
     await http()
       .post(`/api/v1/billing/fee-milestones/${due.id}/cancel`)
@@ -379,5 +424,182 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
       .post(`/api/v1/billing/fee-milestones/${due.id}/cancel`)
       .set(bearer(pa))
       .expect(400);
+  });
+
+  it('not billing a fee is a waiver a partner other than the requester decides; till then it stays unbilled', async () => {
+    const { eng, asOf } = await retainer();
+    const [m2, m1, m0] = [-2, -1, 0].map((d) => `retainer:${monthOf(asOf, d)}`) as [
+      string,
+      string,
+      string,
+    ];
+    await waive(pa, eng, [m2], 'too short').expect(400);
+    await waive(sy, eng, [m2], 'Not billing the first month').expect(403);
+    const asked = await waive(
+      pa,
+      eng,
+      [m2, m1],
+      'First two months free, agreed at onboarding',
+    ).expect(201);
+    expect(asked.body).toMatchObject({
+      setAside: 0,
+      waiver: { status: 'pending', amount: '40000.00', engagementId: eng },
+    });
+    const waiver = asked.body.waiver as { id: string };
+
+    // Still unbilled, flagged; neither set aside nor waived again meanwhile.
+    const row = (await rowOf(eng))!;
+    expect(row.items.find((i) => i.key === m2)).toMatchObject({ waiverId: waiver.id });
+    expect(row.items.find((i) => i.key === m0)!.waiverId).toBeNull();
+    expect(row.waivers.map((w) => w.id)).toEqual([waiver.id]);
+    await setAside(pa, eng, [m2]).expect(400);
+    await waive(pa, eng, [m1], 'Second month free as well').expect(400);
+    const pending = await http()
+      .get('/api/v1/billing/fee-waivers?status=pending')
+      .set(bearer(mp))
+      .expect(200);
+    expect(pending.body.map((w: { id: string }) => w.id)).toContain(waiver.id);
+
+    // The requester cannot decide it; nor can a manager without billing.approve.
+    await decideWaiver(pa, waiver.id, 'approve').expect(403);
+    await decideWaiver(mx, waiver.id, 'approve').expect(403);
+    const ok = await decideWaiver(mp, waiver.id, 'approve').expect(201);
+    expect(ok.body).toMatchObject({ status: 'approved', decidedByName: expect.any(String) });
+    await decideWaiver(mp, waiver.id, 'reject').expect(400);
+
+    const after = (await rowOf(eng))!;
+    expect(after.items.map((i) => i.key)).toEqual([m0]);
+    expect(after.waivers).toEqual([]);
+    expect(after.setAside.map((a) => [a.key, a.kind])).toEqual([
+      [m2, 'not_billing'],
+      [m1, 'not_billing'],
+    ]);
+
+    // A rejected waiver leaves the period unbilled.
+    const no = await waive(pa, eng, [m0], 'Client asked for this month free').expect(201);
+    await decideWaiver(mp, no.body.waiver.id as string, 'reject').expect(201);
+    expect((await rowOf(eng))!.items.find((i) => i.key === m0)!.waiverId).toBeNull();
+
+    // A waiver whose period was billed meanwhile cannot be approved.
+    const late = await waive(pa, eng, [m0], 'Client asked again for this month').expect(201);
+    await draft(pa, eng, [m0]).expect(201);
+    await decideWaiver(mp, late.body.waiver.id as string, 'approve').expect(400);
+
+    const { rows } = await superuser((c) =>
+      c.query<{ action: string }>(
+        `SELECT action FROM hsdg.audit_events WHERE object_id = $1 ORDER BY occurred_at`,
+        [waiver.id],
+      ),
+    );
+    expect(rows.map((r) => r.action)).toEqual(['fee_waiver.requested', 'fee_waiver.approved']);
+  });
+
+  it('never drops an old unbilled fee; the billing go-live in settings is where the list starts', async () => {
+    const { eng, asOf } = await retainer();
+    await http()
+      .patch(`/api/v1/engagements/${eng}/commercial`)
+      .set(bearer(pa))
+      .send({
+        billingFrequency: 'monthly',
+        effectiveDate: `${monthOf(asOf, -15)}-01`,
+        retainerAmount: '20000.00',
+      })
+      .expect(200);
+    const all = (await rowOf(eng))!;
+    expect(all.items[0]!.key).toBe(`retainer:${monthOf(asOf, -15)}`);
+    expect(all.items).toHaveLength(16);
+
+    const settings = async () =>
+      (await http().get('/api/v1/billing/settings').set(bearer(mp)).expect(200)).body as {
+        version: number;
+        billingFrom: string | null;
+      };
+    const setFrom = async (billingFrom: string | null) =>
+      http()
+        .patch('/api/v1/billing/settings')
+        .set(bearer(mp))
+        .send({ version: (await settings()).version, billingFrom })
+        .expect(200);
+    await setFrom(`${monthOf(asOf, -2)}-01`);
+    try {
+      expect((await settings()).billingFrom).toBe(`${monthOf(asOf, -2)}-01`);
+      const report = await unbilled(pa);
+      expect(report.billingFrom).toBe(`${monthOf(asOf, -2)}-01`);
+      const live = report.engagements.find((e) => e.engagementId === eng)!;
+      expect(live.items.map((i) => i.key)).toEqual(
+        [-2, -1, 0].map((d) => `retainer:${monthOf(asOf, d)}`),
+      );
+    } finally {
+      await setFrom(null);
+    }
+  });
+
+  it('bills by one rule: the engagement lead, or a team member who bills the client', async () => {
+    const { eng } = await retainer(false);
+    const [mpEmp, paEmp, pbEmp] = await Promise.all(
+      ['mp@dhvaj.in', 'partner.a@dhvaj.in', 'partner.b@dhvaj.in'].map(employeeOf),
+    );
+    // The managing partner leads it; Partner A (the client's office) and
+    // Partner B (another office) are on the team.
+    await superuser(async (c) => {
+      await c.query(
+        `UPDATE hsdg.engagements SET engagement_partner_id = $2, engagement_manager_id = NULL
+          WHERE id = $1`,
+        [eng, mpEmp],
+      );
+      await c.query(
+        `INSERT INTO hsdg.engagement_team (engagement_id, employee_id) VALUES ($1, $2), ($1, $3)`,
+        [eng, paEmp, pbEmp],
+      );
+    });
+    const due = (
+      await addMilestone(mp, eng, {
+        kind: 'milestone',
+        description: 'Due diligence report',
+        amount: '40000.00',
+        dueOn: '2026-02-01',
+      }).expect(201)
+    ).body as FeeMilestone;
+    const key = `milestone:${due.id}`;
+
+    // Partner A sees the milestone and drafts it.
+    expect((await rowOf(eng, pa))!.items.map((i) => i.key)).toEqual([key]);
+    const made = (await draft(pa, eng, [key]).expect(201)).body as InvoiceDetail;
+    expect(made).toMatchObject({ status: 'draft', subtotal: '40000.00' });
+
+    // Partner B is on the team but bills another office's clients: nothing.
+    await http()
+      .post(`/api/v1/engagements/${eng}/invoices/${made.id}/status`)
+      .set(bearer(pa))
+      .send({ status: 'void' })
+      .expect(201);
+    expect(await rowOf(eng, pb)).toBeUndefined();
+    await draft(pb, eng, [key]).expect(400);
+    await expect(
+      superuser(async (c) => {
+        await c.query('BEGIN');
+        try {
+          await c.query(
+            `SELECT set_config('hsdg.user_id', u.id::text, true), set_config('hsdg.role', 'partner', true),
+                    set_config('hsdg.office_id', e.primary_office_id::text, true),
+                    set_config('hsdg.employee_id', $1::text, true)
+               FROM hsdg.employees e JOIN hsdg.users u ON u.id = e.user_id WHERE e.id = $1::uuid`,
+            [pbEmp],
+          );
+          await c.query('SET LOCAL ROLE hsdg_app');
+          await c.query(
+            `INSERT INTO hsdg.fee_billings
+               (engagement_id, client_entity_id, period_key, period_start, period_end, amount,
+                label, skip_reason, skip_kind, external_invoice_number, external_invoice_date)
+             SELECT $1, e.entity_id, $2, current_date, current_date, 1, 'x', 'Billed by hand',
+                    'billed_outside', 'X/1', current_date
+               FROM hsdg.engagements e WHERE e.id = $1`,
+            [eng, key],
+          );
+        } finally {
+          await c.query('ROLLBACK');
+        }
+      }),
+    ).rejects.toThrow(/row-level security/);
   });
 });

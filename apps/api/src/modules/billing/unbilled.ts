@@ -1,8 +1,5 @@
 import { fromPaise, toPaise, type BillingFrequency, type UnbilledItem } from '@hsdg/contracts';
 
-/** How far back the unbilled list looks, in months: older periods were billed by hand. */
-export const UNBILLED_LOOKBACK_MONTHS = 12;
-
 /** Billing models with no fixed fee to bill. */
 const NOT_FIXED = new Set(['time_and_material', 'pro_bono', 'not_billed']);
 
@@ -129,14 +126,12 @@ function periodsBetween(
   return out.filter((p) => p.start <= to && p.end >= from);
 }
 
-export function lookbackStart(asOf: string): string {
-  const [y, m] = asOf.split('-').map(Number) as [number, number];
-  const total = y * 12 + (m - 1) - UNBILLED_LOOKBACK_MONTHS;
-  return iso(Math.floor(total / 12), (total % 12) + 1, 1);
-}
-
 const isPeriodic = (f: BillingFrequency | null): f is 'monthly' | 'quarterly' | 'annual' =>
   f === 'monthly' || f === 'quarterly' || f === 'annual';
+
+/** Ended before billing went live in the app: billed by hand then. */
+const before = (p: Pick<Period, 'end'>, billingFrom: string | null): boolean =>
+  !!billingFrom && p.end < billingFrom;
 
 function item(
   key: string,
@@ -156,14 +151,14 @@ function item(
   };
 }
 
-/** The retainer: its amount for every period due since it took effect. */
-function retainerItems(t: FeeTerms, asOf: string): UnbilledItem[] {
+/** The retainer: its amount for every period due since it took effect (or billing went live). */
+function retainerItems(t: FeeTerms, asOf: string, billingFrom: string | null): UnbilledItem[] {
   const amount = t.retainerAmount ? toPaise(t.retainerAmount) : 0n;
   if (amount <= 0n) return [];
   const f = t.frequency ?? 'monthly';
   if (isPeriodic(f)) {
     if (!t.startDate) return [];
-    const from = [t.startDate, lookbackStart(asOf)].sort()[1]!;
+    const from = billingFrom && billingFrom > t.startDate ? billingFrom : t.startDate;
     const to = t.endDate && t.endDate < asOf ? t.endDate : asOf;
     return periodsBetween(f, from, to).map((p) =>
       item(`retainer:${p.suffix}`, 'retainer', p, amount, asOf),
@@ -177,14 +172,15 @@ function retainerItems(t: FeeTerms, asOf: string): UnbilledItem[] {
     end: [start, t.endDate ?? asOf].sort()[1]!,
   };
   const due = (f === 'one_time' && start <= asOf) || (f === 'on_completion' && t.completed);
-  if (due) return [item('retainer:once', 'retainer', once, amount, asOf)];
+  if (due && !before(once, billingFrom)) {
+    return [item('retainer:once', 'retainer', once, amount, asOf)];
+  }
   return []; // milestone and event fees need their milestones and events
 }
 
 /** A compliance year's fee, shared over its months or quarters (the last takes the paise). */
-function yearItems(t: FeeTerms, asOf: string): UnbilledItem[] {
+function yearItems(t: FeeTerms, asOf: string, billingFrom: string | null): UnbilledItem[] {
   const out: UnbilledItem[] = [];
-  const from = lookbackStart(asOf);
   // Never configured: the year's fee is billed in one.
   const f: BillingFrequency = t.frequency ?? 'annual';
   for (const y of t.years) {
@@ -199,18 +195,21 @@ function yearItems(t: FeeTerms, asOf: string): UnbilledItem[] {
       const all = periodsBetween(f, year.start, year.end);
       const share = fee / BigInt(all.length);
       all.forEach((p, i) => {
-        if (p.start > asOf || p.end < from) return;
+        if (p.start > asOf || before(p, billingFrom)) return;
         const amount = i === all.length - 1 ? fee - share * BigInt(all.length - 1) : share;
         out.push(item(keyOf(p), 'year_fee', { ...p, label: label(p) }, amount, asOf));
       });
-    } else if ((f === 'one_time' && year.start <= asOf) || (f === 'on_completion' && y.closed)) {
+    } else if (
+      ((f === 'one_time' && year.start <= asOf) || (f === 'on_completion' && y.closed)) &&
+      !before(year, billingFrom)
+    ) {
       out.push(item(keyOf(year), 'year_fee', { ...year, label: label(year) }, fee, asOf));
     }
   }
   return out;
 }
 
-/** A milestone or event fee is due on its date; no lookback, it was agreed by name. */
+/** A milestone or event fee is due on its date, whenever: it was agreed by name in the app. */
 function milestoneItems(t: FeeTerms, asOf: string): UnbilledItem[] {
   return (t.milestones ?? [])
     .filter((m) => m.dueOn <= asOf && toPaise(m.amount) > 0n)
@@ -229,16 +228,22 @@ function milestoneItems(t: FeeTerms, asOf: string): UnbilledItem[] {
  * PS-206 · the fixed-fee periods of an engagement that are due by `asOf` (IST),
  * oldest first: a compliance year's fee shared by the billing frequency, else
  * the retainer per period; and the fee milestones and events that have come
- * due (unless the engagement bills nothing). The caller drops what fee_billings already holds.
- * DI-free and unit-tested; unbilled.service.ts feeds it.
+ * due (unless the engagement bills nothing). Nothing drops off with age: periods
+ * start at the fee's own start, or at `billingFrom` (the firm's billing
+ * go-live) when that is later. The caller drops what fee_billings already
+ * holds. DI-free and unit-tested; unbilled.service.ts feeds it.
  */
-export function dueFeeItems(t: FeeTerms, asOf: string): UnbilledItem[] {
+export function dueFeeItems(
+  t: FeeTerms,
+  asOf: string,
+  billingFrom: string | null = null,
+): UnbilledItem[] {
   const hasYearFee = t.years.some((y) => y.feeAmount && toPaise(y.feeAmount) > 0n);
   const items = hasYearFee
-    ? yearItems(t, asOf)
+    ? yearItems(t, asOf, billingFrom)
     : NOT_FIXED.has(t.billingModel ?? '')
       ? []
-      : retainerItems(t, asOf);
+      : retainerItems(t, asOf, billingFrom);
   if (!NOT_BILLED.has(t.billingModel ?? '')) items.push(...milestoneItems(t, asOf));
   return items.sort(
     (a, b) => a.periodStart.localeCompare(b.periodStart) || a.key.localeCompare(b.key),

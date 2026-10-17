@@ -93,6 +93,7 @@ describe('settingsChanges', () => {
     invoiceReminderDays: [7, 15, 30],
     autoInvoiceReminders: false,
     tdsMatchTolerance: '1.00',
+    billingFrom: null,
     version: 3,
     updatedAt: '2026-10-16T00:00:00Z',
   };

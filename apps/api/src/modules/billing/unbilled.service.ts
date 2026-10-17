@@ -7,16 +7,25 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  FEE_WAIVER_REASON_MIN,
+  NOTIFICATION_TYPE,
+  formatInr,
   sumAmounts,
   type BillingFrequency,
   type CreateFeeMilestoneInput,
+  type DecideAdjustmentInput,
   type DraftFromUnbilledInput,
   type FeeMilestone,
   type FeeMilestoneStatus,
+  type FeeWaiver,
+  type FeeWaiverPeriod,
+  type FeeWaiverStatus,
   type InvoiceDetail,
   type RestoreFeeInput,
   type SetAsideFee,
   type SetAsideFeesInput,
+  type SetAsideFeesResult,
+  type SetAsideKind,
   type UnbilledEngagement,
   type UnbilledItem,
   type UnbilledReport,
@@ -25,7 +34,8 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { CommercialService, translateInvoiceError } from '../commercial/commercial.service';
-import { dueFeeItems, lookbackStart, type FeeTerms } from './unbilled';
+import { NotificationsService } from '../notifications/notifications.service';
+import { dueFeeItems, type FeeTerms } from './unbilled';
 
 const NOTES = [
   'Time is not listed yet: it joins once charge-out rates and approved, billable time arrive (PS-302).',
@@ -56,6 +66,9 @@ interface OpenRow {
   billed_invoice_id: string | null;
   label: string | null;
   skip_reason: string | null;
+  skip_kind: SetAsideKind | null;
+  external_invoice_number: string | null;
+  external_invoice_date: string | null;
   amount: string;
   period_start: string;
   period_end: string;
@@ -77,6 +90,39 @@ interface MilestoneRow {
   created_at: Date;
 }
 
+interface WaiverRow {
+  id: string;
+  engagement_id: string;
+  client_entity_id: string;
+  client_name: string;
+  engagement_code: string | null;
+  service_name: string | null;
+  periods: FeeWaiverPeriod[];
+  amount: string;
+  reason: string;
+  status: FeeWaiverStatus;
+  requested_by_employee_id: string | null;
+  requested_by_name: string | null;
+  created_at: Date;
+  decided_by_name: string | null;
+  decided_at: Date | null;
+  decision_note: string | null;
+  version: number;
+}
+
+// The engagement may be out of the decider's sight: its code and service are then null.
+const WAIVER_SELECT = `
+  SELECT w.id, w.engagement_id, w.client_entity_id, ent.legal_name AS client_name,
+         e.engagement_code, s.name AS service_name, w.periods, w.amount::text, w.reason,
+         w.status, w.requested_by_employee_id, rb.full_name AS requested_by_name, w.created_at,
+         db.full_name AS decided_by_name, w.decided_at, w.decision_note, w.version
+    FROM hsdg.fee_waivers w
+    JOIN hsdg.entities ent ON ent.id = w.client_entity_id
+    LEFT JOIN hsdg.engagements e ON e.id = w.engagement_id
+    LEFT JOIN hsdg.services s ON s.id = e.service_id
+    LEFT JOIN hsdg.employees rb ON rb.id = w.requested_by_employee_id
+    LEFT JOIN hsdg.employees db ON db.id = w.decided_by_employee_id`;
+
 const MILESTONE_SELECT = `
   SELECT m.id, m.engagement_id, m.kind, m.description, m.amount::text, m.due_on::text,
          m.cancelled_at IS NOT NULL AS cancelled, fb.billed_invoice_id,
@@ -92,8 +138,10 @@ const MILESTONE_SELECT = `
  * period, or a compliance year's fee shared by the billing frequency — and
  * a draft invoice from the ones chosen. fee_billings holds each period put on
  * a live invoice, so none is billed twice; voiding the invoice releases them.
- * A period billed outside the app (or not billed) is set aside with a reason
- * and can be restored; fee milestones and events join the list on their date.
+ * A period billed outside the app is set aside at once, naming the outside
+ * invoice; not billing one is a waiver a partner (billing.approve, not the
+ * requester) approves, as a write-off. Either can be restored. Fee milestones
+ * and events join the list on their date. Billers: ctx_may_bill_engagement.
  */
 @Injectable()
 export class UnbilledService {
@@ -101,14 +149,17 @@ export class UnbilledService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly commercial: CommercialService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   report(ctx: RlsContext, partnerId: string | null): Promise<UnbilledReport> {
     return this.db.withRlsContext(ctx, async (client) => {
       const asOf = await istToday(client);
-      const engagements = await this.unbilled(client, asOf, { partnerId });
+      const billingFrom = await billingFromOf(client);
+      const engagements = await this.unbilled(client, asOf, { partnerId }, billingFrom);
       return {
         asOf,
+        billingFrom,
         engagements,
         total: sumAmounts(engagements.map((e) => e.total)),
         notes: NOTES,
@@ -163,18 +214,43 @@ export class UnbilledService {
     });
   }
 
-  /** Set due periods aside without an invoice: billed outside the app, or not billed. */
-  setAside(ctx: RlsContext, input: SetAsideFeesInput): Promise<{ setAside: number }> {
+  /**
+   * Set due periods aside without an invoice. Billed outside the app: at once,
+   * naming the outside invoice. Not billing them: a waiver request the
+   * client's partners are asked to decide; the periods stay unbilled till then.
+   */
+  setAside(ctx: RlsContext, input: SetAsideFeesInput): Promise<SetAsideFeesResult> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const { eng, items } = await this.pick(client, input.engagementId, input.keys);
-      const reason = input.reason.trim();
+      const reason = input.reason?.trim() ?? '';
+      if (input.kind === 'not_billing') {
+        if (reason.length < FEE_WAIVER_REASON_MIN) {
+          throw new BadRequestException(
+            `Say why the firm is not billing this, in at least ${FEE_WAIVER_REASON_MIN} characters; a partner decides.`,
+          );
+        }
+        return { setAside: 0, waiver: await this.requestWaiver(client, ctx, input, reason) };
+      }
+      const number = input.externalInvoiceNumber?.trim() ?? '';
+      const date = input.externalInvoiceDate ?? '';
+      if (!number || !date) {
+        throw new BadRequestException(
+          'Give the number and date of the invoice raised outside the app.',
+        );
+      }
+      if (date > (await istToday(client))) {
+        throw new BadRequestException('The outside invoice cannot be dated after today.');
+      }
+      const { eng, items } = await this.pick(client, input.engagementId, input.keys, true);
+      const why = reason || `Billed outside the app: ${number} of ${date}`;
       try {
         for (const i of items) {
           await client.query(
             `INSERT INTO hsdg.fee_billings
                (engagement_id, client_entity_id, period_key, period_start, period_end, amount,
-                label, skip_reason, created_by_employee_id)
-             VALUES ($1, $2, $3, $4::date, $5::date, $6::numeric, $7, $8, $9)`,
+                label, skip_reason, skip_kind, external_invoice_number, external_invoice_date,
+                created_by_employee_id)
+             VALUES ($1, $2, $3, $4::date, $5::date, $6::numeric, $7, $8, 'billed_outside', $9,
+                     $10::date, $11)`,
             [
               eng.engagementId,
               eng.clientId,
@@ -183,7 +259,9 @@ export class UnbilledService {
               i.periodEnd,
               i.amount,
               i.label,
-              reason,
+              why,
+              number,
+              date,
               ctx.employeeId ?? null,
             ],
           );
@@ -195,13 +273,146 @@ export class UnbilledService {
         action: 'fee.set_aside',
         objectType: 'engagement',
         objectId: eng.engagementId,
-        after: { periods: items.map((i) => i.key), reason },
+        after: {
+          periods: items.map((i) => i.key),
+          kind: 'billed_outside',
+          externalInvoice: { number, date },
+        },
+        reason: why,
       });
-      return { setAside: items.length };
+      return { setAside: items.length, waiver: null };
     });
   }
 
-  /** List a set-aside period as unbilled again (engagement leads). */
+  /** Waivers the caller may see, newest first; `pending` for those waiting on a partner. */
+  waivers(ctx: RlsContext, status: FeeWaiverStatus | null): Promise<FeeWaiver[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await client.query<WaiverRow>(
+        `${WAIVER_SELECT} WHERE ($1::text IS NULL OR w.status = $1)
+          ORDER BY w.created_at DESC LIMIT 200`,
+        [status],
+      );
+      return rows.map(mapWaiver);
+    });
+  }
+
+  /** Approve (the periods are set aside as not billed) or reject someone else's waiver. */
+  decideWaiver(ctx: RlsContext, id: string, input: DecideAdjustmentInput): Promise<FeeWaiver> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.loadWaiver(client, id);
+      if (before.status !== 'pending') {
+        throw new BadRequestException(`This waiver is already ${before.status}.`);
+      }
+      if (input.version !== undefined && input.version !== before.version) {
+        throw new ConflictException(
+          `The waiver was changed by someone else (expected v${input.version}, found v${before.version}).`,
+        );
+      }
+      if (ctx.employeeId && before.requestedById === ctx.employeeId) {
+        throw new ForbiddenException('You asked for this; another partner must decide it.');
+      }
+      const approve = input.decision === 'approve';
+      const note = input.note?.trim() || null;
+      let changed: number;
+      try {
+        const res = await client.query(
+          `UPDATE hsdg.fee_waivers
+              SET status = $2, decided_by_employee_id = $3, decided_at = now(),
+                  decision_note = $4, version = version + 1
+            WHERE id = $1`,
+          [id, approve ? 'approved' : 'rejected', ctx.employeeId ?? null, note],
+        );
+        changed = res.rowCount ?? 0;
+      } catch (err) {
+        throw translateInvoiceError(err);
+      }
+      if (changed === 0) {
+        throw new ForbiddenException('Only a partner who bills the client decides its waivers.');
+      }
+      const after = await this.loadWaiver(client, id);
+      await this.audit.recordWith(client, ctx, {
+        action: `fee_waiver.${approve ? 'approved' : 'rejected'}`,
+        objectType: 'fee_waiver',
+        objectId: id,
+        before: { status: before.status },
+        after: {
+          status: after.status,
+          engagement: after.engagementId,
+          periods: after.periods.map((p) => p.key),
+          amount: after.amount,
+        },
+        ...(note ? { reason: note } : {}),
+      });
+      return after;
+    });
+  }
+
+  /** Not billing the periods: a request, and the client's partners asked to decide it. */
+  private async requestWaiver(
+    client: PoolClient,
+    ctx: RlsContext,
+    input: SetAsideFeesInput,
+    reason: string,
+  ): Promise<FeeWaiver> {
+    const { eng, items } = await this.pick(client, input.engagementId, input.keys, true);
+    const periods: FeeWaiverPeriod[] = items.map((i) => ({
+      key: i.key,
+      label: i.label,
+      periodStart: i.periodStart,
+      periodEnd: i.periodEnd,
+      amount: i.amount,
+    }));
+    const amount = sumAmounts(periods.map((p) => p.amount));
+    let id: string;
+    try {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO hsdg.fee_waivers
+           (engagement_id, client_entity_id, periods, amount, reason, requested_by_employee_id)
+         VALUES ($1, $2, $3::jsonb, $4::numeric, $5, $6) RETURNING id`,
+        [
+          eng.engagementId,
+          eng.clientId,
+          JSON.stringify(periods),
+          amount,
+          reason,
+          ctx.employeeId ?? null,
+        ],
+      );
+      id = rows[0]!.id;
+    } catch (err) {
+      throw translateInvoiceError(err);
+    }
+    const waiver = await this.loadWaiver(client, id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'fee_waiver.requested',
+      objectType: 'fee_waiver',
+      objectId: id,
+      after: { engagement: eng.engagementId, periods: periods.map((p) => p.key), amount },
+      reason,
+    });
+    const { rows: approvers } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.billing_approvers($1) AS t(id) WHERE id IS DISTINCT FROM $2`,
+      [eng.clientId, ctx.employeeId ?? null],
+    );
+    await this.notifications.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.writeOffPending,
+      recipientEmployeeIds: approvers.map((r) => r.id),
+      title: `Not billing ${formatInr(amount)} to approve · ${eng.clientName}`,
+      body: `${eng.serviceName}, ${periods.map((p) => p.label).join(', ')}: ${reason}`,
+      engagementId: eng.engagementId,
+      objectType: 'fee_waiver',
+      objectId: id,
+    });
+    return waiver;
+  }
+
+  private async loadWaiver(client: PoolClient, id: string): Promise<FeeWaiver> {
+    const { rows } = await client.query<WaiverRow>(`${WAIVER_SELECT} WHERE w.id = $1`, [id]);
+    if (!rows[0]) throw new NotFoundException('Waiver not found.');
+    return mapWaiver(rows[0]);
+  }
+
+  /** List a set-aside period as unbilled again (the engagement's billers). */
   restore(ctx: RlsContext, input: RestoreFeeInput): Promise<{ restored: string }> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{ id: string }>(
@@ -322,18 +533,28 @@ export class UnbilledService {
 
   /**
    * The engagement's due, unbilled periods named by `keys` — locked so one
-   * caller at a time takes them; fee_billings_once is the backstop.
+   * caller at a time takes them; fee_billings_once is the backstop. Setting
+   * aside refuses a period whose waiver waits for a partner.
    */
   private async pick(
     client: PoolClient,
     engagementId: string,
     keys: string[],
+    settingAside = false,
   ): Promise<{ eng: UnbilledEngagement; items: UnbilledItem[] }> {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('fee_billings:' || $1))`, [
       engagementId,
     ]);
     const asOf = await istToday(client);
-    const [eng] = await this.unbilled(client, asOf, { engagementId });
+    const [eng] = await this.unbilled(client, asOf, { engagementId }, await billingFromOf(client));
+    if (settingAside) {
+      const waiting = (eng?.items ?? []).filter((i) => i.waiverId && keys.includes(i.key));
+      if (waiting.length) {
+        throw new BadRequestException(
+          `A waiver of ${waiting.map((i) => i.label).join(', ')} is waiting for a partner.`,
+        );
+      }
+    }
     const wanted = [...new Set(keys)];
     const due = new Set((eng?.items ?? []).map((i) => i.key));
     const missing = wanted.filter((k) => !due.has(k));
@@ -355,11 +576,15 @@ export class UnbilledService {
     return rows.length > 0;
   }
 
-  /** Engagements the caller bills with fixed fees due and not yet on an invoice. */
+  /**
+   * Engagements the caller bills (ctx_may_bill_engagement) with fixed fees due
+   * and not yet on an invoice, from the firm's billing go-live when set.
+   */
   private async unbilled(
     client: PoolClient,
     asOf: string,
     filter: { partnerId?: string | null; engagementId?: string },
+    billingFrom: string | null,
   ): Promise<UnbilledEngagement[]> {
     const { rows } = await client.query<TermsRow>(
       `SELECT e.id, e.engagement_code, s.name AS service_name, e.entity_id,
@@ -385,7 +610,7 @@ export class UnbilledService {
          JOIN hsdg.services s ON s.id = e.service_id
          LEFT JOIN hsdg.employees ep ON ep.id = e.engagement_partner_id
          LEFT JOIN hsdg.engagement_commercial ec ON ec.engagement_id = e.id
-        WHERE hsdg.ctx_can_bill(e.entity_id)
+        WHERE hsdg.ctx_may_bill_engagement(e.id)
           AND e.status IN ('accepted', 'active', 'on_hold', 'completed', 'closed')
           AND ($1::uuid IS NULL OR e.engagement_partner_id = $1)
           AND ($2::uuid IS NULL OR e.id = $2)
@@ -402,6 +627,7 @@ export class UnbilledService {
     if (!rows.length) return [];
     const { rows: open } = await client.query<OpenRow>(
       `SELECT fb.engagement_id, fb.period_key, fb.billed_invoice_id, fb.label, fb.skip_reason,
+              fb.skip_kind, fb.external_invoice_number, fb.external_invoice_date::text,
               fb.amount::text, fb.period_start::text, fb.period_end::text,
               e.full_name AS by_name, fb.created_at
          FROM hsdg.fee_billings fb
@@ -410,8 +636,16 @@ export class UnbilledService {
         ORDER BY fb.period_start, fb.period_key`,
       [rows.map((r) => r.id)],
     );
+    const { rows: pending } = await client.query<WaiverRow>(
+      `${WAIVER_SELECT} WHERE w.status = 'pending' AND w.engagement_id = ANY($1::uuid[])
+        ORDER BY w.created_at`,
+      [rows.map((r) => r.id)],
+    );
+    const waivers = pending.map(mapWaiver);
+    const waiverOf = new Map(
+      waivers.flatMap((w) => w.periods.map((p) => [`${w.engagementId}|${p.key}`, w.id] as const)),
+    );
     const taken = new Set(open.map((b) => `${b.engagement_id}|${b.period_key}`));
-    const from = lookbackStart(asOf);
     const out: UnbilledEngagement[] = [];
     for (const r of rows) {
       const items = dueFeeItems(
@@ -426,15 +660,26 @@ export class UnbilledService {
           milestones: r.milestones,
         },
         asOf,
-      ).filter((i) => !taken.has(`${r.id}|${i.key}`));
+        billingFrom,
+      )
+        .filter((i) => !taken.has(`${r.id}|${i.key}`))
+        .map((i) => ({ ...i, waiverId: waiverOf.get(`${r.id}|${i.key}`) ?? null }));
       const setAside: SetAsideFee[] = open
-        .filter((o) => o.engagement_id === r.id && !o.billed_invoice_id && o.period_end >= from)
+        .filter(
+          (o) =>
+            o.engagement_id === r.id &&
+            !o.billed_invoice_id &&
+            (!billingFrom || o.period_end >= billingFrom),
+        )
         .map((o) => ({
           key: o.period_key,
           label: o.label ?? o.period_key,
           periodStart: o.period_start,
           periodEnd: o.period_end,
           amount: o.amount,
+          kind: o.skip_kind,
+          externalInvoiceNumber: o.external_invoice_number,
+          externalInvoiceDate: o.external_invoice_date,
           reason: o.skip_reason ?? '',
           byName: o.by_name,
           at: o.created_at.toISOString(),
@@ -451,6 +696,7 @@ export class UnbilledService {
         items,
         total: sumAmounts(items.map((i) => i.amount)),
         setAside,
+        waivers: waivers.filter((w) => w.engagementId === r.id),
       });
     }
     // The oldest unbilled period first, then the most money.
@@ -468,6 +714,36 @@ async function istToday(client: PoolClient): Promise<string> {
     `SELECT timezone('Asia/Kolkata', now())::date::text AS d`,
   );
   return rows[0]!.d;
+}
+
+/** The firm's billing go-live (Billing settings): the unbilled list starts there. */
+async function billingFromOf(client: PoolClient): Promise<string | null> {
+  const { rows } = await client.query<{ d: string | null }>(
+    `SELECT billing_from::text AS d FROM hsdg.firm_settings LIMIT 1`,
+  );
+  return rows[0]?.d ?? null;
+}
+
+function mapWaiver(r: WaiverRow): FeeWaiver {
+  return {
+    id: r.id,
+    engagementId: r.engagement_id,
+    clientId: r.client_entity_id,
+    clientName: r.client_name,
+    engagementCode: r.engagement_code,
+    serviceName: r.service_name,
+    periods: r.periods,
+    amount: r.amount,
+    reason: r.reason,
+    status: r.status,
+    requestedById: r.requested_by_employee_id,
+    requestedByName: r.requested_by_name,
+    at: r.created_at.toISOString(),
+    decidedByName: r.decided_by_name,
+    decidedAt: r.decided_at?.toISOString() ?? null,
+    decisionNote: r.decision_note,
+    version: r.version,
+  };
 }
 
 /** Another caller took one of the periods between our read and our write. */
