@@ -8,6 +8,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   NOTIFICATION_TYPE,
+  creditNoteGstDeadline,
   creditNoteLines,
   formatInr,
   fromPaise,
@@ -112,6 +113,9 @@ interface InvoiceFacts {
   place_of_supply_state: string | null;
   is_reverse_charge: boolean;
   tax_charged: boolean;
+  issue_date: string | null;
+  /** Today in IST, from the database clock. */
+  today_ist: string;
 }
 
 /**
@@ -162,14 +166,27 @@ export class AdjustmentsService {
   ): Promise<InvoiceAdjustment> {
     return this.db.withRlsContext(ctx, async (client) => {
       const inv = await this.openInvoice(client, invoiceId);
+      // One note at a time per invoice: what earlier notes reversed is read
+      // and topped up under the lock, and the line locks below never cross.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended('credit_note_invoice:' || $1, 0))`,
+        [inv.id],
+      );
       const { rows: lines } = await client.query<CreditableLine>(
         `SELECT l.id, l.description, l.taxable_value::text AS "taxableValue",
                 l.gst_rate::text AS "gstRate",
-                COALESCE((SELECT sum(cl.taxable_value) FROM hsdg.credit_note_lines cl
-                            JOIN hsdg.credit_notes cn ON cn.id = cl.credit_note_id
-                           WHERE cl.invoice_line_id = l.id
-                             AND cn.status IN ('pending', 'approved')), 0)::text AS credited
+                COALESCE(c.taxable, 0)::text AS credited,
+                COALESCE(c.cgst, 0)::text AS "creditedCgst",
+                COALESCE(c.sgst, 0)::text AS "creditedSgst",
+                COALESCE(c.igst, 0)::text AS "creditedIgst"
            FROM hsdg.invoice_line_items l
+           LEFT JOIN LATERAL (
+             SELECT sum(cl.taxable_value) AS taxable, sum(cl.cgst) AS cgst,
+                    sum(cl.sgst) AS sgst, sum(cl.igst) AS igst
+               FROM hsdg.credit_note_lines cl
+               JOIN hsdg.credit_notes cn ON cn.id = cl.credit_note_id
+              WHERE cl.invoice_line_id = l.id AND cn.status IN ('pending', 'approved')
+           ) c ON true
           WHERE l.invoice_id = $1
           ORDER BY l.sort_order, l.created_at`,
         [inv.id],
@@ -180,6 +197,7 @@ export class AdjustmentsService {
         charged: inv.tax_charged && !inv.is_reverse_charge,
       });
       if (!note.ok) throw new BadRequestException(note.error);
+      assertWithinGstDeadline(inv, note);
       assertWithinBalance(inv, note.total);
       let id: string;
       try {
@@ -202,7 +220,9 @@ export class AdjustmentsService {
           ],
         );
         id = rows[0]!.id;
-        for (const l of note.lines) {
+        // Lines in id order, so the guard's per-line locks are always taken alike.
+        const byId = [...note.lines].sort((a, b) => a.invoiceLineId.localeCompare(b.invoiceLineId));
+        for (const l of byId) {
           await client.query(
             `INSERT INTO hsdg.credit_note_lines
                (credit_note_id, invoice_line_id, description, taxable_value, gst_rate,
@@ -273,6 +293,8 @@ export class AdjustmentsService {
         if (!inv || !['issued', 'partially_paid'].includes(inv.status)) {
           throw new BadRequestException('The invoice is no longer open; reject this request.');
         }
+        // The note is dated the day it is approved: s.34 counts that day.
+        if (kind === 'credit_note') assertWithinGstDeadline(inv, before);
         assertWithinBalance(inv, before.total);
       }
       try {
@@ -363,7 +385,8 @@ export class AdjustmentsService {
     const { rows } = await client.query<InvoiceFacts>(
       `SELECT i.id, i.invoice_number, i.engagement_id, i.client_entity_id, i.status, i.total,
               i.amount_settled, i.place_of_supply_state, i.is_reverse_charge,
-              (i.cgst + i.sgst + i.igst) > 0 AS tax_charged
+              (i.cgst + i.sgst + i.igst) > 0 AS tax_charged, i.issue_date::text,
+              (now() AT TIME ZONE 'Asia/Kolkata')::date::text AS today_ist
          FROM hsdg.invoices i
         WHERE i.id = $1`,
       [invoiceId],
@@ -380,6 +403,46 @@ export class AdjustmentsService {
     }
     return inv;
   }
+}
+
+/**
+ * CGST s.34(2): GST is reduced by a credit note only up to 30 November after
+ * the invoice's financial year. Later, the bill can still come down by a
+ * write-off, which carries no GST.
+ */
+function assertWithinGstDeadline(
+  inv: Pick<InvoiceFacts, 'issue_date' | 'today_ist' | 'invoice_number'>,
+  note: { cgst: string; sgst: string; igst: string },
+): void {
+  const tax = toPaise(note.cgst) + toPaise(note.sgst) + toPaise(note.igst);
+  if (tax === 0n || !inv.issue_date) return;
+  const deadline = creditNoteGstDeadline(inv.issue_date);
+  if (inv.today_ist > deadline) {
+    throw new BadRequestException(
+      `GST on ${inv.invoice_number ?? 'this invoice'} can no longer be reduced: under section 34 of the CGST Act ` +
+        `a credit note had to be issued by ${formatDate(deadline)}. Reduce the bill with a write-off instead (no GST).`,
+    );
+  }
+}
+
+/** '2027-11-30' → '30 Nov 2027'. */
+function formatDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return `${Number(d)} ${months[Number(m) - 1]} ${y}`;
 }
 
 /** The request must fit what is still owed (receipts and approved reductions count). */

@@ -44,6 +44,10 @@ export function translatePgError(err: unknown, map: PgErrorMap): Error {
       return err as Error;
     case '42501':
       return new ForbiddenException(map.forbidden ?? 'Not permitted to write this record.');
+    // deadlock_detected / serialization_failure: a concurrent writer won; nothing was saved.
+    case '40P01':
+    case '40001':
+      return new ConflictException('Someone else changed this at the same moment. Try again.');
     default:
       return err as Error;
   }

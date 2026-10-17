@@ -15,6 +15,7 @@ import {
   amountInWords,
   fromPaise,
   gstSplit,
+  stateCodeFromName,
   toPaise,
   type AgingBucket,
   type AgingBucketKey,
@@ -453,7 +454,10 @@ export class CommercialService {
       input.clientGstin !== undefined
         ? input.clientGstin
         : await this.soleClientGstin(client, engagementId);
-    const placeOfSupply = input.placeOfSupplyState ?? clientGstin?.slice(0, 2) ?? null;
+    const placeOfSupply =
+      input.placeOfSupplyState ??
+      clientGstin?.slice(0, 2) ??
+      (await this.placeOfSupplyFallback(client, engagementId));
     let id: string;
     try {
       const { rows } = await client.query<{ id: string }>(
@@ -587,6 +591,22 @@ export class CommercialService {
           throw new ForbiddenException('Issuing an invoice needs the billing.manage permission.');
         }
         const issueDate = input.issueDate ?? current.issue_date ?? istToday();
+        // A draft made before the firm's GSTIN was set has no place of supply
+        // yet: work it out as a new draft would, or ask for it.
+        if (!current.place_of_supply_state && (await this.firmStateCode(client))) {
+          const pos = current.client_gstin
+            ? current.client_gstin.slice(0, 2)
+            : await this.placeOfSupplyFallback(client, engagementId);
+          if (!pos) {
+            throw new BadRequestException(
+              "Set the place of supply before issuing: the client's state (from the GSTIN billed, or its address), or the firm's own state if neither is on record. It decides CGST+SGST or IGST.",
+            );
+          }
+          await client.query(`UPDATE hsdg.invoices SET place_of_supply_state = $2 WHERE id = $1`, [
+            invoiceId,
+            pos,
+          ]);
+        }
         try {
           await this.retax(client, invoiceId);
           await client.query(`SELECT hsdg.issue_invoice($1, $2::date)`, [invoiceId, issueDate]);
@@ -772,6 +792,40 @@ export class CommercialService {
       [engagementId],
     );
     return rows.length === 1 ? rows[0]!.gstin : null;
+  }
+
+  /**
+   * Where no GSTIN decides it (IGST Act s.12(2)(b)): the state of the client's
+   * Indian address on record (registered, then business, primary first); with
+   * no address and no GSTIN at all, the firm's own state. Null when the client
+   * has GSTINs in several states and none was picked: issuing then asks for it.
+   */
+  private async placeOfSupplyFallback(
+    client: PoolClient,
+    engagementId: string,
+  ): Promise<string | null> {
+    const { rows } = await client.query<{ state: string }>(
+      `SELECT a.state
+         FROM hsdg.entity_addresses a
+         JOIN hsdg.engagements e ON e.entity_id = a.entity_id
+        WHERE e.id = $1 AND a.country = 'IN' AND a.state IS NOT NULL
+        ORDER BY CASE a.address_type WHEN 'registered' THEN 0 WHEN 'business' THEN 1 ELSE 2 END,
+                 a.is_primary DESC, a.created_at`,
+      [engagementId],
+    );
+    for (const row of rows) {
+      const code = stateCodeFromName(row.state);
+      if (code) return code;
+    }
+    const { rows: gstins } = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n
+         FROM hsdg.entity_registrations r
+         JOIN hsdg.engagements e ON e.entity_id = r.entity_id
+        WHERE e.id = $1 AND r.registration_type = 'gstin' AND r.status = 'active'
+          AND r.registration_number ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$'`,
+      [engagementId],
+    );
+    return gstins[0]!.n === 0 ? this.firmStateCode(client) : null;
   }
 
   /**
