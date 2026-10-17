@@ -34,6 +34,8 @@ export interface BillingSettings {
   autoInvoiceReminders: boolean;
   /** Rupees a 26AS credit may differ from the TDS booked and still match (PS-204). */
   tdsMatchTolerance: string;
+  /** The day billing started in the app; the unbilled list starts there (PS-206). */
+  billingFrom: string | null;
   version: number;
   updatedAt: string;
 }
@@ -47,6 +49,7 @@ export interface UpdateBillingSettingsInput {
   invoiceReminderDays?: number[];
   autoInvoiceReminders?: boolean;
   tdsMatchTolerance?: string;
+  billingFrom?: string | null;
   version: number;
 }
 
@@ -895,6 +898,8 @@ export interface UnbilledItem {
   amount: string;
   /** Days since the period ended; 0 while it is running. */
   ageDays: number;
+  /** A waiver of it is waiting for a partner; it stays unbilled until approved. */
+  waiverId?: string | null;
 }
 
 /** An engagement's unbilled fixed fees. */
@@ -908,9 +913,21 @@ export interface UnbilledEngagement {
   partnerName: string | null;
   items: UnbilledItem[];
   total: string;
-  /** Periods set aside as billed outside the app or not billed, in the window. */
+  /** Periods set aside as billed outside the app or not billed (from the billing go-live). */
   setAside: SetAsideFee[];
+  /** Waivers of its periods waiting for a partner. */
+  waivers: FeeWaiver[];
 }
+
+/**
+ * How a fee period is set aside: billed outside the app (immediate, the
+ * outside invoice named), or not billed (a waiver a partner approves).
+ */
+export const SET_ASIDE_KINDS = ['billed_outside', 'not_billing'] as const;
+export type SetAsideKind = (typeof SET_ASIDE_KINDS)[number];
+
+/** A waiver's reason is at least this long: why the firm is not billing. */
+export const FEE_WAIVER_REASON_MIN = 10;
 
 /** A fee period set aside without an invoice; restoring it lists it again. */
 export interface SetAsideFee {
@@ -919,13 +936,52 @@ export interface SetAsideFee {
   periodStart: string;
   periodEnd: string;
   amount: string;
+  /** Null for periods set aside before the kinds were kept. */
+  kind: SetAsideKind | null;
+  externalInvoiceNumber: string | null;
+  externalInvoiceDate: string | null;
   reason: string;
   byName: string | null;
   at: string;
 }
 
+export type FeeWaiverStatus = 'pending' | 'approved' | 'rejected';
+
+/** One period of a waiver, as the unbilled list had it. */
+export interface FeeWaiverPeriod {
+  key: string;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: string;
+}
+
+/** "Not billing these": a request someone with billing.approve, not the requester, decides. */
+export interface FeeWaiver {
+  id: string;
+  engagementId: string;
+  clientId: string;
+  clientName: string;
+  /** Null when the decider cannot see the engagement itself. */
+  engagementCode: string | null;
+  serviceName: string | null;
+  periods: FeeWaiverPeriod[];
+  amount: string;
+  reason: string;
+  status: FeeWaiverStatus;
+  requestedById: string | null;
+  requestedByName: string | null;
+  at: string;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  version: number;
+}
+
 export interface UnbilledReport {
   asOf: string;
+  /** The firm's billing go-live (Billing settings); null: each fee from its own start. */
+  billingFrom: string | null;
   engagements: UnbilledEngagement[];
   total: string;
   /** What the report leaves out, said once: time until PS-302. */
@@ -938,11 +994,25 @@ export interface DraftFromUnbilledInput {
   keys: string[];
 }
 
-/** POST /billing/unbilled/set-aside — billed outside the app, or not billing them. */
+/**
+ * POST /billing/unbilled/set-aside. billed_outside: the outside invoice's
+ * number and date, set aside at once. not_billing: a waiver request with a
+ * reason of at least FEE_WAIVER_REASON_MIN characters.
+ */
 export interface SetAsideFeesInput {
   engagementId: string;
   keys: string[];
-  reason: string;
+  kind: SetAsideKind;
+  reason?: string;
+  externalInvoiceNumber?: string;
+  externalInvoiceDate?: string;
+}
+
+export interface SetAsideFeesResult {
+  /** Periods set aside now (billed outside); 0 for a waiver request. */
+  setAside: number;
+  /** The waiver request made, for not_billing. */
+  waiver: FeeWaiver | null;
 }
 
 /** POST /billing/unbilled/restore — list a set-aside period again. */
