@@ -7,7 +7,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   FEATURE_FLAG,
   PERMISSION,
+  type FeeWaiver,
   type InvoiceDetail,
+  type SetAsideFeesResult,
+  type SetAsideKind,
   type UnbilledEngagement,
   type UnbilledReport,
 } from '@hsdg/contracts';
@@ -18,24 +21,29 @@ import { can } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { useToast } from '@/lib/toast';
 import { Button, Card, EmptyState, PageHeader, Spinner } from '@/components/ui';
-import { Field, Select, Textarea } from '@/components/form';
-import { Modal } from '@/components/modal';
+import { Field, Input, Select, Textarea } from '@/components/form';
+import { InlinePanel } from '@/components/inline-panel';
 import {
   SOURCE_LABEL,
   ageLine,
   partnersOf,
   selectedTotal,
   setAsideLine,
+  setAsideProblem,
+  waiverLine,
 } from '@/components/billing/unbilled';
 
 const KEY = ['billing', 'unbilled'] as const;
+const WAIVERS_KEY = ['billing', 'fee-waivers', 'pending'] as const;
+const today = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 /**
  * PS-206 · fixed fees that are due and on no invoice — each engagement's
  * retainer periods, or its compliance year's fee shared by the billing
  * frequency, and fee milestones and events that have come due — and a draft
  * invoice from the ticked ones in one click. Periods billed outside the app
- * (or not billed) are set aside with a reason and can be restored.
+ * are set aside naming that invoice; not billing a period is a waiver another
+ * partner approves. Set-aside periods can be restored.
  */
 export default function UnbilledPage(): JSX.Element {
   const { principal } = useAuth();
@@ -68,7 +76,7 @@ export default function UnbilledPage(): JSX.Element {
         title="Unbilled fees"
         subtitle={
           q.data
-            ? `Fixed fees due and on no invoice, as at ${formatDate(q.data.asOf)}: ${formatMoney(q.data.total, 'INR')}. Oldest first.`
+            ? `Fixed fees due and on no invoice, as at ${formatDate(q.data.asOf)}: ${formatMoney(q.data.total, 'INR')}. Oldest first${q.data.billingFrom ? `, from the billing go-live on ${formatDate(q.data.billingFrom)}` : ''}.`
             : 'Fixed fees due and on no invoice.'
         }
       />
@@ -93,6 +101,7 @@ export default function UnbilledPage(): JSX.Element {
           </div>
         )}
       </div>
+      {can(principal, PERMISSION.billingApprove) && <WaiversToDecide />}
       {q.isLoading && <Spinner label="Finding unbilled fees…" />}
       {q.isError && (
         <EmptyState>
@@ -121,11 +130,22 @@ function EngagementFees({ e }: { e: UnbilledEngagement }): JSX.Element {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
-  const [picked, setPicked] = useState<Set<string>>(() => new Set(e.items.map((i) => i.key)));
+  const [picked, setPicked] = useState<Set<string>>(
+    () => new Set(e.items.filter((i) => !i.waiverId).map((i) => i.key)),
+  );
   const [asideOpen, setAsideOpen] = useState(false);
-  const [reason, setReason] = useState('');
+  const [asideForm, setAsideForm] = useState<{
+    kind: SetAsideKind;
+    reason: string;
+    number: string;
+    date: string;
+  }>({ kind: 'billed_outside', reason: '', number: '', date: '' });
   const mayDraft = can(principal, PERMISSION.billingManage);
   const chosen = e.items.filter((i) => picked.has(i.key)).map((i) => i.key);
+  // A period with a waiver waiting for a partner cannot be set aside again.
+  const asideKeys = e.items.filter((i) => picked.has(i.key) && !i.waiverId).map((i) => i.key);
+  const asideTotal = selectedTotal(e.items, new Set(asideKeys));
+  const problem = setAsideProblem(asideForm, today());
   const fail = (what: string) => (err: unknown) =>
     toast(err instanceof ApiError ? err.message : what, 'error');
 
@@ -145,15 +165,30 @@ function EngagementFees({ e }: { e: UnbilledEngagement }): JSX.Element {
 
   const aside = useMutation({
     mutationFn: () =>
-      apiFetch<{ setAside: number }>('/billing/unbilled/set-aside', {
+      apiFetch<SetAsideFeesResult>('/billing/unbilled/set-aside', {
         method: 'POST',
-        body: { engagementId: e.engagementId, keys: chosen, reason: reason.trim() },
+        body: {
+          engagementId: e.engagementId,
+          keys: asideKeys,
+          kind: asideForm.kind,
+          reason: asideForm.reason.trim() || undefined,
+          ...(asideForm.kind === 'billed_outside'
+            ? {
+                externalInvoiceNumber: asideForm.number.trim(),
+                externalInvoiceDate: asideForm.date,
+              }
+            : {}),
+        },
       }),
     onSuccess: (r) => {
       setAsideOpen(false);
-      setReason('');
+      setAsideForm((f) => ({ ...f, reason: '', number: '', date: '' }));
       void qc.invalidateQueries({ queryKey: ['billing'] });
-      toast(`${r.setAside} period${r.setAside === 1 ? '' : 's'} set aside.`);
+      toast(
+        r.waiver
+          ? `Not billing ${formatMoney(r.waiver.amount, 'INR')}: sent to a partner to approve.`
+          : `${r.setAside} period${r.setAside === 1 ? '' : 's'} set aside.`,
+      );
     },
     onError: fail('Could not set the periods aside.'),
   });
@@ -200,8 +235,8 @@ function EngagementFees({ e }: { e: UnbilledEngagement }): JSX.Element {
             <Button
               size="sm"
               variant="secondary"
-              disabled={chosen.length === 0 || aside.isPending}
-              onClick={() => setAsideOpen(true)}
+              disabled={asideKeys.length === 0 || aside.isPending}
+              onClick={() => setAsideOpen((o) => !o)}
             >
               Set aside…
             </Button>
@@ -217,6 +252,84 @@ function EngagementFees({ e }: { e: UnbilledEngagement }): JSX.Element {
           </div>
         )}
       </div>
+      <InlinePanel
+        open={asideOpen && asideKeys.length > 0}
+        onClose={() => setAsideOpen(false)}
+        title="Set these periods aside"
+        description={`${asideKeys.length} period${asideKeys.length === 1 ? '' : 's'}, ${formatMoney(asideTotal, 'INR')}. They leave the unbilled list; restore them any time.`}
+        className="mx-4 mb-3"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            {problem && <span className="mr-auto text-xs text-ink-faint">{problem}</span>}
+            <Button variant="secondary" size="sm" onClick={() => setAsideOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" disabled={!!problem || aside.isPending} onClick={() => aside.mutate()}>
+              {asideForm.kind === 'not_billing' ? 'Ask a partner' : 'Set aside'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <fieldset className="flex flex-wrap gap-4">
+            <legend className="sr-only">Why they are not billed here</legend>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name={`aside-${e.engagementId}`}
+                checked={asideForm.kind === 'billed_outside'}
+                onChange={() => setAsideForm((f) => ({ ...f, kind: 'billed_outside' }))}
+              />
+              Billed outside the app
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name={`aside-${e.engagementId}`}
+                checked={asideForm.kind === 'not_billing'}
+                onChange={() => setAsideForm((f) => ({ ...f, kind: 'not_billing' }))}
+              />
+              Not billing it — another partner approves
+            </label>
+          </fieldset>
+          {asideForm.kind === 'billed_outside' && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Outside invoice number" hint="e.g. the Tally voucher number">
+                <Input
+                  value={asideForm.number}
+                  maxLength={40}
+                  onChange={(ev) => setAsideForm((f) => ({ ...f, number: ev.target.value }))}
+                />
+              </Field>
+              <Field label="Its date">
+                <Input
+                  type="date"
+                  value={asideForm.date}
+                  max={today()}
+                  onChange={(ev) => setAsideForm((f) => ({ ...f, date: ev.target.value }))}
+                />
+              </Field>
+            </div>
+          )}
+          <Field
+            label={
+              asideForm.kind === 'not_billing' ? 'Why the firm is not billing it' : 'Note (optional)'
+            }
+            hint={
+              asideForm.kind === 'not_billing'
+                ? 'e.g. First month free, agreed at onboarding. It stays unbilled until a partner approves.'
+                : undefined
+            }
+          >
+            <Textarea
+              rows={2}
+              maxLength={500}
+              value={asideForm.reason}
+              onChange={(ev) => setAsideForm((f) => ({ ...f, reason: ev.target.value }))}
+            />
+          </Field>
+        </div>
+      </InlinePanel>
       <ul className="divide-y divide-line text-sm">
         {e.items.map((i) => (
           <li key={i.key} className="flex items-center gap-3 px-4 py-2">
@@ -232,6 +345,9 @@ function EngagementFees({ e }: { e: UnbilledEngagement }): JSX.Element {
               {i.label}
               <span className="block text-xs text-ink-faint">
                 {SOURCE_LABEL[i.source]} · {ageLine(i)}
+                {i.waiverId && (
+                  <span className="text-warning-700"> · Not billing it: waiting for a partner</span>
+                )}
               </span>
             </span>
             <span className="tabular-nums">{formatMoney(i.amount, 'INR')}</span>
@@ -265,29 +381,74 @@ function EngagementFees({ e }: { e: UnbilledEngagement }): JSX.Element {
           </ul>
         </details>
       )}
-      <Modal
-        open={asideOpen}
-        onClose={() => setAsideOpen(false)}
-        title="Set these periods aside"
-        description={`${chosen.length} period${chosen.length === 1 ? '' : 's'}, ${formatMoney(selectedTotal(e.items, picked), 'INR')}. They leave the unbilled list; restore them any time.`}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setAsideOpen(false)}>
-              Cancel
+    </Card>
+  );
+}
+
+/** Waivers waiting on the caller: a partner who bills the client decides another's request. */
+function WaiversToDecide(): JSX.Element | null {
+  const { principal } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({
+    queryKey: WAIVERS_KEY,
+    queryFn: () => apiFetch<FeeWaiver[]>('/billing/fee-waivers?status=pending'),
+  });
+  const decide = useMutation({
+    mutationFn: ({ w, decision }: { w: FeeWaiver; decision: 'approve' | 'reject' }) =>
+      apiFetch<FeeWaiver>(`/billing/fee-waivers/${w.id}/decision`, {
+        method: 'POST',
+        body: { decision, version: w.version },
+      }),
+    onSuccess: (w) => {
+      void qc.invalidateQueries({ queryKey: ['billing'] });
+      toast(
+        w.status === 'approved'
+          ? `Approved: ${formatMoney(w.amount, 'INR')} not billed.`
+          : 'Rejected: the periods stay unbilled.',
+      );
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not decide the waiver.', 'error'),
+  });
+  const toDecide = (q.data ?? []).filter((w) => w.requestedById !== principal?.employeeId);
+  if (toDecide.length === 0) return null;
+  return (
+    <Card className="p-0">
+      <div className="border-b border-line px-4 py-3">
+        <h2 className="text-sm font-semibold text-ink">Not billing — to approve</h2>
+        <p className="text-xs text-ink-faint">
+          Fees a colleague asked not to bill. Approve to set them aside; reject to keep them
+          unbilled.
+        </p>
+      </div>
+      <ul className="divide-y divide-line text-sm">
+        {toDecide.map((w) => (
+          <li key={w.id} className="flex flex-wrap items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              {w.clientName}
+              {w.serviceName ? ` · ${w.serviceName}` : ''}
+              <span className="block text-xs text-ink-faint">{waiverLine(w)}</span>
+            </span>
+            <span className="tabular-nums">{formatMoney(w.amount, 'INR')}</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={decide.isPending}
+              onClick={() => decide.mutate({ w, decision: 'reject' })}
+            >
+              Reject
             </Button>
             <Button
-              disabled={reason.trim().length < 3 || aside.isPending}
-              onClick={() => aside.mutate()}
+              size="sm"
+              disabled={decide.isPending}
+              onClick={() => decide.mutate({ w, decision: 'approve' })}
             >
-              Set aside
+              Approve
             </Button>
-          </>
-        }
-      >
-        <Field label="Why" hint="e.g. Billed in Tally before the switch, or waived by the partner.">
-          <Textarea rows={3} value={reason} onChange={(ev) => setReason(ev.target.value)} />
-        </Field>
-      </Modal>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }

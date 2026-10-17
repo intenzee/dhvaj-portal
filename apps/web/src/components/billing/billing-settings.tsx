@@ -6,6 +6,7 @@ import { GST_STATES, PERMISSION, type BillingSettings } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
+import { formatDate } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { Button, Card, CardBody, CardHeader, CardTitle } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
@@ -35,6 +36,7 @@ export function settingsChanges(
     invoiceReminderDays?: string;
     autoInvoiceReminders?: boolean;
     tdsMatchTolerance?: string;
+    billingFrom?: string;
   },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { version: before.version };
@@ -63,6 +65,10 @@ export function settingsChanges(
     const t = parseTolerance(form.tdsMatchTolerance);
     if (t !== null && t !== before.tdsMatchTolerance) out.tdsMatchTolerance = t;
   }
+  if (form.billingFrom !== undefined) {
+    const from = form.billingFrom || null;
+    if (from !== before.billingFrom) out.billingFrom = from;
+  }
   return out;
 }
 
@@ -76,7 +82,8 @@ export function parseTolerance(text: string): string | null {
 /**
  * PS-201 · who the firm is on its tax invoices (Billing page; partners edit);
  * PS-203 · whether clients are e-mailed payment reminders, and on which days;
- * PS-204 · how near a 26AS credit must be to the TDS booked to match.
+ * PS-204 · how near a 26AS credit must be to the TDS booked to match;
+ * PS-206 · the billing go-live, before which no fixed fee is listed unbilled.
  */
 export function BillingSettingsCard({ settings }: { settings: BillingSettings }): JSX.Element {
   const { principal } = useAuth();
@@ -92,6 +99,7 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
     invoiceReminderDays: settings.invoiceReminderDays.join(', '),
     autoInvoiceReminders: settings.autoInvoiceReminders,
     tdsMatchTolerance: settings.tdsMatchTolerance,
+    billingFrom: settings.billingFrom ?? '',
   });
   const reminderDays = parseReminderDays(form.invoiceReminderDays);
   const tolerance = parseTolerance(form.tdsMatchTolerance);
@@ -141,6 +149,10 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
               />
             </div>
             <Item label="26AS match within" value={`₹${settings.tdsMatchTolerance}`} />
+            <Item
+              label="Unbilled fees from"
+              value={settings.billingFrom ? formatDate(settings.billingFrom) : 'Every period'}
+            />
             {!settings.stateCode && (
               <p className="col-span-full text-xs text-warning-700">
                 Set the firm’s GSTIN to charge CGST + SGST or IGST from each line’s rate.
@@ -210,6 +222,12 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
                   value={form.tdsMatchTolerance}
                   onChange={set('tdsMatchTolerance')}
                 />
+              </Field>
+              <Field
+                label="Unbilled fees from"
+                hint="Billing go-live: earlier periods were billed before the app, so are not listed."
+              >
+                <Input type="date" value={form.billingFrom} onChange={set('billingFrom')} />
               </Field>
             </div>
             <div className="col-span-full flex justify-end gap-2">
