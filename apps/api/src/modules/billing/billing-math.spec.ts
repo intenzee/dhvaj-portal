@@ -2,6 +2,7 @@ import {
   INVOICE_NUMBER_MAX,
   allocateOldestFirst,
   amountInWords,
+  creditNoteGstDeadline,
   creditNoteLines,
   creditNoteSplit,
   financialYearOf,
@@ -225,6 +226,9 @@ describe('creditNoteLines (PS-205, per line)', () => {
       taxableValue: '10000.00',
       gstRate: '18.00',
       credited: '0',
+      creditedCgst: '0',
+      creditedSgst: '0',
+      creditedIgst: '0',
     },
     {
       id: 'b',
@@ -232,6 +236,9 @@ describe('creditNoteLines (PS-205, per line)', () => {
       taxableValue: '2000.00',
       gstRate: '5.00',
       credited: '500.00',
+      creditedCgst: '12.50',
+      creditedSgst: '12.50',
+      creditedIgst: '0',
     },
   ];
   const intra = { firmState: '07', placeOfSupply: '07', charged: true };
@@ -296,5 +303,89 @@ describe('creditNoteLines (PS-205, per line)', () => {
       false,
     );
     expect(creditNoteLines([], lines, intra).ok).toBe(false);
+  });
+});
+
+describe('creditNoteLines (PS-205, paise and rate bands)', () => {
+  const line = (id: string, taxableValue: string, gstRate: string, over = {}) => ({
+    id,
+    description: id,
+    taxableValue,
+    gstRate,
+    credited: '0',
+    creditedCgst: '0',
+    creditedSgst: '0',
+    creditedIgst: '0',
+    ...over,
+  });
+  const intra = { firmState: '07', placeOfSupply: '07', charged: true };
+  const inter = { ...intra, placeOfSupply: '27' };
+
+  it('credits a whole paise-valued invoice to exactly the tax it charged, band by band', () => {
+    const lines = [
+      line('a', '333.33', '18.00'),
+      line('b', '333.33', '18.00'),
+      line('c', '101.01', '12.00'),
+      line('d', '99.99', '5.00'),
+    ];
+    const inv = gstSplit(
+      lines.map((l) => ({ taxableValue: l.taxableValue, gstRate: l.gstRate })),
+      '07',
+      '07',
+    );
+    const r = creditNoteLines(
+      lines.map((l) => ({ invoiceLineId: l.id, taxableValue: l.taxableValue })),
+      lines,
+      intra,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.cgst).toBe(inv.cgst);
+    expect(r.sgst).toBe(inv.sgst);
+    expect(r.total).toBe(inv.total);
+  });
+
+  it('a partial then a final note reverse no more and no less than the invoice charged', () => {
+    const lines = [line('a', '333.33', '18.00'), line('b', '333.33', '18.00')];
+    const inv = gstSplit(
+      lines.map((l) => ({ taxableValue: l.taxableValue, gstRate: l.gstRate })),
+      '07',
+      '27',
+    );
+    const first = creditNoteLines([{ invoiceLineId: 'a', taxableValue: '333.33' }], lines, inter);
+    if (!first.ok) throw new Error(first.error);
+    const after = lines.map((l) =>
+      l.id === 'a' ? { ...l, credited: '333.33', creditedIgst: first.igst } : l,
+    );
+    const last = creditNoteLines([{ invoiceLineId: 'b', taxableValue: '333.33' }], after, inter);
+    if (!last.ok) throw new Error(last.error);
+    expect(first.cgst).toBe('0.00');
+    expect(fromPaise(toPaise(first.igst) + toPaise(last.igst))).toBe(inv.igst);
+  });
+
+  it('gives the same split whatever order the lines are asked in', () => {
+    const lines = [
+      line('a', '0.03', '18.00'),
+      line('b', '0.03', '18.00'),
+      line('c', '0.04', '18.00'),
+    ];
+    const ask = (ids: string[]) =>
+      creditNoteLines(
+        ids.map((id) => ({
+          invoiceLineId: id,
+          taxableValue: lines.find((l) => l.id === id)!.taxableValue,
+        })),
+        lines,
+        intra,
+      );
+    expect(ask(['c', 'a', 'b'])).toEqual(ask(['a', 'b', 'c']));
+  });
+});
+
+describe('creditNoteGstDeadline (CGST s.34)', () => {
+  it('is 30 November after the end of the invoice’s financial year', () => {
+    expect(creditNoteGstDeadline('2025-04-01')).toBe('2026-11-30');
+    expect(creditNoteGstDeadline('2026-03-31')).toBe('2026-11-30');
+    expect(creditNoteGstDeadline('2026-04-01')).toBe('2027-11-30');
   });
 });

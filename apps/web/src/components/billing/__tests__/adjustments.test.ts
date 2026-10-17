@@ -80,7 +80,13 @@ describe('PS-205 credit notes per invoice line', () => {
     ({
       kind: 'credit_note',
       status,
-      lines: lines.map(([invoiceLineId, taxableValue]) => ({ invoiceLineId, taxableValue })),
+      lines: lines.map(([invoiceLineId, taxableValue]) => ({
+        invoiceLineId,
+        taxableValue,
+        cgst: (Number(taxableValue) * 0.09).toFixed(2),
+        sgst: (Number(taxableValue) * 0.09).toFixed(2),
+        igst: '0.00',
+      })),
     }) as InvoiceAdjustment;
 
   it('adds up what pending and approved credit notes take off each line', () => {
@@ -93,7 +99,10 @@ describe('PS-205 credit notes per invoice line', () => {
       cn('rejected', [['a', '9000.00']]),
       { kind: 'write_off', status: 'approved', lines: [] } as unknown as InvoiceAdjustment,
     ]);
-    expect(Object.fromEntries(m)).toEqual({ a: '1500.00', b: '2000.00' });
+    expect(Object.fromEntries(m)).toEqual({
+      a: { credited: '1500.00', creditedCgst: '135.00', creditedSgst: '135.00', creditedIgst: '0.00' },
+      b: { credited: '2000.00', creditedCgst: '180.00', creditedSgst: '180.00', creditedIgst: '0.00' },
+    });
   });
 
   it('taxes each line at its own rate and skips blank lines', () => {
@@ -104,7 +113,7 @@ describe('PS-205 credit notes per invoice line', () => {
   });
 
   it('refuses more than is left of a line, or nothing at all', () => {
-    expect(creditNotePreview({ b: '1' }, inv, '07', new Map([['b', '2000.00']]))).toMatchObject({
+    expect(creditNotePreview({ b: '1' }, inv, '07', new Map([['b', { credited: '2000.00', creditedCgst: '50.00', creditedSgst: '50.00', creditedIgst: '0' }]]))).toMatchObject({
       ok: false,
       error: expect.stringMatching(/left to credit/),
     });

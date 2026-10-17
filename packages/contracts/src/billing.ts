@@ -91,6 +91,19 @@ function rateBp(rate: string | number): bigint {
 
 // ── GST split ────────────────────────────────────────────────────────────
 
+/** The tax on one rate band's taxable value, in paise: each half, or the whole as IGST. */
+function bandTax(
+  base: bigint,
+  bp: bigint,
+  intraState: boolean,
+): { cgst: bigint; sgst: bigint; igst: bigint } {
+  const sign = base < 0n ? -1n : 1n;
+  const abs = base * sign;
+  const half = intraState ? sign * mulDivRound(abs, bp, 20000n) : 0n;
+  const whole = intraState ? 0n : sign * mulDivRound(abs, bp, 10000n);
+  return { cgst: half, sgst: half, igst: whole };
+}
+
 export interface GstLine {
   /** quantity × unit amount, before tax. */
   taxableValue: string | number;
@@ -141,10 +154,7 @@ export function gstSplit(
   let igst = 0n;
   const byRate: GstRateBand[] = [];
   for (const [bp, base] of [...bands].sort((a, b) => (b[0] > a[0] ? 1 : b[0] < a[0] ? -1 : 0))) {
-    const sign = base < 0n ? -1n : 1n;
-    const abs = base * sign;
-    const half = intraState ? sign * mulDivRound(abs, bp, 20000n) : 0n;
-    const whole = intraState ? 0n : sign * mulDivRound(abs, bp, 10000n);
+    const { cgst: half, igst: whole } = bandTax(base, bp, intraState);
     taxable += base;
     cgst += half;
     sgst += half;
@@ -708,13 +718,24 @@ export interface CreditableLine {
   gstRate: string | number;
   /** Already on pending or approved credit notes, before tax. */
   credited: string;
+  /** The CGST, SGST and IGST those notes already reverse on this line. */
+  creditedCgst: string;
+  creditedSgst: string;
+  creditedIgst: string;
 }
 
 /**
- * A credit note's lines, each taxed at its own invoice line's rate (gstSplit
- * per line, so the lines add up to the note), and never more than is left
- * of a line after earlier credit notes. No tax when the invoice carried
- * none. Pure — tested.
+ * A credit note's lines, each taxed at its own invoice line's rate, and never
+ * more than is left of a line after earlier credit notes. No tax when the
+ * invoice carried none.
+ *
+ * The invoice rounds its tax once per rate band (gstSplit), so a note's tax
+ * is worked on the band too: what the band's credited value comes to after
+ * this line, less the tax already reversed in that band, CGST, SGST and IGST
+ * each. A line that takes the last of its band reverses exactly the band's
+ * tax still left, and partial notes never add up to more than the invoice
+ * charged. Lines are worked in the invoice's order, so the split does not
+ * depend on the order they are asked in. Pure — tested.
  */
 export function creditNoteLines(
   asked: CreditNoteLineInput[],
@@ -733,17 +754,11 @@ export function creditNoteLines(
     }
   | { ok: false; error: string } {
   const byId = new Map(lines.map((l) => [l.id, l]));
-  const seen = new Set<string>();
-  const out: CreditNoteLine[] = [];
-  let taxable = 0n;
-  let cgst = 0n;
-  let sgst = 0n;
-  let igst = 0n;
+  const amounts = new Map<string, bigint>();
   for (const a of asked) {
     const line = byId.get(a.invoiceLineId);
     if (!line) return { ok: false, error: 'A credit note line must be a line of this invoice.' };
-    if (seen.has(line.id)) return { ok: false, error: 'Credit each invoice line once.' };
-    seen.add(line.id);
+    if (amounts.has(line.id)) return { ok: false, error: 'Credit each invoice line once.' };
     let paise: bigint;
     try {
       paise = toPaise(a.taxableValue.trim());
@@ -758,43 +773,108 @@ export function creditNoteLines(
         error: `Only ${formatInr(fromPaise(left > 0n ? left : 0n))} of "${line.description}" is left to credit.`,
       };
     }
+    amounts.set(line.id, paise);
+  }
+  if (amounts.size === 0) return { ok: false, error: 'Credit at least one invoice line.' };
+
+  const taxed = invoice.charged && !!invoice.firmState;
+  const intraState = !invoice.placeOfSupply || invoice.placeOfSupply === invoice.firmState;
+  // Per rate band: the invoice's taxable value and tax, and what notes took of it so far.
+  const bands = new Map<bigint, { taxable: bigint; tax: Tax; credited: bigint; reversed: Tax }>();
+  for (const l of lines) {
+    const bp = rateBp(l.gstRate);
+    const b = bands.get(bp) ?? { taxable: 0n, tax: NO_TAX, credited: 0n, reversed: NO_TAX };
+    b.taxable += toPaise(l.taxableValue);
+    b.credited += toPaise(l.credited);
+    b.reversed = addTax(b.reversed, {
+      cgst: toPaise(l.creditedCgst),
+      sgst: toPaise(l.creditedSgst),
+      igst: toPaise(l.creditedIgst),
+    });
+    bands.set(bp, b);
+  }
+  for (const [bp, b] of bands) b.tax = bandTax(b.taxable, bp, intraState);
+
+  const out: CreditNoteLine[] = [];
+  let taxable = 0n;
+  let total: Tax = NO_TAX;
+  for (const line of lines) {
+    const paise = amounts.get(line.id);
+    if (paise === undefined) continue;
+    let tax: Tax = NO_TAX;
+    if (taxed) {
+      const bp = rateBp(line.gstRate);
+      const b = bands.get(bp)!;
+      b.credited += paise;
+      // The whole band credited: exactly its tax. Otherwise the rate on the
+      // credited value, never past the band's tax.
+      const upTo =
+        b.credited === b.taxable ? b.tax : minTax(bandTax(b.credited, bp, intraState), b.tax);
+      tax = {
+        cgst: atLeastZero(upTo.cgst - b.reversed.cgst),
+        sgst: atLeastZero(upTo.sgst - b.reversed.sgst),
+        igst: atLeastZero(upTo.igst - b.reversed.igst),
+      };
+      b.reversed = addTax(b.reversed, tax);
+    }
     const value = fromPaise(paise);
-    const tax =
-      invoice.charged && invoice.firmState
-        ? gstSplit(
-            [{ taxableValue: value, gstRate: line.gstRate }],
-            invoice.firmState,
-            invoice.placeOfSupply,
-          )
-        : null;
-    const row: CreditNoteLine = {
+    out.push({
       invoiceLineId: line.id,
       description: line.description,
       taxableValue: value,
-      gstRate: tax ? Number(line.gstRate).toFixed(2) : '0.00',
-      cgst: tax?.cgst ?? '0.00',
-      sgst: tax?.sgst ?? '0.00',
-      igst: tax?.igst ?? '0.00',
-      total: tax?.total ?? value,
-    };
-    out.push(row);
+      gstRate: taxed ? Number(line.gstRate).toFixed(2) : '0.00',
+      cgst: fromPaise(tax.cgst),
+      sgst: fromPaise(tax.sgst),
+      igst: fromPaise(tax.igst),
+      total: fromPaise(paise + tax.cgst + tax.sgst + tax.igst),
+    });
     taxable += paise;
-    cgst += toPaise(row.cgst);
-    sgst += toPaise(row.sgst);
-    igst += toPaise(row.igst);
+    total = addTax(total, tax);
   }
-  if (out.length === 0) return { ok: false, error: 'Credit at least one invoice line.' };
   const rates = new Set(out.map((l) => l.gstRate));
   return {
     ok: true,
     lines: out,
     taxableValue: fromPaise(taxable),
     gstRate: rates.size === 1 ? out[0]!.gstRate : null,
-    cgst: fromPaise(cgst),
-    sgst: fromPaise(sgst),
-    igst: fromPaise(igst),
-    total: fromPaise(taxable + cgst + sgst + igst),
+    cgst: fromPaise(total.cgst),
+    sgst: fromPaise(total.sgst),
+    igst: fromPaise(total.igst),
+    total: fromPaise(taxable + total.cgst + total.sgst + total.igst),
   };
+}
+
+/** Tax by head, in paise. */
+interface Tax {
+  cgst: bigint;
+  sgst: bigint;
+  igst: bigint;
+}
+
+const NO_TAX: Tax = { cgst: 0n, sgst: 0n, igst: 0n };
+
+function addTax(a: Tax, b: Tax): Tax {
+  return { cgst: a.cgst + b.cgst, sgst: a.sgst + b.sgst, igst: a.igst + b.igst };
+}
+
+function minTax(a: Tax, b: Tax): Tax {
+  const min = (x: bigint, y: bigint): bigint => (x < y ? x : y);
+  return { cgst: min(a.cgst, b.cgst), sgst: min(a.sgst, b.sgst), igst: min(a.igst, b.igst) };
+}
+
+function atLeastZero(p: bigint): bigint {
+  return p > 0n ? p : 0n;
+}
+
+/**
+ * CGST Act s.34(2): a credit note that reduces GST must be issued by 30
+ * November after the end of the financial year of the invoice it reduces
+ * (or the annual return, if filed earlier — not tracked here). Invoice
+ * issued '2026-10-16' (FY 2026-27) → '2027-11-30'. Pure — tested.
+ */
+export function creditNoteGstDeadline(invoiceIssueDate: string): string {
+  const startYear = Number(financialYearOf(invoiceIssueDate).slice(0, 4));
+  return `${startYear + 1}-11-30`;
 }
 
 // ── PS-206 · Unbilled fixed fees into a draft invoice ──────────────────────
