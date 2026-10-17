@@ -451,3 +451,54 @@ export class RemindTdsDto extends TdsMatchQueryDto {
   @IsBoolean()
   force?: boolean;
 }
+
+/** PS-206 (fix): an engagement's billable time in an IST date range. */
+export class BillableTimeQueryDto {
+  @ApiPropertyOptional({ example: '2026-09-01' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-30' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+}
+
+/** The hourly rate typed in for one stream's line. */
+export class TimeRateDto {
+  @ApiProperty({
+    example: 'gst',
+    description: "The stream key, or 'none' for time with no stream.",
+  })
+  @IsString()
+  @Matches(/^[a-z_]{1,40}$/)
+  stream!: string;
+
+  @ApiProperty({ example: '2000.00' })
+  @Matches(AMOUNT, { message: 'An hourly rate is an amount with at most two decimals.' })
+  ratePerHour!: string;
+}
+
+/** PS-206 (fix): the chosen time entries onto one draft, a line per stream. */
+export class DraftFromTimeDto {
+  @ApiProperty({ type: [String], description: 'Original time entry ids.' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  entryIds!: string[];
+
+  @ApiProperty({ type: [TimeRateDto] })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => TimeRateDto)
+  rates!: TimeRateDto[];
+
+  @ApiPropertyOptional({ example: '1 Sep 2026 to 30 Sep 2026' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  period?: string;
+}
