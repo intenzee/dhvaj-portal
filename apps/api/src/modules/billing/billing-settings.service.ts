@@ -18,6 +18,8 @@ interface SettingsRow {
   sac_default: string;
   invoice_prefix: string;
   invoice_terms_days: number;
+  invoice_reminder_days: number[];
+  auto_invoice_reminders: boolean;
   version: number;
   updated_at: Date;
 }
@@ -29,11 +31,14 @@ const COLUMNS = {
   sacDefault: 'sac_default',
   invoicePrefix: 'invoice_prefix',
   invoiceTermsDays: 'invoice_terms_days',
+  invoiceReminderDays: 'invoice_reminder_days',
+  autoInvoiceReminders: 'auto_invoice_reminders',
 } as const satisfies Record<Exclude<keyof UpdateBillingSettingsInput, 'version'>, string>;
 
 /**
  * PS-201 · who the firm is on its tax invoices: GSTIN and state, the default
- * SAC, the number prefix and payment terms. One row, firm_settings; anyone
+ * SAC, the number prefix and payment terms; and (PS-203) the automatic
+ * payment reminders. One row, firm_settings; anyone
  * signed in reads it, partners change it (RLS) and the API asks billing.approve.
  */
 @Injectable()
@@ -51,6 +56,10 @@ export class BillingSettingsService {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.read(client);
       const next = { ...input };
+      // Stored ascending and once each.
+      if (next.invoiceReminderDays) {
+        next.invoiceReminderDays = [...new Set(next.invoiceReminderDays)].sort((a, b) => a - b);
+      }
       // The GSTIN names the state; say so rather than store a mismatch.
       if (next.gstin) {
         const fromGstin = next.gstin.slice(0, 2);
@@ -107,7 +116,8 @@ export class BillingSettingsService {
   private async read(client: PoolClient): Promise<BillingSettings> {
     const { rows } = await client.query<SettingsRow>(
       `SELECT firm_name, address, gstin, state_code, sac_default, invoice_prefix,
-              invoice_terms_days, version, updated_at
+              invoice_terms_days, invoice_reminder_days, auto_invoice_reminders, version,
+              updated_at
          FROM hsdg.firm_settings LIMIT 1`,
     );
     const r = rows[0];
@@ -120,6 +130,8 @@ export class BillingSettingsService {
       sacDefault: r.sac_default,
       invoicePrefix: r.invoice_prefix,
       invoiceTermsDays: r.invoice_terms_days,
+      invoiceReminderDays: r.invoice_reminder_days,
+      autoInvoiceReminders: r.auto_invoice_reminders,
       version: r.version,
       updatedAt: r.updated_at.toISOString(),
     };

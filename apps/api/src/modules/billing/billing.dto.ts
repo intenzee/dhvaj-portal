@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -68,6 +70,23 @@ export class UpdateBillingSettingsDto {
   @Min(0)
   @Max(365)
   invoiceTermsDays?: number;
+
+  @ApiPropertyOptional({
+    example: [7, 15, 30],
+    description: 'Days after due for the automatic reminder e-mails (PS-203).',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(365, { each: true })
+  invoiceReminderDays?: number[];
+
+  @ApiPropertyOptional({ description: 'Automatic reminder e-mails to clients (off by default).' })
+  @IsOptional()
+  @IsBoolean()
+  autoInvoiceReminders?: boolean;
 }
 
 /** PS-202 · one invoice's share of a receipt. */
@@ -232,4 +251,15 @@ export class AdjustmentListQueryDto {
   @IsOptional()
   @IsIn(ADJUSTMENT_STATUSES)
   status?: AdjustmentStatus;
+}
+
+/** PS-203 · POST /billing/invoices/:id/remind. */
+export class RemindInvoiceDto {
+  @ApiPropertyOptional({
+    enum: ['email', 'whatsapp', 'copy'],
+    description: "Omit for the firm's reminder channel.",
+  })
+  @IsOptional()
+  @IsIn(['email', 'whatsapp', 'copy'])
+  channel?: 'email' | 'whatsapp' | 'copy';
 }
