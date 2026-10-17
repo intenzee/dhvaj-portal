@@ -6,7 +6,7 @@ import type { NotificationItem, TodayView } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
-import { dateFromToday } from './date.helper';
+import { istDateFromToday } from './date.helper';
 
 /**
  * PS-205 · Credit notes and write-offs, with a partner's approval.
@@ -29,7 +29,7 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
   };
   const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
   const unique = (): string => `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-  const today = dateFromToday(0);
+  const today = istDateFromToday(0);
 
   const superuser = async <T>(fn: (c: Client) => Promise<T>): Promise<T> => {
     const c = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
@@ -71,7 +71,7 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
       .post(`/api/v1/engagements/${eng}/invoices`)
       .set(bearer(pa))
       .send({
-        dueDate: dateFromToday(15),
+        dueDate: istDateFromToday(15),
         lines: [{ description: 'Professional fees', unitAmount: amount }],
       })
       .expect(201);
@@ -272,7 +272,10 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
     const d = await http()
       .post(`/api/v1/engagements/${eng}/invoices`)
       .set(bearer(pb))
-      .send({ dueDate: dateFromToday(15), lines: [{ description: 'Fees', unitAmount: '40000' }] })
+      .send({
+        dueDate: istDateFromToday(15),
+        lines: [{ description: 'Fees', unitAmount: '40000' }],
+      })
       .expect(201);
     const inv = d.body.id as string;
     await http()
@@ -411,7 +414,7 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
       .post(`/api/v1/engagements/${eng}/invoices`)
       .set(bearer(pa))
       .send({
-        dueDate: dateFromToday(15),
+        dueDate: istDateFromToday(15),
         lines: [
           { description: 'GST returns', unitAmount: '10000.00', gstRate: 18 },
           { description: 'Courier and filing', unitAmount: '2000.00', gstRate: 5 },
@@ -520,7 +523,7 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
       .post(`/api/v1/engagements/${eng}/invoices`)
       .set(bearer(pa))
       .send({
-        dueDate: dateFromToday(15),
+        dueDate: istDateFromToday(15),
         lines: [
           { description: 'Return A', unitAmount: '333.33', gstRate: 18 },
           { description: 'Return B', unitAmount: '333.33', gstRate: 18 },

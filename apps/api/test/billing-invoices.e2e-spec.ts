@@ -89,9 +89,6 @@ describe('PS-201 GST invoices (e2e)', () => {
   beforeAll(async () => {
     await seedIdentityFixtures();
     app = await createTestApp();
-    // Listening once: supertest otherwise opens a server per request, and the
-    // 50 concurrent issues below then reset connections on CI (read ECONNRESET).
-    await app.listen(0, '127.0.0.1');
     mp = await token('mp@dhvaj.in');
     pa = await token('partner.a@dhvaj.in');
     const settings = await http().get('/api/v1/billing/settings').set(bearer(mp)).expect(200);

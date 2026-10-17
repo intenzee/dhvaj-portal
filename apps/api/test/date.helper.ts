@@ -19,3 +19,15 @@ export const dateFromToday = (n: number): string => {
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+
+/**
+ * A YYYY-MM-DD date `n` days from today in **IST** — for modules that date and
+ * age by the firm's day, `timezone('Asia/Kolkata', now())` (billing: credit
+ * notes, write-offs, receivables, unbilled fees). Between 00:00 and 05:30 IST
+ * that is a day ahead of the UTC date above.
+ */
+export const istDateFromToday = (n: number): string => {
+  const d = new Date(Date.now() + 330 * 60_000);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
