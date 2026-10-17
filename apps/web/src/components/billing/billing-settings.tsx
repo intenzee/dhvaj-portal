@@ -34,6 +34,7 @@ export function settingsChanges(
     invoiceTermsDays: string;
     invoiceReminderDays?: string;
     autoInvoiceReminders?: boolean;
+    tdsMatchTolerance?: string;
   },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { version: before.version };
@@ -58,12 +59,24 @@ export function settingsChanges(
   ) {
     out.autoInvoiceReminders = form.autoInvoiceReminders;
   }
+  if (form.tdsMatchTolerance !== undefined) {
+    const t = parseTolerance(form.tdsMatchTolerance);
+    if (t !== null && t !== before.tdsMatchTolerance) out.tdsMatchTolerance = t;
+  }
   return out;
+}
+
+/** '1' → '1.00': rupees from 0 to 1,000, to the paisa; else null. Pure — tested. */
+export function parseTolerance(text: string): string | null {
+  const s = text.trim();
+  if (!/^\d{1,4}(\.\d{1,2})?$/.test(s) || Number(s) > 1000) return null;
+  return Number(s).toFixed(2);
 }
 
 /**
  * PS-201 · who the firm is on its tax invoices (Billing page; partners edit);
- * PS-203 · whether clients are e-mailed payment reminders, and on which days.
+ * PS-203 · whether clients are e-mailed payment reminders, and on which days;
+ * PS-204 · how near a 26AS credit must be to the TDS booked to match.
  */
 export function BillingSettingsCard({ settings }: { settings: BillingSettings }): JSX.Element {
   const { principal } = useAuth();
@@ -78,8 +91,10 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
     invoiceTermsDays: String(settings.invoiceTermsDays),
     invoiceReminderDays: settings.invoiceReminderDays.join(', '),
     autoInvoiceReminders: settings.autoInvoiceReminders,
+    tdsMatchTolerance: settings.tdsMatchTolerance,
   });
   const reminderDays = parseReminderDays(form.invoiceReminderDays);
+  const tolerance = parseTolerance(form.tdsMatchTolerance);
   const save = useMutation({
     mutationFn: () =>
       apiFetch<BillingSettings>('/billing/settings', {
@@ -125,6 +140,7 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
                 }
               />
             </div>
+            <Item label="26AS match within" value={`₹${settings.tdsMatchTolerance}`} />
             {!settings.stateCode && (
               <p className="col-span-full text-xs text-warning-700">
                 Set the firm’s GSTIN to charge CGST + SGST or IGST from each line’s rate.
@@ -185,12 +201,25 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
                   placeholder="7, 15, 30"
                 />
               </Field>
+              <Field
+                label="26AS match within (₹)"
+                hint={tolerance ? 'TDS a rupee or so apart still matches' : 'From 0 to 1,000.'}
+              >
+                <Input
+                  inputMode="decimal"
+                  value={form.tdsMatchTolerance}
+                  onChange={set('tdsMatchTolerance')}
+                />
+              </Field>
             </div>
             <div className="col-span-full flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setEditing(false)}>
                 Cancel
               </Button>
-              <Button onClick={() => save.mutate()} disabled={save.isPending || !reminderDays}>
+              <Button
+                onClick={() => save.mutate()}
+                disabled={save.isPending || !reminderDays || !tolerance}
+              >
                 Save
               </Button>
             </div>

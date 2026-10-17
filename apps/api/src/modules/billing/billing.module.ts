@@ -8,6 +8,7 @@ import { BillingSettingsService } from './billing-settings.service';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesController } from './receivables.controller';
 import { ReceivablesService } from './receivables.service';
+import { TdsCreditsService } from './tds-credits.service';
 import { UnbilledService } from './unbilled.service';
 
 /** Practice Services Phase 2 · Fees to cash (PS-201 onwards). */
@@ -20,6 +21,7 @@ import { UnbilledService } from './unbilled.service';
     AdjustmentsService,
     ReceivablesService,
     UnbilledService,
+    TdsCreditsService,
   ],
 })
 export class BillingModule {}
