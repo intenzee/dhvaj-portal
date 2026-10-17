@@ -23,13 +23,13 @@ permissions:
 jobs:
   deploy:
     name: Deploy ${{ github.event.inputs.environment }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ${{ github.event.inputs.environment }} # GitHub environment protection rules apply
     env:
       LOCATION: centralindia
       IMAGE_TAG: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Azure login (OIDC)
         uses: azure/login@v2

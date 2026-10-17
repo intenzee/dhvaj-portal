@@ -13,7 +13,7 @@ concurrency:
 jobs:
   build-and-test:
     name: Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # Ephemeral PostgreSQL for migration + integration/e2e tests.
     services:
@@ -37,9 +37,9 @@ jobs:
       DATABASE_MIGRATE_URL: postgres://hsdg_migrator:hsdg_migrator_dev_pw@localhost:5432/hsdg
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -83,9 +83,9 @@ jobs:
 
   docker:
     name: Docker image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Verifies the production Dockerfile builds (multi-stage, monorepo-aware).
       - name: Build API image
