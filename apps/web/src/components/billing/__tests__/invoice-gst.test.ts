@@ -1,6 +1,6 @@
 import { PERMISSION, type BillingSettings } from '@hsdg/contracts';
 import { invoiceActions, invoiceNumberLabel, stateLabel, taxRows } from '../invoice-gst';
-import { settingsChanges } from '../billing-settings';
+import { isMonthEnd, settingsChanges } from '../billing-settings';
 
 const zero = { cgst: '0.00', sgst: '0.00', igst: '0.00', isReverseCharge: false };
 
@@ -94,6 +94,7 @@ describe('settingsChanges', () => {
     autoInvoiceReminders: false,
     tdsMatchTolerance: '1.00',
     billingFrom: null,
+    gstFiledThrough: null,
     version: 3,
     updatedAt: '2026-10-16T00:00:00Z',
   };
@@ -127,5 +128,17 @@ describe('settingsChanges', () => {
       gstin: null,
       invoiceTermsDays: 30,
     });
+  });
+});
+
+describe('isMonthEnd (GSTR-1 filed through, PS-205)', () => {
+  it('takes the last day of a month, or blank', () => {
+    expect(isMonthEnd('2026-09-30')).toBe(true);
+    expect(isMonthEnd('2027-02-28')).toBe(true);
+    expect(isMonthEnd('2028-02-29')).toBe(true);
+    expect(isMonthEnd(null)).toBe(true);
+    expect(isMonthEnd('2026-09-29')).toBe(false);
+    expect(isMonthEnd('2026-02-30')).toBe(false);
+    expect(isMonthEnd('30-09-2026')).toBe(false);
   });
 });

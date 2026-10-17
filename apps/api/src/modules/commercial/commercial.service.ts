@@ -88,6 +88,9 @@ interface InvoiceRow {
   voided_by_name: string | null;
   has_pdf: boolean;
   amount_settled: string;
+  amount_received: string;
+  amount_credited: string;
+  amount_written_off: string;
 }
 
 interface LineRow {
@@ -113,7 +116,8 @@ const INVOICE_COLUMNS = `
   i.client_entity_id, i.client_gstin, i.place_of_supply_state, i.is_reverse_charge,
   i.cgst, i.sgst, i.igst, i.amount_in_words, i.financial_year, i.issued_at,
   ie.full_name AS issued_by_name, i.voided_reason, i.voided_at, ve.full_name AS voided_by_name,
-  (i.pdf_storage_reference IS NOT NULL) AS has_pdf, i.amount_settled`;
+  (i.pdf_storage_reference IS NOT NULL) AS has_pdf, i.amount_settled,
+  i.amount_received, i.amount_credited, i.amount_written_off`;
 
 const INVOICE_JOINS = `
   LEFT JOIN hsdg.employees ce ON ce.id = i.created_by_employee_id
@@ -1037,6 +1041,9 @@ function mapInvoice(row: InvoiceRow): InvoiceRecord {
     voidedByName: row.voided_by_name,
     hasPdf: row.has_pdf,
     amountSettled: row.amount_settled,
+    amountReceived: row.amount_received,
+    amountCredited: row.amount_credited,
+    amountWrittenOff: row.amount_written_off,
     balance: fromPaise(toPaise(row.total) - toPaise(row.amount_settled)),
   };
 }

@@ -77,6 +77,8 @@ export function InvoicesSection({ engagementId }: { engagementId: string }): JSX
   const invalidate = (): void => {
     void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'invoices'] });
     void qc.invalidateQueries({ queryKey: ['engagement', engagementId, 'commercial'] });
+    // The Billing pages (dashboard, receivables, unbilled) read the same invoices.
+    void qc.invalidateQueries({ queryKey: ['billing'] });
   };
 
   const items = invoices.data?.items ?? [];
@@ -616,7 +618,13 @@ function InvoiceDetailModal({
             <Fact label="Reverse charge" value={inv.isReverseCharge ? 'Yes' : 'No'} />
             {receipts && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
               <>
-                <Fact label="Received or credited" value={money(inv.amountSettled, inv.currency)} />
+                <Fact label="Received" value={money(inv.amountReceived, inv.currency)} />
+                {Number(inv.amountCredited) > 0 && (
+                  <Fact label="Credited" value={money(inv.amountCredited, inv.currency)} />
+                )}
+                {Number(inv.amountWrittenOff) > 0 && (
+                  <Fact label="Written off" value={money(inv.amountWrittenOff, inv.currency)} />
+                )}
                 <Fact label="Balance" value={money(inv.balance, inv.currency)} />
               </>
             )}

@@ -22,6 +22,7 @@ interface SettingsRow {
   auto_invoice_reminders: boolean;
   tds_match_tolerance: string;
   billing_from: string | null;
+  gst_filed_through: string | null;
   version: number;
   updated_at: Date;
 }
@@ -37,6 +38,7 @@ const COLUMNS = {
   autoInvoiceReminders: 'auto_invoice_reminders',
   tdsMatchTolerance: 'tds_match_tolerance',
   billingFrom: 'billing_from',
+  gstFiledThrough: 'gst_filed_through',
 } as const satisfies Record<Exclude<keyof UpdateBillingSettingsInput, 'version'>, string>;
 
 /**
@@ -73,6 +75,12 @@ export class BillingSettingsService {
             `The GSTIN is registered in state ${fromGstin}; the state must match.`,
           );
         }
+      }
+      // A return covers a whole month (or quarter): the last day of one.
+      if (next.gstFiledThrough && !isMonthEnd(next.gstFiledThrough)) {
+        throw new BadRequestException(
+          'gstFiledThrough is the last day of the latest month (or quarter) whose GSTR-1 is filed.',
+        );
       }
       const sets: string[] = [];
       const values: unknown[] = [input.version];
@@ -121,7 +129,7 @@ export class BillingSettingsService {
     const { rows } = await client.query<SettingsRow>(
       `SELECT firm_name, address, gstin, state_code, sac_default, invoice_prefix,
               invoice_terms_days, invoice_reminder_days, auto_invoice_reminders,
-              tds_match_tolerance::text, billing_from::text, version,
+              tds_match_tolerance::text, billing_from::text, gst_filed_through::text, version,
               updated_at
          FROM hsdg.firm_settings LIMIT 1`,
     );
@@ -139,8 +147,17 @@ export class BillingSettingsService {
       autoInvoiceReminders: r.auto_invoice_reminders,
       tdsMatchTolerance: r.tds_match_tolerance,
       billingFrom: r.billing_from,
+      gstFiledThrough: r.gst_filed_through,
       version: r.version,
       updatedAt: r.updated_at.toISOString(),
     };
   }
+}
+
+/** '2026-09-30' → true; '2026-09-29' → false. */
+function isMonthEnd(iso: string): boolean {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso) return false;
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.getUTCDate() === 1;
 }
