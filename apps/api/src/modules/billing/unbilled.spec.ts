@@ -107,4 +107,43 @@ describe('PS-206 dueFeeItems', () => {
       dueFeeItems(terms({ years: [{ ...year, billingModel: 'pro_bono' }] }), '2026-10-17'),
     ).toEqual([]);
   });
+
+  it('a milestone or event fee is due on its date, beside the retainer, unless nothing is billed', () => {
+    const milestones = [
+      {
+        id: 'm1',
+        description: 'Valuation report delivered',
+        amount: '75000.00',
+        dueOn: '2026-08-20',
+      },
+      { id: 'm2', description: 'Board meeting', amount: '5000.00', dueOn: '2026-11-01' },
+    ];
+    const items = dueFeeItems(
+      terms({ frequency: 'milestone', startDate: '2026-04-01', milestones }),
+      '2026-10-17',
+    );
+    expect(items).toEqual([
+      {
+        key: 'milestone:m1',
+        source: 'milestone',
+        label: 'Valuation report delivered',
+        periodStart: '2026-08-20',
+        periodEnd: '2026-08-20',
+        amount: '75000.00',
+        ageDays: 58,
+      },
+    ]);
+    const both = dueFeeItems(terms({ milestones }), '2026-10-17');
+    expect(both.map((i) => i.key)).toEqual([
+      'retainer:2026-07',
+      'retainer:2026-08',
+      'milestone:m1',
+      'retainer:2026-09',
+      'retainer:2026-10',
+    ]);
+    expect(
+      dueFeeItems(terms({ billingModel: 'time_and_material', milestones }), '2026-10-17'),
+    ).toHaveLength(1);
+    expect(dueFeeItems(terms({ billingModel: 'pro_bono', milestones }), '2026-10-17')).toEqual([]);
+  });
 });

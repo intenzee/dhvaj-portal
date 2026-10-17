@@ -21,10 +21,12 @@ import {
 } from 'class-validator';
 import {
   ADJUSTMENT_STATUSES,
+  FEE_MILESTONE_KINDS,
   GSTIN_REGEX,
   RECEIPT_MODES,
   TDS_SECTIONS,
   type AdjustmentStatus,
+  type FeeMilestoneKind,
   type ReceiptMode,
   type TdsSection,
 } from '@hsdg/contracts';
@@ -293,4 +295,48 @@ export class DraftFromUnbilledDto {
   @IsString({ each: true })
   @MaxLength(120, { each: true })
   keys!: string[];
+}
+
+/** PS-206: due periods billed outside the app, or not billed. */
+export class SetAsideFeesDto extends DraftFromUnbilledDto {
+  @ApiProperty({ example: 'Billed in Tally before the switch' })
+  @IsString()
+  @Matches(/\S.*\S.*\S/, { message: 'Say why, in a few words.' })
+  @MaxLength(500)
+  reason!: string;
+}
+
+/** PS-206: list a set-aside period again. */
+export class RestoreFeeDto {
+  @ApiProperty()
+  @IsUUID()
+  engagementId!: string;
+
+  @ApiProperty({ example: 'retainer:2026-09' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  key!: string;
+}
+
+/** PS-206: a fee agreed on a milestone or an event. */
+export class CreateFeeMilestoneDto {
+  @ApiProperty({ enum: FEE_MILESTONE_KINDS })
+  @IsIn(FEE_MILESTONE_KINDS)
+  kind!: FeeMilestoneKind;
+
+  @ApiProperty({ example: 'Valuation report delivered' })
+  @IsString()
+  @Matches(/\S/, { message: 'Say what the fee is for.' })
+  @MaxLength(300)
+  description!: string;
+
+  @ApiProperty({ example: '75000.00' })
+  @Matches(/^\d{1,12}(\.\d{1,2})?$/, { message: 'amount must be a positive amount.' })
+  @Matches(/[1-9]/, { message: 'amount must be more than zero.' })
+  amount!: string;
+
+  @ApiProperty({ example: '2026-11-30', description: 'Billable from this date.' })
+  @IsDateString({ strict: true })
+  dueOn!: string;
 }

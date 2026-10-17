@@ -35,6 +35,7 @@ import {
 } from '@/components/billing/invoice-gst';
 import { InvoiceAdjustments } from '@/components/billing/invoice-adjustments';
 import { InvoiceReminders } from '@/components/billing/invoice-reminders';
+import { FeeMilestones } from '@/components/billing/fee-milestones';
 
 /** Format a decimal-string amount as money in the invoice's currency. */
 function money(amount: string | null | undefined, currency = 'INR'): string {
@@ -61,6 +62,7 @@ export function InvoicesSection({ engagementId }: { engagementId: string }): JSX
   const [commercialOpen, setCommercialOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
+  const feesV2 = useFeatureFlags().isOn(FEATURE_FLAG.billing);
 
   const commercial = useQuery({
     queryKey: ['engagement', engagementId, 'commercial'],
@@ -104,6 +106,8 @@ export function InvoicesSection({ engagementId }: { engagementId: string }): JSX
           </div>
         )}
       </Card>
+
+      {feesV2 && <FeeMilestones engagementId={engagementId} />}
 
       {/* ── Invoices (§31) ─────────────────────────────────────────────── */}
       <section>

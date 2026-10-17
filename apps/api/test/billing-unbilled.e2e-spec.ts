@@ -1,7 +1,12 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Client } from 'pg';
-import type { InvoiceDetail, UnbilledEngagement, UnbilledReport } from '@hsdg/contracts';
+import type {
+  FeeMilestone,
+  InvoiceDetail,
+  UnbilledEngagement,
+  UnbilledReport,
+} from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
@@ -12,7 +17,9 @@ import { freshClient } from './fresh-client.helper';
  * Done when: a partner turns last month's retainer into a draft invoice in two
  * clicks. Also: a period is never on two live invoices (even when two drafts
  * race), voiding the invoice or taking the line off the draft releases it,
- * and the list keeps to the offices that bill the client.
+ * and the list keeps to the offices that bill the client. The gaps: a period
+ * billed outside the app is set aside with a reason and can be restored; a
+ * fee agreed on a milestone or an event joins the list on its date.
  */
 describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
   let app: INestApplication;
@@ -58,9 +65,25 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
     (await unbilled(t)).engagements.find((e) => e.engagementId === eng);
   const draft = (t: string, engagementId: string, keys: string[]) =>
     http().post('/api/v1/billing/unbilled/draft').set(bearer(t)).send({ engagementId, keys });
+  const setAside = (t: string, engagementId: string, keys: string[], reason = 'Billed in Tally') =>
+    http()
+      .post('/api/v1/billing/unbilled/set-aside')
+      .set(bearer(t))
+      .send({ engagementId, keys, reason });
+  const restore = (t: string, engagementId: string, key: string) =>
+    http().post('/api/v1/billing/unbilled/restore').set(bearer(t)).send({ engagementId, key });
+  const milestones = async (eng: string): Promise<FeeMilestone[]> =>
+    (
+      await http()
+        .get(`/api/v1/billing/engagements/${eng}/fee-milestones`)
+        .set(bearer(pa))
+        .expect(200)
+    ).body as FeeMilestone[];
+  const addMilestone = (t: string, eng: string, body: Record<string, string>) =>
+    http().post(`/api/v1/billing/engagements/${eng}/fee-milestones`).set(bearer(t)).send(body);
 
   /** A fresh NORTH client, an engagement Partner A leads, and a monthly ₹20,000 retainer from two months back. */
-  const retainer = async (): Promise<{ eng: string; asOf: string }> => {
+  const retainer = async (withRetainer = true): Promise<{ eng: string; asOf: string }> => {
     const bharat = await findId('/api/v1/entities?search=Bharat&limit=100');
     const serviceId = await findId('/api/v1/services?search=GST_MONTHLY&limit=100');
     const entityId = await freshClient(bharat);
@@ -77,6 +100,7 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
       .expect(201);
     const eng = res.body.id as string;
     const { asOf } = await unbilled(pa);
+    if (!withRetainer) return { eng, asOf };
     await http()
       .patch(`/api/v1/engagements/${eng}/commercial`)
       .set(bearer(pa))
@@ -232,5 +256,128 @@ describe('PS-206 unbilled fees into a draft invoice (e2e)', () => {
       .send({ status: 'issued' })
       .expect(201);
     await expect(insert(made.id, made.lines[0]!.id, 'x:2')).rejects.toThrow(/draft invoice only/);
+  });
+
+  it('sets a period aside as billed outside the app, with a reason, and restores it', async () => {
+    const { eng, asOf } = await retainer();
+    const old = `retainer:${monthOf(asOf, -2)}`;
+    await setAside(pa, eng, [old], 'ab').expect(400);
+    await setAside(sy, eng, [old]).expect(403);
+    await setAside(pa, eng, [old], 'Billed in Tally before the switch').expect(201);
+
+    const row = (await rowOf(eng))!;
+    expect(row.items.map((i) => i.key)).not.toContain(old);
+    expect(row.setAside).toEqual([
+      expect.objectContaining({
+        key: old,
+        amount: '20000.00',
+        reason: 'Billed in Tally before the switch',
+        label: expect.stringMatching(/\d{4}$/),
+        byName: expect.any(String),
+      }),
+    ]);
+    // Neither billed nor set aside twice.
+    await draft(pa, eng, [old]).expect(400);
+    await setAside(pa, eng, [old]).expect(400);
+
+    // Only an engagement lead restores; once.
+    await restore(pb, eng, old).expect(404);
+    await restore(pa, eng, old).expect(201);
+    await restore(pa, eng, old).expect(404);
+    const back = (await rowOf(eng))!;
+    expect(back.items.map((i) => i.key)).toContain(old);
+    expect(back.setAside).toEqual([]);
+    await draft(pa, eng, [old]).expect(201);
+
+    // The ledger only ever releases, and only once.
+    await expect(
+      superuser((c) =>
+        c.query(`UPDATE hsdg.fee_billings SET amount = 1 WHERE engagement_id = $1`, [eng]),
+      ),
+    ).rejects.toThrow(/only be released/);
+  });
+
+  it('a fee milestone joins the list on its date, bills once, and cancels only when off invoices', async () => {
+    const { eng } = await retainer(false);
+    expect(await rowOf(eng)).toBeUndefined();
+    await addMilestone(pa, eng, {
+      kind: 'milestone',
+      description: 'Valuation',
+      amount: '0',
+      dueOn: '2026-01-01',
+    }).expect(400);
+    await addMilestone(sy, eng, {
+      kind: 'milestone',
+      description: 'Valuation',
+      amount: '1.00',
+      dueOn: '2026-01-01',
+    }).expect(403);
+    const due = (
+      await addMilestone(pa, eng, {
+        kind: 'milestone',
+        description: 'Valuation report delivered',
+        amount: '75000.00',
+        dueOn: '2026-01-15',
+      }).expect(201)
+    ).body as FeeMilestone;
+    const later = (
+      await addMilestone(pa, eng, {
+        kind: 'event',
+        description: 'Board meeting attended',
+        amount: '5000.00',
+        dueOn: '2999-12-31',
+      }).expect(201)
+    ).body as FeeMilestone;
+    expect(due).toMatchObject({ status: 'due', kind: 'milestone', invoiceId: null });
+    expect(later.status).toBe('upcoming');
+
+    const key = `milestone:${due.id}`;
+    const row = (await rowOf(eng))!;
+    expect(row.items).toEqual([
+      expect.objectContaining({
+        key,
+        source: 'milestone',
+        label: 'Valuation report delivered',
+        amount: '75000.00',
+      }),
+    ]);
+    await draft(pa, eng, [`milestone:${later.id}`]).expect(400);
+
+    const made = (await draft(pa, eng, [key]).expect(201)).body as InvoiceDetail;
+    expect(made.lines[0]!.description).toBe(`${row.serviceName} — Valuation report delivered`);
+    expect((await milestones(eng)).find((m) => m.id === due.id)).toMatchObject({
+      status: 'billed',
+      invoiceId: made.id,
+    });
+    await http()
+      .post(`/api/v1/billing/fee-milestones/${due.id}/cancel`)
+      .set(bearer(pa))
+      .expect(400);
+
+    // Voided: due again. Set aside, then cancelled: gone, and the set-aside let go.
+    await http()
+      .post(`/api/v1/engagements/${eng}/invoices/${made.id}/status`)
+      .set(bearer(pa))
+      .send({ status: 'void' })
+      .expect(201);
+    expect((await milestones(eng)).find((m) => m.id === due.id)!.status).toBe('due');
+    await setAside(pa, eng, [key], 'Waived by the partner').expect(201);
+    expect((await milestones(eng)).find((m) => m.id === due.id)!.status).toBe('set_aside');
+    await http()
+      .post(`/api/v1/billing/fee-milestones/${due.id}/cancel`)
+      .set(bearer(sy))
+      .expect(403);
+    const cancelled = (
+      await http()
+        .post(`/api/v1/billing/fee-milestones/${due.id}/cancel`)
+        .set(bearer(pa))
+        .expect(201)
+    ).body as FeeMilestone;
+    expect(cancelled.status).toBe('cancelled');
+    expect(await rowOf(eng)).toBeUndefined();
+    await http()
+      .post(`/api/v1/billing/fee-milestones/${due.id}/cancel`)
+      .set(bearer(pa))
+      .expect(400);
   });
 });
