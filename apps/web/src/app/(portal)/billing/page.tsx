@@ -155,10 +155,17 @@ function Billing({ v2 }: { v2: boolean }): JSX.Element {
             : 'Invoices across everything you can see, with what’s outstanding and overdue. To raise an invoice or record a payment, open the engagement and use its Invoices tab.'
         }
         actions={
-          v2 && can(principal, PERMISSION.billingManage) ? (
-            <Button onClick={() => setRecording(true)}>
-              <Plus className="h-4 w-4" /> Record receipt
-            </Button>
+          v2 ? (
+            <div className="flex gap-2">
+              <Link href="/billing/receivables">
+                <Button variant="secondary">Receivables by age</Button>
+              </Link>
+              {can(principal, PERMISSION.billingManage) && (
+                <Button onClick={() => setRecording(true)}>
+                  <Plus className="h-4 w-4" /> Record receipt
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       />

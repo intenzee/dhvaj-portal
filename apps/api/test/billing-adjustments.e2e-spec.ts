@@ -332,4 +332,61 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
       expect.objectContaining({ kind: 'credit_note', number: ok.body.number, amount: '5900.00' }),
     ]);
   });
+
+  it("looking up approvers switches to 'system' only inside the lookup; the caller's RLS is unchanged after", async () => {
+    const { entityId } = await client();
+    const who = await superuser(async (c) => {
+      const { rows } = await c.query<{
+        email: string;
+        user_id: string;
+        emp: string;
+        office: string;
+      }>(
+        `SELECT u.email::text, u.id AS user_id, e.id AS emp, u.primary_office_id AS office
+           FROM hsdg.users u JOIN hsdg.employees e ON e.user_id = u.id
+          WHERE u.email IN ('manager.x@dhvaj.in', 'partner.b@dhvaj.in', 'partner.a@dhvaj.in')`,
+      );
+      const all = await c.query<{ n: number }>(`SELECT count(*)::int AS n FROM hsdg.users`);
+      return { by: new Map(rows.map((r) => [r.email, r])), allUsers: all.rows[0]!.n };
+    });
+    const asCaller = async (email: string, role: string) => {
+      const u = who.by.get(email)!;
+      const c = new Client({ connectionString: process.env.DATABASE_URL });
+      await c.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query(
+          `SELECT set_config('hsdg.user_id', $1, true), set_config('hsdg.role', $2, true),
+                  set_config('hsdg.office_id', $3, true), set_config('hsdg.employee_id', $4, true)`,
+          [u.user_id, role, u.office, u.emp],
+        );
+        const users = async () =>
+          (await c.query<{ n: number }>(`SELECT count(*)::int AS n FROM hsdg.users`)).rows[0]!.n;
+        const before = await users();
+        const approvers = (
+          await c.query<{ id: string }>(`SELECT hsdg.billing_approvers($1) AS id`, [entityId])
+        ).rows.map((r) => r.id);
+        const roleAfter = (
+          await c.query<{ r: string }>(`SELECT current_setting('hsdg.role', true) AS r`)
+        ).rows[0]!.r;
+        const after = await users();
+        await c.query('ROLLBACK');
+        return { approvers, roleAfter, before, after };
+      } finally {
+        await c.end();
+      }
+    };
+
+    // The client's manager (NORTH) finds the approvers, and is still a manager after.
+    const m = await asCaller('manager.x@dhvaj.in', 'manager');
+    expect(m.approvers).toContain(who.by.get('partner.a@dhvaj.in')!.emp);
+    expect(m.roleAfter).toBe('manager');
+    expect(m.after).toBe(m.before);
+    expect(m.before).toBeLessThan(who.allUsers);
+    // Another office's partner is told nothing, and keeps their role.
+    const b = await asCaller('partner.b@dhvaj.in', 'partner');
+    expect(b.approvers).toEqual([]);
+    expect(b.roleAfter).toBe('partner');
+    expect(b.after).toBe(b.before);
+  });
 });

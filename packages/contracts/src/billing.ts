@@ -28,6 +28,10 @@ export interface BillingSettings {
   invoicePrefix: string;
   /** Due date = issue date + this many days unless the invoice says otherwise. */
   invoiceTermsDays: number;
+  /** Days after due for the automatic reminder e-mails (PS-203). */
+  invoiceReminderDays: number[];
+  /** Automatic reminder e-mails to clients; off until the partners decide. */
+  autoInvoiceReminders: boolean;
   version: number;
   updatedAt: string;
 }
@@ -38,6 +42,8 @@ export interface UpdateBillingSettingsInput {
   sacDefault?: string;
   invoicePrefix?: string;
   invoiceTermsDays?: number;
+  invoiceReminderDays?: number[];
+  autoInvoiceReminders?: boolean;
   version: number;
 }
 
@@ -257,6 +263,161 @@ export function formatInr(amount: string | number): string {
   const last3 = digits.slice(-3);
   const rest = digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ',');
   return `${neg ? '-' : ''}${rest ? `${rest},${last3}` : last3}.${paise}`;
+}
+
+// ── PS-203 · Receivables ageing and payment reminders ────────────────────
+
+/** Age of what is owed, counted from the due date. `current`: not yet due. */
+export const RECEIVABLE_BANDS = [
+  'current',
+  'd0_30',
+  'd31_60',
+  'd61_90',
+  'd91_180',
+  'over_180',
+] as const;
+export type ReceivableBand = (typeof RECEIVABLE_BANDS)[number];
+
+export const RECEIVABLE_BAND_LABEL: Record<ReceivableBand, string> = {
+  current: 'Not yet due',
+  d0_30: '0–30 days',
+  d31_60: '31–60 days',
+  d61_90: '61–90 days',
+  d91_180: '91–180 days',
+  over_180: 'Over 180 days',
+};
+
+/** The band for an invoice `daysPastDue` days past its due date. Pure — tested. */
+export function receivableBand(daysPastDue: number): ReceivableBand {
+  if (daysPastDue < 0) return 'current';
+  if (daysPastDue <= 30) return 'd0_30';
+  if (daysPastDue <= 60) return 'd31_60';
+  if (daysPastDue <= 90) return 'd61_90';
+  if (daysPastDue <= 180) return 'd91_180';
+  return 'over_180';
+}
+
+/** Days past due at which the partner hears of an unpaid invoice. */
+export const INVOICE_OVERDUE_NUDGE_DAYS = [15, 30, 60] as const;
+
+/** The nudge an invoice this late has reached (60 from then on), or null. Pure — tested. */
+export function invoiceOverdueNudge(daysPastDue: number): 15 | 30 | 60 | null {
+  if (daysPastDue >= 60) return 60;
+  if (daysPastDue >= 30) return 30;
+  if (daysPastDue >= 15) return 15;
+  return null;
+}
+
+/**
+ * The automatic reminder due now: the latest threshold the invoice has
+ * passed, unless that one (or a later one) was already sent — so turning the
+ * e-mails on never sends a backlog. Pure — tested.
+ */
+export function autoInvoiceReminderDue(
+  daysPastDue: number,
+  thresholds: number[],
+  sent: number[],
+): number | null {
+  const reached = thresholds.filter((t) => t <= daysPastDue);
+  if (reached.length === 0) return null;
+  const latest = Math.max(...reached);
+  return sent.some((t) => t >= latest) ? null : latest;
+}
+
+/** The payment reminder a client reads (e-mail, WhatsApp or pasted). Pure — tested. */
+export function invoiceReminderText(r: {
+  clientName: string;
+  invoiceNumber: string | null;
+  issueDate: string | null;
+  dueDate: string | null;
+  balance: string;
+  daysPastDue: number;
+  firmName: string;
+}): string {
+  const inv = r.invoiceNumber ? `invoice ${r.invoiceNumber}` : 'our invoice';
+  const dated = r.issueDate ? ` dated ${formatIsoDate(r.issueDate)}` : '';
+  const when =
+    r.dueDate === null
+      ? ''
+      : r.daysPastDue > 0
+        ? `, which was due on ${formatIsoDate(r.dueDate)} (${r.daysPastDue} day${r.daysPastDue === 1 ? '' : 's'} ago)`
+        : `, due on ${formatIsoDate(r.dueDate)}`;
+  return [
+    `Dear ${r.clientName},`,
+    '',
+    `This is a reminder that ${formatInr(r.balance)} is outstanding on ${inv}${dated}${when}.`,
+    'If you have already paid, please share the payment reference so we can match it; if TDS was deducted, the TDS details too.',
+    '',
+    'Thank you,',
+    r.firmName,
+  ].join('\n');
+}
+
+function formatIsoDate(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
+
+export type ReceivableBands = Record<ReceivableBand, string>;
+
+/** One client's (or one engagement partner's) receivable. */
+export interface ReceivableRow {
+  /** Client entity, or the engagement partner (null: no partner on the engagement). */
+  id: string | null;
+  name: string;
+  bands: ReceivableBands;
+  total: string;
+  /** 91+ days past due. */
+  over90: string;
+  oldestInvoice: {
+    id: string;
+    invoiceNumber: string | null;
+    engagementId: string;
+    dueDate: string | null;
+    daysPastDue: number;
+    balance: string;
+  } | null;
+  /** The client's last posted receipt (clients only). */
+  lastReceipt: { date: string; amount: string } | null;
+  openInvoices: number;
+}
+
+/** GET /reports/receivables. */
+export interface ReceivablesReport {
+  /** IST date the ages are counted to. */
+  asOf: string;
+  totals: ReceivableBands & { total: string; over90: string };
+  byPartner: ReceivableRow[];
+  byClient: ReceivableRow[];
+}
+
+/** POST /billing/invoices/:id/remind — omit `channel` for the firm's own. */
+export interface RemindInvoiceInput {
+  channel?: 'email' | 'whatsapp' | 'copy';
+}
+
+interface InvoiceReminderBase {
+  invoiceId: string;
+  client: string;
+  text: string;
+}
+
+/** As the filing chase (PS-001): e-mailed, a wa.me link to open, or text to copy. */
+export type InvoiceReminderResult = InvoiceReminderBase &
+  (
+    | { channel: 'email'; to: string }
+    | { channel: 'whatsapp'; waUrl: string }
+    | { channel: 'copy'; fallback: 'no_email' | 'no_phone' | null }
+  );
+
+/** A reminder sent about an invoice. */
+export interface InvoiceReminderRecord {
+  id: string;
+  channel: 'email' | 'whatsapp' | 'copy';
+  automatic: boolean;
+  daysPastDue: number | null;
+  sentByName: string | null;
+  createdAt: string;
 }
 
 // ── PS-202 · Receipts, part payments and TDS on our fees ────────────────

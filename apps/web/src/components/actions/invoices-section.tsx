@@ -34,6 +34,7 @@ import {
   useBillingSettings,
 } from '@/components/billing/invoice-gst';
 import { InvoiceAdjustments } from '@/components/billing/invoice-adjustments';
+import { InvoiceReminders } from '@/components/billing/invoice-reminders';
 
 /** Format a decimal-string amount as money in the invoice's currency. */
 function money(amount: string | null | undefined, currency = 'INR'): string {
@@ -704,6 +705,9 @@ function InvoiceDetailModal({
 
           {receipts && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
             <InvoiceAdjustments invoice={inv} onChanged={refresh} />
+          )}
+          {receipts && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
+            <InvoiceReminders invoice={inv} />
           )}
 
           {isDraft && (

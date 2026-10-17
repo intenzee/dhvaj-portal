@@ -90,6 +90,8 @@ describe('settingsChanges', () => {
     sacDefault: '998221',
     invoicePrefix: 'INV',
     invoiceTermsDays: 15,
+    invoiceReminderDays: [7, 15, 30],
+    autoInvoiceReminders: false,
     version: 3,
     updatedAt: '2026-10-16T00:00:00Z',
   };

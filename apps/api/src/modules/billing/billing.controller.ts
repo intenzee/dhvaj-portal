@@ -19,6 +19,8 @@ import {
   type ClientStatement,
   type GlobalInvoiceRecord,
   type InvoiceAdjustment,
+  type InvoiceReminderRecord,
+  type InvoiceReminderResult,
   type ReceiptRecord,
   type Paginated,
 } from '@hsdg/contracts';
@@ -36,11 +38,13 @@ import {
   DecideAdjustmentDto,
   ReceiptListQueryDto,
   RequestCreditNoteDto,
+  RemindInvoiceDto,
   RequestWriteOffDto,
   ReverseReceiptDto,
   UpdateBillingSettingsDto,
 } from './billing.dto';
 import { ReceiptsService } from './receipts.service';
+import { ReceivablesService } from './receivables.service';
 
 /**
  * Practice Services Phase 2 · Fees to cash (ff_billing_v2). PS-201: the
@@ -57,6 +61,7 @@ export class BillingController {
     private readonly flags: FeatureFlagsService,
     private readonly receipts: ReceiptsService,
     private readonly adjustments: AdjustmentsService,
+    private readonly receivables: ReceivablesService,
   ) {}
 
   @Get('settings')
@@ -246,6 +251,31 @@ export class BillingController {
     return this.adjustments.decide(rlsContextFromPrincipal(principal), 'write_off', id, dto);
   }
 
+  @Post('invoices/:invoiceId/remind')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({
+    summary: 'Remind the client of an open invoice (e-mail, WhatsApp link or text to copy); logged',
+  })
+  remind(
+    @CurrentPrincipal() principal: Principal,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+    @Body() dto: RemindInvoiceDto,
+  ): Promise<InvoiceReminderResult> {
+    this.requireOn(principal);
+    return this.receivables.remind(rlsContextFromPrincipal(principal), invoiceId, dto);
+  }
+
+  @Get('invoices/:invoiceId/reminders')
+  @ApiOperation({ summary: 'The payment reminders sent about an invoice, newest first' })
+  reminders(
+    @CurrentPrincipal() principal: Principal,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+  ): Promise<InvoiceReminderRecord[]> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.receivables.reminders(rlsContextFromPrincipal(principal), invoiceId);
+  }
+
   private requireOn(principal: Principal): void {
     if (!this.flags.isOnFor(FEATURE_FLAG.billing, principal.officeCode)) {
       throw new NotFoundException();
@@ -253,7 +283,7 @@ export class BillingController {
   }
 }
 
-function requireBillingReader(principal: Principal): void {
+export function requireBillingReader(principal: Principal): void {
   const held = new Set(principal.permissions);
   if (!held.has(PERMISSION.billingManage) && !held.has(PERMISSION.reportRead)) {
     throw new ForbiddenException('Missing required permission(s): billing.manage or report.read.');

@@ -4,6 +4,9 @@ import {
   FEATURE_FLAG,
   NOTIFICATION_TYPE,
   REMINDER_CHANNEL_SETTING,
+  autoInvoiceReminderDue,
+  invoiceOverdueNudge,
+  invoiceReminderText,
   isNoticeOpen,
   type EngagementKind,
   type NoticeStatus,
@@ -30,6 +33,8 @@ export interface ScanResult {
   clientDeliveryEnqueued: number;
   noticeReplyDue: number;
   noticeHearingDue: number;
+  invoiceOverdue: number;
+  invoiceRemindersSent: number;
   total: number;
 }
 
@@ -50,6 +55,24 @@ interface DueNoticeRow {
   reviewer_employee_id: string | null;
   reply_days_left: number | null;
   hearing_days_left: number | null;
+}
+
+interface OverdueInvoiceRow {
+  id: string;
+  invoice_number: string | null;
+  engagement_id: string;
+  engagement_code: string;
+  client_entity_id: string;
+  entity_name: string;
+  office_code: string;
+  engagement_partner_id: string | null;
+  issued_by_employee_id: string | null;
+  issue_date: string | null;
+  due_date: string | null;
+  balance: string;
+  days_past_due: number;
+  client_email: string | null;
+  auto_sent: number[];
 }
 
 interface DueComplianceRow {
@@ -140,6 +163,8 @@ export class NotificationsScanService {
         clientDeliveryEnqueued: 0,
         noticeReplyDue: 0,
         noticeHearingDue: 0,
+        invoiceOverdue: 0,
+        invoiceRemindersSent: 0,
         total: 0,
       };
 
@@ -385,8 +410,10 @@ export class NotificationsScanService {
       }
 
       await this.scanNotices(client, ctx, result);
+      await this.scanOverdueInvoices(client, ctx, result);
 
       result.total =
+        result.invoiceOverdue +
         result.noticeReplyDue +
         result.noticeHearingDue +
         result.internalSlaOverdue +
@@ -472,6 +499,105 @@ export class NotificationsScanService {
           dedupKey: `notice_hearing_due:${row.id}:${row.next_hearing_on}`,
         });
       }
+    }
+  }
+
+  /**
+   * PS-203 — an issued invoice still unpaid 15, 30 and 60 days past its due
+   * date nudges the engagement partner and whoever issued it, once per band;
+   * full payment (or a void) resolves the nudge (invoices_overdue_resolved).
+   * With firm_settings.auto_invoice_reminders on and the firm reminding clients
+   * by e-mail, the client is e-mailed at the firm's reminder days — the latest
+   * one reached, never a backlog — and the reminder is logged on the invoice.
+   * Only where ff_billing_v2 is on for the engagement's office.
+   */
+  private async scanOverdueInvoices(
+    client: PoolClient,
+    ctx: RlsContext,
+    result: ScanResult,
+  ): Promise<void> {
+    const { rows } = await client.query<OverdueInvoiceRow>(
+      `WITH today AS (SELECT timezone('Asia/Kolkata', now())::date AS d)
+       SELECT i.id, i.invoice_number, i.engagement_id, e.engagement_code, i.client_entity_id,
+              ent.legal_name AS entity_name, o.code AS office_code, e.engagement_partner_id,
+              i.issued_by_employee_id, i.issue_date::text, i.due_date::text,
+              (i.total - i.amount_settled)::text AS balance,
+              today.d - COALESCE(i.due_date, i.issue_date) AS days_past_due,
+              (SELECT c.email::text FROM hsdg.entity_contacts c
+                WHERE c.entity_id = i.client_entity_id AND c.email IS NOT NULL
+                ORDER BY c.is_primary DESC, c.created_at LIMIT 1) AS client_email,
+              ARRAY(SELECT r.auto_at_days FROM hsdg.invoice_reminders r
+                     WHERE r.invoice_id = i.id AND r.auto_at_days IS NOT NULL) AS auto_sent
+         FROM hsdg.invoices i
+         CROSS JOIN today
+         JOIN hsdg.engagements e ON e.id = i.engagement_id
+         JOIN hsdg.entities ent ON ent.id = i.client_entity_id
+         JOIN hsdg.offices o ON o.id = e.office_id
+        WHERE i.status IN ('issued', 'partially_paid') AND i.total > i.amount_settled
+          AND COALESCE(i.due_date, i.issue_date) <= today.d`,
+    );
+    if (rows.length === 0) return;
+    const { rows: firm } = await client.query<{
+      firm_name: string;
+      invoice_reminder_days: number[];
+      auto_invoice_reminders: boolean;
+    }>(
+      `SELECT firm_name, invoice_reminder_days, auto_invoice_reminders
+         FROM hsdg.firm_settings LIMIT 1`,
+    );
+    const settings = firm[0];
+    // The db02e19 gate: clients are e-mailed only when the firm reminds by e-mail.
+    const autoEmail =
+      !!settings?.auto_invoice_reminders &&
+      (await workflowPolicy(client)).clientReminderChannel === REMINDER_CHANNEL_SETTING.email;
+    for (const row of rows) {
+      if (!this.flags.isOnFor(FEATURE_FLAG.billing, row.office_code)) continue;
+      const days = Number(row.days_past_due);
+      const what = `${row.invoice_number ?? 'Invoice'} · ${row.entity_name}`;
+      const band = invoiceOverdueNudge(days);
+      if (band !== null) {
+        result.invoiceOverdue += await this.notifications.emitWith(client, ctx, {
+          type: NOTIFICATION_TYPE.invoiceOverdue,
+          recipientEmployeeIds: [row.engagement_partner_id, row.issued_by_employee_id],
+          title: `${band}+ days overdue — ${what}`,
+          body: `₹${row.balance} is outstanding on ${what} (${row.engagement_code}), ${days} days past due.`,
+          engagementId: row.engagement_id,
+          objectType: 'invoice',
+          objectId: row.id,
+          dedupKey: `invoice_overdue:${row.id}:${band}`,
+        });
+      }
+      if (!autoEmail || !settings || !row.client_email) continue;
+      if (!this.notifications.hasExternalChannels) continue;
+      const at = autoInvoiceReminderDue(days, settings.invoice_reminder_days, row.auto_sent);
+      if (at === null) continue;
+      // Log first: the unique (invoice, auto_at_days) index makes a concurrent
+      // sweep a no-op instead of a second e-mail.
+      const { rowCount } = await client.query(
+        `INSERT INTO hsdg.invoice_reminders
+           (invoice_id, client_entity_id, engagement_id, channel, auto_at_days, days_past_due)
+         VALUES ($1, $2, $3, 'email', $4, $5)
+         ON CONFLICT (invoice_id, auto_at_days) WHERE auto_at_days IS NOT NULL DO NOTHING`,
+        [row.id, row.client_entity_id, row.engagement_id, at, days],
+      );
+      if (!rowCount) continue;
+      result.invoiceRemindersSent += 1;
+      const sent = await this.notifications.enqueueClientDeliveryWith(client, {
+        recipientEmail: row.client_email,
+        type: NOTIFICATION_TYPE.invoiceOverdue,
+        title: `Payment reminder — ${row.invoice_number ?? 'invoice'}`,
+        body: invoiceReminderText({
+          clientName: row.entity_name,
+          invoiceNumber: row.invoice_number,
+          issueDate: row.issue_date,
+          dueDate: row.due_date,
+          balance: row.balance,
+          daysPastDue: days,
+          firmName: settings.firm_name,
+        }),
+        engagementId: row.engagement_id,
+      });
+      result.clientDeliveryEnqueued += sent;
     }
   }
 }
