@@ -7,6 +7,8 @@
  * helpers work in whole paise so nothing drifts in floating point.
  */
 
+import type { InvoiceStatus } from './commercial';
+
 /** SAC for accounting, auditing and book-keeping services (the firm may change it). */
 export const SAC_DEFAULT = '998221';
 
@@ -897,6 +899,162 @@ export interface CreateFeeMilestoneInput {
   description: string;
   amount: string;
   dueOn: string;
+}
+
+// ── PS-206 (fix) · Time billed once ────────────────────────────────────────
+
+/** Time with no stream (engagement service) groups under this key. */
+export const NO_STREAM_KEY = 'none';
+
+/**
+ * unbilled: on no live invoice; billed: on a live invoice (draft or issued);
+ * correction_pending: a correction awaits a lead's approval, so it waits too.
+ */
+export const BILLABLE_TIME_STATUSES = ['unbilled', 'billed', 'correction_pending'] as const;
+export type BillableTimeStatus = (typeof BILLABLE_TIME_STATUSES)[number];
+
+/** One stopped, billable time entry of an engagement, and where it stands for billing. */
+export interface BillableTimeEntry {
+  /** The original entry; an approved correction keeps its original's id and billing. */
+  entryId: string;
+  employeeId: string;
+  employeeName: string;
+  /** The day (IST) the work started. */
+  workedOn: string;
+  /** Effective seconds: the latest approved correction's, else the original's. */
+  seconds: number;
+  /** The stream key, or NO_STREAM_KEY. */
+  stream: string;
+  streamLabel: string;
+  taskTitle: string | null;
+  category: string | null;
+  note: string | null;
+  status: BillableTimeStatus;
+  /** The live invoice it is on (billed_invoice_id), when billed. */
+  invoiceId: string | null;
+  /** Null while that invoice is a draft. */
+  invoiceNumber: string | null;
+  invoiceStatus: InvoiceStatus | null;
+  invoiceLineId: string | null;
+  /** The hourly rate it was billed at. */
+  billedRatePerHour: string | null;
+}
+
+/** GET /billing/engagements/:id/time — billable time, billed and not. */
+export interface BillableTimeReport {
+  engagementId: string;
+  from: string | null;
+  to: string | null;
+  entries: BillableTimeEntry[];
+  unbilledSeconds: number;
+  billedSeconds: number;
+}
+
+/** The hourly rate typed in for a stream's line. */
+export interface TimeRateInput {
+  stream: string;
+  ratePerHour: string;
+}
+
+/** POST /billing/engagements/:id/time/draft — the chosen entries onto one draft. */
+export interface DraftFromTimeInput {
+  entryIds: string[];
+  rates: TimeRateInput[];
+  /** Printed after the line description, e.g. "1 Sep 2026 to 30 Sep 2026". */
+  period?: string;
+}
+
+/** GET /billing/invoices/:id/time — the time each line of an invoice covers. */
+export interface InvoiceTimeEntry {
+  lineId: string;
+  entryId: string;
+  employeeName: string;
+  workedOn: string;
+  seconds: number;
+  ratePerHour: string;
+  /** The invoice was voided: the entry is free to bill again. */
+  released: boolean;
+}
+
+/** Hours to two places, as invoices carry them: 5400 → '1.50'. Pure — tested. */
+export function hoursOf(seconds: number): string {
+  return (Math.round(seconds / 36) / 100).toFixed(2);
+}
+
+/** A chosen entry, as the line builder needs it. */
+export interface TimeLinePick {
+  entryId: string;
+  stream: string;
+  streamLabel: string;
+  seconds: number;
+}
+
+/** One draft line from time: a stream's hours at its rate, and the entries it covers. */
+export interface TimeLineDraft {
+  stream: string;
+  description: string;
+  quantity: string;
+  unitAmount: string;
+  sortOrder: number;
+  entries: { entryId: string; seconds: number }[];
+}
+
+/**
+ * Invoice lines from chosen time: one line per stream (in label order, no
+ * stream last) of its hours at the typed hourly rate. A stream with no rate
+ * above nil, or too little time to show as 0.01 h, is named in `unpriced` /
+ * `tooShort` instead. Pure — tested.
+ */
+export function timeBillingLines(
+  picks: TimeLinePick[],
+  rates: Record<string, string>,
+  period: string,
+): { lines: TimeLineDraft[]; unpriced: string[]; tooShort: string[] } {
+  const groups = new Map<string, { label: string; entries: TimeLinePick[] }>();
+  for (const p of picks) {
+    const g = groups.get(p.stream) ?? { label: p.streamLabel, entries: [] };
+    g.entries.push(p);
+    groups.set(p.stream, g);
+  }
+  const ordered = [...groups.entries()].sort(([ka, a], [kb, b]) =>
+    ka === NO_STREAM_KEY ? 1 : kb === NO_STREAM_KEY ? -1 : a.label.localeCompare(b.label),
+  );
+  const lines: TimeLineDraft[] = [];
+  const unpriced: string[] = [];
+  const tooShort: string[] = [];
+  for (const [stream, g] of ordered) {
+    const rate = positiveAmount(rates[stream]);
+    if (!rate) {
+      unpriced.push(g.label);
+      continue;
+    }
+    const seconds = g.entries.reduce((s, e) => s + e.seconds, 0);
+    const quantity = hoursOf(seconds);
+    if (quantity === '0.00') {
+      tooShort.push(g.label);
+      continue;
+    }
+    lines.push({
+      stream,
+      description: `${g.label} — professional time${period ? ` (${period})` : ''}`,
+      quantity,
+      unitAmount: rate,
+      sortOrder: lines.length,
+      entries: g.entries.map((e) => ({ entryId: e.entryId, seconds: e.seconds })),
+    });
+  }
+  return { lines, unpriced, tooShort };
+}
+
+/** '2000' → '2000.00'; nil, negative or not an amount → null. */
+function positiveAmount(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  try {
+    const p = toPaise(value);
+    return p > 0n ? fromPaise(p) : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── PS-204 · TDS on our fees against the firm's 26AS ─────────────────────

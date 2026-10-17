@@ -227,6 +227,16 @@ export class TimeAutoService {
       if (o.has_pending) {
         throw new ConflictException('A correction to this entry is already awaiting approval.');
       }
+      // Billed time stays as billed (PS-206 fix): free it from the invoice first.
+      const billed = await client.query(
+        `SELECT 1 FROM hsdg.time_billings WHERE time_entry_id = $1 AND released_at IS NULL`,
+        [o.id],
+      );
+      if (billed.rows[0]) {
+        throw new ConflictException(
+          'This time is on an invoice: void it or take the line off the draft before correcting.',
+        );
+      }
       const seconds = Math.round((end.getTime() - start.getTime()) / 1000);
       const movedMinutes = Math.abs(seconds - (o.effective_seconds ?? 0)) / 60;
       const needsApproval = movedMinutes > AUTO_TIME.adjustApprovalOverMinutes;
