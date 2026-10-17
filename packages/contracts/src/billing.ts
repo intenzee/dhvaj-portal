@@ -621,12 +621,15 @@ export interface InvoiceAdjustment {
   reason: string;
   /** Before tax; a write-off's amount. */
   taxableValue: string;
-  gstRate: string;
+  /** The one rate a credit note's lines carry; null when they differ. */
+  gstRate: string | null;
   cgst: string;
   sgst: string;
   igst: string;
   /** What comes off the balance. */
   total: string;
+  /** A credit note's lines (PS-205); empty for a write-off. */
+  lines: CreditNoteLine[];
   status: AdjustmentStatus;
   requestedById: string | null;
   requestedByName: string | null;
@@ -637,13 +640,29 @@ export interface InvoiceAdjustment {
   version: number;
 }
 
+/** One invoice line a credit note reduces, before tax. */
+export interface CreditNoteLineInput {
+  invoiceLineId: string;
+  taxableValue: string;
+}
+
 /** POST /billing/invoices/:invoiceId/credit-notes. */
 export interface RequestCreditNoteInput {
-  /** Before tax; GST is added as on the invoice. */
-  taxableValue: string;
-  /** Defaults to the invoice's highest line rate. */
-  gstRate?: number;
+  /** The invoice lines it reduces; each keeps that line's GST rate. */
+  lines: CreditNoteLineInput[];
   reason: string;
+}
+
+/** A credit note's line: part of one invoice line, taxed at its rate. */
+export interface CreditNoteLine {
+  invoiceLineId: string;
+  description: string;
+  taxableValue: string;
+  gstRate: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  total: string;
 }
 
 /** POST /billing/invoices/:invoiceId/write-offs. */
@@ -676,4 +695,101 @@ export function creditNoteSplit(
   }
   const s = gstSplit([{ taxableValue, gstRate }], invoice.firmState, invoice.placeOfSupply);
   return { cgst: s.cgst, sgst: s.sgst, igst: s.igst, total: s.total };
+}
+
+/** An invoice line as a credit note may reduce it. */
+export interface CreditableLine {
+  id: string;
+  description: string;
+  taxableValue: string;
+  gstRate: string | number;
+  /** Already on pending or approved credit notes, before tax. */
+  credited: string;
+}
+
+/**
+ * A credit note's lines, each taxed at its own invoice line's rate (gstSplit
+ * per line, so the lines add up to the note), and never more than is left
+ * of a line after earlier credit notes. No tax when the invoice carried
+ * none. Pure — tested.
+ */
+export function creditNoteLines(
+  asked: CreditNoteLineInput[],
+  lines: CreditableLine[],
+  invoice: { firmState: string | null; placeOfSupply: string | null; charged: boolean },
+):
+  | {
+      ok: true;
+      lines: CreditNoteLine[];
+      taxableValue: string;
+      gstRate: string | null;
+      cgst: string;
+      sgst: string;
+      igst: string;
+      total: string;
+    }
+  | { ok: false; error: string } {
+  const byId = new Map(lines.map((l) => [l.id, l]));
+  const seen = new Set<string>();
+  const out: CreditNoteLine[] = [];
+  let taxable = 0n;
+  let cgst = 0n;
+  let sgst = 0n;
+  let igst = 0n;
+  for (const a of asked) {
+    const line = byId.get(a.invoiceLineId);
+    if (!line) return { ok: false, error: 'A credit note line must be a line of this invoice.' };
+    if (seen.has(line.id)) return { ok: false, error: 'Credit each invoice line once.' };
+    seen.add(line.id);
+    let paise: bigint;
+    try {
+      paise = toPaise(a.taxableValue.trim());
+    } catch {
+      return { ok: false, error: `Enter an amount for "${line.description}".` };
+    }
+    if (paise <= 0n) return { ok: false, error: `Enter an amount for "${line.description}".` };
+    const left = toPaise(line.taxableValue) - toPaise(line.credited);
+    if (paise > left) {
+      return {
+        ok: false,
+        error: `Only ${formatInr(fromPaise(left > 0n ? left : 0n))} of "${line.description}" is left to credit.`,
+      };
+    }
+    const value = fromPaise(paise);
+    const tax =
+      invoice.charged && invoice.firmState
+        ? gstSplit(
+            [{ taxableValue: value, gstRate: line.gstRate }],
+            invoice.firmState,
+            invoice.placeOfSupply,
+          )
+        : null;
+    const row: CreditNoteLine = {
+      invoiceLineId: line.id,
+      description: line.description,
+      taxableValue: value,
+      gstRate: tax ? Number(line.gstRate).toFixed(2) : '0.00',
+      cgst: tax?.cgst ?? '0.00',
+      sgst: tax?.sgst ?? '0.00',
+      igst: tax?.igst ?? '0.00',
+      total: tax?.total ?? value,
+    };
+    out.push(row);
+    taxable += paise;
+    cgst += toPaise(row.cgst);
+    sgst += toPaise(row.sgst);
+    igst += toPaise(row.igst);
+  }
+  if (out.length === 0) return { ok: false, error: 'Credit at least one invoice line.' };
+  const rates = new Set(out.map((l) => l.gstRate));
+  return {
+    ok: true,
+    lines: out,
+    taxableValue: fromPaise(taxable),
+    gstRate: rates.size === 1 ? out[0]!.gstRate : null,
+    cgst: fromPaise(cgst),
+    sgst: fromPaise(sgst),
+    igst: fromPaise(igst),
+    total: fromPaise(taxable + cgst + sgst + igst),
+  };
 }

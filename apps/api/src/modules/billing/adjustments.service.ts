@@ -8,12 +8,14 @@ import {
 import type { PoolClient } from 'pg';
 import {
   NOTIFICATION_TYPE,
-  creditNoteSplit,
+  creditNoteLines,
   formatInr,
   fromPaise,
   toPaise,
   type AdjustmentKind,
   type AdjustmentStatus,
+  type CreditNoteLine,
+  type CreditableLine,
   type DecideAdjustmentInput,
   type InvoiceAdjustment,
   type RequestCreditNoteInput,
@@ -37,7 +39,7 @@ interface AdjustmentRow {
   credit_date: string | null;
   reason: string;
   taxable_value: string;
-  gst_rate: string;
+  gst_rate: string | null;
   cgst: string;
   sgst: string;
   igst: string;
@@ -50,6 +52,7 @@ interface AdjustmentRow {
   decided_at: Date | null;
   decision_note: string | null;
   version: number;
+  lines: CreditNoteLine[];
 }
 
 /** Both kinds as one row shape; a write-off is its own taxable value and total. */
@@ -72,7 +75,16 @@ const ADJUSTMENT_BASE = `
          e.legal_name AS client_name, a.number, a.credit_date, a.reason, a.taxable_value,
          a.gst_rate, a.cgst, a.sgst, a.igst, a.total, a.status, a.requested_by_employee_id,
          rb.full_name AS requested_by_name, a.created_at, db.full_name AS decided_by_name,
-         a.decided_at, a.decision_note, a.version
+         a.decided_at, a.decision_note, a.version,
+         COALESCE((
+           SELECT json_agg(json_build_object(
+                    'invoiceLineId', cl.invoice_line_id, 'description', cl.description,
+                    'taxableValue', cl.taxable_value::text, 'gstRate', cl.gst_rate::text,
+                    'cgst', cl.cgst::text, 'sgst', cl.sgst::text, 'igst', cl.igst::text,
+                    'total', cl.total::text) ORDER BY li.sort_order, cl.created_at)
+             FROM hsdg.credit_note_lines cl
+             JOIN hsdg.invoice_line_items li ON li.id = cl.invoice_line_id
+            WHERE a.kind = 'credit_note' AND cl.credit_note_id = a.id), '[]'::json) AS lines
     FROM (${ADJUSTMENTS}) a
     JOIN hsdg.invoices i ON i.id = a.invoice_id
     JOIN hsdg.entities e ON e.id = a.client_entity_id
@@ -100,11 +112,11 @@ interface InvoiceFacts {
   place_of_supply_state: string | null;
   is_reverse_charge: boolean;
   tax_charged: boolean;
-  top_rate: string | null;
 }
 
 /**
- * PS-205 · reducing a bill: a credit note (with GST, as on the invoice) or a
+ * PS-205 · reducing a bill: a credit note (on named invoice lines, each with its
+ * own GST rate) or a
  * write-off. Anyone who bills the client (billing.manage) asks; a partner
  * (billing.approve) who did not ask decides. Triggers number an approved
  * credit note, refuse a requester's own decision, and settle the invoice so
@@ -150,15 +162,25 @@ export class AdjustmentsService {
   ): Promise<InvoiceAdjustment> {
     return this.db.withRlsContext(ctx, async (client) => {
       const inv = await this.openInvoice(client, invoiceId);
-      const rate = input.gstRate ?? Number(inv.top_rate ?? 0);
-      const firmState = await firmStateCode(client);
-      const split = creditNoteSplit(input.taxableValue, inv.tax_charged ? rate : 0, {
-        firmState,
+      const { rows: lines } = await client.query<CreditableLine>(
+        `SELECT l.id, l.description, l.taxable_value::text AS "taxableValue",
+                l.gst_rate::text AS "gstRate",
+                COALESCE((SELECT sum(cl.taxable_value) FROM hsdg.credit_note_lines cl
+                            JOIN hsdg.credit_notes cn ON cn.id = cl.credit_note_id
+                           WHERE cl.invoice_line_id = l.id
+                             AND cn.status IN ('pending', 'approved')), 0)::text AS credited
+           FROM hsdg.invoice_line_items l
+          WHERE l.invoice_id = $1
+          ORDER BY l.sort_order, l.created_at`,
+        [inv.id],
+      );
+      const note = creditNoteLines(input.lines, lines, {
+        firmState: await firmStateCode(client),
         placeOfSupply: inv.place_of_supply_state,
         charged: inv.tax_charged && !inv.is_reverse_charge,
       });
-      assertWithinBalance(inv, split.total);
-      const charged = toPaise(split.total) > toPaise(input.taxableValue);
+      if (!note.ok) throw new BadRequestException(note.error);
+      assertWithinBalance(inv, note.total);
       let id: string;
       try {
         const { rows } = await client.query<{ id: string }>(
@@ -171,15 +193,24 @@ export class AdjustmentsService {
             inv.id,
             inv.client_entity_id,
             input.reason.trim(),
-            fromPaise(toPaise(input.taxableValue)),
-            charged ? rate : 0,
-            split.cgst,
-            split.sgst,
-            split.igst,
+            note.taxableValue,
+            note.gstRate,
+            note.cgst,
+            note.sgst,
+            note.igst,
             ctx.employeeId ?? null,
           ],
         );
         id = rows[0]!.id;
+        for (const l of note.lines) {
+          await client.query(
+            `INSERT INTO hsdg.credit_note_lines
+               (credit_note_id, invoice_line_id, description, taxable_value, gst_rate,
+                cgst, sgst, igst)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [id, l.invoiceLineId, l.description, l.taxableValue, l.gstRate, l.cgst, l.sgst, l.igst],
+          );
+        }
       } catch (err) {
         throw translateAdjustmentError(err);
       }
@@ -332,9 +363,7 @@ export class AdjustmentsService {
     const { rows } = await client.query<InvoiceFacts>(
       `SELECT i.id, i.invoice_number, i.engagement_id, i.client_entity_id, i.status, i.total,
               i.amount_settled, i.place_of_supply_state, i.is_reverse_charge,
-              (i.cgst + i.sgst + i.igst) > 0 AS tax_charged,
-              (SELECT max(l.gst_rate)::text FROM hsdg.invoice_line_items l
-                WHERE l.invoice_id = i.id) AS top_rate
+              (i.cgst + i.sgst + i.igst) > 0 AS tax_charged
          FROM hsdg.invoices i
         WHERE i.id = $1`,
       [invoiceId],
@@ -399,6 +428,7 @@ function toAdjustment(r: AdjustmentRow): InvoiceAdjustment {
     decidedAt: r.decided_at?.toISOString() ?? null,
     decisionNote: r.decision_note,
     version: r.version,
+    lines: r.lines,
   };
 }
 

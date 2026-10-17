@@ -1,9 +1,12 @@
 import {
+  creditNoteLines,
   creditNoteSplit,
   fromPaise,
   toPaise,
   type AdjustmentKind,
   type AdjustmentStatus,
+  type CreditNoteLine,
+  type InvoiceAdjustment,
   type InvoiceDetail,
 } from '@hsdg/contracts';
 
@@ -23,11 +26,6 @@ export function adjustmentStatusLabel(status: AdjustmentStatus): string {
     default:
       return 'Void';
   }
-}
-
-/** The invoice's highest line rate — a credit note's default. */
-export function topGstRate(lines: Pick<InvoiceDetail['lines'][number], 'gstRate'>[]): number {
-  return lines.reduce((m, l) => Math.max(m, Number(l.gstRate) || 0), 0);
 }
 
 /**
@@ -67,4 +65,59 @@ export function adjustmentPreview(
     return { ok: false, error: `More than the ${invoice.balance} still owed.` };
   }
   return { ok: true, taxable, ...split };
+}
+
+/** Before tax, what pending and approved credit notes already take off each invoice line. Pure — tested. */
+export function creditedByLine(adjustments: readonly InvoiceAdjustment[]): Map<string, string> {
+  const paise = new Map<string, bigint>();
+  for (const a of adjustments) {
+    if (a.kind !== 'credit_note' || (a.status !== 'pending' && a.status !== 'approved')) continue;
+    for (const l of a.lines) {
+      paise.set(l.invoiceLineId, (paise.get(l.invoiceLineId) ?? 0n) + toPaise(l.taxableValue));
+    }
+  }
+  return new Map([...paise].map(([id, p]) => [id, fromPaise(p)]));
+}
+
+/**
+ * A credit note over the invoice's lines — `amounts` by line id, blanks left
+ * out — each line taxed at its own rate as the API will (creditNoteLines),
+ * and never more than the balance. Pure — tested.
+ */
+export function creditNotePreview(
+  amounts: Record<string, string>,
+  invoice: Pick<
+    InvoiceDetail,
+    'balance' | 'cgst' | 'sgst' | 'igst' | 'placeOfSupplyState' | 'isReverseCharge' | 'lines'
+  >,
+  firmState: string | null,
+  credited: Map<string, string>,
+):
+  | { ok: true; lines: CreditNoteLine[]; taxable: string; total: string }
+  | { ok: false; error: string } {
+  const asked = invoice.lines
+    .filter((l) => (amounts[l.id] ?? '').trim() !== '')
+    .map((l) => ({ invoiceLineId: l.id, taxableValue: amounts[l.id]!.trim() }));
+  const r = creditNoteLines(
+    asked,
+    invoice.lines.map((l) => ({
+      id: l.id,
+      description: l.description,
+      taxableValue: l.taxableValue,
+      gstRate: l.gstRate,
+      credited: credited.get(l.id) ?? '0',
+    })),
+    {
+      firmState,
+      placeOfSupply: invoice.placeOfSupplyState,
+      charged:
+        !invoice.isReverseCharge &&
+        toPaise(invoice.cgst) + toPaise(invoice.sgst) + toPaise(invoice.igst) > 0n,
+    },
+  );
+  if (!r.ok) return r;
+  if (toPaise(r.total) > toPaise(invoice.balance)) {
+    return { ok: false, error: `More than the ${invoice.balance} still owed.` };
+  }
+  return { ok: true, lines: r.lines, taxable: r.taxableValue, total: r.total };
 }
