@@ -19,6 +19,7 @@ import {
   type ClientStatement,
   type GlobalInvoiceRecord,
   type InvoiceAdjustment,
+  type FeeMilestone,
   type InvoiceDetail,
   type InvoiceReminderRecord,
   type InvoiceReminderResult,
@@ -36,14 +37,17 @@ import { BillingSettingsService } from './billing-settings.service';
 import { AdjustmentsService } from './adjustments.service';
 import {
   AdjustmentListQueryDto,
+  CreateFeeMilestoneDto,
   CreateReceiptDto,
   DecideAdjustmentDto,
   DraftFromUnbilledDto,
   ReceiptListQueryDto,
   RequestCreditNoteDto,
   RemindInvoiceDto,
+  RestoreFeeDto,
   RequestWriteOffDto,
   ReverseReceiptDto,
+  SetAsideFeesDto,
   UnbilledQueryDto,
   UpdateBillingSettingsDto,
 } from './billing.dto';
@@ -304,6 +308,62 @@ export class BillingController {
   ): Promise<InvoiceDetail> {
     this.requireOn(principal);
     return this.unbilled.draft(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Post('unbilled/set-aside')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Set due fee periods aside: billed outside the app, or not billed' })
+  setAsideFees(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: SetAsideFeesDto,
+  ): Promise<{ setAside: number }> {
+    this.requireOn(principal);
+    return this.unbilled.setAside(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Post('unbilled/restore')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'List a set-aside fee period as unbilled again' })
+  restoreFee(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: RestoreFeeDto,
+  ): Promise<{ restored: string }> {
+    this.requireOn(principal);
+    return this.unbilled.restore(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Get('engagements/:engagementId/fee-milestones')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: "The engagement's fee milestones and events, with where each stands" })
+  feeMilestones(
+    @CurrentPrincipal() principal: Principal,
+    @Param('engagementId', new ParseUUIDPipe()) engagementId: string,
+  ): Promise<FeeMilestone[]> {
+    this.requireOn(principal);
+    return this.unbilled.milestones(rlsContextFromPrincipal(principal), engagementId);
+  }
+
+  @Post('engagements/:engagementId/fee-milestones')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Agree a fee on a milestone or an event; due on its date' })
+  addFeeMilestone(
+    @CurrentPrincipal() principal: Principal,
+    @Param('engagementId', new ParseUUIDPipe()) engagementId: string,
+    @Body() dto: CreateFeeMilestoneDto,
+  ): Promise<FeeMilestone> {
+    this.requireOn(principal);
+    return this.unbilled.addMilestone(rlsContextFromPrincipal(principal), engagementId, dto);
+  }
+
+  @Post('fee-milestones/:id/cancel')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Cancel a fee milestone that is on no live invoice' })
+  cancelFeeMilestone(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<FeeMilestone> {
+    this.requireOn(principal);
+    return this.unbilled.cancelMilestone(rlsContextFromPrincipal(principal), id);
   }
 
   private requireOn(principal: Principal): void {

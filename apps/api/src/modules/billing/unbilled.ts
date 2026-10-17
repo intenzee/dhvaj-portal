@@ -27,7 +27,12 @@ export interface FeeTerms {
     billingModel: string | null;
     closed: boolean;
   }[];
+  /** Fee milestones and events, not cancelled. Due on their date, beside the rest. */
+  milestones?: { id: string; description: string; amount: string; dueOn: string }[];
 }
+
+/** Engagements that bill nothing: not even an agreed milestone. */
+const NOT_BILLED = new Set(['pro_bono', 'not_billed']);
 
 interface Period {
   suffix: string;
@@ -124,7 +129,7 @@ function periodsBetween(
   return out.filter((p) => p.start <= to && p.end >= from);
 }
 
-function lookbackStart(asOf: string): string {
+export function lookbackStart(asOf: string): string {
   const [y, m] = asOf.split('-').map(Number) as [number, number];
   const total = y * 12 + (m - 1) - UNBILLED_LOOKBACK_MONTHS;
   return iso(Math.floor(total / 12), (total % 12) + 1, 1);
@@ -205,10 +210,26 @@ function yearItems(t: FeeTerms, asOf: string): UnbilledItem[] {
   return out;
 }
 
+/** A milestone or event fee is due on its date; no lookback, it was agreed by name. */
+function milestoneItems(t: FeeTerms, asOf: string): UnbilledItem[] {
+  return (t.milestones ?? [])
+    .filter((m) => m.dueOn <= asOf && toPaise(m.amount) > 0n)
+    .map((m) =>
+      item(
+        `milestone:${m.id}`,
+        'milestone',
+        { suffix: m.id, label: m.description, start: m.dueOn, end: m.dueOn },
+        toPaise(m.amount),
+        asOf,
+      ),
+    );
+}
+
 /**
  * PS-206 · the fixed-fee periods of an engagement that are due by `asOf` (IST),
  * oldest first: a compliance year's fee shared by the billing frequency, else
- * the retainer per period. The caller drops what fee_billings already holds.
+ * the retainer per period; and the fee milestones and events that have come
+ * due (unless the engagement bills nothing). The caller drops what fee_billings already holds.
  * DI-free and unit-tested; unbilled.service.ts feeds it.
  */
 export function dueFeeItems(t: FeeTerms, asOf: string): UnbilledItem[] {
@@ -218,6 +239,7 @@ export function dueFeeItems(t: FeeTerms, asOf: string): UnbilledItem[] {
     : NOT_FIXED.has(t.billingModel ?? '')
       ? []
       : retainerItems(t, asOf);
+  if (!NOT_BILLED.has(t.billingModel ?? '')) items.push(...milestoneItems(t, asOf));
   return items.sort(
     (a, b) => a.periodStart.localeCompare(b.periodStart) || a.key.localeCompare(b.key),
   );

@@ -796,13 +796,13 @@ export function creditNoteLines(
 
 // ── PS-206 · Unbilled fixed fees into a draft invoice ──────────────────────
 
-/** Where a fixed fee comes from: the retainer, or a compliance year's fee. */
-export const UNBILLED_SOURCES = ['retainer', 'year_fee'] as const;
+/** Where a fixed fee comes from: the retainer, a compliance year's fee, or a fee milestone. */
+export const UNBILLED_SOURCES = ['retainer', 'year_fee', 'milestone'] as const;
 export type UnbilledSource = (typeof UNBILLED_SOURCES)[number];
 
 /** One fixed-fee period that is due and on no live invoice. */
 export interface UnbilledItem {
-  /** Stable per engagement: `retainer:2026-09`, `year:<id>:2026-27:Q2`, … */
+  /** Stable per engagement: `retainer:2026-09`, `year:<id>:2026-27:Q2`, `milestone:<id>`. */
   key: string;
   source: UnbilledSource;
   /** "September 2026", "Q2 2026-27 (Jul–Sep 2026)", "FY 2026-27", "Fixed fee". */
@@ -825,13 +825,27 @@ export interface UnbilledEngagement {
   partnerName: string | null;
   items: UnbilledItem[];
   total: string;
+  /** Periods set aside as billed outside the app or not billed, in the window. */
+  setAside: SetAsideFee[];
+}
+
+/** A fee period set aside without an invoice; restoring it lists it again. */
+export interface SetAsideFee {
+  key: string;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: string;
+  reason: string;
+  byName: string | null;
+  at: string;
 }
 
 export interface UnbilledReport {
   asOf: string;
   engagements: UnbilledEngagement[];
   total: string;
-  /** What the report leaves out, said once: time (PS-302), milestone/event fees. */
+  /** What the report leaves out, said once: time until PS-302. */
   notes: string[];
 }
 
@@ -839,4 +853,45 @@ export interface UnbilledReport {
 export interface DraftFromUnbilledInput {
   engagementId: string;
   keys: string[];
+}
+
+/** POST /billing/unbilled/set-aside — billed outside the app, or not billing them. */
+export interface SetAsideFeesInput {
+  engagementId: string;
+  keys: string[];
+  reason: string;
+}
+
+/** POST /billing/unbilled/restore — list a set-aside period again. */
+export interface RestoreFeeInput {
+  engagementId: string;
+  key: string;
+}
+
+/** A fee billed on a milestone or an event, not by the calendar. */
+export const FEE_MILESTONE_KINDS = ['milestone', 'event'] as const;
+export type FeeMilestoneKind = (typeof FEE_MILESTONE_KINDS)[number];
+
+/** upcoming: not yet due; due: on the unbilled list; billed: on a live invoice. */
+export type FeeMilestoneStatus = 'upcoming' | 'due' | 'billed' | 'set_aside' | 'cancelled';
+
+export interface FeeMilestone {
+  id: string;
+  engagementId: string;
+  kind: FeeMilestoneKind;
+  description: string;
+  amount: string;
+  dueOn: string;
+  status: FeeMilestoneStatus;
+  /** The live invoice it is on, when billed. */
+  invoiceId: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface CreateFeeMilestoneInput {
+  kind: FeeMilestoneKind;
+  description: string;
+  amount: string;
+  dueOn: string;
 }
