@@ -34,6 +34,8 @@ export interface BillingSettings {
   autoInvoiceReminders: boolean;
   /** Rupees a 26AS credit may differ from the TDS booked and still match (PS-204). */
   tdsMatchTolerance: string;
+  /** The day billing started in the app; the unbilled list starts there (PS-206). */
+  billingFrom: string | null;
   version: number;
   updatedAt: string;
 }
@@ -47,6 +49,7 @@ export interface UpdateBillingSettingsInput {
   invoiceReminderDays?: number[];
   autoInvoiceReminders?: boolean;
   tdsMatchTolerance?: string;
+  billingFrom?: string | null;
   version: number;
 }
 
@@ -90,6 +93,19 @@ function rateBp(rate: string | number): bigint {
 }
 
 // ── GST split ────────────────────────────────────────────────────────────
+
+/** The tax on one rate band's taxable value, in paise: each half, or the whole as IGST. */
+function bandTax(
+  base: bigint,
+  bp: bigint,
+  intraState: boolean,
+): { cgst: bigint; sgst: bigint; igst: bigint } {
+  const sign = base < 0n ? -1n : 1n;
+  const abs = base * sign;
+  const half = intraState ? sign * mulDivRound(abs, bp, 20000n) : 0n;
+  const whole = intraState ? 0n : sign * mulDivRound(abs, bp, 10000n);
+  return { cgst: half, sgst: half, igst: whole };
+}
 
 export interface GstLine {
   /** quantity × unit amount, before tax. */
@@ -141,10 +157,7 @@ export function gstSplit(
   let igst = 0n;
   const byRate: GstRateBand[] = [];
   for (const [bp, base] of [...bands].sort((a, b) => (b[0] > a[0] ? 1 : b[0] < a[0] ? -1 : 0))) {
-    const sign = base < 0n ? -1n : 1n;
-    const abs = base * sign;
-    const half = intraState ? sign * mulDivRound(abs, bp, 20000n) : 0n;
-    const whole = intraState ? 0n : sign * mulDivRound(abs, bp, 10000n);
+    const { cgst: half, igst: whole } = bandTax(base, bp, intraState);
     taxable += base;
     cgst += half;
     sgst += half;
@@ -708,13 +721,24 @@ export interface CreditableLine {
   gstRate: string | number;
   /** Already on pending or approved credit notes, before tax. */
   credited: string;
+  /** The CGST, SGST and IGST those notes already reverse on this line. */
+  creditedCgst: string;
+  creditedSgst: string;
+  creditedIgst: string;
 }
 
 /**
- * A credit note's lines, each taxed at its own invoice line's rate (gstSplit
- * per line, so the lines add up to the note), and never more than is left
- * of a line after earlier credit notes. No tax when the invoice carried
- * none. Pure — tested.
+ * A credit note's lines, each taxed at its own invoice line's rate, and never
+ * more than is left of a line after earlier credit notes. No tax when the
+ * invoice carried none.
+ *
+ * The invoice rounds its tax once per rate band (gstSplit), so a note's tax
+ * is worked on the band too: what the band's credited value comes to after
+ * this line, less the tax already reversed in that band, CGST, SGST and IGST
+ * each. A line that takes the last of its band reverses exactly the band's
+ * tax still left, and partial notes never add up to more than the invoice
+ * charged. Lines are worked in the invoice's order, so the split does not
+ * depend on the order they are asked in. Pure — tested.
  */
 export function creditNoteLines(
   asked: CreditNoteLineInput[],
@@ -733,17 +757,11 @@ export function creditNoteLines(
     }
   | { ok: false; error: string } {
   const byId = new Map(lines.map((l) => [l.id, l]));
-  const seen = new Set<string>();
-  const out: CreditNoteLine[] = [];
-  let taxable = 0n;
-  let cgst = 0n;
-  let sgst = 0n;
-  let igst = 0n;
+  const amounts = new Map<string, bigint>();
   for (const a of asked) {
     const line = byId.get(a.invoiceLineId);
     if (!line) return { ok: false, error: 'A credit note line must be a line of this invoice.' };
-    if (seen.has(line.id)) return { ok: false, error: 'Credit each invoice line once.' };
-    seen.add(line.id);
+    if (amounts.has(line.id)) return { ok: false, error: 'Credit each invoice line once.' };
     let paise: bigint;
     try {
       paise = toPaise(a.taxableValue.trim());
@@ -758,43 +776,108 @@ export function creditNoteLines(
         error: `Only ${formatInr(fromPaise(left > 0n ? left : 0n))} of "${line.description}" is left to credit.`,
       };
     }
+    amounts.set(line.id, paise);
+  }
+  if (amounts.size === 0) return { ok: false, error: 'Credit at least one invoice line.' };
+
+  const taxed = invoice.charged && !!invoice.firmState;
+  const intraState = !invoice.placeOfSupply || invoice.placeOfSupply === invoice.firmState;
+  // Per rate band: the invoice's taxable value and tax, and what notes took of it so far.
+  const bands = new Map<bigint, { taxable: bigint; tax: Tax; credited: bigint; reversed: Tax }>();
+  for (const l of lines) {
+    const bp = rateBp(l.gstRate);
+    const b = bands.get(bp) ?? { taxable: 0n, tax: NO_TAX, credited: 0n, reversed: NO_TAX };
+    b.taxable += toPaise(l.taxableValue);
+    b.credited += toPaise(l.credited);
+    b.reversed = addTax(b.reversed, {
+      cgst: toPaise(l.creditedCgst),
+      sgst: toPaise(l.creditedSgst),
+      igst: toPaise(l.creditedIgst),
+    });
+    bands.set(bp, b);
+  }
+  for (const [bp, b] of bands) b.tax = bandTax(b.taxable, bp, intraState);
+
+  const out: CreditNoteLine[] = [];
+  let taxable = 0n;
+  let total: Tax = NO_TAX;
+  for (const line of lines) {
+    const paise = amounts.get(line.id);
+    if (paise === undefined) continue;
+    let tax: Tax = NO_TAX;
+    if (taxed) {
+      const bp = rateBp(line.gstRate);
+      const b = bands.get(bp)!;
+      b.credited += paise;
+      // The whole band credited: exactly its tax. Otherwise the rate on the
+      // credited value, never past the band's tax.
+      const upTo =
+        b.credited === b.taxable ? b.tax : minTax(bandTax(b.credited, bp, intraState), b.tax);
+      tax = {
+        cgst: atLeastZero(upTo.cgst - b.reversed.cgst),
+        sgst: atLeastZero(upTo.sgst - b.reversed.sgst),
+        igst: atLeastZero(upTo.igst - b.reversed.igst),
+      };
+      b.reversed = addTax(b.reversed, tax);
+    }
     const value = fromPaise(paise);
-    const tax =
-      invoice.charged && invoice.firmState
-        ? gstSplit(
-            [{ taxableValue: value, gstRate: line.gstRate }],
-            invoice.firmState,
-            invoice.placeOfSupply,
-          )
-        : null;
-    const row: CreditNoteLine = {
+    out.push({
       invoiceLineId: line.id,
       description: line.description,
       taxableValue: value,
-      gstRate: tax ? Number(line.gstRate).toFixed(2) : '0.00',
-      cgst: tax?.cgst ?? '0.00',
-      sgst: tax?.sgst ?? '0.00',
-      igst: tax?.igst ?? '0.00',
-      total: tax?.total ?? value,
-    };
-    out.push(row);
+      gstRate: taxed ? Number(line.gstRate).toFixed(2) : '0.00',
+      cgst: fromPaise(tax.cgst),
+      sgst: fromPaise(tax.sgst),
+      igst: fromPaise(tax.igst),
+      total: fromPaise(paise + tax.cgst + tax.sgst + tax.igst),
+    });
     taxable += paise;
-    cgst += toPaise(row.cgst);
-    sgst += toPaise(row.sgst);
-    igst += toPaise(row.igst);
+    total = addTax(total, tax);
   }
-  if (out.length === 0) return { ok: false, error: 'Credit at least one invoice line.' };
   const rates = new Set(out.map((l) => l.gstRate));
   return {
     ok: true,
     lines: out,
     taxableValue: fromPaise(taxable),
     gstRate: rates.size === 1 ? out[0]!.gstRate : null,
-    cgst: fromPaise(cgst),
-    sgst: fromPaise(sgst),
-    igst: fromPaise(igst),
-    total: fromPaise(taxable + cgst + sgst + igst),
+    cgst: fromPaise(total.cgst),
+    sgst: fromPaise(total.sgst),
+    igst: fromPaise(total.igst),
+    total: fromPaise(taxable + total.cgst + total.sgst + total.igst),
   };
+}
+
+/** Tax by head, in paise. */
+interface Tax {
+  cgst: bigint;
+  sgst: bigint;
+  igst: bigint;
+}
+
+const NO_TAX: Tax = { cgst: 0n, sgst: 0n, igst: 0n };
+
+function addTax(a: Tax, b: Tax): Tax {
+  return { cgst: a.cgst + b.cgst, sgst: a.sgst + b.sgst, igst: a.igst + b.igst };
+}
+
+function minTax(a: Tax, b: Tax): Tax {
+  const min = (x: bigint, y: bigint): bigint => (x < y ? x : y);
+  return { cgst: min(a.cgst, b.cgst), sgst: min(a.sgst, b.sgst), igst: min(a.igst, b.igst) };
+}
+
+function atLeastZero(p: bigint): bigint {
+  return p > 0n ? p : 0n;
+}
+
+/**
+ * CGST Act s.34(2): a credit note that reduces GST must be issued by 30
+ * November after the end of the financial year of the invoice it reduces
+ * (or the annual return, if filed earlier — not tracked here). Invoice
+ * issued '2026-10-16' (FY 2026-27) → '2027-11-30'. Pure — tested.
+ */
+export function creditNoteGstDeadline(invoiceIssueDate: string): string {
+  const startYear = Number(financialYearOf(invoiceIssueDate).slice(0, 4));
+  return `${startYear + 1}-11-30`;
 }
 
 // ── PS-206 · Unbilled fixed fees into a draft invoice ──────────────────────
@@ -815,6 +898,8 @@ export interface UnbilledItem {
   amount: string;
   /** Days since the period ended; 0 while it is running. */
   ageDays: number;
+  /** A waiver of it is waiting for a partner; it stays unbilled until approved. */
+  waiverId?: string | null;
 }
 
 /** An engagement's unbilled fixed fees. */
@@ -828,9 +913,21 @@ export interface UnbilledEngagement {
   partnerName: string | null;
   items: UnbilledItem[];
   total: string;
-  /** Periods set aside as billed outside the app or not billed, in the window. */
+  /** Periods set aside as billed outside the app or not billed (from the billing go-live). */
   setAside: SetAsideFee[];
+  /** Waivers of its periods waiting for a partner. */
+  waivers: FeeWaiver[];
 }
+
+/**
+ * How a fee period is set aside: billed outside the app (immediate, the
+ * outside invoice named), or not billed (a waiver a partner approves).
+ */
+export const SET_ASIDE_KINDS = ['billed_outside', 'not_billing'] as const;
+export type SetAsideKind = (typeof SET_ASIDE_KINDS)[number];
+
+/** A waiver's reason is at least this long: why the firm is not billing. */
+export const FEE_WAIVER_REASON_MIN = 10;
 
 /** A fee period set aside without an invoice; restoring it lists it again. */
 export interface SetAsideFee {
@@ -839,13 +936,52 @@ export interface SetAsideFee {
   periodStart: string;
   periodEnd: string;
   amount: string;
+  /** Null for periods set aside before the kinds were kept. */
+  kind: SetAsideKind | null;
+  externalInvoiceNumber: string | null;
+  externalInvoiceDate: string | null;
   reason: string;
   byName: string | null;
   at: string;
 }
 
+export type FeeWaiverStatus = 'pending' | 'approved' | 'rejected';
+
+/** One period of a waiver, as the unbilled list had it. */
+export interface FeeWaiverPeriod {
+  key: string;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: string;
+}
+
+/** "Not billing these": a request someone with billing.approve, not the requester, decides. */
+export interface FeeWaiver {
+  id: string;
+  engagementId: string;
+  clientId: string;
+  clientName: string;
+  /** Null when the decider cannot see the engagement itself. */
+  engagementCode: string | null;
+  serviceName: string | null;
+  periods: FeeWaiverPeriod[];
+  amount: string;
+  reason: string;
+  status: FeeWaiverStatus;
+  requestedById: string | null;
+  requestedByName: string | null;
+  at: string;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  version: number;
+}
+
 export interface UnbilledReport {
   asOf: string;
+  /** The firm's billing go-live (Billing settings); null: each fee from its own start. */
+  billingFrom: string | null;
   engagements: UnbilledEngagement[];
   total: string;
   /** What the report leaves out, said once: time until PS-302. */
@@ -858,11 +994,25 @@ export interface DraftFromUnbilledInput {
   keys: string[];
 }
 
-/** POST /billing/unbilled/set-aside — billed outside the app, or not billing them. */
+/**
+ * POST /billing/unbilled/set-aside. billed_outside: the outside invoice's
+ * number and date, set aside at once. not_billing: a waiver request with a
+ * reason of at least FEE_WAIVER_REASON_MIN characters.
+ */
 export interface SetAsideFeesInput {
   engagementId: string;
   keys: string[];
-  reason: string;
+  kind: SetAsideKind;
+  reason?: string;
+  externalInvoiceNumber?: string;
+  externalInvoiceDate?: string;
+}
+
+export interface SetAsideFeesResult {
+  /** Periods set aside now (billed outside); 0 for a waiver request. */
+  setAside: number;
+  /** The waiver request made, for not_billing. */
+  waiver: FeeWaiver | null;
 }
 
 /** POST /billing/unbilled/restore — list a set-aside period again. */
@@ -910,7 +1060,20 @@ export interface ImportTdsCreditsInput {
   filename: string;
   contentBase64: string;
   contentType?: string;
+  /**
+   * Opens a TRACES PDF: the PAN holder's date of birth or incorporation,
+   * DDMMYYYY. Used to read the file; never stored.
+   */
+  password?: string;
 }
+
+/**
+ * The 400's `reason` when a file needs its password, or was given a wrong
+ * one: a TRACES PDF, or the ZIP the 26AS text export arrives in.
+ */
+export const TDS_FILE_PASSWORD_CODE = 'TDS_PDF_PASSWORD';
+/** @deprecated The PDF-only name of TDS_FILE_PASSWORD_CODE. */
+export const TDS_PDF_PASSWORD_CODE = TDS_FILE_PASSWORD_CODE;
 
 export interface TdsImportResult {
   batchId: string;
@@ -922,6 +1085,8 @@ export interface TdsImportResult {
   tdsTotal: string;
   /** Rows of earlier imports this file replaced. */
   superseded: number;
+  /** The date the statement is as on (a 26AS's creation date); null for a Form 16A. */
+  asOn: string | null;
   /** Rows skipped or totals that did not add up, said in words. */
   warnings: string[];
 }
@@ -934,8 +1099,82 @@ export interface TdsImportBatch {
   pan: string | null;
   credits: number;
   superseded: number;
+  /** The date the statement is as on; null for a Form 16A. */
+  asOn: string | null;
   importedByName: string | null;
   importedAt: string;
+}
+
+/**
+ * What a 26AS section code says the payment was. Sections changed names:
+ * 194J was split in 2020 into 194J(a) technical (2%) and 194J(b) professional
+ * (10%), and the Income-tax Act 2025 numbers payments (1026, 1027, 1028…).
+ */
+export const TDS_SECTION_KINDS = [
+  'professional_10',
+  'technical_2',
+  'director',
+  'contract',
+  'commission',
+  'other',
+] as const;
+export type TdsSectionKind = (typeof TDS_SECTION_KINDS)[number];
+
+/** '194JB', '194J(b)', '1027' → 'professional_10'; '194C' → 'contract'… Pure — tested. */
+export function tdsSectionKind(section: string): TdsSectionKind {
+  const s = section.toUpperCase().replace(/[\s().]/g, '');
+  if (s === '194J' || s === '194JB' || s === '1027') return 'professional_10';
+  if (s === '194JA' || s === '1026') return 'technical_2';
+  if (s === '194JBA' || s === '1028') return 'director';
+  if (s === '194C' || s === '1023' || s === '1024') return 'contract';
+  if (s === '194H' || s === '1006') return 'commission';
+  return 'other';
+}
+
+/** A quarter's TDS return (Form 26Q) is due: Q1 31 Jul, Q2 31 Oct, Q3 31 Jan, Q4 31 May. Pure — tested. */
+export function tdsReturnDueDate(financialYear: string, quarter: TdsQuarter['quarter']): string {
+  const y = Number(financialYear.slice(0, 4));
+  return { Q1: `${y}-07-31`, Q2: `${y}-10-31`, Q3: `${y + 1}-01-31`, Q4: `${y + 1}-05-31` }[
+    quarter
+  ];
+}
+
+/** Days after the return's due date a credit can fairly be expected in the 26AS. */
+export const TDS_26AS_LAG_DAYS = 15;
+
+/** The return's due date and TDS_26AS_LAG_DAYS: before a 26AS as on this date, a missing credit is only awaited. Pure — tested. */
+export function tdsExpectedBy(financialYear: string, quarter: TdsQuarter['quarter']): string {
+  const due = tdsReturnDueDate(financialYear, quarter);
+  const d = new Date(`${due}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + TDS_26AS_LAG_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * What a senior would query on a line. flag: the client deducted wrongly
+ * (rate or section); risk: the credit may not be ours to claim yet; note: for
+ * information.
+ */
+export const TDS_CHECK_CODES = [
+  'rate_2',
+  'rate_20',
+  'tds_on_gst',
+  'unusual_rate',
+  'wrong_section',
+  'director_section',
+  'lower_deduction_certificate',
+  'short_deposit',
+  'status_unmatched',
+  'status_overbooked',
+  'status_provisional',
+  'booked_rate',
+] as const;
+export type TdsCheckCode = (typeof TDS_CHECK_CODES)[number];
+
+export interface TdsCheck {
+  code: TdsCheckCode;
+  level: 'flag' | 'risk' | 'note';
+  message: string;
 }
 
 /** A Part I row of the 26AS: TDS a deductor deposited against the firm's PAN. */
@@ -944,13 +1183,18 @@ export interface TdsCreditLine {
   deductorTan: string;
   deductorName: string;
   section: string;
+  sectionKind: TdsSectionKind;
   transactionDate: string;
   amountPaid: string;
+  taxDeducted: string;
   tdsDeposited: string;
   /** F final, P provisional, U unmatched (the credit is not yet available), O overbooked. */
   bookingStatus: string | null;
+  /** 26AS remarks: A challan rectified, B statement rectified, F a s.197 certificate, G reprocessed. */
+  remarks: string | null;
   financialYear: string;
   quarter: TdsQuarter['quarter'];
+  checks: TdsCheck[];
 }
 
 /** TDS a client deducted, as booked on a posted receipt (PS-202). */
@@ -963,6 +1207,15 @@ export interface TdsBookedLine {
   tdsSection: TdsSection | null;
   financialYear: string;
   quarter: TdsQuarter['quarter'];
+  checks: TdsCheck[];
+}
+
+/** Booked TDS not in the 26AS yet, but not late: the return is not due, or the 26AS is older. */
+export interface TdsAwaitedLine extends TdsBookedLine {
+  /** The 26AS should carry it by this date (TDS_26AS_LAG_DAYS after the return's due date). */
+  expectedBy: string;
+  /** "Return due 31 Oct 2026", or "Your 26AS is as on 20 Oct 2026 — import a newer one after 15 Nov 2026". */
+  reason: string;
 }
 
 /**
@@ -1003,6 +1256,9 @@ export interface TdsClientMismatch {
   /** Booked on a receipt, but missing from the 26AS: ask the client to file or correct. */
   missing: TdsBookedLine[];
   missingTotal: string;
+  /** Booked, not in the 26AS yet, and not late: no reminder. */
+  awaited: TdsAwaitedLine[];
+  awaitedTotal: string;
   lastReminder: {
     channel: 'email' | 'whatsapp' | 'copy';
     at: string;
@@ -1019,6 +1275,8 @@ export interface TdsMatchReport {
   tolerance: string;
   /** The firm's PAN, as the latest import gave it. */
   pan: string | null;
+  /** The latest 26AS of the year is as on this date; null before one is imported. */
+  asOn: string | null;
   /** This year's imports, newest first. */
   imports: TdsImportBatch[];
   matched: TdsMatchedGroup[];
@@ -1032,7 +1290,10 @@ export interface TdsMatchReport {
     matched: string;
     notBooked: string;
     missing: string;
+    awaited: string;
   };
+  /** The flags, risks and notes on the period's lines, by client (null: a TAN on no client). */
+  checks: { clientId: string | null; clientName: string; checks: TdsCheck[] }[];
   notes: string[];
 }
 
@@ -1042,7 +1303,12 @@ export interface RemindTdsInput {
   financialYear: string;
   quarter?: TdsQuarter['quarter'];
   channel?: 'email' | 'whatsapp' | 'copy';
+  /** Send although the client was reminded of the same period within TDS_REMINDER_GAP_DAYS. */
+  force?: boolean;
 }
+
+/** A client is not reminded of the same period again within this many days, unless forced. */
+export const TDS_REMINDER_GAP_DAYS = 7;
 
 interface TdsReminderBase {
   clientId: string;

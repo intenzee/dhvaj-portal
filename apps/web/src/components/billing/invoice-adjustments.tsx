@@ -168,7 +168,7 @@ export function InvoiceAdjustments({
                 Credit each line before tax; its GST rate is added as on the invoice.
               </p>
               {invoice.lines.map((l) => {
-                const left = Number(l.taxableValue) - Number(credited.get(l.id) ?? 0);
+                const left = Number(l.taxableValue) - Number(credited.get(l.id)?.credited ?? 0);
                 return (
                   <div key={l.id} className="grid grid-cols-[1fr_auto_8rem] items-center gap-3">
                     <span className="truncate text-sm text-ink" title={l.description}>

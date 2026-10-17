@@ -1,5 +1,6 @@
 import {
   financialYearOf,
+  type TdsCheck,
   type TdsClientMismatch,
   type TdsImportResult,
   type TdsMatchKind,
@@ -51,7 +52,33 @@ export function importSummary(r: TdsImportResult): string {
   const replaced = r.superseded
     ? ` It replaced ${r.superseded} row${r.superseded === 1 ? '' : 's'} of earlier imports.`
     : '';
-  return `${what}: ${r.credits} credit${r.credits === 1 ? '' : 's'} from ${r.deductors} deductor${
+  const asOn = r.asOn ? ` as on ${formatDate(r.asOn)}` : '';
+  return `${what}${asOn}: ${r.credits} credit${r.credits === 1 ? '' : 's'} from ${r.deductors} deductor${
     r.deductors === 1 ? '' : 's'
   }, ${formatMoney(r.tdsTotal, 'INR')} of TDS.${replaced}`;
+}
+
+/** A check's badge: a flag to query, a risk to the credit, or a note. */
+export const CHECK_LEVEL: Record<TdsCheck['level'], { label: string; tone: string }> = {
+  risk: { label: 'Risk', tone: 'danger' },
+  flag: { label: 'Query', tone: 'warn' },
+  note: { label: 'Note', tone: 'info' },
+};
+
+/** Risks first, then flags, then notes. Pure — tested. */
+export function sortChecks(checks: TdsCheck[]): TdsCheck[] {
+  const rank = { risk: 0, flag: 1, note: 2 } as const;
+  return [...checks].sort((a, b) => rank[a.level] - rank[b.level]);
+}
+
+/** What the confirm step says before a reminder goes. Pure — tested. */
+export function remindConfirmText(
+  c: Pick<TdsClientMismatch, 'clientName' | 'missing' | 'missingTotal'>,
+  period: string,
+): string {
+  const n = c.missing.length;
+  return `Ask ${c.clientName} to file or correct their TDS return for ${period}: ${formatMoney(
+    c.missingTotal,
+    'INR',
+  )} on ${n} receipt${n === 1 ? '' : 's'} is not in our 26AS. It goes by the firm’s reminder channel — e-mail when we have their address.`;
 }

@@ -20,11 +20,13 @@ import {
   type GlobalInvoiceRecord,
   type InvoiceAdjustment,
   type FeeMilestone,
+  type FeeWaiver,
   type InvoiceDetail,
   type InvoiceReminderRecord,
   type InvoiceReminderResult,
   type ReceiptRecord,
   type Paginated,
+  type SetAsideFeesResult,
   type TdsImportResult,
   type TdsMatchReport,
   type TdsReminderResult,
@@ -44,6 +46,7 @@ import {
   CreateReceiptDto,
   DecideAdjustmentDto,
   DraftFromUnbilledDto,
+  FeeWaiversQueryDto,
   ImportTdsCreditsDto,
   ReceiptListQueryDto,
   RequestCreditNoteDto,
@@ -320,13 +323,39 @@ export class BillingController {
 
   @Post('unbilled/set-aside')
   @RequirePermissions(PERMISSION.billingManage)
-  @ApiOperation({ summary: 'Set due fee periods aside: billed outside the app, or not billed' })
+  @ApiOperation({
+    summary:
+      'Set due fee periods aside: billed outside the app (at once), or not billed (a waiver a partner approves)',
+  })
   setAsideFees(
     @CurrentPrincipal() principal: Principal,
     @Body() dto: SetAsideFeesDto,
-  ): Promise<{ setAside: number }> {
+  ): Promise<SetAsideFeesResult> {
     this.requireOn(principal);
     return this.unbilled.setAside(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Get('fee-waivers')
+  @ApiOperation({ summary: 'Waivers of unbilled fees the caller may see, newest first' })
+  feeWaivers(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: FeeWaiversQueryDto,
+  ): Promise<FeeWaiver[]> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.unbilled.waivers(rlsContextFromPrincipal(principal), query.status ?? null);
+  }
+
+  @Post('fee-waivers/:id/decision')
+  @RequirePermissions(PERMISSION.billingApprove)
+  @ApiOperation({ summary: 'Approve (sets the periods aside as not billed) or reject a waiver' })
+  decideFeeWaiver(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: DecideAdjustmentDto,
+  ): Promise<FeeWaiver> {
+    this.requireOn(principal);
+    return this.unbilled.decideWaiver(rlsContextFromPrincipal(principal), id, dto);
   }
 
   @Post('unbilled/restore')

@@ -1,0 +1,26 @@
+^Annual Tax Statement^
+
+File Creation Date^Permanent Account Number (PAN)^Current Status of PAN^Financial Year^Assessment Year^Name of Assessee^Address Line 1^Address Line 2^Address Line 3^Address Line 4^Address Line 5^Statecode^Pin Code
+10-06-2022^AAAFZ9999Q^ACTIVE^2021-2022^2022-2023^EXAMPLE AND CO CHARTERED ACCOUNTANTS^1 SAMPLE ROAD^^^NEW DELHI^^DELHI^110001
+
+^PART A - Details of Tax Deducted at Source^
+Sr. No.^Name of Deductor^TAN of Deductor^^^^^Total Amount Paid / Credited(Rs.)^Total Tax Deducted(Rs.)^Total TDS Deposited(Rs.)
+1^ALPHA WIDGETS PRIVATE LIMITED^DELA00001A^^^^^60000.00^6000.00^6000.00^
+^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid / Credited(Rs.)^Tax Deducted(Rs.)^TDS Deposited(Rs.)
+^1^194J^15-Dec-2021^F^31-Jan-2022^-^60000.00^6000.00^6000.00^
+
+^PART A1 - Details of Tax Deducted at Source for 15G / 15H^
+Sr. No.^Name of Deductor^TAN of Deductor^^^^Total Amount Paid / Credited(Rs.)^Total Tax Deducted(Rs.)^Total TDS Deposited(Rs.)
+^^^*********** No Transactions Present **********^
+
+^PART A2 - Details of Tax Deducted at Source on Sale of Immovable Property u/s194IA/ TDS on Rent of Property u/s 194IB /TDS on payment to resident contractors and professionals u/s 194M (For Seller/Landlord of Property/Payee of resident contractors and professionals)^
+^^^*********** No Transactions Present **********^
+
+^PART B - Details of Tax Collected at Source^
+Sr. No.^Name of Collector^TAN of Collector^^^^^Total Amount Paid/ Debited(Rs.)^Total Tax Collected(Rs.)^Total TCS Deposited(Rs.)
+1^SHOULD NOT BE READ^DELS00009Z^^^^^9000.00^90.00^90.00^
+^Sr. No.^Section^Transaction Date^Status of Booking^Date of Booking^Remarks^Amount Paid/ Debited(Rs.)^Tax Collected(Rs.)^TCS Deposited(Rs.)
+^1^206C^01-Jun-2021^F^-^-^9000.00^90.00^90.00^
+
+^PART G - TDS Defaults* (Processing of Statements)^
+^^^*********** No Transactions Present **********^
