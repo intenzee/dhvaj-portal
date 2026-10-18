@@ -26,9 +26,18 @@ only by hand.
      `access_as_user` → **Grant admin consent**. Its ids go into
      `NEXT_PUBLIC_ENTRA_TENANT_ID` / `NEXT_PUBLIC_ENTRA_CLIENT_ID`, and
      `NEXT_PUBLIC_ENTRA_API_SCOPE` = `api://<API client id>/access_as_user`.
-   - **MFA:** a Conditional Access policy requiring MFA for the Web app. The
-     portal reads MFA from the token (`amr`); revealing a client's portal
-     login needs it.
+   - **MFA:** the portal reads MFA from the token (`amr`). A user with
+     "Require multi-factor authentication" ticked (the bootstrap owner always
+     is) is refused on any sign-in without it, so their MFA must happen every
+     time:
+     - **Entra ID P1/P2** (e.g. Microsoft 365 Business Premium): a Conditional
+       Access policy requiring MFA for both apps (Portal API and Portal Web);
+       then tick the box for anyone.
+     - **Entra Free:** keep **security defaults** on (Entra ID → Overview →
+       Properties → Manage security defaults). They ask Global Administrators
+       for MFA at every sign-in, others only "when necessary"; so the owner
+       must be a Global Administrator, and other users keep the box unticked.
+       Don't mix in legacy per-user MFA.
 2. **Database:** a paid managed Postgres 16 with point-in-time recovery, in the
    same region as the services (Render Postgres or Neon, Singapore). Copy the
    owner's **external** (TLS) connection string.
