@@ -1,4 +1,4 @@
-# HSDG Portal
+# DHVAJ Portal
 
 The central **practice-management and professional-work operating system** for
 HSDG Chartered Accountants — a merged practice with 12 partners.
