@@ -129,8 +129,11 @@ export class OrganisationService {
 
   async createEmployee(ctx: RlsContext, input: CreateEmployeeInput): Promise<EmployeeRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const gradeId = await this.resolveGradeId(client, input.gradeSlug);
+      const grade = await this.resolveGrade(client, input.gradeSlug);
       const officeId = await this.resolveOfficeId(client, input.officeCode);
+      if (!grade.isPartner && (input.membershipNo || input.partnerSince)) {
+        throw new BadRequestException(NOT_A_PARTNER);
+      }
 
       const status = input.employmentStatus ?? EMPLOYMENT_STATUS.active;
       let createdId: string;
@@ -145,7 +148,7 @@ export class OrganisationService {
             input.employeeCode,
             input.fullName,
             input.userId ?? null,
-            gradeId,
+            grade.id,
             officeId,
             input.reportsToId ?? null,
             status,
@@ -153,6 +156,13 @@ export class OrganisationService {
           ],
         );
         createdId = rows[0]!.id;
+        // Every partner-grade employee has a profile (as the first-boot owner does).
+        if (grade.isPartner) {
+          await this.savePartnerProfile(client, createdId, {
+            membershipNo: input.membershipNo ?? null,
+            partnerSince: input.partnerSince ?? null,
+          });
+        }
       } catch (err) {
         throw translatePgError(err);
       }
@@ -192,9 +202,12 @@ export class OrganisationService {
         sets.push(`${column} = $${params.length}`);
       };
 
+      let isPartner = before.isPartner;
       if (input.fullName !== undefined) set('full_name', input.fullName);
       if (input.gradeSlug !== undefined) {
-        set('grade_id', await this.resolveGradeId(client, input.gradeSlug));
+        const grade = await this.resolveGrade(client, input.gradeSlug);
+        set('grade_id', grade.id);
+        isPartner = grade.isPartner;
       }
       if (input.officeCode !== undefined) {
         set('primary_office_id', await this.resolveOfficeId(client, input.officeCode));
@@ -202,8 +215,19 @@ export class OrganisationService {
       if (input.reportsToId !== undefined) set('reports_to_id', input.reportsToId);
       if (input.employmentStatus !== undefined) set('employment_status', input.employmentStatus);
       if (input.dateOfExit !== undefined) set('date_of_exit', input.dateOfExit);
+      if (input.userId !== undefined) set('user_id', input.userId);
 
-      if (sets.length === 0) {
+      const profile = {
+        ...(input.membershipNo !== undefined ? { membershipNo: input.membershipNo } : {}),
+        ...(input.partnerSince !== undefined ? { partnerSince: input.partnerSince } : {}),
+      };
+      if (!isPartner && (input.membershipNo || input.partnerSince)) {
+        throw new BadRequestException(NOT_A_PARTNER);
+      }
+      // A partner without a profile (e.g. just promoted) gets one.
+      const saveProfile = isPartner && (Object.keys(profile).length > 0 || !before.isPartner);
+
+      if (sets.length === 0 && !saveProfile) {
         return before; // Nothing to change.
       }
 
@@ -225,6 +249,7 @@ export class OrganisationService {
           params,
         );
         updated = result.rowCount ?? 0;
+        if (updated > 0 && saveProfile) await this.savePartnerProfile(client, id, profile);
       } catch (err) {
         throw translatePgError(err);
       }
@@ -254,13 +279,40 @@ export class OrganisationService {
     return rows[0] ? mapEmployee(rows[0]) : null;
   }
 
-  private async resolveGradeId(client: PoolClient, slug: GradeSlug): Promise<string> {
-    const { rows } = await client.query<{ id: string }>(
-      `SELECT id FROM hsdg.grades WHERE slug = $1`,
+  private async resolveGrade(
+    client: PoolClient,
+    slug: GradeSlug,
+  ): Promise<{ id: string; isPartner: boolean }> {
+    const { rows } = await client.query<{ id: string; is_partner_grade: boolean }>(
+      `SELECT id, is_partner_grade FROM hsdg.grades WHERE slug = $1`,
       [slug],
     );
     if (!rows[0]) throw new BadRequestException(`Unknown grade "${slug}".`);
-    return rows[0].id;
+    return { id: rows[0].id, isPartner: rows[0].is_partner_grade };
+  }
+
+  /** Insert or update a partner profile; only the given fields change. */
+  private async savePartnerProfile(
+    client: PoolClient,
+    employeeId: string,
+    fields: { membershipNo?: string | null; partnerSince?: string | null },
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO hsdg.partner_profiles (employee_id, membership_no, partner_since)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (employee_id) DO UPDATE SET
+         membership_no = CASE WHEN $4::boolean THEN EXCLUDED.membership_no
+                              ELSE hsdg.partner_profiles.membership_no END,
+         partner_since = CASE WHEN $5::boolean THEN EXCLUDED.partner_since
+                              ELSE hsdg.partner_profiles.partner_since END`,
+      [
+        employeeId,
+        fields.membershipNo ?? null,
+        fields.partnerSince ?? null,
+        fields.membershipNo !== undefined,
+        fields.partnerSince !== undefined,
+      ],
+    );
   }
 
   private async resolveOfficeId(client: PoolClient, code: string): Promise<string> {
@@ -296,10 +348,21 @@ function mapEmployee(row: EmployeeRow): EmployeeRecord {
   };
 }
 
+const NOT_A_PARTNER =
+  'Only a partner-grade employee has a membership number or partner-since date.';
+
 /** Map PostgreSQL constraint violations to clean HTTP errors. */
 export function translatePgError(err: unknown): Error {
-  const code = (err as { code?: string }).code;
-  if (code === '23505') return new ConflictException('Employee code already exists.');
+  const { code, constraint } = err as { code?: string; constraint?: string };
+  if (code === '23505') {
+    if (constraint === 'employees_user_id_key') {
+      return new ConflictException('That portal user is already linked to another employee.');
+    }
+    if (constraint === 'partner_profiles_membership_no_key') {
+      return new ConflictException('Another partner already has this membership number.');
+    }
+    return new ConflictException('Employee code already exists.');
+  }
   if (code === '23503')
     return new BadRequestException('Referenced user, grade, or office does not exist.');
   if (code === '23514') return new BadRequestException('Employee data violates a constraint.');

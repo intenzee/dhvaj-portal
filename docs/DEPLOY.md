@@ -61,9 +61,22 @@ only by hand.
    named in the log; nothing is half-written. Once the office exists the
    `BOOTSTRAP_*` values are no longer read.
 5. **Sign in as the owner** with Microsoft, then in Admin add the other offices,
-   every staff member (Users: email = their UPN, roles, office; People: the
-   employee record), and the clients. Anyone without a portal user is refused
-   at sign-in ("not a known user"), and a deactivated user is refused too.
+   every staff member, and the clients. For each person: **Users & Roles** →
+   New user (email = their UPN, roles, office), then **People** → New employee
+   (code, grade, office, joining date; pick the user under *Portal login*;
+   partners also get their ICAI membership number). Anyone without a portal
+   user is refused at sign-in ("not a known user"), and a deactivated user is
+   refused too.
+
+   **Moving to another Microsoft tenant or domain** (e.g. `@hsdg.in` →
+   `@dhvaj.in`): register the two apps in the new tenant (step 1), create
+   everyone's portal user under the new address *or* edit the existing user's
+   Email in Users & Roles — editing keeps their roles, employee record and
+   history and drops the link to the old Microsoft account. Then swap
+   `AUTH_ENTRA_TENANT_ID`/`AUTH_ENTRA_CLIENT_ID` (API) and
+   `NEXT_PUBLIC_ENTRA_TENANT_ID`/`_CLIENT_ID`/`_API_SCOPE` (web) and
+   redeploy both. Keep one admin who can sign in on each side of the swap, or
+   change your own email last, after you can sign in with the new tenant.
 6. Then: the vault key (§6), features (§4), billing (§3), and the smoke tests
    (§5). Back up (§2) before the first real data goes in, and test a restore.
 7. **The link on dhvaj.in.** A button or menu item on the firm's website that

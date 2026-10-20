@@ -265,6 +265,14 @@ export class IdentityService {
         sets.push(`${column} = $${params.length}`);
       };
 
+      if (
+        input.email !== undefined &&
+        input.email.trim().toLowerCase() !== before.email.toLowerCase()
+      ) {
+        set('email', input.email.trim());
+        // A new sign-in identity: drop any link to the old Microsoft account.
+        set('entra_object_id', null);
+      }
       if (input.displayName !== undefined) set('display_name', input.displayName);
       if (input.officeCode !== undefined) {
         set('primary_office_id', await this.resolveOfficeId(client, input.officeCode));

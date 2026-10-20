@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Min,
   ValidateIf,
 } from 'class-validator';
@@ -47,6 +48,28 @@ export class UpdateEmployeeDto {
   @ValidateIf((_o, v) => v !== null)
   @IsDateString()
   dateOfExit?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Portal user to link, or null to unlink.' })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsUUID()
+  userId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '512345',
+    description: 'ICAI membership number (partners only), or null to clear.',
+  })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @Matches(/^[0-9A-Za-z/-]{3,20}$/)
+  membershipNo?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Partner since (YYYY-MM-DD), or null.' })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsDateString()
+  partnerSince?: string | null;
 
   @ApiPropertyOptional({
     description: 'Expected current version for optimistic concurrency. Stale ⇒ 409.',

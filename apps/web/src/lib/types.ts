@@ -15,6 +15,7 @@ import type {
   EngagementStatus,
   EngagementType,
   RoleSlug,
+  EmploymentStatus,
   Stream,
   TaskPriority,
   TaskStatus,
@@ -595,6 +596,19 @@ export interface AdminUserRow {
   officeCode: string;
   isActive: boolean;
   roles: RoleSlug[];
+}
+
+/** An employee record as Administration → People edits it. */
+export interface AdminEmployeeRow extends EmployeeRow {
+  userId: string | null;
+  userEmail: string | null;
+  isPartner: boolean;
+  employmentStatus: EmploymentStatus;
+  dateOfJoining: string;
+  dateOfExit: string | null;
+  membershipNo: string | null;
+  partnerSince: string | null;
+  version: number;
 }
 
 export interface OfficeRow {

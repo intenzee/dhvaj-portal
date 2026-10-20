@@ -112,6 +112,58 @@ describe('Administration (e2e)', () => {
       expect(res.body.isActive).toBe(false);
     });
 
+    it('changes a user’s sign-in email, keeping their roles (audited)', async () => {
+      const oldEmail = `qa.${uniq()}@hsdg.in`;
+      const newEmail = `qa.${uniq()}@dhvaj.in`;
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/users')
+        .set(bearer(await token('admin@dhvaj.in')))
+        .send({ email: oldEmail, displayName: 'Moving Firm', officeCode: 'NORTH', roles: ['manager'] })
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/v1/users/${created.body.id}`)
+        .set(bearer(await token('admin@dhvaj.in')))
+        .send({ email: newEmail })
+        .expect(200);
+      expect(res.body.email).toBe(newEmail);
+      expect(res.body.roles).toContain('manager');
+
+      // Sign-in now resolves the new email, not the old one.
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/dev-token')
+        .send({ email: oldEmail })
+        .expect(404);
+      const me = await request(app.getHttpServer())
+        .get('/api/v1/auth/me')
+        .set(bearer(await token(newEmail)))
+        .expect(200);
+      expect(me.body.principal.userId).toBe(created.body.id);
+      expect(me.body.principal.email).toBe(newEmail);
+
+      const audit = await request(app.getHttpServer())
+        .get('/api/v1/audit?limit=100')
+        .set(bearer(await token('mp@dhvaj.in')))
+        .expect(200);
+      const updated = (audit.body.items as Array<{ action: string; objectId: string }>).some(
+        (e) => e.action === 'user.updated' && e.objectId === created.body.id,
+      );
+      expect(updated).toBe(true);
+    });
+
+    it('rejects changing an email to one already in use (409)', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/users')
+        .set(bearer(await token('admin@dhvaj.in')))
+        .send({ email: `qa.${uniq()}@dhvaj.in`, displayName: 'Clash', officeCode: 'NORTH' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/users/${created.body.id}`)
+        .set(bearer(await token('admin@dhvaj.in')))
+        .send({ email: 'Partner.A@dhvaj.in' })
+        .expect(409);
+    });
+
     it('replaces a user’s role set via PUT :id/roles', async () => {
       const email = `qa.${uniq()}@dhvaj.in`;
       const created = await request(app.getHttpServer())
