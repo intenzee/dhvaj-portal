@@ -39,4 +39,17 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsIn(EMPLOYMENT_STATUSES)
   employmentStatus?: EmploymentStatus;
+
+  @ApiPropertyOptional({
+    example: '512345',
+    description: 'ICAI membership number (partners only).',
+  })
+  @IsOptional()
+  @Matches(/^[0-9A-Za-z/-]{3,20}$/)
+  membershipNo?: string;
+
+  @ApiPropertyOptional({ example: '2026-10-01', description: 'Partner since (YYYY-MM-DD).' })
+  @IsOptional()
+  @IsDateString()
+  partnerSince?: string;
 }

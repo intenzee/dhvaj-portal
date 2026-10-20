@@ -38,6 +38,8 @@ export interface CreateEmployeeInput {
   userId?: string;
   reportsToId?: string;
   employmentStatus?: EmploymentStatus;
+  membershipNo?: string;
+  partnerSince?: string;
 }
 
 export interface UpdateEmployeeInput {
@@ -47,6 +49,10 @@ export interface UpdateEmployeeInput {
   reportsToId?: string | null;
   employmentStatus?: EmploymentStatus;
   dateOfExit?: string | null;
+  userId?: string | null;
+  /** Partner profile (partner grade only). */
+  membershipNo?: string | null;
+  partnerSince?: string | null;
   /** Expected current version. If given and stale, the update fails with 409. */
   version?: number;
 }

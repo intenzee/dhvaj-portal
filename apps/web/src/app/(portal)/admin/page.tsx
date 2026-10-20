@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn';
 import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui';
 import { UsersSection } from '@/components/admin/users-section';
 import { OfficesSection } from '@/components/admin/offices-section';
+import { PeopleSection } from '@/components/admin/people-section';
 import { TemplatesSection } from '@/components/admin/templates-section';
 import { RulesLibrarySection } from '@/components/admin/rules-library-section';
 import { PlanningSignalLibrarySection } from '@/components/admin/planning-signal-library-section';
@@ -23,6 +24,7 @@ import { NoticeTypesSection } from '@/components/admin/notice-types-section';
 
 type Tab =
   | 'users'
+  | 'people'
   | 'offices'
   | 'templates'
   | 'rules'
@@ -61,6 +63,8 @@ export default function AdministrationPage(): JSX.Element {
           { id: 'offices' as const, label: 'Offices' },
         ]
       : []),
+    // Employee records — grade, office, portal login, partner details (employee.manage).
+    ...(can(principal, PERMISSION.employeeManage) ? [{ id: 'people' as const, label: 'People' }] : []),
     // Firm templates are configured with service.manage (MP / admin).
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'templates' as const, label: 'Templates' }]
@@ -103,7 +107,7 @@ export default function AdministrationPage(): JSX.Element {
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library, the firm’s workflow policy and the rollout of each phase. Every change is audited."
+        subtitle="Manage portal users, role assignments, people (employee records), offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library, the firm’s workflow policy and the rollout of each phase. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -126,6 +130,8 @@ export default function AdministrationPage(): JSX.Element {
         <CardBody>
           {tab === 'users' ? (
             <UsersSection />
+          ) : tab === 'people' ? (
+            <PeopleSection />
           ) : tab === 'offices' ? (
             <OfficesSection />
           ) : tab === 'rules' ? (

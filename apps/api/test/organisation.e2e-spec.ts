@@ -239,6 +239,118 @@ describe('Organisation & People (e2e)', () => {
       expect(ok.body.employmentStatus).toBe('exited');
     });
 
+    describe('people admin', () => {
+      const suffix = () => Date.now().toString().slice(-6) + Math.floor(Math.random() * 100);
+      const newUser = async (): Promise<{ id: string; email: string }> => {
+        const res = await request(app.getHttpServer())
+          .post('/api/v1/users')
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send({ email: `qa.${suffix()}@dhvaj.in`, displayName: 'Linked', officeCode: 'NORTH' })
+          .expect(201);
+        return res.body as { id: string; email: string };
+      };
+
+      it('creates a partner with a profile and a linked user; unlinks and edits it', async () => {
+        const user = await newUser();
+        const created = await request(app.getHttpServer())
+          .post('/api/v1/employees')
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send({
+            employeeCode: `P${suffix()}`,
+            fullName: 'New Partner',
+            gradeSlug: 'partner',
+            officeCode: 'NORTH',
+            dateOfJoining: '2026-10-01',
+            userId: user.id,
+            membershipNo: `M${suffix()}`,
+            partnerSince: '2026-10-01',
+          })
+          .expect(201);
+        expect(created.body.isPartner).toBe(true);
+        expect(created.body.userEmail).toBe(user.email);
+        expect(created.body.partnerSince).toBe('2026-10-01');
+
+        const membershipNo = `N${suffix()}`;
+        const edited = await request(app.getHttpServer())
+          .patch(`/api/v1/employees/${created.body.id}`)
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send({ userId: null, membershipNo, version: created.body.version })
+          .expect(200);
+        expect(edited.body.userId).toBeNull();
+        expect(edited.body.membershipNo).toBe(membershipNo);
+        expect(edited.body.partnerSince).toBe('2026-10-01'); // untouched
+        expect(edited.body.version).toBe(created.body.version + 1);
+      });
+
+      it('gives an employee promoted to partner a profile', async () => {
+        const created = await request(app.getHttpServer())
+          .post('/api/v1/employees')
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send({
+            employeeCode: `S${suffix()}`,
+            fullName: 'Rising Senior',
+            gradeSlug: 'senior',
+            officeCode: 'NORTH',
+            dateOfJoining: '2024-01-01',
+          })
+          .expect(201);
+        const membershipNo = `R${suffix()}`;
+        const promoted = await request(app.getHttpServer())
+          .patch(`/api/v1/employees/${created.body.id}`)
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send({ gradeSlug: 'partner', membershipNo })
+          .expect(200);
+        expect(promoted.body.isPartner).toBe(true);
+        expect(promoted.body.membershipNo).toBe(membershipNo);
+
+        const partners = await request(app.getHttpServer())
+          .get('/api/v1/partners')
+          .set(bearer(await token('mp@dhvaj.in')))
+          .expect(200);
+        expect((partners.body as Array<{ id: string }>).some((p) => p.id === created.body.id)).toBe(
+          true,
+        );
+      });
+
+      it('refuses a membership number for a non-partner (400)', async () => {
+        await request(app.getHttpServer())
+          .post('/api/v1/employees')
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send({
+            employeeCode: `X${suffix()}`,
+            fullName: 'Not A Partner',
+            gradeSlug: 'manager',
+            officeCode: 'NORTH',
+            dateOfJoining: '2024-01-01',
+            membershipNo: '123456',
+          })
+          .expect(400);
+      });
+
+      it('refuses linking one user to two employees (409)', async () => {
+        const user = await newUser();
+        const body = (code: string) => ({
+          employeeCode: code,
+          fullName: 'Twin',
+          gradeSlug: 'article',
+          officeCode: 'NORTH',
+          dateOfJoining: '2024-01-01',
+          userId: user.id,
+        });
+        await request(app.getHttpServer())
+          .post('/api/v1/employees')
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send(body(`T${suffix()}`))
+          .expect(201);
+        const res = await request(app.getHttpServer())
+          .post('/api/v1/employees')
+          .set(bearer(await token('admin@dhvaj.in')))
+          .send(body(`U${suffix()}`))
+          .expect(409);
+        expect(res.body.message).toMatch(/already linked/);
+      });
+    });
+
     it('validates the request body (bad grade → 400)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/employees')

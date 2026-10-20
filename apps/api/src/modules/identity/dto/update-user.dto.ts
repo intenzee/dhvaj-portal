@@ -1,7 +1,17 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, Length, Matches } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, Length, Matches } from 'class-validator';
 
 export class UpdateUserDto {
+  @ApiPropertyOptional({
+    example: 'ravi.kumar@dhvaj.in',
+    description:
+      "Change the login email — it must be the person's Microsoft sign-in name. " +
+      'Roles, employee record and history stay with the user.',
+  })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
   @ApiPropertyOptional({ example: 'Ravi Kumar' })
   @IsOptional()
   @IsString()

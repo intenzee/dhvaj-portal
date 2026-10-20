@@ -49,6 +49,7 @@ export interface CreateUserInput {
 }
 
 export interface UpdateUserInput {
+  email?: string;
   displayName?: string;
   officeCode?: string;
   isActive?: boolean;

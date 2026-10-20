@@ -169,6 +169,7 @@ function UserFormModal({
     mutationFn: async () => {
       // Only send what changed, in two audited calls (profile, then roles).
       const patch: Record<string, unknown> = {};
+      if (email.trim().toLowerCase() !== user!.email.toLowerCase()) patch.email = email.trim();
       if (displayName.trim() !== user!.displayName) patch.displayName = displayName.trim();
       if (officeCode !== user!.officeCode) patch.officeCode = officeCode;
       if (isActive !== user!.isActive) patch.isActive = isActive;
@@ -190,9 +191,7 @@ function UserFormModal({
   });
 
   const pending = create.isPending || save.isPending;
-  const canSubmit = isEdit
-    ? displayName.trim().length > 0 && officeCode.length > 0
-    : /.+@.+/.test(email) && displayName.trim().length > 0 && officeCode.length > 0;
+  const canSubmit = /.+@.+/.test(email) && displayName.trim().length > 0 && officeCode.length > 0;
 
   return (
     <Modal
@@ -212,16 +211,22 @@ function UserFormModal({
       }
     >
       <div className="space-y-3">
-        {!isEdit && (
-          <Field label="Email" required hint="The login email. Must be unique.">
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@dhvaj.in"
-            />
-          </Field>
-        )}
+        <Field
+          label="Email"
+          required
+          hint={
+            isEdit
+              ? 'Exactly their Microsoft sign-in name. Changing it moves the login to the new account; roles, employee record and history stay.'
+              : 'Exactly their Microsoft sign-in name. Must be unique.'
+          }
+        >
+          <Input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@dhvaj.in"
+          />
+        </Field>
         <Field label="Display name" required>
           <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </Field>
