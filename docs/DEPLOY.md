@@ -68,6 +68,27 @@ only by hand.
    user is refused at sign-in ("not a known user"), and a deactivated user is
    refused too.
 
+   **Email + password logins (no Microsoft account needed).** In Users & Roles
+   → New user, leave *Give a portal password* ticked. After *Create user* the
+   dialog shows the portal address, the email and a **temporary password**
+   (e.g. `Abcd-Efgh-Jkmn`) once — copy it and hand it over. At
+   portal.dhvaj.in they type the email and temporary password and must choose
+   their own (≥ 10 characters, not their name or a common word) before they
+   are in. Afterwards they change it with the key icon next to *Sign out*.
+   - The **Sign-in** column shows *Password*, *Temporary password*, *Locked*
+     or *Microsoft only*.
+   - Forgotten password or *Locked*: Edit → **Reset password** gives a new
+     temporary one, lifts the lock and signs them out everywhere.
+   - Five wrong passwords lock the account for 15 minutes (it lifts by
+     itself); `/auth/login` also allows 10 tries a minute per address.
+   - Edit → **Turn off password sign-in** leaves Microsoft only. A user created
+     with *Require multi-factor authentication* can only use Microsoft.
+   - Passwords are stored as scrypt hashes in `hsdg.user_passwords`, readable
+     only by the sign-in code; no admin ever sees one after it is shown. Every
+     set, reset, change and password sign-in is in the audit log.
+   - To switch the feature off: `AUTH_PASSWORD_LOGIN=false` (API) and
+     `NEXT_PUBLIC_PASSWORD_LOGIN=false` (web, rebuild).
+
    **Moving to another Microsoft tenant or domain** (e.g. `@hsdg.in` →
    `@dhvaj.in`): register the two apps in the new tenant (step 1), create
    everyone's portal user under the new address *or* edit the existing user's
@@ -80,8 +101,8 @@ only by hand.
 6. Then: the vault key (§6), features (§4), billing (§3), and the smoke tests
    (§5). Back up (§2) before the first real data goes in, and test a restore.
 7. **The link on dhvaj.in.** A button or menu item on the firm's website that
-   opens the portal in a new tab. Signed-out visitors land on the Microsoft
-   sign-in; nothing else is public. The portal cannot be embedded in a page
+   opens the portal in a new tab. Signed-out visitors land on the sign-in
+   page (email + password, or Microsoft); nothing else is public. The portal cannot be embedded in a page
    (it sends `X-Frame-Options: SAMEORIGIN`) — link to it, don't iframe it:
    ```html
    <a href="https://portal.dhvaj.in" target="_blank" rel="noopener">Staff portal</a>
@@ -139,6 +160,7 @@ Also set, as needed:
 - `SCHEDULER_ENABLED=true` on the API instances, **or** `CRON_SECRET` plus an external daily call to `GET /api/v1/internal/cron` with `Authorization: Bearer <CRON_SECRET>`. Scheduled jobs take a Postgres advisory lock, so several instances never run the same tick twice.
 - `CREDENTIALS_KEYS`: the vault key (§6).
 - `NOTIFICATION_CHANNELS`, `CLIENT_UPLOAD_*`, `SCHEDULER_*_CRON`, `COMPLIANCE_*`: optional; the defaults are in `env.validation.ts`.
+- `AUTH_PASSWORD_LOGIN` (default `true`): email + password sign-in alongside Microsoft. Password sessions are signed with a key derived from `AUTH_JWT_SECRET`; rotating that secret signs everyone out.
 - `SWAGGER_ENABLED=false` unless the API docs should be public.
 - `LOG_LEVEL=info`, `LOG_PRETTY=false`. Request logs carry the method, path, status and user agent only: no bodies, no headers, no query values, and client-upload tokens are masked.
 
@@ -149,6 +171,7 @@ Baked in at **build** time, so rebuild after a change:
 - `NEXT_PUBLIC_API_URL`: `https://<api host>/api/v1`.
 - `NEXT_PUBLIC_ENTRA_TENANT_ID`, `NEXT_PUBLIC_ENTRA_CLIENT_ID`, `NEXT_PUBLIC_ENTRA_API_SCOPE`: with Entra sign-in.
 - `NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED`: matches the API's `CLIENT_UPLOAD_ENABLED`.
+- `NEXT_PUBLIC_PASSWORD_LOGIN` (default on): `false` hides the email + password form; matches the API's `AUTH_PASSWORD_LOGIN`.
 
 The web sends HSTS, `nosniff`, `SAMEORIGIN` framing, a referrer policy and a
 permissions policy (`next.config.mjs`). A full Content-Security-Policy is still

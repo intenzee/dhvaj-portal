@@ -69,6 +69,14 @@ export const envSchema = z.object({
   AUTH_JWT_AUDIENCE: z.string().default('hsdg-portal'),
   AUTH_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
+  // Email + password sign-in alongside Microsoft. Nobody can use it until an
+  // admin gives them a password (Users & Roles); `false` turns it off entirely
+  // (the endpoints 404 and password sessions are refused).
+  AUTH_PASSWORD_LOGIN: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+
   // ── Clients' portal logins (ADR-0035) ────────────────────────────────────
   // AES-256-GCM keys for the GST (and later other) portal logins the firm saves
   // for its clients: `1:<base64 of 32 random bytes>`, comma-separated to rotate

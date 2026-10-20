@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil } from 'lucide-react';
+import { Copy, KeyRound, Pencil, Plus } from 'lucide-react';
 import { ASSIGNABLE_ROLES, PERMISSION, type Paginated, type RoleSlug } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
@@ -17,6 +17,17 @@ import { Pagination } from '@/components/pagination';
 import type { ColumnDef } from '@tanstack/react-table';
 
 const PAGE_SIZE = 25;
+
+/** GET /user-passwords: users with a portal password (absent = Microsoft only). */
+type PasswordStatuses = Record<string, { mustChange: boolean; locked: boolean }>;
+const PASSWORDS_KEY = ['admin', 'user-passwords'];
+
+function SignInBadge({ status }: { status?: PasswordStatuses[string] }): JSX.Element {
+  if (!status) return <Badge>Microsoft only</Badge>;
+  if (status.locked) return <Badge tone="danger">Locked</Badge>;
+  if (status.mustChange) return <Badge tone="warn">Temporary password</Badge>;
+  return <Badge tone="success">Password</Badge>;
+}
 
 export function UsersSection(): JSX.Element {
   const { principal } = useAuth();
@@ -33,6 +44,12 @@ export function UsersSection(): JSX.Element {
     queryKey: ['admin', 'offices'],
     queryFn: () => apiFetch<OfficeRow[]>('/offices'),
   });
+  const passwords = useQuery({
+    queryKey: PASSWORDS_KEY,
+    queryFn: () => apiFetch<PasswordStatuses>('/user-passwords'),
+    enabled: mayManage,
+  });
+  const statuses = passwords.data;
 
   const columns = useMemo<ColumnDef<AdminUserRow, unknown>[]>(
     () => [
@@ -73,6 +90,13 @@ export function UsersSection(): JSX.Element {
       ...(mayManage
         ? [
             {
+              header: 'Sign-in',
+              id: 'sign-in',
+              cell: ({ row }: { row: { original: AdminUserRow } }) => (
+                <SignInBadge status={statuses?.[row.original.id]} />
+              ),
+            } as ColumnDef<AdminUserRow, unknown>,
+            {
               header: '',
               id: 'actions',
               cell: ({ row }: { row: { original: AdminUserRow } }) => (
@@ -84,7 +108,7 @@ export function UsersSection(): JSX.Element {
           ]
         : []),
     ],
-    [mayManage],
+    [mayManage, statuses],
   );
 
   if (users.isLoading || offices.isLoading) return <Spinner label="Loading users…" />;
@@ -116,6 +140,7 @@ export function UsersSection(): JSX.Element {
         <UserFormModal
           offices={offices.data ?? []}
           user={editing}
+          passwordStatus={statuses?.[editing.id]}
           onClose={() => setEditing(null)}
         />
       )}
@@ -123,14 +148,61 @@ export function UsersSection(): JSX.Element {
   );
 }
 
-/** Create (no `user`) or edit an existing user, including their role set. */
+/**
+ * The temporary password, shown once right after it is made. The admin hands
+ * it over; the person must choose their own at first sign-in.
+ */
+function TemporaryPasswordPanel({ email, password }: { email: string; password: string }): JSX.Element {
+  const toast = useToast();
+  const site = typeof window === 'undefined' ? '' : window.location.origin;
+  const copy = async (): Promise<void> => {
+    const text = `Portal: ${site}\nEmail: ${email}\nTemporary password: ${password}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Sign-in details copied.');
+    } catch {
+      toast('Could not copy — select the password and copy it by hand.', 'error');
+    }
+  };
+  return (
+    <div className="space-y-2 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm">
+      <p className="font-medium text-ink">Give these sign-in details to the person:</p>
+      <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
+        <dt className="text-ink-muted">Portal</dt>
+        <dd className="text-ink">{site}</dd>
+        <dt className="text-ink-muted">Email</dt>
+        <dd className="text-ink">{email}</dd>
+        <dt className="text-ink-muted">Temporary password</dt>
+        <dd>
+          <code data-testid="temporary-password" className="select-all font-mono text-base font-semibold text-ink">
+            {password}
+          </code>
+        </dd>
+      </dl>
+      <Button size="sm" variant="secondary" onClick={() => void copy()}>
+        <Copy className="h-3.5 w-3.5" /> Copy sign-in details
+      </Button>
+      <p className="text-xs text-ink-muted">
+        It is shown only this once. At first sign-in they must choose their own password. If it is
+        lost, use Reset password.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Create (no `user`) or edit an existing user, including their role set and
+ * their portal password (give, reset, or turn off).
+ */
 function UserFormModal({
   offices,
   user,
+  passwordStatus,
   onClose,
 }: {
   offices: OfficeRow[];
   user?: AdminUserRow;
+  passwordStatus?: PasswordStatuses[string];
   onClose: () => void;
 }): JSX.Element {
   const qc = useQueryClient();
@@ -143,26 +215,72 @@ function UserFormModal({
   const [mfaRequired, setMfaRequired] = useState(false);
   const [isActive, setIsActive] = useState(user?.isActive ?? true);
   const [roles, setRoles] = useState<RoleSlug[]>(user?.roles ?? []);
+  // A user who must use MFA signs in with Microsoft only; the API refuses a password.
+  const [givePassword, setGivePassword] = useState(true);
+  // The temporary password just made, shown once in place of the form.
+  const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
 
   const toggleRole = (r: RoleSlug): void =>
     setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
 
   const invalidate = (): void => {
     qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    qc.invalidateQueries({ queryKey: PASSWORDS_KEY });
   };
 
+  const issueTemporary = (userId: string) =>
+    apiFetch<{ temporaryPassword: string }>(`/users/${userId}/password`, { method: 'POST' });
+
   const create = useMutation({
-    mutationFn: () =>
-      apiFetch<AdminUserRow>('/users', {
+    mutationFn: async () => {
+      const created = await apiFetch<AdminUserRow>('/users', {
         method: 'POST',
         body: { email: email.trim(), displayName: displayName.trim(), officeCode, mfaRequired, roles },
-      }),
+      });
+      if (!givePassword || mfaRequired) return { created, temporaryPassword: null };
+      try {
+        const { temporaryPassword } = await issueTemporary(created.id);
+        return { created, temporaryPassword };
+      } catch {
+        // The user exists; the password can be given from Edit.
+        return { created, temporaryPassword: null, passwordFailed: true };
+      }
+    },
+    onSuccess: (res) => {
+      invalidate();
+      if ('passwordFailed' in res) {
+        toast('User created, but the password was not set. Open Edit → Give a portal password.', 'error');
+        onClose();
+      } else if (res.temporaryPassword) {
+        toast('User created.');
+        setIssued({ email: res.created.email, password: res.temporaryPassword });
+      } else {
+        toast('User created.');
+        onClose();
+      }
+    },
+    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not create the user.', 'error'),
+  });
+
+  const resetPassword = useMutation({
+    mutationFn: () => issueTemporary(user!.id),
+    onSuccess: (res) => {
+      invalidate();
+      setIssued({ email: user!.email, password: res.temporaryPassword });
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not set the password.', 'error'),
+  });
+
+  const removePassword = useMutation({
+    mutationFn: () => apiFetch(`/users/${user!.id}/password`, { method: 'DELETE' }),
     onSuccess: () => {
-      toast('User created.');
+      toast('Password sign-in turned off. They can still sign in with Microsoft.');
       invalidate();
       onClose();
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not create the user.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not turn off password sign-in.', 'error'),
   });
 
   const save = useMutation({
@@ -193,6 +311,22 @@ function UserFormModal({
   const pending = create.isPending || save.isPending;
   const canSubmit = /.+@.+/.test(email) && displayName.trim().length > 0 && officeCode.length > 0;
 
+  if (issued) {
+    return (
+      <Modal
+        open
+        onClose={onClose}
+        title={isEdit ? 'New temporary password' : 'User created'}
+        description={issued.email}
+        footer={<Button onClick={onClose}>Done</Button>}
+      >
+        <TemporaryPasswordPanel email={issued.email} password={issued.password} />
+      </Modal>
+    );
+  }
+
+  const passwordBusy = resetPassword.isPending || removePassword.isPending;
+
   return (
     <Modal
       open
@@ -216,8 +350,8 @@ function UserFormModal({
           required
           hint={
             isEdit
-              ? 'Exactly their Microsoft sign-in name. Changing it moves the login to the new account; roles, employee record and history stay.'
-              : 'Exactly their Microsoft sign-in name. Must be unique.'
+              ? 'Their sign-in email (and Microsoft sign-in name, if they use Microsoft). Changing it moves the login to the new address; roles, employee record and history stay.'
+              : 'Their sign-in email (and Microsoft sign-in name, if they use Microsoft). Must be unique.'
           }
         >
           <Input
@@ -257,10 +391,59 @@ function UserFormModal({
             Active (uncheck to deactivate — the user is never deleted)
           </label>
         ) : (
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" checked={mfaRequired} onChange={(e) => setMfaRequired(e.target.checked)} />
-            Require multi-factor authentication
-          </label>
+          <>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={givePassword && !mfaRequired}
+                disabled={mfaRequired}
+                onChange={(e) => setGivePassword(e.target.checked)}
+              />
+              Give a portal password (email + password sign-in)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input type="checkbox" checked={mfaRequired} onChange={(e) => setMfaRequired(e.target.checked)} />
+              Require multi-factor authentication (Microsoft sign-in only)
+            </label>
+          </>
+        )}
+
+        {isEdit && (
+          <div className="space-y-2 rounded-lg border border-line-strong p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                <KeyRound className="h-4 w-4" /> Portal password
+              </span>
+              <SignInBadge status={passwordStatus} />
+            </div>
+            <p className="text-xs text-ink-muted">
+              {passwordStatus?.locked
+                ? 'Locked after 5 wrong passwords (lifts by itself after 15 minutes). A reset unlocks it now.'
+                : passwordStatus
+                  ? 'A reset makes a new temporary password and signs them out everywhere.'
+                  : 'They have no portal password yet, so they can only sign in with Microsoft.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={passwordBusy}
+                onClick={() => resetPassword.mutate()}
+              >
+                {passwordStatus ? 'Reset password' : 'Give a portal password'}
+              </Button>
+              {passwordStatus && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={passwordBusy}
+                  onClick={() => removePassword.mutate()}
+                >
+                  Turn off password sign-in
+                </Button>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </Modal>

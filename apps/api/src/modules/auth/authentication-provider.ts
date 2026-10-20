@@ -10,6 +10,12 @@ export interface VerifiedToken {
   entraObjectId?: string;
   /** Whether the identity provider asserts MFA was satisfied for this token. */
   mfaSatisfied: boolean;
+  /** How the person signed in; absent means the active provider's own method. */
+  method?: 'password';
+  /** Password sessions: the user the session was issued to. */
+  userId?: string;
+  /** Password sessions: the password version the session was issued under. */
+  passwordVersion?: number;
 }
 
 /**

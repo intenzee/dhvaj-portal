@@ -24,6 +24,8 @@ export interface Principal {
   permissions: string[];
   mfaRequired: boolean;
   mfaSatisfied: boolean;
+  /** How this session was signed in (Microsoft, portal password, or dev token). */
+  authMethod?: 'microsoft' | 'password' | 'dev';
 }
 
 /** Derive the transaction-local database security context from a principal. */

@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Bell,
   HelpCircle,
+  KeyRound,
   LogOut,
   Plus,
   Layers,
@@ -33,6 +34,7 @@ import { RunningTimerBanner } from './time/running-timer-banner';
 import { AwayResumeBanner } from './time/away-resume-banner';
 import { HelpPanel } from './help/help-panel';
 import { TelemetryTracker } from './telemetry-tracker';
+import { ChangePasswordModal } from './change-password-modal';
 
 /** "New …" quick-create actions, shown only to users who may create that thing. */
 const CREATE_ACTIONS: {
@@ -104,6 +106,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   const [collapsed, toggleSidebar] = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   useTrackOnboardingVisit(principal, pathname);
@@ -213,6 +216,16 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                   {roleLabel(principal.effectiveRole)} · {principal.officeCode}
                 </div>
               </div>
+              {principal.authMethod === 'password' && (
+                <button
+                  onClick={() => setChangingPassword(true)}
+                  className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
+                  aria-label="Change password"
+                  title="Change password"
+                >
+                  <KeyRound className="h-4 w-4" />
+                </button>
+              )}
               <button
                 onClick={logout}
                 className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
@@ -224,6 +237,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             </div>
           </div>
         </header>
+        {changingPassword && <ChangePasswordModal onClose={() => setChangingPassword(false)} />}
 
         <main className="min-w-0 flex-1 p-4 sm:p-5 lg:p-6">{children}</main>
         <TelemetryTracker />
