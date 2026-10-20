@@ -32,7 +32,7 @@ export class CreateClientDependencyDto {
   @MaxLength(2000)
   outstandingItems?: string;
 
-  @ApiPropertyOptional({ description: 'HSDG employee chasing this dependency.' })
+  @ApiPropertyOptional({ description: 'Firm employee chasing this dependency.' })
   @IsOptional()
   @IsUUID()
   responsibleEmployeeId?: string;

@@ -28,7 +28,7 @@ services:
   - type: web
     name: dhvaj-api
     runtime: docker
-    repo: https://github.com/intenzee/hsdg
+    repo: https://github.com/intenzee/dhvaj-portal
     branch: main
     dockerfilePath: apps/api/Dockerfile
     dockerContext: .
@@ -128,7 +128,7 @@ services:
   - type: web
     name: dhvaj-web
     runtime: docker
-    repo: https://github.com/intenzee/hsdg
+    repo: https://github.com/intenzee/dhvaj-portal
     branch: main
     dockerfilePath: apps/web/Dockerfile
     dockerContext: .

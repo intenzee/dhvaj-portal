@@ -15,6 +15,12 @@ describe('format helpers', () => {
     expect(humanize(null)).toBe('—');
   });
 
+  it('shows the legacy HSDG deadline codes as the firm’s', () => {
+    expect(humanize('HSDG_MILESTONE')).toBe('FIRM MILESTONE');
+    expect(humanize('hsdg_preparation')).toBe('Firm Preparation');
+    expect(humanize('STATUTORY_RULE')).toBe('STATUTORY RULE');
+  });
+
   it('formats counts and handles nullish', () => {
     expect(formatCount(0)).toBe('0');
     expect(formatCount(null)).toBe('0');

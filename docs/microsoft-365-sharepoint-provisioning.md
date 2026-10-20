@@ -1,7 +1,7 @@
 # Microsoft 365 — SharePoint storage + Office editing: setup & cutover
 
 This is the one-time setup that connects the portal to the firm's Microsoft 365
-tenant (`hsdgassociates`, Business Basic/Standard) for two things:
+tenant (Dhvaj & Associates, `084db8e6-ad22-46e5-9410-a1083b6f6dde`, Business Basic) for two things:
 
 1. **All document storage in SharePoint** — every uploaded version, client
    upload and template version is kept in one locked-down SharePoint site
@@ -47,17 +47,29 @@ cover those.
 
 ## Checklist
 
-Already done ✅: app registration created — tenant `f631fbcc-8fbb-43e2-a022-c1827230f4d9`,
-client `628308a0-3a3c-4ea6-b039-a771075d6ff8`; site created at
-`https://hsdgassociates.sharepoint.com/sites/DHVAJPortalFiles`.
+`<tenant>` below is the first part of the tenant's SharePoint address — open
+**SharePoint admin center** and read it from the browser's address bar
+(`https://<tenant>-admin.sharepoint.com`).
+
+The portal was first set up in the HSDG tenant (2026-10-12); on 2026-10-21 it
+moved to Dhvaj & Associates' own tenant. Files kept their paths, so moving them
+is a copy of the `vault` folder between the two sites (see "Moving between
+tenants" below).
+
+### 0. App registration and site
+- [ ] entra.microsoft.com → **App registrations → New registration**: name
+      `DHVAJ Portal Storage`, "Accounts in this organizational directory only",
+      no redirect URI. Copy the **Application (client) ID**.
+- [ ] SharePoint admin center → **Sites → Active sites → Create → Team site**
+      (or Communication site): name `DHVAJ Portal Files`, address
+      `/sites/DHVAJPortalFiles`, owner the Global Admin. Add no members.
 
 ### 1. App permissions — only one is needed
-- [ ] entra.microsoft.com → **App registrations → DHVAJ Portal → API permissions**.
-- [ ] Keep **Microsoft Graph → Application → `Sites.Selected`** and click
-      **Grant admin consent for HSDG** (status must show a green tick).
-- [ ] **Remove** anything else added earlier (`Mail.Send`, `User.Read.All`,
-      `TeamsAppInstallation.ReadWriteSelfForUser.All`, any `Sites.ReadWrite.All`)
-      — email/Teams are out of scope, and least privilege matters.
+- [ ] entra.microsoft.com → **App registrations → DHVAJ Portal Storage → API permissions**.
+- [ ] **Add a permission → Microsoft Graph → Application permissions →
+      `Sites.Selected`**, then click **Grant admin consent for Dhvaj & Associates**
+      (status must show a green tick).
+- [ ] Nothing else — email/Teams are out of scope, and least privilege matters.
 
 ### 2. Client secret
 - [ ] **Certificates & secrets → New client secret** (e.g. 24 months). Copy the
@@ -73,15 +85,15 @@ client `628308a0-3a3c-4ea6-b039-a771075d6ff8`; site created at
 2. **Modify permissions** tab → consent to **`Sites.FullControl.All`** (this is
    for *you* in Graph Explorer, not the portal app).
 3. Run **GET**
-   `https://graph.microsoft.com/v1.0/sites/hsdgassociates.sharepoint.com:/sites/DHVAJPortalFiles?$select=id`
-   → copy the `id` (looks like `hsdgassociates.sharepoint.com,xxxx,yyyy`).
+   `https://graph.microsoft.com/v1.0/sites/<tenant>.sharepoint.com:/sites/DHVAJPortalFiles?$select=id`
+   → copy the `id` (looks like `<tenant>.sharepoint.com,xxxx,yyyy`).
 4. Run **POST** `https://graph.microsoft.com/v1.0/sites/{that id}/permissions`
    with body:
    ```json
    {
      "roles": ["write"],
      "grantedToIdentities": [
-       { "application": { "id": "628308a0-3a3c-4ea6-b039-a771075d6ff8", "displayName": "DHVAJ Portal" } }
+       { "application": { "id": "<storage app client id>", "displayName": "DHVAJ Portal Storage" } }
      ]
    }
    ```
@@ -114,10 +126,10 @@ Add to `apps/api/.env` locally, and to the hosting provider's secret settings in
 production (never commit the secret):
 
 ```
-M365_TENANT_ID=f631fbcc-8fbb-43e2-a022-c1827230f4d9
-M365_CLIENT_ID=628308a0-3a3c-4ea6-b039-a771075d6ff8
+M365_TENANT_ID=084db8e6-ad22-46e5-9410-a1083b6f6dde
+M365_CLIENT_ID=<the storage app client id>
 M365_CLIENT_SECRET=<the secret VALUE from step 2>
-M365_SITE_URL=https://hsdgassociates.sharepoint.com/sites/DHVAJPortalFiles
+M365_SITE_URL=https://<tenant>.sharepoint.com/sites/DHVAJPortalFiles
 # Optional: pin what `m365:check` prints to skip a lookup at boot
 # M365_DRIVE_ID=b!...
 
@@ -182,6 +194,25 @@ summary names each one so it can be re-uploaded or written off.
 as a fallback.
 
 ---
+
+## Moving between tenants (SharePoint → SharePoint)
+
+Stored files are keyed by path inside the site's default **Documents** library
+(`vault/{engagementId}/{documentId}/{uuid}`), and the database keeps only that
+path — not the site or tenant. So the files move by copying the folder:
+
+1. Set up the new tenant (steps 0–4 above) and run `m365:check` against it.
+2. In the **old** site → Documents, select the `vault` folder → **Download**
+   (a zip). Unzip it.
+3. In the **new** site → Documents → **Upload → Folder** → choose the unzipped
+   `vault` folder, so it sits at the library root with the same sub-folders.
+4. Swap `M365_TENANT_ID` / `M365_CLIENT_ID` / `M365_CLIENT_SECRET` /
+   `M365_SITE_URL` (and drop any `M365_DRIVE_ID`) and redeploy the API.
+5. Open a few documents in the portal. Keep the old site for a few weeks before
+   deleting it.
+
+`portal/…` (the live Office-editing copies) need not move — they are recreated
+on the next open.
 
 ## Verification (once live)
 1. Upload a document, download it → identical bytes; it appears in the site under

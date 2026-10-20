@@ -18,7 +18,7 @@ import { Settings2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
-import { formatDate, deadlineLabel } from '@/lib/format';
+import { formatDate, deadlineLabel, withFirmPrefix } from '@/lib/format';
 import type { ComplianceRow, ComplianceEventRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge, Button } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
@@ -40,7 +40,7 @@ type EventKind = 'all' | 'statutory' | 'internal_sla' | 'layer';
 /** Humanise a frozen due-date category code (§2), e.g. STATUTORY_FIXED → "Statutory fixed". */
 function humanise(code: string | null): string {
   if (!code) return '';
-  const spaced = code.replace(/_/g, ' ').toLowerCase();
+  const spaced = withFirmPrefix(code).replace(/_/g, ' ').toLowerCase();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
