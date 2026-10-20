@@ -118,7 +118,12 @@ describe('Administration (e2e)', () => {
       const created = await request(app.getHttpServer())
         .post('/api/v1/users')
         .set(bearer(await token('admin@dhvaj.in')))
-        .send({ email: oldEmail, displayName: 'Moving Firm', officeCode: 'NORTH', roles: ['manager'] })
+        .send({
+          email: oldEmail,
+          displayName: 'Moving Firm',
+          officeCode: 'NORTH',
+          roles: ['manager'],
+        })
         .expect(201);
 
       const res = await request(app.getHttpServer())
