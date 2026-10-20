@@ -1,9 +1,17 @@
 /** Presentation helpers. UX only — the backend remains authoritative (§18). */
 
+/**
+ * The firm's own deadline codes keep a legacy `HSDG_` / `hsdg_` prefix in stored
+ * data (e.g. HSDG_MILESTONE); people see them as the firm's ("Firm milestone").
+ */
+export function withFirmPrefix(value: string): string {
+  return value.replace(/^hsdg(?=[_-])/i, (m) => (m === 'HSDG' ? 'FIRM' : 'firm'));
+}
+
 /** Turn a snake_case / kebab enum value into Title Case for display. */
 export function humanize(value: string | null | undefined): string {
   if (!value) return '—';
-  return value
+  return withFirmPrefix(value)
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }

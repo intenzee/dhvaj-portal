@@ -263,7 +263,7 @@ function SidebarContent({
         title="Home"
       >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-600 text-sm font-black text-white">
-          H
+          D
         </div>
         {!collapsed && (
           <div className="text-lg font-bold tracking-tight text-white">

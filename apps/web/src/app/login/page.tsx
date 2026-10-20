@@ -51,7 +51,7 @@ export default function LoginPage(): JSX.Element {
         <CardBody className="p-6">
           <div className="mb-1 flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600 text-sm font-black text-white">
-              H
+              D
             </div>
             <div className="text-2xl font-bold tracking-tight text-ink">
               Dhvaj <span className="text-ink-faint">Portal</span>
