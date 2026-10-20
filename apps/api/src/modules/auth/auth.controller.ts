@@ -1,5 +1,6 @@
 import { Body, Controller, Get, NotFoundException, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AppConfigService } from '../../config/config.module';
 import { IdentityService } from '../identity/identity.service';
 import { AuditService } from '../audit/audit.service';
@@ -8,6 +9,12 @@ import { DevAuthProvider } from './dev-auth.provider';
 import { CurrentPrincipal, Public, RequirePermissions } from './auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from './principal';
 import { DevTokenDto } from './dto/dev-token.dto';
+import { ChangePasswordDto, PasswordLoginDto } from './dto/password-login.dto';
+import {
+  PasswordLoginService,
+  type PasswordLoginResult,
+  type PasswordSession,
+} from './password-login.service';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -17,7 +24,32 @@ export class AuthController {
     private readonly identity: IdentityService,
     private readonly devProvider: DevAuthProvider,
     private readonly audit: AuditService,
+    private readonly passwords: PasswordLoginService,
   ) {}
+
+  @Post('login')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Sign in with email + portal password',
+    description:
+      'Returns a session token, or { mustChangePassword: true } when the password is a temporary one — then call POST /auth/password. Five wrong passwords lock it for 15 minutes. 404 when password sign-in is turned off.',
+  })
+  login(@Body() dto: PasswordLoginDto): Promise<PasswordLoginResult> {
+    return this.passwords.login(dto.email, dto.password);
+  }
+
+  @Post('password')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Choose a new portal password',
+    description:
+      'With the current (or temporary) password. Ends every other password session and returns a fresh one.',
+  })
+  changePassword(@Body() dto: ChangePasswordDto): Promise<PasswordSession> {
+    return this.passwords.changePassword(dto.email, dto.currentPassword, dto.newPassword);
+  }
 
   @Post('dev-token')
   @Public()
@@ -63,13 +95,18 @@ export class AuthController {
   @Post('renew')
   @RequirePermissions()
   @ApiOperation({
-    summary: 'Renew a development access token (non-production only)',
+    summary: 'Renew a password session or a development token',
     description:
-      'Swaps a still-valid dev token for a fresh one with a full lifetime, so a signed-in session does not lapse while it is in use. Hidden wherever dev-token is.',
+      'Swaps a still-valid password session (or, outside production, a dev token) for a fresh one with a full lifetime, so a signed-in session does not lapse while it is in use. 404 for Microsoft sign-in, which renews itself.',
   })
   async renew(
     @CurrentPrincipal() principal: Principal,
   ): Promise<{ accessToken: string; tokenType: 'Bearer'; expiresIn: number }> {
+    if (principal.authMethod === 'password') {
+      const version = await this.passwords.currentVersion(principal.userId);
+      if (version === null) throw new NotFoundException();
+      return this.passwords.renew(principal, version);
+    }
     const devEnabled = this.config.get('AUTH_PROVIDER') === 'dev' || this.config.devFallbackEnabled;
     if (this.config.isProduction || !devEnabled) throw new NotFoundException();
     const { token, expiresIn } = await this.devProvider.issue(

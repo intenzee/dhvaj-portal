@@ -9,6 +9,8 @@ import {
   type VerifiedToken,
 } from './authentication-provider';
 import { DevAuthProvider } from './dev-auth.provider';
+import { PasswordAuthProvider } from './password-auth.provider';
+import { PasswordLoginService } from './password-login.service';
 import type { Principal } from './principal';
 
 /**
@@ -30,13 +32,17 @@ export class AuthService {
     private readonly devProvider: DevAuthProvider,
     private readonly config: AppConfigService,
     private readonly identity: IdentityService,
+    private readonly passwordSessions: PasswordAuthProvider,
+    private readonly passwords: PasswordLoginService,
   ) {}
 
   async resolvePrincipal(token: string): Promise<Principal> {
     const verified = await this.verifyToken(token);
 
     let data: PrincipalData | null = null;
-    if (verified.entraObjectId) {
+    if (verified.method === 'password') {
+      data = await this.loadPasswordUser(verified);
+    } else if (verified.entraObjectId) {
       data = await this.identity.loadPrincipalByEntraId(verified.entraObjectId);
     }
     if (!data && verified.email) {
@@ -62,7 +68,24 @@ export class AuthService {
       permissions: data.permissions,
       mfaRequired: data.mfaRequired,
       mfaSatisfied: verified.mfaSatisfied,
+      authMethod: verified.method ?? (verified.entraObjectId ? 'microsoft' : 'dev'),
     };
+  }
+
+  /**
+   * A password session is good only for the user it was issued to and only
+   * while their password is unchanged — a reset or change ends it.
+   */
+  private async loadPasswordUser(verified: VerifiedToken): Promise<PrincipalData> {
+    if (!this.passwords.enabled) throw new UnauthorizedException('Password sign-in is turned off.');
+    const data = verified.email ? await this.identity.loadPrincipalByEmail(verified.email) : null;
+    if (!data || data.userId !== verified.userId) {
+      throw new UnauthorizedException('Authenticated identity is not a known user.');
+    }
+    if ((await this.passwords.currentVersion(data.userId)) !== verified.passwordVersion) {
+      throw new UnauthorizedException('Your password was changed. Sign in again.');
+    }
+    return data;
   }
 
   /**
@@ -71,6 +94,7 @@ export class AuthService {
    * IS dev, there is nothing to fall back to.
    */
   private async verifyToken(token: string): Promise<VerifiedToken> {
+    if (this.passwordSessions.claims(token)) return this.passwordSessions.verify(token);
     try {
       return await this.provider.verify(token);
     } catch (err) {

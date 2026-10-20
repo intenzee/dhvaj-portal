@@ -24,11 +24,22 @@ interface AuthState {
   /** Microsoft Entra SSO sign-in (production). */
   loginWithEntra: () => Promise<void>;
   entraEnabled: boolean;
+  /**
+   * Email + portal password. 'must_change' means it was a temporary password:
+   * the person has to choose their own (changePassword) before they are in.
+   */
+  loginWithPassword: (email: string, password: string) => Promise<'ok' | 'must_change'>;
+  /** Replace the current (or temporary) password; signs the person in. */
+  changePassword: (email: string, currentPassword: string, newPassword: string) => Promise<void>;
+  passwordEnabled: boolean;
   logout: () => void;
   refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+
+/** Email + password sign-in is on unless the deployment turns it off. */
+const passwordEnabled = process.env.NEXT_PUBLIC_PASSWORD_LOGIN !== 'false';
 
 async function loadMe(): Promise<Principal> {
   const res = await apiFetch<{ principal: Principal }>('/auth/me');
@@ -84,8 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   }, [refresh]);
 
   // Swap the token for a fresh one while the portal is in use, so a working
-  // session does not lapse. Only dev sign-in renews this way; elsewhere the
-  // API answers 404 and the portal stops asking.
+  // session does not lapse. Dev and password sign-in renew this way; for
+  // Microsoft the API answers 404 and the portal stops asking.
   const signedIn = principal !== null;
   useEffect(() => {
     if (!signedIn) return;
@@ -140,7 +151,43 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     setPrincipal(await loadMe());
   }, [queryClient]);
 
+  const startSession = useCallback(
+    async (accessToken: string) => {
+      queryClient.clear();
+      newTelemetrySession();
+      setToken(accessToken);
+      setPrincipal(await loadMe());
+    },
+    [queryClient],
+  );
+
+  const loginWithPassword = useCallback(
+    async (email: string, password: string): Promise<'ok' | 'must_change'> => {
+      const res = await apiFetch<{ accessToken?: string; mustChangePassword?: boolean }>(
+        '/auth/login',
+        { method: 'POST', body: { email, password }, anonymous: true },
+      );
+      if (res.mustChangePassword || !res.accessToken) return 'must_change';
+      await startSession(res.accessToken);
+      return 'ok';
+    },
+    [startSession],
+  );
+
+  const changePassword = useCallback(
+    async (email: string, currentPassword: string, newPassword: string) => {
+      const res = await apiFetch<{ accessToken: string }>('/auth/password', {
+        method: 'POST',
+        body: { email, currentPassword, newPassword },
+        anonymous: true,
+      });
+      await startSession(res.accessToken);
+    },
+    [startSession],
+  );
+
   const logout = useCallback(() => {
+    const viaMicrosoft = principal?.authMethod !== 'password';
     // Change 3: signing out closes the automatic clock (signed_out). The token
     // is read synchronously, so the request carries it even though it is
     // cleared on the next line; failures never block signing out.
@@ -148,8 +195,9 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     setToken(null);
     setPrincipal(null);
     queryClient.clear();
-    if (isEntraConfigured) void entraSignOut().catch(() => undefined);
-  }, [queryClient]);
+    // A password session has no Microsoft account to sign out of.
+    if (isEntraConfigured && viaMicrosoft) void entraSignOut().catch(() => undefined);
+  }, [queryClient, principal]);
 
   return (
     <AuthContext.Provider
@@ -159,6 +207,9 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
         login,
         loginWithEntra,
         entraEnabled: isEntraConfigured,
+        loginWithPassword,
+        changePassword,
+        passwordEnabled,
         logout,
         refresh,
       }}

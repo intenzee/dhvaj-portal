@@ -13,6 +13,8 @@ export interface Principal {
   permissions: PermissionSlug[];
   mfaRequired: boolean;
   mfaSatisfied: boolean;
+  /** How this session signed in: a portal password, Microsoft, or dev token. */
+  authMethod?: 'microsoft' | 'password' | 'dev';
 }
 
 /** Does the principal hold the given permission? */
