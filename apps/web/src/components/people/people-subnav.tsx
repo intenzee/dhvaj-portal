@@ -8,7 +8,10 @@ import { can } from '@/lib/principal';
 import { readsPeople } from '@/lib/people';
 import { cn } from '@/lib/cn';
 
-/** The People area's own tabs: each shows only to those who may open it. */
+/**
+ * The People area's own tabs, gated as the sidebar gates them (every role holds
+ * employee.read, so the area itself is employee.manage).
+ */
 export function PeopleSubnav(): JSX.Element {
   const { principal } = useAuth();
   const pathname = usePathname() ?? '';
@@ -18,9 +21,9 @@ export function PeopleSubnav(): JSX.Element {
     {
       href: '/people/employees',
       label: 'Employees',
-      show: can(principal, PERMISSION.employeeRead),
+      show: can(principal, PERMISSION.employeeManage),
     },
-    { href: '/people/articles', label: 'Articles', show: can(principal, PERMISSION.employeeRead) },
+    { href: '/people/articles', label: 'Articles', show: can(principal, PERMISSION.employeeManage) },
     {
       href: '/people/joiners-leavers',
       label: 'Joiners & leavers',
