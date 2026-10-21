@@ -360,6 +360,23 @@ describe('Engagement Core (e2e)', () => {
       expect(created.body.engagementManagerName).toBe('Manager X');
       expect(created.body.engagementPartnerId).toBeNull();
     });
+
+    it('a Manager creating an accepted engagement with no EP is told to pick one (400)', async () => {
+      const entityId = await findEntityId('Bharat'); // North client
+      const serviceId = await findServiceId('GST_MONTHLY');
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(await token('manager.x@dhvaj.in')))
+        .send({
+          entityId: await freshClient(entityId),
+          serviceId,
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          status: 'accepted',
+        })
+        .expect(400);
+      expect(res.body.message).toMatch(/needs an Engagement Partner/);
+    });
   });
 
   describe('concurrency consistency (checkpoint)', () => {
