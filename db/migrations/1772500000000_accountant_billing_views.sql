@@ -423,7 +423,66 @@ BEGIN
 END;
 $$;
 
+-- ── 9. Asking a partner to issue an ad-hoc invoice ─────────────────────────
+-- An invoice with a line that no agreed fee or billable time stands behind
+-- needs billing.approve to issue (spec §3.5, decision 9.3). Whoever lacks it
+-- asks; the request closes when the invoice is issued, voided or withdrawn.
+CREATE TABLE hsdg.invoice_issue_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid NOT NULL REFERENCES hsdg.invoices (id) ON DELETE CASCADE,
+  engagement_id uuid NOT NULL,
+  client_entity_id uuid NOT NULL,
+  requested_by_employee_id uuid REFERENCES hsdg.employees (id),
+  note text CHECK (note IS NULL OR length(note) <= 1000),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  closed_at timestamptz,
+  closed_reason text CHECK (closed_reason IN ('issued', 'void', 'withdrawn')),
+  CONSTRAINT invoice_issue_requests_closed CHECK ((closed_at IS NULL) = (closed_reason IS NULL))
+);
+CREATE UNIQUE INDEX invoice_issue_requests_open
+  ON hsdg.invoice_issue_requests (invoice_id) WHERE closed_at IS NULL;
+CREATE INDEX invoice_issue_requests_client ON hsdg.invoice_issue_requests (client_entity_id);
+
+-- The engagement and client always come from the invoice.
+CREATE FUNCTION hsdg.invoice_issue_request_fill() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = hsdg, pg_temp AS $$
+BEGIN
+  SELECT i.engagement_id, i.client_entity_id INTO NEW.engagement_id, NEW.client_entity_id
+    FROM hsdg.invoices i WHERE i.id = NEW.invoice_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Invoice not found.' USING ERRCODE = 'P0002';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER invoice_issue_requests_fill
+  BEFORE INSERT ON hsdg.invoice_issue_requests
+  FOR EACH ROW EXECUTE FUNCTION hsdg.invoice_issue_request_fill();
+
+ALTER TABLE hsdg.invoice_issue_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE hsdg.invoice_issue_requests FORCE ROW LEVEL SECURITY;
+CREATE POLICY invoice_issue_requests_billing ON hsdg.invoice_issue_requests
+  FOR ALL TO hsdg_app
+  USING (hsdg.ctx_can_bill(client_entity_id))
+  WITH CHECK (hsdg.ctx_can_bill(client_entity_id));
+CREATE POLICY invoice_issue_requests_owner ON hsdg.invoice_issue_requests
+  FOR ALL TO hsdg_migrator USING (true) WITH CHECK (true);
+REVOKE ALL ON hsdg.invoice_issue_requests FROM PUBLIC;
+GRANT SELECT, INSERT, UPDATE ON hsdg.invoice_issue_requests TO hsdg_app;
+
+-- ── 10. Drafting from time, like drafting from fees ───────────────────────
+-- time_billings took only the engagement lead; fee_billings and fee_waivers
+-- take whoever may bill the engagement (ctx_may_bill_engagement, which
+-- includes finance). Time now matches.
+CREATE POLICY time_billings_insert_billing ON hsdg.time_billings
+  FOR INSERT TO hsdg_app
+  WITH CHECK (hsdg.ctx_may_bill_engagement(engagement_id));
+
 -- Down Migration
+
+DROP POLICY IF EXISTS time_billings_insert_billing ON hsdg.time_billings;
+DROP TABLE IF EXISTS hsdg.invoice_issue_requests;
+DROP FUNCTION IF EXISTS hsdg.invoice_issue_request_fill();
 
 CREATE OR REPLACE FUNCTION hsdg.time_billing_guard() RETURNS trigger
   LANGUAGE plpgsql AS $$

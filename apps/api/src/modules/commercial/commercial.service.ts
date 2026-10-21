@@ -594,6 +594,18 @@ export class CommercialService {
         if (!permissions.includes(PERMISSION.billingManage)) {
           throw new ForbiddenException('Issuing an invoice needs the billing.manage permission.');
         }
+        // Decision 9.3: a line no agreed fee or billable time stands behind
+        // is the partner's call to issue; the rest ask (request-issue).
+        if (!permissions.includes(PERMISSION.billingApprove)) {
+          const adHoc = await this.adHocLines(client, invoiceId);
+          if (adHoc.length > 0) {
+            throw new ForbiddenException(
+              `A partner issues this invoice: no agreed fee or billable time stands behind ${adHoc
+                .map((l) => `"${l.description}"`)
+                .join(', ')}. Ask for it with Request issue.`,
+            );
+          }
+        }
         const issueDate = input.issueDate ?? current.issue_date ?? istToday();
         // A draft made before the firm's GSTIN was set has no place of supply
         // yet: work it out as a new draft would, or ask for it.
@@ -646,6 +658,13 @@ export class CommercialService {
           [input.status, invoiceId, engagementId],
         );
         if ((result.rowCount ?? 0) === 0) throw new NotFoundException('Invoice not found.');
+      }
+      if (input.status === INVOICE_STATUS.issued || input.status === INVOICE_STATUS.void) {
+        await client.query(
+          `UPDATE hsdg.invoice_issue_requests SET closed_at = now(), closed_reason = $2
+            WHERE invoice_id = $1 AND closed_at IS NULL`,
+          [invoiceId, input.status === INVOICE_STATUS.issued ? 'issued' : 'void'],
+        );
       }
       const after = await this.selectInvoiceDetail(client, engagementId, invoiceId);
       await this.audit.recordWith(client, ctx, {
@@ -782,6 +801,28 @@ export class CommercialService {
       `SELECT state_code FROM hsdg.firm_settings LIMIT 1`,
     );
     return rows[0]?.state_code ?? null;
+  }
+
+  /**
+   * Lines no agreed fee or billable time stands behind: no live fee billing
+   * for the line's whole amount, and no live time billing.
+   */
+  async adHocLines(
+    client: PoolClient,
+    invoiceId: string,
+  ): Promise<{ id: string; description: string; amount: string }[]> {
+    const { rows } = await client.query<{ id: string; description: string; amount: string }>(
+      `SELECT l.id, l.description, l.amount::text
+         FROM hsdg.invoice_line_items l
+        WHERE l.invoice_id = $1
+          AND (SELECT sum(fb.amount) FROM hsdg.fee_billings fb
+                WHERE fb.invoice_line_id = l.id AND fb.released_at IS NULL) IS DISTINCT FROM l.amount
+          AND NOT EXISTS (SELECT 1 FROM hsdg.time_billings tb
+                           WHERE tb.invoice_line_id = l.id AND tb.released_at IS NULL)
+        ORDER BY l.sort_order, l.created_at`,
+      [invoiceId],
+    );
+    return rows;
   }
 
   /** The client's GSTIN when it has exactly one active, well-formed registration. */

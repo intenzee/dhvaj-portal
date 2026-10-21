@@ -27,6 +27,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { CommercialModule } from './modules/commercial/commercial.module';
+import { AccountsModule } from './modules/accounts/accounts.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.module';
@@ -111,6 +112,7 @@ import { NoticeIntakeModule } from './modules/notice-intake/notice-intake.module
     SchedulerModule,
     CommercialModule,
     BillingModule,
+    AccountsModule,
     NotesModule,
     StatutoryAuditModule,
     FilingWorkspaceModule,
