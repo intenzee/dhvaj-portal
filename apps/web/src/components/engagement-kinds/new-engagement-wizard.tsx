@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import {
   ENGAGEMENT_STATUS,
+  PERMISSION,
   STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
   type EngagementKind,
@@ -33,6 +34,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
+import { can } from '@/lib/principal';
 import type { EmployeeRow, EntityDetail } from '@/lib/types';
 import { EntityPicker, type Picked } from '@/components/entity-picker';
 import { PageHeader, Card, CardBody, Button, Spinner, Badge } from '@/components/ui';
@@ -112,7 +114,14 @@ export function NewEngagementWizard(): JSX.Element {
 
   // Shared
   const [financialYear, setFinancialYear] = useState(currentFy);
-  const [status, setStatus] = useState<string>(ENGAGEMENT_STATUS.accepted);
+  // Anyone may create an engagement; only those who manage engagements may
+  // create it already accepted — for everyone else it waits for the EP.
+  const canAccept = can(principal, PERMISSION.engagementManage);
+  const [statusChoice, setStatus] = useState<string>(ENGAGEMENT_STATUS.accepted);
+  const status =
+    !canAccept && statusChoice === ENGAGEMENT_STATUS.accepted
+      ? ENGAGEMENT_STATUS.pendingAcceptance
+      : statusChoice;
   const [partnerId, setPartnerId] = useState('');
   const [managerId, setManagerId] = useState('');
   // Assignment
@@ -422,7 +431,12 @@ export function NewEngagementWizard(): JSX.Element {
                     placeholder="2026-27"
                   />
                 </Field>
-                <StatusField value={status} onChange={setStatus} meIsPartner={meIsPartner} />
+                <StatusField
+                  value={status}
+                  onChange={setStatus}
+                  meIsPartner={meIsPartner}
+                  canAccept={canAccept}
+                />
               </div>
               <LeadFields
                 partners={partners}
@@ -468,7 +482,12 @@ export function NewEngagementWizard(): JSX.Element {
                 <Field label="Period" hint="FY, Q1, Apr-2026…">
                   <Input value={periodLabel} onChange={(e) => setPeriodLabel(e.target.value)} />
                 </Field>
-                <StatusField value={status} onChange={setStatus} meIsPartner={meIsPartner} />
+                <StatusField
+                  value={status}
+                  onChange={setStatus}
+                  meIsPartner={meIsPartner}
+                  canAccept={canAccept}
+                />
               </div>
               <LeadFields
                 partners={partners}
@@ -743,24 +762,28 @@ function StatusField({
   value,
   onChange,
   meIsPartner,
+  canAccept,
 }: {
   value: string;
   onChange: (v: string) => void;
   meIsPartner: boolean;
+  canAccept: boolean;
 }): JSX.Element {
   return (
     <Field
       label="Initial status"
       hint={
-        meIsPartner
-          ? '“Accepted” makes you the Engagement Partner if none is set.'
-          : '“Accepted” needs an Engagement Partner — pick one below.'
+        !canAccept
+          ? 'The Engagement Partner you pick accepts it.'
+          : meIsPartner
+            ? '“Accepted” makes you the Engagement Partner if none is set.'
+            : '“Accepted” needs an Engagement Partner — pick one below.'
       }
     >
       <Select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value={ENGAGEMENT_STATUS.prospect}>Prospect</option>
         <option value={ENGAGEMENT_STATUS.pendingAcceptance}>Pending Acceptance</option>
-        <option value={ENGAGEMENT_STATUS.accepted}>Accepted</option>
+        {canAccept && <option value={ENGAGEMENT_STATUS.accepted}>Accepted</option>}
       </Select>
     </Field>
   );
