@@ -67,12 +67,17 @@ const ENTITY_SUMMARY_COLS = `
  * MISSING_INFO_CODES, in their order — for the client page, the list's marker
  * and its filter alike. `e` is the entities row's alias, `category` the SQL
  * for its type category. Absence is reported, never read as "not applicable".
+ * GSTIN is missing only for a GST client: one with a GST login or GST
+ * return marks (from the login workbook) but no GSTIN.
  */
 export function missingInfoSql(e: string, category: string): string {
   const none = (from: string, where: string): string =>
     `NOT EXISTS (SELECT 1 FROM hsdg.${from} WHERE x.entity_id = ${e}.id${where})`;
   return `array_remove(ARRAY[
     CASE WHEN NULLIF(${e}.pan, '') IS NULL THEN 'pan' END,
+    CASE WHEN (NOT ${none('client_credentials x', " AND x.portal = 'gst'")}
+               OR NOT ${none('client_return_marks x', '')})
+          AND ${none('entity_registrations x', " AND x.registration_type = 'gstin'")} THEN 'gstin' END,
     CASE WHEN ${e}.incorporation_date IS NULL THEN 'incorporation_date' END,
     CASE WHEN ${e}.legal_status IS NULL THEN 'legal_status' END,
     CASE WHEN ${none('entity_registrations x', '')} THEN 'registrations' END,
