@@ -95,3 +95,4 @@ export * from './feature-rollout';
 export * from './credentials';
 export * from './notices';
 export * from './billing';
+export * from './people';
