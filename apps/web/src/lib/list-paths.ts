@@ -1,10 +1,13 @@
-import { workSectionsParam, type WorkSection } from '@hsdg/contracts';
+import { workSectionsParam, type MissingFilter, type WorkSection } from '@hsdg/contracts';
 
 /**
  * API paths for the client and engagement lists, and the home panel's "View
  * all" link — one place that writes `?section=` (any-of, comma list). Pure.
  */
-function withQuery(path: string, q: Record<string, string | number | boolean | null | undefined>): string {
+function withQuery(
+  path: string,
+  q: Record<string, string | number | boolean | null | undefined>,
+): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) {
     if (v === null || v === undefined || v === '' || v === false) continue;
@@ -19,11 +22,13 @@ export function entityListPath(o: {
   offset: number;
   search?: string;
   sections?: readonly WorkSection[];
+  missing?: MissingFilter | null;
 }): string {
   return withQuery('/entities', {
     limit: o.limit,
     offset: o.offset,
     search: o.search,
+    missing: o.missing,
     section: workSectionsParam(o.sections ?? []),
   });
 }
