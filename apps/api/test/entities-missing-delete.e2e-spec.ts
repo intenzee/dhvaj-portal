@@ -112,7 +112,41 @@ describe('Clients: missing data and delete (e2e)', () => {
       .expect(200);
     expect(page.body.total).toBe(2);
     expect(page.body.items).toHaveLength(1);
-    await http().get('/api/v1/entities?missing=gstin').set(bearer(pa)).expect(400);
+    await http().get('/api/v1/entities?missing=nonsense').set(bearer(pa)).expect(400);
+  });
+
+  it('misses a GSTIN only for a client with GST logins or GST return marks', async () => {
+    const name = `GstGap${Date.now().toString(36)}`;
+    const codes = async (): Promise<string[]> =>
+      (
+        (await http().get(`/api/v1/entities?search=${name}&limit=10`).set(bearer(pa)).expect(200))
+          .body.items as Row[]
+      )[0]!.missingInfo.map((m) => m.code);
+    const id = await create(pa, {
+      legalName: `${name} Traders`,
+      typeSlug: 'proprietorship',
+      officeCode: 'NORTH',
+    });
+    expect(await codes()).not.toContain('gstin');
+    await su.query(
+      `INSERT INTO hsdg.client_credentials
+         (id, entity_id, portal, state_code, username_hint, ciphertext, iv, auth_tag, key_version)
+       VALUES (gen_random_uuid(), $1, 'gst', '07', 'gs***', '\\x00',
+               decode(repeat('00', 12), 'hex'), decode(repeat('00', 16), 'hex'), 1)`,
+      [id],
+    );
+    expect((await codes()).slice(0, 2)).toEqual(['pan', 'gstin']);
+    const filtered = await http()
+      .get(`/api/v1/entities?search=${name}&missing=gstin`)
+      .set(bearer(pa))
+      .expect(200);
+    expect(filtered.body.items.map((r: Row) => r.id)).toEqual([id]);
+    await su.query(
+      `INSERT INTO hsdg.entity_registrations (entity_id, registration_type, registration_number)
+       VALUES ($1, 'gstin', $2)`,
+      [id, `08${pan}1Z5`],
+    );
+    expect(await codes()).not.toContain('gstin');
   });
 
   it('lets only the Managing Partner delete a client', async () => {
@@ -138,12 +172,21 @@ describe('Clients: missing data and delete (e2e)', () => {
        VALUES ($1, $2, 'GSTR3B', '2026-04', 'filed'), ($1, NULL, 'GSTR1', '2026-05', 'filed')`,
       [complete, reg],
     );
+    const login = (
+      await su.query<{ id: string }>(
+        `INSERT INTO hsdg.client_credentials
+           (id, entity_id, portal, username_hint, ciphertext, iv, auth_tag, key_version)
+         VALUES (gen_random_uuid(), $1, 'gst', 'as***', '\\x00',
+                 decode(repeat('00', 12), 'hex'), decode(repeat('00', 16), 'hex'), 1)
+         RETURNING id`,
+        [complete],
+      )
+    ).rows[0]!.id;
+    // Someone saw the login before the client was deleted.
     await su.query(
-      `INSERT INTO hsdg.client_credentials
-         (id, entity_id, portal, username_hint, ciphertext, iv, auth_tag, key_version)
-       VALUES (gen_random_uuid(), $1, 'gst', 'as***', '\\x00',
-               decode(repeat('00', 12), 'hex'), decode(repeat('00', 16), 'hex'), 1)`,
-      [complete],
+      `INSERT INTO hsdg.credential_access_log (credential_id, entity_id, user_id, role)
+       SELECT $1, $2, id, 'partner' FROM hsdg.users WHERE email = 'partner.a@dhvaj.in'`,
+      [login, complete],
     );
 
     await http().delete(`/api/v1/entities/${complete}`).set(bearer(mp)).expect(204);
@@ -159,6 +202,12 @@ describe('Clients: missing data and delete (e2e)', () => {
       [complete],
     );
     expect(left.rows.filter((r) => r.n !== '0')).toEqual([]);
+    // Who saw its logins is kept; only the login it pointed at is gone.
+    const seen = await su.query<{ credential_id: string | null }>(
+      `SELECT credential_id FROM hsdg.credential_access_log WHERE entity_id = $1`,
+      [complete],
+    );
+    expect(seen.rows).toEqual([{ credential_id: null }]);
 
     const audit = await su.query<{ actor_role: string; before_state: { legalName: string } }>(
       `SELECT actor_role, before_state FROM hsdg.audit_events

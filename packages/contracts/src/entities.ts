@@ -254,6 +254,7 @@ export interface MissingInfoItem {
  */
 export const MISSING_INFO_CODES = [
   'pan',
+  'gstin',
   'incorporation_date',
   'legal_status',
   'registrations',
@@ -267,6 +268,7 @@ export type MissingInfoCode = (typeof MISSING_INFO_CODES)[number];
 /** The sentence the client page shows for a missing item. */
 export const MISSING_INFO_LABEL: Record<MissingInfoCode, string> = {
   pan: 'PAN not recorded',
+  gstin: 'GSTIN not recorded for a client with GST logins or returns',
   incorporation_date: 'Date of incorporation/birth not recorded',
   legal_status: 'Legal/operational status not assessed',
   registrations: 'No registrations recorded',
@@ -279,6 +281,7 @@ export const MISSING_INFO_LABEL: Record<MissingInfoCode, string> = {
 /** The short name a list filter or a marker uses for it. */
 export const MISSING_INFO_SHORT: Record<MissingInfoCode, string> = {
   pan: 'PAN',
+  gstin: 'GSTIN',
   incorporation_date: 'Date of incorporation',
   legal_status: 'Legal status',
   registrations: 'Registrations',
