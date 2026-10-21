@@ -829,7 +829,7 @@ accept `?limit=&offset=` and return `{ items, total, limit, offset }`
 | PATCH | `/services/:id` | `service.manage` | Update (audited; optimistic concurrency) |
 | GET | `/engagements` | `engagement.read` | Assignment-scoped _(paginated)_; filter `?status=&entityId=&serviceCode=&office=&mine=` |
 | GET | `/engagements/:id` | `engagement.read` | Detail with team; 404 unless assigned |
-| POST | `/engagements` | `engagement.manage` | Create (audited) |
+| POST | `/engagements` | `engagement.create` | Create (audited). Every staff role holds it; without `engagement.manage` it starts as Prospect / Pending Acceptance and the creator joins the team |
 | PATCH | `/engagements/:id` | `engagement.manage` | Update (audited; optimistic concurrency) |
 | POST | `/engagements/:id/reassign-partner` | `engagement.manage` | Change EP (firm-wide; audited) |
 | POST | `/engagements/:id/team` | `engagement.manage` | Assign a team member (audited) |
