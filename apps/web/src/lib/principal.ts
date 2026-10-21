@@ -35,6 +35,8 @@ const ROLE_LABELS: Record<RoleSlug, string> = {
   manager: 'Manager',
   senior: 'Senior',
   article: 'Article',
+  accountant: 'Accountant',
+  hr: 'HR',
 };
 
 export function roleLabel(role: RoleSlug | undefined): string {

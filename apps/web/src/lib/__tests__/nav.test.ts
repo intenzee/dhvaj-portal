@@ -3,6 +3,7 @@ import {
   NAV_ITEMS,
   activeNavHref,
   foldedHref,
+  isDeskOnly,
   isNavActive,
   landingPath,
   visibleNav,
@@ -263,5 +264,66 @@ describe('Notices (PS-102)', () => {
   it('marks Notices current on a notice', () => {
     const items = visibleNav(principal([PERMISSION.engagementRead]), { notices: true });
     expect(activeNavHref(items, '/notices/abc')).toBe('/notices');
+  });
+});
+
+describe('Accountant and HR desks (roles spec §5)', () => {
+  const ACCOUNTANT = [
+    PERMISSION.billingManage,
+    PERMISSION.entityReadBilling,
+    PERMISSION.engagementReadCommercial,
+    PERMISSION.notificationRead,
+    PERMISSION.payrollReadSummary,
+  ];
+  const HR = [
+    PERMISSION.employeeRead,
+    PERMISSION.employeeManage,
+    PERMISSION.userOnboard,
+    PERMISSION.reportReadPeople,
+    PERMISSION.timeReadAttendance,
+    PERMISSION.payrollPrepare,
+    PERMISSION.payrollRead,
+    PERMISSION.notificationRead,
+  ];
+  const as = (roles: RoleSlug[], permissions: string[]): Principal => ({
+    ...principal(permissions),
+    roles,
+    effectiveRole: roles[0],
+  });
+  const sections = (p: Principal) => visibleNavSections(p).map((s) => s.title);
+
+  it('gives the Accountant the Accounts desk and no practice', () => {
+    const p = as(['accountant'], ACCOUNTANT);
+    expect(isDeskOnly(p)).toBe(true);
+    expect(landingPath(p)).toBe('/accounts');
+    const labels = visibleNav(p).map((i) => i.label);
+    expect(labels).not.toContain('Home');
+    expect(labels).not.toContain('Engagements');
+    expect(sections(p)).toContain('Accounts');
+    expect(sections(p)).not.toContain('People');
+    expect(sections(p)).not.toContain('Payroll');
+  });
+
+  it('gives HR the People and Payroll desks and no client work', () => {
+    const p = as(['hr'], HR);
+    expect(landingPath(p)).toBe('/people');
+    expect(sections(p)).toEqual(expect.arrayContaining(['People', 'Payroll']));
+    expect(sections(p)).not.toContain('Accounts');
+    const labels = visibleNav(p).map((i) => i.label);
+    expect(labels).not.toContain('Home');
+    expect(labels).not.toContain('Clients');
+  });
+
+  it('lands someone holding both desks on Accounts', () => {
+    expect(landingPath(as(['hr', 'accountant'], [...HR, ...ACCOUNTANT]))).toBe('/accounts');
+  });
+
+  it('keeps a Senior + Accountant on the practice, with the Accounts desk added', () => {
+    const p = as(['senior', 'accountant'], [PERMISSION.engagementRead, ...ACCOUNTANT]);
+    expect(isDeskOnly(p)).toBe(false);
+    expect(landingPath(p)).toBe('/');
+    const labels = visibleNav(p).map((i) => i.label);
+    expect(labels).toEqual(expect.arrayContaining(['Home', 'Engagements']));
+    expect(sections(p)).toContain('Accounts');
   });
 });
