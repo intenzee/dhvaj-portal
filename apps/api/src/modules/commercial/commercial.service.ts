@@ -120,9 +120,9 @@ const INVOICE_COLUMNS = `
   i.amount_received, i.amount_credited, i.amount_written_off`;
 
 const INVOICE_JOINS = `
-  LEFT JOIN hsdg.employees ce ON ce.id = i.created_by_employee_id
-  LEFT JOIN hsdg.employees ie ON ie.id = i.issued_by_employee_id
-  LEFT JOIN hsdg.employees ve ON ve.id = i.voided_by_employee_id`;
+  LEFT JOIN hsdg.employee_names ce ON ce.id = i.created_by_employee_id
+  LEFT JOIN hsdg.employee_names ie ON ie.id = i.issued_by_employee_id
+  LEFT JOIN hsdg.employee_names ve ON ve.id = i.voided_by_employee_id`;
 
 const INVOICE_BASE = `SELECT ${INVOICE_COLUMNS} FROM hsdg.invoices i ${INVOICE_JOINS}`;
 
@@ -144,8 +144,8 @@ const GLOBAL_INVOICE_BASE = `
            AND i.due_date < CURRENT_DATE) AS overdue
   FROM hsdg.invoices i
   ${INVOICE_JOINS}
-  LEFT JOIN hsdg.engagements eng ON eng.id = i.engagement_id
-  LEFT JOIN hsdg.entities ent ON ent.id = i.client_entity_id`;
+  LEFT JOIN hsdg.engagement_billing_headers eng ON eng.id = i.engagement_id
+  LEFT JOIN hsdg.entity_billing_profiles ent ON ent.id = i.client_entity_id`;
 
 /** Legal invoice status transitions (spec §31). */
 const INVOICE_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
@@ -786,16 +786,14 @@ export class CommercialService {
 
   /** The client's GSTIN when it has exactly one active, well-formed registration. */
   private async soleClientGstin(client: PoolClient, engagementId: string): Promise<string | null> {
-    const { rows } = await client.query<{ gstin: string }>(
-      `SELECT r.registration_number AS gstin
-         FROM hsdg.entity_registrations r
-         JOIN hsdg.engagements e ON e.entity_id = r.entity_id
-        WHERE e.id = $1 AND r.registration_type = 'gstin' AND r.status = 'active'
-          AND r.registration_number ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$'
-        LIMIT 2`,
+    const { rows } = await client.query<{ gstin: string | null }>(
+      `SELECT p.gstin
+         FROM hsdg.entity_billing_profiles p
+         JOIN hsdg.engagement_billing_headers e ON e.entity_id = p.id
+        WHERE e.id = $1`,
       [engagementId],
     );
-    return rows.length === 1 ? rows[0]!.gstin : null;
+    return rows[0]?.gstin ?? null;
   }
 
   /**
@@ -808,28 +806,18 @@ export class CommercialService {
     client: PoolClient,
     engagementId: string,
   ): Promise<string | null> {
-    const { rows } = await client.query<{ state: string }>(
-      `SELECT a.state
-         FROM hsdg.entity_addresses a
-         JOIN hsdg.engagements e ON e.entity_id = a.entity_id
-        WHERE e.id = $1 AND a.country = 'IN' AND a.state IS NOT NULL
-        ORDER BY CASE a.address_type WHEN 'registered' THEN 0 WHEN 'business' THEN 1 ELSE 2 END,
-                 a.is_primary DESC, a.created_at`,
+    const { rows } = await client.query<{ states: string[] | null; gstin_count: number }>(
+      `SELECT p.address_states AS states, p.gstin_count
+         FROM hsdg.entity_billing_profiles p
+         JOIN hsdg.engagement_billing_headers e ON e.entity_id = p.id
+        WHERE e.id = $1`,
       [engagementId],
     );
-    for (const row of rows) {
-      const code = stateCodeFromName(row.state);
+    for (const state of rows[0]?.states ?? []) {
+      const code = stateCodeFromName(state);
       if (code) return code;
     }
-    const { rows: gstins } = await client.query<{ n: number }>(
-      `SELECT count(*)::int AS n
-         FROM hsdg.entity_registrations r
-         JOIN hsdg.engagements e ON e.entity_id = r.entity_id
-        WHERE e.id = $1 AND r.registration_type = 'gstin' AND r.status = 'active'
-          AND r.registration_number ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$'`,
-      [engagementId],
-    );
-    return gstins[0]!.n === 0 ? this.firmStateCode(client) : null;
+    return (rows[0]?.gstin_count ?? 0) === 0 ? this.firmStateCode(client) : null;
   }
 
   /**
@@ -895,7 +883,7 @@ export class CommercialService {
       state_code: string | null;
     }>(`SELECT firm_name, address, gstin, state_code FROM hsdg.firm_settings LIMIT 1`);
     const { rows: clientRows } = await client.query<{ legal_name: string; pan: string | null }>(
-      `SELECT legal_name, pan FROM hsdg.entities WHERE id = $1`,
+      `SELECT legal_name, pan FROM hsdg.entity_billing_profiles WHERE id = $1`,
       [inv.clientEntityId],
     );
     const firm = firmRows[0];
@@ -986,9 +974,10 @@ export class CommercialService {
   }
 
   private async assertEngagementVisible(client: PoolClient, engagementId: string): Promise<void> {
-    const { rows } = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [
-      engagementId,
-    ]);
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.engagement_billing_headers WHERE id = $1`,
+      [engagementId],
+    );
     if (!rows[0]) throw new NotFoundException('Engagement not found.');
   }
 }

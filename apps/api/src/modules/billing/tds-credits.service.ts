@@ -40,10 +40,8 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { istToday } from '../compliance/compliance-profile';
-import { clientPhoneSql } from '../filing-workspace/client-chase';
 import { NotificationsService } from '../notifications/notifications.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
-import { CLIENT_EMAIL_SQL } from './receivables.service';
 import { awaitedFor, bookedChecks, creditChecks, longDate } from './tds-checks';
 import { TdsParseError, parseTdsText } from './tds-parsers';
 import { TdsPdfReader } from './tds-pdf-reader';
@@ -335,9 +333,9 @@ export class TdsCreditsService {
         firm_name: string;
       }>(
         `SELECT e.legal_name AS name, hsdg.ctx_can_bill(e.id) AS can_bill,
-                ${CLIENT_EMAIL_SQL('e.id')} AS email, ${clientPhoneSql('e.id')} AS phone,
+                e.contact_email AS email, e.contact_phone AS phone,
                 (SELECT f.firm_name FROM hsdg.firm_settings f LIMIT 1) AS firm_name
-           FROM hsdg.entities e WHERE e.id = $1`,
+           FROM hsdg.entity_billing_profiles e WHERE e.id = $1`,
         [input.clientId],
       );
       const c = who[0];
@@ -364,7 +362,7 @@ export class TdsCreditsService {
       }>(
         `SELECT t.channel, t.created_at, e.full_name AS by_name
            FROM hsdg.tds_reminders t
-           LEFT JOIN hsdg.employees e ON e.id = t.sent_by_employee_id
+           LEFT JOIN hsdg.employee_names e ON e.id = t.sent_by_employee_id
           WHERE t.client_entity_id = $1 AND t.financial_year = $2
             AND t.quarter IS NOT DISTINCT FROM $3
             AND t.created_at > now() - make_interval(days => $4)
@@ -487,10 +485,9 @@ export class TdsCreditsService {
          FROM hsdg.firm_tds_credits c
          LEFT JOIN LATERAL (
            SELECT r.entity_id, e.legal_name
-             FROM hsdg.entity_registrations r
-             JOIN hsdg.entities e ON e.id = r.entity_id
-            WHERE r.registration_type = 'tan'
-              AND upper(replace(r.registration_number, ' ', '')) = c.deductor_tan
+             FROM hsdg.client_tans r
+             JOIN hsdg.entity_billing_profiles e ON e.id = r.entity_id
+            WHERE r.tan = c.deductor_tan
             ORDER BY COALESCE(r.status = 'active', false) DESC,
                      hsdg.ctx_can_bill(r.entity_id) DESC, r.created_at, r.id
             LIMIT 1) owner ON true
@@ -504,7 +501,7 @@ export class TdsCreditsService {
               r.reference, r.gross_amount::text, r.tds_amount::text, r.tds_section,
               CASE WHEN a.allocated = r.gross_amount THEN a.taxable::text END AS taxable
          FROM hsdg.receipts r
-         JOIN hsdg.entities e ON e.id = r.client_entity_id
+         JOIN hsdg.entity_billing_profiles e ON e.id = r.client_entity_id
          LEFT JOIN LATERAL (
            SELECT sum(x.amount) AS allocated,
                   round(sum(x.amount * i.subtotal / NULLIF(i.total, 0)), 2) AS taxable
@@ -531,7 +528,7 @@ export class TdsCreditsService {
       `SELECT b.id, b.source, b.file_name, b.financial_year, b.pan, b.credits_count,
               b.superseded_count, b.as_on::text, e.full_name AS by_name, b.created_at
          FROM hsdg.firm_tds_import_batches b
-         LEFT JOIN hsdg.employees e ON e.id = b.imported_by_employee_id
+         LEFT JOIN hsdg.employee_names e ON e.id = b.imported_by_employee_id
         WHERE b.financial_year = $1
         ORDER BY b.created_at DESC
         LIMIT 10`,
@@ -697,9 +694,9 @@ export class TdsCreditsService {
     const lastReminder = new Map<string, TdsClientMismatch['lastReminder']>();
     if (clientIds.length) {
       const { rows: tanRows } = await client.query<{ entity_id: string; tans: string[] }>(
-        `SELECT entity_id, array_agg(DISTINCT upper(replace(registration_number, ' ', ''))) AS tans
-           FROM hsdg.entity_registrations
-          WHERE registration_type = 'tan' AND entity_id = ANY($1::uuid[])
+        `SELECT entity_id, array_agg(DISTINCT tan) AS tans
+           FROM hsdg.client_tans
+          WHERE entity_id = ANY($1::uuid[])
           GROUP BY entity_id`,
         [clientIds],
       );
@@ -713,7 +710,7 @@ export class TdsCreditsService {
         `SELECT DISTINCT ON (t.client_entity_id) t.client_entity_id, t.channel, t.created_at,
                 e.full_name AS by_name
            FROM hsdg.tds_reminders t
-           LEFT JOIN hsdg.employees e ON e.id = t.sent_by_employee_id
+           LEFT JOIN hsdg.employee_names e ON e.id = t.sent_by_employee_id
           WHERE t.financial_year = $1 AND t.client_entity_id = ANY($2::uuid[])
           ORDER BY t.client_entity_id, t.created_at DESC`,
         [financialYear, clientIds],
@@ -816,10 +813,9 @@ export class TdsCreditsService {
     const seenTans = [...new Set(creditRows.map((c) => c.deductor_tan))];
     if (seenTans.length) {
       const { rows: shared } = await client.query<{ tan: string }>(
-        `SELECT upper(replace(registration_number, ' ', '')) AS tan
-           FROM hsdg.entity_registrations
-          WHERE registration_type = 'tan'
-            AND upper(replace(registration_number, ' ', '')) = ANY($1::text[])
+        `SELECT tan
+           FROM hsdg.client_tans
+          WHERE tan = ANY($1::text[])
           GROUP BY 1 HAVING count(DISTINCT entity_id) > 1
           ORDER BY 1`,
         [seenTans],

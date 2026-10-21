@@ -99,10 +99,10 @@ const ADJUSTMENT_BASE = `
             WHERE a.kind = 'credit_note' AND cl.credit_note_id = a.id), '[]'::json) AS lines
     FROM (${ADJUSTMENTS}) a
     JOIN hsdg.invoices i ON i.id = a.invoice_id
-    JOIN hsdg.entities e ON e.id = a.client_entity_id
-    LEFT JOIN hsdg.employees rb ON rb.id = a.requested_by_employee_id
-    LEFT JOIN hsdg.employees db ON db.id = a.decided_by_employee_id
-    LEFT JOIN hsdg.employees vb ON vb.id = a.voided_by_employee_id`;
+    JOIN hsdg.entity_billing_profiles e ON e.id = a.client_entity_id
+    LEFT JOIN hsdg.employee_names rb ON rb.id = a.requested_by_employee_id
+    LEFT JOIN hsdg.employee_names db ON db.id = a.decided_by_employee_id
+    LEFT JOIN hsdg.employee_names vb ON vb.id = a.voided_by_employee_id`;
 
 const TABLE: Record<AdjustmentKind, string> = {
   credit_note: 'hsdg.credit_notes',
@@ -467,7 +467,7 @@ export class AdjustmentsService {
     }>(
       `SELECT i.invoice_number, i.issue_date::text, i.client_gstin, i.place_of_supply_state,
               i.is_reverse_charge, e.legal_name, e.pan
-         FROM hsdg.invoices i JOIN hsdg.entities e ON e.id = i.client_entity_id
+         FROM hsdg.invoices i JOIN hsdg.entity_billing_profiles e ON e.id = i.client_entity_id
         WHERE i.id = $1`,
       [note.invoiceId],
     );
@@ -475,13 +475,9 @@ export class AdjustmentsService {
     if (!inv) throw new NotFoundException('Invoice not found.');
     // Registered, then business, then any address; primary first.
     const { rows: addrRows } = await client.query<{ address: string }>(
-      `SELECT concat_ws(', ', a.line1, NULLIF(a.line2, ''), NULLIF(a.city, ''),
-                        NULLIF(concat_ws(' ', NULLIF(a.state, ''), a.pincode), '')) AS address
-         FROM hsdg.entity_addresses a
-        WHERE a.entity_id = $1
-        ORDER BY (a.address_type = 'registered') DESC, (a.address_type = 'business') DESC,
-                 a.is_primary DESC, a.created_at
-        LIMIT 1`,
+      `SELECT p.billing_address AS address
+         FROM hsdg.entity_billing_profiles p
+        WHERE p.id = $1 AND p.billing_address IS NOT NULL`,
       [note.clientEntityId],
     );
     const { rows: sacRows } = await client.query<{ id: string; sac_code: string | null }>(
