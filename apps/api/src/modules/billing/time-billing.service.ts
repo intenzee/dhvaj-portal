@@ -50,17 +50,14 @@ const ENTRY_SELECT = `
          (e.started_at AT TIME ZONE 'Asia/Kolkata')::date::text AS worked_on,
          e.duration_seconds AS seconds, sv.stream,
          (SELECT t.title FROM hsdg.tasks t WHERE t.id = e.task_id) AS task_title,
-         e.category, COALESCE(e.note, o.note) AS note,
-         EXISTS (SELECT 1 FROM hsdg.engagement_time_entries a
-                  WHERE a.adjusts_entry_id = e.entry_id AND a.adjustment_status = 'pending') AS pending,
+         e.category, e.note, e.pending,
          tb.billed_invoice_id, i.invoice_number, i.status AS invoice_status, tb.invoice_line_id,
          tb.rate_per_hour::text
-    FROM (SELECT COALESCE(te.adjusts_entry_id, te.id) AS entry_id, te.*
-            FROM hsdg.effective_time_entries te
+    FROM (SELECT te.*
+            FROM hsdg.billable_time_entries te
            WHERE te.engagement_id = $1 AND te.ended_at IS NOT NULL AND te.is_billable
              AND te.duration_seconds > 0) e
-    JOIN hsdg.engagement_time_entries o ON o.id = e.entry_id
-    LEFT JOIN hsdg.employees emp ON emp.id = e.employee_id
+    LEFT JOIN hsdg.employee_names emp ON emp.id = e.employee_id
     LEFT JOIN hsdg.engagement_services es ON es.id = e.engagement_service_id
     LEFT JOIN hsdg.services sv ON sv.id = es.service_id
     LEFT JOIN hsdg.time_billings tb ON tb.time_entry_id = e.entry_id AND tb.released_at IS NULL
@@ -218,13 +215,17 @@ export class TimeBillingService {
       }>(
         `SELECT tb.invoice_line_id, tb.time_entry_id,
                 COALESCE(emp.full_name, 'Team member') AS employee_name,
-                (te.started_at AT TIME ZONE 'Asia/Kolkata')::date::text AS worked_on,
+                (COALESCE(te.started_at, bt.started_at) AT TIME ZONE 'Asia/Kolkata')::date::text
+                  AS worked_on,
                 tb.seconds, tb.rate_per_hour::text, tb.released_at IS NOT NULL AS released
            FROM hsdg.time_billings tb
-           JOIN hsdg.engagement_time_entries te ON te.id = tb.time_entry_id
-           LEFT JOIN hsdg.employees emp ON emp.id = te.employee_id
-          WHERE tb.billed_invoice_id = $1
-          ORDER BY te.started_at, tb.time_entry_id`,
+           LEFT JOIN hsdg.engagement_time_entries te ON te.id = tb.time_entry_id
+           -- The Accountant reads no raw time; the billable view stands in.
+           LEFT JOIN hsdg.billable_time_entries bt
+             ON te.id IS NULL AND bt.entry_id = tb.time_entry_id
+           LEFT JOIN hsdg.employee_names emp ON emp.id = COALESCE(te.employee_id, bt.employee_id)
+          WHERE tb.billed_invoice_id = $1 AND (te.id IS NOT NULL OR bt.entry_id IS NOT NULL)
+          ORDER BY COALESCE(te.started_at, bt.started_at), tb.time_entry_id`,
         [invoiceId],
       );
       return rows.map((r) => ({
@@ -255,9 +256,10 @@ export class TimeBillingService {
   }
 
   private async requireVisible(client: PoolClient, engagementId: string): Promise<void> {
-    const { rows } = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [
-      engagementId,
-    ]);
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.engagement_billing_headers WHERE id = $1`,
+      [engagementId],
+    );
     if (!rows[0]) throw new NotFoundException('Engagement not found.');
   }
 }
