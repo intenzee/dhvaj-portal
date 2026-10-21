@@ -72,8 +72,8 @@ const RECEIPT_BASE = `
          r.bank_account, r.status, r.reversed_reason, r.reversed_at,
          rb.full_name AS recorded_by_name, r.version, r.created_at
     FROM hsdg.receipts r
-    JOIN hsdg.entities e ON e.id = r.client_entity_id
-    LEFT JOIN hsdg.employees rb ON rb.id = r.recorded_by_employee_id`;
+    JOIN hsdg.entity_billing_profiles e ON e.id = r.client_entity_id
+    LEFT JOIN hsdg.employee_names rb ON rb.id = r.recorded_by_employee_id`;
 
 /**
  * PS-202 · money in from clients. A receipt is what reached the bank plus the
@@ -405,7 +405,7 @@ export class ReceiptsService {
   /** The client's name, or 404 when the caller cannot see it. */
   private async assertClient(client: PoolClient, entityId: string): Promise<string> {
     const { rows } = await client.query<{ legal_name: string }>(
-      `SELECT legal_name FROM hsdg.entities WHERE id = $1`,
+      `SELECT legal_name FROM hsdg.entity_billing_profiles WHERE id = $1`,
       [entityId],
     );
     if (!rows[0]) throw new NotFoundException('Client not found.');

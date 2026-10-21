@@ -28,5 +28,6 @@ import { UnbilledService } from './unbilled.service';
     TdsPdfReader,
     TimeBillingService,
   ],
+  exports: [AdjustmentsService, ReceivablesService, TdsCreditsService, UnbilledService],
 })
 export class BillingModule {}
