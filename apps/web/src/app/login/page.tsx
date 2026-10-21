@@ -22,6 +22,8 @@ const SEEDED = [
   { email: 'manager.x@dhvaj.in', label: 'Manager X' },
   { email: 'senior.y@dhvaj.in', label: 'Senior Y' },
   { email: 'admin@dhvaj.in', label: 'Administrator' },
+  { email: 'accounts@dhvaj.in', label: 'Accountant' },
+  { email: 'hr@dhvaj.in', label: 'HR' },
 ];
 
 export default function LoginPage(): JSX.Element {

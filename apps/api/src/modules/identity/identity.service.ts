@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { assertAssignable, assertOnboardable, type OnboardCeiling } from './onboard-ceiling';
 import type { PoolClient } from 'pg';
 import { SYSTEM_ROLE, type RoleSlug } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -221,7 +222,12 @@ export class IdentityService {
     });
   }
 
-  async createUser(ctx: RlsContext, input: CreateUserInput): Promise<UserListItem> {
+  async createUser(
+    ctx: RlsContext,
+    input: CreateUserInput,
+    ceiling?: OnboardCeiling,
+  ): Promise<UserListItem> {
+    assertAssignable(ceiling, input.roles ?? []);
     return this.db.withRlsContext(ctx, async (client) => {
       const officeId = await this.resolveOfficeId(client, input.officeCode);
 
@@ -253,10 +259,16 @@ export class IdentityService {
     });
   }
 
-  async updateUser(ctx: RlsContext, id: string, input: UpdateUserInput): Promise<UserListItem> {
+  async updateUser(
+    ctx: RlsContext,
+    id: string,
+    input: UpdateUserInput,
+    ceiling?: OnboardCeiling,
+  ): Promise<UserListItem> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectUser(client, id);
       if (!before) throw new NotFoundException('User not found.');
+      assertOnboardable(ceiling, before);
 
       const sets: string[] = [];
       const params: unknown[] = [];
@@ -305,10 +317,17 @@ export class IdentityService {
   }
 
   /** Replace a user's full role set (idempotent). Records before/after roles. */
-  async setUserRoles(ctx: RlsContext, id: string, roles: RoleSlug[]): Promise<UserListItem> {
+  async setUserRoles(
+    ctx: RlsContext,
+    id: string,
+    roles: RoleSlug[],
+    ceiling?: OnboardCeiling,
+  ): Promise<UserListItem> {
+    assertAssignable(ceiling, roles);
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectUser(client, id);
       if (!before) throw new NotFoundException('User not found.');
+      assertOnboardable(ceiling, before);
 
       await this.replaceRoles(client, id, roles);
 

@@ -128,6 +128,9 @@ const ROLE_CARD_KEYS: Record<RoleSlug, string[]> = {
   senior: ['myTasks', 'dueSoon', 'clientDependencies'],
   article: ['myTasks', 'dueSoon'],
   admin: ['myTasks'],
+  // Desk roles land on their own desk (/accounts, /people), not Home.
+  accountant: [],
+  hr: [],
 };
 
 /** The ordered cards for a role (empty if the role is unknown). */

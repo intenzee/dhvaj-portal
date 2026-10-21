@@ -12,10 +12,15 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
-import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
+import {
+  CurrentPrincipal,
+  RequireAnyPermission,
+  RequirePermissions,
+} from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { PaginationQueryDto, paginate } from '../../common/pagination/pagination.dto';
 import { IdentityService } from './identity.service';
+import { onboardCeiling } from './onboard-ceiling';
 import type { UserListItem } from './identity.types';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -60,44 +65,60 @@ export class UsersController {
   }
 
   @Post()
-  @RequirePermissions(PERMISSION.userManage)
+  @RequireAnyPermission(PERMISSION.userManage, PERMISSION.userOnboard)
   @ApiOperation({
     summary: 'Create a user (audited)',
     description:
-      'Requires firm-wide authority (RLS). Optionally grants roles on creation. The email must be unique.',
+      'Requires firm-wide authority (RLS), or HR (user.onboard) giving only Article, Senior or Manager. Optionally grants roles on creation. The email must be unique.',
   })
   create(
     @CurrentPrincipal() principal: Principal,
     @Body() dto: CreateUserDto,
   ): Promise<UserListItem> {
-    return this.identity.createUser(rlsContextFromPrincipal(principal), dto);
+    return this.identity.createUser(
+      rlsContextFromPrincipal(principal),
+      dto,
+      onboardCeiling(principal),
+    );
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSION.userManage)
+  @RequireAnyPermission(PERMISSION.userManage, PERMISSION.userOnboard)
   @ApiOperation({
     summary: 'Update a user (audited, records before/after)',
-    description: 'Deactivation is a soft flag — users are never hard-deleted.',
+    description:
+      'Deactivation is a soft flag — users are never hard-deleted. HR (user.onboard) may change only other people holding nothing above Manager.',
   })
   update(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateUserDto,
   ): Promise<UserListItem> {
-    return this.identity.updateUser(rlsContextFromPrincipal(principal), id, dto);
+    return this.identity.updateUser(
+      rlsContextFromPrincipal(principal),
+      id,
+      dto,
+      onboardCeiling(principal),
+    );
   }
 
   @Put(':id/roles')
-  @RequirePermissions(PERMISSION.userManage)
+  @RequireAnyPermission(PERMISSION.userManage, PERMISSION.userOnboard)
   @ApiOperation({
     summary: 'Replace a user’s role set (audited)',
-    description: 'Idempotent — sets the complete role set. An empty set removes all roles.',
+    description:
+      'Idempotent — sets the complete role set. An empty set removes all roles. HR (user.onboard) may give only Article, Senior or Manager, never to themselves.',
   })
   setRoles(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: SetUserRolesDto,
   ): Promise<UserListItem> {
-    return this.identity.setUserRoles(rlsContextFromPrincipal(principal), id, dto.roles);
+    return this.identity.setUserRoles(
+      rlsContextFromPrincipal(principal),
+      id,
+      dto.roles,
+      onboardCeiling(principal),
+    );
   }
 }
