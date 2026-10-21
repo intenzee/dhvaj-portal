@@ -19,10 +19,10 @@ import type { ColumnDef } from '@tanstack/react-table';
 const PAGE_SIZE = 25;
 
 /** GET /user-passwords: users with a portal password (absent = Microsoft only). */
-type PasswordStatuses = Record<string, { mustChange: boolean; locked: boolean }>;
-const PASSWORDS_KEY = ['admin', 'user-passwords'];
+export type PasswordStatuses = Record<string, { mustChange: boolean; locked: boolean }>;
+export const PASSWORDS_KEY = ['admin', 'user-passwords'];
 
-function SignInBadge({ status }: { status?: PasswordStatuses[string] }): JSX.Element {
+export function SignInBadge({ status }: { status?: PasswordStatuses[string] }): JSX.Element {
   if (!status) return <Badge>Microsoft only</Badge>;
   if (status.locked) return <Badge tone="danger">Locked</Badge>;
   if (status.mustChange) return <Badge tone="warn">Temporary password</Badge>;
@@ -152,7 +152,7 @@ export function UsersSection(): JSX.Element {
  * The temporary password, shown once right after it is made. The admin hands
  * it over; the person must choose their own at first sign-in.
  */
-function TemporaryPasswordPanel({ email, password }: { email: string; password: string }): JSX.Element {
+export function TemporaryPasswordPanel({ email, password }: { email: string; password: string }): JSX.Element {
   const toast = useToast();
   const site = typeof window === 'undefined' ? '' : window.location.origin;
   const copy = async (): Promise<void> => {
