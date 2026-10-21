@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { gstinCheckChar } from '@hsdg/contracts';
+import { gstinCheckChar, returnPeriodFinancialYear } from '@hsdg/contracts';
 import {
   clientsOfWorkbook,
   entityTypeFromName,
@@ -357,6 +357,15 @@ describe('the firm login workbook (ADR-0035)', () => {
       'proprietorship',
     );
     expect(acme!.error).toMatch(/Rows 2 and 3 are both Delhi with no GSTIN/);
+  });
+
+  it('knows the financial year a return period is in', () => {
+    expect(returnPeriodFinancialYear('2026-04')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2027-03')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2027-01')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2026-27:Q4')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2099-04')).toBe('2099-00');
+    expect(returnPeriodFinancialYear('Apr-26')).toBeNull();
   });
 
   it('knows names that start with the same word, give or take a letter', () => {

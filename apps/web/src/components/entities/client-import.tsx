@@ -9,6 +9,7 @@ import {
   GST_STATES,
   type ClientImportAction,
   type ClientImportGst,
+  type ClientImportGstEngagement,
   type ClientImportPreview,
   type ClientImportRequest,
   type ClientImportResult,
@@ -28,7 +29,9 @@ import { Field, Select } from '@/components/form';
  * workbook (GST Login and TDS Login sheets), the server reads it (here it is
  * only base64 in memory) and says what happens to each client; Import creates
  * or completes the clients, seals the logins, sets each GSTIN's monthly /
- * quarterly scheme and marks the months the sheet says were filed or NA.
+ * quarterly scheme, and puts the months the sheet says were filed or NA into
+ * the client's GST engagement — creating it when there is none. A client
+ * whose GST marks have no GSTIN is pointed out before importing.
  */
 
 export const ACTION_LABEL: Record<ClientImportAction, string> = {
@@ -66,16 +69,18 @@ function monthRange(months: string[]): string | null {
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
-/** "Import 12 new clients, update 3, 40 logins". Pure — tested. */
+/** "Import 12 new clients, update 3, 40 logins, 9 GST engagements". Pure — tested. */
 export function importButtonLabel(p: ClientImportPreview): string {
   const ok = p.rows.filter((r) => r.action !== CLIENT_IMPORT_ACTION.error);
   const created = ok.filter((r) => r.action === CLIENT_IMPORT_ACTION.createClient).length;
   const updated = ok.filter((r) => r.action === CLIENT_IMPORT_ACTION.updateClient).length;
   const logins = ok.reduce((n, r) => n + r.logins.length, 0);
+  const engagements = ok.filter((r) => r.gstEngagement?.action === 'create').length;
   const parts = [
     created ? plural(created, 'new client') : null,
     updated ? `update ${plural(updated, 'client')}` : null,
     logins ? plural(logins, 'login') : null,
+    engagements ? plural(engagements, 'GST engagement') : null,
   ].filter(Boolean);
   return parts.length ? `Import ${parts.join(', ')}` : 'Nothing to import';
 }
@@ -93,6 +98,15 @@ export function gstLine(g: ClientImportGst): string {
   ]
     .filter(Boolean)
     .join(' · ');
+}
+
+/** Where the client's filed months go, as a badge: 'New GST engagement 2026-27'. Pure — tested. */
+export function gstEngagementLabel(e: ClientImportGstEngagement): string {
+  const years = e.financialYears.join(', ');
+  if (e.action === 'create') return `New GST engagement ${years}`;
+  if (e.action === 'add_year') return `${years} added to ${e.engagementCode}`;
+  if (e.action === 'add_stream') return `GST added to ${e.engagementCode}`;
+  return `Into ${e.engagementCode}`;
 }
 
 const hasProblem = (r: ClientImportRow): boolean =>
@@ -231,6 +245,22 @@ export function ClientImport(): JSX.Element {
               administrator to set CREDENTIALS_KEYS.
             </p>
           )}
+          {p.noGstin > 0 && (
+            <p
+              role="alert"
+              className="flex items-start gap-2 rounded-md bg-warning-50 px-3 py-2 text-sm text-warning-700"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {p.noGstin === 1
+                  ? '1 client has GST returns marked but no GSTIN'
+                  : `${p.noGstin} clients have GST returns marked but no GSTIN`}
+                , so their filed months cannot go into a GST engagement yet — they are marked “No
+                GSTIN” below. Importing keeps the months on the client; add the GSTIN to the client,
+                then upload the sheet again.
+              </span>
+            </p>
+          )}
           <Card>
             <CardBody className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -239,6 +269,8 @@ export function ClientImport(): JSX.Element {
                 <span className="text-ink-muted">
                   · {plural(p.rows.length, 'client')} · {plural(p.logins, 'login')}
                   {p.marks > 0 && ` · ${plural(p.marks, 'filed / NA mark')}`}
+                  {p.engagementsToCreate > 0 &&
+                    ` · ${plural(p.engagementsToCreate, 'new GST engagement')}`}
                   {monthRange(p.months) && ` · months ${monthRange(p.months)}`}
                 </span>
               </div>
@@ -346,7 +378,13 @@ function ClientRow({ r }: { r: ClientImportRow }): JSX.Element {
         {r.gst.length === 0 && <span className="text-ink-faint">—</span>}
         {r.gst.map((g) => (
           <span key={`${g.sheet}-${g.row}`} className="block">
-            <span className="font-mono">{g.gstin ?? 'GSTIN to come'}</span>
+            {g.gstin ? (
+              <span className="font-mono">{g.gstin}</span>
+            ) : g.filed || g.notApplicable ? (
+              <Badge tone="warn">No GSTIN</Badge>
+            ) : (
+              <span className="font-mono">GSTIN to come</span>
+            )}
             {gstLine(g) && <span className="text-ink-muted"> · {gstLine(g)}</span>}
           </span>
         ))}
@@ -366,6 +404,11 @@ function ClientRow({ r }: { r: ClientImportRow }): JSX.Element {
       </td>
       <td className="px-3 py-2">
         <Badge tone={ACTION_TONE[r.action]}>{ACTION_LABEL[r.action]}</Badge>
+        {r.gstEngagement && r.action !== CLIENT_IMPORT_ACTION.error && (
+          <span className="ml-1">
+            <Badge tone="info">{gstEngagementLabel(r.gstEngagement)}</Badge>
+          </span>
+        )}
         {r.error && <span className="mt-1 block text-xs text-danger-700">{r.error}</span>}
         {r.warnings.map((w) => (
           <span key={w} className="mt-1 block text-xs text-warning-700">
@@ -391,9 +434,20 @@ export function resultLines(r: ClientImportResult): string[] {
       `${plural(r.schemesSet, 'GSTIN')} set monthly / quarterly`,
     ].join(' · '),
   ];
+  if (r.engagementsCreated || r.engagementsExtended)
+    lines.push(
+      [
+        r.engagementsCreated ? `${plural(r.engagementsCreated, 'GST engagement')} created` : null,
+        r.engagementsExtended
+          ? `${plural(r.engagementsExtended, 'engagement')} given GST or a year`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ') + ' for the filed months',
+    );
   if (r.marksRecorded)
     lines.push(
-      `${plural(r.marksRecorded, 'filed / NA mark')} kept as the clients' GST return history (Clients → GST returns)`,
+      `${plural(r.marksRecorded, 'filed / NA mark')} kept on the clients' pages (GST returns filed)`,
     );
   if (r.marksApplied || r.marksAlreadyDone)
     lines.push(
@@ -402,7 +456,7 @@ export function resultLines(r: ClientImportResult): string[] {
     );
   if (r.marksWithoutFiling)
     lines.push(
-      `${plural(r.marksWithoutFiling, 'filed / NA mark')} not applied to a filing: the client has no GST engagement for that month yet (the marks are in its GST returns). Import the workbook again once it has.`,
+      `${plural(r.marksWithoutFiling, 'filed / NA mark')} not put in an engagement: no GSTIN, or no filing for that month (kept on the client's page). Add the GSTIN and import the workbook again.`,
     );
   if (r.marksNotAllowed)
     lines.push(
