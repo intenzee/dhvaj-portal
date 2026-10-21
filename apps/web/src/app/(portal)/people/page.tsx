@@ -1,15 +1,25 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
+import { UserPlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { GRADE, PERMISSION, type GradeSlug, type PeopleDesk } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { can } from '@/lib/principal';
+import { can, type Principal } from '@/lib/principal';
 import { QUEUE_LABEL } from '@/lib/people';
 import { formatDate } from '@/lib/format';
 import { PeopleSubnav, Tile } from '@/components/people/people-subnav';
-import { Badge, EmptyState, PageHeader, Panel, Spinner } from '@/components/ui';
+import { NewJoinerModal } from '@/components/people/new-joiner-modal';
+import { Badge, Button, EmptyState, PageHeader, Panel, Spinner } from '@/components/ui';
+
+function mayOnboard(principal: Principal | null): boolean {
+  return (
+    can(principal, PERMISSION.employeeManage) &&
+    (can(principal, PERMISSION.userOnboard) || can(principal, PERMISSION.userManage))
+  );
+}
 
 const GRADE_ORDER: GradeSlug[] = [GRADE.partner, GRADE.manager, GRADE.senior, GRADE.article];
 const GRADE_SHORT: Record<GradeSlug, string> = {
@@ -23,6 +33,7 @@ const GRADE_SHORT: Record<GradeSlug, string> = {
 export default function PeopleDeskPage(): JSX.Element {
   const { principal } = useAuth();
   const allowed = can(principal, PERMISSION.employeeManage);
+  const [joining, setJoining] = useState(false);
   const desk = useQuery({
     queryKey: ['people', 'desk'],
     queryFn: () => apiFetch<PeopleDesk>('/people/desk'),
@@ -43,11 +54,19 @@ export default function PeopleDeskPage(): JSX.Element {
       <PageHeader
         title="People"
         subtitle="The firm’s people: who is here, who needs something done, and how loaded they are. Never client work."
+        actions={
+          mayOnboard(principal) ? (
+            <Button size="sm" onClick={() => setJoining(true)}>
+              <UserPlus className="h-4 w-4" /> New joiner
+            </Button>
+          ) : undefined
+        }
       />
       <PeopleSubnav />
       {desk.isLoading && <Spinner label="Loading the desk…" />}
       {desk.isError && <EmptyState>Could not load the desk.</EmptyState>}
       {desk.data && <Desk desk={desk.data} />}
+      {joining && <NewJoinerModal onClose={() => setJoining(false)} />}
     </div>
   );
 }
