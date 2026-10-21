@@ -11,6 +11,7 @@ import {
   periodKeysOfMark,
   periodKeysOfMonth,
   roleOfHeading,
+  similarNames,
   sourceLabel,
   splitStateFromName,
 } from './client-workbook';
@@ -353,6 +354,71 @@ describe('the firm login workbook (ADR-0035)', () => {
       'proprietorship',
     );
     expect(acme!.error).toMatch(/Rows 2 and 3 are both Delhi with no GSTIN/);
+  });
+
+  it('knows names that are probably the same client', () => {
+    expect(similarNames('Drift Logistics Pvt. Ltd.', 'drift logistics')).toBe(true);
+    expect(similarNames('Cosmotrendez', 'Cosmotrendz')).toBe(true);
+    expect(similarNames('GRIID Chandigarh', 'griid')).toBe(true);
+    expect(similarNames('aveer green', 'aveer')).toBe(true);
+    expect(similarNames('DRIFTS LOGISTICS PRIVATE LIMITED', 'Drift')).toBe(false);
+    expect(similarNames('Ricky', 'Rocky')).toBe(false);
+    expect(similarNames('Jai hanuman', 'Jaynat Gupta')).toBe(false);
+    expect(similarNames('ABC Traders', 'ABC')).toBe(false);
+  });
+
+  it('joins TDS rows by a similar name only when one client fits, and says so', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['Particular', 'ID', 'Pwd', 'GSTIN'],
+        ['Cosmotrendez', 'c1', 'p1', ''],
+        ['GRIID Chandigarh', 'g1', 'p2', ''],
+        ['Sunrise Foods', 's1', 'p3', gstin('27', SUNRISE)],
+        ['Kumar Agencies', 'k1', 'p4', ''],
+        ['Kumar Agro', 'k2', 'p5', ''],
+      ]),
+      'GST Login',
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['S.No', 'Client name', 'mail', 'IT- PAN', 'PWD', 'IT-TAN', 'Pwd'],
+        [1, 'Cosmotrendz', 'a@cosmo.in', 'AABCC1111E', 'x1', 'DELC12345E', 'x2'],
+        [2, 'griid', 'b@griid.in'],
+        [3, 'Drift', 'c@drift.in', SUNRISE, 'x3'],
+        [4, 'Kumar', 'd@kumar.in'],
+        [5, 'Director of Estate', 'e@doe.in'],
+      ]),
+      'tds login detail',
+    );
+    const clients = clientsOfWorkbook(
+      parseClientWorkbook(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer),
+      'proprietorship',
+    );
+    const of = (name: string) => clients.find((c) => c.name === name)!;
+
+    expect(of('Cosmotrendez')).toMatchObject({
+      pan: 'AABCC1111E',
+      tan: 'DELC12345E',
+      email: 'a@cosmo.in',
+    });
+    expect(of('Cosmotrendez').warnings.join(' ')).toMatch(
+      /row 2 "Cosmotrendz" is taken to be "Cosmotrendez" \(GST Login 2/,
+    );
+    expect(of('GRIID Chandigarh').email).toBe('b@griid.in');
+    // By PAN, even with another name, but not silently.
+    expect(of('Sunrise Foods').email).toBe('c@drift.in');
+    expect(of('Sunrise Foods').warnings.join(' ')).toMatch(
+      /"Drift" has the PAN of "Sunrise Foods"/,
+    );
+    // Two clients fit: no guess.
+    expect(of('Kumar').error).toMatch(/could be "Kumar Agencies" .* or "Kumar Agro"/);
+    expect(of('Kumar Agencies').email).toBeNull();
+    // Nothing fits: a client of its own.
+    expect(of('Director of Estate').email).toBe('e@doe.in');
+    expect(clients).toHaveLength(7);
   });
 
   it('reads quarter headings', () => {

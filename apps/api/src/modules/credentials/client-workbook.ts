@@ -219,6 +219,42 @@ export function nameKey(name: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+const LEGAL_FORM_WORDS = new Set(['m', 's', 'pvt', 'private', 'ltd', 'limited', 'llp', 'opc']);
+
+/** A name's words without its legal form: 'M/s Drift Logistics Pvt. Ltd.' → drift, logistics. */
+function nameWords(name: string): string[] {
+  return name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !LEGAL_FORM_WORDS.has(w));
+}
+
+/** At most one letter added, dropped or changed between a and b. */
+function withinOneEdit(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/**
+ * Whether two sheets probably name the same client: equal but for the legal
+ * form, one letter apart in a long name ('Cosmotrendz' / 'Cosmotrendez'), or
+ * one the leading words of the other ('griid' / 'GRIID Chandigarh'). Pure — tested.
+ */
+export function similarNames(a: string, b: string): boolean {
+  const wa = nameWords(a);
+  const wb = nameWords(b);
+  const ka = wa.join('');
+  const kb = wb.join('');
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  if (Math.min(ka.length, kb.length) >= 8 && withinOneEdit(ka, kb)) return true;
+  const [short, long] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
+  return short.join('').length >= 4 && short.every((w, i) => long[i] === w);
+}
+
 // ── Headings ─────────────────────────────────────────────────────────────
 
 type Role =
@@ -757,12 +793,41 @@ export function clientsOfWorkbook(
     clients.delete(key);
   }
 
-  // TDS rows join by PAN, else by name.
+  // TDS rows join by PAN, else by name: the one client of that name, else the
+  // one of a similar name (said in a warning). Never a guess between two.
+  const gstClients = [...clients.values()];
+  const where = (o: WorkbookClient): string => `"${o.name}" (${sourceLabel(o.sources)})`;
   for (const line of book.tds) {
     const pan = isValidPan(line.pan) ? line.pan : null;
-    let c =
-      (pan ? clients.get(`pan:${pan}`) : undefined) ??
-      byName(line.name).find((o) => !pan || !o.pan || o.pan === pan);
+    const at = `${line.sheet} row ${line.row}`;
+    let c = pan ? clients.get(`pan:${pan}`) : undefined;
+    if (c && line.name && !similarNames(c.name, line.name))
+      c.warnings.push(
+        `${at} "${line.name}" has the PAN of ${where(c)}'s GSTIN, so the two are put together. If that GSTIN is another client's, correct the sheet.`,
+      );
+    if (!c && line.name) {
+      const fits = (o: WorkbookClient): boolean => !pan || !o.pan || o.pan === pan;
+      const same = gstClients.filter((o) => fits(o) && nameKey(o.name) === nameKey(line.name));
+      const like = same.length
+        ? same
+        : gstClients.filter((o) => fits(o) && similarNames(o.name, line.name));
+      if (like.length > 1) {
+        const key = `tds:${line.sheet}:${line.row}`;
+        const lone = blank(key, line.name);
+        lone.sources.push({ sheet: line.sheet, row: line.row });
+        fail(
+          lone,
+          `${at} "${line.name}" could be ${like.map(where).join(' or ')}; add the PAN to the TDS row, or write the name as on the GST sheet.`,
+        );
+        clients.set(key, lone);
+        continue;
+      }
+      c = like[0];
+      if (c && !same.length)
+        c.warnings.push(
+          `${at} "${line.name}" is taken to be ${where(c)} by its name; if it is another client, write its full name in the sheet.`,
+        );
+    }
     if (!c) {
       const key = pan ? `pan:${pan}` : `name:${nameKey(line.name)}`;
       c = clients.get(key) ?? blank(key, line.name);
