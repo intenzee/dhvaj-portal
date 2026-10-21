@@ -16,6 +16,8 @@ import { LoginTab } from '@/components/people/login-tab';
 import { HoursTab } from '@/components/people/hours-tab';
 import { HrDocumentsTab } from '@/components/people/hr-documents-tab';
 import { PeopleSubnav } from '@/components/people/people-subnav';
+import { SalaryTab } from '@/components/payroll/salary-tab';
+import { BankIdsTab } from '@/components/payroll/bank-ids-tab';
 import { Badge, EmptyState, PageHeader, Spinner } from '@/components/ui';
 
 interface PersonTab {
@@ -48,6 +50,18 @@ const TABS: PersonTab[] = [
     label: 'Hours',
     show: (p) => readsPeople(p),
     render: (e) => <HoursTab employeeId={e.id} />,
+  },
+  {
+    id: 'salary',
+    label: 'Salary',
+    show: (p) => can(p, PERMISSION.payrollRead),
+    render: (e) => <SalaryTab employeeId={e.id} />,
+  },
+  {
+    id: 'bank',
+    label: 'Bank & IDs',
+    show: (p) => can(p, PERMISSION.payrollPrepare),
+    render: (e) => <BankIdsTab employeeId={e.id} />,
   },
   {
     id: 'documents',
