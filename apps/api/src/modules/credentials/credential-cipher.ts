@@ -74,6 +74,15 @@ export class CredentialCipher {
     return { ciphertext, iv, authTag: cipher.getAuthTag(), keyVersion: this.current };
   }
 
+  /** Seal one value (a bank account, a PAN) under the same key and rules. */
+  sealText(value: string, aad: string): SealedCredential {
+    return this.seal({ username: value, password: '' }, aad);
+  }
+
+  openText(sealed: SealedCredential, aad: string): string {
+    return this.open(sealed, aad).username;
+  }
+
   open(sealed: SealedCredential, aad: string): CredentialSecret {
     const key = this.keys.get(sealed.keyVersion);
     if (!key) throw new Error(`Credential key version ${sealed.keyVersion} is not configured.`);

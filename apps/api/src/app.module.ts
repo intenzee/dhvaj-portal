@@ -28,6 +28,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { CommercialModule } from './modules/commercial/commercial.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { StatutoryAuditModule } from './modules/statutory-audit/statutory-audit.module';
 import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module';
@@ -121,6 +122,7 @@ import { NoticeIntakeModule } from './modules/notice-intake/notice-intake.module
     FeatureRolloutsModule,
     CredentialsModule,
     NoticeIntakeModule,
+    PayrollModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.
