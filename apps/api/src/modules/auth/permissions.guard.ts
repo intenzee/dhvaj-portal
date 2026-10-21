@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import type { PermissionSlug } from '@hsdg/contracts';
-import { REQUIRED_PERMISSIONS_KEY } from './auth.decorators';
+import { REQUIRED_ANY_PERMISSIONS_KEY, REQUIRED_PERMISSIONS_KEY } from './auth.decorators';
 import type { Principal } from './principal';
 
 /**
@@ -24,11 +24,13 @@ export class PermissionsGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const required = this.reflector.getAllAndOverride<PermissionSlug[]>(REQUIRED_PERMISSIONS_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (!required || required.length === 0) return true;
+    const targets = [context.getHandler(), context.getClass()];
+    const required =
+      this.reflector.getAllAndOverride<PermissionSlug[]>(REQUIRED_PERMISSIONS_KEY, targets) ?? [];
+    const anyOf =
+      this.reflector.getAllAndOverride<PermissionSlug[]>(REQUIRED_ANY_PERMISSIONS_KEY, targets) ??
+      [];
+    if (required.length === 0 && anyOf.length === 0) return true;
 
     const request = context.switchToHttp().getRequest<Request & { principal?: Principal }>();
     const principal = request.principal;
@@ -41,6 +43,9 @@ export class PermissionsGuard implements CanActivate {
     const missing = required.filter((p) => !held.has(p));
     if (missing.length > 0) {
       throw new ForbiddenException(`Missing required permission(s): ${missing.join(', ')}.`);
+    }
+    if (anyOf.length > 0 && !anyOf.some((p) => held.has(p))) {
+      throw new ForbiddenException(`Requires one of: ${anyOf.join(', ')}.`);
     }
     return true;
   }
