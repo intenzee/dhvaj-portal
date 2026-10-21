@@ -497,7 +497,10 @@ export class AccountsService {
 
   /** The Accounts desk: this month's money, what is owed, and the work queues. */
   async desk(ctx: RlsContext): Promise<AccountsDesk> {
-    const base = await this.db.withRlsContext(ctx, (client) => this.deskFigures(client));
+    const [base, payrollToBook] = await this.db.withRlsContext(
+      ctx,
+      async (client) => [await this.deskFigures(client), await this.payrollToBook(client)] as const,
+    );
     const [receivables, unbilled, pending, tdsMissing] = await Promise.all([
       this.receivables.report(ctx),
       this.unbilled.report(ctx, null),
@@ -525,7 +528,7 @@ export class AccountsService {
         tdsNotIn26as: tdsMissing,
         remindersDueToday: base.remindersDue,
         waitingForPartner: pending.length,
-        payrollToBook: null,
+        payrollToBook,
       },
       byPartner: receivables.byPartner.map((p) => ({
         partnerId: p.id,
@@ -534,6 +537,18 @@ export class AccountsService {
       })),
       collections: base.collections,
     };
+  }
+
+  /**
+   * Approved or paid payroll runs HR has not yet locked: the Accountant's to
+   * book (/payroll/books). Null for anyone outside finance.
+   */
+  private async payrollToBook(client: PoolClient): Promise<number | null> {
+    const { rows } = await client.query<{ n: number | null }>(
+      `SELECT CASE WHEN hsdg.ctx_is_finance() THEN count(*)::int END AS n
+         FROM hsdg.payroll_runs WHERE status IN ('approved', 'paid')`,
+    );
+    return rows[0]?.n ?? null;
   }
 
   private async deskFigures(client: PoolClient) {
