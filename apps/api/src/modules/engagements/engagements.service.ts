@@ -193,6 +193,13 @@ export class EngagementsService {
       if (epId === null && grade === 'partner') epId = ctx.employeeId;
       if (managerId === null && grade === 'manager') managerId = ctx.employeeId;
     }
+    // A non-partner creating an accepted engagement has no EP to default to;
+    // say so plainly rather than letting the EP check constraint fire.
+    if (epId === null && isAccepted(input.status)) {
+      throw new BadRequestException(
+        'An accepted engagement needs an Engagement Partner — pick one, or create it as Pending Acceptance.',
+      );
+    }
 
     // Kind, service, streams and years in scope; independence rules (Change 1).
     const plan = await this.kinds.planCreate(client, input);
