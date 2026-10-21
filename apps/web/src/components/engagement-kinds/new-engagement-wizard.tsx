@@ -32,6 +32,7 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import type { EmployeeRow, EntityDetail } from '@/lib/types';
 import { EntityPicker, type Picked } from '@/components/entity-picker';
 import { PageHeader, Card, CardBody, Button, Spinner, Badge } from '@/components/ui';
@@ -102,6 +103,7 @@ export function NewEngagementWizard(): JSX.Element {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
+  const { principal } = useAuth();
   const currentFy = financialYearOf(new Date());
 
   const [step, setStep] = useState(0);
@@ -187,6 +189,11 @@ export function NewEngagementWizard(): JSX.Element {
   const partners = people.filter((p) => p.gradeSlug === 'partner');
   const managers = people.filter((p) => p.gradeSlug === 'partner' || p.gradeSlug === 'manager');
   const personName = (id: string): string => people.find((p) => p.id === id)?.fullName ?? '—';
+  // The API makes the creator the EP only when they are partner-grade; anyone
+  // else must pick a partner before an accepted engagement can be created.
+  const meIsPartner =
+    !!principal?.employeeId && partners.some((p) => p.id === principal.employeeId);
+  const needsPartner = status === ENGAGEMENT_STATUS.accepted && !partnerId && !meIsPartner;
 
   const assignmentServices = (services.data?.items ?? []).filter(
     (s) =>
@@ -290,7 +297,7 @@ export function NewEngagementWizard(): JSX.Element {
     },
   });
 
-  const detailsOk =
+  const kindDetailsOk =
     kind === 'compliance'
       ? years.length > 0 &&
         years.every((y) => FY_RE.test(y.financialYear) && (y.fee === '' || Number(y.fee) >= 0)) &&
@@ -298,6 +305,7 @@ export function NewEngagementWizard(): JSX.Element {
       : kind === 'assignment'
         ? FY_RE.test(financialYear) && !!serviceId
         : FY_RE.test(financialYear);
+  const detailsOk = kindDetailsOk && !needsPartner;
   const canNext =
     (step === 0 && !!entity) ||
     (step === 1 && !!kind && !(kind === 'compliance' && openCompliance)) ||
@@ -414,13 +422,15 @@ export function NewEngagementWizard(): JSX.Element {
                     placeholder="2026-27"
                   />
                 </Field>
-                <StatusField value={status} onChange={setStatus} />
+                <StatusField value={status} onChange={setStatus} meIsPartner={meIsPartner} />
               </div>
               <LeadFields
                 partners={partners}
                 managers={managers}
                 partnerId={partnerId}
                 managerId={managerId}
+                meIsPartner={meIsPartner}
+                partnerRequired={needsPartner}
                 onPartner={setPartnerId}
                 onManager={setManagerId}
               />
@@ -458,13 +468,15 @@ export function NewEngagementWizard(): JSX.Element {
                 <Field label="Period" hint="FY, Q1, Apr-2026…">
                   <Input value={periodLabel} onChange={(e) => setPeriodLabel(e.target.value)} />
                 </Field>
-                <StatusField value={status} onChange={setStatus} />
+                <StatusField value={status} onChange={setStatus} meIsPartner={meIsPartner} />
               </div>
               <LeadFields
                 partners={partners}
                 managers={managers}
                 partnerId={partnerId}
                 managerId={managerId}
+                meIsPartner={meIsPartner}
+                partnerRequired={needsPartner}
                 onPartner={setPartnerId}
                 onManager={setManagerId}
               />
@@ -616,6 +628,8 @@ export function NewEngagementWizard(): JSX.Element {
                 managers={managers}
                 partnerId={partnerId}
                 managerId={managerId}
+                meIsPartner={meIsPartner}
+                partnerRequired={needsPartner}
                 onPartner={setPartnerId}
                 onManager={setManagerId}
               />
@@ -671,7 +685,7 @@ export function NewEngagementWizard(): JSX.Element {
               )}
               <Row
                 label="Partner"
-                value={partnerId ? personName(partnerId) : 'You (if accepted)'}
+                value={partnerId ? personName(partnerId) : meIsPartner ? 'You (if accepted)' : '—'}
               />
               <Row label="Manager" value={managerId ? personName(managerId) : '—'} />
               {block && (
@@ -728,14 +742,20 @@ export function NewEngagementWizard(): JSX.Element {
 function StatusField({
   value,
   onChange,
+  meIsPartner,
 }: {
   value: string;
   onChange: (v: string) => void;
+  meIsPartner: boolean;
 }): JSX.Element {
   return (
     <Field
       label="Initial status"
-      hint="“Accepted” makes you the Engagement Partner if none is set."
+      hint={
+        meIsPartner
+          ? '“Accepted” makes you the Engagement Partner if none is set.'
+          : '“Accepted” needs an Engagement Partner — pick one below.'
+      }
     >
       <Select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value={ENGAGEMENT_STATUS.prospect}>Prospect</option>
@@ -751,6 +771,8 @@ function LeadFields({
   managers,
   partnerId,
   managerId,
+  meIsPartner,
+  partnerRequired,
   onPartner,
   onManager,
 }: {
@@ -758,14 +780,20 @@ function LeadFields({
   managers: EmployeeRow[];
   partnerId: string;
   managerId: string;
+  meIsPartner: boolean;
+  partnerRequired: boolean;
   onPartner: (v: string) => void;
   onManager: (v: string) => void;
 }): JSX.Element {
   return (
     <div className="grid grid-cols-2 gap-4">
-      <Field label="Engagement partner">
+      <Field
+        label="Engagement partner"
+        required={partnerRequired}
+        hint={partnerRequired ? 'An accepted engagement needs one.' : undefined}
+      >
         <Select value={partnerId} onChange={(e) => onPartner(e.target.value)}>
-          <option value="">Me (default)</option>
+          <option value="">{meIsPartner ? 'Me (default)' : '— choose a partner —'}</option>
           {partners.map((p) => (
             <option key={p.id} value={p.id}>
               {p.fullName} · {p.officeCode}
