@@ -382,6 +382,22 @@ export interface ClientImportRow {
   warnings: string[];
   /** Why the client cannot be imported. */
   error: string | null;
+  /** What the import does to the client's GST engagement for the years the sheet marks. */
+  gstEngagement: ClientImportGstEngagement | null;
+  /** The sheet marks GST returns for it but it has no GSTIN: they cannot go into an engagement. */
+  noGstin: boolean;
+}
+
+/**
+ * The GST engagement the sheet's filed / NA months go into: a new Compliance
+ * engagement with GST, a year or the GST stream added to the client's open
+ * one, or the one it already has. Its filings for those months are then closed.
+ */
+export interface ClientImportGstEngagement {
+  action: 'create' | 'add_year' | 'add_stream' | 'existing';
+  /** The open Compliance engagement it goes into (null when one is created). */
+  engagementCode: string | null;
+  financialYears: string[];
 }
 
 /** POST /client-imports/workbook/preview and POST /client-imports/workbook */
@@ -405,6 +421,10 @@ export interface ClientImportPreview {
   marks: number;
   /** False when logins cannot be saved on this server (no encryption key). */
   vaultReady: boolean;
+  /** Clients that will get a new GST engagement for their filed months. */
+  engagementsToCreate: number;
+  /** Clients whose GST marks have no GSTIN, so no engagement — the person is told. */
+  noGstin: number;
 }
 
 export interface ClientImportResult {
@@ -425,6 +445,10 @@ export interface ClientImportResult {
   marksNotAllowed: number;
   /** filed / NA marks kept as the clients' GST return history (new or changed). */
   marksRecorded: number;
+  /** GST engagements created for clients the sheet marks returns for. */
+  engagementsCreated: number;
+  /** Open Compliance engagements that got the GST stream or a year for the marks. */
+  engagementsExtended: number;
   failed: { source: string; name: string; message: string }[];
   /** Imported, with something to know (a scheme kept, a step not allowed). */
   notes: { source: string; name: string; message: string }[];
@@ -468,6 +492,16 @@ export function returnPeriodEnd(key: string): string {
   return month > 12
     ? `${start + 1}-${String(month - 12).padStart(2, '0')}`
     : `${start}-${String(month).padStart(2, '0')}`;
+}
+
+/** The financial year a return period is in: '2026-04' → '2026-27', '2027-02' → '2026-27', '2026-27:Q1' → '2026-27'. */
+export function returnPeriodFinancialYear(key: string): string | null {
+  const q = /^(\d{4}-\d{2}):Q[1-4]$/.exec(key);
+  if (q) return q[1]!;
+  const m = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!m) return null;
+  const start = Number(m[2]) >= 4 ? Number(m[1]) : Number(m[1]) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
 /** '2026-04' → 'Apr-26'; '2026-27:Q1' → 'Q1 26-27'. */

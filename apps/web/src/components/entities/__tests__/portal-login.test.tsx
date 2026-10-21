@@ -15,7 +15,13 @@ import {
   pendingNote,
   type LoginTarget,
 } from '../portal-login';
-import { gstLine, importButtonLabel, monthLabel, resultLines } from '../client-import';
+import {
+  gstEngagementLabel,
+  gstLine,
+  importButtonLabel,
+  monthLabel,
+  resultLines,
+} from '../client-import';
 
 const apiFetch = jest.fn();
 jest.mock('@/lib/api', () => ({
@@ -193,13 +199,32 @@ describe('client login workbook import', () => {
     entityName: null,
     warnings: [],
     error: null,
+    gstEngagement: null,
+    noGstin: false,
     ...over,
   });
   const preview = (rows: ClientImportRow[]): ClientImportPreview => {
     const counts = { create_client: 0, update_client: 0, unchanged: 0, error: 0 };
     for (const r of rows) counts[r.action] += 1;
-    return { sheets: [], months: [], rows, counts, logins: 0, marks: 0, vaultReady: true };
+    return {
+      sheets: [],
+      months: [],
+      rows,
+      counts,
+      logins: 0,
+      marks: 0,
+      vaultReady: true,
+      engagementsToCreate: 0,
+      noGstin: 0,
+    };
   };
+  const engagement = (
+    action: 'create' | 'add_year' | 'add_stream' | 'existing',
+  ): ClientImportRow['gstEngagement'] => ({
+    action,
+    engagementCode: action === 'create' ? null : 'ENG-0007',
+    financialYears: ['2026-27'],
+  });
 
   it('counts new and updated clients and the logins that will be saved', () => {
     expect(
@@ -215,6 +240,21 @@ describe('client login workbook import', () => {
     expect(importButtonLabel(preview([row({ action: 'unchanged', logins: [] })]))).toBe(
       'Nothing to import',
     );
+    expect(
+      importButtonLabel(
+        preview([
+          row({ gstEngagement: engagement('create') }),
+          row({ key: 'b', action: 'update_client', gstEngagement: engagement('add_year') }),
+        ]),
+      ),
+    ).toBe('Import 1 new client, update 1 client, 2 logins, 1 GST engagement');
+  });
+
+  it('says where the filed months go', () => {
+    expect(gstEngagementLabel(engagement('create')!)).toBe('New GST engagement 2026-27');
+    expect(gstEngagementLabel(engagement('add_year')!)).toBe('2026-27 added to ENG-0007');
+    expect(gstEngagementLabel(engagement('add_stream')!)).toBe('GST added to ENG-0007');
+    expect(gstEngagementLabel(engagement('existing')!)).toBe('Into ENG-0007');
   });
 
   it('describes months and GST registrations', () => {
@@ -245,6 +285,8 @@ describe('client login workbook import', () => {
       marksAlreadyDone: 0,
       marksWithoutFiling: 4,
       marksNotAllowed: 0,
+      engagementsCreated: 0,
+      engagementsExtended: 0,
       failed: [],
       notes: [],
     };
@@ -253,11 +295,10 @@ describe('client login workbook import', () => {
     expect(lines[1]).toBe(
       '3 registrations added · 8 logins saved (encrypted) · 2 GSTINs set monthly / quarterly',
     );
-    expect(lines[2]).toBe(
-      "4 filed / NA marks kept as the clients' GST return history (Clients → GST returns)",
-    );
-    expect(lines[3]).toMatch(
-      /^4 filed \/ NA marks not applied to a filing: the client has no GST engagement/,
+    expect(lines[2]).toBe("4 filed / NA marks kept on the clients' pages (GST returns filed)");
+    expect(lines[3]).toMatch(/^4 filed \/ NA marks not put in an engagement: no GSTIN/);
+    expect(resultLines({ ...r, engagementsCreated: 2, engagementsExtended: 1 })[2]).toBe(
+      '2 GST engagements created · 1 engagement given GST or a year for the filed months',
     );
   });
 });
