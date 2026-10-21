@@ -205,19 +205,25 @@ export class EngagementsService {
     const plan = await this.kinds.planCreate(client, input);
     const status = input.status ?? 'prospect';
 
-    let id: string;
+    // The id is minted first and the INSERT has no RETURNING: RETURNING is
+    // checked against the SELECT policies before the AFTER INSERT trigger
+    // records the creator, so a creator who is neither the EP nor the manager
+    // could not read the row back yet.
+    const {
+      rows: [minted],
+    } = await client.query<{ id: string }>(`SELECT gen_random_uuid() AS id`);
+    const id = minted!.id;
     try {
-      const { rows } = await client.query<{ id: string }>(
+      await client.query(
         `INSERT INTO hsdg.engagements
            (entity_id, service_id, financial_year, period_label, office_id,
             engagement_partner_id, engagement_manager_id, status,
             predecessor_engagement_id, planned_start_date, planned_end_date, accepted_at,
             engagement_type, priority, confidentiality, currency, billing_model,
-            mandate_letter_reference, mandate_letter_date, kind)
+            mandate_letter_reference, mandate_letter_date, kind, id)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
             COALESCE($13,'recurring_compliance'),COALESCE($14,'normal'),
-            COALESCE($15,'normal'),COALESCE($16,'INR'),$17,$18,$19,$20)
-         RETURNING id`,
+            COALESCE($15,'normal'),COALESCE($16,'INR'),$17,$18,$19,$20,$21)`,
         [
           input.entityId,
           plan.serviceId,
@@ -239,12 +245,13 @@ export class EngagementsService {
           input.mandateLetterReference ?? null,
           input.mandateLetterDate ?? null,
           plan.kind,
+          id,
         ],
       );
-      id = rows[0]!.id;
     } catch (err) {
       throw translatePgError(err);
     }
+    await this.addCreatorToTeam(client, ctx, id, epId, managerId);
     await this.kinds.completeCreate(
       client,
       ctx,
@@ -668,6 +675,26 @@ export class EngagementsService {
    *  concurrency (team writes touch a child table, not the engagement row). */
   private async bumpVersion(client: PoolClient, id: string): Promise<void> {
     await client.query(`UPDATE hsdg.engagements SET version = version + 1 WHERE id = $1`, [id]);
+  }
+
+  /** Anyone may create an engagement (engagement.create). A creator who is not
+   *  its EP or manager joins the team as a member, so they can open what they
+   *  made; the leads may remove them like any other member. Firm-wide roles see
+   *  every engagement already and are not added. */
+  private async addCreatorToTeam(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    epId: string | null,
+    managerId: string | null,
+  ): Promise<void> {
+    if (!ctx.employeeId || ctx.employeeId === epId || ctx.employeeId === managerId) return;
+    await client.query(
+      `INSERT INTO hsdg.engagement_team (engagement_id, employee_id, role_on_engagement)
+       SELECT $1, $2, 'member' WHERE NOT hsdg.ctx_is_business_firmwide()
+       ON CONFLICT (engagement_id, employee_id) DO NOTHING`,
+      [engagementId, ctx.employeeId],
+    );
   }
 
   /** Classify the caller's grade for accountability defaulting (partner ⇒ EP,
