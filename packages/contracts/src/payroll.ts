@@ -1,4 +1,5 @@
 import { fromPaise, toPaise } from './billing';
+import type { TaxRules } from './payroll-tax';
 
 // ── Payroll (docs/accountant-hr-roles-spec.md §4.8, §7.6) ───────────────
 
@@ -31,6 +32,18 @@ export const PAYROLL_INPUT_KINDS = [
 ] as const;
 /** One-off monthly inputs HR enters for a person. */
 export type PayrollInputKind = (typeof PAYROLL_INPUT_KINDS)[number];
+
+/**
+ * What an approved full and final adds to the run that pays it (phase 2b).
+ * Never entered by hand: the run reads them from the settlement.
+ */
+export const SETTLEMENT_PAY_KINDS = [
+  'leave_encashment',
+  'gratuity',
+  'notice_pay',
+  'notice_recovery',
+] as const;
+export type SettlementPayKind = (typeof SETTLEMENT_PAY_KINDS)[number];
 
 export const STATUTORY_KINDS = ['pf', 'esi', 'pt', 'tds'] as const;
 export type StatutoryKind = (typeof STATUTORY_KINDS)[number];
@@ -108,8 +121,8 @@ export interface PayMonthInput {
   /** Left this month ('YYYY-MM-DD', their last day), else null. */
   exitedOn?: string | null;
   lossOfPayDays: number;
-  /** One-off inputs; tds is HR's figure until the tax engine (phase 2b) projects it. */
-  inputs: { kind: PayrollInputKind; amount: string; note?: string }[];
+  /** One-off inputs; tds is HR's figure or the tax projection's (phase 2b). */
+  inputs: { kind: PayrollInputKind | SettlementPayKind; amount: string; note?: string }[];
   /**
    * Was covered by ESI at the start of this contribution period (April–September,
    * October–March): they stay covered for the period even if pay rises above
@@ -228,13 +241,14 @@ export function computePayLine(
   let wagesFromComponents = 0n;
   for (const c of structure.components) {
     const full = toPaise(c.monthly);
-    const paid = payableDays === dim ? full : roundRupee(mulDiv(full, BigInt(payableDays), BigInt(dim)));
+    const paid =
+      payableDays === dim ? full : roundRupee(mulDiv(full, BigInt(payableDays), BigInt(dim)));
     add('earning', c.code, c.label, paid);
     gross += paid;
     if (c.pfWage) wagesFromComponents += paid;
   }
 
-  const sumInputs = (kind: PayrollInputKind) =>
+  const sumInputs = (kind: PayrollInputKind | SettlementPayKind) =>
     month.inputs.filter((i) => i.kind === kind).reduce((s, i) => s + toPaise(i.amount), 0n);
   const arrears = sumInputs('arrears');
   const incentive = sumInputs('incentive');
@@ -244,11 +258,19 @@ export function computePayLine(
   add('earning', 'incentive', 'Incentive', incentive);
   add('earning', 'bonus', 'Bonus', bonus);
   add('reimbursement', 'reimbursement', 'Reimbursements', reimbursement);
-  gross += arrears + incentive + bonus;
+  // Full and final: paid on exit, outside wages for PF and ESI.
+  const leaveEncashment = sumInputs('leave_encashment');
+  const gratuityPaid = sumInputs('gratuity');
+  const noticePay = sumInputs('notice_pay');
+  add('earning', 'leave_encashment', 'Leave encashment', leaveEncashment);
+  add('earning', 'gratuity_paid', 'Gratuity', gratuityPaid);
+  add('earning', 'notice_pay', 'Notice pay', noticePay);
+  const onExit = leaveEncashment + gratuityPaid + noticePay;
+  gross += arrears + incentive + bonus + onExit;
 
   // Wages for PF: the wage components; under the Labour Codes, at least half of pay.
   let pfWages = wagesFromComponents;
-  const regularPay = gross - arrears - bonus;
+  const regularPay = gross - arrears - bonus - onExit;
   if (settings.labourCodeWages && regularPay > 0n && pfWages * 2n < regularPay) {
     pfWages = (regularPay + 1n) / 2n;
     warnings.push(
@@ -256,7 +278,7 @@ export function computePayLine(
     );
   }
   // ESI wages leave out reimbursements and annual bonus.
-  const esiWages = gross - bonus;
+  const esiWages = gross - bonus - onExit;
 
   const statutory = structure.kind === 'salary' || settings.stipendDeductions;
   let pfEmployee = 0n;
@@ -288,7 +310,9 @@ export function computePayLine(
       add('employer', 'esi', 'Employer ESI', employer);
       employerCost += employer;
       if (esiWages > threshold) {
-        warnings.push('Pay is above the ESI threshold; ESI continues to the end of this contribution period.');
+        warnings.push(
+          'Pay is above the ESI threshold; ESI continues to the end of this contribution period.',
+        );
       }
     }
   }
@@ -307,11 +331,13 @@ export function computePayLine(
   const tds = sumInputs('tds');
   const advance = sumInputs('advance_recovery');
   const other = sumInputs('other_deduction');
+  const noticeRecovery = sumInputs('notice_recovery');
   add('deduction', 'tds', 'Income tax (TDS)', tds);
   add('deduction', 'advance_recovery', 'Advance recovery', advance);
+  add('deduction', 'notice_recovery', 'Notice period recovery', noticeRecovery);
   add('deduction', 'other', 'Other deductions', other);
 
-  const deductions = pfEmployee + esiEmployee + pt + tds + advance + other;
+  const deductions = pfEmployee + esiEmployee + pt + tds + advance + noticeRecovery + other;
   const net = gross + reimbursement - deductions;
   if (net < 0n) warnings.push('Deductions are more than pay: net pay is negative.');
   if (month.lossOfPayDays > 0) warnings.push(`${month.lossOfPayDays} loss-of-pay day(s).`);
@@ -351,9 +377,11 @@ export function revisionArrears(
   for (const m of paidMonths) {
     const dim = daysInMonth(m.month);
     const share =
-      m.payableDays === dim ? diff : diff < 0n
-        ? -roundRupee(mulDiv(-diff, BigInt(m.payableDays), BigInt(dim)))
-        : roundRupee(mulDiv(diff, BigInt(m.payableDays), BigInt(dim)));
+      m.payableDays === dim
+        ? diff
+        : diff < 0n
+          ? -roundRupee(mulDiv(-diff, BigInt(m.payableDays), BigInt(dim)))
+          : roundRupee(mulDiv(diff, BigInt(m.payableDays), BigInt(dim)));
     total += share;
   }
   return fromPaise(total);
@@ -563,6 +591,8 @@ export interface Payslip {
 export interface PayRules extends PaySettings {
   ptSlabsByOffice: Record<string, PtSlab[]>;
   stipendMinimumByOffice: Record<string, string>;
+  /** Income tax, gratuity, leave encashment and bonus (phase 2b); the seeded defaults when absent. */
+  tax?: TaxRules;
 }
 
 export interface PaySettingsRecord {
@@ -592,6 +622,11 @@ export interface PayrollMonthInputs {
   employeeId: string;
   lossOfPayDays: number;
   inputs: { kind: PayrollInputKind; amount: string; note: string | null }[];
+  /**
+   * What the portal added (phase 2b): the TDS a computed run projected and
+   * statutory bonus. Read-only here; HR's own `tds` input overrides the projection.
+   */
+  auto?: { kind: PayrollInputKind; amount: string; note: string | null; source: 'tax' | 'bonus' }[];
 }
 
 /** A payslip in a person's list. */
