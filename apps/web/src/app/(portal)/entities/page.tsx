@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { PERMISSION, type Paginated } from '@hsdg/contracts';
+import { PERMISSION, type MissingFilter, type Paginated } from '@hsdg/contracts';
 import { FileCheck2, Plus, Upload } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -17,6 +17,7 @@ import { DataTable } from '@/components/data-table';
 import { Pagination } from '@/components/pagination';
 import { SectionChips, useUrlSections } from '@/components/section-filter';
 import { entityListPath } from '@/lib/list-paths';
+import { MISSING_FILTER_OPTIONS, MissingDataMarker } from '@/components/entities/missing-data';
 
 const PAGE_SIZE = 25;
 
@@ -34,6 +35,10 @@ const columns: ColumnDef<EntityRow, unknown>[] = [
     cell: ({ row }) => row.original.pan ?? <span className="text-ink-faint">—</span>,
   },
   { header: 'Registrations', cell: ({ row }) => row.original.registrationCount },
+  {
+    header: 'Missing data',
+    cell: ({ row }) => <MissingDataMarker items={row.original.missingInfo} />,
+  },
   { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
 ];
 
@@ -42,6 +47,7 @@ function EntitiesInner(): JSX.Element {
   const { principal } = useAuth();
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
+  const [missing, setMissing] = useState<MissingFilter | ''>('');
   const [sections, setSectionsUrl] = useUrlSections();
 
   const onSearch = (v: string): void => {
@@ -54,10 +60,10 @@ function EntitiesInner(): JSX.Element {
   };
 
   const q = useQuery({
-    queryKey: ['entities', search, sections, offset],
+    queryKey: ['entities', search, sections, missing, offset],
     queryFn: () =>
       apiFetch<Paginated<EntityRow>>(
-        entityListPath({ limit: PAGE_SIZE, offset, search, sections }),
+        entityListPath({ limit: PAGE_SIZE, offset, search, sections, missing: missing || null }),
       ),
   });
 
@@ -94,13 +100,28 @@ function EntitiesInner(): JSX.Element {
       />
 
       <SectionChips value={sections} onChange={setSections} className="mb-3" />
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap gap-2">
         <input
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder="Search by name or PAN…"
           className="w-full max-w-sm rounded-md border border-line-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
+        <select
+          aria-label="Missing data"
+          value={missing}
+          onChange={(e) => {
+            setMissing(e.target.value as MissingFilter | '');
+            setOffset(0);
+          }}
+          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+        >
+          {MISSING_FILTER_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <Card className="p-0">
@@ -114,9 +135,11 @@ function EntitiesInner(): JSX.Element {
             columns={columns}
             data={q.data.items}
             empty={
-              sections.length
-                ? 'No clients in this section match.'
-                : 'No entities match your search.'
+              missing
+                ? 'No clients match this missing-data filter.'
+                : sections.length
+                  ? 'No clients in this section match.'
+                  : 'No entities match your search.'
             }
             onRowClick={(row) => router.push(`/entities/${row.id}`)}
           />

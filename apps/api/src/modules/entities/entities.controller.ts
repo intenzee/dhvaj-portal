@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   NotFoundException,
   Param,
   ParseUUIDPipe,
@@ -45,7 +46,7 @@ export class EntitiesController {
   @ApiOperation({
     summary: 'List client entities (RLS-scoped, paginated)',
     description:
-      'Firm-wide roles see all clients; office-scoped roles see their office. Filter by status/type/office and free-text search.',
+      'Firm-wide roles see all clients; office-scoped roles see their office. Filter by status/type/office, missing master data and free-text search; each row carries its missing items.',
   })
   async list(
     @CurrentPrincipal() principal: Principal,
@@ -57,6 +58,7 @@ export class EntitiesController {
     if (query.office) filter.officeCode = query.office;
     if (query.search) filter.search = query.search;
     if (query.section?.length) filter.section = query.section;
+    if (query.missing) filter.missing = query.missing;
     const result = await this.entities.listEntities(
       rlsContextFromPrincipal(principal),
       filter,
@@ -116,6 +118,21 @@ export class EntitiesController {
     @Body() dto: UpdateEntityDto,
   ): Promise<EntityDetail> {
     return this.entities.updateEntity(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Delete a client entered by mistake (Managing Partner only; audited)',
+    description:
+      'Its registrations, contacts, logins and other master go with it. 409 while it has engagements, a place in another engagement, or billing — mark it inactive instead.',
+  })
+  async remove(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<void> {
+    await this.entities.deleteEntity(rlsContextFromPrincipal(principal), id);
   }
 
   @Post(':id/registrations')
