@@ -36,7 +36,7 @@ export function deskQueues(q: AccountsDesk['queues']): DeskQueue[] {
     { key: 'receiptsUnallocated', label: 'Receipts held as advance', count: q.receiptsUnallocated, href: '/billing/statements' },
     { key: 'tdsNotIn26as', label: 'TDS not yet in 26AS', count: q.tdsNotIn26as, href: '/billing/tds' },
     { key: 'waitingForPartner', label: 'Waiting for a partner', count: q.waitingForPartner, href: '/billing/approvals?scope=all' },
-    { key: 'payrollToBook', label: 'Payroll runs to book', count: q.payrollToBook, href: '/reports/finance' },
+    { key: 'payrollToBook', label: 'Payroll runs to book', count: q.payrollToBook, href: '/payroll/books' },
   ];
   return all.filter((x): x is DeskQueue => (x.count ?? 0) > 0);
 }
