@@ -67,7 +67,8 @@ export class EngagementCalendarV2Controller {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() body: GenerateCalendarDto,
   ): Promise<GenerateCalendarResult> {
-    requireCalendarV2(this.flags);
+    // Not behind ff_calendar_v2: creating a Compliance engagement builds this
+    // calendar unflagged, so rebuilding it (the stream tab's button) is too.
     return this.calendar.generate(rlsContextFromPrincipal(principal), id, body.financialYear);
   }
 
