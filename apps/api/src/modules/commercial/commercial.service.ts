@@ -599,11 +599,13 @@ export class CommercialService {
         if (!permissions.includes(PERMISSION.billingApprove)) {
           const adHoc = await this.adHocLines(client, invoiceId);
           if (adHoc.length > 0) {
-            throw new ForbiddenException(
-              `A partner issues this invoice: no agreed fee or billable time stands behind ${adHoc
+            throw new ForbiddenException({
+              statusCode: 403,
+              message: `A partner issues this invoice: no agreed fee or billable time stands behind ${adHoc
                 .map((l) => `"${l.description}"`)
                 .join(', ')}. Ask for it with Request issue.`,
-            );
+              rule: 'AD_HOC_ISSUE_NEEDS_PARTNER',
+            });
           }
         }
         const issueDate = input.issueDate ?? current.issue_date ?? istToday();
