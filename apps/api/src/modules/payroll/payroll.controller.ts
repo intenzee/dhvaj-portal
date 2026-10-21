@@ -17,7 +17,10 @@ import {
   type BankChangeRequest,
   type EmployeePayDetails,
   type Payslip,
+  type PayRosterRow,
+  type PaySettingsRecord,
   type PayrollJournal,
+  type PayrollMonthInputs,
   type PayrollRunDetail,
   type PayrollRunSummary,
   type PayrollRunTotals,
@@ -49,7 +52,7 @@ import {
   StatutoryKindParamDto,
   VersionDto,
 } from './payroll.dto';
-import { PayrollService, type PayRosterRow, type PaySettingsRecord } from './payroll.service';
+import { PayrollService } from './payroll.service';
 
 const xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -217,7 +220,10 @@ export class PayrollController {
   // ── Monthly inputs ─────────────────────────────────────────────────────
 
   @Get('inputs/:month')
-  inputs(@CurrentPrincipal() principal: Principal, @Param() p: MonthParamDto) {
+  inputs(
+    @CurrentPrincipal() principal: Principal,
+    @Param() p: MonthParamDto,
+  ): Promise<PayrollMonthInputs[]> {
     return this.payroll.inputs(rlsContextFromPrincipal(principal), p.month);
   }
 
@@ -247,7 +253,9 @@ export class PayrollController {
 
   @Get('runs/totals')
   @RequireAnyPermission(PERMISSION.payrollReadSummary, PERMISSION.payrollRead)
-  @ApiOperation({ summary: 'The Accountant’s “Payroll to book” feed: totals of approved and paid runs' })
+  @ApiOperation({
+    summary: 'The Accountant’s “Payroll to book” feed: totals of approved and paid runs',
+  })
   totalsFeed(@CurrentPrincipal() principal: Principal): Promise<PayrollRunTotals[]> {
     return this.runs.totalsFeed(rlsContextFromPrincipal(principal));
   }

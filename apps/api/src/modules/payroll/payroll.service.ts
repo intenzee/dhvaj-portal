@@ -14,7 +14,11 @@ import {
   type BankChangeRequest,
   type EmployeePayDetails,
   type PayComponent,
-  type PaySettings,
+  type PayRosterRow,
+  type PayRules,
+  type PaySettingsRecord,
+  type PayrollInputKind,
+  type PayrollMonthInputs,
   type ProposeStructureInput,
   type PtSlab,
   type SalaryStructure,
@@ -31,34 +35,6 @@ import {
   monthStart,
   translatePayrollError,
 } from './payroll-errors';
-
-/** The stored rules: the engine's settings plus what varies by office. */
-export interface PayRules extends PaySettings {
-  ptSlabsByOffice: Record<string, PtSlab[]>;
-  stipendMinimumByOffice: Record<string, string>;
-}
-
-export interface PaySettingsRecord {
-  effectiveFrom: string;
-  rules: PayRules;
-  confirmedBy: string | null;
-}
-
-/** A person on the pay roster: who they are and whether they can be paid. */
-export interface PayRosterRow {
-  employeeId: string;
-  employeeCode: string;
-  fullName: string;
-  officeCode: string;
-  grade: string | null;
-  status: string;
-  dateOfJoining: string;
-  dateOfExit: string | null;
-  current: SalaryStructure | null;
-  pending: number;
-  hasBankAccount: boolean;
-  openBankChange: boolean;
-}
 
 interface StructureRow {
   id: string;
@@ -747,21 +723,12 @@ export class PayrollService {
 
   // ── Monthly inputs ─────────────────────────────────────────────────────
 
-  async inputs(
-    ctx: RlsContext,
-    month: string,
-  ): Promise<
-    {
-      employeeId: string;
-      lossOfPayDays: number;
-      inputs: { kind: string; amount: string; note: string | null }[];
-    }[]
-  > {
+  async inputs(ctx: RlsContext, month: string): Promise<PayrollMonthInputs[]> {
     return this.db.withRlsContext(ctx, async (client) => {
       await assertCanSeePay(client);
       const { rows } = await client.query<{
         employee_id: string;
-        kind: string;
+        kind: PayrollInputKind | 'loss_of_pay_days';
         amount: string;
         note: string | null;
       }>(
@@ -769,14 +736,7 @@ export class PayrollService {
           WHERE month = $1 ORDER BY employee_id, kind, created_at`,
         [monthStart(month)],
       );
-      const by = new Map<
-        string,
-        {
-          employeeId: string;
-          lossOfPayDays: number;
-          inputs: { kind: string; amount: string; note: string | null }[];
-        }
-      >();
+      const by = new Map<string, PayrollMonthInputs>();
       for (const r of rows) {
         const e = by.get(r.employee_id) ?? {
           employeeId: r.employee_id,
