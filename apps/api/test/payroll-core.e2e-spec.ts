@@ -472,6 +472,10 @@ describe('Payroll core — phase 2a (e2e)', () => {
     expect(recorded.body.find((w: { kind: string }) => w.kind === 'pf').challanNumber).toBe(
       'PF-123',
     );
+
+    // The paid, unlocked run sits in the Accounts desk's "Payroll runs to book".
+    const desk = (await http().get('/api/v1/accounts/desk').set(bearer(accounts)).expect(200)).body;
+    expect(desk.queues.payrollToBook).toBeGreaterThanOrEqual(1);
   });
 
   it('pays into a new account only after HR verifies it, and flags it', async () => {

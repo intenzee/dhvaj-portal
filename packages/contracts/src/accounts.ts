@@ -175,7 +175,7 @@ export interface AccountsDesk {
     tdsNotIn26as: number;
     remindersDueToday: number;
     waitingForPartner: number;
-    /** Paid payroll runs not yet booked; null until payroll is on. */
+    /** Approved or paid payroll runs not yet locked; null outside finance. */
     payrollToBook: number | null;
   };
   byPartner: { partnerId: string | null; partnerName: string; outstanding: string }[];
