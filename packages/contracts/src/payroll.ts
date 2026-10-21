@@ -559,6 +559,41 @@ export interface Payslip {
   bankReference: string | null;
 }
 
+/** The stored rules: the engine's settings plus what varies by office (office code →). */
+export interface PayRules extends PaySettings {
+  ptSlabsByOffice: Record<string, PtSlab[]>;
+  stipendMinimumByOffice: Record<string, string>;
+}
+
+export interface PaySettingsRecord {
+  effectiveFrom: string;
+  rules: PayRules;
+  confirmedBy: string | null;
+}
+
+/** A person on the pay roster: who they are and whether they can be paid. */
+export interface PayRosterRow {
+  employeeId: string;
+  employeeCode: string;
+  fullName: string;
+  officeCode: string;
+  grade: string | null;
+  status: string;
+  dateOfJoining: string;
+  dateOfExit: string | null;
+  current: SalaryStructure | null;
+  pending: number;
+  hasBankAccount: boolean;
+  openBankChange: boolean;
+}
+
+/** One person's inputs for a month, as HR entered them. */
+export interface PayrollMonthInputs {
+  employeeId: string;
+  lossOfPayDays: number;
+  inputs: { kind: PayrollInputKind; amount: string; note: string | null }[];
+}
+
 /** A payslip in a person's list. */
 export interface PayslipSummary {
   runId: string;
