@@ -39,6 +39,7 @@ import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-set
 import { FeatureRolloutsModule } from './modules/feature-rollouts/feature-rollouts.module';
 import { CredentialsModule } from './modules/credentials/credentials.module';
 import { NoticeIntakeModule } from './modules/notice-intake/notice-intake.module';
+import { PeopleModule } from './modules/people/people.module';
 
 /**
  * Composition root of the modular monolith.
@@ -121,6 +122,7 @@ import { NoticeIntakeModule } from './modules/notice-intake/notice-intake.module
     FeatureRolloutsModule,
     CredentialsModule,
     NoticeIntakeModule,
+    PeopleModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.
