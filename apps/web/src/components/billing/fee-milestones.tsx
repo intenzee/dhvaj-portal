@@ -34,7 +34,8 @@ export function FeeMilestones({ engagementId }: { engagementId: string }): JSX.E
     queryKey: key,
     queryFn: () => apiFetch<FeeMilestone[]>(`/billing/engagements/${engagementId}/fee-milestones`),
   });
-  const mayManage = can(principal, PERMISSION.billingManage);
+  // Agreeing or cancelling a fee is the partner's call (fee.agree), not billing's.
+  const mayManage = can(principal, PERMISSION.feeAgree);
 
   const cancel = useMutation({
     mutationFn: (id: string) =>
