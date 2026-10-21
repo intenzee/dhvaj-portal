@@ -45,7 +45,12 @@ const STATUS_LABEL: Record<EmploymentStatus, string> = {
  * user is how they sign in. Engagement teams, sign-offs and partner lists all
  * read the employee record.
  */
-export function PeopleSection(): JSX.Element {
+export function PeopleSection({
+  rowHref,
+}: {
+  /** Open a person from their row (the People area); the admin tab edits in place. */
+  rowHref?: (employee: AdminEmployeeRow) => string;
+} = {}): JSX.Element {
   const { principal } = useAuth();
   const mayManage = can(principal, PERMISSION.employeeManage);
   const [editing, setEditing] = useState<AdminEmployeeRow | null>(null);
@@ -135,7 +140,12 @@ export function PeopleSection(): JSX.Element {
           </Button>
         </div>
       )}
-      <DataTable columns={columns} data={employees.data?.items ?? []} empty="No employees yet." />
+      <DataTable
+        columns={columns}
+        data={employees.data?.items ?? []}
+        empty="No employees yet."
+        rowHref={rowHref}
+      />
       {employees.data && (
         <Pagination
           total={employees.data.total}
@@ -166,7 +176,7 @@ export function PeopleSection(): JSX.Element {
 }
 
 /** Create (no `employee`) or edit an employee record, its portal login and partner details. */
-function EmployeeFormModal({
+export function EmployeeFormModal({
   offices,
   users,
   employee,

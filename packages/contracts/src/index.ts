@@ -97,3 +97,4 @@ export * from './notices';
 export * from './billing';
 export * from './payroll';
 export * from './accounts';
+export * from './people';
