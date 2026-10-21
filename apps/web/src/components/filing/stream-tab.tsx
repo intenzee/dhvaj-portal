@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   STREAM_LABEL,
+  STREAM_REGISTRATION_TYPES,
   type PeriodSection,
   type Stream,
   type StreamTree,
@@ -17,7 +18,7 @@ import type { TaskActionContext } from '@/lib/work-types';
 import { defaultPeriodKey } from '@/lib/period-choice';
 import { rememberPlace } from '@/lib/last-place';
 import { todayIst } from '@/components/work/my-task-columns';
-import { Card, CardBody, CardHeader, CardTitle, EmptyState, Spinner } from '@/components/ui';
+import { Button, Card, CardBody, CardHeader, CardTitle, EmptyState, Spinner } from '@/components/ui';
 import { Select } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 import { WorkList } from '@/components/tasks/work-list';
@@ -119,6 +120,16 @@ export function StreamTab({
     enabled: regQ.isSuccess,
   });
 
+  const qc = useQueryClient();
+  const rebuild = useMutation({
+    mutationFn: () =>
+      apiFetch<{ created: number }>(`/engagements/${engagementId}/compliance/generate-calendar`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['filing', 'tree', engagementId] }),
+  });
+
   const tree = q.data;
   const fy = tree?.financialYear ?? null;
   const openKey = useMemo(() => {
@@ -164,6 +175,46 @@ export function StreamTab({
   const err = regQ.error ?? q.error;
   if (err || !tree) {
     return <EmptyState>{err instanceof ApiError ? err.message : 'Could not load this stream.'}</EmptyState>;
+  }
+
+  // A GST / TDS stream with no registration behind it has nothing to file:
+  // say so, rather than twelve empty months.
+  const regTypes = STREAM_REGISTRATION_TYPES[stream];
+  const hasFilings =
+    tree.annual.length > 0 ||
+    tree.periods.some((p) => p.items.length > 0 || Object.values(p.sections).some((x) => x?.length));
+  if (stream !== 'roc' && !regTypes.includes('entity') && tree.registrations.length === 0 && !hasFilings) {
+    const kind = regTypes.join(' / ').toUpperCase();
+    return (
+      <Card>
+        <CardBody className="space-y-3">
+          <p className="text-sm text-ink">
+            No {kind} on this engagement yet, so there are no {STREAM_LABEL[stream]} returns to show.
+          </p>
+          <p className="text-xs text-ink-muted">
+            {STREAM_LABEL[stream]} returns are built per {kind}. Add the client’s {kind} on the client’s
+            page (Registrations) — the calendar rebuilds itself — or rebuild it here once it is on file.
+          </p>
+          {ctx.isLead && (
+            <div className="flex items-center gap-3">
+              <Button size="sm" onClick={() => rebuild.mutate()} disabled={rebuild.isPending}>
+                {rebuild.isPending ? 'Rebuilding…' : 'Rebuild calendar'}
+              </Button>
+              {rebuild.isSuccess && rebuild.data.created === 0 && (
+                <span className="text-xs text-warning-700">
+                  Still nothing to file — check the client has an active {kind}.
+                </span>
+              )}
+              {rebuild.error && (
+                <span className="text-xs text-danger-700">
+                  {rebuild.error instanceof ApiError ? rebuild.error.message : 'Could not rebuild.'}
+                </span>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+    );
   }
 
   // ROC: the FY's events sit below the annual strip (spec §6.1); with no

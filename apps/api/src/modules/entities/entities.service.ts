@@ -16,6 +16,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { AuditService } from '../audit/audit.service';
+import { ComplianceGeneratorService } from '../compliance/compliance-generator.service';
 import { engagementInSectionsSql } from '../../common/sections';
 import type {
   AddressInput,
@@ -132,6 +133,7 @@ export class EntitiesService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly generator: ComplianceGeneratorService,
   ) {}
 
   async listEntityTypes(ctx: RlsContext): Promise<EntityTypeRecord[]> {
@@ -481,6 +483,7 @@ export class EntitiesService {
     return this.mutateChildWith(client, ctx, entityId, 'entity.registration_added', async () => {
       await this.insertRegistration(client, entityId, input);
       await this.flagReassessmentIfComplete(client, entityId);
+      await this.regenerateCalendars(client, entityId);
     });
   }
 
@@ -527,6 +530,7 @@ export class EntitiesService {
         throw new NotFoundException('Registration not found for this entity.');
       }
       await this.flagReassessmentIfComplete(client, entityId);
+      await this.regenerateCalendars(client, entityId);
     });
   }
 
@@ -858,6 +862,30 @@ export class EntitiesService {
        WHERE id = $2 AND regulatory_profile_status = $3`,
       [REGULATORY_PROFILE_STATUS.needs_reassessment, entityId, REGULATORY_PROFILE_STATUS.complete],
     );
+  }
+
+  /**
+   * A GSTIN / TAN / CIN added or changed after the client's Compliance
+   * engagement was opened: rebuild its calendar so the new registration's
+   * filings appear (savepoint each; a caller who does not lead an engagement
+   * leaves it to the nightly run).
+   */
+  private async regenerateCalendars(client: PoolClient, entityId: string): Promise<void> {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.engagements
+        WHERE entity_id = $1 AND kind = 'compliance' AND status <> ALL($2::text[])
+        ORDER BY created_at`,
+      [entityId, CLOSED_ENGAGEMENT_STATUSES],
+    );
+    for (const { id } of rows) {
+      await client.query('SAVEPOINT registration_regen');
+      try {
+        await this.generator.generateForEngagement(client, id);
+        await client.query('RELEASE SAVEPOINT registration_regen');
+      } catch {
+        await client.query('ROLLBACK TO SAVEPOINT registration_regen');
+      }
+    }
   }
 
   private async insertRegistration(
