@@ -11,6 +11,7 @@ import {
   periodKeysOfMark,
   periodKeysOfMonth,
   roleOfHeading,
+  sameFirstWord,
   similarNames,
   sourceLabel,
   splitStateFromName,
@@ -197,6 +198,8 @@ describe('the firm login workbook (ADR-0035)', () => {
     expect(parseMark('12/05/2026')).toBe('filed');
     expect(parseMark('NA')).toBe('not_applicable');
     expect(parseMark('N/A')).toBe('not_applicable');
+    expect(parseMark('nil')).toBe('filed');
+    expect(parseMark('10/9/26', 46304)).toBe('filed');
     expect(parseMark('pending')).toBe('other');
     expect(parseMark('')).toBeNull();
     expect(parseFrequency('Monthly')).toBe('monthly');
@@ -356,6 +359,15 @@ describe('the firm login workbook (ADR-0035)', () => {
     expect(acme!.error).toMatch(/Rows 2 and 3 are both Delhi with no GSTIN/);
   });
 
+  it('knows names that start with the same word, give or take a letter', () => {
+    expect(sameFirstWord('3Acess', '3Aces Technologies - Firm')).toBe(true);
+    expect(sameFirstWord('M/s Hasol', 'Hasol Impex Private Limited')).toBe(true);
+    expect(sameFirstWord('Dawon LLP', 'Dawon Drone India Pvt Ltd')).toBe(true);
+    expect(sameFirstWord('Ram', 'Ram Traders')).toBe(false);
+    expect(sameFirstWord('Global Impex', 'Gopal Eng works')).toBe(false);
+    expect(sameFirstWord('', 'Gumlabs')).toBe(false);
+  });
+
   it('knows names that are probably the same client', () => {
     expect(similarNames('Drift Logistics Pvt. Ltd.', 'drift logistics')).toBe(true);
     expect(similarNames('Cosmotrendez', 'Cosmotrendz')).toBe(true);
@@ -364,6 +376,9 @@ describe('the firm login workbook (ADR-0035)', () => {
     expect(similarNames('DRIFTS LOGISTICS PRIVATE LIMITED', 'Drift')).toBe(false);
     expect(similarNames('Ricky', 'Rocky')).toBe(false);
     expect(similarNames('Jai hanuman', 'Jaynat Gupta')).toBe(false);
+    expect(similarNames('Jaynat Gupta', 'Jayant Gupta')).toBe(true);
+    expect(similarNames('aveer green', 'Aveer Green PrivateLimited')).toBe(true);
+    expect(similarNames('Director of estate', 'Director of Estates')).toBe(true);
     expect(similarNames('ABC Traders', 'ABC')).toBe(false);
   });
 
