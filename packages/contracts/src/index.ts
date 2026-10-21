@@ -100,3 +100,4 @@ export * from './payroll-tax';
 export * from './payroll-tax-api';
 export * from './accounts';
 export * from './people';
+export * from './finance';

@@ -20,6 +20,15 @@ import { Button, Spinner } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
 import { autoAllocate, checkAllocations, receiptGross, type AllocationDraft } from './receipts';
 
+/** What a matched bank credit already says: the day, the reference, the split. */
+export interface ReceiptPrefill {
+  receivedOn: string;
+  reference: string | null;
+  net: string;
+  tds: string;
+  allocations: AllocationDraft[];
+}
+
 const today = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 /**
@@ -31,21 +40,26 @@ export function RecordReceiptModal({
   open,
   onClose,
   entity,
+  prefill,
+  onSaved,
 }: {
   open: boolean;
   onClose: () => void;
   /** Fixed client (statement page); omit to pick one. */
   entity?: { id: string; name: string };
+  /** A bank statement credit the Accountant matched (Reports → Finance). */
+  prefill?: ReceiptPrefill;
+  onSaved?: (receipt: ReceiptRecord) => void;
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState<{ id: string; name: string } | null>(entity ?? null);
-  const [receivedOn, setReceivedOn] = useState(today());
+  const [receivedOn, setReceivedOn] = useState(prefill?.receivedOn ?? today());
   const [mode, setMode] = useState<ReceiptMode>('bank');
-  const [reference, setReference] = useState('');
-  const [net, setNet] = useState('');
-  const [tds, setTds] = useState('');
+  const [reference, setReference] = useState(prefill?.reference ?? '');
+  const [net, setNet] = useState(prefill?.net ?? '');
+  const [tds, setTds] = useState(prefill && Number(prefill.tds) > 0 ? prefill.tds : '');
   const [section, setSection] = useState<TdsSection>('194J');
   const [rows, setRows] = useState<AllocationDraft[]>([]);
   const [edited, setEdited] = useState(false);
@@ -64,9 +78,17 @@ export function RecordReceiptModal({
   const openInvoices = (statement.data?.invoices ?? []).filter((i) => Number(i.balance) > 0);
   const gross = receiptGross(net, tds);
 
-  // Until the split is edited by hand, follow the amount.
+  // Until the split is edited by hand, follow the amount (or the match, while
+  // the amount is still the matched one).
+  const prefillGross = prefill ? receiptGross(prefill.net, prefill.tds) : null;
   useEffect(() => {
-    if (!edited) setRows(autoAllocate(gross, openInvoices));
+    if (edited) return;
+    if (prefill && gross === prefillGross) {
+      const by = new Map(prefill.allocations.map((a) => [a.invoiceId, a.amount]));
+      setRows(openInvoices.map((i) => ({ invoiceId: i.id, amount: by.get(i.id) ?? '' })));
+    } else {
+      setRows(autoAllocate(gross, openInvoices));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gross, statement.data, edited]);
 
@@ -97,6 +119,7 @@ export function RecordReceiptModal({
       );
       void qc.invalidateQueries({ queryKey: ['billing'] });
       void qc.invalidateQueries({ queryKey: ['engagement'] });
+      onSaved?.(r);
       onClose();
     },
     onError: (e) =>
