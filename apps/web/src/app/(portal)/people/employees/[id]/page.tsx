@@ -28,8 +28,8 @@ interface PersonTab {
 }
 
 /**
- * The person's tabs. Payroll adds "Salary" and "Bank & IDs" here (spec §4.8),
- * each gated on its own permission, after "Hours".
+ * The person's tabs. Payroll's "Salary" and "Bank & IDs" (spec §4.8) come last,
+ * each gated on its own permission.
  */
 const TABS: PersonTab[] = [
   { id: 'profile', label: 'Profile', show: () => true, render: (e) => <ProfileTab employee={e} /> },
@@ -52,22 +52,23 @@ const TABS: PersonTab[] = [
     render: (e) => <HoursTab employeeId={e.id} />,
   },
   {
+    id: 'documents',
+    label: 'Documents',
+    show: (p) => readsPeople(p) && can(p, PERMISSION.employeeManage),
+    render: (e) => <HrDocumentsTab employeeId={e.id} />,
+  },
+  {
     id: 'salary',
     label: 'Salary',
     show: (p) => can(p, PERMISSION.payrollRead),
     render: (e) => <SalaryTab employeeId={e.id} />,
   },
   {
+    // Bank numbers and reveal are HR's alone; approvers see pay, not accounts.
     id: 'bank',
     label: 'Bank & IDs',
     show: (p) => can(p, PERMISSION.payrollPrepare),
     render: (e) => <BankIdsTab employeeId={e.id} />,
-  },
-  {
-    id: 'documents',
-    label: 'Documents',
-    show: (p) => readsPeople(p) && can(p, PERMISSION.employeeManage),
-    render: (e) => <HrDocumentsTab employeeId={e.id} />,
   },
 ];
 
