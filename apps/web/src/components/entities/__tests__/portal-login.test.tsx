@@ -240,6 +240,7 @@ describe('client login workbook import', () => {
       registrationsAdded: 3,
       loginsSaved: 8,
       schemesSet: 2,
+      marksRecorded: 4,
       marksApplied: 0,
       marksAlreadyDone: 0,
       marksWithoutFiling: 4,
@@ -252,6 +253,11 @@ describe('client login workbook import', () => {
     expect(lines[1]).toBe(
       '3 registrations added · 8 logins saved (encrypted) · 2 GSTINs set monthly / quarterly',
     );
-    expect(lines[2]).toMatch(/^4 filed \/ NA marks not applied: the client has no GST engagement/);
+    expect(lines[2]).toBe(
+      "4 filed / NA marks kept as the clients' GST return history (Clients → GST returns)",
+    );
+    expect(lines[3]).toMatch(
+      /^4 filed \/ NA marks not applied to a filing: the client has no GST engagement/,
+    );
   });
 });
