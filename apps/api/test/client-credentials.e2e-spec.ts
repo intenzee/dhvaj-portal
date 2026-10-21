@@ -537,4 +537,143 @@ describe('Client portal credentials (e2e)', () => {
     await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(pa)).expect(429);
     await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(mp)).expect(200);
   });
+
+  it("finds a client by a similar name, takes the sheet's fuller name, and points out duplicates", async () => {
+    const t = `Alike${Date.now()}`;
+    const book = (names: string[]): string => {
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['Particular', 'ID', 'Pwd', 'GSTIN', 'Apr-26'],
+          ['', '', '', '', 'GSTR-1'],
+          ...names.map((n, i) => [`${t} ${n}`, `${t}_${i}`, `pw-${i}`, '', 'filed']),
+        ]),
+        'GST Login',
+      );
+      return (XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer).toString('base64');
+    };
+    const send = (path: string, names: string[]) =>
+      http()
+        .post(`/api/v1/client-imports/workbook${path}`)
+        .set(bearer(pa))
+        .send({
+          filename: 'alike.xlsx',
+          contentBase64: book(names),
+          officeCode: 'NORTH',
+          defaultTypeSlug: 'proprietorship',
+        })
+        .expect(200);
+    const named = async () =>
+      (
+        await su.query<{ legal_name: string }>(
+          `SELECT legal_name FROM hsdg.entities WHERE legal_name LIKE $1 ORDER BY legal_name`,
+          [`${t} %`],
+        )
+      ).rows.map((r) => r.legal_name.slice(t.length + 1));
+
+    await send('', [
+      'aveer green',
+      'Jaynat Gupta',
+      'GRIID Chandigarh',
+      'Kumar Agencies',
+      'Kumar Agro',
+    ]);
+    await http()
+      .post('/api/v1/entities')
+      .set(bearer(pa))
+      .send({ legalName: `${t} Griid`, typeSlug: 'proprietorship', officeCode: 'NORTH' })
+      .expect(201);
+
+    const next = ['Aveer Green Private Limited', 'Jayant Gupta', 'GRIID- Chandigarh', 'Kumar'];
+    const preview = (await send('/preview', next)).body as ClientImportPreview;
+    const row = (n: string) => preview.rows.find((r) => r.name === `${t} ${n}`)!;
+    expect(row('Aveer Green Private Limited')).toMatchObject({
+      action: 'update_client',
+      entityName: `${t} aveer green`,
+    });
+    expect(row('Aveer Green Private Limited').warnings).toEqual(
+      expect.arrayContaining([
+        `Taken to be "${t} aveer green" in the portal, by its name.`,
+        `"${t} aveer green" will be renamed "${t} Aveer Green Private Limited".`,
+      ]),
+    );
+    expect(row('Jayant Gupta').warnings).toContain(
+      `"${t} Jaynat Gupta" will be renamed "${t} Jayant Gupta".`,
+    );
+    expect(row('GRIID- Chandigarh').entityName).toBe(`${t} GRIID Chandigarh`);
+    expect(row('GRIID- Chandigarh').warnings.join(' ')).toMatch(
+      new RegExp(`"${t} Griid" \\(.+\\) in the portal looks like the same client`),
+    );
+    expect(row('Kumar')).toMatchObject({ action: 'error' });
+    expect(row('Kumar').error).toMatch(/could be .*Kumar Agencies.* or .*Kumar Agro/);
+
+    const result = (await send('', next)).body as ClientImportResult;
+    expect(result).toMatchObject({ clientsCreated: 0, clientsUpdated: 3 });
+    expect(result.notes).toContainEqual(
+      expect.objectContaining({
+        message: `"${t} aveer green" renamed "${t} Aveer Green Private Limited", as the sheet has it.`,
+      }),
+    );
+    expect(await named()).toEqual(
+      [
+        'Aveer Green Private Limited',
+        'GRIID Chandigarh',
+        'Griid',
+        'Jayant Gupta',
+        'Kumar Agencies',
+        'Kumar Agro',
+      ].sort(),
+    );
+    const audit = await su.query(
+      `SELECT 1 FROM hsdg.audit_events WHERE action = 'entity.updated' AND after_state->>'legalName' = $1`,
+      [`${t} Jayant Gupta`],
+    );
+    expect(audit.rowCount).toBe(1);
+  });
+
+  it('points out a client of the same first word and GST login as a likely duplicate, never taking it', async () => {
+    const t = `Twin${Date.now()}`;
+    const book = (rows: [string, string][]): string => {
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['Particular', 'ID', 'Pwd', 'GSTIN', 'Apr-26'],
+          ['', '', '', '', 'GSTR-1'],
+          ...rows.map(([n, id], i) => [`${n} ${t}`, id, `pw-${i}`, '', 'filed']),
+        ]),
+        'GST Login',
+      );
+      return (XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer).toString('base64');
+    };
+    const send = (path: string, rows: [string, string][]) =>
+      http()
+        .post(`/api/v1/client-imports/workbook${path}`)
+        .set(bearer(pa))
+        .send({
+          filename: 'twin.xlsx',
+          contentBase64: book(rows),
+          officeCode: 'NORTH',
+          defaultTypeSlug: 'proprietorship',
+        })
+        .expect(200);
+
+    await send('', [['3Acess', `${t}_ace`]]);
+    const preview = (
+      await send('/preview', [
+        ['3Aces Technologies - Firm', `${t}_ace`],
+        ['3Aces Technologies Private Limited', `${t}_xyz`],
+      ])
+    ).body as ClientImportPreview;
+    const row = (n: string) => preview.rows.find((r) => r.name === `${n} ${t}`)!;
+    expect(row('3Aces Technologies - Firm')).toMatchObject({ action: 'create_client' });
+    expect(row('3Aces Technologies - Firm').warnings.join(' ')).toMatch(
+      new RegExp(`"3Acess ${t}" \\(.+\\) in the portal looks like the same client`),
+    );
+    expect(row('3Aces Technologies Private Limited')).toMatchObject({ action: 'create_client' });
+    expect(row('3Aces Technologies Private Limited').warnings.join(' ')).not.toMatch(
+      /looks like the same client/,
+    );
+  });
 });

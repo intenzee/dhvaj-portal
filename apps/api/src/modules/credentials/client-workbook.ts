@@ -178,6 +178,8 @@ export function parseMark(cell: string, raw?: unknown): FilingMark | 'other' | n
   if (!t) return null;
   if (/^(n\.?\s*\/?\s*a\.?|not\s*applicable)$/.test(t)) return 'not_applicable';
   if (/^(filed|file|done|yes|y|ok|✓|✔)\b/.test(t) || t === '✓' || t === '✔') return 'filed';
+  // A nil return is a return filed.
+  if (/^nil\b/.test(t)) return 'filed';
   // A filing date in the cell means it was filed.
   if (typeof raw === 'number' && raw > 20000 && raw < 80000) return 'filed';
   if (/^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}$/.test(t)) return 'filed';
@@ -229,12 +231,16 @@ function nameWords(name: string): string[] {
     .filter((w) => w && !LEGAL_FORM_WORDS.has(w));
 }
 
-/** At most one letter added, dropped or changed between a and b. */
+/** At most one letter added, dropped, changed or swapped with the next between a and b. */
 function withinOneEdit(a: string, b: string): boolean {
   if (Math.abs(a.length - b.length) > 1) return false;
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
-  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  if (a.length === b.length)
+    return (
+      a.slice(i + 1) === b.slice(i + 1) ||
+      (a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2))
+    );
   return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
 }
 
@@ -253,6 +259,17 @@ export function similarNames(a: string, b: string): boolean {
   if (Math.min(ka.length, kb.length) >= 8 && withinOneEdit(ka, kb)) return true;
   const [short, long] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
   return short.join('').length >= 4 && short.every((w, i) => long[i] === w);
+}
+
+/**
+ * Whether two names start with the same word, give or take a letter
+ * ('3Acess' / '3Aces Technologies - Firm'). Too loose to match clients on;
+ * with the same login it points out a likely duplicate. Pure — tested.
+ */
+export function sameFirstWord(a: string, b: string): boolean {
+  const [wa] = nameWords(a);
+  const [wb] = nameWords(b);
+  return Boolean(wa && wb && Math.min(wa.length, wb.length) >= 4 && withinOneEdit(wa, wb));
 }
 
 // ── Headings ─────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import {
   type ClientImportRequest,
   type ClientImportResult,
   type ClientImportRow,
+  usernameHint,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -26,6 +27,8 @@ import {
   parseClientWorkbook,
   periodKeysOfMark,
   previewLogin,
+  sameFirstWord,
+  similarNames,
   sourceLabel,
   type ParsedWorkbook,
   type WorkbookClient,
@@ -42,6 +45,10 @@ interface PlannedClient extends WorkbookClient {
   /** GSTINs / the TAN the client does not have yet. */
   newGstins: string[];
   newTan: boolean;
+  /** How the portal's client was found: by PAN / GSTIN / TAN, its name, or a similar name. */
+  matchedBy: 'key' | 'name' | 'similar' | null;
+  /** The sheet's fuller name for the portal's client, when it has a shorter one. */
+  rename: string | null;
 }
 
 interface Plan {
@@ -74,6 +81,20 @@ function failureMessage(err: unknown): string {
 }
 
 const SCHEME = { monthly: 'regular', quarterly: 'qrmp' } as const;
+
+/**
+ * The sheet's name for the portal's client when it is the same name spelt
+ * out or corrected ('aveer green' → 'Aveer Green Private Limited',
+ * 'Jaynat Gupta' → 'Jayant Gupta'); never a shorter one, nor case alone.
+ */
+function fullerName(sheet: string, portal: string): string | null {
+  const name = sheet.trim().replace(/\s+/g, ' ');
+  return nameKey(name) !== nameKey(portal) &&
+    nameKey(name).length >= nameKey(portal).length &&
+    similarNames(name, portal)
+    ? name
+    : null;
+}
 const FREQUENCY_OF: Record<string, string> = {
   regular: 'Monthly',
   qrmp: 'Quarterly',
@@ -219,6 +240,24 @@ export class ClientImportService {
       entityId = detail.id;
       tally.registrationsAdded = c.newGstins.length + tanRegistration.length;
     } else {
+      if (c.rename) {
+        const before = await client.query<{ legal_name: string }>(
+          `SELECT legal_name FROM hsdg.entities WHERE id = $1`,
+          [entityId],
+        );
+        await client.query(
+          `UPDATE hsdg.entities SET legal_name = $2, version = version + 1 WHERE id = $1`,
+          [entityId, c.rename],
+        );
+        await this.audit.recordWith(client, ctx, {
+          action: 'entity.updated',
+          objectType: 'entity',
+          objectId: entityId!,
+          before: { legalName: before.rows[0]?.legal_name },
+          after: { legalName: c.rename },
+        });
+        notes.push(`"${before.rows[0]?.legal_name}" renamed "${c.rename}", as the sheet has it.`);
+      }
       for (const gstin of c.newGstins) {
         await this.entities.addRegistrationWith(client, ctx, entityId!, {
           registrationType: 'gstin',
@@ -506,15 +545,23 @@ export class ClientImportService {
              OR (registration_type = 'tan' AND registration_number = ANY($2::text[]))`,
         [gstins, tans],
       );
-      const pans = clients.flatMap((c) => (c.pan ? [c.pan] : []));
-      const names = clients.map((c) => nameKey(c.name));
-      const entities = await client.query<{ id: string; legal_name: string; pan: string | null }>(
-        `SELECT id, legal_name, pan FROM hsdg.entities
-          WHERE pan = ANY($1::text[]) OR id = ANY($3::uuid[])
-             OR lower(regexp_replace(legal_name, '[^A-Za-z0-9]', '', 'g')) = ANY($2::text[])`,
-        [pans, names, [...new Set(regs.rows.map((r) => r.entity_id))]],
+      // Every client one can see: the sheet's are matched by name, or a similar one.
+      const entities = await client.query<{
+        id: string;
+        entity_code: string;
+        legal_name: string;
+        pan: string | null;
+      }>(
+        `SELECT id, entity_code, legal_name, pan FROM hsdg.entities
+          WHERE status <> 'archived' OR id = ANY($1::uuid[])
+          ORDER BY legal_name LIMIT 50000`,
+        [[...new Set(regs.rows.map((r) => r.entity_id))]],
       );
-      return { slugs, regs: regs.rows, entities: entities.rows };
+      // The shown part of each GST login ('ab•••yz'): with the first word, a likely duplicate.
+      const hints = await client.query<{ entity_id: string; username_hint: string }>(
+        `SELECT entity_id, username_hint FROM hsdg.client_credentials WHERE portal = 'gst'`,
+      );
+      return { slugs, regs: regs.rows, entities: entities.rows, hints: hints.rows };
     });
 
     const regEntity = new Map(lookups.regs.map((r) => [r.registration_number, r.entity_id]));
@@ -528,6 +575,8 @@ export class ClientImportService {
         entityName: null,
         newGstins: c.gst.flatMap((g) => (g.gstin && !regEntity.has(g.gstin) ? [g.gstin] : [])),
         newTan: Boolean(c.tan && !regEntity.has(c.tan)),
+        matchedBy: null,
+        rename: null,
       };
       if (c.error) return base;
       const error = (message: string): PlannedClient => ({ ...base, error: message });
@@ -538,15 +587,27 @@ export class ClientImportService {
       for (const g of c.gst)
         if (g.gstin && regEntity.has(g.gstin)) ids.add(regEntity.get(g.gstin)!);
       if (c.tan && regEntity.has(c.tan)) ids.add(regEntity.get(c.tan)!);
+      let matchedBy: PlannedClient['matchedBy'] = ids.size ? 'key' : null;
       if (ids.size === 0) {
+        const fits = (e: { pan: string | null }): boolean => !e.pan || !c.pan || e.pan === c.pan;
         const named = lookups.entities.filter(
-          (e) => nameKey(e.legal_name) === nameKey(c.name) && (!e.pan || !c.pan || e.pan === c.pan),
+          (e) => nameKey(e.legal_name) === nameKey(c.name) && fits(e),
         );
         if (named.length > 1)
           return error(
             `${named.length} clients in the portal are called "${c.name}"; add the PAN or GSTIN to the sheet.`,
           );
-        if (named[0]) ids.add(named[0].id);
+        const like = named.length
+          ? named
+          : lookups.entities.filter((e) => fits(e) && similarNames(e.legal_name, c.name));
+        if (like.length > 1)
+          return error(
+            `"${c.name}" could be ${like.map((e) => `"${e.legal_name}"`).join(' or ')} in the portal; write the name as it is there, or add the PAN or GSTIN.`,
+          );
+        if (like[0]) {
+          ids.add(like[0].id);
+          matchedBy = named.length ? 'name' : 'similar';
+        }
       }
       if (ids.size > 1)
         return error(
@@ -562,6 +623,10 @@ export class ClientImportService {
         if (c.pan && entity.pan && entity.pan !== c.pan)
           return error(`"${entity.legal_name}" in the portal has PAN ${entity.pan}, not ${c.pan}.`);
         const warnings = [...c.warnings];
+        if (matchedBy === 'similar')
+          warnings.push(`Taken to be "${entity.legal_name}" in the portal, by its name.`);
+        const rename = fullerName(c.name, entity.legal_name);
+        if (rename) warnings.push(`"${entity.legal_name}" will be renamed "${rename}".`);
         if (c.pan && !entity.pan)
           warnings.push(
             `"${entity.legal_name}" has no PAN in the portal; add ${c.pan} on the client page.`,
@@ -571,9 +636,12 @@ export class ClientImportService {
           base.newTan ||
           c.logins.length > 0 ||
           c.gst.some((g) => g.marks.length > 0 || (g.gstin && g.frequency)) ||
-          Boolean(c.email);
+          Boolean(c.email) ||
+          Boolean(rename);
         return {
           ...base,
+          matchedBy,
+          rename,
           warnings,
           action: anything ? CLIENT_IMPORT_ACTION.updateClient : CLIENT_IMPORT_ACTION.unchanged,
           entityId: id,
@@ -587,7 +655,10 @@ export class ClientImportService {
       if (!lookups.slugs.has(c.typeSlug)) return error(`Unknown client type "${c.typeSlug}".`);
       return { ...base, action: CLIENT_IMPORT_ACTION.createClient };
     });
-    return { book, clients: planned };
+    const hintsOf = new Map<string, Set<string>>();
+    for (const h of lookups.hints)
+      hintsOf.set(h.entity_id, (hintsOf.get(h.entity_id) ?? new Set()).add(h.username_hint));
+    return { book, clients: crossCheck(planned, lookups.entities, hintsOf) };
   }
 }
 
@@ -621,4 +692,60 @@ function toPreviewRow(c: PlannedClient): ClientImportRow {
     warnings: c.warnings,
     error: c.error,
   };
+}
+
+/**
+ * Two sheet clients never take one portal client by name: the ones that did
+ * are held back. And a portal client that no sheet row took (and has no other
+ * PAN) is pointed out as a likely duplicate when its name is the same or
+ * similar, or starts with the same word and it has a GST login that looks
+ * like the sheet's.
+ */
+function crossCheck(
+  planned: PlannedClient[],
+  entities: { id: string; entity_code: string; legal_name: string; pan: string | null }[],
+  hintsOf: Map<string, Set<string>>,
+): PlannedClient[] {
+  const takers = new Map<string, PlannedClient[]>();
+  for (const c of planned)
+    if (c.entityId) takers.set(c.entityId, [...(takers.get(c.entityId) ?? []), c]);
+  const out = planned.map((c): PlannedClient => {
+    const others = c.entityId ? takers.get(c.entityId)!.filter((o) => o !== c) : [];
+    if (others.length && c.matchedBy !== 'key')
+      return {
+        ...c,
+        action: CLIENT_IMPORT_ACTION.error,
+        error: `"${c.entityName}" in the portal is also ${others.map((o) => `"${o.name}"`).join(', ')} in the sheet; write the name as it is in the portal, or add the PAN or GSTIN.`,
+      };
+    return c;
+  });
+  const taken = new Set(out.flatMap((c) => (c.entityId && !c.error ? [c.entityId] : [])));
+  return out.map((c) => {
+    if (c.error) return c;
+    const twins = entities.filter(
+      (e) =>
+        e.id !== c.entityId &&
+        !taken.has(e.id) &&
+        (!e.pan || !c.pan || e.pan === c.pan) &&
+        (nameKey(e.legal_name) === nameKey(c.name) ||
+          similarNames(e.legal_name, c.name) ||
+          (c.entityName !== null && nameKey(e.legal_name) === nameKey(c.entityName)) ||
+          (sameFirstWord(e.legal_name, c.name) &&
+            c.logins.some(
+              (l) => l.portal === 'gst' && hintsOf.get(e.id)?.has(usernameHint(l.username)),
+            ))),
+    );
+    return twins.length
+      ? {
+          ...c,
+          warnings: [
+            ...c.warnings,
+            ...twins.map(
+              (e) =>
+                `"${e.legal_name}" (${e.entity_code}) in the portal looks like the same client; if it is, delete it.`,
+            ),
+          ],
+        }
+      : c;
+  });
 }
