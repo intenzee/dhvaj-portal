@@ -9,6 +9,7 @@ import type {
   LegalStatus,
   ListingLineStatus,
   ListingStatus,
+  MissingFilter,
   MissingInfoItem,
   RegistrationApplicability,
   RegistrationSource,
@@ -118,6 +119,8 @@ export interface EntitySummary {
   incorporationDate: string | null;
   registrationCount: number;
   primaryContactName: string | null;
+  /** Progressive-completion signal (§5/§27/§28); absence is never "N/A". */
+  missingInfo: MissingInfoItem[];
   version: number;
 }
 
@@ -205,8 +208,6 @@ export interface EntityDetail extends EntitySummary {
   businessActivities: BusinessActivityRecord[];
   listings: ListingRecord[];
   regulatoryAttributes: RegulatoryAttributeRecord[];
-  /** Progressive-completion signal (§5/§27/§28); absence is never "N/A". */
-  missingInfo: MissingInfoItem[];
 }
 
 export interface DuplicateCandidate {
@@ -438,4 +439,6 @@ export interface EntityFilter {
   search?: string;
   /** Any-of: a live engagement in one of these sections. */
   section?: WorkSection[];
+  /** Something missing from the master ('any'), nothing ('none'), or one item. */
+  missing?: MissingFilter;
 }
