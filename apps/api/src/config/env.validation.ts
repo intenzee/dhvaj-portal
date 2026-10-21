@@ -292,6 +292,9 @@ export const envSchema = z.object({
   // Staff Workflow WF-305: yesterday's informational notices in one message,
   // 07:00 IST, once actionable notifications are on firm-wide.
   SCHEDULER_DIGEST_CRON: z.string().default('30 1 * * *'),
+  // HR: leavers whose date of exit has come are exited and their login
+  // switched off, 00:05 IST daily.
+  SCHEDULER_PEOPLE_EXITS_CRON: z.string().default('35 18 * * *'),
   // Browser-facing base URL of the web app (links sent to clients).
   WEB_PUBLIC_URL: z.string().url().default('http://localhost:3000'),
   // Bearer secret for GET /internal/cron — the HTTP trigger serverless hosts

@@ -76,6 +76,8 @@ export const NOTIFICATION_TYPE = {
   writeOffPending: 'write_off_pending',
   /** PS-203: an issued invoice went past its due date unpaid. */
   invoiceOverdue: 'invoice_overdue',
+  /** HR started someone's exit — reassign their engagements and open tasks (partners). */
+  employeeExitReassign: 'employee_exit_reassign',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -155,6 +157,7 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   notice_hearing_due: A,
   write_off_pending: A,
   invoice_overdue: A,
+  employee_exit_reassign: A,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -201,6 +204,7 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   notice_hearing_due: 'Notice hearing coming up',
   write_off_pending: 'Write-off or credit note to approve',
   invoice_overdue: 'Invoice overdue',
+  employee_exit_reassign: 'Someone is leaving — reassign their work',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */
