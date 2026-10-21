@@ -28,6 +28,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { CommercialModule } from './modules/commercial/commercial.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
+import { FinanceModule } from './modules/finance/finance.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { NotesModule } from './modules/notes/notes.module';
@@ -115,6 +116,7 @@ import { PeopleModule } from './modules/people/people.module';
     CommercialModule,
     BillingModule,
     AccountsModule,
+    FinanceModule,
     NotesModule,
     StatutoryAuditModule,
     FilingWorkspaceModule,
