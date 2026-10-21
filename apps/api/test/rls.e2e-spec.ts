@@ -1106,7 +1106,16 @@ describe('RLS (database-level, independent of the application)', () => {
          WHERE p.slug = 'notification.read'`,
       );
       expect(read.map((r) => r.slug).sort()).toEqual(
-        ['admin', 'article', 'manager', 'managing_partner', 'partner', 'senior'].sort(),
+        [
+          'accountant',
+          'admin',
+          'article',
+          'hr',
+          'manager',
+          'managing_partner',
+          'partner',
+          'senior',
+        ].sort(),
       );
     });
   });
