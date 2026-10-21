@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { FileText } from 'lucide-react';
 import {
@@ -40,6 +41,11 @@ export default function MyPayPage(): JSX.Element {
       <PageHeader
         title="My pay"
         subtitle="Only you, HR and the Managing Partner see this. Payslips appear once the month is paid and released."
+        actions={
+          <Link href="/me/tax">
+            <Button variant="secondary">My income tax and Form 130</Button>
+          </Link>
+        }
       />
       <Payslips />
       {own.isLoading ? (
