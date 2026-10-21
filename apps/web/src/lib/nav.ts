@@ -18,6 +18,17 @@ import {
   Wallet,
   Settings,
   Bell,
+  Calculator,
+  Receipt,
+  BadgeCheck,
+  Landmark,
+  Contact,
+  UserPlus,
+  GraduationCap,
+  CalendarCheck,
+  Gauge,
+  Banknote,
+  ScrollText,
   type LucideIcon,
 } from 'lucide-react';
 import type { Principal } from './principal';
@@ -38,6 +49,8 @@ export interface NavItem {
    * other screens rely on it (Staff Workflow WF-107, design rule 6).
    */
   hideFor?: RoleSlug[];
+  /** The practice dashboard: hidden from desk-only users (Accountant, HR), who land on their desk. */
+  practice?: boolean;
   /** With ff_work_links: folded into this My Work tab; the old route redirects (WF-106). */
   foldedInto?: string;
   /** With ff_work_links: a count pill read from `path` (`{ total }`), e.g. reviews waiting (WF-105). */
@@ -48,6 +61,9 @@ export interface NavItem {
 
 /** Preparers: their sidebar is trimmed to the client work (WF-107). */
 export const PREPARER_ROLES: RoleSlug[] = [ROLE.article, ROLE.senior];
+
+/** Desk roles: no client work; they land on their own desk (accountant-hr-roles spec). */
+export const DESK_ROLES: RoleSlug[] = [ROLE.accountant, ROLE.hr];
 
 export interface NavOptions {
   /** ff_work_links: fold duplicate lists into My Work and trim the sidebar by role. */
@@ -88,6 +104,7 @@ export const NAV_SECTIONS: NavSection[] = [
         href: '/',
         icon: Home,
         hint: 'Your dashboard — what needs attention today.',
+        practice: true,
         ready: true,
       },
       {
@@ -193,6 +210,149 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: 'Accounts',
+    items: [
+      {
+        label: 'Accounts desk',
+        href: '/accounts',
+        icon: Calculator,
+        hint: 'Billed, collected and outstanding this month, and today’s billing work queues.',
+        permission: PERMISSION.entityReadBilling,
+        ready: true,
+      },
+      {
+        label: 'Client statements',
+        href: '/billing/statements',
+        icon: Receipt,
+        hint: 'Each client’s billing profile and running balance: invoices, receipts, credits, TDS.',
+        permission: PERMISSION.entityReadBilling,
+        ready: true,
+      },
+      {
+        label: 'Approvals sent',
+        href: '/billing/approvals',
+        icon: BadgeCheck,
+        hint: 'Credit notes, write-offs, waivers and invoices waiting for a partner’s decision.',
+        permission: PERMISSION.entityReadBilling,
+        ready: true,
+      },
+      {
+        label: 'Finance reports',
+        href: '/reports/finance',
+        icon: Landmark,
+        hint: 'GST outward register, books export and bank statement matching.',
+        permission: PERMISSION.entityReadBilling,
+        ready: true,
+      },
+    ],
+  },
+  {
+    title: 'People',
+    items: [
+      {
+        label: 'People desk',
+        href: '/people',
+        icon: Contact,
+        hint: 'Headcount, joiners and leavers, and the people who need something done today.',
+        permission: PERMISSION.employeeManage,
+        ready: true,
+      },
+      {
+        label: 'Employees',
+        href: '/people/employees',
+        icon: Users,
+        hint: 'Every employee’s record, reporting line, login and hours.',
+        permission: PERMISSION.employeeManage,
+        ready: true,
+      },
+      {
+        label: 'Articles',
+        href: '/people/articles',
+        icon: GraduationCap,
+        hint: 'The articleship register: principal, registration, term, leave and completion.',
+        permission: PERMISSION.employeeManage,
+        ready: true,
+      },
+      {
+        label: 'Joiners & leavers',
+        href: '/people/joiners-leavers',
+        icon: UserPlus,
+        hint: 'Add a joiner with their login in one go; take a leaver through exit.',
+        permission: PERMISSION.employeeManage,
+        ready: true,
+      },
+      {
+        label: 'Attendance',
+        href: '/people/attendance',
+        icon: CalendarCheck,
+        hint: 'Each person’s first start, last stop and hours by day — no client names.',
+        permission: PERMISSION.timeReadAttendance,
+        ready: true,
+      },
+      {
+        label: 'Workload',
+        href: '/people/workload',
+        icon: Gauge,
+        hint: 'Who is overloaded and who has room, as counts — no client names.',
+        permission: PERMISSION.reportReadPeople,
+        ready: true,
+      },
+      {
+        label: 'People reports',
+        href: '/people/reports',
+        icon: BarChart3,
+        hint: 'Hours, headcount and attrition by office and grade — no client names.',
+        permission: PERMISSION.reportReadPeople,
+        ready: true,
+      },
+    ],
+  },
+  {
+    title: 'Payroll',
+    items: [
+      {
+        label: 'Monthly runs',
+        href: '/payroll',
+        icon: Banknote,
+        hint: 'Run the month’s salaries and stipends, get them approved, pay and release payslips.',
+        permission: PERMISSION.payrollRead,
+        ready: true,
+      },
+      {
+        label: 'Salary structures',
+        href: '/payroll/structures',
+        icon: ScrollText,
+        hint: 'Each person’s pay, effective-dated, with revisions waiting for approval.',
+        permission: PERMISSION.payrollRead,
+        ready: true,
+      },
+      {
+        label: 'Statutory',
+        href: '/payroll/statutory',
+        icon: Landmark,
+        hint: 'PF, ESI, professional tax and TDS on salary: working, due dates and challans.',
+        permission: PERMISSION.payrollRead,
+        ready: true,
+      },
+      {
+        label: 'Tax declarations',
+        href: '/payroll/declarations',
+        icon: FileText,
+        hint: 'Tax regime choices, investment declarations and proofs; Form 16.',
+        permission: PERMISSION.payrollRead,
+        ready: true,
+      },
+      {
+        label: 'Registers & payslips',
+        href: '/payroll/registers',
+        icon: FolderOpen,
+        hint: 'Locked salary and stipend registers and every payslip, by month.',
+        permission: PERMISSION.payrollRead,
+        ready: true,
+      },
+    ],
+  },
+  {
     title: 'Practice',
     items: [
       {
@@ -227,7 +387,8 @@ export const NAV_SECTIONS: NavSection[] = [
         href: '/billing',
         icon: Wallet,
         hint: 'Invoices, payments received and amounts outstanding.',
-        permission: PERMISSION.reportRead,
+        // Billers (incl. the Accountant, who has no report.read) and report readers.
+        permission: [PERMISSION.billingManage, PERMISSION.reportRead],
         hideFor: PREPARER_ROLES,
         ready: true,
       },
@@ -248,7 +409,6 @@ export const NAV_SECTIONS: NavSection[] = [
 /** Every nav item, flattened in display order. */
 export const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
 
-/** Does the principal act only in these roles (its effective role, else every held role)? */
 function onlyIn(principal: Principal | null, roles: RoleSlug[]): boolean {
   if (!principal) return false;
   const held = principal.effectiveRole ? [principal.effectiveRole] : principal.roles;
@@ -262,16 +422,31 @@ function canSee(item: NavItem, principal: Principal | null, opts: NavOptions): b
     if (!needed.some((p) => held.includes(p))) return false;
   }
   if (item.flag && !opts[item.flag]) return false;
+  if (item.practice && isDeskOnly(principal)) return false;
   if (!opts.workLinks) return true;
   if (item.foldedInto) return false;
   return !(item.hideFor && onlyIn(principal, item.hideFor));
 }
 
 /**
+ * Holds only desk roles (Accountant, HR): no practice dashboard, no client work.
+ * Every held role counts, so a Senior who is also the Accountant is not desk-only.
+ */
+export function isDeskOnly(principal: Principal | null): boolean {
+  const held = principal?.roles ?? [];
+  return held.length > 0 && held.every((r) => DESK_ROLES.includes(r));
+}
+
+/**
  * Where sign-in lands (WF-201): Today for preparers (article / senior) once
- * ff_today_view is on for their office; Home for everyone else.
+ * ff_today_view is on for their office; the Accounts or People desk for the
+ * desk roles (Accountant, HR) when that is all they hold; Home for everyone else.
  */
 export function landingPath(principal: Principal | null, opts: NavOptions = {}): string {
+  // Desk roles only: the Accounts desk or the People desk.
+  if (isDeskOnly(principal)) {
+    return principal!.roles.includes(ROLE.accountant) ? '/accounts' : '/people';
+  }
   const canRead = (principal?.permissions ?? []).includes(PERMISSION.engagementRead);
   return opts.todayView && canRead && onlyIn(principal, PREPARER_ROLES) ? '/today' : '/';
 }

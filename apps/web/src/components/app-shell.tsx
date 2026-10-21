@@ -8,6 +8,8 @@ import {
   Bell,
   HelpCircle,
   KeyRound,
+  Wallet,
+  CalendarClock,
   LogOut,
   Plus,
   Layers,
@@ -216,6 +218,24 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                   {roleLabel(principal.effectiveRole)} · {principal.officeCode}
                 </div>
               </div>
+              {can(principal, PERMISSION.payrollReadOwn) && (
+                <Link
+                  href="/me/pay"
+                  className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
+                  aria-label="My pay"
+                  title="My pay"
+                >
+                  <Wallet className="h-4 w-4" />
+                </Link>
+              )}
+              <Link
+                href="/me/attendance"
+                className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
+                aria-label="My attendance"
+                title="My attendance"
+              >
+                <CalendarClock className="h-4 w-4" />
+              </Link>
               {principal.authMethod === 'password' && (
                 <button
                   onClick={() => setChangingPassword(true)}
