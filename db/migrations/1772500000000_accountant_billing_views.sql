@@ -478,8 +478,18 @@ CREATE POLICY time_billings_insert_billing ON hsdg.time_billings
   FOR INSERT TO hsdg_app
   WITH CHECK (hsdg.ctx_may_bill_engagement(engagement_id));
 
+-- ── 11. issue_invoice sees the draft's lines ─────────────────────────────
+-- The owner-run issue function reads the lines as the migrator, which saw
+-- them only through invoice_line_items_select (is_engagement_member): a
+-- biller off the team, the Accountant or a home-office partner, found "no
+-- line items". The function checks who may issue before it reads; read-only,
+-- like invoices_owner.
+CREATE POLICY invoice_line_items_owner_read ON hsdg.invoice_line_items
+  FOR SELECT TO hsdg_migrator USING (true);
+
 -- Down Migration
 
+DROP POLICY IF EXISTS invoice_line_items_owner_read ON hsdg.invoice_line_items;
 DROP POLICY IF EXISTS time_billings_insert_billing ON hsdg.time_billings;
 DROP TABLE IF EXISTS hsdg.invoice_issue_requests;
 DROP FUNCTION IF EXISTS hsdg.invoice_issue_request_fill();
