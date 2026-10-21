@@ -9,6 +9,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   DEFAULT_PAY_SETTINGS,
+  DEFAULT_TAX_RULES,
   maskTail,
   stipendBelowMinimum,
   type BankChangeRequest,
@@ -23,6 +24,7 @@ import {
   type PtSlab,
   type SalaryStructure,
   type SetPayDetailsInput,
+  type TaxRules,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -731,8 +733,9 @@ export class PayrollService {
         kind: PayrollInputKind | 'loss_of_pay_days';
         amount: string;
         note: string | null;
+        source: 'hr' | 'tax' | 'bonus';
       }>(
-        `SELECT employee_id, kind, amount, note FROM hsdg.payroll_inputs
+        `SELECT employee_id, kind, amount, note, source FROM hsdg.payroll_inputs
           WHERE month = $1 ORDER BY employee_id, kind, created_at`,
         [monthStart(month)],
       );
@@ -743,7 +746,9 @@ export class PayrollService {
           lossOfPayDays: 0,
           inputs: [],
         };
-        if (r.kind === 'loss_of_pay_days') e.lossOfPayDays = Number(r.amount);
+        if (r.source !== 'hr' && r.kind !== 'loss_of_pay_days') {
+          (e.auto ??= []).push({ kind: r.kind, amount: r.amount, note: r.note, source: r.source });
+        } else if (r.kind === 'loss_of_pay_days') e.lossOfPayDays = Number(r.amount);
         else e.inputs.push({ kind: r.kind, amount: r.amount, note: r.note });
         by.set(r.employee_id, e);
       }
@@ -751,7 +756,10 @@ export class PayrollService {
     });
   }
 
-  /** Replace one person's inputs for the month (refused once their run is submitted). */
+  /**
+   * Replace one person's inputs for the month (refused once their run is
+   * submitted). Only HR's own: projected TDS and bonus rows stay.
+   */
   async setInputs(
     ctx: RlsContext,
     month: string,
@@ -762,7 +770,7 @@ export class PayrollService {
     return this.db.withRlsContext(ctx, async (client) => {
       try {
         await client.query(
-          `DELETE FROM hsdg.payroll_inputs WHERE month = $1 AND employee_id = $2`,
+          `DELETE FROM hsdg.payroll_inputs WHERE month = $1 AND employee_id = $2 AND source = 'hr'`,
           [monthStart(month), employeeId],
         );
         const all = [
@@ -915,5 +923,32 @@ function validateRules(raw: Record<string, unknown>): PayRules {
     stipendDeductions: r.stipendDeductions,
     ptSlabsByOffice: r.ptSlabsByOffice,
     stipendMinimumByOffice: r.stipendMinimumByOffice,
+    ...(r.tax ? { tax: validTax(r.tax) } : {}),
   };
+}
+
+/** The tax rules keep their shape; a slab table must end open (upTo null). */
+function validTax(tax: TaxRules): TaxRules {
+  const isAmount = (v: unknown) => typeof v === 'string' && /^\d{1,12}(\.\d{1,2})?$/.test(v);
+  const regimeOk = (r: TaxRules['new'] | undefined) =>
+    !!r &&
+    Array.isArray(r.slabs) &&
+    r.slabs.length > 0 &&
+    r.slabs.every((s) => (s.upTo === null || isAmount(s.upTo)) && isAmount(s.rate)) &&
+    r.slabs[r.slabs.length - 1]!.upTo === null &&
+    isAmount(r.standardDeduction) &&
+    isAmount(r.rebateLimit) &&
+    isAmount(r.rebateMax);
+  const ok =
+    typeof tax === 'object' &&
+    regimeOk(tax.new) &&
+    regimeOk(tax.old) &&
+    isAmount(tax.cessRate) &&
+    Array.isArray(tax.surcharge) &&
+    typeof tax.caps === 'object' &&
+    typeof tax.gratuity === 'object' &&
+    typeof tax.bonus === 'object' &&
+    typeof tax.leaveEncashment === 'object';
+  if (!ok) throw new BadRequestException('The income-tax settings are not in the expected form.');
+  return { ...DEFAULT_TAX_RULES, ...tax };
 }

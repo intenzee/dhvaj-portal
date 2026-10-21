@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,6 +12,7 @@ import {
   computePayLine,
   fromPaise,
   revisionArrears,
+  taxYearOf,
   toPaise,
   type PayComponent,
   type PayKind,
@@ -47,6 +49,14 @@ import {
 } from './payroll-errors';
 import { PayrollService, payAad, requireEmployee, sealedFrom } from './payroll.service';
 import { renderPayslipPdf } from './payslip-pdf';
+import {
+  blankTaxYear,
+  loadTaxYears,
+  projectTds,
+  taxRulesOf,
+  type PersonTaxYear,
+  type StoredTds,
+} from './tax-context';
 
 interface RunRow {
   id: string;
@@ -96,6 +106,10 @@ interface LineRow {
 /** A line's inputs as computed: HR's month plus what the run worked out itself. */
 interface StoredInputs extends PayMonthInput {
   autoArrears?: { structureId: string; months: string[]; amount: string };
+  /** Phase 2b: how this month's TDS was projected (absent when HR entered it). */
+  tds?: StoredTds;
+  /** Phase 2b: the approved full and final this run pays. */
+  settlement?: { id: string };
 }
 
 const RUN_SELECT = `
@@ -221,6 +235,16 @@ export class PayrollRunsService {
       const last = lastDay(month);
       const { rules } = await this.payroll.settingsWith(client, first);
 
+      const settlements = await client.query<{
+        id: string;
+        employee_id: string;
+        working: { items: PayLineItem[] };
+      }>(
+        `SELECT id, employee_id, working FROM hsdg.exit_settlements
+          WHERE status = 'approved' AND pay_month = $1`,
+        [first],
+      );
+      const settlementOf = new Map(settlements.rows.map((x) => [x.employee_id, x]));
       const people = await client.query<{
         id: string;
         employee_code: string;
@@ -232,9 +256,10 @@ export class PayrollRunsService {
         `SELECT e.id, e.employee_code, e.full_name, o.code AS office_code,
                 e.date_of_joining, e.date_of_exit
            FROM hsdg.employees e JOIN hsdg.offices o ON o.id = e.primary_office_id
-          WHERE e.date_of_joining <= $2 AND (e.date_of_exit IS NULL OR e.date_of_exit >= $1)
+          WHERE e.date_of_joining <= $2
+            AND (e.date_of_exit IS NULL OR e.date_of_exit >= $1 OR e.id = ANY ($3))
           ORDER BY e.employee_code`,
-        [first, last],
+        [first, last, [...settlementOf.keys()]],
       );
       const structures = await client.query<{
         id: string;
@@ -258,9 +283,28 @@ export class PayrollRunsService {
         kind: string;
         amount: string;
         note: string | null;
-      }>(`SELECT employee_id, kind, amount, note FROM hsdg.payroll_inputs WHERE month = $1`, [
-        first,
-      ]);
+        source: 'hr' | 'tax' | 'bonus';
+      }>(
+        `SELECT employee_id, kind, amount, note, source FROM hsdg.payroll_inputs
+          WHERE month = $1 AND source <> 'tax'`,
+        [first],
+      );
+      // TDS on salary (s.392): projected afresh on every compute, unless HR entered it.
+      const taxing = run.kind === 'salary';
+      const taxRules = taxRulesOf(rules);
+      const taxYears = taxing
+        ? await loadTaxYears(client, taxYearOf(month), { beforeMonth: month, excludeRunId: id })
+        : new Map<string, PersonTaxYear>();
+      if (taxing) {
+        try {
+          await client.query(
+            `DELETE FROM hsdg.payroll_inputs WHERE month = $1 AND source = 'tax'`,
+            [first],
+          );
+        } catch (err) {
+          throw translatePayrollError(err);
+        }
+      }
       // Lines already submitted or paid for earlier months: arrears, ESI periods.
       const earlier = await client.query<{
         employee_id: string;
@@ -316,10 +360,14 @@ export class PayrollRunsService {
         }
         const theirInputs = inputs.rows.filter((i) => i.employee_id === p.id);
         const lop = theirInputs.find((i) => i.kind === 'loss_of_pay_days');
+        // A leaver whose full and final falls in a later month: the settlement only.
+        const settlementOnly = !!p.date_of_exit && p.date_of_exit < first;
+        const settlement = settlementOf.get(p.id);
         const monthInput: StoredInputs = {
           month,
           joinedOn: p.date_of_joining >= first ? p.date_of_joining : null,
-          exitedOn: p.date_of_exit && p.date_of_exit <= last ? p.date_of_exit : null,
+          exitedOn:
+            p.date_of_exit && p.date_of_exit <= last && !settlementOnly ? p.date_of_exit : null,
           lossOfPayDays: lop ? Number(lop.amount) : 0,
           inputs: theirInputs
             .filter((i) => i.kind !== 'loss_of_pay_days')
@@ -330,9 +378,14 @@ export class PayrollRunsService {
             })),
         };
 
+        if (settlement) {
+          monthInput.settlement = { id: settlement.id };
+          monthInput.inputs.push(...settlementInputs(settlement.working.items));
+        }
+
         const theirs = earlier.rows.filter((l) => l.employee_id === p.id);
         // A revision dated back into months already paid: pay the difference now, once.
-        if (s.effective_from < first) {
+        if (s.effective_from < first && !settlementOnly) {
           const covered = new Set(
             theirs.flatMap((l) =>
               l.inputs.autoArrears?.structureId === s.id ? l.inputs.autoArrears.months : [],
@@ -390,21 +443,45 @@ export class PayrollRunsService {
           ...rules,
           ptSlabs: rules.ptSlabsByOffice[p.office_code] ?? rules.ptSlabs,
         };
+        const structure = {
+          kind: s.kind,
+          ctc: '0',
+          components: settlementOnly
+            ? s.components.map((c) => ({ ...c, monthly: '0' }))
+            : s.components,
+          pfApplicable: s.pf_applicable,
+          esiApplicable: s.esi_applicable,
+          ptApplicable: s.pt_applicable && !settlementOnly,
+        };
         let line: PayLine;
         try {
-          line = computePayLine(
-            {
-              kind: s.kind,
-              ctc: '0',
-              components: s.components,
-              pfApplicable: s.pf_applicable,
-              esiApplicable: s.esi_applicable,
-              ptApplicable: s.pt_applicable,
-            },
-            monthInput,
-            settings,
-          );
+          line = computePayLine(structure, monthInput, settings);
+          const ownTds = theirInputs.some((i) => i.kind === 'tds' && i.source === 'hr');
+          if (taxing && !ownTds) {
+            const person = taxYears.get(p.id) ?? blankTaxYear();
+            const tds = projectTds({
+              month,
+              line,
+              structure: { ...structure, components: s.components },
+              settings,
+              rules: taxRules,
+              person,
+              exitedOn: p.date_of_exit,
+            });
+            monthInput.tds = tds;
+            if (toPaise(tds.tds) > 0n) {
+              monthInput.inputs.push({ kind: 'tds', amount: tds.tds, note: 'Projected (s.392)' });
+              await client.query(
+                `INSERT INTO hsdg.payroll_inputs (month, employee_id, kind, amount, note, source)
+                 VALUES ($1, $2, 'tds', $3, 'Projected (s.392)', 'tax')`,
+                [first, p.id, tds.tds],
+              );
+              line = computePayLine(structure, monthInput, settings);
+            }
+          }
         } catch (err) {
+          if (err instanceof HttpException) throw err;
+          if ((err as { code?: string }).code) throw translatePayrollError(err);
           errors.push(`${p.full_name} (${p.employee_code}): ${(err as Error).message}`);
           continue;
         }
@@ -463,6 +540,14 @@ export class PayrollRunsService {
         people_ += 1;
       }
       if (errors.length > 0) throw new BadRequestException(errors.join(' '));
+      if (settlementOf.size > 0) {
+        await client.query(
+          `UPDATE hsdg.exit_settlements SET run_id = $1, version = version + 1
+            WHERE status = 'approved' AND pay_month = $2 AND run_id IS DISTINCT FROM $1
+              AND employee_id IN (SELECT employee_id FROM hsdg.payroll_lines WHERE run_id = $1)`,
+          [id, first],
+        );
+      }
 
       try {
         const { rowCount } = await client.query(
@@ -1199,3 +1284,18 @@ function csvCell(v: string): string {
 
 const stale = () =>
   new ConflictException('The run changed since you opened it. Reload and try again.');
+
+/** An approved settlement's items as the run's inputs. */
+function settlementInputs(items: PayLineItem[]): PayMonthInput['inputs'] {
+  const kindOf: Record<string, PayMonthInput['inputs'][number]['kind']> = {
+    leave_encashment: 'leave_encashment',
+    gratuity_paid: 'gratuity',
+    notice_pay: 'notice_pay',
+    notice_recovery: 'notice_recovery',
+  };
+  return items.map((i) => ({
+    kind: kindOf[i.code] ?? (i.kind === 'earning' ? 'incentive' : 'other_deduction'),
+    amount: i.amount,
+    note: `Full and final: ${i.label}`,
+  }));
+}

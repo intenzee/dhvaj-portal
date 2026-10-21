@@ -8,7 +8,10 @@ const clean = (raw: string | undefined): string =>
 
 export function translatePayrollError(err: unknown): Error {
   const e = err as { code?: string; message?: string };
-  if (e.code === '22023') return translatePgError({ ...e, code: 'P0001' }, { raise: clean });
+  // A pg error's message is not enumerable: carry it over explicitly.
+  if (e.code === '22023') {
+    return translatePgError({ ...e, code: 'P0001', message: e.message }, { raise: clean });
+  }
   if (e.code === '42501' && e.message && !/row-level security/.test(e.message)) {
     return new ForbiddenException(clean(e.message));
   }
@@ -25,6 +28,19 @@ export function translatePayrollError(err: unknown): Error {
       },
       { match: 'statutory_payments_once', message: 'That challan is already recorded.' },
       { match: 'pay_settings_effective_from', message: 'Settings from that date already exist.' },
+      {
+        match: 'tax_declarations_once',
+        message: 'This person already has a declaration for that year.',
+      },
+      {
+        match: 'exit_settlements_once',
+        message: 'A settlement for that exit date already exists.',
+      },
+      {
+        match: 'payroll_inputs_one_projected_tds',
+        message: 'The projected TDS for this month was written meanwhile. Compute again.',
+      },
+      { match: 'tax_proofs_hr_document_id', message: 'That file is already filed as a proof.' },
     ],
     check: (raw) => clean(raw),
     raise: clean,

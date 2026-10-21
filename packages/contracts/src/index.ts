@@ -96,5 +96,7 @@ export * from './credentials';
 export * from './notices';
 export * from './billing';
 export * from './payroll';
+export * from './payroll-tax';
+export * from './payroll-tax-api';
 export * from './accounts';
 export * from './people';
