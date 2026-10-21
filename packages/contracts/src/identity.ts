@@ -11,6 +11,10 @@ export const ROLE = {
   manager: 'manager',
   senior: 'senior',
   article: 'article',
+  /** The firm's accounts executive: billing and collections, no client work. */
+  accountant: 'accountant',
+  /** People operations: employee master, logins up to Manager, payroll. */
+  hr: 'hr',
 } as const;
 
 export type RoleSlug = (typeof ROLE)[keyof typeof ROLE];
@@ -27,6 +31,8 @@ export const ASSIGNABLE_ROLES: RoleSlug[] = [
   ROLE.manager,
   ROLE.senior,
   ROLE.article,
+  ROLE.accountant,
+  ROLE.hr,
 ];
 
 /**
@@ -41,7 +47,18 @@ export const ROLE_PRECEDENCE: RoleSlug[] = [
   ROLE.manager,
   ROLE.senior,
   ROLE.article,
+  // The desk roles sit below every professional role, so a Manager + HR still
+  // acts as a Manager on client work; what they add reaches RLS through
+  // hsdg.roles (every role held), not hsdg.role.
+  ROLE.accountant,
+  ROLE.hr,
 ];
+
+/**
+ * Roles HR may give with `user.onboard` (spec §4.5). Anyone holding a role
+ * outside this list is managed by an administrator only.
+ */
+export const ONBOARD_ASSIGNABLE_ROLES: RoleSlug[] = [ROLE.article, ROLE.senior, ROLE.manager];
 
 /**
  * Reserved, non-assignable context role used only by the authentication
@@ -89,6 +106,28 @@ export const PERMISSION = {
   billingManage: 'billing.manage',
   /** PS-201: void an issued invoice; approve credit notes and write-offs. */
   billingApprove: 'billing.approve',
+  /** Agree a fee with a client: add or cancel fee milestones (split from billing.manage). */
+  feeAgree: 'fee.agree',
+  /** A client's billing profile only (name, PAN, GSTIN, address, billing contact). */
+  entityReadBilling: 'entity.read_billing',
+  /** An engagement's header, fee schedule and billable hours — not its work. */
+  engagementReadCommercial: 'engagement.read_commercial',
+  /** Create logins, set passwords and deactivate — only for ONBOARD_ASSIGNABLE_ROLES. */
+  userOnboard: 'user.onboard',
+  /** Workload and hours reports, without client or engagement names. */
+  reportReadPeople: 'report.read_people',
+  /** Per-person daily hours by kind, without client or engagement names. */
+  timeReadAttendance: 'time.read_attendance',
+  /** Salary structures (proposed), monthly runs, bank file, payslips, statutory working. */
+  payrollPrepare: 'payroll.prepare',
+  /** Everyone's pay, payslips, registers and bank/statutory IDs. */
+  payrollRead: 'payroll.read',
+  /** Approve a payroll run, a salary revision or a full and final. */
+  payrollApprove: 'payroll.approve',
+  /** Paid runs' totals by head, for the books — never a person's line. */
+  payrollReadSummary: 'payroll.read_summary',
+  /** One's own payslips, structure, tax and bank-change requests. */
+  payrollReadOwn: 'payroll.read_own',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

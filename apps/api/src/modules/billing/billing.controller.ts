@@ -37,7 +37,11 @@ import {
 } from '@hsdg/contracts';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { paginate } from '../../common/pagination/pagination.dto';
-import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
+import {
+  CurrentPrincipal,
+  RequireAnyPermission,
+  RequirePermissions,
+} from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { CommercialService } from '../commercial/commercial.service';
 import { GlobalInvoiceListQueryDto } from '../commercial/dto/commercial.dto';
@@ -408,7 +412,7 @@ export class BillingController {
   }
 
   @Get('engagements/:engagementId/fee-milestones')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.engagementReadCommercial)
   @ApiOperation({ summary: "The engagement's fee milestones and events, with where each stands" })
   feeMilestones(
     @CurrentPrincipal() principal: Principal,
@@ -419,7 +423,8 @@ export class BillingController {
   }
 
   @Post('engagements/:engagementId/fee-milestones')
-  @RequirePermissions(PERMISSION.billingManage)
+  // Agreeing a fee is the partner's commercial call (spec §3.5), not billing.
+  @RequirePermissions(PERMISSION.feeAgree)
   @ApiOperation({ summary: 'Agree a fee on a milestone or an event; due on its date' })
   addFeeMilestone(
     @CurrentPrincipal() principal: Principal,
@@ -431,7 +436,7 @@ export class BillingController {
   }
 
   @Post('fee-milestones/:id/cancel')
-  @RequirePermissions(PERMISSION.billingManage)
+  @RequirePermissions(PERMISSION.feeAgree)
   @ApiOperation({ summary: 'Cancel a fee milestone that is on no live invoice' })
   cancelFeeMilestone(
     @CurrentPrincipal() principal: Principal,

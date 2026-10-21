@@ -11,6 +11,7 @@ import type { Principal } from './principal';
 
 export const IS_PUBLIC_KEY = 'auth:isPublic';
 export const REQUIRED_PERMISSIONS_KEY = 'auth:permissions';
+export const REQUIRED_ANY_PERMISSIONS_KEY = 'auth:anyPermissions';
 
 /** Marks a route as not requiring authentication (e.g. health, dev token). */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
@@ -21,6 +22,15 @@ export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
  */
 export const RequirePermissions = (...permissions: PermissionSlug[]) =>
   applyDecorators(SetMetadata(REQUIRED_PERMISSIONS_KEY, permissions), ApiBearerAuth('bearer'));
+
+/**
+ * Requires the principal to hold AT LEAST ONE of the given permissions, e.g. a
+ * route open to both the administrator (`user.manage`) and HR (`user.onboard`),
+ * whose service then applies the narrower rule. Combines with
+ * {@link RequirePermissions} (both must pass).
+ */
+export const RequireAnyPermission = (...permissions: PermissionSlug[]) =>
+  applyDecorators(SetMetadata(REQUIRED_ANY_PERMISSIONS_KEY, permissions), ApiBearerAuth('bearer'));
 
 /** Injects the authenticated {@link Principal} into a controller handler. */
 export const CurrentPrincipal = createParamDecorator(
