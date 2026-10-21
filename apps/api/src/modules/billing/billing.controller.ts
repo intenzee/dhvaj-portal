@@ -98,7 +98,7 @@ export class BillingController {
   ) {}
 
   @Get('settings')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.billingManage)
   @ApiOperation({ summary: 'Who the firm is on its invoices: GSTIN, state, SAC, prefix, terms' })
   getSettings(@CurrentPrincipal() principal: Principal): Promise<BillingSettings> {
     this.requireOn(principal);
@@ -288,7 +288,7 @@ export class BillingController {
   }
 
   @Get('credit-notes/:id/pdf')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.billingManage)
   @ApiOperation({ summary: 'An approved (or voided) credit note as a PDF (CGST rule 53)' })
   async creditNotePdf(
     @CurrentPrincipal() principal: Principal,
