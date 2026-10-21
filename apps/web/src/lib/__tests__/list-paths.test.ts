@@ -6,6 +6,10 @@ describe('list paths', () => {
     expect(
       entityListPath({ limit: 25, offset: 50, search: 'Acme & Co', sections: ['income_tax', 'gst'] }),
     ).toBe('/entities?limit=25&offset=50&search=Acme+%26+Co&section=gst,income_tax');
+    expect(entityListPath({ limit: 25, offset: 0, missing: 'pan', sections: ['gst'] })).toBe(
+      '/entities?limit=25&offset=0&missing=pan&section=gst',
+    );
+    expect(entityListPath({ limit: 25, offset: 0, missing: null })).toBe('/entities?limit=25&offset=0');
   });
 
   it('writes the engagement list query, dropping empty filters', () => {

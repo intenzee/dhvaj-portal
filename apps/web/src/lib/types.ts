@@ -145,6 +145,8 @@ export interface EntityRow {
   regulatoryProfileStatus?: string;
   listingStatus?: string;
   clientId?: string | null;
+  /** What the client's master still lacks (the list's marker, the client page's card). */
+  missingInfo: MissingInfoItem[];
 }
 
 export interface EntityType {
@@ -312,7 +314,6 @@ export interface EntityDetail extends EntityRow {
   businessActivities: BusinessActivity[];
   listings: Listing[];
   regulatoryAttributes: RegulatoryAttribute[];
-  missingInfo: MissingInfoItem[];
 }
 
 export interface Industry {

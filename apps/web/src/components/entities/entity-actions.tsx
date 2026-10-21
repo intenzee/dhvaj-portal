@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil } from 'lucide-react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import {
   CONTACT_TYPES,
   ENTITY_STATUSES,
@@ -11,6 +12,7 @@ import {
   PAN_REGEX,
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
+  ROLE,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
@@ -26,9 +28,11 @@ import { Field, Input, Select, Textarea } from '@/components/form';
 /** Manage buttons shown on Client 360 for users who can manage entities. */
 export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.Element | null {
   const { principal } = useAuth();
-  const [open, setOpen] = useState<null | 'edit' | 'registration' | 'contact'>(null);
+  const [open, setOpen] = useState<null | 'edit' | 'registration' | 'contact' | 'delete'>(null);
 
   if (!can(principal, PERMISSION.entityManage)) return null;
+  // The API lets the Managing Partner (by effective role) delete, and only them.
+  const mayDelete = principal?.effectiveRole === ROLE.managingPartner;
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -41,13 +45,99 @@ export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.E
       <Button size="sm" variant="secondary" onClick={() => setOpen('contact')}>
         <Plus className="h-4 w-4" /> Contact
       </Button>
+      {mayDelete && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-danger-700 hover:bg-danger-50"
+          onClick={() => setOpen('delete')}
+        >
+          <Trash2 className="h-4 w-4" /> Delete client
+        </Button>
+      )}
 
       {open === 'edit' && <EditEntityModal entity={entity} onClose={() => setOpen(null)} />}
       {open === 'registration' && (
         <AddRegistrationModal entityId={entity.id} onClose={() => setOpen(null)} />
       )}
       {open === 'contact' && <AddContactModal entityId={entity.id} onClose={() => setOpen(null)} />}
+      {open === 'delete' && <DeleteClientModal entity={entity} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/**
+ * Delete a client entered by mistake. Typing the client code confirms it; the
+ * API refuses (409) a client with an engagement or billing, and the reason is
+ * shown here — such a client is marked inactive instead.
+ */
+export function DeleteClientModal({
+  entity,
+  onClose,
+}: {
+  entity: EntityDetail;
+  onClose: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const [typed, setTyped] = useState('');
+  const [refused, setRefused] = useState<string | null>(null);
+
+  const remove = useMutation({
+    mutationFn: () => apiFetch<void>(`/entities/${entity.id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ['entity', entity.id] });
+      void qc.invalidateQueries({ queryKey: ['entities'] });
+      toast(`${entity.legalName} deleted.`);
+      onClose();
+      router.push('/entities');
+    },
+    onError: (err) =>
+      setRefused(err instanceof ApiError ? err.message : 'Could not delete the client.'),
+  });
+  const confirmed = typed.trim().toUpperCase() === entity.entityCode.toUpperCase();
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Delete client"
+      description={`${entity.legalName} (${entity.entityCode})`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-danger-600 hover:bg-danger-700 disabled:bg-danger-600/50"
+            disabled={!confirmed || remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            {remove.isPending ? 'Deleting…' : 'Delete for good'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm text-ink">
+        <p>
+          For a client entered by mistake — a duplicate or a wrong import. Its registrations,
+          contacts, addresses, portal logins and GST return marks are deleted with it. This cannot
+          be undone; the audit trail keeps a copy of the master.
+        </p>
+        <p className="text-ink-muted">
+          A client with an engagement or billing cannot be deleted: mark it inactive instead.
+        </p>
+        <Field label={`Type ${entity.entityCode} to confirm`}>
+          <Input value={typed} autoFocus onChange={(e) => setTyped(e.target.value)} />
+        </Field>
+        {refused && (
+          <p role="alert" className="rounded-lg bg-danger-50 px-3 py-2 text-danger-700">
+            {refused}
+          </p>
+        )}
+      </div>
+    </Modal>
   );
 }
 
