@@ -14,6 +14,7 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
+import { engagementHref } from '@/components/accounts/accounts';
 import { can } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { cn } from '@/lib/cn';
@@ -143,6 +144,7 @@ export default function ReceivablesPage(): JSX.Element {
 }
 
 function Row({ r, view }: { r: ReceivableRow; view: View }): JSX.Element {
+  const { principal } = useAuth();
   const o = r.oldestInvoice;
   return (
     <tr>
@@ -182,7 +184,7 @@ function Row({ r, view }: { r: ReceivableRow; view: View }): JSX.Element {
       </td>
       <td className="px-3 py-2">
         {o ? (
-          <Link href={`/engagements/${o.engagementId}`} className="hover:underline">
+          <Link href={engagementHref(principal, o.engagementId)} className="hover:underline">
             {oldestLine(o)}
           </Link>
         ) : (

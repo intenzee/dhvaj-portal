@@ -19,7 +19,11 @@ import {
   type InvoiceRecord,
   type Paginated,
 } from '@hsdg/contracts';
-import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
+import {
+  CurrentPrincipal,
+  RequireAnyPermission,
+  RequirePermissions,
+} from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
@@ -49,7 +53,7 @@ export class CommercialController {
   // ── Commercial configuration ────────────────────────────────────────────
 
   @Get(':id/commercial')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.engagementReadCommercial)
   @ApiOperation({ summary: 'Get the engagement’s commercial configuration (§31).' })
   getCommercial(
     @CurrentPrincipal() principal: Principal,
@@ -72,7 +76,7 @@ export class CommercialController {
   // ── Invoices ────────────────────────────────────────────────────────────
 
   @Get(':id/invoices')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.engagementReadCommercial)
   @ApiOperation({ summary: 'List the engagement’s invoices (paginated; filter ?status=).' })
   listInvoices(
     @CurrentPrincipal() principal: Principal,
@@ -86,7 +90,7 @@ export class CommercialController {
   }
 
   @Post(':id/invoices')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
   @ApiOperation({ summary: 'Create a draft invoice with optional lines (audited).' })
   createInvoice(
     @CurrentPrincipal() principal: Principal,
@@ -97,7 +101,7 @@ export class CommercialController {
   }
 
   @Get(':id/invoices/:invoiceId')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.engagementReadCommercial)
   @ApiOperation({ summary: 'Get an invoice with its line items.' })
   getInvoice(
     @CurrentPrincipal() principal: Principal,
@@ -108,7 +112,7 @@ export class CommercialController {
   }
 
   @Patch(':id/invoices/:invoiceId')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
   @ApiOperation({ summary: 'Amend a draft invoice header (audited; optimistic-locked).' })
   updateInvoice(
     @CurrentPrincipal() principal: Principal,
@@ -120,7 +124,7 @@ export class CommercialController {
   }
 
   @Post(':id/invoices/:invoiceId/status')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
   @ApiOperation({
     summary: 'Transition an invoice’s status (§31: issue / mark paid / void; audited).',
   })
@@ -138,7 +142,7 @@ export class CommercialController {
   }
 
   @Get(':id/invoices/:invoiceId/pdf')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.engagementReadCommercial)
   @ApiOperation({ summary: 'The issued invoice as a PDF (PS-201; kept at issue).' })
   async invoicePdf(
     @CurrentPrincipal() principal: Principal,
@@ -153,7 +157,7 @@ export class CommercialController {
   }
 
   @Post(':id/invoices/:invoiceId/lines')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
   @ApiOperation({ summary: 'Add a line to a draft invoice (audited).' })
   addLine(
     @CurrentPrincipal() principal: Principal,
@@ -165,7 +169,7 @@ export class CommercialController {
   }
 
   @Delete(':id/invoices/:invoiceId/lines/:lineId')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
   @ApiOperation({ summary: 'Remove a line from a draft invoice (audited).' })
   removeLine(
     @CurrentPrincipal() principal: Principal,
