@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
-import { Plus, Upload } from 'lucide-react';
+import { FileCheck2, Plus, Upload } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -21,10 +21,18 @@ import { entityListPath } from '@/lib/list-paths';
 const PAGE_SIZE = 25;
 
 const columns: ColumnDef<EntityRow, unknown>[] = [
-  { header: 'Code', cell: ({ row }) => <span className="font-medium text-primary-700">{row.original.entityCode}</span> },
+  {
+    header: 'Code',
+    cell: ({ row }) => (
+      <span className="font-medium text-primary-700">{row.original.entityCode}</span>
+    ),
+  },
   { header: 'Legal name', accessorKey: 'legalName' },
   { header: 'Type', accessorKey: 'typeName' },
-  { header: 'PAN', cell: ({ row }) => row.original.pan ?? <span className="text-ink-faint">—</span> },
+  {
+    header: 'PAN',
+    cell: ({ row }) => row.original.pan ?? <span className="text-ink-faint">—</span>,
+  },
   { header: 'Registrations', cell: ({ row }) => row.original.registrationCount },
   { header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
 ];
@@ -48,7 +56,9 @@ function EntitiesInner(): JSX.Element {
   const q = useQuery({
     queryKey: ['entities', search, sections, offset],
     queryFn: () =>
-      apiFetch<Paginated<EntityRow>>(entityListPath({ limit: PAGE_SIZE, offset, search, sections })),
+      apiFetch<Paginated<EntityRow>>(
+        entityListPath({ limit: PAGE_SIZE, offset, search, sections }),
+      ),
   });
 
   return (
@@ -57,22 +67,29 @@ function EntitiesInner(): JSX.Element {
         title="Clients"
         subtitle="Companies, firms and individuals we work for. Click a client to see everything we do for them."
         actions={
-          can(principal, PERMISSION.entityManage) ? (
-            <div className="flex gap-2">
-              {can(principal, PERMISSION.credentialManage) && (
-                <Link href="/entities/import">
-                  <Button variant="secondary">
-                    <Upload className="h-4 w-4" /> Import client logins
+          <div className="flex gap-2">
+            <Link href="/entities/returns">
+              <Button variant="secondary">
+                <FileCheck2 className="h-4 w-4" /> GST returns
+              </Button>
+            </Link>
+            {can(principal, PERMISSION.entityManage) && (
+              <>
+                {can(principal, PERMISSION.credentialManage) && (
+                  <Link href="/entities/import">
+                    <Button variant="secondary">
+                      <Upload className="h-4 w-4" /> Import client logins
+                    </Button>
+                  </Link>
+                )}
+                <Link href="/entities/new">
+                  <Button>
+                    <Plus className="h-4 w-4" /> New client
                   </Button>
                 </Link>
-              )}
-              <Link href="/entities/new">
-                <Button>
-                  <Plus className="h-4 w-4" /> New client
-                </Button>
-              </Link>
-            </div>
-          ) : undefined
+              </>
+            )}
+          </div>
         }
       />
 
@@ -87,12 +104,20 @@ function EntitiesInner(): JSX.Element {
       </div>
 
       <Card className="p-0">
-        {q.isLoading && <div className="p-4"><Spinner /></div>}
+        {q.isLoading && (
+          <div className="p-4">
+            <Spinner />
+          </div>
+        )}
         {q.data && (
           <DataTable
             columns={columns}
             data={q.data.items}
-            empty={sections.length ? 'No clients in this section match.' : 'No entities match your search.'}
+            empty={
+              sections.length
+                ? 'No clients in this section match.'
+                : 'No entities match your search.'
+            }
             onRowClick={(row) => router.push(`/entities/${row.id}`)}
           />
         )}

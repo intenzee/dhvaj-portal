@@ -391,6 +391,10 @@ export function resultLines(r: ClientImportResult): string[] {
       `${plural(r.schemesSet, 'GSTIN')} set monthly / quarterly`,
     ].join(' · '),
   ];
+  if (r.marksRecorded)
+    lines.push(
+      `${plural(r.marksRecorded, 'filed / NA mark')} kept as the clients' GST return history (Clients → GST returns)`,
+    );
   if (r.marksApplied || r.marksAlreadyDone)
     lines.push(
       `${plural(r.marksApplied, 'filing')} marked filed or NA` +
@@ -398,7 +402,7 @@ export function resultLines(r: ClientImportResult): string[] {
     );
   if (r.marksWithoutFiling)
     lines.push(
-      `${plural(r.marksWithoutFiling, 'filed / NA mark')} not applied: the client has no GST engagement for that month yet. Import the workbook again once it has.`,
+      `${plural(r.marksWithoutFiling, 'filed / NA mark')} not applied to a filing: the client has no GST engagement for that month yet (the marks are in its GST returns). Import the workbook again once it has.`,
     );
   if (r.marksNotAllowed)
     lines.push(

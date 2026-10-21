@@ -423,7 +423,81 @@ export interface ClientImportResult {
   marksWithoutFiling: number;
   /** Marks on filings the importer does not lead (left for the engagement's partner or manager). */
   marksNotAllowed: number;
+  /** filed / NA marks kept as the clients' GST return history (new or changed). */
+  marksRecorded: number;
   failed: { source: string; name: string; message: string }[];
   /** Imported, with something to know (a scheme kept, a step not allowed). */
   notes: { source: string; name: string; message: string }[];
+}
+
+// ── The firm's GST return history (from its login workbook) ──────────────
+
+export const RETURN_FORM = { gstr1: 'GSTR1', gstr3b: 'GSTR3B', gstr7: 'GSTR7' } as const;
+export type ReturnForm = (typeof RETURN_FORM)[keyof typeof RETURN_FORM];
+export const RETURN_FORMS: ReturnForm[] = ['GSTR1', 'GSTR3B', 'GSTR7'];
+export const RETURN_FORM_LABEL: Record<ReturnForm, string> = {
+  GSTR1: 'GSTR-1',
+  GSTR3B: 'GSTR-3B',
+  GSTR7: 'GSTR-7',
+};
+
+export const RETURN_MARK = { filed: 'filed', notApplicable: 'not_applicable' } as const;
+export type ReturnMark = (typeof RETURN_MARK)[keyof typeof RETURN_MARK];
+
+const MONTH_ABBR = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** A return period's last month: '2026-04' → '2026-04', '2026-27:Q1' → '2026-06'. For sorting. */
+export function returnPeriodEnd(key: string): string {
+  const q = /^(\d{4})-\d{2}:Q([1-4])$/.exec(key);
+  if (!q) return key;
+  const start = Number(q[1]);
+  const month = Number(q[2]) * 3 + 3;
+  return month > 12
+    ? `${start + 1}-${String(month - 12).padStart(2, '0')}`
+    : `${start}-${String(month).padStart(2, '0')}`;
+}
+
+/** '2026-04' → 'Apr-26'; '2026-27:Q1' → 'Q1 26-27'. */
+export function returnPeriodLabel(key: string): string {
+  const q = /^\d{2}(\d{2})-(\d{2}):Q([1-4])$/.exec(key);
+  if (q) return `Q${q[3]} ${q[1]}-${q[2]}`;
+  const m = /^\d{2}(\d{2})-(\d{2})$/.exec(key);
+  if (m) return `${MONTH_ABBR[Number(m[2]) - 1] ?? m[2]}-${m[1]}`;
+  return key;
+}
+
+/** One GSTIN (or one state / the client, while the sheet has no GSTIN) and its marks. */
+export interface ClientReturnLine {
+  entityId: string;
+  entityCode: string;
+  entityName: string;
+  registrationId: string | null;
+  gstin: string | null;
+  stateCode: string | null;
+  /** period key → form → filed / NA */
+  marks: Record<string, Partial<Record<ReturnForm, ReturnMark>>>;
+  /** When the marks were last imported. */
+  updatedAt: string;
+}
+
+/** GET /client-returns */
+export interface ClientReturns {
+  /** The periods with a mark, in order ('2026-04', …, '2026-27:Q1'). */
+  periods: string[];
+  /** The forms with a mark, in RETURN_FORMS order. */
+  forms: ReturnForm[];
+  lines: ClientReturnLine[];
 }

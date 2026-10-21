@@ -6,6 +6,7 @@ import {
   gstinCheckChar,
   type ClientImportPreview,
   type ClientImportResult,
+  type ClientReturns,
   type EntityCredentials,
 } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
@@ -18,7 +19,8 @@ import { createTestApp } from './create-test-app';
  * the client's partner (or the managing partner, or its engagement team). A
  * GST login without its GSTIN waits on the client and moves onto the GSTIN
  * when it is added; the sheet's frequency becomes the GSTIN's scheme and its
- * filed / NA marks close the matching filings.
+ * filed / NA marks are kept as the client's GST return history (GSTIN or
+ * not) and close the matching filings.
  */
 describe('Client portal credentials (e2e)', () => {
   let app: INestApplication;
@@ -182,6 +184,9 @@ describe('Client portal credentials (e2e)', () => {
   const entityOf = async (p: string): Promise<string> =>
     (await su.query<{ id: string }>(`SELECT id FROM hsdg.entities WHERE pan = $1`, [p])).rows[0]!
       .id;
+  const returnsOf = async (t: string, entityId: string): Promise<ClientReturns> =>
+    (await http().get(`/api/v1/client-returns?entityId=${entityId}`).set(bearer(t)).expect(200))
+      .body as ClientReturns;
   const schemeOf = async (number: string) =>
     (
       await su.query<{ gst_scheme: string; qrmp_category: string | null }>(
@@ -254,7 +259,9 @@ describe('Client portal credentials (e2e)', () => {
       ['traces', 'deductor', 'co•••or'],
       ['traces', 'taxpayer', 'co•••er'],
     ]);
-    expect(co.warnings.join()).toMatch(/marks need the GSTIN/);
+    // The Maharashtra row's mark stays with it although it has no GSTIN yet.
+    expect(co.warnings).toEqual([]);
+    expect(co.gst[1]).toMatchObject({ gstin: null, filed: 1, notApplicable: 0 });
     expect(p.rows[1]!.gst[0]).toMatchObject({ gstin: G_FIRM, filed: 3, notApplicable: 1 });
     expect(p.rows[2]!.error).toMatch(/not a valid GSTIN/);
     expect(p.rows[3]).toMatchObject({ typeSlug: 'proprietorship', typeGuessed: false });
@@ -278,6 +285,7 @@ describe('Client portal credentials (e2e)', () => {
       schemesSet: 2,
       marksApplied: 0,
       marksWithoutFiling: 4, // no GST engagement yet
+      marksRecorded: 5, // …but all kept: Firm's 4, Company's Maharashtra row (no GSTIN) 1
     });
     expect(result.failed).toEqual([
       expect.objectContaining({ source: 'GST Login 8', message: expect.stringMatching(/GSTIN/) }),
@@ -304,6 +312,42 @@ describe('Client portal credentials (e2e)', () => {
 
     expect(await schemeOf(G_CO_DL)).toEqual([{ gst_scheme: 'regular', qrmp_category: null }]);
     expect(await schemeOf(G_FIRM)).toEqual([{ gst_scheme: 'regular', qrmp_category: null }]);
+  });
+
+  it("keeps the sheet's marks as each client's return history, GSTIN or not", async () => {
+    const firmReturns = await returnsOf(pa, firmId);
+    expect(firmReturns.periods).toEqual(['2026-04', '2026-05', '2026-06']);
+    expect(firmReturns.forms).toEqual(['GSTR1', 'GSTR3B']);
+    expect(firmReturns.lines).toEqual([
+      expect.objectContaining({
+        entityId: firmId,
+        entityName: `${tag} Firm`,
+        gstin: G_FIRM,
+        stateCode: '07',
+        marks: {
+          '2026-04': { GSTR1: 'filed', GSTR3B: 'filed' },
+          '2026-05': { GSTR3B: 'not_applicable' },
+          '2026-06': { GSTR1: 'filed' },
+        },
+      }),
+    ]);
+    // The Maharashtra row has no GSTIN yet: kept by its state.
+    expect((await returnsOf(pa, companyId)).lines).toEqual([
+      expect.objectContaining({
+        gstin: null,
+        registrationId: null,
+        stateCode: '27',
+        marks: { '2026-04': { GSTR1: 'filed' } },
+      }),
+    ]);
+    // The whole firm's list has both; another office sees neither.
+    const all = (await http().get('/api/v1/client-returns').set(bearer(mp)).expect(200))
+      .body as ClientReturns;
+    expect(all.lines.filter((l) => [firmId, companyId].includes(l.entityId))).toHaveLength(2);
+    expect((await returnsOf(pb, firmId)).lines).toEqual([]);
+    const south = (await http().get('/api/v1/client-returns').set(bearer(pb)).expect(200))
+      .body as ClientReturns;
+    expect(south.lines.some((l) => [firmId, companyId].includes(l.entityId))).toBe(false);
   });
 
   it('stores only ciphertext, which the app role cannot even select', async () => {
@@ -395,6 +439,10 @@ describe('Client portal credentials (e2e)', () => {
       ].sort(),
     );
     expect(await schemeOf(G_CO_MH)).toEqual([{ gst_scheme: 'qrmp', qrmp_category: 'X' }]);
+    // The marks kept by state now show under the GSTIN.
+    expect((await returnsOf(pa, companyId)).lines).toEqual([
+      expect.objectContaining({ gstin: G_CO_MH, marks: { '2026-04': { GSTR1: 'filed' } } }),
+    ]);
     // Still opens: the seal is bound to the client, not the GSTIN.
     const moved = gst.find((i) => i.registrationNumber === G_CO_MH)!;
     const res = await http()
@@ -426,6 +474,7 @@ describe('Client portal credentials (e2e)', () => {
       schemesSet: 0,
       marksApplied: 4,
       marksNotAllowed: 0,
+      marksRecorded: 0, // the same marks: nothing new
     });
     const { rows } = await su.query<{ code: string; period_key: string; workflow_status: string }>(
       `SELECT r.code, ci.period_key, ci.workflow_status

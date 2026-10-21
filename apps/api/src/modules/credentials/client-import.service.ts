@@ -24,7 +24,7 @@ import {
   clientsOfWorkbook,
   nameKey,
   parseClientWorkbook,
-  periodKeysOfMonth,
+  periodKeysOfMark,
   previewLogin,
   sourceLabel,
   type ParsedWorkbook,
@@ -62,6 +62,7 @@ const emptyTally = (): Tally => ({
   marksAlreadyDone: 0,
   marksWithoutFiling: 0,
   marksNotAllowed: 0,
+  marksRecorded: 0,
 });
 
 function failureMessage(err: unknown): string {
@@ -84,7 +85,9 @@ const FREQUENCY_OF: Record<string, string> = {
  * matched; its GSTINs and TAN are added; its logins are sealed into the
  * vault (a GST login without its GSTIN waits on the client, by state); each
  * GSTIN's frequency becomes its first GST scheme; and the sheet's filed / NA
- * marks close the matching GSTR-1 / 3B / 7 filings the importer leads.
+ * marks are kept as the client's GST return history (client_return_marks,
+ * GSTIN or not) and close the matching GSTR-1 / 3B / 7 filings the importer
+ * leads.
  * Preview first; the import re-reads the same file, so nothing is held
  * between the two calls. Each client commits on its own, and importing the
  * same file again only refreshes, so it is safe to repeat.
@@ -144,7 +147,7 @@ export class ClientImportService {
       try {
         const notes: string[] = [];
         const tally = await this.db.withRlsContext(ctx, (client) =>
-          this.importClient(client, ctx, req.officeCode, c, notes),
+          this.importClient(client, ctx, req, c, notes),
         );
         if (c.action === CLIENT_IMPORT_ACTION.createClient) result.clientsCreated += 1;
         else result.clientsUpdated += 1;
@@ -173,10 +176,11 @@ export class ClientImportService {
   private async importClient(
     client: PoolClient,
     ctx: RlsContext,
-    officeCode: string,
+    req: ClientImportRequest,
     c: PlannedClient,
     notes: string[],
   ): Promise<Tally> {
+    const { officeCode } = req;
     const tally = emptyTally();
     const tanRegistration = c.tan
       ? [{ registrationType: 'tan' as const, registrationNumber: c.tan, source: 'client' as const }]
@@ -294,8 +298,65 @@ export class ClientImportService {
         );
     }
 
+    await this.recordMarks(client, ctx, req.filename, entityId!, c, regOf, tally);
     await this.applyMarks(client, ctx, c, regOf, tally);
     return tally;
+  }
+
+  /**
+   * The sheet's filed / NA marks, kept as the client's GST return history:
+   * per GSTIN, or per state (or the client) while the sheet has no GSTIN.
+   * A mark recorded by state before the GSTIN came moves onto the GSTIN.
+   */
+  private async recordMarks(
+    client: PoolClient,
+    ctx: RlsContext,
+    filename: string,
+    entityId: string,
+    c: PlannedClient,
+    regOf: Map<string, string>,
+    tally: Tally,
+  ): Promise<void> {
+    for (const g of c.gst) {
+      if (g.marks.length === 0) continue;
+      const registrationId = g.gstin ? (regOf.get(g.gstin) ?? null) : null;
+      const stateCode = g.gstin ? g.gstin.slice(0, 2) : g.stateCode;
+      if (registrationId)
+        await client.query(
+          `DELETE FROM hsdg.client_return_marks
+            WHERE entity_id = $1 AND registration_id IS NULL AND state_code = $2`,
+          [entityId, stateCode],
+        );
+      // One mark per form and period: a later column wins.
+      const marks = new Map(g.marks.map((m) => [`${m.form}|${m.period}`, m]));
+      const res = await client.query(
+        `INSERT INTO hsdg.client_return_marks AS m
+           (entity_id, registration_id, state_code, return_form, period_key, mark,
+            source_file, source_sheet, source_row, imported_by_user_id)
+         SELECT $1::uuid, $2::uuid, $3::text, f.form, f.period, f.mark,
+                $7::text, $8::text, $9::int, $10::uuid
+           FROM unnest($4::text[], $5::text[], $6::text[]) AS f (form, period, mark)
+         ON CONFLICT (entity_id, (COALESCE(registration_id::text, state_code, '')),
+                      return_form, period_key)
+         DO UPDATE SET mark = EXCLUDED.mark, source_file = EXCLUDED.source_file,
+                       source_sheet = EXCLUDED.source_sheet, source_row = EXCLUDED.source_row,
+                       imported_by_user_id = EXCLUDED.imported_by_user_id
+          WHERE m.mark IS DISTINCT FROM EXCLUDED.mark`,
+        [
+          entityId,
+          registrationId,
+          stateCode,
+          [...marks.values()].map((m) => m.form),
+          [...marks.values()].map((m) => m.period),
+          [...marks.values()].map((m) => m.mark),
+          filename.slice(0, 200),
+          g.sheet.trim().slice(0, 100),
+          g.row,
+          ctx.userId,
+        ],
+      );
+      tally.marksRecorded += res.rowCount ?? 0;
+    }
   }
 
   /** filed / NA marks → the matching open GSTR-1 / 3B / 7 filings, where the importer leads. */
@@ -311,7 +372,7 @@ export class ClientImportService {
     const registrationIds = marked.map((g) => regOf.get(g.gstin!)!);
     const codes = Object.values(RULES_OF_FORM).flat();
     const periods = [
-      ...new Set(marked.flatMap((g) => g.marks.flatMap((m) => periodKeysOfMonth(m.month)))),
+      ...new Set(marked.flatMap((g) => g.marks.flatMap((m) => periodKeysOfMark(m.period)))),
     ];
     const { rows } = await client.query<{
       id: string;
@@ -335,10 +396,11 @@ export class ClientImportService {
     for (const g of marked) {
       const registrationId = regOf.get(g.gstin!);
       for (const m of g.marks) {
-        const quarterEnd = Number(m.month.slice(5)) % 3 === 0;
+        // A quarter's mark ('2026-27:Q1') is its quarter-end already.
+        const quarterEnd = m.period.includes(':') || Number(m.period.slice(5)) % 3 === 0;
         // A quarterly GSTIN's other months have no GSTR-1 / 3B to mark (IFF, NA).
         if (g.frequency === 'quarterly' && !quarterEnd && m.form !== 'GSTR7') continue;
-        const keys = periodKeysOfMonth(m.month);
+        const keys = periodKeysOfMark(m.period);
         const filing = rows.find(
           (r) =>
             r.registration_id === registrationId &&
