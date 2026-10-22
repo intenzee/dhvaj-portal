@@ -441,7 +441,10 @@ export interface ClientImportResult {
   marksAlreadyDone: number;
   /** Marks with no filing in the portal yet (no GST engagement for that month). */
   marksWithoutFiling: number;
-  /** Marks on filings the importer does not lead (left for the engagement's partner or manager). */
+  /**
+   * Marks left for the engagement's partner or manager. Always 0 now: a mark
+   * closes its filing on any engagement (the firm's record of the return).
+   */
   marksNotAllowed: number;
   /** filed / NA marks kept as the clients' GST return history (new or changed). */
   marksRecorded: number;
