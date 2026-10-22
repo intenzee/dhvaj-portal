@@ -28,6 +28,7 @@ import {
   type InvoiceReminderResult,
   type InvoiceTimeEntry,
   type ReceiptRecord,
+  type ReversalRequest,
   type Paginated,
   type SetAsideFeesResult,
   type TdsImportResult,
@@ -62,7 +63,9 @@ import {
   RemindInvoiceDto,
   RemindTdsDto,
   RestoreFeeDto,
+  RequestReversalDto,
   RequestWriteOffDto,
+  ReversalListQueryDto,
   ReverseReceiptDto,
   SetAsideFeesDto,
   TdsMatchQueryDto,
@@ -72,6 +75,7 @@ import {
 } from './billing.dto';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesService } from './receivables.service';
+import { ReversalRequestsService } from './reversal-requests.service';
 import { TdsCreditsService } from './tds-credits.service';
 import { TimeBillingService } from './time-billing.service';
 import { UnbilledService } from './unbilled.service';
@@ -95,6 +99,7 @@ export class BillingController {
     private readonly unbilled: UnbilledService,
     private readonly tds: TdsCreditsService,
     private readonly time: TimeBillingService,
+    private readonly reversals: ReversalRequestsService,
   ) {}
 
   @Get('settings')
@@ -204,6 +209,59 @@ export class BillingController {
   ): Promise<ReceiptRecord> {
     this.requireOn(principal);
     return this.receipts.reverse(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  // ── §3.5 · asking a partner to void an issued invoice or reverse a receipt ──
+
+  @Get('reversal-requests')
+  @ApiOperation({
+    summary: 'Requests to void an invoice or reverse a receipt (the client billers)',
+  })
+  listReversalRequests(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: ReversalListQueryDto,
+  ): Promise<ReversalRequest[]> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.reversals.list(rlsContextFromPrincipal(principal), {
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.invoiceId ? { invoiceId: query.invoiceId } : {}),
+      ...(query.receiptId ? { receiptId: query.receiptId } : {}),
+    });
+  }
+
+  @Post('reversal-requests')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Ask a partner to void an issued invoice or reverse a receipt' })
+  requestReversal(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: RequestReversalDto,
+  ): Promise<ReversalRequest> {
+    this.requireOn(principal);
+    return this.reversals.request(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Post('reversal-requests/:id/decision')
+  @RequirePermissions(PERMISSION.billingApprove)
+  @ApiOperation({ summary: 'Approve (the void or reversal happens now) or reject a request' })
+  decideReversal(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: DecideAdjustmentDto,
+  ): Promise<ReversalRequest> {
+    this.requireOn(principal);
+    return this.reversals.decide(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Post('reversal-requests/:id/withdraw')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Take back your own pending request' })
+  withdrawReversal(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<ReversalRequest> {
+    this.requireOn(principal);
+    return this.reversals.withdraw(rlsContextFromPrincipal(principal), id);
   }
 
   @Get('clients/:entityId/statement')

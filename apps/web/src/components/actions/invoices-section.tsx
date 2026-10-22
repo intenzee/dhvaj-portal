@@ -37,6 +37,12 @@ import {
 import { InvoiceAdjustments } from '@/components/billing/invoice-adjustments';
 import { InvoiceReminders } from '@/components/billing/invoice-reminders';
 import { FeeMilestones } from '@/components/billing/fee-milestones';
+import {
+  AskReversal,
+  PendingReversal,
+  mayAskReversal,
+  usePendingReversals,
+} from '@/components/billing/reversal-request';
 
 /** Format a decimal-string amount as money in the invoice's currency. */
 function money(amount: string | null | undefined, currency = 'INR'): string {
@@ -581,6 +587,8 @@ export function InvoiceDetailModal({
   const inv = invoice.data;
   const isDraft = inv?.status === INVOICE_STATUS.draft;
   const may = inv ? invoiceActions(inv, principal?.permissions ?? [], receipts) : null;
+  const voidable = !!receipts && inv?.status === INVOICE_STATUS.issued;
+  const voidAsked = usePendingReversals(voidable).find((q) => q.invoiceId === invoiceId);
 
   return (
     <Modal
@@ -615,7 +623,7 @@ export function InvoiceDetailModal({
               <Send className="h-4 w-4" /> Issue
             </Button>
           )}
-          {may?.voidIssued && !voiding && (
+          {may?.voidIssued && !voiding && !voidAsked && (
             <Button variant="secondary" onClick={() => setVoiding(true)} disabled={setStatus.isPending}>
               <Ban className="h-4 w-4" /> Void
             </Button>
@@ -663,6 +671,10 @@ export function InvoiceDetailModal({
             <p className="rounded-md bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
               Voided{inv.voidedByName ? ` by ${inv.voidedByName}` : ''}: {inv.voidedReason}
             </p>
+          )}
+          {voidable && voidAsked && <PendingReversal request={voidAsked} />}
+          {voidable && !voidAsked && mayAskReversal(principal) && (
+            <AskReversal kind="invoice_void" targetId={invoiceId} />
           )}
           {asking && isDraft && (
             <div className="space-y-2 rounded-md border border-line p-3">

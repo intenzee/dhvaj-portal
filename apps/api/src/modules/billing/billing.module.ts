@@ -9,6 +9,7 @@ import { BillingSettingsService } from './billing-settings.service';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesController } from './receivables.controller';
 import { ReceivablesService } from './receivables.service';
+import { ReversalRequestsService } from './reversal-requests.service';
 import { TdsPdfReader } from './tds-pdf-reader';
 import { TdsCreditsService } from './tds-credits.service';
 import { TimeBillingService } from './time-billing.service';
@@ -23,11 +24,18 @@ import { UnbilledService } from './unbilled.service';
     ReceiptsService,
     AdjustmentsService,
     ReceivablesService,
+    ReversalRequestsService,
     UnbilledService,
     TdsCreditsService,
     TdsPdfReader,
     TimeBillingService,
   ],
-  exports: [AdjustmentsService, ReceivablesService, TdsCreditsService, UnbilledService],
+  exports: [
+    AdjustmentsService,
+    ReceivablesService,
+    ReversalRequestsService,
+    TdsCreditsService,
+    UnbilledService,
+  ],
 })
 export class BillingModule {}

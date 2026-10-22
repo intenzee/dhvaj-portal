@@ -610,6 +610,159 @@ describe('Accounts desk and the ad-hoc issue rule (e2e)', () => {
       await http().get('/api/v1/billing/settings').set(bearer(ac)).expect(200);
     });
 
+    it('asks a partner to void an invoice or reverse a receipt; another partner decides (§3.5)', async () => {
+      const { eng, client, inv } = await billed();
+      // Doing it directly is a partner's.
+      await http()
+        .post(`/api/v1/engagements/${eng}/invoices/${inv.id}/status`)
+        .set(bearer(ac))
+        .send({ status: 'void', reason: 'Raised twice' })
+        .expect(403);
+      const asked = await http()
+        .post('/api/v1/billing/reversal-requests')
+        .set(bearer(ac))
+        .send({ kind: 'invoice_void', invoiceId: inv.id, reason: 'Raised twice' })
+        .expect(201);
+      expect(asked.body).toMatchObject({
+        kind: 'invoice_void',
+        status: 'pending',
+        engagementId: eng,
+        clientId: client,
+        amount: inv.total,
+      });
+      // One open ask per invoice; the asker never decides.
+      await http()
+        .post('/api/v1/billing/reversal-requests')
+        .set(bearer(ac))
+        .send({ kind: 'invoice_void', invoiceId: inv.id, reason: 'Again' })
+        .expect(409);
+      await http()
+        .post(`/api/v1/billing/reversal-requests/${asked.body.id as string}/decision`)
+        .set(bearer(ac))
+        .send({ decision: 'approve' })
+        .expect(403);
+      const queue = (await http().get('/api/v1/billing/approvals').set(bearer(ac)).expect(200))
+        .body as ApprovalItem[];
+      expect(queue.find((a) => a.id === asked.body.id)).toMatchObject({
+        kind: 'invoice_void',
+        status: 'pending',
+        invoiceNumber: expect.stringMatching(/^INV\//),
+      });
+      const approved = await http()
+        .post(`/api/v1/billing/reversal-requests/${asked.body.id as string}/decision`)
+        .set(bearer(pa))
+        .send({ decision: 'approve', version: asked.body.version })
+        .expect(201);
+      expect(approved.body).toMatchObject({ status: 'approved', decidedByName: 'Partner A' });
+      const voided = (
+        await http()
+          .get(`/api/v1/engagements/${eng}/invoices/${inv.id}`)
+          .set(bearer(pa))
+          .expect(200)
+      ).body as InvoiceDetail;
+      expect(voided).toMatchObject({
+        status: 'void',
+        voidedReason: 'Raised twice',
+        voidedByName: 'Partner A',
+      });
+
+      // A receipt: asked, rejected; asked, taken back; asked, approved.
+      const second = await adHocDraft(eng, pa);
+      await setStatus(pa, eng, second.id, 'issued').expect(201);
+      const receipt = (
+        await http()
+          .post('/api/v1/billing/receipts')
+          .set(bearer(ac))
+          .send({
+            clientEntityId: client,
+            receivedOn: today,
+            mode: 'cheque',
+            reference: `CHQ${unique()}`,
+            netAmount: '1000.00',
+            allocations: [{ invoiceId: second.id, amount: '1000.00' }],
+          })
+          .expect(201)
+      ).body as { id: string };
+      await http()
+        .post(`/api/v1/billing/receipts/${receipt.id}/reverse`)
+        .set(bearer(ac))
+        .send({ reason: 'Cheque bounced' })
+        .expect(403);
+      const ask = () =>
+        http()
+          .post('/api/v1/billing/reversal-requests')
+          .set(bearer(ac))
+          .send({ kind: 'receipt_reversal', receiptId: receipt.id, reason: 'Cheque bounced' })
+          .expect(201)
+          .then((r) => r.body as { id: string; engagementId: string | null });
+      const first = await ask();
+      expect(first.engagementId).toBeNull();
+      await http()
+        .post(`/api/v1/billing/reversal-requests/${first.id}/decision`)
+        .set(bearer(mp))
+        .send({ decision: 'reject', note: 'It cleared on the second try' })
+        .expect(201);
+      const again = await ask();
+      // Only the asker takes it back.
+      await http()
+        .post(`/api/v1/billing/reversal-requests/${again.id}/withdraw`)
+        .set(bearer(mx))
+        .expect(403);
+      await http()
+        .post(`/api/v1/billing/reversal-requests/${again.id}/withdraw`)
+        .set(bearer(ac))
+        .expect(201);
+      const third = await ask();
+      await http()
+        .post(`/api/v1/billing/reversal-requests/${third.id}/decision`)
+        .set(bearer(pa))
+        .send({ decision: 'approve' })
+        .expect(201);
+      const statement = (
+        await http().get(`/api/v1/billing/clients/${client}/statement`).set(bearer(ac)).expect(200)
+      ).body as { receipts: { id: string; status: string; reversedReason: string | null }[] };
+      expect(statement.receipts.find((r) => r.id === receipt.id)).toMatchObject({
+        status: 'reversed',
+        reversedReason: 'Cheque bounced',
+      });
+      const history = (
+        await http()
+          .get(`/api/v1/billing/reversal-requests?receiptId=${receipt.id}`)
+          .set(bearer(ac))
+          .expect(200)
+      ).body as { status: string }[];
+      expect(history.map((h) => h.status).sort()).toEqual(['approved', 'rejected', 'withdrawn']);
+
+      // A partner who asks still needs another partner.
+      const thirdInv = await adHocDraft(eng, pa);
+      await setStatus(pa, eng, thirdInv.id, 'issued').expect(201);
+      const own = await http()
+        .post('/api/v1/billing/reversal-requests')
+        .set(bearer(pa))
+        .send({ kind: 'invoice_void', invoiceId: thirdInv.id, reason: 'Wrong client' })
+        .expect(201);
+      await http()
+        .post(`/api/v1/billing/reversal-requests/${own.body.id as string}/decision`)
+        .set(bearer(pa))
+        .send({ decision: 'approve' })
+        .expect(403);
+
+      const { rows } = await superuser((c) =>
+        c.query<{ action: string }>(
+          `SELECT action FROM hsdg.audit_events WHERE object_id::text IN ($1, $2, $3, $4)`,
+          [asked.body.id, inv.id, third.id, receipt.id],
+        ),
+      );
+      expect(rows.map((r) => r.action)).toEqual(
+        expect.arrayContaining([
+          'billing.reversal_requested',
+          'billing.reversal_approved',
+          'invoice.void',
+          'receipt.reversed',
+        ]),
+      );
+    });
+
     it('opens no client work: engagement, tasks, documents and the client master stay shut', async () => {
       const { eng, client } = await billed();
       for (const path of [

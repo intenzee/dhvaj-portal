@@ -30,13 +30,48 @@ export interface DeskQueue {
 /** Today's work, each queue linking to the list that clears it; empty queues drop out. */
 export function deskQueues(q: AccountsDesk['queues']): DeskQueue[] {
   const all: (Omit<DeskQueue, 'count'> & { count: number | null })[] = [
-    { key: 'readyToIssue', label: 'Drafts ready to issue', count: q.readyToIssue, href: '/billing?status=draft' },
-    { key: 'unbilledFeesDue', label: 'Agreed fees not yet billed', count: q.unbilledFeesDue, href: '/billing/unbilled' },
-    { key: 'remindersDueToday', label: 'Payment reminders due today', count: q.remindersDueToday, href: '/billing?overdue=1' },
-    { key: 'receiptsUnallocated', label: 'Receipts held as advance', count: q.receiptsUnallocated, href: '/billing/statements' },
-    { key: 'tdsNotIn26as', label: 'TDS not yet in 26AS', count: q.tdsNotIn26as, href: '/billing/tds' },
-    { key: 'waitingForPartner', label: 'Waiting for a partner', count: q.waitingForPartner, href: '/billing/approvals?scope=all' },
-    { key: 'payrollToBook', label: 'Payroll runs to book', count: q.payrollToBook, href: '/payroll/books' },
+    {
+      key: 'readyToIssue',
+      label: 'Drafts ready to issue',
+      count: q.readyToIssue,
+      href: '/billing?status=draft',
+    },
+    {
+      key: 'unbilledFeesDue',
+      label: 'Agreed fees not yet billed',
+      count: q.unbilledFeesDue,
+      href: '/billing/unbilled',
+    },
+    {
+      key: 'remindersDueToday',
+      label: 'Payment reminders due today',
+      count: q.remindersDueToday,
+      href: '/billing?overdue=1',
+    },
+    {
+      key: 'receiptsUnallocated',
+      label: 'Receipts held as advance',
+      count: q.receiptsUnallocated,
+      href: '/billing/statements',
+    },
+    {
+      key: 'tdsNotIn26as',
+      label: 'TDS not yet in 26AS',
+      count: q.tdsNotIn26as,
+      href: '/billing/tds',
+    },
+    {
+      key: 'waitingForPartner',
+      label: 'Waiting for a partner',
+      count: q.waitingForPartner,
+      href: '/billing/approvals?scope=all',
+    },
+    {
+      key: 'payrollToBook',
+      label: 'Payroll runs to book',
+      count: q.payrollToBook,
+      href: '/payroll/books',
+    },
   ];
   return all.filter((x): x is DeskQueue => (x.count ?? 0) > 0);
 }
@@ -64,6 +99,8 @@ export const APPROVAL_KIND_LABEL: Record<ApprovalKind, string> = {
   credit_note: 'Credit note',
   write_off: 'Write-off',
   fee_waiver: 'Fee waiver',
+  invoice_void: 'Void invoice',
+  receipt_reversal: 'Reverse receipt',
 };
 
 export const APPROVAL_STATUS: Record<ApprovalStatus, { label: string; tone: string }> = {
@@ -75,22 +112,38 @@ export const APPROVAL_STATUS: Record<ApprovalStatus, { label: string; tone: stri
   withdrawn: { label: 'Withdrawn', tone: 'neutral' },
 };
 
-/** Only the one who asked takes back an issue request, while it is open. */
+/** Only the one who asked takes back an issue, void or reversal request, while it is open. */
 export function mayWithdraw(a: ApprovalItem, employeeId: string | null | undefined): boolean {
   return (
-    a.kind === 'invoice_issue' &&
+    WITHDRAW_PATH[a.kind] !== undefined &&
     a.status === 'pending' &&
     !!employeeId &&
     a.requestedById === employeeId
   );
 }
 
+/** Where the asker takes a request back (the other kinds stay until a partner decides). */
+export const WITHDRAW_PATH: Partial<Record<ApprovalKind, (id: string) => string>> = {
+  invoice_issue: (id) => `/billing/issue-requests/${id}/withdraw`,
+  invoice_void: (id) => `/billing/reversal-requests/${id}/withdraw`,
+  receipt_reversal: (id) => `/billing/reversal-requests/${id}/withdraw`,
+};
+
+/** A void or reversal request a partner decides from the Approvals list. */
+export function isReversal(a: ApprovalItem): boolean {
+  return a.kind === 'invoice_void' || a.kind === 'receipt_reversal';
+}
+
 /** "Flat 4, Lake View, Kolkata 700001, West Bengal": the parts the client gave. */
-export function addressLine(p: Pick<ClientBillingProfile, 'address' | 'billingAddress'>): string | null {
+export function addressLine(
+  p: Pick<ClientBillingProfile, 'address' | 'billingAddress'>,
+): string | null {
   const a = p.address;
   if (a) {
     const cityPin = [a.city, a.pincode].filter(Boolean).join(' ');
-    const parts = [a.line1, a.line2, cityPin, a.state].filter((x): x is string => !!x && !!x.trim());
+    const parts = [a.line1, a.line2, cityPin, a.state].filter(
+      (x): x is string => !!x && !!x.trim(),
+    );
     if (parts.length) return parts.join(', ');
   }
   return p.billingAddress?.trim() || null;

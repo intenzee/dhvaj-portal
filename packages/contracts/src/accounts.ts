@@ -122,7 +122,14 @@ export interface InvoiceIssueRequest {
   closedReason: IssueRequestClosedReason | null;
 }
 
-export const APPROVAL_KINDS = ['invoice_issue', 'credit_note', 'write_off', 'fee_waiver'] as const;
+export const APPROVAL_KINDS = [
+  'invoice_issue',
+  'credit_note',
+  'write_off',
+  'fee_waiver',
+  'invoice_void',
+  'receipt_reversal',
+] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 /** Open, or how it ended: decided, or (an issue request) issued, voided, withdrawn. */
@@ -134,9 +141,15 @@ export interface ApprovalItem {
   id: string;
   clientId: string;
   clientName: string;
-  engagementId: string;
+  /** Null for a receipt reversal: a receipt belongs to the client. */
+  engagementId: string | null;
   invoiceId: string | null;
   invoiceNumber: string | null;
+  /** A receipt reversal's receipt, and its UTR / cheque reference. */
+  receiptId?: string | null;
+  receiptReference?: string | null;
+  /** For a decision sent from the list (void and reversal requests). */
+  version?: number;
   amount: string;
   reason: string | null;
   status: ApprovalStatus;
@@ -146,6 +159,41 @@ export interface ApprovalItem {
   decidedByName: string | null;
   decidedAt: string | null;
   decisionNote: string | null;
+}
+
+/** Spec §3.5: voiding an issued invoice or reversing a receipt is asked for
+ *  (billing.manage) and decided by a partner other than the one who asked
+ *  (billing.approve); approval does it, under the partner's name. */
+export const REVERSAL_KINDS = ['invoice_void', 'receipt_reversal'] as const;
+export type ReversalKind = (typeof REVERSAL_KINDS)[number];
+
+export interface ReversalRequest {
+  id: string;
+  kind: ReversalKind;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  receiptId: string | null;
+  receiptReference: string | null;
+  clientId: string;
+  clientName: string;
+  engagementId: string | null;
+  amount: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'withdrawn';
+  requestedById: string | null;
+  requestedByName: string | null;
+  at: string;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  version: number;
+}
+
+export interface RequestReversalInput {
+  kind: ReversalKind;
+  invoiceId?: string;
+  receiptId?: string;
+  reason: string;
 }
 
 export interface ApprovalListQuery {
