@@ -17,6 +17,7 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
+import { engagementHref } from '@/components/accounts/accounts';
 import { can } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { useToast } from '@/lib/toast';
@@ -220,7 +221,7 @@ function EngagementFees({ e }: { e: UnbilledEngagement }): JSX.Element {
       <div className="flex flex-wrap items-start gap-3 border-b border-line px-4 py-3">
         <div className="min-w-0 flex-1">
           <Link
-            href={`/engagements/${e.engagementId}`}
+            href={engagementHref(principal, e.engagementId)}
             className="font-medium text-ink hover:underline"
           >
             {e.clientName}

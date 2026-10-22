@@ -13,6 +13,7 @@ import { IdentityService } from '../identity/identity.service';
 import type { PrincipalData } from '../identity/identity.types';
 import { PasswordAuthProvider } from './password-auth.provider';
 import { rlsContextFromPrincipal, type Principal } from './principal';
+import { assertOnboardable, onboardCeiling, withVia } from '../identity/onboard-ceiling';
 import {
   decoyPasswordHash,
   generateTemporaryPassword,
@@ -143,6 +144,8 @@ export class PasswordLoginService {
     const ctx = rlsContextFromPrincipal(actor);
     const target = await this.identity.getUserById(ctx, userId);
     if (!target) throw new NotFoundException('User not found.');
+    const ceiling = onboardCeiling(actor);
+    assertOnboardable(ceiling, target);
 
     const temporaryPassword = generateTemporaryPassword();
     const hash = await hashPassword(temporaryPassword);
@@ -163,6 +166,7 @@ export class PasswordLoginService {
       action: created ? 'user.password_set' : 'user.password_reset',
       objectType: 'user',
       objectId: userId,
+      ...(ceiling ? { after: withVia({}, ceiling) } : {}),
     });
     return { temporaryPassword };
   }
@@ -173,6 +177,8 @@ export class PasswordLoginService {
     const ctx = rlsContextFromPrincipal(actor);
     const target = await this.identity.getUserById(ctx, userId);
     if (!target) throw new NotFoundException('User not found.');
+    const ceiling = onboardCeiling(actor);
+    assertOnboardable(ceiling, target);
     const removed = await this.db.withRlsContext(this.system, async (client) => {
       const { rowCount } = await client.query(
         'DELETE FROM hsdg.user_passwords WHERE user_id = $1',
@@ -185,6 +191,7 @@ export class PasswordLoginService {
       action: 'user.password_removed',
       objectType: 'user',
       objectId: userId,
+      ...(ceiling ? { after: withVia({}, ceiling) } : {}),
     });
   }
 

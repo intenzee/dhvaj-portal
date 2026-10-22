@@ -15,7 +15,7 @@ import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { OrganisationService } from './organisation.service';
-import type { EmployeeFilter, EmployeeRecord } from './organisation.types';
+import type { EmployeeFilter, EmployeeRecord, EngagementLeadCandidate } from './organisation.types';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { EmployeeListQueryDto } from './dto/employee-list-query.dto';
@@ -42,6 +42,19 @@ export class EmployeesController {
     if (query.office) filter.officeCode = query.office;
     const result = await this.org.listEmployees(rlsContextFromPrincipal(principal), filter, query);
     return paginate(result, query);
+  }
+
+  // Declared before ':id' so "leads" is not parsed as an employee id.
+  @Get('leads')
+  @RequirePermissions(PERMISSION.engagementCreate)
+  @ApiOperation({
+    summary: 'Who can lead an engagement, in every office',
+    description:
+      'Active partner- and manager-grade employees firm-wide, for the Engagement Partner / ' +
+      'Manager pickers. Not office-scoped; returns only id, name, grade and office.',
+  })
+  leads(@CurrentPrincipal() principal: Principal): Promise<EngagementLeadCandidate[]> {
+    return this.org.listEngagementLeads(rlsContextFromPrincipal(principal));
   }
 
   @Get(':id')

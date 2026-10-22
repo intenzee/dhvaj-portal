@@ -22,4 +22,10 @@ export interface RlsContext {
   employeeId?: string;
   /** Organisation UUID (firm). */
   orgId?: string;
+  /**
+   * Every role the user holds (hsdg.roles), beside the single effective `role`.
+   * Desk roles (accountant, hr) rank below every professional role, so they
+   * reach RLS only through this list — hsdg.ctx_has_role().
+   */
+  roles?: string[];
 }

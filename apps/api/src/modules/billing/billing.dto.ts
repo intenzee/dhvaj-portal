@@ -25,6 +25,8 @@ import {
   FEE_MILESTONE_KINDS,
   GSTIN_REGEX,
   RECEIPT_MODES,
+  REVERSAL_KINDS,
+  type ReversalKind,
   SET_ASIDE_KINDS,
   TDS_SECTIONS,
   type AdjustmentStatus,
@@ -281,6 +283,47 @@ export class DecideAdjustmentDto {
   @IsInt()
   @Min(1)
   version?: number;
+}
+
+/** §3.5 · POST /billing/reversal-requests: ask a partner to void an issued invoice or reverse a receipt. */
+export class RequestReversalDto {
+  @ApiProperty({ enum: [...REVERSAL_KINDS] })
+  @IsIn([...REVERSAL_KINDS])
+  kind!: ReversalKind;
+
+  @ApiPropertyOptional({ description: 'The issued invoice to void (kind invoice_void).' })
+  @ValidateIf((o: RequestReversalDto) => o.kind === 'invoice_void')
+  @IsUUID()
+  invoiceId?: string;
+
+  @ApiPropertyOptional({ description: 'The receipt to reverse (kind receipt_reversal).' })
+  @ValidateIf((o: RequestReversalDto) => o.kind === 'receipt_reversal')
+  @IsUUID()
+  receiptId?: string;
+
+  @ApiProperty({ example: 'Cheque returned unpaid' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
+}
+
+/** §3.5 · GET /billing/reversal-requests. */
+export class ReversalListQueryDto {
+  @ApiPropertyOptional({ enum: ['pending', 'approved', 'rejected', 'withdrawn'] })
+  @IsOptional()
+  @IsIn(['pending', 'approved', 'rejected', 'withdrawn'])
+  status?: 'pending' | 'approved' | 'rejected' | 'withdrawn';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  invoiceId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  receiptId?: string;
 }
 
 /** PS-205 · POST /billing/credit-notes/:id/void. */

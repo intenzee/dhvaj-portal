@@ -14,7 +14,6 @@ import {
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
-import { clientPhoneSql } from '../filing-workspace/client-chase';
 import { NotificationsService } from '../notifications/notifications.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { buildReceivables, type OpenReceivable } from './receivables';
@@ -22,12 +21,6 @@ import { buildReceivables, type OpenReceivable } from './receivables';
 /** Days since the due date (else the issue date), counted to today in IST. */
 export const DAYS_PAST_DUE_SQL = (alias: string): string =>
   `(timezone('Asia/Kolkata', now())::date - COALESCE(${alias}.due_date, ${alias}.issue_date))`;
-
-/** The client contact a payment reminder goes to: the primary e-mail first. */
-export const CLIENT_EMAIL_SQL = (entityId: string): string => `
-  (SELECT c.email::text FROM hsdg.entity_contacts c
-    WHERE c.entity_id = ${entityId} AND c.email IS NOT NULL
-    ORDER BY c.is_primary DESC, c.created_at LIMIT 1)`;
 
 interface RemindRow {
   id: string;
@@ -82,9 +75,9 @@ export class ReceivablesService {
                 ${DAYS_PAST_DUE_SQL('i')} AS days_past_due,
                 (i.total - i.amount_settled)::text AS balance
            FROM hsdg.invoices i
-           JOIN hsdg.entities ent ON ent.id = i.client_entity_id
-           LEFT JOIN hsdg.engagements eng ON eng.id = i.engagement_id
-           LEFT JOIN hsdg.employees ep ON ep.id = eng.engagement_partner_id
+           JOIN hsdg.entity_billing_profiles ent ON ent.id = i.client_entity_id
+           LEFT JOIN hsdg.engagement_billing_headers eng ON eng.id = i.engagement_id
+           LEFT JOIN hsdg.employee_names ep ON ep.id = eng.engagement_partner_id
           WHERE i.status IN ('issued', 'partially_paid') AND i.total > i.amount_settled`,
       );
       const open: OpenReceivable[] = rows.map((r) => ({
@@ -208,7 +201,7 @@ export class ReceivablesService {
         `SELECT r.id, r.channel, r.auto_at_days, r.days_past_due,
                 e.full_name AS sent_by_name, r.created_at
            FROM hsdg.invoice_reminders r
-           LEFT JOIN hsdg.employees e ON e.id = r.sent_by_employee_id
+           LEFT JOIN hsdg.employee_names e ON e.id = r.sent_by_employee_id
           WHERE r.invoice_id = $1
           ORDER BY r.created_at DESC`,
         [invoiceId],
@@ -230,11 +223,10 @@ export class ReceivablesService {
               ent.legal_name AS client_name, i.status, i.issue_date::text, i.due_date::text,
               (i.total - i.amount_settled)::text AS balance,
               ${DAYS_PAST_DUE_SQL('i')} AS days_past_due,
-              ${CLIENT_EMAIL_SQL('i.client_entity_id')} AS client_email,
-              ${clientPhoneSql('i.client_entity_id')} AS client_phone,
+              ent.contact_email AS client_email, ent.contact_phone AS client_phone,
               (SELECT f.firm_name FROM hsdg.firm_settings f LIMIT 1) AS firm_name
          FROM hsdg.invoices i
-         JOIN hsdg.entities ent ON ent.id = i.client_entity_id
+         JOIN hsdg.entity_billing_profiles ent ON ent.id = i.client_entity_id
         WHERE i.id = $1`,
       [invoiceId],
     );

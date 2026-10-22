@@ -9,6 +9,7 @@ import { TimeCloserScheduler } from '../engagements/time/time-closer.scheduler';
 import { MonthlyDataRequestScheduler } from '../filing-workspace/monthly-data-request.scheduler';
 import { NotificationDigestScheduler } from '../notifications/notification-digest.scheduler';
 import { istToday } from '../engagements/time/auto-time';
+import { PeopleExitsScheduler } from '../people/people-exits.scheduler';
 
 /**
  * HTTP trigger for the background jobs on hosts with no long-running process
@@ -27,6 +28,7 @@ export class CronController {
     private readonly timeCloser: TimeCloserScheduler,
     private readonly monthlyRequest: MonthlyDataRequestScheduler,
     private readonly digest: NotificationDigestScheduler,
+    private readonly exits: PeopleExitsScheduler,
   ) {}
 
   @Get()
@@ -47,6 +49,8 @@ export class CronController {
     await this.scheduler.runOutboxDrain();
     await this.scheduler.runCalendarMaintenance();
     await this.timeCloser.run();
+    // Leavers whose date of exit has come: exited, login off.
+    await this.exits.run();
     return { status: 'ok' };
   }
 }

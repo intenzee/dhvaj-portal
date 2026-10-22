@@ -1,5 +1,18 @@
 import type { EmploymentStatus, GradeSlug } from '@hsdg/contracts';
 
+/**
+ * Someone who can lead an engagement (manager grade or above), firm-wide.
+ * Deliberately narrow: what the Engagement Partner / Manager picker shows.
+ */
+export interface EngagementLeadCandidate {
+  id: string;
+  fullName: string;
+  gradeSlug: GradeSlug;
+  gradeName: string;
+  isPartner: boolean;
+  officeCode: string;
+}
+
 /** An employee as exposed by the API (RLS decides which are visible). */
 export interface EmployeeRecord {
   id: string;

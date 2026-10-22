@@ -117,11 +117,11 @@ const WAIVER_SELECT = `
          w.status, w.requested_by_employee_id, rb.full_name AS requested_by_name, w.created_at,
          db.full_name AS decided_by_name, w.decided_at, w.decision_note, w.version
     FROM hsdg.fee_waivers w
-    JOIN hsdg.entities ent ON ent.id = w.client_entity_id
-    LEFT JOIN hsdg.engagements e ON e.id = w.engagement_id
+    JOIN hsdg.entity_billing_profiles ent ON ent.id = w.client_entity_id
+    LEFT JOIN hsdg.engagement_billing_headers e ON e.id = w.engagement_id
     LEFT JOIN hsdg.services s ON s.id = e.service_id
-    LEFT JOIN hsdg.employees rb ON rb.id = w.requested_by_employee_id
-    LEFT JOIN hsdg.employees db ON db.id = w.decided_by_employee_id`;
+    LEFT JOIN hsdg.employee_names rb ON rb.id = w.requested_by_employee_id
+    LEFT JOIN hsdg.employee_names db ON db.id = w.decided_by_employee_id`;
 
 const MILESTONE_SELECT = `
   SELECT m.id, m.engagement_id, m.kind, m.description, m.amount::text, m.due_on::text,
@@ -131,7 +131,7 @@ const MILESTONE_SELECT = `
     LEFT JOIN hsdg.fee_billings fb
       ON fb.engagement_id = m.engagement_id AND fb.period_key = 'milestone:' || m.id
      AND fb.released_at IS NULL
-    LEFT JOIN hsdg.employees ce ON ce.id = m.created_by_employee_id`;
+    LEFT JOIN hsdg.employee_names ce ON ce.id = m.created_by_employee_id`;
 
 /**
  * PS-206 · fixed fees that are due and on no invoice — the retainer per
@@ -570,9 +570,10 @@ export class UnbilledService {
   }
 
   private async visible(client: PoolClient, engagementId: string): Promise<boolean> {
-    const { rows } = await client.query(`SELECT 1 FROM hsdg.engagements WHERE id = $1`, [
-      engagementId,
-    ]);
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.engagement_billing_headers WHERE id = $1`,
+      [engagementId],
+    );
     return rows.length > 0;
   }
 
@@ -605,10 +606,10 @@ export class UnbilledService {
                          'amount', m.amount::text, 'dueOn', m.due_on::text) ORDER BY m.due_on)
                   FROM hsdg.engagement_fee_milestones m
                  WHERE m.engagement_id = e.id AND m.cancelled_at IS NULL), '[]'::json) AS milestones
-         FROM hsdg.engagements e
-         JOIN hsdg.entities ent ON ent.id = e.entity_id
+         FROM hsdg.engagement_billing_headers e
+         JOIN hsdg.entity_billing_profiles ent ON ent.id = e.entity_id
          JOIN hsdg.services s ON s.id = e.service_id
-         LEFT JOIN hsdg.employees ep ON ep.id = e.engagement_partner_id
+         LEFT JOIN hsdg.employee_names ep ON ep.id = e.engagement_partner_id
          LEFT JOIN hsdg.engagement_commercial ec ON ec.engagement_id = e.id
         WHERE hsdg.ctx_may_bill_engagement(e.id)
           AND e.status IN ('accepted', 'active', 'on_hold', 'completed', 'closed')
@@ -631,7 +632,7 @@ export class UnbilledService {
               fb.amount::text, fb.period_start::text, fb.period_end::text,
               e.full_name AS by_name, fb.created_at
          FROM hsdg.fee_billings fb
-         LEFT JOIN hsdg.employees e ON e.id = fb.created_by_employee_id
+         LEFT JOIN hsdg.employee_names e ON e.id = fb.created_by_employee_id
         WHERE fb.released_at IS NULL AND fb.engagement_id = ANY($1::uuid[])
         ORDER BY fb.period_start, fb.period_key`,
       [rows.map((r) => r.id)],
