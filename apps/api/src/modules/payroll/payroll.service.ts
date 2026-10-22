@@ -48,6 +48,7 @@ interface StructureRow {
   pf_applicable: boolean;
   esi_applicable: boolean;
   pt_applicable: boolean;
+  eps_member: boolean;
   status: SalaryStructure['status'];
   note: string | null;
   proposed_by: string | null;
@@ -61,7 +62,7 @@ interface StructureRow {
 
 const STRUCTURE_SELECT = `
   SELECT s.id, s.employee_id, s.effective_from, s.kind, s.ctc, s.components,
-         s.pf_applicable, s.esi_applicable, s.pt_applicable, s.status, s.note,
+         s.pf_applicable, s.esi_applicable, s.pt_applicable, s.eps_member, s.status, s.note,
          pu.display_name AS proposed_by, au.display_name AS approved_by, s.approved_at,
          s.version, o.code AS office_code, e.full_name, e.employee_code
     FROM hsdg.salary_structures s
@@ -292,8 +293,8 @@ export class PayrollService {
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO hsdg.salary_structures
              (employee_id, effective_from, kind, ctc, components, pf_applicable,
-              esi_applicable, pt_applicable, note)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+              esi_applicable, pt_applicable, note, eps_member)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
           [
             input.employeeId,
             input.effectiveFrom,
@@ -304,6 +305,7 @@ export class PayrollService {
             input.esiApplicable,
             input.ptApplicable,
             input.note ?? null,
+            input.epsMember ?? true,
           ],
         );
         id = rows[0]!.id;
@@ -810,8 +812,8 @@ export class PayrollService {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<StructureRow>(
         `SELECT s.id, s.employee_id, s.effective_from, s.kind, s.ctc, s.components,
-                s.pf_applicable, s.esi_applicable, s.pt_applicable, s.status, s.note,
-                NULL::text AS proposed_by, NULL::text AS approved_by, s.approved_at, s.version,
+                s.pf_applicable, s.esi_applicable, s.pt_applicable, s.eps_member, s.status,
+                s.note, NULL::text AS proposed_by, NULL::text AS approved_by, s.approved_at, s.version,
                 NULL::text AS office_code
            FROM hsdg.salary_structures s
           WHERE s.employee_id = $1 AND s.status = 'approved'
@@ -854,6 +856,7 @@ function mapStructure(r: StructureRow, stipendMinimum: Record<string, string>): 
     pfApplicable: r.pf_applicable,
     esiApplicable: r.esi_applicable,
     ptApplicable: r.pt_applicable,
+    epsMember: r.eps_member,
     status: r.status,
     proposedBy: r.proposed_by,
     approvedBy: r.approved_by,
@@ -899,6 +902,8 @@ function validateRules(raw: Record<string, unknown>): PayRules {
     isRate(r.pf?.employeeRate) &&
     isRate(r.pf?.employerRate) &&
     isRate(r.pf?.epsRate) &&
+    (r.pf?.edliRate === undefined || isRate(r.pf.edliRate)) &&
+    (r.pf?.adminRate === undefined || isRate(r.pf.adminRate)) &&
     isAmount(r.pf?.wageCeiling) &&
     typeof r.pf?.onFullWages === 'boolean' &&
     isRate(r.esi?.employeeRate) &&

@@ -99,6 +99,13 @@ export class ProposeStructureDto {
   @IsBoolean()
   ptApplicable!: boolean;
 
+  @ApiPropertyOptional({
+    description: 'In the pension scheme (EPS); false: the whole employer PF goes to EPF.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  epsMember?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

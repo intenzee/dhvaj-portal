@@ -270,9 +270,10 @@ export class PayrollRunsService {
         pf_applicable: boolean;
         esi_applicable: boolean;
         pt_applicable: boolean;
+        eps_member: boolean;
       }>(
         `SELECT id, employee_id, effective_from, kind, components, pf_applicable,
-                esi_applicable, pt_applicable
+                esi_applicable, pt_applicable, eps_member
            FROM hsdg.salary_structures
           WHERE status = 'approved' AND effective_from <= $1
           ORDER BY employee_id, effective_from DESC`,
@@ -452,6 +453,7 @@ export class PayrollRunsService {
           pfApplicable: s.pf_applicable,
           esiApplicable: s.esi_applicable,
           ptApplicable: s.pt_applicable && !settlementOnly,
+          epsMember: s.eps_member,
         };
         let line: PayLine;
         try {
@@ -851,7 +853,8 @@ export class PayrollRunsService {
       const earnings = (run.totals.earnings ?? []).reduce((t, h) => t + toPaise(h.amount), 0n);
       const d = run.totals.deductions;
       const e = run.totals.employer;
-      const employerPf = head(e, 'pf_epf') + head(e, 'pf_eps');
+      const employerPf =
+        head(e, 'pf_epf') + head(e, 'pf_eps') + head(e, 'pf_edli') + head(e, 'pf_admin');
       const employerEsi = head(e, 'esi');
       const gratuity = head(e, 'gratuity');
       const stipend = run.kind === 'stipend';
@@ -941,7 +944,7 @@ export class PayrollRunsService {
       };
       for (const r of runs.rows) {
         shares.pf[0] += pick(r.totals.deductions, ['pf']);
-        shares.pf[1] += pick(r.totals.employer, ['pf_epf', 'pf_eps']);
+        shares.pf[1] += pick(r.totals.employer, ['pf_epf', 'pf_eps', 'pf_edli', 'pf_admin']);
         shares.esi[0] += pick(r.totals.deductions, ['esi']);
         shares.esi[1] += pick(r.totals.employer, ['esi']);
         shares.pt[0] += pick(r.totals.deductions, ['pt']);
