@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { EngagementsModule } from '../engagements/engagements.module';
 import { EntitiesModule } from '../entities/entities.module';
 import { ClientImportController } from './client-import.controller';
 import { ClientImportService } from './client-import.service';
@@ -15,7 +16,7 @@ import { CredentialsService } from './credentials.service';
  * the GST return history that workbook marks.
  */
 @Module({
-  imports: [AuditModule, EntitiesModule],
+  imports: [AuditModule, EntitiesModule, EngagementsModule],
   controllers: [CredentialsController, ClientImportController, ClientReturnsController],
   providers: [CredentialCipher, CredentialsService, ClientImportService, ClientReturnsService],
 })

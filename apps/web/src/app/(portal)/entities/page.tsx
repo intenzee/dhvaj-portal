@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { PERMISSION, type MissingFilter, type Paginated } from '@hsdg/contracts';
-import { FileCheck2, Plus, Upload } from 'lucide-react';
+import { Plus, Upload } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -74,11 +74,6 @@ function EntitiesInner(): JSX.Element {
         subtitle="Companies, firms and individuals we work for. Click a client to see everything we do for them."
         actions={
           <div className="flex gap-2">
-            <Link href="/entities/returns">
-              <Button variant="secondary">
-                <FileCheck2 className="h-4 w-4" /> GST returns
-              </Button>
-            </Link>
             {can(principal, PERMISSION.entityManage) && (
               <>
                 {can(principal, PERMISSION.credentialManage) && (

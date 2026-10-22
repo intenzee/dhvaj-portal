@@ -39,18 +39,6 @@ export function returnLineLabel(line: Pick<ClientReturnLine, 'gstin' | 'stateCod
   return 'No GSTIN in the sheet';
 }
 
-/** Lines whose client, GSTIN or state matches the search. Pure — tested. */
-export function filterReturnLines(lines: ClientReturnLine[], search: string): ClientReturnLine[] {
-  const q = search.trim().toLowerCase();
-  if (!q) return lines;
-  return lines.filter(
-    (l) =>
-      l.entityName.toLowerCase().includes(q) ||
-      l.entityCode.toLowerCase().includes(q) ||
-      returnLineLabel(l).toLowerCase().includes(q),
-  );
-}
-
 /** Filed and NA marks across the lines. Pure — tested. */
 export function returnCounts(lines: ClientReturnLine[]): { filed: number; notApplicable: number } {
   let filed = 0;
@@ -167,18 +155,16 @@ export function ClientReturnsCard({ entityId }: { entityId: string }): JSX.Eleme
   const updated = q.data.lines.reduce((a, l) => (l.updatedAt > a ? l.updatedAt : a), '');
   return (
     <Card id="gst-returns">
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader>
         <CardTitle>GST returns filed</CardTitle>
-        <Link href="/entities/returns" className="text-xs text-primary-700 hover:underline">
-          All clients →
-        </Link>
       </CardHeader>
       <CardBody className="space-y-2">
         <ReturnsGrid data={q.data} />
         <p className="text-xs text-ink-faint">
           {filed} filed · {notApplicable} NA — as marked in the firm&rsquo;s GST sheet
-          {updated && `, imported ${new Date(updated).toLocaleDateString('en-IN')}`}. Import the
-          sheet again to refresh.
+          {updated && `, imported ${new Date(updated).toLocaleDateString('en-IN')}`}. The months of
+          a GSTIN are closed in the client&rsquo;s GST engagement too. Import the sheet again to
+          refresh.
         </p>
       </CardBody>
     </Card>

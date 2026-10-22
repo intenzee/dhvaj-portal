@@ -20,7 +20,9 @@ import { createTestApp } from './create-test-app';
  * GST login without its GSTIN waits on the client and moves onto the GSTIN
  * when it is added; the sheet's frequency becomes the GSTIN's scheme and its
  * filed / NA marks are kept as the client's GST return history (GSTIN or
- * not) and close the matching filings.
+ * not) and close the matching filings — in a GST engagement the import
+ * creates, or adds the year / GST to, when the client has none. Marks
+ * without a GSTIN are pointed out.
  */
 describe('Client portal credentials (e2e)', () => {
   let app: INestApplication;
@@ -259,10 +261,20 @@ describe('Client portal credentials (e2e)', () => {
       ['traces', 'deductor', 'co•••or'],
       ['traces', 'taxpayer', 'co•••er'],
     ]);
-    // The Maharashtra row's mark stays with it although it has no GSTIN yet.
-    expect(co.warnings).toEqual([]);
+    // The Maharashtra row's mark stays with it although it has no GSTIN yet —
+    // and the person is told it cannot go into an engagement.
+    expect(co).toMatchObject({ noGstin: true, gstEngagement: null });
+    expect(co.warnings).toEqual([expect.stringMatching(/^No GSTIN: /)]);
     expect(co.gst[1]).toMatchObject({ gstin: null, filed: 1, notApplicable: 0 });
     expect(p.rows[1]!.gst[0]).toMatchObject({ gstin: G_FIRM, filed: 3, notApplicable: 1 });
+    expect(p.rows[1]).toMatchObject({
+      noGstin: false,
+      gstEngagement: { action: 'create', engagementCode: null, financialYears: ['2026-27'] },
+    });
+    expect(p.rows[1]!.warnings).toContain(
+      'A GST engagement for 2026-27 will be created, with the months the sheet marks filed / NA closed in it.',
+    );
+    expect(p).toMatchObject({ engagementsToCreate: 1, noGstin: 1 });
     expect(p.rows[2]!.error).toMatch(/not a valid GSTIN/);
     expect(p.rows[3]).toMatchObject({ typeSlug: 'proprietorship', typeGuessed: false });
     expect(p.logins).toBe(8);
@@ -283,13 +295,20 @@ describe('Client portal credentials (e2e)', () => {
       registrationsAdded: 3, // Company: Delhi GSTIN + TAN; Firm: its GSTIN
       loginsSaved: 8,
       schemesSet: 2,
-      marksApplied: 0,
-      marksWithoutFiling: 4, // no GST engagement yet
-      marksRecorded: 5, // …but all kept: Firm's 4, Company's Maharashtra row (no GSTIN) 1
+      engagementsCreated: 1, // the Firm's: the Company's marked row has no GSTIN
+      engagementsExtended: 0,
+      marksApplied: 4,
+      marksWithoutFiling: 0,
+      marksRecorded: 5, // all kept: Firm's 4, Company's Maharashtra row (no GSTIN) 1
     });
     expect(result.failed).toEqual([
       expect.objectContaining({ source: 'GST Login 8', message: expect.stringMatching(/GSTIN/) }),
     ]);
+    expect(result.notes).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(/^GST engagement \S+ created for 2026-27\.$/),
+      }),
+    );
     companyId = await entityOf(company);
     firmId = await entityOf(firm);
 
@@ -348,6 +367,52 @@ describe('Client portal credentials (e2e)', () => {
     const south = (await http().get('/api/v1/client-returns').set(bearer(pb)).expect(200))
       .body as ClientReturns;
     expect(south.lines.some((l) => [firmId, companyId].includes(l.entityId))).toBe(false);
+  });
+
+  it("creates the Firm's GST engagement for the marked year, the importer its partner, and closes the months in it", async () => {
+    const { rows: engagements } = await su.query<{
+      kind: string;
+      status: string;
+      ep: string;
+      years: string;
+    }>(
+      `SELECT e.kind, e.status, u.email AS ep,
+              string_agg(y.financial_year || ' ' || array_to_string(y.streams, ','), '; '
+                         ORDER BY y.financial_year) AS years
+         FROM hsdg.engagements e
+         JOIN hsdg.employees em ON em.id = e.engagement_partner_id
+         JOIN hsdg.users u ON u.id = em.user_id
+         JOIN hsdg.compliance_engagement_years y ON y.engagement_id = e.id
+        WHERE e.entity_id = $1
+        GROUP BY e.id, u.email`,
+      [firmId],
+    );
+    expect(engagements).toEqual([
+      {
+        kind: 'compliance',
+        status: 'accepted',
+        ep: 'partner.a@dhvaj.in',
+        years: '2026-27 gst',
+      },
+    ]);
+    const { rows } = await su.query<{ code: string; period_key: string; workflow_status: string }>(
+      `SELECT r.code, ci.period_key, ci.workflow_status
+         FROM hsdg.compliance_instances ci
+         JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
+         JOIN hsdg.entity_registrations g ON g.id = ci.registration_id
+        WHERE g.registration_number = $1 AND ci.period_key IN ('2026-04', '2026-05', '2026-06')
+          AND r.code IN ('GST_GSTR1_M', 'GST_GSTR3B_M')
+        ORDER BY ci.period_key, r.code`,
+      [G_FIRM],
+    );
+    expect(rows.map((r) => `${r.period_key} ${r.code} ${r.workflow_status}`)).toEqual([
+      '2026-04 GST_GSTR1_M filed',
+      '2026-04 GST_GSTR3B_M filed',
+      '2026-05 GST_GSTR1_M not_started',
+      '2026-05 GST_GSTR3B_M not_applicable',
+      '2026-06 GST_GSTR1_M filed',
+      '2026-06 GST_GSTR3B_M not_started',
+    ]);
   });
 
   it('stores only ciphertext, which the app role cannot even select', async () => {
@@ -452,19 +517,24 @@ describe('Client portal credentials (e2e)', () => {
     expect(res.body.password).toBe(PASSWORDS[1]);
   });
 
-  it('closes the filings the sheet marks filed / NA once there is a GST engagement, and only once', async () => {
-    await http()
-      .post('/api/v1/engagements')
-      .set(bearer(pa))
-      .send({
-        kind: 'compliance',
-        entityId: firmId,
-        status: 'accepted',
-        financialYear: '2026-27',
-        streams: ['gst'],
-        years: [{ financialYear: '2026-27' }],
-      })
-      .expect(201);
+  it('puts the months of a GSTIN added later into an engagement on the next upload, and only once', async () => {
+    const preview = (
+      await http()
+        .post('/api/v1/client-imports/workbook/preview')
+        .set(bearer(pa))
+        .send(body())
+        .expect(200)
+    ).body as ClientImportPreview;
+    const co = preview.rows.find((r) => r.name === `${tag} Company Pvt Ltd`)!;
+    // The sheet's Maharashtra row has no GSTIN: it takes the one added in the portal.
+    expect(co).toMatchObject({ action: 'update_client', noGstin: false });
+    expect(co.gst[1]).toMatchObject({ gstin: G_CO_MH, stateCode: '27' });
+    expect(co.gstEngagement).toMatchObject({ action: 'create', financialYears: ['2026-27'] });
+    expect(preview.rows.find((r) => r.name === `${tag} Firm`)!.gstEngagement).toMatchObject({
+      action: 'existing',
+    });
+    expect(preview).toMatchObject({ engagementsToCreate: 1, noGstin: 0 });
+
     const again = await runImport();
     expect(again).toMatchObject({
       clientsCreated: 0,
@@ -472,31 +542,41 @@ describe('Client portal credentials (e2e)', () => {
       registrationsAdded: 0,
       loginsSaved: 8,
       schemesSet: 0,
-      marksApplied: 4,
+      engagementsCreated: 1,
       marksNotAllowed: 0,
-      marksRecorded: 0, // the same marks: nothing new
+      marksAlreadyDone: 4, // the Firm's
+      marksRecorded: 1, // the Company's Maharashtra mark, moved from its state onto the GSTIN
     });
-    const { rows } = await su.query<{ code: string; period_key: string; workflow_status: string }>(
-      `SELECT r.code, ci.period_key, ci.workflow_status
-         FROM hsdg.compliance_instances ci
+    // April on a quarterly GSTIN has no GSTR-1 to close (IFF): kept on the client only.
+    expect(again).toMatchObject({ marksApplied: 0, marksWithoutFiling: 0 });
+    expect((await returnsOf(pa, companyId)).lines).toEqual([
+      expect.objectContaining({ gstin: G_CO_MH, marks: { '2026-04': { GSTR1: 'filed' } } }),
+    ]);
+    // The Company's new engagement has the Maharashtra GSTIN's quarterly returns.
+    const { rows } = await su.query<{ period_key: string }>(
+      `SELECT ci.period_key FROM hsdg.compliance_instances ci
          JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
          JOIN hsdg.entity_registrations g ON g.id = ci.registration_id
-        WHERE g.registration_number = $1 AND ci.period_key IN ('2026-04', '2026-05', '2026-06')
-          AND r.code IN ('GST_GSTR1_M', 'GST_GSTR3B_M')
-        ORDER BY ci.period_key, r.code`,
-      [G_FIRM],
+         JOIN hsdg.engagements e ON e.id = ci.engagement_id
+        WHERE g.registration_number = $1 AND r.code = 'GST_GSTR1_Q' AND e.entity_id = $2
+        ORDER BY ci.period_key`,
+      [G_CO_MH, companyId],
     );
-    expect(rows.map((r) => `${r.period_key} ${r.code} ${r.workflow_status}`)).toEqual([
-      '2026-04 GST_GSTR1_M filed',
-      '2026-04 GST_GSTR3B_M filed',
-      '2026-05 GST_GSTR1_M not_started',
-      '2026-05 GST_GSTR3B_M not_applicable',
-      '2026-06 GST_GSTR1_M filed',
-      '2026-06 GST_GSTR3B_M not_started',
+    expect(rows.map((r) => r.period_key)).toEqual([
+      '2026-27:Q1',
+      '2026-27:Q2',
+      '2026-27:Q3',
+      '2026-27:Q4',
     ]);
 
     const third = await runImport();
-    expect(third).toMatchObject({ marksApplied: 0, marksAlreadyDone: 4 });
+    expect(third).toMatchObject({
+      engagementsCreated: 0,
+      engagementsExtended: 0,
+      marksApplied: 0,
+      marksRecorded: 0,
+    });
+    expect(third.marksAlreadyDone).toBe(4);
   });
 
   it('lets a manager of the office change or remove a login; not another office', async () => {
@@ -536,6 +616,92 @@ describe('Client portal credentials (e2e)', () => {
     );
     await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(pa)).expect(429);
     await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(mp)).expect(200);
+  });
+
+  it("adds the marked year, or GST, to the client's open Compliance engagement", async () => {
+    const p = pan('C');
+    const g = gstin('07', p);
+    const name = `Extend${Date.now()} Traders Pvt Ltd`;
+    const book = (marks: Record<string, string>): string => {
+      const months = Object.keys(marks);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['', '', '', '', ...months],
+          ['Particular', 'ID', 'Pwd', 'GSTIN', ...months.map(() => 'GSTR-1')],
+          [name, 'ext_id', 'ext-pw', g, ...months.map((m) => marks[m])],
+        ]),
+        'GST Login',
+      );
+      return (XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer).toString('base64');
+    };
+    const send = async (path: string, marks: Record<string, string>) =>
+      (
+        await http()
+          .post(`/api/v1/client-imports/workbook${path}`)
+          .set(bearer(pa))
+          .send({ filename: 'extend.xlsx', contentBase64: book(marks), officeCode: 'NORTH' })
+          .expect(200)
+      ).body;
+
+    // No marks: the client only, no engagement.
+    expect(await send('', { 'Apr-26': '' })).toMatchObject({
+      clientsCreated: 1,
+      engagementsCreated: 0,
+    });
+    const entityId = await entityOf(p);
+    const created = await http()
+      .post('/api/v1/engagements')
+      .set(bearer(pa))
+      .send({
+        kind: 'compliance',
+        entityId,
+        status: 'accepted',
+        financialYear: '2026-27',
+        streams: ['tds'],
+        years: [{ financialYear: '2026-27' }],
+      })
+      .expect(201);
+    const code = created.body.engagementCode as string;
+
+    // A year it already has, without GST: GST is added to it.
+    const marks = { 'Apr-26': 'filed' };
+    const preview = (await send('/preview', marks)) as ClientImportPreview;
+    expect(preview.rows[0]!.gstEngagement).toEqual({
+      action: 'add_stream',
+      engagementCode: code,
+      financialYears: ['2026-27'],
+    });
+    const result = (await send('', marks)) as ClientImportResult;
+    expect(result).toMatchObject({
+      engagementsCreated: 0,
+      engagementsExtended: 1,
+      marksApplied: 1,
+    });
+    expect(result.notes).toContainEqual(
+      expect.objectContaining({ message: `GST added to ${code} for 2026-27.` }),
+    );
+
+    // A year it does not have: added with GST.
+    const later = { 'Apr-27': 'filed' };
+    expect(((await send('/preview', later)) as ClientImportPreview).rows[0]!.gstEngagement).toEqual(
+      { action: 'add_year', engagementCode: code, financialYears: ['2027-28'] },
+    );
+    const added = (await send('', later)) as ClientImportResult;
+    expect(added).toMatchObject({ engagementsCreated: 0, engagementsExtended: 1 });
+    expect(added.notes).toContainEqual(
+      expect.objectContaining({ message: `2027-28 with GST added to ${code}.` }),
+    );
+    const { rows } = await su.query<{ financial_year: string; streams: string[] }>(
+      `SELECT financial_year, streams FROM hsdg.compliance_engagement_years
+        WHERE engagement_id = $1 ORDER BY financial_year`,
+      [created.body.id],
+    );
+    expect(rows.map((r) => [r.financial_year, [...r.streams].sort()])).toEqual([
+      ['2026-27', ['gst', 'tds']],
+      ['2027-28', ['gst']],
+    ]);
   });
 
   it("finds a client by a similar name, takes the sheet's fuller name, and points out duplicates", async () => {
