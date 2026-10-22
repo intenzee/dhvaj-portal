@@ -1,18 +1,23 @@
-import { ROLE } from '@hsdg/contracts';
+import { ROLE, type FirmChecks } from '@hsdg/contracts';
 import { hasRole } from './principal';
 import type { EngagementDetail, TeamMember } from './types';
 import type { TaskActionContext } from './work-types';
 
 type Principal = Parameters<typeof hasRole>[0];
 
-/** Who may move the engagement's tasks: me, and whether I lead it (EP / manager / MP). */
+/**
+ * Who may move the engagement's tasks: me, whether I lead it (EP / manager /
+ * MP), and the firm's checks that decide how much that matters.
+ */
 export function taskContextFor(
   principal: Principal,
   e: Partial<Pick<EngagementDetail, 'engagementPartnerId' | 'engagementManagerId'>>,
+  checks?: FirmChecks,
 ): TaskActionContext {
   const me = principal?.employeeId ?? null;
   return {
     me,
+    checks,
     isLead:
       hasRole(principal, ROLE.managingPartner) ||
       (!!me && (me === e.engagementPartnerId || me === e.engagementManagerId)),
