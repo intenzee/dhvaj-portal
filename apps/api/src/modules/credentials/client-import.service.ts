@@ -398,8 +398,12 @@ export class ClientImportService {
     }
 
     await this.recordMarks(client, ctx, req.filename, entityId!, c, regOf, tally);
+    // A filing takes its mark when created (a trigger); here the import does
+    // it after the engagement, so it can count what the sheet closed.
+    await client.query(`SELECT set_config('hsdg.deferring_return_marks', 'on', true)`);
     await this.ensureGstEngagement(client, ctx, c, entityId!, tally, notes);
-    await this.applyMarks(client, ctx, c, regOf, tally);
+    await this.applyMarks(client, c, regOf, tally);
+    await client.query(`SELECT set_config('hsdg.deferring_return_marks', '', true)`);
     return tally;
   }
 
@@ -459,21 +463,23 @@ export class ClientImportService {
     }
   }
 
-  /** filed / NA marks → the matching open GSTR-1 / 3B / 7 filings, where the importer leads. */
+  /**
+   * filed / NA marks → the matching open GSTR-1 / 3B / 7 filings, on whichever
+   * engagement holds them (hsdg.apply_return_marks: the firm's record of the
+   * return, so not only where the importer leads). Then every other filing
+   * the client's marks cover — the months' inward reconciliations, filings
+   * created while this import ran — is closed too, uncounted.
+   */
   private async applyMarks(
     client: PoolClient,
-    ctx: RlsContext,
     c: PlannedClient,
     regOf: Map<string, string>,
     tally: Tally,
   ): Promise<void> {
-    const marked = c.gst.filter((g) => g.gstin && g.marks.length);
-    if (marked.length === 0) return;
-    const registrationIds = marked.map((g) => regOf.get(g.gstin!)!);
-    const codes = Object.values(RULES_OF_FORM).flat();
-    const periods = [
-      ...new Set(marked.flatMap((g) => g.marks.flatMap((m) => periodKeysOfMark(m.period)))),
+    const registrationIds = [
+      ...new Set(c.gst.flatMap((g) => (g.gstin ? [regOf.get(g.gstin)!] : []))),
     ];
+    if (registrationIds.length === 0) return;
     const { rows } = await client.query<{
       id: string;
       registration_id: string;
@@ -481,19 +487,15 @@ export class ClientImportService {
       period_key: string;
       status: string;
       workflow_status: string | null;
-      lead: boolean;
+      removed: boolean;
     }>(
-      `SELECT ci.id, ci.registration_id, r.code, ci.period_key, ci.status, ci.workflow_status,
-              hsdg.is_engagement_lead(ci.engagement_id) AS lead
-         FROM hsdg.compliance_instances ci
-         JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
-        WHERE ci.registration_id = ANY($1::uuid[]) AND r.code = ANY($2::text[])
-          AND ci.period_key = ANY($3::text[])`,
-      [registrationIds, codes, periods],
+      `SELECT id, registration_id, code, period_key, status, workflow_status, removed
+         FROM hsdg.return_mark_filings($1::uuid[])`,
+      [registrationIds],
     );
     const done = new Set<string>();
 
-    for (const g of marked) {
+    for (const g of c.gst.filter((x) => x.gstin && x.marks.length)) {
       const registrationId = regOf.get(g.gstin!);
       for (const m of g.marks) {
         // A quarter's mark ('2026-27:Q1') is its quarter-end already.
@@ -511,49 +513,31 @@ export class ClientImportService {
           tally.marksWithoutFiling += 1;
           continue;
         }
-        if (
-          done.has(filing.id) ||
-          filing.status !== 'open' ||
-          filing.workflow_status === 'filed' ||
-          filing.workflow_status === 'not_applicable'
-        ) {
+        const open =
+          filing.status === 'open' &&
+          filing.workflow_status !== 'filed' &&
+          filing.workflow_status !== 'not_applicable';
+        // A month removed from the portal that the client filed shows as filed.
+        const removedButFiled = filing.removed && m.mark === 'filed';
+        if (done.has(filing.id) || !(open || removedButFiled)) {
           tally.marksAlreadyDone += 1;
           continue;
         }
-        if (!filing.lead) {
-          tally.marksNotAllowed += 1;
-          continue;
-        }
-        const filed = m.mark === 'filed';
-        const reason = `Marked ${filed ? 'filed' : 'NA'} in the firm's GST sheet (${g.sheet.trim()}, row ${g.row}).`;
         const res = await client.query(
-          filed
-            ? `UPDATE hsdg.compliance_instances
-                  SET status = 'completed', completed_at = now(), completed_by_employee_id = $2,
-                      version = version + 1
-                WHERE id = $1 AND status = 'open'`
-            : `UPDATE hsdg.compliance_instances
-                  SET status = 'waived', notes = $2, version = version + 1
-                WHERE id = $1 AND status = 'open'`,
-          [filing.id, filed ? (ctx.employeeId ?? null) : reason],
+          `SELECT filing_id FROM hsdg.apply_return_marks($1::uuid[])`,
+          [[filing.id]],
         );
-        if (!res.rowCount) {
-          tally.marksNotAllowed += 1;
-          continue;
-        }
-        await client.query(`SELECT hsdg.refresh_instance_workflow_status($1)`, [filing.id]);
-        await this.audit.recordWith(client, ctx, {
-          action: filed ? 'compliance.instance_completed' : 'compliance.instance_waived',
-          objectType: 'compliance_instance',
-          objectId: filing.id,
-          before: { status: 'open' },
-          after: { status: filed ? 'completed' : 'waived' },
-          reason,
-        });
         done.add(filing.id);
-        tally.marksApplied += 1;
+        if (res.rowCount) tally.marksApplied += 1;
+        else tally.marksAlreadyDone += 1;
       }
     }
+
+    await client.query(
+      `SELECT count(*) FROM hsdg.apply_return_marks(
+         ARRAY(SELECT id FROM hsdg.return_mark_filings($1::uuid[])))`,
+      [[...regOf.values()]],
+    );
   }
 
   /**
