@@ -37,9 +37,19 @@ describe('Notices on Today, search and the bell (e2e)', () => {
     ).rows[0]!.id;
   const today = async (t: string): Promise<TodayView> =>
     (await http().get('/api/v1/work/today').set(bearer(t)).expect(200)).body as TodayView;
-  const inbox = async (t: string): Promise<NotificationItem[]> =>
-    (await http().get('/api/v1/notifications?limit=100').set(bearer(t)).expect(200)).body
-      .items as NotificationItem[];
+  // The notice nudges only: after the whole suite has run, other work fills a
+  // manager's first page of notifications.
+  const inbox = async (t: string): Promise<NotificationItem[]> => {
+    const out: NotificationItem[] = [];
+    for (const type of ['notice_reply_due', 'notice_hearing_due']) {
+      const res = await http()
+        .get(`/api/v1/notifications?limit=100&type=${type}`)
+        .set(bearer(t))
+        .expect(200);
+      out.push(...(res.body.items as NotificationItem[]));
+    }
+    return out;
+  };
   const scan = () => http().post('/api/v1/notifications/scan').set(bearer(mp)).expect(201);
 
   /** A notice owned by Manager X, its internal reply date `replyIn` days from today (IST). */

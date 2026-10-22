@@ -131,9 +131,19 @@ describe('People desk (e2e)', () => {
       const res = await http().get('/api/v1/people/desk').set(bearer(hr)).expect(200);
       expect(res.body.workload.available).toBe(true);
       expect(res.body.queues.map((q: { key: string }) => q.key)).toContain('no_hours_yesterday');
-      const noLogin = res.body.queues.find((q: { key: string }) => q.key === 'no_login');
+      // Its own joiner with no login: other suites link Article North to one.
+      const { rows } = await su.query<{ id: string }>(
+        `INSERT INTO hsdg.employees
+           (employee_code, full_name, grade_id, primary_office_id, employment_status, date_of_joining)
+         SELECT $1, 'Desk No Login', g.id, o.id, 'active', $2
+           FROM hsdg.grades g, hsdg.offices o WHERE g.slug = 'article' AND o.code = 'NORTH'
+         RETURNING id`,
+        [`NL${Date.now()}`.slice(0, 20), daysAgo(3)],
+      );
+      const desk = await http().get('/api/v1/people/desk').set(bearer(hr)).expect(200);
+      const noLogin = desk.body.queues.find((q: { key: string }) => q.key === 'no_login');
       expect(noLogin.people.map((p: { employeeId: string }) => p.employeeId)).toContain(
-        articleNorth,
+        rows[0]!.id,
       );
     });
 
