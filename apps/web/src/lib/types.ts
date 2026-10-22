@@ -542,6 +542,16 @@ export interface EmployeeRow {
   officeCode: string;
 }
 
+/** GET /employees/leads — who can be Engagement Partner / Manager, any office. */
+export interface EngagementLeadRow {
+  id: string;
+  fullName: string;
+  gradeSlug: string;
+  gradeName: string;
+  isPartner: boolean;
+  officeCode: string;
+}
+
 export interface DocumentRow {
   id: string;
   title: string;
