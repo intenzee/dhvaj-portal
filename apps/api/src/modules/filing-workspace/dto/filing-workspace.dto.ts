@@ -46,6 +46,33 @@ export class StreamTreeQueryDto {
   fy?: string;
 }
 
+/** A period on a stream tab — "Remove this month" / restore it. */
+export class PeriodParamDto extends StreamParamDto {
+  @ApiProperty({ example: '2024-12', description: "A month, or a quarter '2026-27:Q2'." })
+  @Matches(/^[A-Za-z0-9:-]{1,24}$/)
+  periodKey!: string;
+}
+
+export class PeriodCleanupDto {
+  @ApiPropertyOptional({ description: 'The registration the tab shows; others are left alone.' })
+  @IsOptional()
+  @IsUUID()
+  registrationId?: string;
+}
+
+/** Firm-wide start fresh: overdue filings for periods ending before `from` go. */
+export class StartFreshDto {
+  @ApiProperty({ example: '2026-09-01' })
+  @IsDateString({ strict: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from!: string;
+
+  @ApiPropertyOptional({ description: 'Count only; change nothing.' })
+  @IsOptional()
+  @IsBoolean()
+  dryRun?: boolean;
+}
+
 export class PatchChecklistItemDto {
   @ApiProperty({ enum: CHECKLIST_ITEM_STATUSES })
   @IsIn(CHECKLIST_ITEM_STATUSES)

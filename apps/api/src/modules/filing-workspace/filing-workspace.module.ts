@@ -6,6 +6,7 @@ import { DocumentsModule } from '../documents/documents.module';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
+import { FilingCleanupService } from './filing-cleanup.service';
 import { MonthlyDataRequestScheduler } from './monthly-data-request.scheduler';
 import { LastPeriodService } from './last-period.service';
 import { LastPeriodController } from './last-period.controller';
@@ -14,6 +15,7 @@ import { FilingRunsService } from './filing-runs.service';
 import { ClientChaseController, FilingRunsController } from './filing-runs.controller';
 import {
   EngagementStreamsController,
+  FilingCleanupController,
   FilingWorkspaceController,
 } from './filing-workspace.controller';
 
@@ -30,6 +32,7 @@ import {
     LastPeriodController,
     FilingRunsController,
     ClientChaseController,
+    FilingCleanupController,
   ],
   providers: [
     FilingWorkspaceService,
@@ -38,6 +41,7 @@ import {
     LastPeriodService,
     ClientChaseService,
     FilingRunsService,
+    FilingCleanupService,
   ],
   exports: [FilingWorkspaceService, MonthlyDataRequestScheduler, ClientChaseService],
 })

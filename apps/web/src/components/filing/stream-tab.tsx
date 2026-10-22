@@ -25,6 +25,7 @@ import { WorkList } from '@/components/tasks/work-list';
 import { filingEnd, filingStatusLabel } from './filing-status';
 import { InstanceWorkspace } from './instance-workspace';
 import { RocEvents } from './roc-events';
+import { PeriodCleanup } from './period-cleanup';
 
 const GST_SECTIONS: { key: PeriodSection; label: string }[] = [
   { key: 'outward', label: 'Outward' },
@@ -330,27 +331,37 @@ export function StreamTab({
                         {p.quarter}
                       </p>
                     )}
-                    <button
-                      type="button"
-                      className="group flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left hover:bg-surface-sunken/50"
-                      aria-expanded={open}
-                      onClick={() => url.set({ [param.key]: open ? null : param.value })}
-                    >
-                      <ExpandToggle open={open} />
-                      <span className="w-24 shrink-0 font-medium text-ink">{p.label}</span>
-                      <span className="flex flex-wrap gap-1">
-                        {sectioned
-                          ? GST_SECTIONS.flatMap((s) =>
-                              (p.sections[s.key] ?? []).map((i) => (
-                                <Pill key={i.instanceId} item={i} stream={stream} label={`${s.label}: ${i.label}`} />
-                              )),
-                            )
-                          : p.items.map((i) => <Pill key={i.instanceId} item={i} stream={stream} />)}
-                      </span>
-                      {p.nextAction && (
-                        <span className="ml-auto text-xs text-ink-muted">Next: {p.nextAction}</span>
+                    <div className="flex flex-wrap items-center hover:bg-surface-sunken/50">
+                      <button
+                        type="button"
+                        className="group flex min-w-0 flex-1 flex-wrap items-center gap-2 px-4 py-2 text-left"
+                        aria-expanded={open}
+                        onClick={() => url.set({ [param.key]: open ? null : param.value })}
+                      >
+                        <ExpandToggle open={open} />
+                        <span className="w-24 shrink-0 font-medium text-ink">{p.label}</span>
+                        <span className="flex flex-wrap gap-1">
+                          {sectioned
+                            ? GST_SECTIONS.flatMap((s) =>
+                                (p.sections[s.key] ?? []).map((i) => (
+                                  <Pill key={i.instanceId} item={i} stream={stream} label={`${s.label}: ${i.label}`} />
+                                )),
+                              )
+                            : p.items.map((i) => <Pill key={i.instanceId} item={i} stream={stream} />)}
+                        </span>
+                        {p.nextAction && (
+                          <span className="ml-auto text-xs text-ink-muted">Next: {p.nextAction}</span>
+                        )}
+                      </button>
+                      {ctx.isLead && (
+                        <PeriodCleanup
+                          engagementId={engagementId}
+                          stream={stream}
+                          period={p}
+                          registrationId={tree.registrationId}
+                        />
                       )}
-                    </button>
+                    </div>
                     {open && (
                       <div data-open-period={p.periodKey} className="border-l-4 border-l-primary-600 bg-surface-sunken/40 px-4 py-3">
                         {sectioned ? (
