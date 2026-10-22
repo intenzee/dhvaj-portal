@@ -33,6 +33,7 @@ import {
   workLinkOf,
 } from '../../../common/work-links';
 import { AuditService } from '../../audit/audit.service';
+import { notLinkedToEmployee } from '../../../common/errors/staff-link.messages';
 
 interface TimeEntryRow {
   id: string;
@@ -127,9 +128,7 @@ export class TimeTrackingService {
     note: string | undefined,
   ): Promise<TimeEntryRecord> {
     if (!ctx.employeeId) {
-      throw new BadRequestException(
-        'Your account is not linked to an employee record, so you cannot log time.',
-      );
+      throw new BadRequestException(notLinkedToEmployee('log time'));
     }
     return this.db.withRlsContext(ctx, async (client) => {
       // The engagement must be visible to the caller (RLS); a clean 404 rather
@@ -193,7 +192,7 @@ export class TimeTrackingService {
     note: string | undefined,
   ): Promise<TimeEntryRecord> {
     if (!ctx.employeeId) {
-      throw new BadRequestException('Your account is not linked to an employee record.');
+      throw new BadRequestException(notLinkedToEmployee('log time'));
     }
     return this.db.withRlsContext(ctx, async (client) => {
       // COALESCE keeps the original note when no closing note is supplied.
