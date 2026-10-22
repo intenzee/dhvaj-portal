@@ -90,6 +90,7 @@ export * from './filing-runs';
 export * from './client-chase';
 export * from './work-today';
 export * from './workflow-settings';
+export * from './firm-checks';
 export * from './search';
 export * from './feature-rollout';
 export * from './credentials';
