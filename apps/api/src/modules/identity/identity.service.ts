@@ -413,9 +413,10 @@ export class IdentityService {
   }
 
   /**
-   * Give a staff-role user the employee record their roles imply, so a new
-   * Partner or Manager can be put on engagements straight away (Engagement
-   * Partner / Manager are employees at a grade, not roles). See
+   * Give a user the employee record their roles imply, so a new Partner or
+   * Manager can lead engagements straight away (Engagement Partner / Manager
+   * are employees at a grade, not roles) and anyone can file, log time and act
+   * on tasks (those need ctx_employee_id). Support roles get article grade. See
    * hsdg.sync_employee_from_roles: links or creates, raises grade, never lowers.
    */
   private async syncEmployee(client: PoolClient, ctx: RlsContext, userId: string): Promise<void> {

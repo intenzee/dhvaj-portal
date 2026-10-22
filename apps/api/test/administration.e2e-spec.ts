@@ -296,19 +296,29 @@ describe('Administration (e2e)', () => {
         expect(await leadIds()).not.toContain(emp!.id);
       });
 
-      it('creates no employee for a non-fee-earning role (admin only)', async () => {
-        const created = await request(app.getHttpServer())
-          .post('/api/v1/users')
-          .set(bearer(await token('admin@dhvaj.in')))
-          .send({
-            email: `qa.${uniq()}@dhvaj.in`,
-            displayName: `Ops ${uniq()}`,
-            officeCode: 'NORTH',
-            roles: ['admin'],
-          })
-          .expect(201);
-        expect(await employeeOf(created.body.id)).toBeUndefined();
-      });
+      it.each(['accountant', 'hr', 'admin'])(
+        'gives a %s-only login an article-grade employee, never an engagement lead',
+        async (role) => {
+          const created = await request(app.getHttpServer())
+            .post('/api/v1/users')
+            .set(bearer(await token('admin@dhvaj.in')))
+            .send({
+              email: `qa.${uniq()}@dhvaj.in`,
+              displayName: `Support ${uniq()}`,
+              officeCode: 'NORTH',
+              roles: [role],
+            })
+            .expect(201);
+          const emp = await employeeOf(created.body.id);
+          expect(emp?.gradeSlug).toBe('article');
+
+          const leads = await request(app.getHttpServer())
+            .get('/api/v1/employees/leads')
+            .set(bearer(await token('mp@dhvaj.in')))
+            .expect(200);
+          expect((leads.body as Array<{ id: string }>).map((r) => r.id)).not.toContain(emp!.id);
+        },
+      );
     });
 
     it('rejects an unknown role slug (400)', async () => {

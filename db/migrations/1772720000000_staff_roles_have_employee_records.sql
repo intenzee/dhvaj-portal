@@ -7,9 +7,13 @@
 -- appeared as an Engagement Partner / Manager: those pickers, the
 -- engagements FKs and enforce_engagement_grades() all read employee grade.
 --
--- hsdg.sync_employee_from_roles(user) closes the gap. For an active user
--- whose roles imply a grade (managing_partner/partner → partner, manager,
--- senior, article) it:
+-- Filing work, time and task actions also need an employee (ctx_employee_id),
+-- so every role gets one — the support roles (accountant, hr, admin) at
+-- article grade, below the manager grade any engagement-lead picker needs.
+--
+-- hsdg.sync_employee_from_roles(user) closes the gap. For an active user it
+-- takes the highest grade their roles imply (managing_partner/partner →
+-- partner, manager, senior; article, accountant, hr, admin → article) and:
 --   · links the one unlinked employee with exactly the same name, else
 --     creates one (today's date, the user's office, code U + id prefix);
 --   · raises a linked employee's grade to what the roles imply. Never
@@ -48,12 +52,15 @@ BEGIN
          WHEN 'manager' THEN 'manager'
          WHEN 'senior' THEN 'senior'
          WHEN 'article' THEN 'article'
+         WHEN 'accountant' THEN 'article'
+         WHEN 'hr' THEN 'article'
+         WHEN 'admin' THEN 'article'
        END
   WHERE ur.user_id = p_user
   ORDER BY g.rank DESC
   LIMIT 1;
   IF NOT FOUND THEN
-    RETURN; -- admin / accountant / hr only: not fee-earning staff.
+    RETURN; -- no roles yet.
   END IF;
 
   SELECT e.id, g.rank INTO emp_id, emp_rank
