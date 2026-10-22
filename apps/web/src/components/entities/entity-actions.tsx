@@ -149,6 +149,46 @@ function useEntityInvalidate(entityId: string): () => void {
   };
 }
 
+/** Trash button on a registration row — removes one recorded in error, after a confirm. */
+export function RemoveRegistrationButton({
+  entityId,
+  registration,
+}: {
+  entityId: string;
+  registration: { id: string; registrationType: string; registrationNumber: string };
+}): JSX.Element {
+  const toast = useToast();
+  const invalidate = useEntityInvalidate(entityId);
+  const remove = useMutation({
+    mutationFn: () =>
+      apiFetch(`/entities/${entityId}/registrations/${registration.id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      toast('Registration removed.');
+      invalidate();
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not remove the registration.', 'error'),
+  });
+  const label = `${humanize(registration.registrationType)} ${registration.registrationNumber}`;
+
+  return (
+    <button
+      type="button"
+      className="rounded p-1 text-ink-faint hover:bg-surface-sunken hover:text-danger-600 disabled:opacity-50"
+      disabled={remove.isPending}
+      onClick={() => {
+        if (window.confirm(`Remove ${label} from this client? This cannot be undone.`)) {
+          remove.mutate();
+        }
+      }}
+      aria-label={`Remove ${label}`}
+      title="Remove"
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  );
+}
+
 export function EditEntityModal({
   entity,
   onClose,

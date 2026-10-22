@@ -178,6 +178,17 @@ export class EntitiesController {
     return this.entities.verifyRegistration(rlsContextFromPrincipal(principal), id, registrationId);
   }
 
+  @Delete(':id/registrations/:registrationId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Remove a registration recorded in error (audited)' })
+  removeRegistration(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('registrationId', new ParseUUIDPipe()) registrationId: string,
+  ): Promise<EntityDetail> {
+    return this.entities.removeRegistration(rlsContextFromPrincipal(principal), id, registrationId);
+  }
+
   @Post(':id/contacts')
   @RequirePermissions(PERMISSION.entityManage)
   @ApiOperation({ summary: 'Add a contact/signatory to an entity (audited)' })
