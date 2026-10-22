@@ -709,15 +709,20 @@ export class ComplianceGeneratorService {
 
     // A period that replaces another on the same date (a small company's Jul–Dec
     // board meeting ends 31 Dec, as Q3 did) takes over the row it replaces:
-    // one row per rule and reference date (compliance_instances_unique).
+    // one row per rule, registration and reference date
+    // (compliance_instances_unique). Per-director rows are keyed by period alone.
     const pending = toInsert.splice(0);
     for (const d of pending) {
-      const x = existing.find(
-        (e) =>
-          e.compliance_rule_id === d.ruleId &&
-          e.reference_date === d.referenceDate &&
-          !seen.has(keyOf(e.compliance_rule_id, e.registration_id, e.period_key)),
-      );
+      const x = d.periodKey.includes(':DIN:')
+        ? undefined
+        : existing.find(
+            (e) =>
+              e.compliance_rule_id === d.ruleId &&
+              e.registration_id === d.registrationId &&
+              e.reference_date === d.referenceDate &&
+              !e.period_key?.includes(':DIN:') &&
+              !seen.has(keyOf(e.compliance_rule_id, e.registration_id, e.period_key)),
+          );
       if (!x) {
         toInsert.push(d);
         continue;

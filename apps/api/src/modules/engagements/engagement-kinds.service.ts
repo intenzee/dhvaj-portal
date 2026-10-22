@@ -601,61 +601,66 @@ export class EngagementKindsService {
     engagementId: string,
     input: AddComplianceYearInput,
   ): Promise<ComplianceEngagementYear> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const eng = await this.loadCompliance(client, engagementId);
-      const latest = await client.query<YearRow>(
-        `SELECT ${YEAR_COLUMNS} FROM hsdg.compliance_engagement_years
-          WHERE engagement_id = $1 ORDER BY financial_year DESC LIMIT 1`,
-        [engagementId],
-      );
-      const streams = input.streams ?? latest.rows[0]?.streams ?? [];
-      if (streams.length === 0)
-        throw new BadRequestException('Pick at least one stream for the year.');
-      const registrations = input.streamRegistrations
-        ? await this.validateRegistrations(
-            client,
-            eng.entity_id,
-            streams,
-            input.streamRegistrations,
-          )
-        : pick(latest.rows[0]?.stream_registrations ?? {}, streams);
+    return this.db.withRlsContext(ctx, (client) =>
+      this.addYearWith(client, ctx, engagementId, input),
+    );
+  }
 
-      const kc = await this.kindContext(client, eng.entity_id);
-      const findings = evaluateIndependence(
-        {
-          isCompany: kc.isCompany,
-          kind: 'compliance',
-          financialYears: [input.financialYear],
-          streams,
-          s144ApprovalRef: input.s144ApprovalRef,
-          engagementId,
-        },
-        kc.facts,
-      );
-      this.enforce(findings, input.acknowledgedIndependenceRules, true);
+  /** addYear on the caller's transaction (the client import adds a GST year). */
+  async addYearWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    input: AddComplianceYearInput,
+  ): Promise<ComplianceEngagementYear> {
+    const eng = await this.loadCompliance(client, engagementId);
+    const latest = await client.query<YearRow>(
+      `SELECT ${YEAR_COLUMNS} FROM hsdg.compliance_engagement_years
+        WHERE engagement_id = $1 ORDER BY financial_year DESC LIMIT 1`,
+      [engagementId],
+    );
+    const streams = input.streams ?? latest.rows[0]?.streams ?? [];
+    if (streams.length === 0)
+      throw new BadRequestException('Pick at least one stream for the year.');
+    const registrations = input.streamRegistrations
+      ? await this.validateRegistrations(client, eng.entity_id, streams, input.streamRegistrations)
+      : pick(latest.rows[0]?.stream_registrations ?? {}, streams);
 
-      await this.ensureStreamLines(client, engagementId, eng.office_id, 'active', streams);
-      try {
-        await this.insertYear(client, engagementId, input, streams, registrations);
-      } catch (err) {
-        throw yearPgError(err);
-      }
-      await this.recordChecks(
-        client,
-        ctx,
+    const kc = await this.kindContext(client, eng.entity_id);
+    const findings = evaluateIndependence(
+      {
+        isCompany: kc.isCompany,
+        kind: 'compliance',
+        financialYears: [input.financialYear],
+        streams,
+        s144ApprovalRef: input.s144ApprovalRef,
         engagementId,
-        findings,
-        input.acknowledgedIndependenceRules,
-      );
-      await this.generate(client, engagementId, [input.financialYear]);
-      await this.audit.recordWith(client, ctx, {
-        action: 'engagement.year_added',
-        objectType: 'engagement',
-        objectId: engagementId,
-        after: { financialYear: input.financialYear, streams },
-      });
-      return this.yearOrThrow(client, engagementId, input.financialYear, kc);
+      },
+      kc.facts,
+    );
+    this.enforce(findings, input.acknowledgedIndependenceRules, true);
+
+    await this.ensureStreamLines(client, engagementId, eng.office_id, 'active', streams);
+    try {
+      await this.insertYear(client, engagementId, input, streams, registrations);
+    } catch (err) {
+      throw yearPgError(err);
+    }
+    await this.recordChecks(
+      client,
+      ctx,
+      engagementId,
+      findings,
+      input.acknowledgedIndependenceRules,
+    );
+    await this.generate(client, engagementId, [input.financialYear]);
+    await this.audit.recordWith(client, ctx, {
+      action: 'engagement.year_added',
+      objectType: 'engagement',
+      objectId: engagementId,
+      after: { financialYear: input.financialYear, streams },
     });
+    return this.yearOrThrow(client, engagementId, input.financialYear, kc);
   }
 
   async updateYear(
@@ -732,83 +737,89 @@ export class EngagementKindsService {
     fy: string,
     input: UpdateYearStreamsInput,
   ): Promise<ComplianceEngagementYear> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const eng = await this.loadCompliance(client, engagementId);
-      const kc = await this.kindContext(client, eng.entity_id);
-      const before = await this.yearOrThrow(client, engagementId, fy, kc);
-      const add = (input.add ?? []).filter((s) => !before.streams.includes(s));
-      const end = new Set(input.end ?? []);
-      if ((input.add ?? []).some((s) => end.has(s))) {
-        throw new BadRequestException('A stream cannot be added and ended at once.');
-      }
-      const streams = STREAMS.filter(
-        (s) => (before.streams.includes(s) || add.includes(s)) && !end.has(s),
-      );
-      if (streams.length === 0) {
-        throw new BadRequestException('A year keeps at least one stream — close the year instead.');
-      }
+    return this.db.withRlsContext(ctx, (client) =>
+      this.updateYearStreamsWith(client, ctx, engagementId, fy, input),
+    );
+  }
 
-      const findings = add.length
-        ? evaluateIndependence(
-            {
-              isCompany: kc.isCompany,
-              kind: 'compliance',
-              financialYears: [fy],
-              streams: add,
-              s144ApprovalRef: before.s144ApprovalRef,
-              engagementId,
-            },
-            kc.facts,
-          )
-        : [];
-      this.enforce(findings, input.acknowledgedIndependenceRules, true);
+  /** updateYearStreams on the caller's transaction (the client import adds GST). */
+  async updateYearStreamsWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    fy: string,
+    input: UpdateYearStreamsInput,
+  ): Promise<ComplianceEngagementYear> {
+    const eng = await this.loadCompliance(client, engagementId);
+    const kc = await this.kindContext(client, eng.entity_id);
+    const before = await this.yearOrThrow(client, engagementId, fy, kc);
+    const add = (input.add ?? []).filter((s) => !before.streams.includes(s));
+    const end = new Set(input.end ?? []);
+    if ((input.add ?? []).some((s) => end.has(s))) {
+      throw new BadRequestException('A stream cannot be added and ended at once.');
+    }
+    const streams = STREAMS.filter(
+      (s) => (before.streams.includes(s) || add.includes(s)) && !end.has(s),
+    );
+    if (streams.length === 0) {
+      throw new BadRequestException('A year keeps at least one stream — close the year instead.');
+    }
 
-      const given = input.streamRegistrations
-        ? await this.validateRegistrations(
-            client,
-            eng.entity_id,
-            streams,
-            input.streamRegistrations,
-          )
-        : {};
-      const registrations = { ...pick(before.streamRegistrations, streams), ...given };
+    const findings = add.length
+      ? evaluateIndependence(
+          {
+            isCompany: kc.isCompany,
+            kind: 'compliance',
+            financialYears: [fy],
+            streams: add,
+            s144ApprovalRef: before.s144ApprovalRef,
+            engagementId,
+          },
+          kc.facts,
+        )
+      : [];
+    this.enforce(findings, input.acknowledgedIndependenceRules, true);
 
-      await this.ensureStreamLines(
-        client,
-        engagementId,
-        eng.office_id,
-        'active',
-        add,
-        input.streamLeads,
-      );
-      const r = await client.query(
-        `UPDATE hsdg.compliance_engagement_years
-            SET streams = $4, stream_registrations = $5, version = version + 1
-          WHERE engagement_id = $1 AND financial_year = $2 AND version = $3`,
-        [engagementId, fy, input.version, streams, JSON.stringify(registrations)],
-      );
-      if ((r.rowCount ?? 0) === 0)
-        await this.staleOrForbidden(client, engagementId, fy, input.version);
-      await this.recordChecks(
-        client,
-        ctx,
-        engagementId,
-        findings,
-        input.acknowledgedIndependenceRules,
-      );
-      const ended = before.streams.filter((s) => end.has(s));
-      await this.generator.endStreams(client, engagementId, fy, ended);
-      if (before.status === 'open') await this.generate(client, engagementId, [fy]);
-      const after = await this.yearOrThrow(client, engagementId, fy, kc);
-      await this.audit.recordWith(client, ctx, {
-        action: 'engagement.year_streams_changed',
-        objectType: 'engagement',
-        objectId: engagementId,
-        before: { streams: before.streams },
-        after: { streams: after.streams, added: add, ended },
-      });
-      return after;
+    const given = input.streamRegistrations
+      ? await this.validateRegistrations(client, eng.entity_id, streams, input.streamRegistrations)
+      : {};
+    const registrations = { ...pick(before.streamRegistrations, streams), ...given };
+
+    await this.ensureStreamLines(
+      client,
+      engagementId,
+      eng.office_id,
+      'active',
+      add,
+      input.streamLeads,
+    );
+    const r = await client.query(
+      `UPDATE hsdg.compliance_engagement_years
+          SET streams = $4, stream_registrations = $5, version = version + 1
+        WHERE engagement_id = $1 AND financial_year = $2 AND version = $3`,
+      [engagementId, fy, input.version, streams, JSON.stringify(registrations)],
+    );
+    if ((r.rowCount ?? 0) === 0)
+      await this.staleOrForbidden(client, engagementId, fy, input.version);
+    await this.recordChecks(
+      client,
+      ctx,
+      engagementId,
+      findings,
+      input.acknowledgedIndependenceRules,
+    );
+    const ended = before.streams.filter((s) => end.has(s));
+    await this.generator.endStreams(client, engagementId, fy, ended);
+    if (before.status === 'open') await this.generate(client, engagementId, [fy]);
+    const after = await this.yearOrThrow(client, engagementId, fy, kc);
+    await this.audit.recordWith(client, ctx, {
+      action: 'engagement.year_streams_changed',
+      objectType: 'engagement',
+      objectId: engagementId,
+      before: { streams: before.streams },
+      after: { streams: after.streams, added: add, ended },
     });
+    return after;
   }
 
   // ── helpers ─────────────────────────────────────────────────────────────

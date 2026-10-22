@@ -32,6 +32,7 @@ import { DataTable } from '@/components/data-table';
 import { EntityDetailActions } from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
+import { ClientReturnsCard } from '@/components/entities/client-returns';
 import {
   ClientLogins,
   CredentialAccessNote,
@@ -244,6 +245,8 @@ export default function EntityDetailPage(): JSX.Element {
           </CardBody>
         </Card>
       </div>
+
+      <ClientReturnsCard entityId={e.id} />
 
       {isOn(FEATURE_FLAG.calendarV2) && <ComplianceProfilesCard entityId={e.id} />}
 

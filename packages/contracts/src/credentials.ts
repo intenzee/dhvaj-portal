@@ -382,6 +382,22 @@ export interface ClientImportRow {
   warnings: string[];
   /** Why the client cannot be imported. */
   error: string | null;
+  /** What the import does to the client's GST engagement for the years the sheet marks. */
+  gstEngagement: ClientImportGstEngagement | null;
+  /** The sheet marks GST returns for it but it has no GSTIN: they cannot go into an engagement. */
+  noGstin: boolean;
+}
+
+/**
+ * The GST engagement the sheet's filed / NA months go into: a new Compliance
+ * engagement with GST, a year or the GST stream added to the client's open
+ * one, or the one it already has. Its filings for those months are then closed.
+ */
+export interface ClientImportGstEngagement {
+  action: 'create' | 'add_year' | 'add_stream' | 'existing';
+  /** The open Compliance engagement it goes into (null when one is created). */
+  engagementCode: string | null;
+  financialYears: string[];
 }
 
 /** POST /client-imports/workbook/preview and POST /client-imports/workbook */
@@ -405,6 +421,10 @@ export interface ClientImportPreview {
   marks: number;
   /** False when logins cannot be saved on this server (no encryption key). */
   vaultReady: boolean;
+  /** Clients that will get a new GST engagement for their filed months. */
+  engagementsToCreate: number;
+  /** Clients whose GST marks have no GSTIN, so no engagement — the person is told. */
+  noGstin: number;
 }
 
 export interface ClientImportResult {
@@ -423,7 +443,95 @@ export interface ClientImportResult {
   marksWithoutFiling: number;
   /** Marks on filings the importer does not lead (left for the engagement's partner or manager). */
   marksNotAllowed: number;
+  /** filed / NA marks kept as the clients' GST return history (new or changed). */
+  marksRecorded: number;
+  /** GST engagements created for clients the sheet marks returns for. */
+  engagementsCreated: number;
+  /** Open Compliance engagements that got the GST stream or a year for the marks. */
+  engagementsExtended: number;
   failed: { source: string; name: string; message: string }[];
   /** Imported, with something to know (a scheme kept, a step not allowed). */
   notes: { source: string; name: string; message: string }[];
+}
+
+// ── The firm's GST return history (from its login workbook) ──────────────
+
+export const RETURN_FORM = { gstr1: 'GSTR1', gstr3b: 'GSTR3B', gstr7: 'GSTR7' } as const;
+export type ReturnForm = (typeof RETURN_FORM)[keyof typeof RETURN_FORM];
+export const RETURN_FORMS: ReturnForm[] = ['GSTR1', 'GSTR3B', 'GSTR7'];
+export const RETURN_FORM_LABEL: Record<ReturnForm, string> = {
+  GSTR1: 'GSTR-1',
+  GSTR3B: 'GSTR-3B',
+  GSTR7: 'GSTR-7',
+};
+
+export const RETURN_MARK = { filed: 'filed', notApplicable: 'not_applicable' } as const;
+export type ReturnMark = (typeof RETURN_MARK)[keyof typeof RETURN_MARK];
+
+const MONTH_ABBR = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** A return period's last month: '2026-04' → '2026-04', '2026-27:Q1' → '2026-06'. For sorting. */
+export function returnPeriodEnd(key: string): string {
+  const q = /^(\d{4})-\d{2}:Q([1-4])$/.exec(key);
+  if (!q) return key;
+  const start = Number(q[1]);
+  const month = Number(q[2]) * 3 + 3;
+  return month > 12
+    ? `${start + 1}-${String(month - 12).padStart(2, '0')}`
+    : `${start}-${String(month).padStart(2, '0')}`;
+}
+
+/** The financial year a return period is in: '2026-04' → '2026-27', '2027-02' → '2026-27', '2026-27:Q1' → '2026-27'. */
+export function returnPeriodFinancialYear(key: string): string | null {
+  const q = /^(\d{4}-\d{2}):Q[1-4]$/.exec(key);
+  if (q) return q[1]!;
+  const m = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!m) return null;
+  const start = Number(m[2]) >= 4 ? Number(m[1]) : Number(m[1]) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+/** '2026-04' → 'Apr-26'; '2026-27:Q1' → 'Q1 26-27'. */
+export function returnPeriodLabel(key: string): string {
+  const q = /^\d{2}(\d{2})-(\d{2}):Q([1-4])$/.exec(key);
+  if (q) return `Q${q[3]} ${q[1]}-${q[2]}`;
+  const m = /^\d{2}(\d{2})-(\d{2})$/.exec(key);
+  if (m) return `${MONTH_ABBR[Number(m[2]) - 1] ?? m[2]}-${m[1]}`;
+  return key;
+}
+
+/** One GSTIN (or one state / the client, while the sheet has no GSTIN) and its marks. */
+export interface ClientReturnLine {
+  entityId: string;
+  entityCode: string;
+  entityName: string;
+  registrationId: string | null;
+  gstin: string | null;
+  stateCode: string | null;
+  /** period key → form → filed / NA */
+  marks: Record<string, Partial<Record<ReturnForm, ReturnMark>>>;
+  /** When the marks were last imported. */
+  updatedAt: string;
+}
+
+/** GET /client-returns */
+export interface ClientReturns {
+  /** The periods with a mark, in order ('2026-04', …, '2026-27:Q1'). */
+  periods: string[];
+  /** The forms with a mark, in RETURN_FORMS order. */
+  forms: ReturnForm[];
+  lines: ClientReturnLine[];
 }

@@ -16,6 +16,8 @@ import {
   type CredentialAccount,
   type CredentialPortal,
   type GstFrequency,
+  type ReturnForm,
+  type ReturnMark,
 } from '@hsdg/contracts';
 
 /**
@@ -24,7 +26,10 @@ import {
  *
  * The "GST Login" sheet: S No | Particular | Frequency | ID | Pwd | GSTIN |
  * then GSTR-1 / GSTR-3 (/ GSTR 7) per month, the month ("Apr-26") in the row
- * above, merged over its columns. "Name (Delhi)" is the client's Delhi GST
+ * above, merged over its columns. A sheet can hold more than one such block
+ * (a "Quarterly Return" block under the monthly one): each heading row
+ * starts a block, and there the quarter ("QTR-1") may be the heading with
+ * the form above it. "Name (Delhi)" is the client's Delhi GST
  * registration. The "TDS Login" sheet: Client name | mail | IT-PAN | PWD |
  * IT-TAN | Pwd | Traces ID (Deductor) | Pwd | Traces ID (Tax Payer) | Pwd.
  * Every other sheet (the ITR sheet) is skipped, as are Fees, DOI, Return
@@ -35,8 +40,8 @@ import {
  * sealing) and never reach a preview or a log.
  */
 
-export type ReturnForm = 'GSTR1' | 'GSTR3B' | 'GSTR7';
-export type FilingMark = 'filed' | 'not_applicable';
+export type { ReturnForm };
+export type FilingMark = ReturnMark;
 
 export interface SheetLogin {
   portal: CredentialPortal;
@@ -47,8 +52,8 @@ export interface SheetLogin {
 }
 
 export interface MonthMark {
-  /** '2026-04' */
-  month: string;
+  /** A month ('2026-04') or a quarter ('2026-27:Q1'). */
+  period: string;
   form: ReturnForm;
   mark: FilingMark;
 }
@@ -137,12 +142,44 @@ export function parseMonth(cell: string, raw?: unknown): string | null {
   return null;
 }
 
+/** The financial year a month is in: '2026-04' → '2026-27', '2027-03' → '2026-27'. */
+export function fyOfMonth(month: string): string {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const start = m >= 4 ? y : y - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+/** A quarter whose year the sheet leaves to its months. */
+const QUARTER_OF_SHEET = '?';
+
+/**
+ * A quarter heading → '2026-27:Q1': "QTR-1", "Q1", "Quarter 1", "Quater1",
+ * "Q1 2026-27". The year, when the cell has none, is '?' (the sheet's months
+ * settle it). Null otherwise. Pure — tested.
+ */
+export function parseQuarter(cell: string): string | null {
+  const m =
+    /^(?:q|qtr|quarter|quater|qr)[\s\-.]*([1-4])(?:\s*(?:fy)?[\s\-,(]*(\d{4})\s*[-–/]\s*(\d{2}|\d{4})\)?)?$/.exec(
+      cell.trim().toLowerCase(),
+    );
+  if (!m) return null;
+  const fy = m[2] ? `${m[2]}-${m[3]!.slice(-2)}` : QUARTER_OF_SHEET;
+  return `${fy}:Q${m[1]}`;
+}
+
+/** A month or quarter heading → its period key. Pure. */
+export function parsePeriod(cell: string, raw?: unknown): string | null {
+  return parseMonth(cell, raw) ?? parseQuarter(cell);
+}
+
 /** A return cell → filed / not applicable, null when empty, 'other' otherwise. Pure — tested. */
 export function parseMark(cell: string, raw?: unknown): FilingMark | 'other' | null {
   const t = cell.trim().toLowerCase();
   if (!t) return null;
   if (/^(n\.?\s*\/?\s*a\.?|not\s*applicable)$/.test(t)) return 'not_applicable';
   if (/^(filed|file|done|yes|y|ok|✓|✔)\b/.test(t) || t === '✓' || t === '✔') return 'filed';
+  // A nil return is a return filed.
+  if (/^nil\b/.test(t)) return 'filed';
   // A filing date in the cell means it was filed.
   if (typeof raw === 'number' && raw > 20000 && raw < 80000) return 'filed';
   if (/^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}$/.test(t)) return 'filed';
@@ -184,6 +221,57 @@ export function nameKey(name: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+const LEGAL_FORM_WORDS = new Set(['m', 's', 'pvt', 'private', 'ltd', 'limited', 'llp', 'opc']);
+
+/** A name's words without its legal form: 'M/s Drift Logistics Pvt. Ltd.' → drift, logistics. */
+function nameWords(name: string): string[] {
+  return name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !LEGAL_FORM_WORDS.has(w));
+}
+
+/** At most one letter added, dropped, changed or swapped with the next between a and b. */
+function withinOneEdit(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  if (a.length === b.length)
+    return (
+      a.slice(i + 1) === b.slice(i + 1) ||
+      (a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2))
+    );
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/**
+ * Whether two sheets probably name the same client: equal but for the legal
+ * form, one letter apart in a long name ('Cosmotrendz' / 'Cosmotrendez'), or
+ * one the leading words of the other ('griid' / 'GRIID Chandigarh'). Pure — tested.
+ */
+export function similarNames(a: string, b: string): boolean {
+  const wa = nameWords(a);
+  const wb = nameWords(b);
+  const ka = wa.join('');
+  const kb = wb.join('');
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  if (Math.min(ka.length, kb.length) >= 8 && withinOneEdit(ka, kb)) return true;
+  const [short, long] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
+  return short.join('').length >= 4 && short.every((w, i) => long[i] === w);
+}
+
+/**
+ * Whether two names start with the same word, give or take a letter
+ * ('3Acess' / '3Aces Technologies - Firm'). Too loose to match clients on;
+ * with the same login it points out a likely duplicate. Pure — tested.
+ */
+export function sameFirstWord(a: string, b: string): boolean {
+  const [wa] = nameWords(a);
+  const [wb] = nameWords(b);
+  return Boolean(wa && wb && Math.min(wa.length, wb.length) >= 4 && withinOneEdit(wa, wb));
+}
+
 // ── Headings ─────────────────────────────────────────────────────────────
 
 type Role =
@@ -199,7 +287,8 @@ export function roleOfHeading(raw: string): Role | null {
   if (!n) return null;
   if (/^(pwd|pass|passwd|password)/.test(n) || t.includes('pwd') || n.includes('password'))
     return { kind: 'password' };
-  const gstr = /^gstr(\d+)/.exec(n);
+  // "GSTR-1", "GSTR 3B", and "GST-1" as typed in a hurry.
+  const gstr = /^gstr?(\d+)/.exec(n);
   if (gstr || n === 'iff') {
     const form =
       n === 'iff' || gstr![1] === '1'
@@ -257,45 +346,86 @@ function gridOf(sheet: XLSX.WorkSheet): Grid {
 
 const SCORED = new Set(['name', 'password', 'gstin', 'pan', 'tan', 'login', 'frequency', 'return']);
 
+/** How much a row reads like the firm's headings: the kinds it names, 0 without a name column. */
+function headingScore(row: string[]): number {
+  const roles = row.map(roleOfHeading).filter((r): r is Role => r !== null);
+  const kinds = new Set(roles.map((r) => r.kind).filter((k) => SCORED.has(k)));
+  return kinds.has('name') ? kinds.size : 0;
+}
+
 /** The heading row: among the first 15, the one that reads most like the firm's headings. */
 function findHeadingRow(cells: string[][]): number {
   let best = -1;
   let bestScore = 0;
   for (let i = 0; i < Math.min(cells.length, 15); i += 1) {
-    const roles = cells[i]!.map(roleOfHeading).filter((r): r is Role => r !== null);
-    const kinds = new Set(roles.map((r) => r.kind).filter((k) => SCORED.has(k)));
-    if (!kinds.has('name')) continue;
-    if (kinds.size > bestScore) {
+    const score = headingScore(cells[i]!);
+    if (score > bestScore) {
       best = i;
-      bestScore = kinds.size;
+      bestScore = score;
     }
   }
   return bestScore >= 3 ? best : -1;
 }
 
+const HEADING_NAME = /^(particulars?|party|clients?|(client|party)?name|nameof\w*)$/;
+
+/**
+ * A heading row further down ("Particular | ID | Pwd | GSTIN | QTR-1 …"
+ * under a "Quarterly Return" band): heading words, not a client's values.
+ */
+function isLaterHeading(row: string[]): boolean {
+  if (headingScore(row) < 3) return false;
+  if (!row.some((c) => HEADING_NAME.test(normalizeHeader(c)))) return false;
+  return !row.some((c) => isValidGstin(normalizeGstin(c)) || parseMark(c) === 'filed');
+}
+
+/** Each block's heading row, in order. */
+function headingRows(cells: string[][]): number[] {
+  const first = findHeadingRow(cells);
+  if (first < 0) return [];
+  const out = [first];
+  for (let i = first + 1; i < cells.length; i += 1) if (isLaterHeading(cells[i]!)) out.push(i);
+  return out;
+}
+
+/** The band over a heading row: its title, months or forms, not a client. */
+function isBand(row: string[]): boolean {
+  if (row.filter((c) => c !== '').length <= 1) return true;
+  return row.some((c) => roleOfHeading(c)?.kind === 'return' || parsePeriod(c) !== null);
+}
+
 interface Layout {
   kind: 'gst' | 'tds';
   headingAt: number;
+  /** The first row after the block. */
+  endAt: number;
   roles: (Role | null)[];
-  /** Column → its month, for the return columns. */
-  monthOf: Map<number, string>;
+  /** Return column → its period and form. */
+  returns: Map<number, { period: string; form: ReturnForm }>;
   /** Password column → its user-ID column. */
   pairs: Map<number, number>;
   notes: string[];
 }
 
-function layoutOf(name: string, grid: Grid): Layout | { skip: string } {
-  const headingAt = findHeadingRow(grid.cells);
-  if (headingAt < 0) return { skip: 'Not a login sheet: no IDs, passwords or GSTINs.' };
-  const roles = grid.cells[headingAt]!.map(roleOfHeading);
-  const has = (k: Role['kind']): boolean => roles.some((r) => r?.kind === k);
+function layoutOf(name: string, grid: Grid, headingAt: number, endAt: number): Layout | null {
+  const heading = grid.cells[headingAt]!;
+  const above = grid.cells[headingAt - 1] ?? [];
+  const aboveRaw = grid.raw[headingAt - 1] ?? [];
+  const headingRaw = grid.raw[headingAt] ?? [];
+  const roles = heading.map(roleOfHeading);
+  // A form in the band over a heading that is a period ("QTR-1" under "GSTR-1").
+  const formAbove = above.map(roleOfHeading);
+  const isReturn = (c: number): boolean =>
+    roles[c]?.kind === 'return' || (!roles[c] && formAbove[c]?.kind === 'return');
+  const has = (k: Role['kind']): boolean =>
+    roles.some((r) => r?.kind === k) || (k === 'return' && heading.some((_, c) => isReturn(c)));
   const sheetName = name.toLowerCase();
   const gstLike = has('gstin') || has('return') || has('frequency') || /\bgst\b/.test(sheetName);
   const tdsLike =
     has('tan') ||
     roles.some((r) => r?.kind === 'login' && r.portal === 'traces') ||
     /tds|income/.test(sheetName);
-  if (!has('password') && !has('gstin')) return { skip: 'No logins or GSTINs in it.' };
+  if (!has('password') && !has('gstin')) return null;
   const kind: Layout['kind'] = gstLike ? 'gst' : tdsLike ? 'tds' : 'gst';
   const notes: string[] = [];
 
@@ -316,26 +446,26 @@ function layoutOf(name: string, grid: Grid): Layout | { skip: string } {
     notes.push(`The password in column ${XLSX.utils.encode_col(c)} has no user ID beside it.`);
   });
 
-  // Months: the row above the headings, a month carried right over its columns.
-  const monthOf = new Map<number, string>();
-  if (roles.some((r) => r?.kind === 'return')) {
-    const above = grid.cells[headingAt - 1] ?? [];
-    const aboveRaw = grid.raw[headingAt - 1] ?? [];
-    let current: string | null = null;
-    let missing = 0;
-    roles.forEach((r, c) => {
-      const m = parseMonth(above[c] ?? '', aboveRaw[c]);
-      if (m) current = m;
-      if (r?.kind !== 'return' || !r.form) return;
-      if (current) monthOf.set(c, current);
-      else missing += 1;
-    });
-    if (missing)
-      notes.push(`${missing} return column(s) have no month above them and were left out.`);
-    const other = roles.filter((r) => r?.kind === 'return' && !r.form).length;
-    if (other) notes.push(`${other} return column(s) other than GSTR-1, 3B and 7 were left out.`);
+  // Periods: in the band above or in the heading, carried right over their columns.
+  const returns = new Map<number, { period: string; form: ReturnForm }>();
+  let current: string | null = null;
+  let missing = 0;
+  let other = 0;
+  for (let c = 0; c < Math.max(heading.length, above.length); c += 1) {
+    const period =
+      parsePeriod(above[c] ?? '', aboveRaw[c]) ?? parsePeriod(heading[c] ?? '', headingRaw[c]);
+    if (period) current = period;
+    if (!isReturn(c)) continue;
+    const role = roles[c]?.kind === 'return' ? roles[c] : formAbove[c];
+    const form = role?.kind === 'return' ? role.form : null;
+    if (!form) other += 1;
+    else if (current) returns.set(c, { period: current, form });
+    else missing += 1;
   }
-  return { kind, headingAt, roles, monthOf, pairs, notes };
+  if (missing)
+    notes.push(`${missing} return column(s) have no month above them and were left out.`);
+  if (other) notes.push(`${other} return column(s) other than GSTR-1, 3B and 7 were left out.`);
+  return { kind, headingAt, endAt, roles, returns, pairs, notes };
 }
 
 function loginTarget(
@@ -361,10 +491,12 @@ interface ReadRow {
 
 function readRows(grid: Grid, layout: Layout): ReadRow[] {
   const out: ReadRow[] = [];
-  for (let i = layout.headingAt + 1; i < grid.cells.length; i += 1) {
+  for (let i = layout.headingAt + 1; i < layout.endAt; i += 1) {
     const cells = grid.cells[i]!;
     const raw = grid.raw[i] ?? [];
     if (cells.every((c) => c === '')) continue;
+    // The next block's band ("Quarterly Return", its forms) is not a client.
+    if (i === layout.endAt - 1 && layout.endAt < grid.cells.length && isBand(cells)) continue;
     const value = (kind: Role['kind']): string => {
       const c = layout.roles.findIndex((r) => r?.kind === kind);
       return c < 0 ? '' : (cells[c] ?? '');
@@ -381,12 +513,10 @@ function readRows(grid: Grid, layout: Layout): ReadRow[] {
     }
     const marks: MonthMark[] = [];
     let otherMarks = 0;
-    for (const [c, month] of layout.monthOf) {
-      const role = layout.roles[c]!;
-      if (role.kind !== 'return' || !role.form) continue;
+    for (const [c, { period, form }] of layout.returns) {
       const mark = parseMark(cells[c] ?? '', raw[c]);
       if (mark === 'other') otherMarks += 1;
-      else if (mark) marks.push({ month, form: role.form, mark });
+      else if (mark) marks.push({ period, form, mark });
     }
     // A heading inside the list ("Quarterly clients") is a lone cell, not a client.
     const filled = cells.filter((c) => c !== '').length;
@@ -398,9 +528,11 @@ function readRows(grid: Grid, layout: Layout): ReadRow[] {
 
 /**
  * Reads every sheet of the workbook: the GST and TDS login sheets, by their
- * headings. Throws a plain Error with a person-readable message. Pure — tested.
+ * headings. A quarter heading without its year ("QTR-1") takes the financial
+ * year of the sheet's first month, else of `today`. Throws a plain Error
+ * with a person-readable message. Pure — tested.
  */
-export function parseClientWorkbook(bytes: Buffer): ParsedWorkbook {
+export function parseClientWorkbook(bytes: Buffer, today: Date = new Date()): ParsedWorkbook {
   let workbook: XLSX.WorkBook;
   try {
     workbook = XLSX.read(bytes, { type: 'buffer', dense: true });
@@ -414,52 +546,68 @@ export function parseClientWorkbook(bytes: Buffer): ParsedWorkbook {
 
   for (const name of workbook.SheetNames) {
     const grid = gridOf(workbook.Sheets[name]!);
-    const layout = layoutOf(name, grid);
-    if ('skip' in layout) {
-      sheets.push({ name, kind: 'skipped', rows: 0, note: layout.skip });
+    const starts = headingRows(grid.cells);
+    if (starts.length === 0) {
+      sheets.push({
+        name,
+        kind: 'skipped',
+        rows: 0,
+        note: 'Not a login sheet: no IDs, passwords or GSTINs.',
+      });
       continue;
     }
-    const rows = readRows(grid, layout);
+    const layouts = starts
+      .map((at, b) => layoutOf(name, grid, at, starts[b + 1] ?? grid.cells.length))
+      .filter((l): l is Layout => l !== null);
+    if (layouts.length === 0) {
+      sheets.push({ name, kind: 'skipped', rows: 0, note: 'No logins or GSTINs in it.' });
+      continue;
+    }
+    let rowCount = 0;
     let otherMarks = 0;
-    for (const r of rows) {
-      otherMarks += r.otherMarks;
-      if (layout.kind === 'gst') {
-        const split = splitStateFromName(r.value('name'));
-        const frequencyRaw = r.value('frequency');
-        for (const m of r.marks) months.add(m.month);
-        gst.push({
-          sheet: name,
-          row: r.row,
-          name: split.name,
-          nameState: split.state,
-          gstin: normalizeGstin(r.value('gstin')),
-          frequency: parseFrequency(frequencyRaw),
-          frequencyRaw,
-          pan: r.value('pan').toUpperCase(),
-          email: r.value('email'),
-          phone: r.value('phone'),
-          logins: r.logins,
-          halfLogins: r.halfLogins,
-          marks: r.marks,
-        });
-      } else {
-        tds.push({
-          sheet: name,
-          row: r.row,
-          name: splitStateFromName(r.value('name')).name,
-          pan: r.value('pan').replace(/\s+/g, '').toUpperCase(),
-          tan: r.value('tan').replace(/\s+/g, '').toUpperCase(),
-          email: r.value('email'),
-          phone: r.value('phone'),
-          logins: r.logins,
-          halfLogins: r.halfLogins,
-        });
+    for (const layout of layouts) {
+      const rows = readRows(grid, layout);
+      rowCount += rows.length;
+      for (const r of rows) {
+        otherMarks += r.otherMarks;
+        if (layout.kind === 'gst') {
+          const split = splitStateFromName(r.value('name'));
+          const frequencyRaw = r.value('frequency');
+          for (const m of r.marks) if (!m.period.includes(':')) months.add(m.period);
+          gst.push({
+            sheet: name,
+            row: r.row,
+            name: split.name,
+            nameState: split.state,
+            gstin: normalizeGstin(r.value('gstin')),
+            frequency: parseFrequency(frequencyRaw),
+            frequencyRaw,
+            pan: r.value('pan').toUpperCase(),
+            email: r.value('email'),
+            phone: r.value('phone'),
+            logins: r.logins,
+            halfLogins: r.halfLogins,
+            marks: r.marks,
+          });
+        } else {
+          tds.push({
+            sheet: name,
+            row: r.row,
+            name: splitStateFromName(r.value('name')).name,
+            pan: r.value('pan').replace(/\s+/g, '').toUpperCase(),
+            tan: r.value('tan').replace(/\s+/g, '').toUpperCase(),
+            email: r.value('email'),
+            phone: r.value('phone'),
+            logins: r.logins,
+            halfLogins: r.halfLogins,
+          });
+        }
       }
     }
-    const notes = [...layout.notes];
+    const notes = [...new Set(layouts.flatMap((l) => l.notes))];
     if (otherMarks)
       notes.push(`${otherMarks} return cell(s) were neither "filed" nor "NA" and were left alone.`);
-    sheets.push({ name, kind: layout.kind, rows: rows.length, note: notes.join(' ') || null });
+    sheets.push({ name, kind: layouts[0]!.kind, rows: rowCount, note: notes.join(' ') || null });
   }
   if (gst.length === 0 && tds.length === 0 && sheets.some((s) => s.kind !== 'skipped'))
     throw new Error('The GST and TDS sheets have no client rows yet.');
@@ -467,7 +615,15 @@ export function parseClientWorkbook(bytes: Buffer): ParsedWorkbook {
     throw new Error(
       'No sheet in the file has client logins: expected a GST sheet (Particular, ID, Pwd, GSTIN) or a TDS sheet (Client name, PAN, TAN, Pwd).',
     );
-  return { sheets, months: [...months].sort(), gst, tds };
+
+  const sorted = [...months].sort();
+  const fy = fyOfMonth(
+    sorted[0] ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`,
+  );
+  for (const line of gst)
+    for (const m of line.marks)
+      if (m.period.startsWith(`${QUARTER_OF_SHEET}:`)) m.period = fy + m.period.slice(1);
+  return { sheets, months: sorted, gst, tds };
 }
 
 // ── Clients ──────────────────────────────────────────────────────────────
@@ -611,12 +767,9 @@ export function clientsOfWorkbook(
       gstin: validGstin ? gstin : null,
       stateCode,
       frequency: line.frequency,
-      marks: validGstin ? line.marks : [],
+      // Kept as the client's return history even without a GSTIN (by state, or the client).
+      marks: line.marks,
     });
-    if (!validGstin && line.marks.length)
-      c.warnings.push(
-        `Row ${line.row}: filed / NA marks need the GSTIN, so they wait until it is in the sheet.`,
-      );
     for (const l of line.logins) {
       const target =
         l.portal === 'gst'
@@ -657,12 +810,41 @@ export function clientsOfWorkbook(
     clients.delete(key);
   }
 
-  // TDS rows join by PAN, else by name.
+  // TDS rows join by PAN, else by name: the one client of that name, else the
+  // one of a similar name (said in a warning). Never a guess between two.
+  const gstClients = [...clients.values()];
+  const where = (o: WorkbookClient): string => `"${o.name}" (${sourceLabel(o.sources)})`;
   for (const line of book.tds) {
     const pan = isValidPan(line.pan) ? line.pan : null;
-    let c =
-      (pan ? clients.get(`pan:${pan}`) : undefined) ??
-      byName(line.name).find((o) => !pan || !o.pan || o.pan === pan);
+    const at = `${line.sheet} row ${line.row}`;
+    let c = pan ? clients.get(`pan:${pan}`) : undefined;
+    if (c && line.name && !similarNames(c.name, line.name))
+      c.warnings.push(
+        `${at} "${line.name}" has the PAN of ${where(c)}'s GSTIN, so the two are put together. If that GSTIN is another client's, correct the sheet.`,
+      );
+    if (!c && line.name) {
+      const fits = (o: WorkbookClient): boolean => !pan || !o.pan || o.pan === pan;
+      const same = gstClients.filter((o) => fits(o) && nameKey(o.name) === nameKey(line.name));
+      const like = same.length
+        ? same
+        : gstClients.filter((o) => fits(o) && similarNames(o.name, line.name));
+      if (like.length > 1) {
+        const key = `tds:${line.sheet}:${line.row}`;
+        const lone = blank(key, line.name);
+        lone.sources.push({ sheet: line.sheet, row: line.row });
+        fail(
+          lone,
+          `${at} "${line.name}" could be ${like.map(where).join(' or ')}; add the PAN to the TDS row, or write the name as on the GST sheet.`,
+        );
+        clients.set(key, lone);
+        continue;
+      }
+      c = like[0];
+      if (c && !same.length)
+        c.warnings.push(
+          `${at} "${line.name}" is taken to be ${where(c)} by its name; if it is another client, write its full name in the sheet.`,
+        );
+    }
     if (!c) {
       const key = pan ? `pan:${pan}` : `name:${nameKey(line.name)}`;
       c = clients.get(key) ?? blank(key, line.name);
@@ -788,4 +970,9 @@ export function periodKeysOfMonth(month: string): string[] {
     keys.push(`${fy}:Q${q}`);
   }
   return keys;
+}
+
+/** The period keys a mark can match: a quarter's own key, or a month's. Pure — tested. */
+export function periodKeysOfMark(period: string): string[] {
+  return period.includes(':') ? [period] : periodKeysOfMonth(period);
 }

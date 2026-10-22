@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { gstinCheckChar } from '@hsdg/contracts';
+import { gstinCheckChar, returnPeriodFinancialYear } from '@hsdg/contracts';
 import {
   clientsOfWorkbook,
   entityTypeFromName,
@@ -7,8 +7,12 @@ import {
   parseFrequency,
   parseMark,
   parseMonth,
+  parseQuarter,
+  periodKeysOfMark,
   periodKeysOfMonth,
   roleOfHeading,
+  sameFirstWord,
+  similarNames,
   sourceLabel,
   splitStateFromName,
 } from './client-workbook';
@@ -194,6 +198,8 @@ describe('the firm login workbook (ADR-0035)', () => {
     expect(parseMark('12/05/2026')).toBe('filed');
     expect(parseMark('NA')).toBe('not_applicable');
     expect(parseMark('N/A')).toBe('not_applicable');
+    expect(parseMark('nil')).toBe('filed');
+    expect(parseMark('10/9/26', 46304)).toBe('filed');
     expect(parseMark('pending')).toBe('other');
     expect(parseMark('')).toBeNull();
     expect(parseFrequency('Monthly')).toBe('monthly');
@@ -225,6 +231,9 @@ describe('the firm login workbook (ADR-0035)', () => {
     expect(roleOfHeading('Pwd')).toEqual({ kind: 'password' });
     expect(roleOfHeading('GSTR-3')).toEqual({ kind: 'return', form: 'GSTR3B' });
     expect(roleOfHeading('GSTR 7')).toEqual({ kind: 'return', form: 'GSTR7' });
+    expect(roleOfHeading('GST-1')).toEqual({ kind: 'return', form: 'GSTR1' });
+    expect(roleOfHeading('GSTR-3B')).toEqual({ kind: 'return', form: 'GSTR3B' });
+    expect(roleOfHeading('GSTIN')).toEqual({ kind: 'gstin' });
     expect(roleOfHeading('IT- PAN')).toEqual({ kind: 'pan' });
     expect(roleOfHeading('IT-TAN')).toEqual({ kind: 'tan' });
     expect(roleOfHeading('Traces ID (Tax Payer)')).toEqual({
@@ -257,11 +266,11 @@ describe('the firm login workbook (ADR-0035)', () => {
     ]);
     // Fees (column O) is not a return; Aug's merge covers GSTR-1, 3 and 7.
     expect(bharat.marks).toEqual([
-      { month: '2026-04', form: 'GSTR1', mark: 'filed' },
-      { month: '2026-04', form: 'GSTR3B', mark: 'filed' },
-      { month: '2026-05', form: 'GSTR1', mark: 'filed' },
-      { month: '2026-05', form: 'GSTR3B', mark: 'not_applicable' },
-      { month: '2026-08', form: 'GSTR7', mark: 'not_applicable' },
+      { period: '2026-04', form: 'GSTR1', mark: 'filed' },
+      { period: '2026-04', form: 'GSTR3B', mark: 'filed' },
+      { period: '2026-05', form: 'GSTR1', mark: 'filed' },
+      { period: '2026-05', form: 'GSTR3B', mark: 'not_applicable' },
+      { period: '2026-08', form: 'GSTR7', mark: 'not_applicable' },
     ]);
     expect(book.tds[0]!.logins.map((l) => [l.portal, l.account, l.username])).toEqual([
       ['income_tax', 'main', BHARAT],
@@ -348,6 +357,185 @@ describe('the firm login workbook (ADR-0035)', () => {
       'proprietorship',
     );
     expect(acme!.error).toMatch(/Rows 2 and 3 are both Delhi with no GSTIN/);
+  });
+
+  it('knows the financial year a return period is in', () => {
+    expect(returnPeriodFinancialYear('2026-04')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2027-03')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2027-01')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2026-27:Q4')).toBe('2026-27');
+    expect(returnPeriodFinancialYear('2099-04')).toBe('2099-00');
+    expect(returnPeriodFinancialYear('Apr-26')).toBeNull();
+  });
+
+  it('knows names that start with the same word, give or take a letter', () => {
+    expect(sameFirstWord('3Acess', '3Aces Technologies - Firm')).toBe(true);
+    expect(sameFirstWord('M/s Hasol', 'Hasol Impex Private Limited')).toBe(true);
+    expect(sameFirstWord('Dawon LLP', 'Dawon Drone India Pvt Ltd')).toBe(true);
+    expect(sameFirstWord('Ram', 'Ram Traders')).toBe(false);
+    expect(sameFirstWord('Global Impex', 'Gopal Eng works')).toBe(false);
+    expect(sameFirstWord('', 'Gumlabs')).toBe(false);
+  });
+
+  it('knows names that are probably the same client', () => {
+    expect(similarNames('Drift Logistics Pvt. Ltd.', 'drift logistics')).toBe(true);
+    expect(similarNames('Cosmotrendez', 'Cosmotrendz')).toBe(true);
+    expect(similarNames('GRIID Chandigarh', 'griid')).toBe(true);
+    expect(similarNames('aveer green', 'aveer')).toBe(true);
+    expect(similarNames('DRIFTS LOGISTICS PRIVATE LIMITED', 'Drift')).toBe(false);
+    expect(similarNames('Ricky', 'Rocky')).toBe(false);
+    expect(similarNames('Jai hanuman', 'Jaynat Gupta')).toBe(false);
+    expect(similarNames('Jaynat Gupta', 'Jayant Gupta')).toBe(true);
+    expect(similarNames('aveer green', 'Aveer Green PrivateLimited')).toBe(true);
+    expect(similarNames('Director of estate', 'Director of Estates')).toBe(true);
+    expect(similarNames('ABC Traders', 'ABC')).toBe(false);
+  });
+
+  it('joins TDS rows by a similar name only when one client fits, and says so', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['Particular', 'ID', 'Pwd', 'GSTIN'],
+        ['Cosmotrendez', 'c1', 'p1', ''],
+        ['GRIID Chandigarh', 'g1', 'p2', ''],
+        ['Sunrise Foods', 's1', 'p3', gstin('27', SUNRISE)],
+        ['Kumar Agencies', 'k1', 'p4', ''],
+        ['Kumar Agro', 'k2', 'p5', ''],
+      ]),
+      'GST Login',
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['S.No', 'Client name', 'mail', 'IT- PAN', 'PWD', 'IT-TAN', 'Pwd'],
+        [1, 'Cosmotrendz', 'a@cosmo.in', 'AABCC1111E', 'x1', 'DELC12345E', 'x2'],
+        [2, 'griid', 'b@griid.in'],
+        [3, 'Drift', 'c@drift.in', SUNRISE, 'x3'],
+        [4, 'Kumar', 'd@kumar.in'],
+        [5, 'Director of Estate', 'e@doe.in'],
+      ]),
+      'tds login detail',
+    );
+    const clients = clientsOfWorkbook(
+      parseClientWorkbook(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer),
+      'proprietorship',
+    );
+    const of = (name: string) => clients.find((c) => c.name === name)!;
+
+    expect(of('Cosmotrendez')).toMatchObject({
+      pan: 'AABCC1111E',
+      tan: 'DELC12345E',
+      email: 'a@cosmo.in',
+    });
+    expect(of('Cosmotrendez').warnings.join(' ')).toMatch(
+      /row 2 "Cosmotrendz" is taken to be "Cosmotrendez" \(GST Login 2/,
+    );
+    expect(of('GRIID Chandigarh').email).toBe('b@griid.in');
+    // By PAN, even with another name, but not silently.
+    expect(of('Sunrise Foods').email).toBe('c@drift.in');
+    expect(of('Sunrise Foods').warnings.join(' ')).toMatch(
+      /"Drift" has the PAN of "Sunrise Foods"/,
+    );
+    // Two clients fit: no guess.
+    expect(of('Kumar').error).toMatch(/could be "Kumar Agencies" .* or "Kumar Agro"/);
+    expect(of('Kumar Agencies').email).toBeNull();
+    // Nothing fits: a client of its own.
+    expect(of('Director of Estate').email).toBe('e@doe.in');
+    expect(clients).toHaveLength(7);
+  });
+
+  it('reads quarter headings', () => {
+    expect(parseQuarter('QTR-1')).toBe('?:Q1');
+    expect(parseQuarter('Q2')).toBe('?:Q2');
+    expect(parseQuarter('Quarter 3')).toBe('?:Q3');
+    expect(parseQuarter('Quater4')).toBe('?:Q4');
+    expect(parseQuarter('Q1 2026-27')).toBe('2026-27:Q1');
+    expect(parseQuarter('Q5')).toBeNull();
+    expect(parseQuarter('GSTR-1')).toBeNull();
+    expect(periodKeysOfMark('2026-27:Q2')).toEqual(['2026-27:Q2']);
+    expect(periodKeysOfMark('2026-06')).toEqual(['2026-06', '2026-27:Q1']);
+  });
+
+  it('reads the firm sheet as it is: a monthly block, then a quarterly block under it', () => {
+    const wb = XLSX.utils.book_new();
+    const filed = (n: number) => Array.from({ length: n }, () => 'filed');
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['Monthly Return', '', '', '', 'Apr-26', '', 'May-26', '', 'Jun-26', ''],
+        [
+          'Particular',
+          'ID',
+          'Pwd',
+          'GSTIN',
+          'GSTR-1',
+          'GSTR-3',
+          'GSTR-1',
+          'GSTR-3',
+          'GST-1',
+          'GSTR-3',
+        ],
+        ['Khatri Roadlines', 'kh', 'pw-1', gstin('07', BHARAT), ...filed(6)],
+        ['Gensync', 'gs', 'pw-2', '', 'NA', 'NA', ...filed(4)],
+        [],
+        ['Quarterly Return', '', '', '', 'GSTR-1', 'GSTR-3', 'GSTR-1', 'GSTR-3'],
+        ['Particular', 'ID', 'Pwd', 'GSTIN', 'QTR-1', '', 'QTR-2', ''],
+        ['Gopal Eng Works', 'gp', 'pw-3', '', 'filed', '', 'filed'],
+      ]),
+      'GST Login',
+    );
+    const book = parseClientWorkbook(
+      XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer,
+    );
+    // The quarterly block's band and headings are not clients.
+    expect(book.gst.map((g) => g.name)).toEqual(['Khatri Roadlines', 'Gensync', 'Gopal Eng Works']);
+    expect(book.sheets[0]).toMatchObject({ kind: 'gst', rows: 3, note: null });
+    expect(book.months).toEqual(['2026-04', '2026-05', '2026-06']);
+    // "GST-1" is June's GSTR-1.
+    expect(book.gst[0]!.marks.filter((m) => m.period === '2026-06')).toEqual([
+      { period: '2026-06', form: 'GSTR1', mark: 'filed' },
+      { period: '2026-06', form: 'GSTR3B', mark: 'filed' },
+    ]);
+    expect(book.gst[1]!.marks.slice(0, 2)).toEqual([
+      { period: '2026-04', form: 'GSTR1', mark: 'not_applicable' },
+      { period: '2026-04', form: 'GSTR3B', mark: 'not_applicable' },
+    ]);
+    // QTR-1 / QTR-2 under GSTR-1, in the year of the sheet's months.
+    expect(book.gst[2]!.marks).toEqual([
+      { period: '2026-27:Q1', form: 'GSTR1', mark: 'filed' },
+      { period: '2026-27:Q2', form: 'GSTR1', mark: 'filed' },
+    ]);
+    expect(book.gst[2]!.logins).toEqual([
+      { portal: 'gst', account: 'main', username: 'gp', password: 'pw-3' },
+    ]);
+
+    // Marks stay on a client the sheet gives no GSTIN, without a warning.
+    const clients = clientsOfWorkbook(book, 'proprietorship');
+    const gensync = clients.find((c) => c.name === 'Gensync')!;
+    expect(gensync.gst[0]!.marks).toHaveLength(6);
+    expect(gensync.warnings).toEqual([]);
+  });
+
+  it('gives a quarter without months the current financial year', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['', '', '', '', 'GSTR-1', 'GSTR-3'],
+        ['Particular', 'ID', 'Pwd', 'GSTIN', 'Q4', ''],
+        ['Hasol', 'h', 'p', '', 'filed', 'NA'],
+      ]),
+      'GST Login',
+    );
+    const book = parseClientWorkbook(
+      XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer,
+      new Date('2027-02-10T00:00:00Z'),
+    );
+    expect(book.gst[0]!.marks).toEqual([
+      { period: '2026-27:Q4', form: 'GSTR1', mark: 'filed' },
+      { period: '2026-27:Q4', form: 'GSTR3B', mark: 'not_applicable' },
+    ]);
   });
 
   it('turns a month into the filing periods it can close', () => {
