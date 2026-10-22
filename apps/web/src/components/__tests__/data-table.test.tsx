@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { DataTable } from '../data-table';
+import { DataTable, withColumnIds } from '../data-table';
 import { workHrefFor } from '@/lib/work-href';
 
 const push = jest.fn();
@@ -82,6 +82,25 @@ describe('DataTable onRowOpen (WF-202)', () => {
     fireEvent.click(screen.getByText('note'), { metaKey: true });
     expect(onRowOpen).toHaveBeenCalledTimes(1);
     open.mockRestore();
+  });
+});
+
+describe('DataTable column ids', () => {
+  // The Client Dependencies crash: an actions column with `header: ''` and no
+  // id threw "Columns require an id when using a non-string header" as soon as
+  // there was a row.
+  it('renders rows when an actions column has no id', () => {
+    const noId: ColumnDef<Row, unknown>[] = [
+      { header: 'Title', accessorKey: 'title' },
+      { header: '', cell: () => <button type="button">Received</button> },
+    ];
+    render(<DataTable columns={noId} data={rows} />);
+    expect(screen.getByRole('button', { name: 'Received' })).toBeInTheDocument();
+  });
+
+  it('keeps the ids it has and numbers the rest', () => {
+    expect(withColumnIds(columns).map((c) => c.id)).toEqual([undefined, 'act', undefined]);
+    expect(withColumnIds<Row>([{ header: '', cell: () => null }])[0]!.id).toBe('col_0');
   });
 });
 

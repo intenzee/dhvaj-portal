@@ -11,21 +11,30 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type InstanceWorkspace, type StreamTree } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type FilingCleanupResult,
+  type InstanceWorkspace,
+  type StreamTree,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import type { ClientUploadLinkCreated } from '../documents/client-upload/client-upload.service';
 import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
+import { FilingCleanupService } from './filing-cleanup.service';
 import {
   CorrectionDto,
   FileDocumentDto,
   LodgeDto,
   PatchChecklistItemDto,
+  PeriodCleanupDto,
+  PeriodParamDto,
   ReasonDto,
   SaveFiguresDto,
   SlotRequestDto,
   SlotUploadDto,
+  StartFreshDto,
   StreamParamDto,
   StreamTreeQueryDto,
 } from './dto/filing-workspace.dto';
@@ -40,6 +49,7 @@ export class EngagementStreamsController {
   constructor(
     private readonly trees: StreamTreeService,
     private readonly workspace: FilingWorkspaceService,
+    private readonly cleanup: FilingCleanupService,
   ) {}
 
   /**
@@ -75,6 +85,69 @@ export class EngagementStreamsController {
       ...(query.registrationId ? { registrationId: query.registrationId } : {}),
       ...(query.fy ? { fy: query.fy } : {}),
     });
+  }
+
+  /**
+   * "Remove this month" — the period's open filings are waived (Not
+   * applicable), their open tasks cancelled and client requests waived. Lead
+   * only; lodged filings stay. Restore puts them back.
+   */
+  @Post(':id/streams/:stream/periods/:periodKey/remove')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Remove a period’s open filings from the portal (lead)' })
+  removePeriod(
+    @CurrentPrincipal() principal: Principal,
+    @Param() params: PeriodParamDto,
+    @Body() dto: PeriodCleanupDto,
+  ): Promise<FilingCleanupResult> {
+    return this.cleanup.removePeriod(
+      rlsContextFromPrincipal(principal),
+      params.id,
+      params.stream,
+      params.periodKey,
+      dto.registrationId ?? null,
+    );
+  }
+
+  @Post(':id/streams/:stream/periods/:periodKey/restore')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Restore a removed period (lead)' })
+  restorePeriod(
+    @CurrentPrincipal() principal: Principal,
+    @Param() params: PeriodParamDto,
+    @Body() dto: PeriodCleanupDto,
+  ): Promise<FilingCleanupResult> {
+    return this.cleanup.restorePeriod(
+      rlsContextFromPrincipal(principal),
+      params.id,
+      params.stream,
+      params.periodKey,
+      dto.registrationId ?? null,
+    );
+  }
+}
+
+/**
+ * Start fresh — the Managing Partner clears every overdue filing for a period
+ * that ended before a date (history is kept on the client). Preview first.
+ */
+@ApiTags('filing-workspace')
+@Controller('filings')
+export class FilingCleanupController {
+  constructor(private readonly cleanup: FilingCleanupService) {}
+
+  @Post('start-fresh')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Clear overdue filings before a date, firm-wide (MP; dryRun previews)' })
+  startFresh(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: StartFreshDto,
+  ): Promise<FilingCleanupResult> {
+    return this.cleanup.startFresh(
+      rlsContextFromPrincipal(principal),
+      dto.from,
+      dto.dryRun ?? false,
+    );
   }
 }
 

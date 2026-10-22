@@ -1,6 +1,6 @@
 'use client';
 
-import type { MouseEvent } from 'react';
+import { useMemo, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -14,6 +14,19 @@ import { EmptyState } from './ui';
 /** Did the click land on a control inside the row (which handles it itself)? */
 function onControl(e: MouseEvent): boolean {
   return (e.target as HTMLElement).closest('a,button,input,select,textarea,label,[role="button"]') !== null;
+}
+
+/**
+ * TanStack needs an id per column, taken from `id`, `accessorKey` or a
+ * non-empty string header; an actions column (`header: ''`) without one throws
+ * the moment rows render. Give such a column its position. Pure — tested.
+ */
+export function withColumnIds<T>(columns: ColumnDef<T, unknown>[]): ColumnDef<T, unknown>[] {
+  return columns.map((c, i) => {
+    const key = (c as { accessorKey?: unknown }).accessorKey;
+    if (c.id || key || (typeof c.header === 'string' && c.header)) return c;
+    return { ...c, id: `col_${i}` };
+  });
 }
 
 /**
@@ -43,7 +56,8 @@ export function DataTable<T>({
   onRowOpen?: (row: T) => boolean;
 }): JSX.Element {
   const router = useRouter();
-  const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() });
+  const safeColumns = useMemo(() => withColumnIds(columns), [columns]);
+  const table = useReactTable({ data, columns: safeColumns, getCoreRowModel: getCoreRowModel() });
   const clickable = Boolean(onRowClick || rowHref);
   const open = (e: MouseEvent, row: T) => {
     if (onControl(e)) return;

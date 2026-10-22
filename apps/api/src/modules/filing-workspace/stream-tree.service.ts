@@ -14,6 +14,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { istToday } from '../engagements/time/auto-time';
 import { seedChecklistForInstance } from '../compliance/compliance-checklist';
+import { REMOVED_MARK } from './filing-cleanup.service';
 import {
   fyMonths,
   isAnnualKey,
@@ -40,6 +41,7 @@ interface TreeRow {
   pending_label: string | null;
   has_items: boolean;
   mine: boolean;
+  removed: boolean;
 }
 
 const STREAM_SQL = `COALESCE(rv.stream, sv.stream)`;
@@ -155,7 +157,8 @@ export class StreamTreeService {
                            WHERE mt.source_compliance_instance_id = ci.id
                              AND mt.status NOT IN ('done', 'cancelled')
                              AND (mt.assigned_to_employee_id = $5 OR mt.reviewer_employee_id = $5))
-                    AS mine
+                    AS mine,
+                  (ci.status = 'waived' AND COALESCE(ci.notes, '') LIKE $6) AS removed
              FROM hsdg.compliance_instances ci
              JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
              LEFT JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
@@ -175,7 +178,14 @@ export class StreamTreeService {
             WHERE ci.engagement_id = $1 AND ${STREAM_SQL} = $2 AND ci.financial_year = $3
               AND ($4::uuid IS NULL OR ci.registration_id = $4 OR ci.registration_id IS NULL)
             ORDER BY due, cr.code`,
-          [engagementId, stream, financialYear, registrationId, ctx.employeeId ?? null],
+          [
+            engagementId,
+            stream,
+            financialYear,
+            registrationId,
+            ctx.employeeId ?? null,
+            `${REMOVED_MARK}%`,
+          ],
         );
       let rows = (await select()).rows;
       // Checklists are created lazily; fill them for this year so progress shows.
@@ -214,6 +224,7 @@ export class StreamTreeService {
         requiredDone: r.required_done,
         requiredTotal: r.required_total,
         mine: r.mine,
+        removed: r.removed,
         ...(stream === 'roc'
           ? {
               dscWarning: CLOSED.has(r.workflow_status)
