@@ -241,6 +241,7 @@ export class IdentityService {
       if (input.roles && input.roles.length > 0) {
         await this.replaceRoles(client, createdId, input.roles);
       }
+      await this.syncEmployee(client, ctx, createdId);
 
       const created = (await this.selectUser(client, createdId))!;
       await this.audit.recordWith(client, ctx, {
@@ -292,6 +293,10 @@ export class IdentityService {
         throw translateUserPgError(err);
       }
 
+      if (input.isActive === true && !before.isActive) {
+        await this.syncEmployee(client, ctx, id);
+      }
+
       const after = (await this.selectUser(client, id))!;
       await this.audit.recordWith(client, ctx, {
         action: 'user.updated',
@@ -311,6 +316,7 @@ export class IdentityService {
       if (!before) throw new NotFoundException('User not found.');
 
       await this.replaceRoles(client, id, roles);
+      await this.syncEmployee(client, ctx, id);
 
       const after = (await this.selectUser(client, id))!;
       await this.audit.recordWith(client, ctx, {
@@ -403,6 +409,27 @@ export class IdentityService {
          ON CONFLICT DO NOTHING`,
         [userId, roleId],
       );
+    }
+  }
+
+  /**
+   * Give a staff-role user the employee record their roles imply, so a new
+   * Partner or Manager can be put on engagements straight away (Engagement
+   * Partner / Manager are employees at a grade, not roles). See
+   * hsdg.sync_employee_from_roles: links or creates, raises grade, never lowers.
+   */
+  private async syncEmployee(client: PoolClient, ctx: RlsContext, userId: string): Promise<void> {
+    const { rows } = await client.query<{ employee_id: string; action: string }>(
+      `SELECT employee_id, action FROM hsdg.sync_employee_from_roles($1)`,
+      [userId],
+    );
+    for (const row of rows) {
+      await this.audit.recordWith(client, ctx, {
+        action: row.action === 'created' ? 'employee.created' : 'employee.updated',
+        objectType: 'employee',
+        objectId: row.employee_id,
+        after: { userId, sync: row.action },
+      });
     }
   }
 
