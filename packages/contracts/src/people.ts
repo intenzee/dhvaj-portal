@@ -144,6 +144,23 @@ export interface StartExitResult {
   reassignAskedOf: string[];
 }
 
+/**
+ * One entry in an employee record's change history (spec §4.3, §4.4): the
+ * audit events about that person — their record, articleship, HR documents,
+ * exit and login. HR sees this instead of the firm-wide audit log.
+ */
+export interface EmployeeHistoryEvent {
+  id: string;
+  occurredAt: string;
+  actorName: string | null;
+  actorRole: string | null;
+  action: string;
+  objectType: string;
+  before: unknown;
+  after: unknown;
+  reason: string | null;
+}
+
 /** The monthly hours export (people reports): one row per person. */
 export interface MonthlyHoursRow {
   employeeId: string;

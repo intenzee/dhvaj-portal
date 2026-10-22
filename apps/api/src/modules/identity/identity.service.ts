@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { assertAssignable, assertOnboardable, type OnboardCeiling } from './onboard-ceiling';
+import {
+  assertAssignable,
+  assertOnboardable,
+  withVia,
+  type OnboardCeiling,
+} from './onboard-ceiling';
 import type { PoolClient } from 'pg';
 import { SYSTEM_ROLE, type RoleSlug } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -253,7 +258,7 @@ export class IdentityService {
         action: 'user.created',
         objectType: 'user',
         objectId: createdId,
-        after: created,
+        after: withVia(created, ceiling),
       });
       return created;
     });
@@ -310,7 +315,7 @@ export class IdentityService {
         objectType: 'user',
         objectId: id,
         before,
-        after,
+        after: withVia(after, ceiling),
       });
       return after;
     });
@@ -337,7 +342,7 @@ export class IdentityService {
         objectType: 'user',
         objectId: id,
         before: { roles: before.roles },
-        after: { roles: after.roles },
+        after: withVia({ roles: after.roles }, ceiling),
       });
       return after;
     });

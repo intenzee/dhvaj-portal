@@ -10,6 +10,7 @@ import type { PoolClient } from 'pg';
 import {
   EMPLOYMENT_STATUS,
   NOTIFICATION_TYPE,
+  ONBOARD_ASSIGNABLE_ROLES,
   PEOPLE_DESK_QUEUE,
   ROLE,
   SYSTEM_ROLE,
@@ -17,6 +18,7 @@ import {
   WORKLOAD_UNDER_SECONDS,
   type AttendanceDay,
   type AttendanceReport,
+  type EmployeeHistoryEvent,
   type EmploymentStatus,
   type GradeSlug,
   type MonthlyHoursReport,
@@ -31,6 +33,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { IdentityService } from '../identity/identity.service';
+import { withVia, type OnboardCeiling } from '../identity/onboard-ceiling';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrganisationService } from '../organisation/organisation.service';
 import { istToday } from '../engagements/time/auto-time';
@@ -261,13 +264,54 @@ export class PeopleService {
   }
 
   /**
+   * An employee record's change history (spec §4.3): the audit events about
+   * this person, through hsdg.employee_history — HR and the Managing Partner
+   * only. 404 when the employee is not visible.
+   */
+  async history(ctx: RlsContext, employeeId: string): Promise<EmployeeHistoryEvent[]> {
+    const exists = await this.org.getEmployeeById(ctx, employeeId);
+    if (!exists) throw new NotFoundException('Employee not found.');
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await guard(() =>
+        client.query<{
+          id: string;
+          occurred_at: Date;
+          actor_name: string | null;
+          actor_role: string | null;
+          action: string;
+          object_type: string;
+          before_state: unknown;
+          after_state: unknown;
+          reason: string | null;
+        }>(`SELECT * FROM hsdg.employee_history($1)`, [employeeId]),
+      );
+      return rows.map((r) => ({
+        id: r.id,
+        occurredAt: r.occurred_at.toISOString(),
+        actorName: r.actor_name,
+        actorRole: r.actor_role,
+        action: r.action,
+        objectType: r.object_type,
+        before: r.before_state,
+        after: r.after_state,
+        reason: r.reason,
+      }));
+    });
+  }
+
+  /**
    * Start someone's exit (spec §4.2): set the date; on or after it the person
    * is exited and their login is switched off with its password removed (now
    * if the date has come, else by the daily job). The partners whose work
    * they're on are asked to reassign it — by notification, so HR never learns
    * which engagements those are.
    */
-  async startExit(ctx: RlsContext, id: string, input: StartExitInput): Promise<StartExitResult> {
+  async startExit(
+    ctx: RlsContext,
+    id: string,
+    input: StartExitInput,
+    loginPower: LoginPower = null,
+  ): Promise<StartExitResult> {
     const before = await this.org.getEmployeeById(ctx, id);
     if (!before) throw new NotFoundException('Employee not found.');
     if (before.employmentStatus === EMPLOYMENT_STATUS.exited) {
@@ -290,7 +334,7 @@ export class PeopleService {
 
     let loginTurnedOff = false;
     if (due && before.userId) {
-      loginTurnedOff = await this.turnOffLogin(ctx, before.userId);
+      loginTurnedOff = await this.turnOffLogin(ctx, before.userId, loginPower);
     }
 
     const partners = await this.db.withRlsContext(ctx, async (client) => {
@@ -352,15 +396,22 @@ export class PeopleService {
         RETURNING id, user_id`,
         [today],
       );
-      // Also catch anyone exited by hand whose login was left on.
+      // Also catch anyone exited by hand whose login was left on. Only logins
+      // HR could switch off themselves (nothing above Manager — spec §4.5):
+      // otherwise setting a partner's exit date would switch off a partner's
+      // login. Those stay on, on the desk's "left, but the login is still on"
+      // queue, for an administrator.
       const off = await client.query<{ id: string }>(
         `UPDATE hsdg.users u SET is_active = false
            FROM hsdg.employees e
           WHERE e.user_id = u.id AND u.is_active
             AND e.employment_status = 'exited'
             AND e.date_of_exit IS NOT NULL AND e.date_of_exit <= $1::date
+            AND NOT EXISTS (
+              SELECT 1 FROM hsdg.user_roles ur JOIN hsdg.roles r ON r.id = ur.role_id
+               WHERE ur.user_id = u.id AND r.slug <> ALL ($2::text[]))
         RETURNING u.id`,
-        [today],
+        [today, ONBOARD_ASSIGNABLE_ROLES],
       );
       const userIds = off.rows.map((r) => r.id);
       if (userIds.length) {
@@ -389,14 +440,22 @@ export class PeopleService {
   }
 
   /**
-   * Switch a leaver's login off now. Goes through IdentityService, so the
-   * user.onboard ceiling applies (HR can't switch off a partner's login); the
-   * password row is then removed in the system context, as the sign-in path
-   * owns that table. False when the ceiling refuses.
+   * Switch a leaver's login off now. Goes through IdentityService with the
+   * caller's ceiling, so HR can't switch off a partner's login (nor their own);
+   * the password row is then removed in the system context, as the sign-in
+   * path owns that table — but only once the login is really off. False when
+   * the caller may not manage logins or the ceiling refuses.
    */
-  private async turnOffLogin(ctx: RlsContext, userId: string): Promise<boolean> {
+  private async turnOffLogin(
+    ctx: RlsContext,
+    userId: string,
+    loginPower: LoginPower,
+  ): Promise<boolean> {
+    if (loginPower === null) return false;
+    const ceiling = loginPower === 'all' ? undefined : loginPower;
     try {
-      await this.identity.updateUser(ctx, userId, { isActive: false });
+      const after = await this.identity.updateUser(ctx, userId, { isActive: false }, ceiling);
+      if (after.isActive) return false;
     } catch (err) {
       if (err instanceof ForbiddenException || err instanceof NotFoundException) {
         this.logger.log(`Exit: login ${userId} left for an administrator (${err.message}).`);
@@ -412,7 +471,7 @@ export class PeopleService {
       action: 'user.deactivated_on_exit',
       objectType: 'user',
       objectId: userId,
-      after: { isActive: false, password: 'removed' },
+      after: withVia({ isActive: false, password: 'removed' }, ceiling),
     });
     return true;
   }
@@ -519,6 +578,12 @@ export class PeopleService {
     }));
   }
 }
+
+/**
+ * What the caller may do to a leaver's login: anything (`user.manage`), within
+ * HR's ceiling (`user.onboard`), or nothing.
+ */
+export type LoginPower = 'all' | OnboardCeiling | null;
 
 /** Queues that need only the employee master (what the administrator sees). */
 const EMPLOYEE_MASTER_QUEUES = new Set<PeopleDeskQueue>([

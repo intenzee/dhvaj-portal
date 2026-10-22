@@ -43,3 +43,15 @@ export function assertOnboardable(
     throw new ForbiddenException('This person holds a role above Manager; ask an administrator.');
   }
 }
+
+/**
+ * An audit payload marked with how the change was allowed (spec §7.5: "Audit
+ * entries carry via: 'user.onboard'"), so HR's changes stand apart from an
+ * administrator's even when HR also holds a professional role.
+ */
+export function withVia<T extends object>(
+  payload: T,
+  ceiling: OnboardCeiling | undefined,
+): T | (T & { via: 'user.onboard' }) {
+  return ceiling ? { ...payload, via: 'user.onboard' as const } : payload;
+}

@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
   type AttendanceReport,
+  type EmployeeHistoryEvent,
   type MonthlyHoursReport,
   type PeopleDesk,
   type PeopleWorkloadReport,
@@ -10,7 +11,8 @@ import {
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
-import { PeopleService } from './people.service';
+import { onboardCeiling } from '../identity/onboard-ceiling';
+import { PeopleService, type LoginPower } from './people.service';
 import { AttendanceQueryDto, MonthlyHoursQueryDto, WorkloadQueryDto } from './dto/people-query.dto';
 import { StartExitDto } from './dto/start-exit.dto';
 
@@ -88,6 +90,32 @@ export class PeopleController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: StartExitDto,
   ): Promise<StartExitResult> {
-    return this.people.startExit(rlsContextFromPrincipal(principal), id, dto);
+    return this.people.startExit(
+      rlsContextFromPrincipal(principal),
+      id,
+      dto,
+      loginPower(principal),
+    );
   }
+
+  @Get('people/employees/:id/history')
+  @RequirePermissions(PERMISSION.employeeManage)
+  @ApiOperation({
+    summary: 'The change history of one employee record',
+    description:
+      'Audit events about this person only: their record, articleship, HR documents, exit and login. HR and the Managing Partner (the firm-wide audit log stays with the MP and the Administrator).',
+  })
+  history(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<EmployeeHistoryEvent[]> {
+    return this.people.history(rlsContextFromPrincipal(principal), id);
+  }
+}
+
+/** What the caller may do to a leaver's login (spec §7.5). */
+function loginPower(principal: Principal): LoginPower {
+  if (principal.permissions.includes(PERMISSION.userManage)) return 'all';
+  if (principal.permissions.includes(PERMISSION.userOnboard)) return onboardCeiling(principal)!;
+  return null;
 }
