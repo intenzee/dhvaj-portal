@@ -38,6 +38,7 @@ import {
   type ClosedEntry,
 } from './auto-time';
 import { translateTimeError } from './time-tracking.service';
+import { notLinkedToEmployee } from '../../../common/errors/staff-link.messages';
 
 export interface OtherTimeInput {
   category: OtherTimeCategory;
@@ -533,9 +534,7 @@ export class TimeAutoService {
 
 function requireEmployee(ctx: RlsContext): string {
   if (!ctx.employeeId) {
-    throw new BadRequestException(
-      'Your account is not linked to an employee record, so you cannot log time.',
-    );
+    throw new BadRequestException(notLinkedToEmployee('log time'));
   }
   return ctx.employeeId;
 }
