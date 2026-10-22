@@ -8,6 +8,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   EP_OPTIONAL_STATUSES,
+  FIRM_CHECK,
   NOTIFICATION_TYPE,
   STATUTORY_AUDIT_SERVICE_CODE,
   type EngagementStatus,
@@ -20,6 +21,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StatutoryAuditWorkflowService } from '../statutory-audit/statutory-audit-workflow.service';
 import { EngagementKindsService } from './engagement-kinds.service';
+import { firmChecks, isStrict } from '../workflow-settings/firm-checks';
 import { engagementInSectionsSql } from '../../common/sections';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
@@ -194,8 +196,14 @@ export class EngagementsService {
       if (managerId === null && grade === 'manager') managerId = ctx.employeeId;
     }
     // A non-partner creating an accepted engagement has no EP to default to;
-    // say so plainly rather than letting the EP check constraint fire.
-    if (epId === null && isAccepted(input.status)) {
+    // say so plainly rather than letting the EP trigger fire. With the
+    // engagement_partner_required check off it is accepted without one.
+    const checks = await firmChecks(client);
+    if (
+      epId === null &&
+      isAccepted(input.status) &&
+      isStrict(checks, FIRM_CHECK.engagementPartnerRequired)
+    ) {
       throw new BadRequestException(
         'An accepted engagement needs an Engagement Partner — pick one, or create it as Pending Acceptance.',
       );

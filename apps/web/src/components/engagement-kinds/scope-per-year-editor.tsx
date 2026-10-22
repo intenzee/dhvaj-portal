@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Lock, Plus, Unlock } from 'lucide-react';
 import {
+  FIRM_CHECK,
   STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
   type ComplianceEngagementYear,
@@ -16,6 +17,7 @@ import {
 import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
+import { useFirmChecks } from '@/lib/firm-checks';
 import type { EntityDetail } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardBody, Button, Spinner, Badge } from '@/components/ui';
 import { Field, Input } from '@/components/form';
@@ -40,6 +42,7 @@ export function ScopePerYearEditor({
 }): JSX.Element | null {
   const qc = useQueryClient();
   const toast = useToast();
+  const ackRequired = useFirmChecks()[FIRM_CHECK.independenceAckRequired];
   const years = useQuery({
     queryKey: ['engagement-years', engagementId],
     queryFn: () => apiFetch<ComplianceEngagementYear[]>(`/engagements/${engagementId}/years`),
@@ -109,6 +112,7 @@ export function ScopePerYearEditor({
           <IndependencePanel
             loading={false}
             findings={addFindings}
+            ackRequired={ackRequired}
             acks={addAcks}
             onAck={(rule, on) =>
               setAddAcks((a) => (on ? [...a, rule] : a.filter((r) => r !== rule)))
@@ -148,6 +152,7 @@ function YearEditor({
   onSaved: () => void;
 }): JSX.Element {
   const toast = useToast();
+  const ackRequired = useFirmChecks()[FIRM_CHECK.independenceAckRequired];
   const closed = year.status === 'closed';
   const editable = canManage && !closed;
 
@@ -197,9 +202,9 @@ function YearEditor({
   });
   const findings = added.length > 0 ? (check.data?.findings ?? []) : [];
   const block = added.length > 0 ? (check.data?.block ?? null) : null;
-  const acksOk = findings
-    .filter((f) => f.requiresAcknowledgement)
-    .every((f) => acks.includes(f.rule));
+  const acksOk =
+    !ackRequired ||
+    findings.filter((f) => f.requiresAcknowledgement).every((f) => acks.includes(f.rule));
 
   const registrationsFor = (s: Stream) =>
     (entity?.registrations ?? []).filter((r) =>
@@ -402,6 +407,7 @@ function YearEditor({
               <IndependencePanel
                 loading={check.isFetching}
                 findings={findings}
+                ackRequired={ackRequired}
                 acks={acks}
                 onAck={(rule, v) =>
                   setAcks((a) => (v ? [...a, rule] : a.filter((r) => r !== rule)))
