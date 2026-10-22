@@ -29,7 +29,10 @@ import {
 } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
-import { EntityDetailActions } from '@/components/entities/entity-actions';
+import {
+  EntityDetailActions,
+  RemoveRegistrationButton,
+} from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import { ClientReturnsCard } from '@/components/entities/client-returns';
@@ -214,6 +217,7 @@ export default function EntityDetailPage(): JSX.Element {
                       <ShieldCheck className="h-4 w-4" />
                     </span>
                   )}
+                  {canManage && <RemoveRegistrationButton entityId={e.id} registration={r} />}
                 </div>
               </div>
             ))}

@@ -122,6 +122,39 @@ describe('Entity Master lifecycle (e2e)', () => {
     expect(v.verifiedAt).toBeTruthy();
   });
 
+  it('removes a registration recorded in error, and only with entity.manage', async () => {
+    const t = await token('partner.a@dhvaj.in');
+    const stamp = Date.now();
+    const created = await create(t, {
+      legalName: 'Wrong GSTIN Pvt Ltd',
+      typeSlug: 'private_limited',
+      officeCode: 'NORTH',
+      registrations: [
+        { registrationType: 'gstin', registrationNumber: `KEEP-${stamp}` },
+        { registrationType: 'gstin', registrationNumber: `MISTAKE-${stamp}` },
+      ],
+    });
+    const id = created.body.id as string;
+    const mistake = (
+      created.body.registrations as Array<{ id: string; registrationNumber: string }>
+    ).find((r) => r.registrationNumber === `MISTAKE-${stamp}`)!;
+    const path = `/api/v1/entities/${id}/registrations/${mistake.id}`;
+
+    await request(app.getHttpServer())
+      .delete(path)
+      .set(bearer(await token('manager.x@dhvaj.in')))
+      .expect(403);
+
+    const removed = await request(app.getHttpServer()).delete(path).set(bearer(t)).expect(200);
+    const left = (removed.body.registrations as Array<{ registrationNumber: string }>).map(
+      (r) => r.registrationNumber,
+    );
+    expect(left).toEqual([`KEEP-${stamp}`]);
+
+    // Already gone — a second delete is a 404, not a silent success.
+    await request(app.getHttpServer()).delete(path).set(bearer(t)).expect(404);
+  });
+
   it('financials are append-only per year — superseded, never overwritten (§16)', async () => {
     const t = await token('partner.a@dhvaj.in');
     const created = await create(t, {
