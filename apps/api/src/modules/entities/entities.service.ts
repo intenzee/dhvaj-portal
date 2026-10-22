@@ -8,14 +8,17 @@ import {
 import type { PoolClient } from 'pg';
 import {
   ENTITY_STATUS,
+  MISSING_INFO_LABEL,
   REGULATORY_PROFILE_STATUS,
+  ROLE,
   type ContactType,
-  type MissingInfoItem,
+  type MissingInfoCode,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { AuditService } from '../audit/audit.service';
+import { ComplianceGeneratorService } from '../compliance/compliance-generator.service';
 import { engagementInSectionsSql } from '../../common/sections';
 import type {
   AddressInput,
@@ -59,6 +62,34 @@ const ENTITY_SUMMARY_COLS = `
   e.group_id, e.incorporation_date, e.version, e.home_office_id,
   e.entity_type_id, e.parent_entity_id`;
 
+/**
+ * The client's missing master items (§5/§27/§28) as a text[] of
+ * MISSING_INFO_CODES, in their order — for the client page, the list's marker
+ * and its filter alike. `e` is the entities row's alias, `category` the SQL
+ * for its type category. Absence is reported, never read as "not applicable".
+ * GSTIN is missing only for a GST client: one with a GST login or GST
+ * return marks (from the login workbook) but no GSTIN.
+ */
+export function missingInfoSql(e: string, category: string): string {
+  const none = (from: string, where: string): string =>
+    `NOT EXISTS (SELECT 1 FROM hsdg.${from} WHERE x.entity_id = ${e}.id${where})`;
+  return `array_remove(ARRAY[
+    CASE WHEN NULLIF(${e}.pan, '') IS NULL THEN 'pan' END,
+    CASE WHEN (NOT ${none('client_credentials x', " AND x.portal = 'gst'")}
+               OR NOT ${none('client_return_marks x', '')})
+          AND ${none('entity_registrations x', " AND x.registration_type = 'gstin'")} THEN 'gstin' END,
+    CASE WHEN ${e}.incorporation_date IS NULL THEN 'incorporation_date' END,
+    CASE WHEN ${e}.legal_status IS NULL THEN 'legal_status' END,
+    CASE WHEN ${none('entity_registrations x', '')} THEN 'registrations' END,
+    CASE WHEN ${none('entity_contacts x', ' AND x.is_primary')} THEN 'primary_contact' END,
+    CASE WHEN ${none('entity_financial_profiles x', ' AND x.is_current')} THEN 'financials' END,
+    CASE WHEN ${category} = 'company'
+          AND ${none('entity_registrations x', " AND x.registration_type = 'cin'")} THEN 'cin' END,
+    CASE WHEN ${category} = 'llp'
+          AND ${none('entity_registrations x', " AND x.registration_type = 'llpin'")} THEN 'llpin' END
+  ]::text[], NULL)`;
+}
+
 const ENTITY_SUMMARY_SELECT = `
   SELECT ${ENTITY_SUMMARY_COLS}, o.code AS office_code,
          et.slug AS type_slug, et.name AS type_name, et.category AS type_category,
@@ -67,7 +98,8 @@ const ENTITY_SUMMARY_SELECT = `
          e.act_import, e.act_export, e.act_ecommerce, e.act_regulated,
          (SELECT count(*) FROM hsdg.entity_registrations r WHERE r.entity_id = e.id) AS registration_count,
          (SELECT ec.full_name FROM hsdg.entity_contacts ec
-            WHERE ec.entity_id = e.id AND ec.is_primary LIMIT 1) AS primary_contact_name
+            WHERE ec.entity_id = e.id AND ec.is_primary LIMIT 1) AS primary_contact_name,
+         ${missingInfoSql('e', 'et.category')} AS missing_info
   FROM hsdg.entities e
   JOIN hsdg.entity_types et ON et.id = e.entity_type_id
   JOIN hsdg.offices o ON o.id = e.home_office_id`;
@@ -98,6 +130,7 @@ interface SummaryRow {
   parent_entity_id: string | null;
   registration_count: string;
   primary_contact_name: string | null;
+  missing_info: MissingInfoCode[];
 }
 
 interface DetailRow extends SummaryRow {
@@ -132,6 +165,7 @@ export class EntitiesService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly generator: ComplianceGeneratorService,
   ) {}
 
   async listEntityTypes(ctx: RlsContext): Promise<EntityTypeRecord[]> {
@@ -182,6 +216,15 @@ export class EntitiesService {
         `(e.legal_name ILIKE $${params.length} OR e.entity_code ILIKE $${params.length} OR e.pan ILIKE $${params.length})`,
       );
     }
+    if (filter.missing) {
+      const missing = missingInfoSql('e', 'et.category');
+      if (filter.missing === 'any') conditions.push(`cardinality(${missing}) > 0`);
+      else if (filter.missing === 'none') conditions.push(`cardinality(${missing}) = 0`);
+      else {
+        params.push(filter.missing);
+        conditions.push(`$${params.length} = ANY(${missing})`);
+      }
+    }
     if (filter.section?.length) {
       // A client is in a section while it has a live engagement there.
       params.push(filter.section, CLOSED_ENGAGEMENT_STATUSES);
@@ -205,7 +248,8 @@ export class EntitiesService {
                   AS registration_count,
                 (SELECT ec.full_name FROM hsdg.entity_contacts ec
                    WHERE ec.entity_id = sub.id AND ec.is_primary LIMIT 1)
-                  AS primary_contact_name
+                  AS primary_contact_name,
+                ${missingInfoSql('sub', 'sub.type_category')} AS missing_info
          FROM (
            SELECT ${ENTITY_SUMMARY_COLS}, o.code AS office_code,
                   et.slug AS type_slug, et.name AS type_name, et.category AS type_category,
@@ -461,6 +505,85 @@ export class EntitiesService {
     });
   }
 
+  /**
+   * Delete a client entered by mistake (a duplicate, a wrong import). The
+   * Managing Partner only — the entities_delete policy says the same. Its own
+   * master goes with it (registrations, contacts, addresses, logins, return
+   * marks…, by ON DELETE CASCADE); a client with work or billing is never
+   * deleted (409) — close it (status) instead. Audited with the full master.
+   */
+  async deleteEntity(ctx: RlsContext, id: string): Promise<void> {
+    if (ctx.role !== ROLE.managingPartner) {
+      throw new ForbiddenException('Only the Managing Partner can delete a client.');
+    }
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.selectDetail(client, id);
+      if (!before) throw new NotFoundException('Entity not found.');
+
+      const blockers = await this.deleteBlockers(client, id);
+      if (blockers.length) {
+        throw new ConflictException(
+          `${before.legalName} can’t be deleted: it has ${blockers.join(', ')}. ` +
+            'Mark the client inactive instead.',
+        );
+      }
+      let deleted: number;
+      try {
+        deleted =
+          (await client.query(`DELETE FROM hsdg.entities WHERE id = $1`, [id])).rowCount ?? 0;
+      } catch (err) {
+        // A reference the counts could not see (outside the caller's RLS) still
+        // holds the row: the foreign key is the last word.
+        if ((err as { code?: string }).code === '23503') {
+          throw new ConflictException(
+            `${before.legalName} can’t be deleted: other records in the portal still refer to it. Mark the client inactive instead.`,
+          );
+        }
+        throw translatePgError(err);
+      }
+      if (deleted === 0)
+        throw new ForbiddenException('Only the Managing Partner can delete a client.');
+
+      await this.audit.recordWith(client, ctx, {
+        action: 'entity.deleted',
+        objectType: 'entity',
+        objectId: id,
+        before,
+      });
+    });
+  }
+
+  /** What stops a client being deleted, in words ("2 engagements", "1 invoice"). */
+  private async deleteBlockers(client: PoolClient, id: string): Promise<string[]> {
+    const { rows } = await client.query<Record<string, string>>(
+      `SELECT
+         (SELECT count(*) FROM hsdg.engagements WHERE entity_id = $1) AS engagements,
+         (SELECT count(*) FROM hsdg.engagement_entities WHERE entity_id = $1)
+           + (SELECT count(*) FROM hsdg.engagement_services WHERE entity_id = $1) AS covered,
+         (SELECT count(*) FROM hsdg.invoices WHERE client_entity_id = $1) AS invoices,
+         (SELECT count(*) FROM hsdg.receipts WHERE client_entity_id = $1) AS receipts,
+         (SELECT count(*) FROM hsdg.credit_notes WHERE client_entity_id = $1)
+           + (SELECT count(*) FROM hsdg.write_offs WHERE client_entity_id = $1)
+           + (SELECT count(*) FROM hsdg.fee_billings WHERE client_entity_id = $1)
+           + (SELECT count(*) FROM hsdg.time_billings WHERE client_entity_id = $1)
+           + (SELECT count(*) FROM hsdg.fee_waivers WHERE client_entity_id = $1)
+           + (SELECT count(*) FROM hsdg.invoice_reminders WHERE client_entity_id = $1)
+           + (SELECT count(*) FROM hsdg.tds_reminders WHERE client_entity_id = $1) AS billing`,
+      [id],
+    );
+    const r = rows[0]!;
+    const n = (k: string): number => Number(r[k]);
+    const words = (count: number, one: string, many: string): string =>
+      `${count} ${count === 1 ? one : many}`;
+    const out: string[] = [];
+    if (n('engagements')) out.push(words(n('engagements'), 'engagement', 'engagements'));
+    if (n('covered')) out.push('a place in another client’s engagement');
+    if (n('invoices')) out.push(words(n('invoices'), 'invoice', 'invoices'));
+    if (n('receipts')) out.push(words(n('receipts'), 'receipt', 'receipts'));
+    if (n('billing')) out.push('billing records');
+    return out;
+  }
+
   async addRegistration(
     ctx: RlsContext,
     entityId: string,
@@ -481,6 +604,7 @@ export class EntitiesService {
     return this.mutateChildWith(client, ctx, entityId, 'entity.registration_added', async () => {
       await this.insertRegistration(client, entityId, input);
       await this.flagReassessmentIfComplete(client, entityId);
+      await this.regenerateCalendars(client, entityId);
     });
   }
 
@@ -527,6 +651,7 @@ export class EntitiesService {
         throw new NotFoundException('Registration not found for this entity.');
       }
       await this.flagReassessmentIfComplete(client, entityId);
+      await this.regenerateCalendars(client, entityId);
     });
   }
 
@@ -860,6 +985,30 @@ export class EntitiesService {
     );
   }
 
+  /**
+   * A GSTIN / TAN / CIN added or changed after the client's Compliance
+   * engagement was opened: rebuild its calendar so the new registration's
+   * filings appear (savepoint each; a caller who does not lead an engagement
+   * leaves it to the nightly run).
+   */
+  private async regenerateCalendars(client: PoolClient, entityId: string): Promise<void> {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.engagements
+        WHERE entity_id = $1 AND kind = 'compliance' AND status <> ALL($2::text[])
+        ORDER BY created_at`,
+      [entityId, CLOSED_ENGAGEMENT_STATUSES],
+    );
+    for (const { id } of rows) {
+      await client.query('SAVEPOINT registration_regen');
+      try {
+        await this.generator.generateForEngagement(client, id);
+        await client.query('RELEASE SAVEPOINT registration_regen');
+      } catch {
+        await client.query('ROLLBACK TO SAVEPOINT registration_regen');
+      }
+    }
+  }
+
   private async insertRegistration(
     client: PoolClient,
     entityId: string,
@@ -1118,9 +1267,7 @@ export class EntitiesService {
         source: a.source,
         notes: a.notes,
       })),
-      missingInfo: [],
     };
-    detail.missingInfo = computeMissingInfo(detail);
     return detail;
   }
 
@@ -1432,33 +1579,13 @@ function mapSummary(row: SummaryRow): EntitySummary {
     incorporationDate: row.incorporation_date,
     registrationCount: Number(row.registration_count),
     primaryContactName: row.primary_contact_name,
+    missingInfo: row.missing_info.map((code) => ({
+      code,
+      label: MISSING_INFO_LABEL[code],
+      severity: 'recommended' as const,
+    })),
     version: row.version,
   };
-}
-
-/**
- * Progressive-completion signal (§5/§27/§28). Reports what is ABSENT so it can
- * be surfaced prominently — never as "Not Applicable". Creation is not blocked
- * by these; they are enrichment prompts, not statutory conclusions.
- */
-export function computeMissingInfo(d: EntityDetail): MissingInfoItem[] {
-  const items: MissingInfoItem[] = [];
-  const rec = (code: string, label: string): void => {
-    items.push({ code, label, severity: 'recommended' });
-  };
-  if (!d.pan) rec('pan', 'PAN not recorded');
-  if (!d.incorporationDate) rec('incorporation_date', 'Date of incorporation/birth not recorded');
-  if (!d.legalStatus) rec('legal_status', 'Legal/operational status not assessed');
-  if (d.registrations.length === 0) rec('registrations', 'No registrations recorded');
-  if (!d.contacts.some((c) => c.isPrimary)) rec('primary_contact', 'No primary contact recorded');
-  if (d.financialProfiles.filter((f) => f.isCurrent).length === 0)
-    rec('financials', 'No financial year recorded');
-  // A company/LLP without its identity registration is a notable gap.
-  if (d.typeCategory === 'company' && !d.registrations.some((r) => r.registrationType === 'cin'))
-    rec('cin', 'CIN not recorded for a company');
-  if (d.typeCategory === 'llp' && !d.registrations.some((r) => r.registrationType === 'llpin'))
-    rec('llpin', 'LLPIN not recorded for an LLP');
-  return items;
 }
 
 /** Map PostgreSQL constraint/RLS violations to clean HTTP errors. */

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -13,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  ENGAGEMENT_STATUS,
   FEATURE_FLAG,
   LIFECYCLE_ACTION,
   PERMISSION,
@@ -44,6 +46,13 @@ import {
   ReopenEngagementDto,
   WorkflowTransitionDto,
 } from './dto/lifecycle-transition.dto';
+
+/** The statuses someone without engagement.manage may create an engagement in:
+ *  acceptance stays with the partner and manager named on it. */
+const CREATE_STATUSES_WITHOUT_MANAGE: readonly string[] = [
+  ENGAGEMENT_STATUS.prospect,
+  ENGAGEMENT_STATUS.pendingAcceptance,
+];
 
 @ApiTags('engagements')
 @Controller('engagements')
@@ -102,8 +111,13 @@ export class EngagementsController {
   }
 
   @Post()
-  @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'Create an engagement (audited)' })
+  @RequirePermissions(PERMISSION.engagementCreate)
+  @ApiOperation({
+    summary: 'Create an engagement (audited)',
+    description:
+      'Any staff member may create one (engagement.create). Without engagement.manage it starts ' +
+      'as Prospect or Pending Acceptance — the partner and manager named on it take it from there.',
+  })
   create(
     @CurrentPrincipal() principal: Principal,
     @Body() dto: CreateEngagementDto,
@@ -113,6 +127,14 @@ export class EngagementsController {
       (dto.kind !== undefined || dto.years !== undefined || dto.streams !== undefined)
     ) {
       throw new BadRequestException('Engagement kinds are not enabled.');
+    }
+    if (
+      !principal.permissions.includes(PERMISSION.engagementManage) &&
+      !CREATE_STATUSES_WITHOUT_MANAGE.includes(dto.status ?? ENGAGEMENT_STATUS.prospect)
+    ) {
+      throw new ForbiddenException(
+        'Create it as Prospect or Pending Acceptance — the Engagement Partner accepts it.',
+      );
     }
     return this.engagements.createEngagement(rlsContextFromPrincipal(principal), dto);
   }

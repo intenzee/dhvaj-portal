@@ -49,7 +49,7 @@ const CREATE_ACTIONS: {
     label: 'New engagement',
     href: '/engagements/new',
     icon: Layers,
-    permission: PERMISSION.engagementManage,
+    permission: PERMISSION.engagementCreate,
   },
   {
     label: 'New client',

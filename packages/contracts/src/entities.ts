@@ -247,6 +247,54 @@ export interface MissingInfoItem {
   severity: 'required' | 'recommended';
 }
 
+/**
+ * What the portal checks a client's master for, in the order it reports it.
+ * The API works these out in one SQL expression, so the client page, the
+ * Clients list's marker and its "Missing data" filter always agree.
+ */
+export const MISSING_INFO_CODES = [
+  'pan',
+  'gstin',
+  'incorporation_date',
+  'legal_status',
+  'registrations',
+  'primary_contact',
+  'financials',
+  'cin',
+  'llpin',
+] as const;
+export type MissingInfoCode = (typeof MISSING_INFO_CODES)[number];
+
+/** The sentence the client page shows for a missing item. */
+export const MISSING_INFO_LABEL: Record<MissingInfoCode, string> = {
+  pan: 'PAN not recorded',
+  gstin: 'GSTIN not recorded for a client with GST logins or returns',
+  incorporation_date: 'Date of incorporation/birth not recorded',
+  legal_status: 'Legal/operational status not assessed',
+  registrations: 'No registrations recorded',
+  primary_contact: 'No primary contact recorded',
+  financials: 'No financial year recorded',
+  cin: 'CIN not recorded for a company',
+  llpin: 'LLPIN not recorded for an LLP',
+};
+
+/** The short name a list filter or a marker uses for it. */
+export const MISSING_INFO_SHORT: Record<MissingInfoCode, string> = {
+  pan: 'PAN',
+  gstin: 'GSTIN',
+  incorporation_date: 'Date of incorporation',
+  legal_status: 'Legal status',
+  registrations: 'Registrations',
+  primary_contact: 'Primary contact',
+  financials: 'Financial year',
+  cin: 'CIN',
+  llpin: 'LLPIN',
+};
+
+/** GET /entities?missing= — anything missing, nothing missing, or one item. */
+export const MISSING_FILTERS = ['any', 'none', ...MISSING_INFO_CODES] as const;
+export type MissingFilter = (typeof MISSING_FILTERS)[number];
+
 /** Indian identifier formats (uppercase). */
 export const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 export const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z][Z][0-9A-Z]$/;

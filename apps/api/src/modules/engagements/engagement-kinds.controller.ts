@@ -48,7 +48,7 @@ export class EngagementKindsController {
 
   @Post('independence-check')
   @HttpCode(200)
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementCreate)
   @ApiOperation({
     summary: 'Preview the independence rules for a proposed engagement, year or stream',
     description:

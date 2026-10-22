@@ -149,7 +149,7 @@ function EngagementsInner(): JSX.Element {
         title="Engagements"
         subtitle="Each engagement is one job for one client. You see the ones you are assigned to — click a row to open it."
         actions={
-          can(principal, PERMISSION.engagementManage) && (
+          can(principal, PERMISSION.engagementCreate) && (
             <Link
               href="/engagements/new"
               className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-700"

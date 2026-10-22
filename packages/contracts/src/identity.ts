@@ -89,6 +89,8 @@ export const PERMISSION = {
   serviceManage: 'service.manage',
   serviceManageOther: 'service.manage_other',
   engagementRead: 'engagement.read',
+  /** Create an engagement — every staff role. Running it stays with engagement.manage. */
+  engagementCreate: 'engagement.create',
   engagementManage: 'engagement.manage',
   complianceRead: 'compliance.read',
   complianceManage: 'compliance.manage',

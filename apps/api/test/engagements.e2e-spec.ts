@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { Client } from 'pg';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
@@ -181,14 +182,21 @@ describe('Engagement Core (e2e)', () => {
         .expect(409);
     });
 
-    it('forbids a Senior (no engagement.manage) from creating (403)', async () => {
-      const entityId = await findEntityId('Bharat');
-      const serviceId = await findServiceId('ITR_FILING');
-      await request(app.getHttpServer())
+    it('keeps acceptance with the partner: a Senior cannot create it already accepted (403)', async () => {
+      const partnerB = await findEmployeeId('EMP004');
+      const res = await request(app.getHttpServer())
         .post('/api/v1/engagements')
         .set(bearer(await token('senior.y@dhvaj.in')))
-        .send({ entityId: await freshClient(entityId), serviceId, financialYear: '2022-23' })
+        .send({
+          entityId: await freshClient(await findEntityId('Coastal')),
+          serviceId: await findServiceId('CERTIFICATION'),
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          status: 'accepted',
+          engagementPartnerEmployeeId: partnerB,
+        })
         .expect(403);
+      expect(res.body.message).toMatch(/Pending Acceptance/);
     });
 
     it('assigns and removes a team member (audited)', async () => {
@@ -304,6 +312,139 @@ describe('Engagement Core (e2e)', () => {
         .patch(`/api/v1/engagements/${created.body.id}`)
         .set(bearer(pa))
         .send({ status: 'active' })
+        .expect(400);
+    });
+  });
+
+  describe('everyone creates engagements', () => {
+    /** As hsdg_app under a staff member's context, in a rolled-back transaction
+     *  that has a transaction id (as any write would). */
+    const asStaff = async <T>(employeeId: string, sql: string, params: unknown[]): Promise<T> => {
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      await db.connect();
+      try {
+        await db.query('BEGIN');
+        await db.query(
+          `SELECT set_config('hsdg.role', 'senior', true),
+                  set_config('hsdg.employee_id', $1, true),
+                  pg_current_xact_id()`,
+          [employeeId],
+        );
+        const { rows } = await db.query(sql, params);
+        return rows[0] as T;
+      } finally {
+        await db.query('ROLLBACK').catch(() => undefined);
+        await db.end();
+      }
+    };
+
+    it('grants engagement.create to every staff role (not the platform admin)', async () => {
+      const db = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
+      await db.connect();
+      try {
+        const { rows } = await db.query<{ slug: string }>(
+          `SELECT r.slug FROM hsdg.role_permissions rp
+             JOIN hsdg.roles r ON r.id = rp.role_id
+             JOIN hsdg.permissions p ON p.id = rp.permission_id
+            WHERE p.slug = 'engagement.create' ORDER BY r.slug`,
+        );
+        expect(rows.map((r) => r.slug)).toEqual([
+          'article',
+          'manager',
+          'managing_partner',
+          'partner',
+          'senior',
+        ]);
+      } finally {
+        await db.end();
+      }
+    });
+
+    it.each([
+      ['an assignment', { kind: 'assignment', serviceCode: 'CERTIFICATION' }],
+      ['a Compliance engagement', { kind: 'compliance', streams: ['gst'] }],
+      ['a Statutory Audit', { kind: 'statutory_audit' }],
+    ])(
+      'lets a Senior who is neither EP nor manager create %s pending acceptance, and open it',
+      async (_label, spec: { kind: string; serviceCode?: string; streams?: string[] }) => {
+        const sy = await token('senior.y@dhvaj.in');
+        const seniorY = await findEmployeeId('EMP006');
+        const partnerB = await findEmployeeId('EMP004');
+        const managerX = await findEmployeeId('EMP005');
+        const body: Record<string, unknown> = {
+          kind: spec.kind,
+          entityId: await freshClient(await findEntityId('Coastal')), // South, Senior Y's office
+          financialYear: '2026-27',
+          status: 'pending_acceptance',
+          engagementPartnerEmployeeId: partnerB,
+          engagementManagerEmployeeId: managerX,
+        };
+        if (spec.serviceCode) {
+          body.serviceId = await findServiceId(spec.serviceCode);
+          body.periodLabel = uniquePeriod();
+        }
+        if (spec.streams) {
+          body.streams = spec.streams;
+          body.years = [{ financialYear: '2026-27' }];
+        }
+        const created = await request(app.getHttpServer())
+          .post('/api/v1/engagements')
+          .set(bearer(sy))
+          .send(body)
+          .expect(201);
+        expect(created.body).toMatchObject({
+          kind: spec.kind,
+          status: 'pending_acceptance',
+          engagementPartnerName: 'Partner B',
+          engagementManagerName: 'Manager X',
+        });
+        // The creator joins the team so they can open what they made.
+        expect(
+          (created.body.team as Array<{ employeeId: string; roleOnEngagement: string }>).find(
+            (t) => t.employeeId === seniorY,
+          ),
+        ).toMatchObject({ roleOnEngagement: 'member' });
+
+        const opened = await request(app.getHttpServer())
+          .get(`/api/v1/engagements/${created.body.id}`)
+          .set(bearer(sy))
+          .expect(200);
+        expect(opened.body.id).toBe(created.body.id);
+        const services = await request(app.getHttpServer())
+          .get(`/api/v1/engagements/${created.body.id}/services`)
+          .set(bearer(sy))
+          .expect(200);
+        expect((services.body as unknown[]).length).toBeGreaterThan(0);
+
+        // After the create commits the creator is a member, not a lead: the
+        // EP and manager run it from here.
+        const access = await asStaff<{ lead: boolean; member: boolean }>(
+          seniorY,
+          `SELECT hsdg.is_engagement_lead($1) AS lead, hsdg.is_engagement_member($1) AS member`,
+          [created.body.id],
+        );
+        expect(access).toEqual({ lead: false, member: true });
+        await request(app.getHttpServer())
+          .patch(`/api/v1/engagements/${created.body.id}`)
+          .set(bearer(sy))
+          .send({ priority: 'high' })
+          .expect(403);
+      },
+    );
+
+    it('still refuses a creator who names themselves EP without being a partner (400)', async () => {
+      const seniorY = await findEmployeeId('EMP006');
+      await request(app.getHttpServer())
+        .post('/api/v1/engagements')
+        .set(bearer(await token('senior.y@dhvaj.in')))
+        .send({
+          entityId: await freshClient(await findEntityId('Coastal')),
+          serviceId: await findServiceId('CERTIFICATION'),
+          financialYear: '2024-25',
+          periodLabel: uniquePeriod(),
+          status: 'pending_acceptance',
+          engagementPartnerEmployeeId: seniorY,
+        })
         .expect(400);
     });
   });

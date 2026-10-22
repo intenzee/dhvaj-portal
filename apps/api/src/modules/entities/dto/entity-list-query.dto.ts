@@ -1,6 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
-import { ENTITY_STATUSES, type EntityStatus, type WorkSection } from '@hsdg/contracts';
+import {
+  ENTITY_STATUSES,
+  MISSING_FILTERS,
+  type EntityStatus,
+  type MissingFilter,
+  type WorkSection,
+} from '@hsdg/contracts';
 import { PaginationQueryDto } from '../../../common/pagination/pagination.dto';
 import { SectionQuery } from '../../../common/sections';
 
@@ -25,6 +31,15 @@ export class EntityListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({
+    enum: MISSING_FILTERS,
+    description:
+      'Master data: "any" — something missing; "none" — nothing missing; or one missing item (pan, registrations, …).',
+  })
+  @IsOptional()
+  @IsIn(MISSING_FILTERS)
+  missing?: MissingFilter;
 
   /** Clients with a live engagement in any of these sections (GST, Statutory Audit, …). */
   @SectionQuery()

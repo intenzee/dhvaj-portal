@@ -6,6 +6,7 @@ import {
   gstinCheckChar,
   type ClientImportPreview,
   type ClientImportResult,
+  type ClientReturns,
   type EntityCredentials,
 } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
@@ -18,7 +19,10 @@ import { createTestApp } from './create-test-app';
  * the client's partner (or the managing partner, or its engagement team). A
  * GST login without its GSTIN waits on the client and moves onto the GSTIN
  * when it is added; the sheet's frequency becomes the GSTIN's scheme and its
- * filed / NA marks close the matching filings.
+ * filed / NA marks are kept as the client's GST return history (GSTIN or
+ * not) and close the matching filings — in a GST engagement the import
+ * creates, or adds the year / GST to, when the client has none. Marks
+ * without a GSTIN are pointed out.
  */
 describe('Client portal credentials (e2e)', () => {
   let app: INestApplication;
@@ -182,6 +186,9 @@ describe('Client portal credentials (e2e)', () => {
   const entityOf = async (p: string): Promise<string> =>
     (await su.query<{ id: string }>(`SELECT id FROM hsdg.entities WHERE pan = $1`, [p])).rows[0]!
       .id;
+  const returnsOf = async (t: string, entityId: string): Promise<ClientReturns> =>
+    (await http().get(`/api/v1/client-returns?entityId=${entityId}`).set(bearer(t)).expect(200))
+      .body as ClientReturns;
   const schemeOf = async (number: string) =>
     (
       await su.query<{ gst_scheme: string; qrmp_category: string | null }>(
@@ -254,8 +261,20 @@ describe('Client portal credentials (e2e)', () => {
       ['traces', 'deductor', 'co•••or'],
       ['traces', 'taxpayer', 'co•••er'],
     ]);
-    expect(co.warnings.join()).toMatch(/marks need the GSTIN/);
+    // The Maharashtra row's mark stays with it although it has no GSTIN yet —
+    // and the person is told it cannot go into an engagement.
+    expect(co).toMatchObject({ noGstin: true, gstEngagement: null });
+    expect(co.warnings).toEqual([expect.stringMatching(/^No GSTIN: /)]);
+    expect(co.gst[1]).toMatchObject({ gstin: null, filed: 1, notApplicable: 0 });
     expect(p.rows[1]!.gst[0]).toMatchObject({ gstin: G_FIRM, filed: 3, notApplicable: 1 });
+    expect(p.rows[1]).toMatchObject({
+      noGstin: false,
+      gstEngagement: { action: 'create', engagementCode: null, financialYears: ['2026-27'] },
+    });
+    expect(p.rows[1]!.warnings).toContain(
+      'A GST engagement for 2026-27 will be created, with the months the sheet marks filed / NA closed in it.',
+    );
+    expect(p).toMatchObject({ engagementsToCreate: 1, noGstin: 1 });
     expect(p.rows[2]!.error).toMatch(/not a valid GSTIN/);
     expect(p.rows[3]).toMatchObject({ typeSlug: 'proprietorship', typeGuessed: false });
     expect(p.logins).toBe(8);
@@ -276,12 +295,20 @@ describe('Client portal credentials (e2e)', () => {
       registrationsAdded: 3, // Company: Delhi GSTIN + TAN; Firm: its GSTIN
       loginsSaved: 8,
       schemesSet: 2,
-      marksApplied: 0,
-      marksWithoutFiling: 4, // no GST engagement yet
+      engagementsCreated: 1, // the Firm's: the Company's marked row has no GSTIN
+      engagementsExtended: 0,
+      marksApplied: 4,
+      marksWithoutFiling: 0,
+      marksRecorded: 5, // all kept: Firm's 4, Company's Maharashtra row (no GSTIN) 1
     });
     expect(result.failed).toEqual([
       expect.objectContaining({ source: 'GST Login 8', message: expect.stringMatching(/GSTIN/) }),
     ]);
+    expect(result.notes).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(/^GST engagement \S+ created for 2026-27\.$/),
+      }),
+    );
     companyId = await entityOf(company);
     firmId = await entityOf(firm);
 
@@ -304,6 +331,88 @@ describe('Client portal credentials (e2e)', () => {
 
     expect(await schemeOf(G_CO_DL)).toEqual([{ gst_scheme: 'regular', qrmp_category: null }]);
     expect(await schemeOf(G_FIRM)).toEqual([{ gst_scheme: 'regular', qrmp_category: null }]);
+  });
+
+  it("keeps the sheet's marks as each client's return history, GSTIN or not", async () => {
+    const firmReturns = await returnsOf(pa, firmId);
+    expect(firmReturns.periods).toEqual(['2026-04', '2026-05', '2026-06']);
+    expect(firmReturns.forms).toEqual(['GSTR1', 'GSTR3B']);
+    expect(firmReturns.lines).toEqual([
+      expect.objectContaining({
+        entityId: firmId,
+        entityName: `${tag} Firm`,
+        gstin: G_FIRM,
+        stateCode: '07',
+        marks: {
+          '2026-04': { GSTR1: 'filed', GSTR3B: 'filed' },
+          '2026-05': { GSTR3B: 'not_applicable' },
+          '2026-06': { GSTR1: 'filed' },
+        },
+      }),
+    ]);
+    // The Maharashtra row has no GSTIN yet: kept by its state.
+    expect((await returnsOf(pa, companyId)).lines).toEqual([
+      expect.objectContaining({
+        gstin: null,
+        registrationId: null,
+        stateCode: '27',
+        marks: { '2026-04': { GSTR1: 'filed' } },
+      }),
+    ]);
+    // The whole firm's list has both; another office sees neither.
+    const all = (await http().get('/api/v1/client-returns').set(bearer(mp)).expect(200))
+      .body as ClientReturns;
+    expect(all.lines.filter((l) => [firmId, companyId].includes(l.entityId))).toHaveLength(2);
+    expect((await returnsOf(pb, firmId)).lines).toEqual([]);
+    const south = (await http().get('/api/v1/client-returns').set(bearer(pb)).expect(200))
+      .body as ClientReturns;
+    expect(south.lines.some((l) => [firmId, companyId].includes(l.entityId))).toBe(false);
+  });
+
+  it("creates the Firm's GST engagement for the marked year, the importer its partner, and closes the months in it", async () => {
+    const { rows: engagements } = await su.query<{
+      kind: string;
+      status: string;
+      ep: string;
+      years: string;
+    }>(
+      `SELECT e.kind, e.status, u.email AS ep,
+              string_agg(y.financial_year || ' ' || array_to_string(y.streams, ','), '; '
+                         ORDER BY y.financial_year) AS years
+         FROM hsdg.engagements e
+         JOIN hsdg.employees em ON em.id = e.engagement_partner_id
+         JOIN hsdg.users u ON u.id = em.user_id
+         JOIN hsdg.compliance_engagement_years y ON y.engagement_id = e.id
+        WHERE e.entity_id = $1
+        GROUP BY e.id, u.email`,
+      [firmId],
+    );
+    expect(engagements).toEqual([
+      {
+        kind: 'compliance',
+        status: 'accepted',
+        ep: 'partner.a@dhvaj.in',
+        years: '2026-27 gst',
+      },
+    ]);
+    const { rows } = await su.query<{ code: string; period_key: string; workflow_status: string }>(
+      `SELECT r.code, ci.period_key, ci.workflow_status
+         FROM hsdg.compliance_instances ci
+         JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
+         JOIN hsdg.entity_registrations g ON g.id = ci.registration_id
+        WHERE g.registration_number = $1 AND ci.period_key IN ('2026-04', '2026-05', '2026-06')
+          AND r.code IN ('GST_GSTR1_M', 'GST_GSTR3B_M')
+        ORDER BY ci.period_key, r.code`,
+      [G_FIRM],
+    );
+    expect(rows.map((r) => `${r.period_key} ${r.code} ${r.workflow_status}`)).toEqual([
+      '2026-04 GST_GSTR1_M filed',
+      '2026-04 GST_GSTR3B_M filed',
+      '2026-05 GST_GSTR1_M not_started',
+      '2026-05 GST_GSTR3B_M not_applicable',
+      '2026-06 GST_GSTR1_M filed',
+      '2026-06 GST_GSTR3B_M not_started',
+    ]);
   });
 
   it('stores only ciphertext, which the app role cannot even select', async () => {
@@ -395,6 +504,10 @@ describe('Client portal credentials (e2e)', () => {
       ].sort(),
     );
     expect(await schemeOf(G_CO_MH)).toEqual([{ gst_scheme: 'qrmp', qrmp_category: 'X' }]);
+    // The marks kept by state now show under the GSTIN.
+    expect((await returnsOf(pa, companyId)).lines).toEqual([
+      expect.objectContaining({ gstin: G_CO_MH, marks: { '2026-04': { GSTR1: 'filed' } } }),
+    ]);
     // Still opens: the seal is bound to the client, not the GSTIN.
     const moved = gst.find((i) => i.registrationNumber === G_CO_MH)!;
     const res = await http()
@@ -404,19 +517,24 @@ describe('Client portal credentials (e2e)', () => {
     expect(res.body.password).toBe(PASSWORDS[1]);
   });
 
-  it('closes the filings the sheet marks filed / NA once there is a GST engagement, and only once', async () => {
-    await http()
-      .post('/api/v1/engagements')
-      .set(bearer(pa))
-      .send({
-        kind: 'compliance',
-        entityId: firmId,
-        status: 'accepted',
-        financialYear: '2026-27',
-        streams: ['gst'],
-        years: [{ financialYear: '2026-27' }],
-      })
-      .expect(201);
+  it('puts the months of a GSTIN added later into an engagement on the next upload, and only once', async () => {
+    const preview = (
+      await http()
+        .post('/api/v1/client-imports/workbook/preview')
+        .set(bearer(pa))
+        .send(body())
+        .expect(200)
+    ).body as ClientImportPreview;
+    const co = preview.rows.find((r) => r.name === `${tag} Company Pvt Ltd`)!;
+    // The sheet's Maharashtra row has no GSTIN: it takes the one added in the portal.
+    expect(co).toMatchObject({ action: 'update_client', noGstin: false });
+    expect(co.gst[1]).toMatchObject({ gstin: G_CO_MH, stateCode: '27' });
+    expect(co.gstEngagement).toMatchObject({ action: 'create', financialYears: ['2026-27'] });
+    expect(preview.rows.find((r) => r.name === `${tag} Firm`)!.gstEngagement).toMatchObject({
+      action: 'existing',
+    });
+    expect(preview).toMatchObject({ engagementsToCreate: 1, noGstin: 0 });
+
     const again = await runImport();
     expect(again).toMatchObject({
       clientsCreated: 0,
@@ -424,30 +542,41 @@ describe('Client portal credentials (e2e)', () => {
       registrationsAdded: 0,
       loginsSaved: 8,
       schemesSet: 0,
-      marksApplied: 4,
+      engagementsCreated: 1,
       marksNotAllowed: 0,
+      marksAlreadyDone: 4, // the Firm's
+      marksRecorded: 1, // the Company's Maharashtra mark, moved from its state onto the GSTIN
     });
-    const { rows } = await su.query<{ code: string; period_key: string; workflow_status: string }>(
-      `SELECT r.code, ci.period_key, ci.workflow_status
-         FROM hsdg.compliance_instances ci
+    // April on a quarterly GSTIN has no GSTR-1 to close (IFF): kept on the client only.
+    expect(again).toMatchObject({ marksApplied: 0, marksWithoutFiling: 0 });
+    expect((await returnsOf(pa, companyId)).lines).toEqual([
+      expect.objectContaining({ gstin: G_CO_MH, marks: { '2026-04': { GSTR1: 'filed' } } }),
+    ]);
+    // The Company's new engagement has the Maharashtra GSTIN's quarterly returns.
+    const { rows } = await su.query<{ period_key: string }>(
+      `SELECT ci.period_key FROM hsdg.compliance_instances ci
          JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
          JOIN hsdg.entity_registrations g ON g.id = ci.registration_id
-        WHERE g.registration_number = $1 AND ci.period_key IN ('2026-04', '2026-05', '2026-06')
-          AND r.code IN ('GST_GSTR1_M', 'GST_GSTR3B_M')
-        ORDER BY ci.period_key, r.code`,
-      [G_FIRM],
+         JOIN hsdg.engagements e ON e.id = ci.engagement_id
+        WHERE g.registration_number = $1 AND r.code = 'GST_GSTR1_Q' AND e.entity_id = $2
+        ORDER BY ci.period_key`,
+      [G_CO_MH, companyId],
     );
-    expect(rows.map((r) => `${r.period_key} ${r.code} ${r.workflow_status}`)).toEqual([
-      '2026-04 GST_GSTR1_M filed',
-      '2026-04 GST_GSTR3B_M filed',
-      '2026-05 GST_GSTR1_M not_started',
-      '2026-05 GST_GSTR3B_M not_applicable',
-      '2026-06 GST_GSTR1_M filed',
-      '2026-06 GST_GSTR3B_M not_started',
+    expect(rows.map((r) => r.period_key)).toEqual([
+      '2026-27:Q1',
+      '2026-27:Q2',
+      '2026-27:Q3',
+      '2026-27:Q4',
     ]);
 
     const third = await runImport();
-    expect(third).toMatchObject({ marksApplied: 0, marksAlreadyDone: 4 });
+    expect(third).toMatchObject({
+      engagementsCreated: 0,
+      engagementsExtended: 0,
+      marksApplied: 0,
+      marksRecorded: 0,
+    });
+    expect(third.marksAlreadyDone).toBe(4);
   });
 
   it('lets a manager of the office change or remove a login; not another office', async () => {
@@ -487,5 +616,230 @@ describe('Client portal credentials (e2e)', () => {
     );
     await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(pa)).expect(429);
     await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(mp)).expect(200);
+  });
+
+  it("adds the marked year, or GST, to the client's open Compliance engagement", async () => {
+    const p = pan('C');
+    const g = gstin('07', p);
+    const name = `Extend${Date.now()} Traders Pvt Ltd`;
+    const book = (marks: Record<string, string>): string => {
+      const months = Object.keys(marks);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['', '', '', '', ...months],
+          ['Particular', 'ID', 'Pwd', 'GSTIN', ...months.map(() => 'GSTR-1')],
+          [name, 'ext_id', 'ext-pw', g, ...months.map((m) => marks[m])],
+        ]),
+        'GST Login',
+      );
+      return (XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer).toString('base64');
+    };
+    const send = async (path: string, marks: Record<string, string>) =>
+      (
+        await http()
+          .post(`/api/v1/client-imports/workbook${path}`)
+          .set(bearer(pa))
+          .send({ filename: 'extend.xlsx', contentBase64: book(marks), officeCode: 'NORTH' })
+          .expect(200)
+      ).body;
+
+    // No marks: the client only, no engagement.
+    expect(await send('', { 'Apr-26': '' })).toMatchObject({
+      clientsCreated: 1,
+      engagementsCreated: 0,
+    });
+    const entityId = await entityOf(p);
+    const created = await http()
+      .post('/api/v1/engagements')
+      .set(bearer(pa))
+      .send({
+        kind: 'compliance',
+        entityId,
+        status: 'accepted',
+        financialYear: '2026-27',
+        streams: ['tds'],
+        years: [{ financialYear: '2026-27' }],
+      })
+      .expect(201);
+    const code = created.body.engagementCode as string;
+
+    // A year it already has, without GST: GST is added to it.
+    const marks = { 'Apr-26': 'filed' };
+    const preview = (await send('/preview', marks)) as ClientImportPreview;
+    expect(preview.rows[0]!.gstEngagement).toEqual({
+      action: 'add_stream',
+      engagementCode: code,
+      financialYears: ['2026-27'],
+    });
+    const result = (await send('', marks)) as ClientImportResult;
+    expect(result).toMatchObject({
+      engagementsCreated: 0,
+      engagementsExtended: 1,
+      marksApplied: 1,
+    });
+    expect(result.notes).toContainEqual(
+      expect.objectContaining({ message: `GST added to ${code} for 2026-27.` }),
+    );
+
+    // A year it does not have: added with GST.
+    const later = { 'Apr-27': 'filed' };
+    expect(((await send('/preview', later)) as ClientImportPreview).rows[0]!.gstEngagement).toEqual(
+      { action: 'add_year', engagementCode: code, financialYears: ['2027-28'] },
+    );
+    const added = (await send('', later)) as ClientImportResult;
+    expect(added).toMatchObject({ engagementsCreated: 0, engagementsExtended: 1 });
+    expect(added.notes).toContainEqual(
+      expect.objectContaining({ message: `2027-28 with GST added to ${code}.` }),
+    );
+    const { rows } = await su.query<{ financial_year: string; streams: string[] }>(
+      `SELECT financial_year, streams FROM hsdg.compliance_engagement_years
+        WHERE engagement_id = $1 ORDER BY financial_year`,
+      [created.body.id],
+    );
+    expect(rows.map((r) => [r.financial_year, [...r.streams].sort()])).toEqual([
+      ['2026-27', ['gst', 'tds']],
+      ['2027-28', ['gst']],
+    ]);
+  });
+
+  it("finds a client by a similar name, takes the sheet's fuller name, and points out duplicates", async () => {
+    const t = `Alike${Date.now()}`;
+    const book = (names: string[]): string => {
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['Particular', 'ID', 'Pwd', 'GSTIN', 'Apr-26'],
+          ['', '', '', '', 'GSTR-1'],
+          ...names.map((n, i) => [`${t} ${n}`, `${t}_${i}`, `pw-${i}`, '', 'filed']),
+        ]),
+        'GST Login',
+      );
+      return (XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer).toString('base64');
+    };
+    const send = (path: string, names: string[]) =>
+      http()
+        .post(`/api/v1/client-imports/workbook${path}`)
+        .set(bearer(pa))
+        .send({
+          filename: 'alike.xlsx',
+          contentBase64: book(names),
+          officeCode: 'NORTH',
+          defaultTypeSlug: 'proprietorship',
+        })
+        .expect(200);
+    const named = async () =>
+      (
+        await su.query<{ legal_name: string }>(
+          `SELECT legal_name FROM hsdg.entities WHERE legal_name LIKE $1 ORDER BY legal_name`,
+          [`${t} %`],
+        )
+      ).rows.map((r) => r.legal_name.slice(t.length + 1));
+
+    await send('', [
+      'aveer green',
+      'Jaynat Gupta',
+      'GRIID Chandigarh',
+      'Kumar Agencies',
+      'Kumar Agro',
+    ]);
+    await http()
+      .post('/api/v1/entities')
+      .set(bearer(pa))
+      .send({ legalName: `${t} Griid`, typeSlug: 'proprietorship', officeCode: 'NORTH' })
+      .expect(201);
+
+    const next = ['Aveer Green Private Limited', 'Jayant Gupta', 'GRIID- Chandigarh', 'Kumar'];
+    const preview = (await send('/preview', next)).body as ClientImportPreview;
+    const row = (n: string) => preview.rows.find((r) => r.name === `${t} ${n}`)!;
+    expect(row('Aveer Green Private Limited')).toMatchObject({
+      action: 'update_client',
+      entityName: `${t} aveer green`,
+    });
+    expect(row('Aveer Green Private Limited').warnings).toEqual(
+      expect.arrayContaining([
+        `Taken to be "${t} aveer green" in the portal, by its name.`,
+        `"${t} aveer green" will be renamed "${t} Aveer Green Private Limited".`,
+      ]),
+    );
+    expect(row('Jayant Gupta').warnings).toContain(
+      `"${t} Jaynat Gupta" will be renamed "${t} Jayant Gupta".`,
+    );
+    expect(row('GRIID- Chandigarh').entityName).toBe(`${t} GRIID Chandigarh`);
+    expect(row('GRIID- Chandigarh').warnings.join(' ')).toMatch(
+      new RegExp(`"${t} Griid" \\(.+\\) in the portal looks like the same client`),
+    );
+    expect(row('Kumar')).toMatchObject({ action: 'error' });
+    expect(row('Kumar').error).toMatch(/could be .*Kumar Agencies.* or .*Kumar Agro/);
+
+    const result = (await send('', next)).body as ClientImportResult;
+    expect(result).toMatchObject({ clientsCreated: 0, clientsUpdated: 3 });
+    expect(result.notes).toContainEqual(
+      expect.objectContaining({
+        message: `"${t} aveer green" renamed "${t} Aveer Green Private Limited", as the sheet has it.`,
+      }),
+    );
+    expect(await named()).toEqual(
+      [
+        'Aveer Green Private Limited',
+        'GRIID Chandigarh',
+        'Griid',
+        'Jayant Gupta',
+        'Kumar Agencies',
+        'Kumar Agro',
+      ].sort(),
+    );
+    const audit = await su.query(
+      `SELECT 1 FROM hsdg.audit_events WHERE action = 'entity.updated' AND after_state->>'legalName' = $1`,
+      [`${t} Jayant Gupta`],
+    );
+    expect(audit.rowCount).toBe(1);
+  });
+
+  it('points out a client of the same first word and GST login as a likely duplicate, never taking it', async () => {
+    const t = `Twin${Date.now()}`;
+    const book = (rows: [string, string][]): string => {
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['Particular', 'ID', 'Pwd', 'GSTIN', 'Apr-26'],
+          ['', '', '', '', 'GSTR-1'],
+          ...rows.map(([n, id], i) => [`${n} ${t}`, id, `pw-${i}`, '', 'filed']),
+        ]),
+        'GST Login',
+      );
+      return (XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer).toString('base64');
+    };
+    const send = (path: string, rows: [string, string][]) =>
+      http()
+        .post(`/api/v1/client-imports/workbook${path}`)
+        .set(bearer(pa))
+        .send({
+          filename: 'twin.xlsx',
+          contentBase64: book(rows),
+          officeCode: 'NORTH',
+          defaultTypeSlug: 'proprietorship',
+        })
+        .expect(200);
+
+    await send('', [['3Acess', `${t}_ace`]]);
+    const preview = (
+      await send('/preview', [
+        ['3Aces Technologies - Firm', `${t}_ace`],
+        ['3Aces Technologies Private Limited', `${t}_xyz`],
+      ])
+    ).body as ClientImportPreview;
+    const row = (n: string) => preview.rows.find((r) => r.name === `${n} ${t}`)!;
+    expect(row('3Aces Technologies - Firm')).toMatchObject({ action: 'create_client' });
+    expect(row('3Aces Technologies - Firm').warnings.join(' ')).toMatch(
+      new RegExp(`"3Acess ${t}" \\(.+\\) in the portal looks like the same client`),
+    );
+    expect(row('3Aces Technologies Private Limited')).toMatchObject({ action: 'create_client' });
+    expect(row('3Aces Technologies Private Limited').warnings.join(' ')).not.toMatch(
+      /looks like the same client/,
+    );
   });
 });
