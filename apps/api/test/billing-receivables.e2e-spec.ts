@@ -238,7 +238,8 @@ describe('PS-203 receivables and payment reminders (e2e)', () => {
     // A paid invoice is not chased again.
     await scan();
     expect(await about()).toHaveLength(2);
-  });
+    // Five firm-wide scans: on CI's full database each takes seconds.
+  }, 120_000);
 
   it('automatic client e-mails stay off unless the firm turns them on and has a mail channel', async () => {
     const { eng } = await client();
