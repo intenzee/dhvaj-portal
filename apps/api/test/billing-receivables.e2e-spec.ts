@@ -96,9 +96,15 @@ describe('PS-203 receivables and payment reminders (e2e)', () => {
   const report = async (t: string): Promise<ReceivablesReport> =>
     (await http().get('/api/v1/reports/receivables').set(bearer(t)).expect(200))
       .body as ReceivablesReport;
+  // Only the overdue nudges: a firm-wide scan raises many at one created_at,
+  // so an unfiltered first page need not hold this invoice's.
   const inbox = async (t: string): Promise<NotificationItem[]> =>
-    (await http().get('/api/v1/notifications?limit=100').set(bearer(t)).expect(200)).body
-      .items as NotificationItem[];
+    (
+      await http()
+        .get('/api/v1/notifications?type=invoice_overdue&limit=100')
+        .set(bearer(t))
+        .expect(200)
+    ).body.items as NotificationItem[];
   const scan = () => http().post('/api/v1/notifications/scan').set(bearer(mp)).expect(201);
 
   beforeAll(async () => {

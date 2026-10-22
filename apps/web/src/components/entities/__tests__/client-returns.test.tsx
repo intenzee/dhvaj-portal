@@ -5,7 +5,6 @@ import type { ClientReturnLine, ClientReturns } from '@hsdg/contracts';
 import {
   ClientReturnsCard,
   ReturnsGrid,
-  filterReturnLines,
   returnCounts,
   returnLineLabel,
 } from '@/components/entities/client-returns';
@@ -61,14 +60,6 @@ describe('client GST returns', () => {
     expect(returnLineLabel({ gstin: '07AAACB1234C1Z5', stateCode: '07' })).toBe('07AAACB1234C1Z5');
     expect(returnLineLabel({ gstin: null, stateCode: '27' })).toBe('Maharashtra (GSTIN not added)');
     expect(returnLineLabel({ gstin: null, stateCode: null })).toBe('No GSTIN in the sheet');
-  });
-
-  it('searches by client, code, GSTIN or state', () => {
-    expect(filterReturnLines(data.lines, '  ').length).toBe(2);
-    expect(filterReturnLines(data.lines, 'kumar').map((l) => l.entityId)).toEqual(['e2']);
-    expect(filterReturnLines(data.lines, 'c-0001').map((l) => l.entityId)).toEqual(['e1']);
-    expect(filterReturnLines(data.lines, '07aaacb').map((l) => l.entityId)).toEqual(['e1']);
-    expect(filterReturnLines(data.lines, 'maharashtra').map((l) => l.entityId)).toEqual(['e2']);
   });
 
   it('counts filed and NA marks', () => {

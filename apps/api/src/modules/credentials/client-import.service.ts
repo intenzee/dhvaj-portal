@@ -9,15 +9,19 @@ import type { PoolClient } from 'pg';
 import {
   CLIENT_IMPORT_ACTION,
   type ClientImportAction,
+  type ClientImportGstEngagement,
   type ClientImportPreview,
   type ClientImportRequest,
   type ClientImportResult,
   type ClientImportRow,
+  returnPeriodFinancialYear,
   usernameHint,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { EngagementKindsService } from '../engagements/engagement-kinds.service';
+import { EngagementsService } from '../engagements/engagements.service';
 import { EntitiesService } from '../entities/entities.service';
 import { CredentialsService } from './credentials.service';
 import {
@@ -31,6 +35,7 @@ import {
   similarNames,
   sourceLabel,
   type ParsedWorkbook,
+  type PlannedGst,
   type WorkbookClient,
 } from './client-workbook';
 
@@ -49,6 +54,17 @@ interface PlannedClient extends WorkbookClient {
   matchedBy: 'key' | 'name' | 'similar' | null;
   /** The sheet's fuller name for the portal's client, when it has a shorter one. */
   rename: string | null;
+  /** The GST engagement the marked months go into. */
+  gstEngagement: ClientImportGstEngagement | null;
+  /** GST marks without a GSTIN, in the sheet or the portal. */
+  noGstin: boolean;
+}
+
+/** The client's open Compliance engagement and its years in scope. */
+interface GstCover {
+  id: string;
+  code: string;
+  years: { financial_year: string; streams: string[]; status: string; version: number }[];
 }
 
 interface Plan {
@@ -70,7 +86,47 @@ const emptyTally = (): Tally => ({
   marksWithoutFiling: 0,
   marksNotAllowed: 0,
   marksRecorded: 0,
+  engagementsCreated: 0,
+  engagementsExtended: 0,
 });
+
+const NO_GSTIN =
+  'No GSTIN: the GST returns the sheet marks for it cannot go into an engagement. Add the GSTIN to the client (or the sheet), then upload the sheet again.';
+
+/** The financial years a client's GST marks fall in, for its GSTINs. */
+function gstYears(gst: PlannedGst[]): string[] {
+  const years = new Set<string>();
+  for (const g of gst)
+    if (g.gstin)
+      for (const m of g.marks) {
+        const fy = returnPeriodFinancialYear(m.period);
+        if (fy) years.add(fy);
+      }
+  return [...years].sort();
+}
+
+/** What the import does to the client's GST engagement for those years. */
+function engagementPlan(cover: GstCover | null, years: string[]): ClientImportGstEngagement {
+  if (!cover) return { action: 'create', engagementCode: null, financialYears: years };
+  const yearOf = (fy: string) => cover.years.find((y) => y.financial_year === fy);
+  const action = years.some((fy) => !yearOf(fy))
+    ? 'add_year'
+    : years.some((fy) => !yearOf(fy)!.streams.includes('gst'))
+      ? 'add_stream'
+      : 'existing';
+  return { action, engagementCode: cover.code, financialYears: years };
+}
+
+function engagementWarning(p: ClientImportGstEngagement): string | null {
+  const years = p.financialYears.join(', ');
+  if (p.action === 'create')
+    return `A GST engagement for ${years} will be created, with the months the sheet marks filed / NA closed in it.`;
+  if (p.action === 'add_year')
+    return `${years} with GST will be added to ${p.engagementCode}, with the marked months closed in it.`;
+  if (p.action === 'add_stream')
+    return `GST will be added to ${p.engagementCode} for ${years}, with the marked months closed in it.`;
+  return null;
+}
 
 function failureMessage(err: unknown): string {
   const e = err as { code?: string };
@@ -120,6 +176,8 @@ export class ClientImportService {
     private readonly audit: AuditService,
     private readonly entities: EntitiesService,
     private readonly credentials: CredentialsService,
+    private readonly engagements: EngagementsService,
+    private readonly kinds: EngagementKindsService,
   ) {}
 
   async preview(ctx: RlsContext, req: ClientImportRequest): Promise<ClientImportPreview> {
@@ -137,6 +195,8 @@ export class ClientImportService {
       logins: live.reduce((n, c) => n + c.logins.length, 0),
       marks: live.reduce((n, c) => n + c.gst.reduce((m, g) => m + g.marks.length, 0), 0),
       vaultReady: this.credentials.vaultReady,
+      engagementsToCreate: live.filter((c) => c.gstEngagement?.action === 'create').length,
+      noGstin: live.filter((c) => c.noGstin).length,
     };
   }
 
@@ -338,6 +398,7 @@ export class ClientImportService {
     }
 
     await this.recordMarks(client, ctx, req.filename, entityId!, c, regOf, tally);
+    await this.ensureGstEngagement(client, ctx, c, entityId!, tally, notes);
     await this.applyMarks(client, ctx, c, regOf, tally);
     return tally;
   }
@@ -495,6 +556,133 @@ export class ClientImportService {
     }
   }
 
+  /**
+   * The client's GST engagement for the years the sheet marks: a new
+   * Compliance engagement with GST (the importer its partner), or the year /
+   * the GST stream added to its open one; an existing year's calendar is
+   * filled in for GSTINs added since. Then applyMarks closes the months. A
+   * refusal (no partner to lead it, an independence rule) is noted and the
+   * rest of the client still imports.
+   */
+  private async ensureGstEngagement(
+    client: PoolClient,
+    ctx: RlsContext,
+    c: PlannedClient,
+    entityId: string,
+    tally: Tally,
+    notes: string[],
+  ): Promise<void> {
+    const years = c.gstEngagement?.financialYears ?? [];
+    if (years.length === 0) return;
+    await client.query('SAVEPOINT gst_engagement');
+    try {
+      const cover = await this.gstCover(client, entityId);
+      if (!cover) {
+        const created = await this.engagements.createEngagementWith(client, ctx, {
+          kind: 'compliance',
+          entityId,
+          financialYear: years[0]!,
+          status: 'accepted',
+          streams: ['gst'],
+          years: years.map((financialYear) => ({ financialYear })),
+        });
+        tally.engagementsCreated += 1;
+        notes.push(`GST engagement ${created.engagementCode} created for ${years.join(', ')}.`);
+      } else {
+        let extended = false;
+        for (const fy of years) {
+          const year = cover.years.find((y) => y.financial_year === fy);
+          if (!year) {
+            await this.kinds.addYearWith(client, ctx, cover.id, {
+              financialYear: fy,
+              streams: ['gst'],
+            });
+            notes.push(`${fy} with GST added to ${cover.code}.`);
+            extended = true;
+          } else if (!year.streams.includes('gst')) {
+            await this.kinds.updateYearStreamsWith(client, ctx, cover.id, fy, {
+              add: ['gst'],
+              version: year.version,
+            });
+            notes.push(`GST added to ${cover.code} for ${fy}.`);
+            extended = true;
+          } else if (year.status === 'open') {
+            await this.kinds.generate(client, cover.id, [fy]);
+          }
+        }
+        if (extended) tally.engagementsExtended += 1;
+      }
+      await client.query('RELEASE SAVEPOINT gst_engagement');
+    } catch (err) {
+      await client.query('ROLLBACK TO SAVEPOINT gst_engagement');
+      const why =
+        err instanceof HttpException
+          ? err.message
+          : (err as { code?: string }).code === '42501'
+            ? 'not allowed for you.'
+            : 'it could not be saved.';
+      notes.push(`No GST engagement for ${years.join(', ')}: ${why}`);
+    }
+  }
+
+  /** The client's open Compliance engagement and its years, if it has one. */
+  private async gstCover(client: PoolClient, entityId: string): Promise<GstCover | null> {
+    const kc = await this.kinds.kindContext(client, entityId);
+    const open = this.kinds.openCompliance(kc.facts);
+    if (!open) return null;
+    const { rows } = await client.query<GstCover['years'][number]>(
+      `SELECT financial_year, streams, status, version FROM hsdg.compliance_engagement_years
+        WHERE engagement_id = $1`,
+      [open.id],
+    );
+    return { id: open.id, code: open.engagementCode, years: rows };
+  }
+
+  /**
+   * Where each client's filed / NA months go: its GST engagement for the
+   * years they fall in. A sheet row without a GSTIN takes the client's one
+   * GSTIN in the portal (in the row's state) — so adding the GSTIN and
+   * uploading again puts the months in; with none the person is told.
+   */
+  private async planGstEngagements(
+    client: PoolClient,
+    planned: PlannedClient[],
+    gstinsOf: Map<string, string[]>,
+  ): Promise<PlannedClient[]> {
+    const out: PlannedClient[] = [];
+    for (const c of planned) {
+      if (c.action === CLIENT_IMPORT_ACTION.error) {
+        out.push(c);
+        continue;
+      }
+      const known = c.entityId ? (gstinsOf.get(c.entityId) ?? []) : [];
+      const gst = c.gst.map((g) => {
+        if (g.gstin || g.marks.length === 0) return g;
+        const fit = known.filter((n) => !g.stateCode || n.startsWith(g.stateCode));
+        return fit.length === 1 ? { ...g, gstin: fit[0]! } : g;
+      });
+      const noGstin = gst.some((g) => !g.gstin && g.marks.length > 0);
+      const warnings = [...c.warnings];
+      if (noGstin) warnings.push(NO_GSTIN);
+      const years = gstYears(gst);
+      let gstEngagement: ClientImportGstEngagement | null = null;
+      if (years.length) {
+        const cover = c.entityId ? await this.gstCover(client, c.entityId) : null;
+        gstEngagement = engagementPlan(cover, years);
+        const note = engagementWarning(gstEngagement);
+        if (note) warnings.push(note);
+      }
+      // The months still go in when the client has nothing else new.
+      const action =
+        c.action === CLIENT_IMPORT_ACTION.unchanged &&
+        (gstEngagement?.action ?? 'existing') !== 'existing'
+          ? CLIENT_IMPORT_ACTION.updateClient
+          : c.action;
+      out.push({ ...c, action, gst, warnings, gstEngagement, noGstin });
+    }
+    return out;
+  }
+
   /** Runs one optional step; a database refusal rolls back only that step (undefined). */
   private async step<T>(client: PoolClient, work: () => Promise<T>): Promise<T | undefined> {
     await client.query('SAVEPOINT import_step');
@@ -561,7 +749,18 @@ export class ClientImportService {
       const hints = await client.query<{ entity_id: string; username_hint: string }>(
         `SELECT entity_id, username_hint FROM hsdg.client_credentials WHERE portal = 'gst'`,
       );
-      return { slugs, regs: regs.rows, entities: entities.rows, hints: hints.rows };
+      // Each client's GSTINs: a sheet row without one takes the client's only one.
+      const portalGstins = await client.query<{ entity_id: string; registration_number: string }>(
+        `SELECT entity_id, registration_number FROM hsdg.entity_registrations
+          WHERE registration_type = 'gstin'`,
+      );
+      return {
+        slugs,
+        regs: regs.rows,
+        entities: entities.rows,
+        hints: hints.rows,
+        gstins: portalGstins.rows,
+      };
     });
 
     const regEntity = new Map(lookups.regs.map((r) => [r.registration_number, r.entity_id]));
@@ -577,6 +776,8 @@ export class ClientImportService {
         newTan: Boolean(c.tan && !regEntity.has(c.tan)),
         matchedBy: null,
         rename: null,
+        gstEngagement: null,
+        noGstin: false,
       };
       if (c.error) return base;
       const error = (message: string): PlannedClient => ({ ...base, error: message });
@@ -658,7 +859,16 @@ export class ClientImportService {
     const hintsOf = new Map<string, Set<string>>();
     for (const h of lookups.hints)
       hintsOf.set(h.entity_id, (hintsOf.get(h.entity_id) ?? new Set()).add(h.username_hint));
-    return { book, clients: crossCheck(planned, lookups.entities, hintsOf) };
+    const gstinsOf = new Map<string, string[]>();
+    for (const r of lookups.gstins)
+      gstinsOf.set(r.entity_id, [...(gstinsOf.get(r.entity_id) ?? []), r.registration_number]);
+    const checked = crossCheck(planned, lookups.entities, hintsOf);
+    return {
+      book,
+      clients: await this.db.withRlsContext(ctx, (client) =>
+        this.planGstEngagements(client, checked, gstinsOf),
+      ),
+    };
   }
 }
 
@@ -691,6 +901,8 @@ function toPreviewRow(c: PlannedClient): ClientImportRow {
     entityName: c.entityName,
     warnings: c.warnings,
     error: c.error,
+    gstEngagement: c.gstEngagement,
+    noGstin: c.noGstin,
   };
 }
 
