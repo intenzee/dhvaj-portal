@@ -94,7 +94,7 @@ function StructureRow({ s }: { s: SalaryStructure }): JSX.Element {
       </div>
       <p className="mt-1 text-xs text-ink-muted">
         {s.components.map((c) => `${c.label} ${formatMoney(c.monthly)}`).join(' · ')}
-        {' · '}PF {s.pfApplicable ? 'yes' : 'no'} · ESI {s.esiApplicable ? 'yes' : 'no'} · PT{' '}
+        {' · '}PF {s.pfApplicable ? (s.epsMember === false ? 'yes (no EPS)' : 'yes') : 'no'} · ESI {s.esiApplicable ? 'yes' : 'no'} · PT{' '}
         {s.ptApplicable ? 'yes' : 'no'}
       </p>
       <p className="mt-0.5 text-xs text-ink-faint">
@@ -151,6 +151,7 @@ export function StructureForm({
   const [pf, setPf] = useState(from?.pfApplicable ?? true);
   const [esi, setEsi] = useState(from?.esiApplicable ?? true);
   const [pt, setPt] = useState(from?.ptApplicable ?? true);
+  const [eps, setEps] = useState(from?.epsMember ?? true);
   const [note, setNote] = useState('');
   const monthly = monthlyTotal(components);
   const [ctc, setCtc] = useState('');
@@ -173,6 +174,7 @@ export function StructureForm({
           ctc: ctc.trim() || (monthly * 12).toFixed(2),
           components: components.map((c) => ({ ...c, label: c.label.trim(), pfWage: !!c.pfWage })),
           pfApplicable: pf,
+          epsMember: eps,
           esiApplicable: esi,
           ptApplicable: pt,
           ...(note.trim() ? { note: note.trim() } : {}),
@@ -269,6 +271,7 @@ export function StructureForm({
         {(
           [
             ['PF', pf, setPf],
+            ['Pension (EPS) member', eps, setEps],
             ['ESI', esi, setEsi],
             ['Professional tax', pt, setPt],
           ] as const

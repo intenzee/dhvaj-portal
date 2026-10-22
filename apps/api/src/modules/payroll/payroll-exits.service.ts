@@ -301,8 +301,9 @@ export class PayrollExitsService {
       pf_applicable: boolean;
       esi_applicable: boolean;
       pt_applicable: boolean;
+      eps_member: boolean;
     }>(
-      `SELECT kind, components, pf_applicable, esi_applicable, pt_applicable
+      `SELECT kind, components, pf_applicable, esi_applicable, pt_applicable, eps_member
          FROM hsdg.salary_structures
         WHERE employee_id = $1 AND status = 'approved' AND effective_from <= $2
         ORDER BY effective_from DESC LIMIT 1`,
@@ -317,6 +318,7 @@ export class PayrollExitsService {
       pfApplicable: s.pf_applicable,
       esiApplicable: s.esi_applicable,
       ptApplicable: s.pt_applicable,
+      epsMember: s.eps_member,
     };
     const monthlyGross = s.components.reduce((t, c) => t + toPaise(c.monthly), 0n);
     let wages = s.components.filter((c) => c.pfWage).reduce((t, c) => t + toPaise(c.monthly), 0n);

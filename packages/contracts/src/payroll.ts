@@ -71,6 +71,13 @@ export interface SalaryStructureInput {
   esiApplicable: boolean;
   /** PT applies (false: exempt, e.g. a person with a disability). */
   ptApplicable: boolean;
+  /**
+   * A member of the pension scheme (EPS). False for someone who first joined
+   * PF after 1 Sep 2014 on PF wages above the ceiling (para 6A of the EPS),
+   * or who is past 58: the whole employer share then goes to EPF.
+   * Default true.
+   */
+  epsMember?: boolean;
 }
 
 /** One professional-tax slab on monthly gross; `to` null = and above. */
@@ -95,6 +102,10 @@ export interface PaySettings {
     wageCeiling: string;
     /** The firm contributes on full PF wages, not just up to the ceiling. */
     onFullWages: boolean;
+    /** EDLI premium on wages up to the ceiling (0.5%: ₹75 at ₹15,000). Default '0.5'. */
+    edliRate?: string;
+    /** EPF administration charges on the wages PF is paid on. Default '0.5'. */
+    adminRate?: string;
   };
   esi: {
     employeeRate: string;
@@ -293,11 +304,17 @@ export function computePayLine(
     const employer = roundRupee(mulDiv(base, pct(settings.pf.employerRate), 10000n));
     const epsBase = pfWages < ceiling ? pfWages : ceiling;
     const eps = roundRupee(mulDiv(epsBase, pct(settings.pf.epsRate), 10000n));
-    const epsShare = eps < employer ? eps : employer;
+    const epsShare = structure.epsMember === false ? 0n : eps < employer ? eps : employer;
+    // The firm also pays the EDLI premium and EPF administration charges
+    // (challan accounts 21 and 2): its cost, never the person's.
+    const edli = roundRupee(mulDiv(epsBase, pct(settings.pf.edliRate ?? '0.5'), 10000n));
+    const admin = roundRupee(mulDiv(base, pct(settings.pf.adminRate ?? '0.5'), 10000n));
     add('deduction', 'pf', 'Provident fund', pfEmployee);
     add('employer', 'pf_epf', 'Employer PF (EPF)', employer - epsShare);
     add('employer', 'pf_eps', 'Employer PF (pension)', epsShare);
-    employerCost += employer;
+    add('employer', 'pf_edli', 'EDLI premium', edli);
+    add('employer', 'pf_admin', 'PF administration charges', admin);
+    employerCost += employer + edli + admin;
   }
 
   if (statutory && structure.esiApplicable) {
@@ -412,6 +429,8 @@ export const DEFAULT_PAY_SETTINGS: PaySettings = {
     employeeRate: '12',
     employerRate: '12',
     epsRate: '8.33',
+    edliRate: '0.5',
+    adminRate: '0.5',
     wageCeiling: '15000',
     onFullWages: false,
   },
