@@ -78,6 +78,7 @@ import type {
   SlotRequestDto,
   SlotUploadDto,
 } from './dto/filing-workspace.dto';
+import { notLinkedToEmployee, notOnTeamReason } from '../../common/errors/staff-link.messages';
 
 /** The meetings whose "Record meeting" records the year's AGM (decision 2). */
 const AGM_RULES: ReadonlySet<string> = new Set(['ROC_AGM', 'ROC_FIRST_AGM']);
@@ -544,7 +545,8 @@ export class FilingWorkspaceService {
   ): Promise<InstanceWorkspace> {
     const { inst, label } = await this.db.withRlsContext(ctx, async (client) => {
       const i = await this.loadInstance(client, id);
-      if (!i.is_member) throw new ForbiddenException('Only the engagement team can upload here.');
+      if (!i.is_member)
+        throw new ForbiddenException(notOnTeamReason(ctx.employeeId, 'upload to this filing'));
       this.requireOpenEngagement(i);
       // The acknowledgement goes in after lodge only via undo; slots lock with the filing.
       this.requireUnlocked(client, i, await this.summaryFiledLabel(client, i));
@@ -601,12 +603,13 @@ export class FilingWorkspaceService {
   async lodge(ctx: RlsContext, id: string, dto: LodgeDto): Promise<InstanceWorkspace> {
     return this.write(ctx, id, async (client, inst) => {
       const me = ctx.employeeId ?? null;
-      if (!me) throw new BadRequestException('Your account is not linked to an employee record.');
+      if (!me) throw new BadRequestException(notLinkedToEmployee('lodge this filing'));
       const task = await this.loadTask(client, id);
       const isAssignee = task?.assigned_to_employee_id === me;
       if (!inst.is_lead && !isAssignee) {
         throw new ForbiddenException(
-          'Only the preparer or the engagement manager can lodge this filing.',
+          'Only the person this filing is assigned to, or the engagement partner or manager, ' +
+            'can lodge it. Ask the engagement manager to assign the filing to you.',
         );
       }
       if (inst.workflow_status === 'filed')
@@ -1399,7 +1402,7 @@ export class FilingWorkspaceService {
       return await this.db.withRlsContext(ctx, async (client) => {
         const inst = await this.loadInstance(client, id);
         if (!inst.is_member)
-          throw new ForbiddenException('Only the engagement team can change this filing.');
+          throw new ForbiddenException(notOnTeamReason(ctx.employeeId, 'work on this filing'));
         this.requireOpenEngagement(inst);
         await seedChecklistForInstance(client, id);
         await work(client, inst);

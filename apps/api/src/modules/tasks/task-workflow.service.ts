@@ -38,6 +38,7 @@ import {
   type TransitionPlan,
 } from './task-workflow';
 import type { TaskRecord } from './tasks.types';
+import { notLinkedToEmployee } from '../../common/errors/staff-link.messages';
 
 export interface TransitionBody {
   reason?: string;
@@ -173,9 +174,7 @@ export class TaskWorkflowService {
       throw toHttp(err);
     }
     if (plan.open && !me) {
-      throw new BadRequestException(
-        'Your account is not linked to an employee record, so no time can be recorded.',
-      );
+      throw new BadRequestException(notLinkedToEmployee('record time on this task'));
     }
 
     // Reviewer: default on Send for review; a lead taking over a review.
