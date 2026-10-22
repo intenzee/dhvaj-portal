@@ -27,6 +27,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { DAYS_PAST_DUE_SQL, ReceivablesService } from '../billing/receivables.service';
 import { AdjustmentsService } from '../billing/adjustments.service';
+import { ReversalRequestsService } from '../billing/reversal-requests.service';
 import { TdsCreditsService } from '../billing/tds-credits.service';
 import { UnbilledService } from '../billing/unbilled.service';
 import { CommercialService } from '../commercial/commercial.service';
@@ -100,6 +101,7 @@ export class AccountsService {
     private readonly adjustments: AdjustmentsService,
     private readonly unbilled: UnbilledService,
     private readonly tds: TdsCreditsService,
+    private readonly reversals: ReversalRequestsService,
   ) {}
 
   profile(ctx: RlsContext, entityId: string): Promise<ClientBillingProfile> {
@@ -412,7 +414,7 @@ export class AccountsService {
   /** Requests to partners of every kind: the caller's own, or all they may see. */
   async approvals(ctx: RlsContext, query: ApprovalListQuery): Promise<ApprovalItem[]> {
     const pendingOnly = (query.status ?? 'pending') === 'pending';
-    const [requests, adjustments, waivers] = await Promise.all([
+    const [requests, adjustments, waivers, reversals] = await Promise.all([
       this.db.withRlsContext(ctx, async (client) => {
         const { rows } = await client.query<IssueRequestRow>(
           `${ISSUE_REQUEST_SELECT}
@@ -425,6 +427,7 @@ export class AccountsService {
       }),
       this.adjustments.list(ctx, pendingOnly ? { status: 'pending' } : {}),
       this.unbilled.waivers(ctx, pendingOnly ? 'pending' : null),
+      this.reversals.list(ctx, pendingOnly ? { status: 'pending' } : {}),
     ]);
     const since = Date.now() - RECENT_DAYS * 86_400_000;
     const recent = (status: string, decidedAt: string | null): boolean =>
@@ -487,6 +490,29 @@ export class AccountsService {
           decidedByName: w.decidedByName,
           decidedAt: w.decidedAt,
           decisionNote: w.decisionNote,
+        })),
+      ...reversals
+        .filter((q) => recent(q.status, q.decidedAt))
+        .map((q): ApprovalItem => ({
+          kind: q.kind,
+          id: q.id,
+          clientId: q.clientId,
+          clientName: q.clientName,
+          engagementId: q.engagementId,
+          invoiceId: q.invoiceId,
+          invoiceNumber: q.invoiceNumber,
+          receiptId: q.receiptId,
+          receiptReference: q.receiptReference,
+          version: q.version,
+          amount: q.amount,
+          reason: q.reason,
+          status: q.status,
+          requestedById: q.requestedById,
+          requestedByName: q.requestedByName,
+          at: q.at,
+          decidedByName: q.decidedByName,
+          decidedAt: q.decidedAt,
+          decisionNote: q.decisionNote,
         })),
     ];
     const mine = (query.scope ?? 'mine') === 'mine';

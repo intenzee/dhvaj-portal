@@ -30,6 +30,12 @@ import {
 import { Field, Input } from '@/components/form';
 import { RecordReceiptModal } from '@/components/billing/record-receipt-modal';
 import { statementKindLabel } from '@/components/billing/receipts';
+import {
+  AskReversal,
+  PendingReversal,
+  mayAskReversal,
+  usePendingReversals,
+} from '@/components/billing/reversal-request';
 
 /**
  * PS-202 · a client's account with the firm: invoices, receipts, TDS, approved
@@ -229,6 +235,7 @@ function ReceiptRow({ r, entityId }: { r: ReceiptRecord; entityId: string }): JS
   const toast = useToast();
   const [reversing, setReversing] = useState(false);
   const [reason, setReason] = useState('');
+  const pending = usePendingReversals().find((q) => q.receiptId === r.id);
   const reverse = useMutation({
     mutationFn: () =>
       apiFetch<ReceiptRecord>(`/billing/receipts/${r.id}/reverse`, {
@@ -263,12 +270,26 @@ function ReceiptRow({ r, entityId }: { r: ReceiptRecord; entityId: string }): JS
             <Badge tone="info">Advance {formatMoney(r.unallocated, 'INR')}</Badge>
           )
         )}
-        {r.status === 'posted' && can(principal, PERMISSION.billingApprove) && !reversing && (
-          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setReversing(true)}>
-            <Undo2 className="h-4 w-4" /> Reverse
-          </Button>
+        {r.status === 'posted' &&
+          !pending &&
+          can(principal, PERMISSION.billingApprove) &&
+          !reversing && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={() => setReversing(true)}
+            >
+              <Undo2 className="h-4 w-4" /> Reverse
+            </Button>
+          )}
+        {r.status === 'posted' && !pending && mayAskReversal(principal) && (
+          <span className="ml-auto">
+            <AskReversal kind="receipt_reversal" targetId={r.id} />
+          </span>
         )}
       </div>
+      {r.status === 'posted' && pending && <PendingReversal request={pending} />}
       {r.allocations.length > 0 && (
         <div className="mt-1 text-xs text-ink-faint">
           Paid{' '}

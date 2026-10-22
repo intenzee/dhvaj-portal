@@ -15,9 +15,12 @@ import { Badge, Button, Card, EmptyState, PageHeader, Spinner } from '@/componen
 import {
   APPROVAL_KIND_LABEL,
   APPROVAL_STATUS,
+  WITHDRAW_PATH,
   canReadAccounts,
+  isReversal,
   mayWithdraw,
 } from '@/components/accounts/accounts';
+import { PendingReversal } from '@/components/billing/reversal-request';
 
 type Scope = 'mine' | 'all';
 type Status = 'pending' | 'recent';
@@ -55,7 +58,9 @@ export default function ApprovalsPage(): JSX.Element {
 function Approvals(): JSX.Element {
   const params = useSearchParams();
   const [scope, setScope] = useState<Scope>(params.get('scope') === 'all' ? 'all' : 'mine');
-  const [status, setStatus] = useState<Status>(params.get('status') === 'recent' ? 'recent' : 'pending');
+  const [status, setStatus] = useState<Status>(
+    params.get('status') === 'recent' ? 'recent' : 'pending',
+  );
 
   const list = useQuery({
     queryKey: ['billing', 'approvals', scope, status],
@@ -74,7 +79,11 @@ function Approvals(): JSX.Element {
         <Chip label="Everyone’s" active={scope === 'all'} onClick={() => setScope('all')} />
         <span className="mx-1 h-5 w-px bg-line" aria-hidden />
         <Chip label="Waiting" active={status === 'pending'} onClick={() => setStatus('pending')} />
-        <Chip label="Last 30 days" active={status === 'recent'} onClick={() => setStatus('recent')} />
+        <Chip
+          label="Last 30 days"
+          active={status === 'recent'}
+          onClick={() => setStatus('recent')}
+        />
       </div>
       <Card className="p-0">
         {list.isLoading && (
@@ -89,7 +98,9 @@ function Approvals(): JSX.Element {
         )}
         {list.data && list.data.length === 0 && (
           <p className="p-4 text-sm text-ink-faint">
-            {status === 'pending' ? 'Nothing waiting on a partner.' : 'Nothing in the last 30 days.'}
+            {status === 'pending'
+              ? 'Nothing waiting on a partner.'
+              : 'Nothing in the last 30 days.'}
           </p>
         )}
         {list.data && list.data.length > 0 && (
@@ -110,7 +121,7 @@ function ApprovalRow({ a }: { a: ApprovalItem }): JSX.Element {
   const toast = useToast();
   const withdraw = useMutation({
     mutationFn: () =>
-      apiFetch<InvoiceIssueRequest>(`/billing/issue-requests/${a.id}/withdraw`, { method: 'POST' }),
+      apiFetch<InvoiceIssueRequest>(WITHDRAW_PATH[a.kind]!(a.id), { method: 'POST' }),
     onSuccess: () => {
       toast('Request taken back.');
       void qc.invalidateQueries({ queryKey: ['billing', 'approvals'] });
@@ -125,11 +136,16 @@ function ApprovalRow({ a }: { a: ApprovalItem }): JSX.Element {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium text-ink">{APPROVAL_KIND_LABEL[a.kind]}</span>
         <Badge tone={st.tone}>{st.label}</Badge>
-        <Link href={`/billing/statements/${a.clientId}`} className="text-primary-700 hover:underline">
+        <Link
+          href={`/billing/statements/${a.clientId}`}
+          className="text-primary-700 hover:underline"
+        >
           {a.clientName}
         </Link>
         {a.invoiceNumber && <span className="tabular-nums text-ink-muted">{a.invoiceNumber}</span>}
-        <span className="ml-auto font-medium tabular-nums text-ink">{formatMoney(a.amount, 'INR')}</span>
+        <span className="ml-auto font-medium tabular-nums text-ink">
+          {formatMoney(a.amount, 'INR')}
+        </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-ink-faint">
         <span>
@@ -142,15 +158,59 @@ function ApprovalRow({ a }: { a: ApprovalItem }): JSX.Element {
             {a.decidedByName ? ` by ${a.decidedByName}` : ''}, {formatDate(a.decidedAt)}
           </span>
         )}
-        <Link href={`/billing/engagements/${a.engagementId}`} className="text-primary-700 hover:underline">
-          Engagement
-        </Link>
+        {a.engagementId && (
+          <Link
+            href={`/billing/engagements/${a.engagementId}`}
+            className="text-primary-700 hover:underline"
+          >
+            Engagement
+          </Link>
+        )}
+        {a.kind === 'receipt_reversal' && (
+          <Link
+            href={`/billing/statements/${a.clientId}`}
+            className="text-primary-700 hover:underline"
+          >
+            Receipt{a.receiptReference ? ` ${a.receiptReference}` : ''}
+          </Link>
+        )}
       </div>
-      {a.reason && <p className="mt-1 text-ink-muted">{a.reason}</p>}
       {a.decisionNote && <p className="mt-1 text-ink-muted">Partner: {a.decisionNote}</p>}
-      {mayWithdraw(a, principal?.employeeId) && (
+      {isReversal(a) && a.status === 'pending' ? (
+        <PendingReversal
+          request={{
+            id: a.id,
+            kind: a.kind as 'invoice_void' | 'receipt_reversal',
+            invoiceId: a.invoiceId,
+            invoiceNumber: a.invoiceNumber,
+            receiptId: a.receiptId ?? null,
+            receiptReference: a.receiptReference ?? null,
+            clientId: a.clientId,
+            clientName: a.clientName,
+            engagementId: a.engagementId,
+            amount: a.amount,
+            reason: a.reason ?? '',
+            status: 'pending',
+            requestedById: a.requestedById,
+            requestedByName: a.requestedByName,
+            at: a.at,
+            decidedByName: null,
+            decidedAt: null,
+            decisionNote: null,
+            version: a.version ?? 1,
+          }}
+        />
+      ) : (
+        a.reason && <p className="mt-1 text-ink-muted">{a.reason}</p>
+      )}
+      {!isReversal(a) && mayWithdraw(a, principal?.employeeId) && (
         <div className="mt-2">
-          <Button variant="ghost" size="sm" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => withdraw.mutate()}
+            disabled={withdraw.isPending}
+          >
             Take back
           </Button>
         </div>
@@ -159,7 +219,15 @@ function ApprovalRow({ a }: { a: ApprovalItem }): JSX.Element {
   );
 }
 
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }): JSX.Element {
+function Chip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}): JSX.Element {
   return (
     <button
       type="button"

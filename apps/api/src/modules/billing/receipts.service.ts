@@ -208,38 +208,46 @@ export class ReceiptsService {
 
   /** Reverse a receipt (a bounced cheque, a mistake): its invoices reopen. */
   reverse(ctx: RlsContext, id: string, input: ReverseReceiptInput): Promise<ReceiptRecord> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.load(client, id);
-      if (before.status === 'reversed') {
-        throw new BadRequestException('This receipt is already reversed.');
-      }
-      if (input.version !== undefined && input.version !== before.version) {
-        throw new ConflictException(
-          `Receipt was changed by someone else (expected v${input.version}, found v${before.version}).`,
-        );
-      }
-      try {
-        await client.query(
-          `UPDATE hsdg.receipts
-              SET status = 'reversed', reversed_reason = $2, reversed_at = now(),
-                  reversed_by_employee_id = $3, version = version + 1
-            WHERE id = $1`,
-          [id, input.reason.trim(), ctx.employeeId ?? null],
-        );
-      } catch (err) {
-        throw translateReceiptError(err);
-      }
-      const after = await this.load(client, id);
-      await this.audit.recordWith(client, ctx, {
-        action: 'receipt.reversed',
-        objectType: 'receipt',
-        objectId: id,
-        before: { status: before.status },
-        after: { status: after.status, invoices: before.allocations.map((a) => a.invoiceId) },
-        reason: input.reason.trim(),
-      });
-      return after;
+    return this.db.withRlsContext(ctx, (client) => this.reverseWith(client, ctx, id, input));
+  }
+
+  /** reverse inside the caller's transaction (an approved reversal request). */
+  async reverseWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    id: string,
+    input: ReverseReceiptInput,
+  ): Promise<ReceiptRecord> {
+    const before = await this.load(client, id);
+    if (before.status === 'reversed') {
+      throw new BadRequestException('This receipt is already reversed.');
+    }
+    if (input.version !== undefined && input.version !== before.version) {
+      throw new ConflictException(
+        `Receipt was changed by someone else (expected v${input.version}, found v${before.version}).`,
+      );
+    }
+    try {
+      await client.query(
+        `UPDATE hsdg.receipts
+            SET status = 'reversed', reversed_reason = $2, reversed_at = now(),
+                reversed_by_employee_id = $3, version = version + 1
+          WHERE id = $1`,
+        [id, input.reason.trim(), ctx.employeeId ?? null],
+      );
+    } catch (err) {
+      throw translateReceiptError(err);
+    }
+    const after = await this.load(client, id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'receipt.reversed',
+      objectType: 'receipt',
+      objectId: id,
+      before: { status: before.status },
+      after: { status: after.status, invoices: before.allocations.map((a) => a.invoiceId) },
+      reason: input.reason.trim(),
     });
+    return after;
   }
 
   /** Invoices, receipts, credits and the running balance for one client. */
