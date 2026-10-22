@@ -19,6 +19,7 @@ import { MaterialityMethodologySection } from '@/components/admin/materiality-me
 import { ScopeMethodologySection } from '@/components/admin/scope-methodology-section';
 import { AuditAreaLibrarySection } from '@/components/admin/audit-area-library-section';
 import { WorkflowSection } from '@/components/admin/workflow-section';
+import { ChecksSection } from '@/components/admin/checks-section';
 import { RolloutSection } from '@/components/admin/rollout-section';
 import { NoticeTypesSection } from '@/components/admin/notice-types-section';
 
@@ -34,6 +35,7 @@ type Tab =
   | 'scope'
   | 'areas'
   | 'workflow'
+  | 'checks'
   | 'notice-types'
   | 'rollout';
 
@@ -64,7 +66,9 @@ export default function AdministrationPage(): JSX.Element {
         ]
       : []),
     // Employee records — grade, office, portal login, partner details (employee.manage).
-    ...(can(principal, PERMISSION.employeeManage) ? [{ id: 'people' as const, label: 'People' }] : []),
+    ...(can(principal, PERMISSION.employeeManage)
+      ? [{ id: 'people' as const, label: 'People' }]
+      : []),
     // Firm templates are configured with service.manage (MP / admin).
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'templates' as const, label: 'Templates' }]
@@ -95,6 +99,8 @@ export default function AdministrationPage(): JSX.Element {
       : []),
     // The partners' answers to the Staff Workflow plan's questions.
     ...(setsWorkflow ? [{ id: 'workflow' as const, label: 'Workflow' }] : []),
+    // The firm's checks: the MP and the administrator switch them; partners see them.
+    { id: 'checks' as const, label: 'Checks' },
     // PS-101: the notice types library the stream leads maintain (ff_notices).
     ...(setsWorkflow && isOn(FEATURE_FLAG.notices)
       ? [{ id: 'notice-types' as const, label: 'Notice types' }]
@@ -107,7 +113,7 @@ export default function AdministrationPage(): JSX.Element {
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, people (employee records), offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library, the firm’s workflow policy and the rollout of each phase. Every change is audited."
+        subtitle="Manage portal users, role assignments, people (employee records), offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library, the firm’s workflow policy and checks, and the rollout of each phase. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -146,6 +152,8 @@ export default function AdministrationPage(): JSX.Element {
             <AuditAreaLibrarySection />
           ) : tab === 'workflow' ? (
             <WorkflowSection />
+          ) : tab === 'checks' ? (
+            <ChecksSection />
           ) : tab === 'notice-types' ? (
             <NoticeTypesSection />
           ) : tab === 'rollout' ? (

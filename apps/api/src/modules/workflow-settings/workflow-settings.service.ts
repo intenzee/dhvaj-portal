@@ -7,16 +7,21 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  FIRM_CHECK_KEYS,
   suggestedInternalDueDays,
+  toFirmChecks,
+  type FirmChecks,
   type FormInternalDue,
   type FormInternalDueList,
   type FormInternalDueUpdate,
+  type UpdateFirmChecksInput,
   type UpdateWorkflowSettingsInput,
   type WorkflowSettings,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
+import { canSwitchChecks } from './firm-checks';
 
 interface SettingsRow {
   default_reviewer: WorkflowSettings['defaultReviewer'];
@@ -25,6 +30,7 @@ interface SettingsRow {
   bulk_assign_scope: WorkflowSettings['bulkAssignScope'];
   client_reminder_days: number;
   client_escalation_days: number;
+  strict_checks: Record<string, unknown> | null;
   version: number;
   updated_at: Date;
   updated_by_name: string | null;
@@ -61,12 +67,12 @@ export class WorkflowSettingsService {
   ) {}
 
   async get(ctx: RlsContext): Promise<WorkflowSettings> {
-    return this.db.withRlsContext(ctx, (client) => this.read(client));
+    return this.db.withRlsContext(ctx, (client) => this.read(client, ctx));
   }
 
   async update(ctx: RlsContext, input: UpdateWorkflowSettingsInput): Promise<WorkflowSettings> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.read(client);
+      const before = await this.read(client, ctx);
       const next = {
         reminder: input.clientReminderDays ?? before.clientReminderDays,
         escalation: input.clientEscalationDays ?? before.clientEscalationDays,
@@ -95,13 +101,71 @@ export class WorkflowSettingsService {
           'The workflow settings changed since you loaded them; refresh and retry.',
         );
       }
-      const after = await this.read(client);
+      const after = await this.read(client, ctx);
       await this.audit.recordWith(client, ctx, {
         action: 'workflow_settings.updated',
         objectType: 'firm_settings',
         objectId: null,
         before: pick(before, input),
         after: pick(after, input),
+      });
+      return after;
+    });
+  }
+
+  /**
+   * Switch the firm's checks on or off (the managing partner or the
+   * administrator; audited). Checks not named keep their state.
+   */
+  async updateChecks(ctx: RlsContext, input: UpdateFirmChecksInput): Promise<WorkflowSettings> {
+    if (!canSwitchChecks(ctx)) {
+      throw new ForbiddenException(
+        "Only the managing partner or the administrator can change the firm's checks.",
+      );
+    }
+    const named = Object.entries(input.checks ?? {});
+    if (named.length === 0) throw new BadRequestException('Name at least one check.');
+    for (const [key, on] of named) {
+      if (!(FIRM_CHECK_KEYS as string[]).includes(key)) {
+        throw new BadRequestException(`Unknown check: ${key}.`);
+      }
+      if (typeof on !== 'boolean') {
+        throw new BadRequestException(`Check ${key} must be on (true) or off (false).`);
+      }
+    }
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await this.read(client, ctx);
+      const checks: FirmChecks = { ...before.checks, ...input.checks };
+      // Only the checks that are on are stored: a missing key is off.
+      const stored = Object.fromEntries(Object.entries(checks).filter(([, on]) => on));
+      let rowCount: number;
+      try {
+        const res = await client.query(
+          `UPDATE hsdg.firm_settings
+              SET strict_checks = $2::jsonb, version = version + 1, updated_by_employee_id = $3
+            WHERE version = $1`,
+          [input.version, JSON.stringify(stored), ctx.employeeId ?? null],
+        );
+        rowCount = res.rowCount ?? 0;
+      } catch (err) {
+        if ((err as { code?: string }).code === '42501') {
+          throw new ForbiddenException((err as Error).message);
+        }
+        throw err;
+      }
+      if (rowCount === 0) {
+        throw new ConflictException(
+          'The workflow settings changed since you loaded them; refresh and retry.',
+        );
+      }
+      const after = await this.read(client, ctx);
+      const changed = named.map(([k]) => k as keyof FirmChecks);
+      await this.audit.recordWith(client, ctx, {
+        action: 'workflow_settings.checks_updated',
+        objectType: 'firm_settings',
+        objectId: null,
+        before: Object.fromEntries(changed.map((k) => [k, before.checks[k]])),
+        after: Object.fromEntries(changed.map((k) => [k, after.checks[k]])),
       });
       return after;
     });
@@ -148,10 +212,11 @@ export class WorkflowSettingsService {
     });
   }
 
-  private async read(client: PoolClient): Promise<WorkflowSettings> {
+  private async read(client: PoolClient, ctx: RlsContext): Promise<WorkflowSettings> {
     const { rows } = await client.query<SettingsRow>(
       `SELECT f.default_reviewer, f.article_client_scope, f.client_reminder_channel,
-              f.bulk_assign_scope, f.client_reminder_days, f.client_escalation_days, f.version,
+              f.bulk_assign_scope, f.client_reminder_days, f.client_escalation_days,
+              f.strict_checks, f.version,
               f.updated_at, e.full_name AS updated_by_name
          FROM hsdg.firm_settings f
          LEFT JOIN hsdg.employees e ON e.id = f.updated_by_employee_id
@@ -166,6 +231,8 @@ export class WorkflowSettingsService {
       bulkAssignScope: r.bulk_assign_scope,
       clientReminderDays: r.client_reminder_days,
       clientEscalationDays: r.client_escalation_days,
+      checks: toFirmChecks(r.strict_checks),
+      checksEditable: canSwitchChecks(ctx),
       version: r.version,
       updatedAt: r.updated_at.toISOString(),
       updatedByName: r.updated_by_name,

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'pg';
+import { STRICT_FIRM_CHECKS } from '@hsdg/contracts';
 
 /**
  * Seeds the dev identity fixtures (offices + users) as the PostgreSQL superuser,
@@ -23,6 +24,11 @@ export async function seedIdentityFixtures(): Promise<{
   await client.connect();
   try {
     await client.query(seedSql);
+    // The suites were written against the strict portal: every check on. A
+    // suite testing the relaxed portal switches them off itself.
+    await client.query(`UPDATE hsdg.firm_settings SET strict_checks = $1::jsonb`, [
+      JSON.stringify(STRICT_FIRM_CHECKS),
+    ]);
     const users = await client.query<{ email: string; id: string }>(
       'SELECT email::text AS email, id FROM hsdg.users',
     );
