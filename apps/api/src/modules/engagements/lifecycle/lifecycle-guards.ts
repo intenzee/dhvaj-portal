@@ -1,9 +1,11 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { LIFECYCLE_ACTION, ROLE, type LifecycleAction } from '@hsdg/contracts';
+import { FIRM_CHECK, LIFECYCLE_ACTION, ROLE, type LifecycleAction } from '@hsdg/contracts';
+import { isStrict } from '../../workflow-settings/firm-checks';
 import type { LifecycleGuard, LifecycleGuardContext } from './lifecycle.types';
 
 /**
- * ACCEPT requires the accountable EP already be set. The database CHECK
+ * ACCEPT requires the accountable EP already be set while the firm's
+ * engagement_partner_required check is on. The database trigger
  * (`engagements_ep_required_when_accepted`) is the authoritative floor — this
  * guard exists only to fail fast with a clear message before hitting SQL.
  * "More than one EP" (§7) cannot occur: the schema has exactly one
@@ -12,7 +14,9 @@ import type { LifecycleGuard, LifecycleGuardContext } from './lifecycle.types';
  */
 export const epRequiredGuard: LifecycleGuard = {
   name: 'ep-required',
-  check({ engagement }: LifecycleGuardContext) {
+  check({ engagement, checks }: LifecycleGuardContext) {
+    // With engagement_partner_required off the partner may be picked later.
+    if (!isStrict(checks, FIRM_CHECK.engagementPartnerRequired)) return;
     if (!engagement.engagementPartnerId) {
       throw new BadRequestException(
         'Cannot accept: the engagement has no accountable Engagement Partner assigned.',
