@@ -674,6 +674,28 @@ export class EntitiesService {
     });
   }
 
+  /**
+   * Remove a registration recorded in error (e.g. a wrong or duplicate GSTIN).
+   * Audited like every other child change; a complete regulatory profile is
+   * flagged Needs Reassessment since the registration set it rests on changed.
+   */
+  async removeRegistration(
+    ctx: RlsContext,
+    entityId: string,
+    registrationId: string,
+  ): Promise<EntityDetail> {
+    return this.mutateChild(ctx, entityId, 'entity.registration_removed', async (client) => {
+      await this.removeChildRow(
+        client,
+        'entity_registrations',
+        'entity_id',
+        entityId,
+        registrationId,
+      );
+      await this.flagReassessmentIfComplete(client, entityId);
+    });
+  }
+
   async addContact(ctx: RlsContext, entityId: string, input: ContactInput): Promise<EntityDetail> {
     return this.mutateChild(ctx, entityId, 'entity.contact_added', (client) =>
       this.insertContact(client, entityId, input),
