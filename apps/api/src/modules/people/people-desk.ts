@@ -143,6 +143,7 @@ export function buildQueues(input: DeskInputs): PeopleDeskQueueItem[] {
     .filter(
       (e) =>
         e.gradeSlug !== GRADE.partner &&
+        e.gradeSlug !== GRADE.staff &&
         e.employmentStatus !== 'on_leave' &&
         e.dateOfJoining <= lastDay &&
         !loggedOnLastWorkingDay.has(e.id),

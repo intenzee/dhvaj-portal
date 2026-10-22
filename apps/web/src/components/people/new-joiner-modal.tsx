@@ -26,6 +26,7 @@ const GRADE_LABEL: Record<GradeSlug, string> = {
   manager: 'Manager',
   senior: 'Senior',
   article: 'Article Assistant',
+  staff: 'Staff',
 };
 
 /** The portal role a grade starts with. */
