@@ -2,6 +2,7 @@
  * Staff Workflow · Questions for the partners, answered as firm settings
  * (Admin → Workflow). GET /workflow-settings, PATCH by `workflow.manage`.
  */
+import type { FirmChecks } from './firm-checks';
 
 /** Who reviews a task sent for review without a reviewer named. */
 export const DEFAULT_REVIEWER = {
@@ -64,6 +65,10 @@ export interface WorkflowSettings {
   clientReminderDays: number;
   /** Escalate to the stream lead this many days before it. */
   clientEscalationDays: number;
+  /** The firm's checks, each on or off (Admin → Workflow → Checks). */
+  checks: FirmChecks;
+  /** Whether the viewer may switch checks: the managing partner or the administrator. */
+  checksEditable: boolean;
   /** Optimistic lock: send it back on PATCH. */
   version: number;
   updatedAt: string;

@@ -2,7 +2,12 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { PERMISSION, type FormInternalDueList, type WorkflowSettings } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  RELAXED_FIRM_CHECKS,
+  type FormInternalDueList,
+  type WorkflowSettings,
+} from '@hsdg/contracts';
 import { WorkflowSection } from '../workflow-section';
 
 const apiFetch = jest.fn();
@@ -27,6 +32,8 @@ const SETTINGS: WorkflowSettings = {
   bulkAssignScope: 'managers_and_leads',
   clientReminderDays: 5,
   clientEscalationDays: 2,
+  checks: RELAXED_FIRM_CHECKS,
+  checksEditable: false,
   version: 3,
   updatedAt: '2026-10-14T00:00:00.000Z',
   updatedByName: 'Partner A',
