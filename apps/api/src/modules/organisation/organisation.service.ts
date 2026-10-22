@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -366,5 +367,14 @@ export function translatePgError(err: unknown): Error {
   if (code === '23503')
     return new BadRequestException('Referenced user, grade, or office does not exist.');
   if (code === '23514') return new BadRequestException('Employee data violates a constraint.');
+  // The database's copy of the HR login ceiling (employees_login_link_guard).
+  if (code === '42501') {
+    const message = (err as { message?: string }).message ?? '';
+    return new ForbiddenException(
+      message && !message.includes('row-level security')
+        ? message
+        : 'You can’t change this employee record.',
+    );
+  }
   return err as Error;
 }
