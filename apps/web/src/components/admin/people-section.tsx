@@ -30,6 +30,7 @@ const GRADE_LABEL: Record<GradeSlug, string> = {
   manager: 'Manager',
   senior: 'Senior',
   article: 'Article Assistant',
+  staff: 'Staff',
 };
 
 const STATUS_LABEL: Record<EmploymentStatus, string> = {
@@ -89,7 +90,9 @@ export function PeopleSection({
           <div>
             <span className="block">{row.original.gradeName}</span>
             {row.original.membershipNo && (
-              <span className="block text-xs text-ink-faint">M. No. {row.original.membershipNo}</span>
+              <span className="block text-xs text-ink-faint">
+                M. No. {row.original.membershipNo}
+              </span>
             )}
           </div>
         ),
@@ -208,6 +211,22 @@ export function EmployeeFormModal({
 
   const isPartner = gradeSlug === GRADE.partner;
 
+  // Every staff login gets its own employee record when it is created, so a
+  // login already on another record can't be picked here: edit that record.
+  const linked = useQuery({
+    queryKey: ['admin', 'employees', 'linked-logins'],
+    queryFn: async () => {
+      const ids = new Set<string>();
+      for (let offset = 0; ; offset += 100) {
+        const page = await apiFetch<Paginated<AdminEmployeeRow>>(
+          `/employees?limit=100&offset=${offset}`,
+        );
+        page.items.forEach((e) => e.userId && e.id !== employee?.id && ids.add(e.userId));
+        if (offset + page.items.length >= page.total || page.items.length === 0) return ids;
+      }
+    },
+  });
+
   const invalidate = (): void => {
     void qc.invalidateQueries({ queryKey: ['admin', 'employees'] });
   };
@@ -232,7 +251,8 @@ export function EmployeeFormModal({
       invalidate();
       onClose();
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not create the employee.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not create the employee.', 'error'),
   });
 
   const save = useMutation({
@@ -247,7 +267,8 @@ export function EmployeeFormModal({
       if (employmentStatus !== e.employmentStatus) patch.employmentStatus = employmentStatus;
       if (dateOfExit !== (e.dateOfExit ?? '')) patch.dateOfExit = dateOfExit || null;
       if (isPartner) {
-        if (membershipNo.trim() !== (e.membershipNo ?? '')) patch.membershipNo = membershipNo.trim() || null;
+        if (membershipNo.trim() !== (e.membershipNo ?? ''))
+          patch.membershipNo = membershipNo.trim() || null;
         if (partnerSince !== (e.partnerSince ?? '')) patch.partnerSince = partnerSince || null;
       }
       return apiFetch(`/employees/${e.id}`, { method: 'PATCH', body: patch });
@@ -257,7 +278,8 @@ export function EmployeeFormModal({
       invalidate();
       onClose();
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not update the employee.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not update the employee.', 'error'),
   });
 
   const pending = create.isPending || save.isPending;
@@ -280,7 +302,10 @@ export function EmployeeFormModal({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={!canSubmit || pending} onClick={() => (isEdit ? save.mutate() : create.mutate())}>
+          <Button
+            disabled={!canSubmit || pending}
+            onClick={() => (isEdit ? save.mutate() : create.mutate())}
+          >
             {pending ? 'Saving…' : isEdit ? 'Save changes' : 'Create employee'}
           </Button>
         </>
@@ -288,7 +313,11 @@ export function EmployeeFormModal({
     >
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Employee code" required hint="2–20 chars: A–Z, 0–9, - or _. Fixed once created.">
+          <Field
+            label="Employee code"
+            required
+            hint="2–20 chars: A–Z, 0–9, - or _. Fixed once created."
+          >
             <Input
               value={employeeCode}
               disabled={isEdit}
@@ -328,11 +357,14 @@ export function EmployeeFormModal({
           <Field label="Portal login" hint="The user they sign in as. One user per employee.">
             <Select value={userId} onChange={(e) => setUserId(e.target.value)}>
               <option value="">— Not linked —</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.displayName} ({u.email})
-                </option>
-              ))}
+              {users.map((u) => {
+                const taken = u.id !== employee?.userId && !!linked.data?.has(u.id);
+                return (
+                  <option key={u.id} value={u.id} disabled={taken}>
+                    {u.displayName} ({u.email}){taken ? ' — already has an employee record' : ''}
+                  </option>
+                );
+              })}
             </Select>
           </Field>
         </div>
@@ -340,10 +372,18 @@ export function EmployeeFormModal({
         {isPartner && (
           <div className="grid grid-cols-2 gap-3 rounded-lg border border-line-strong p-3">
             <Field label="ICAI membership no." hint="Printed on reports the partner signs.">
-              <Input value={membershipNo} onChange={(e) => setMembershipNo(e.target.value)} placeholder="512345" />
+              <Input
+                value={membershipNo}
+                onChange={(e) => setMembershipNo(e.target.value)}
+                placeholder="512345"
+              />
             </Field>
             <Field label="Partner since">
-              <Input type="date" value={partnerSince} onChange={(e) => setPartnerSince(e.target.value)} />
+              <Input
+                type="date"
+                value={partnerSince}
+                onChange={(e) => setPartnerSince(e.target.value)}
+              />
             </Field>
           </div>
         )}
@@ -363,7 +403,11 @@ export function EmployeeFormModal({
               </Select>
             </Field>
             <Field label="Date of exit">
-              <Input type="date" value={dateOfExit} onChange={(e) => setDateOfExit(e.target.value)} />
+              <Input
+                type="date"
+                value={dateOfExit}
+                onChange={(e) => setDateOfExit(e.target.value)}
+              />
             </Field>
           </div>
         )}

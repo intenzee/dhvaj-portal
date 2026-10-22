@@ -226,6 +226,9 @@ function UserFormModal({
   const invalidate = (): void => {
     qc.invalidateQueries({ queryKey: ['admin', 'users'] });
     qc.invalidateQueries({ queryKey: PASSWORDS_KEY });
+    // A staff role creates or regrades the linked employee (sync_employee_from_roles).
+    qc.invalidateQueries({ queryKey: ['admin', 'employees'] });
+    qc.invalidateQueries({ queryKey: ['employees'] });
   };
 
   const issueTemporary = (userId: string) =>

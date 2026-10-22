@@ -21,12 +21,19 @@ function mayOnboard(principal: Principal | null): boolean {
   );
 }
 
-const GRADE_ORDER: GradeSlug[] = [GRADE.partner, GRADE.manager, GRADE.senior, GRADE.article];
+const GRADE_ORDER: GradeSlug[] = [
+  GRADE.partner,
+  GRADE.manager,
+  GRADE.senior,
+  GRADE.article,
+  GRADE.staff,
+];
 const GRADE_SHORT: Record<GradeSlug, string> = {
   partner: 'Partners',
   manager: 'Managers',
   senior: 'Seniors',
   article: 'Articles',
+  staff: 'Staff',
 };
 
 /** The HR desk (spec §4.4): headcount, the "needs action" queues, load this week. */

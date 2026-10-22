@@ -140,6 +140,8 @@ export const GRADE = {
   manager: 'manager',
   senior: 'senior',
   article: 'article',
+  /** Support roles (Accountant, HR, Administrator): not an articled trainee. */
+  staff: 'staff',
 } as const;
 
 export type GradeSlug = (typeof GRADE)[keyof typeof GRADE];

@@ -35,7 +35,7 @@ import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
-import type { EmployeeRow, EntityDetail } from '@/lib/types';
+import type { EmployeeRow, EngagementLeadRow, EntityDetail } from '@/lib/types';
 import { EntityPicker, type Picked } from '@/components/entity-picker';
 import { PageHeader, Card, CardBody, Button, Spinner, Badge } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
@@ -146,8 +146,14 @@ export function NewEngagementWizard(): JSX.Element {
     staleTime: 10 * 60 * 1000,
   });
   const employees = useQuery({
-    queryKey: ['employees', 'all'],
-    queryFn: () => apiFetch<Paginated<EmployeeRow>>('/employees?limit=100'),
+    // Only people still with the firm can lead or staff a new engagement.
+    queryKey: ['employees', 'active'],
+    queryFn: () => apiFetch<Paginated<EmployeeRow>>('/employees?limit=100&status=active'),
+  });
+  // EP / manager candidates come from every office, not just the caller's.
+  const leadCandidates = useQuery({
+    queryKey: ['employees', 'leads'],
+    queryFn: () => apiFetch<EngagementLeadRow[]>('/employees/leads'),
   });
   const services = useQuery({
     queryKey: ['services', 'all'],
@@ -195,9 +201,10 @@ export function NewEngagementWizard(): JSX.Element {
   const acksOk = needAck.every((f) => acks.includes(f.rule));
 
   const people = employees.data?.items ?? [];
-  const partners = people.filter((p) => p.gradeSlug === 'partner');
-  const managers = people.filter((p) => p.gradeSlug === 'partner' || p.gradeSlug === 'manager');
-  const personName = (id: string): string => people.find((p) => p.id === id)?.fullName ?? '—';
+  const managers = leadCandidates.data ?? [];
+  const partners = managers.filter((p) => p.isPartner);
+  const personName = (id: string): string =>
+    (managers.find((p) => p.id === id) ?? people.find((p) => p.id === id))?.fullName ?? '—';
   // The API makes the creator the EP only when they are partner-grade; anyone
   // else must pick a partner before an accepted engagement can be created.
   const meIsPartner =
@@ -799,8 +806,8 @@ function LeadFields({
   onPartner,
   onManager,
 }: {
-  partners: EmployeeRow[];
-  managers: EmployeeRow[];
+  partners: EngagementLeadRow[];
+  managers: EngagementLeadRow[];
   partnerId: string;
   managerId: string;
   meIsPartner: boolean;
@@ -829,7 +836,7 @@ function LeadFields({
           <option value="">— not set —</option>
           {managers.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.fullName} · {p.gradeName}
+              {p.fullName} · {p.gradeName} · {p.officeCode}
             </option>
           ))}
         </Select>
