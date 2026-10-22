@@ -1,14 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsObject, IsOptional, Max, Min } from 'class-validator';
 import {
   ARTICLE_CLIENT_SCOPES,
   BULK_ASSIGN_SCOPES,
+  FIRM_CHECK_KEYS,
   DEFAULT_REVIEWERS,
   REMINDER_CHANNEL_SETTINGS,
   type ArticleClientScope,
   type BulkAssignScope,
   type DefaultReviewer,
+  type FirmChecks,
   type ReminderChannelSetting,
 } from '@hsdg/contracts';
 
@@ -67,4 +69,20 @@ export class UpdateFormInternalDueDto {
   @Min(0)
   @Max(60)
   internalSlaOffsetDays!: number;
+}
+
+export class UpdateFirmChecksDto {
+  @ApiProperty({ description: 'The version read; a stale one is a 409.' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version!: number;
+
+  @ApiProperty({
+    description: `Check → on (true) or off (false); checks not named keep their state. Keys: ${FIRM_CHECK_KEYS.join(', ')}.`,
+    type: 'object',
+    additionalProperties: { type: 'boolean' },
+  })
+  @IsObject()
+  checks!: Partial<FirmChecks>;
 }
