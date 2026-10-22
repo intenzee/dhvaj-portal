@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type {
+  FirmChecks,
   EngagementKind,
   FilingRun,
   FilingRunBulkResult,
@@ -26,6 +27,7 @@ import {
 } from '../../common/work-links';
 import type { WorkLinkSqlRow } from '../../common/work-links';
 import { AuditService } from '../audit/audit.service';
+import { firmChecks } from '../workflow-settings/firm-checks';
 import { TasksService } from '../tasks/tasks.service';
 import { istToday } from '../engagements/time/auto-time';
 import { CLIENT_DATA_SLOTS } from './client-chase';
@@ -79,7 +81,9 @@ interface RunSqlRow extends WorkLinkSqlRow {
   statutory_date: string | null;
   reference_no: string | null;
   filed_on: string | null;
+  ack_missing: boolean;
   is_lead: boolean;
+  is_member: boolean;
   /** The filing's stream lead, when the firm lets stream leads assign (Questions for the partners, 5). */
   is_stream_lead: boolean;
 }
@@ -197,7 +201,9 @@ export class FilingRunsService {
                     COALESCE(ci.statutory_deadline_override, ge.revised_due_date,
                              ci.statutory_deadline)::text AS statutory_date,
                     fr.reference_no, fr.filed_on::text AS filed_on,
+                    (fr.id IS NOT NULL AND fr.ack_document_id IS NULL) AS ack_missing,
                     hsdg.is_engagement_lead(ci.engagement_id) AS is_lead,
+                    hsdg.is_engagement_member(ci.engagement_id) AS is_member,
                     hsdg.can_assign_as_stream_lead(ci.id) AS is_stream_lead
                FROM hsdg.compliance_instances ci
                JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
@@ -239,7 +245,8 @@ export class FilingRunsService {
           ORDER BY p.entity_name, p.registration_number NULLS LAST, p.instance_id`,
         [rule, periodKey, DEAD_ENGAGEMENT, CLIENT_DATA_SLOTS],
       );
-      const items = rows.map((r) => this.toRow(r, ctx.employeeId ?? null));
+      const checks = await firmChecks(client);
+      const items = rows.map((r) => this.toRow(r, ctx.employeeId ?? null, checks));
       return {
         rule,
         formLabel: rows[0]?.form_label ?? rule,
@@ -376,7 +383,7 @@ export class FilingRunsService {
     return row;
   }
 
-  private toRow(r: RunSqlRow, me: string | null): FilingRunRow {
+  private toRow(r: RunSqlRow, me: string | null, checks: FirmChecks): FilingRunRow {
     const filed = r.workflow_status === 'filed';
     return {
       instanceId: r.instance_id,
@@ -402,9 +409,20 @@ export class FilingRunsService {
       workflowStatus: r.workflow_status,
       internalDate: r.internal_date,
       statutoryDate: r.statutory_date,
-      filed:
-        r.reference_no && r.filed_on ? { referenceNo: r.reference_no, filedOn: r.filed_on } : null,
-      canLodge: !filed && (r.is_lead || (me !== null && r.preparer_id === me)),
+      filed: r.filed_on
+        ? {
+            referenceNo: r.reference_no,
+            filedOn: r.filed_on,
+            ackMissing: r.ack_missing,
+            referenceMissing: r.reference_no === null,
+          }
+        : null,
+      // Who may lodge follows the firm's checks; the lodge itself checks the stage.
+      canLodge:
+        !filed &&
+        (checks.lodge_assignee_only
+          ? r.is_lead || (me !== null && r.preparer_id === me)
+          : r.is_member || r.is_lead),
       canAssign: !filed && (r.is_lead || r.is_stream_lead),
       link: workLinkOf(
         { engagementId: r.engagement_id, engagementKind: r.engagement_kind, taskId: r.task_id },

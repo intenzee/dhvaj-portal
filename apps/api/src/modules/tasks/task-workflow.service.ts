@@ -45,6 +45,11 @@ export interface TransitionBody {
   escalationDate?: string;
   reviewerEmployeeId?: string;
   version?: number;
+  /**
+   * The filing was lodged: its task closes whoever recorded the lodge, with a
+   * lead's standing — the lodge has its own rules (the firm's lodge checks).
+   */
+  closedByLodge?: boolean;
 }
 
 export interface TransitionResult {
@@ -163,7 +168,7 @@ export class TaskWorkflowService {
         actor: {
           isAssignee: !!me && row.assigned_to_employee_id === me,
           isReviewer: !!me && row.reviewer_employee_id === me,
-          isLead: row.is_lead,
+          isLead: row.is_lead || body.closedByLodge === true,
         },
         hasAssignee: !!row.assigned_to_employee_id,
         hasReviewer: !!row.reviewer_employee_id,

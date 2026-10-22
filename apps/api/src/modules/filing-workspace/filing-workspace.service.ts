@@ -9,6 +9,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   isMeetingRule,
+  FILING_REFERENCE_KIND,
   NOTIFICATION_TYPE,
   TASK_ACTION,
   DSC_REQUEST_CODE,
@@ -65,12 +66,16 @@ import {
   defaultReferenceKind,
   indicativeLateCharges,
   lockState,
+  lodgeWarnings,
+  mayLodge,
   meetingReference,
   periodLabel,
   undoAllowed,
   workspacePeriodLabel,
 } from './filing-rules';
+import { firmChecks } from '../workflow-settings/firm-checks';
 import type {
+  CompleteLodgeDto,
   CorrectionDto,
   LodgeDto,
   PatchChecklistItemDto,
@@ -161,7 +166,7 @@ interface ItemRow {
 interface FilingRow {
   id: string;
   reference_kind: FilingReferenceKind;
-  reference_no: string;
+  reference_no: string | null;
   filed_on: string;
   filed_by_employee_id: string | null;
   filed_by_name: string | null;
@@ -170,7 +175,7 @@ interface FilingRow {
   late_fee_paid: string | null;
   interest_paid: string | null;
   normal_fee_paid: string | null;
-  ack_document_id: string;
+  ack_document_id: string | null;
   remarks: string | null;
   created_at: Date;
   undone_at: Date | null;
@@ -286,21 +291,26 @@ export class FilingWorkspaceService {
       if (!item) throw new NotFoundException('Checklist item not found.');
       this.requireUnlocked(client, inst, await this.summaryFiledLabel(client, inst));
       if (item.status === dto.status) return;
-      if (
-        dto.status !== 'not_applicable' &&
-        (item.auto_tick === 'review' || item.auto_tick === 'lodge')
-      ) {
-        throw new ConflictException(
-          item.auto_tick === 'review'
-            ? 'This step ticks itself when the reviewer approves the task.'
-            : 'This step ticks itself when the filing is lodged.',
-        );
+      const checks = await firmChecks(client);
+      // With the firm's check off, a step that ticks itself may be ticked by hand too.
+      if (checks.checklist_auto_steps) {
+        if (
+          dto.status !== 'not_applicable' &&
+          (item.auto_tick === 'review' || item.auto_tick === 'lodge')
+        ) {
+          throw new ConflictException(
+            item.auto_tick === 'review'
+              ? 'This step ticks itself when the reviewer approves the task.'
+              : 'This step ticks itself when the filing is lodged.',
+          );
+        }
+        if (dto.status === 'done' && item.auto_tick === 'document') {
+          throw new ConflictException(
+            'Upload the document to its slot — this step then ticks itself.',
+          );
+        }
       }
-      if (dto.status === 'done' && item.auto_tick === 'document') {
-        throw new ConflictException(
-          'Upload the document to its slot — this step then ticks itself.',
-        );
-      }
+      // The AGM moves AOC-4, MGT-7 and ADT-1: it is always recorded as a meeting.
       if (dto.status === 'done' && item.auto_tick === 'event') {
         throw new ConflictException(
           'Record the AGM (its meeting, or Events on the ROC tab) — this step then ticks itself.',
@@ -316,12 +326,14 @@ export class FilingWorkspaceService {
         }
       }
       if (dto.status === 'not_applicable') {
-        if (!dto.naReason?.trim())
-          throw new BadRequestException('Give a reason for Not applicable.');
-        if (item.required && !inst.is_lead) {
-          throw new ForbiddenException(
-            'Only the engagement manager or partner can waive a required step.',
-          );
+        if (checks.checklist_na_lead_only) {
+          if (!dto.naReason?.trim())
+            throw new BadRequestException('Give a reason for Not applicable.');
+          if (item.required && !inst.is_lead) {
+            throw new ForbiddenException(
+              'Only the engagement manager or partner can waive a required step.',
+            );
+          }
         }
         if (item.auto_tick === 'lodge') {
           throw new ConflictException('Mark the whole filing Not applicable instead.');
@@ -340,7 +352,7 @@ export class FilingWorkspaceService {
         [
           dto.status,
           ctx.employeeId ?? null,
-          dto.naReason?.trim() ?? null,
+          dto.naReason?.trim() || null,
           itemId,
           dto.version,
           dto.note?.trim() || null,
@@ -543,17 +555,19 @@ export class FilingWorkspaceService {
     slot: string,
     dto: SlotUploadDto,
   ): Promise<InstanceWorkspace> {
-    const { inst, label } = await this.db.withRlsContext(ctx, async (client) => {
+    const { inst, label, ackDue } = await this.db.withRlsContext(ctx, async (client) => {
       const i = await this.loadInstance(client, id);
       if (!i.is_member)
         throw new ForbiddenException(notOnTeamReason(ctx.employeeId, 'upload to this filing'));
       this.requireOpenEngagement(i);
-      // The acknowledgement goes in after lodge only via undo; slots lock with the filing.
-      this.requireUnlocked(client, i, await this.summaryFiledLabel(client, i));
+      // Slots lock with the filing — except the acknowledgement slot while the
+      // live lodge was recorded without one: that upload becomes its ack.
+      const due = await this.ackSlotDue(client, id, slot);
+      if (!due) this.requireUnlocked(client, i, await this.summaryFiledLabel(client, i));
       await seedChecklistForInstance(client, id);
-      return { inst: i, label: await this.slotLabel(client, id, slot) };
+      return { inst: i, label: await this.slotLabel(client, id, slot), ackDue: due };
     });
-    await this.documents.create(ctx, inst.engagement_id, {
+    const doc = await this.documents.create(ctx, inst.engagement_id, {
       title:
         dto.title?.trim() || `${label} — ${inst.rule_name} ${periodLabel(inst.period_key)}`.trim(),
       filename: dto.filename,
@@ -565,7 +579,21 @@ export class FilingWorkspaceService {
       periodSection: inst.section,
       slotCode: slot,
     });
+    if (ackDue) return this.completeLodge(ctx, id, { ackDocumentId: doc.id });
     return this.get(ctx, id);
+  }
+
+  /** The acknowledgement slot of a live lodge that has no acknowledgement yet. */
+  private async ackSlotDue(client: PoolClient, id: string, slot: string): Promise<boolean> {
+    const { rows } = await client.query<{ due: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM hsdg.instance_checklist_items
+                       WHERE compliance_instance_id = $1 AND slot_code = $2 AND auto_tick = 'lodge')
+          AND EXISTS (SELECT 1 FROM hsdg.filing_records
+                       WHERE compliance_instance_id = $1 AND undone_at IS NULL
+                         AND ack_document_id IS NULL) AS due`,
+      [id, slot],
+    );
+    return rows[0]?.due ?? false;
   }
 
   /**
@@ -604,24 +632,34 @@ export class FilingWorkspaceService {
     return this.write(ctx, id, async (client, inst) => {
       const me = ctx.employeeId ?? null;
       if (!me) throw new BadRequestException(notLinkedToEmployee('lodge this filing'));
+      const checks = await firmChecks(client);
       const task = await this.loadTask(client, id);
       const isAssignee = task?.assigned_to_employee_id === me;
-      if (!inst.is_lead && !isAssignee) {
-        throw new ForbiddenException(
-          'Only the person this filing is assigned to, or the engagement partner or manager, ' +
-            'can lodge it. Ask the engagement manager to assign the filing to you.',
-        );
-      }
+      const who = mayLodge(
+        {
+          isLead: inst.is_lead,
+          isAssignee,
+          isMember: inst.is_member,
+          workflowStatus: 'ready_to_file',
+        },
+        checks,
+      );
+      if (!who.ok) throw new ForbiddenException(who.why);
       if (inst.workflow_status === 'filed')
         throw new ConflictException('This filing is already lodged.');
       if (inst.workflow_status === 'not_applicable') {
         throw new ConflictException('This filing is marked Not applicable — lift that first.');
       }
-      if (inst.workflow_status !== 'ready_to_file' && !inst.is_lead) {
-        throw new ConflictException(
-          'This filing is not Ready to file yet — it needs the reviewer’s approval first.',
-        );
-      }
+      const stage = mayLodge(
+        {
+          isLead: inst.is_lead,
+          isAssignee,
+          isMember: inst.is_member,
+          workflowStatus: inst.workflow_status,
+        },
+        checks,
+      );
+      if (!stage.ok) throw new ConflictException(stage.why);
 
       // A meeting closes as a meeting: held on (in the period), the minutes, an
       // internal reference — no SRN (spec decision 1).
@@ -632,41 +670,66 @@ export class FilingWorkspaceService {
           'Only the engagement partner or manager records the AGM — it moves AOC-4, MGT-7 and ADT-1.',
         );
       }
-      const filedOn = dto.filedOn.slice(0, 10);
+      const today = istToday(new Date());
+      const filedOn = (dto.filedOn ?? today).slice(0, 10);
       const kind =
         dto.referenceKind ??
         (meeting ? 'internal' : defaultReferenceKind(inst.stream, inst.section));
       const rawRef = dto.referenceNo?.trim() || (meeting ? meetingReference(filedOn) : '');
-      if (!rawRef) throw new BadRequestException('Enter the reference number.');
-      const ref = checkReference(kind, rawRef, inst.stream);
-      if ('error' in ref) throw new BadRequestException(ref.error);
+      // With the firm's checks off the reference, a GST ARN's shape and the
+      // date rules are warnings on the filing; a reference must still be one
+      // the register can hold, and a date a date.
+      let referenceNo: string | null = null;
+      if (rawRef) {
+        const ref = checkReference(kind, rawRef, inst.stream);
+        if ('value' in ref) referenceNo = ref.value;
+        else {
+          const loose = checkReference(FILING_REFERENCE_KIND.internal, rawRef, null);
+          if (checks.lodge_reference_required || !('value' in loose)) {
+            throw new BadRequestException(ref.error);
+          }
+          referenceNo = loose.value;
+        }
+      } else if (checks.lodge_reference_required) {
+        throw new BadRequestException('Enter the reference number.');
+      }
       const dateErr = checkFiledOn(
         filedOn,
-        istToday(new Date()),
+        today,
         inst.period_end,
         meeting ? { periodStart: inst.period_start } : undefined,
       );
-      if (dateErr) throw new BadRequestException(dateErr);
+      if (dateErr && (checks.lodge_date_rules || !/^\d{4}-\d{2}-\d{2}$/.test(filedOn))) {
+        throw new BadRequestException(dateErr);
+      }
+      if (Number.isNaN(Date.parse(filedOn))) {
+        throw new BadRequestException('The filing date must be a date (YYYY-MM-DD).');
+      }
 
       const form = this.formOf(inst);
       const savedFigures = await this.loadFigures(client, id);
       const { figures, errors } = validateFigures(
         figureSchema(form),
         dto.figures ?? savedFigures.figures,
-        { forLodge: figuresRequiredToLodge(form), isNil: dto.isNil ?? false },
+        {
+          forLodge: checks.lodge_figures_required && figuresRequiredToLodge(form),
+          isNil: dto.isNil ?? false,
+        },
       );
       if (errors.length) throw new BadRequestException(errors.join(' '));
 
-      const ack = await client.query(
-        `SELECT 1 FROM hsdg.documents
-          WHERE id = $1 AND compliance_instance_id = $2 AND status = 'active' AND deleted_at IS NULL`,
-        [dto.ackDocumentId, id],
-      );
-      if (!ack.rows[0]) {
+      const ackDocumentId = dto.ackDocumentId ?? null;
+      if (ackDocumentId) {
+        await this.requireFilingDocument(client, id, ackDocumentId);
+      } else if (checks.lodge_ack_required) {
         throw new BadRequestException('Upload the acknowledgement to this filing before lodging.');
       }
       const filedBy = dto.filedByEmployeeId ?? me;
-      if (filedBy !== me) await this.requireMember(client, inst.engagement_id, filedBy);
+      if (filedBy !== me) {
+        if (checks.lodge_filed_by_team)
+          await this.requireMember(client, inst.engagement_id, filedBy);
+        else await this.requireEmployee(client, filedBy);
+      }
 
       await client.query(
         `INSERT INTO hsdg.filing_records
@@ -682,7 +745,7 @@ export class FilingWorkspaceService {
           inst.compliance_rule_id,
           inst.period_key,
           kind,
-          ref.value,
+          referenceNo,
           filedOn,
           filedBy,
           dto.isNil ?? false,
@@ -691,7 +754,7 @@ export class FilingWorkspaceService {
             (typeof figures.late_fee_paid === 'number' ? figures.late_fee_paid : null),
           dto.interestPaid ??
             (typeof figures.interest_paid === 'number' ? figures.interest_paid : null),
-          dto.ackDocumentId,
+          ackDocumentId,
           dto.remarks?.trim() || null,
           me,
           dto.normalFeePaid ?? null,
@@ -719,7 +782,10 @@ export class FilingWorkspaceService {
           inst.engagement_id,
           task.id,
           task.status === 'in_review' ? TASK_ACTION.approve : TASK_ACTION.complete,
-          { reason: `Lodged ${ref.value}` },
+          {
+            reason: referenceNo ? `Lodged ${referenceNo}` : `Lodged on ${filedOn}`,
+            closedByLodge: true,
+          },
         );
       }
       await syncAutoTicks(client, id);
@@ -733,7 +799,9 @@ export class FilingWorkspaceService {
         type: NOTIFICATION_TYPE.filingLodged,
         recipientEmployeeIds: recipients,
         title: `${what} filed`,
-        body: `${kind.toUpperCase()} ${ref.value}, filed on ${filedOn}${dto.isNil ? ' (Nil)' : ''}.`,
+        body: `${referenceNo ? `${kind.toUpperCase()} ${referenceNo}, filed` : 'Filed'} on ${filedOn}${
+          dto.isNil ? ' (Nil)' : ''
+        }.`,
         engagementId: inst.engagement_id,
         objectType: 'compliance_instance',
         objectId: id,
@@ -743,7 +811,26 @@ export class FilingWorkspaceService {
         objectType: 'compliance_instance',
         objectId: id,
         before: { workflowStatus: inst.workflow_status },
-        after: { referenceKind: kind, referenceNo: ref.value, filedOn, isNil: dto.isNil ?? false },
+        after: {
+          referenceKind: kind,
+          referenceNo,
+          filedOn,
+          isNil: dto.isNil ?? false,
+          // What the firm's checks let through, for the tidy-up.
+          warnings: lodgeWarnings({
+            referenceKind: kind,
+            referenceNo,
+            ackDocumentId,
+            filedOn,
+            today,
+            periodEnd: inst.period_end,
+            periodStart: inst.period_start,
+            stream: inst.stream,
+            isMeeting: meeting,
+            figuresMissing:
+              figuresRequiredToLodge(form) && !dto.isNil && Object.keys(figures).length === 0,
+          }).map((w) => w.code),
+        },
       });
     });
   }
@@ -751,20 +838,34 @@ export class FilingWorkspaceService {
   /** POST /compliance-instances/:id/lodge/undo — lead within 24 h, then partner. */
   async undoLodge(ctx: RlsContext, id: string, reason: string): Promise<InstanceWorkspace> {
     return this.write(ctx, id, async (client, inst) => {
-      const live = await client.query<{ id: string; created_at: Date; reference_no: string }>(
+      const live = await client.query<{
+        id: string;
+        created_at: Date;
+        reference_no: string | null;
+      }>(
         `SELECT id, created_at, reference_no FROM hsdg.filing_records
           WHERE compliance_instance_id = $1 AND undone_at IS NULL`,
         [id],
       );
       const rec = live.rows[0];
       if (!rec) throw new ConflictException('This filing has no lodge to undo.');
-      const ok = undoAllowed({
-        isLead: inst.is_lead,
-        isPartner: this.isPartner(ctx, inst),
-        recordedAt: rec.created_at,
-        now: new Date(),
-      });
+      const ok = undoAllowed(
+        {
+          isLead: inst.is_lead,
+          isPartner: this.isPartner(ctx, inst),
+          isMember: inst.is_member,
+          recordedAt: rec.created_at,
+          now: new Date(),
+        },
+        await firmChecks(client),
+      );
       if (!ok.ok) throw new ForbiddenException(ok.why);
+      // An AGM undone moves AOC-4, MGT-7 and ADT-1 back: the leads' call.
+      if (AGM_RULES.has(inst.rule_code) && !inst.is_lead && !this.isPartner(ctx, inst)) {
+        throw new ForbiddenException(
+          'Only the engagement partner or manager can undo the AGM — it moves AOC-4, MGT-7 and ADT-1.',
+        );
+      }
       if (!reason.trim()) throw new BadRequestException('Give a reason for undoing the lodge.');
       await client.query(
         `UPDATE hsdg.filing_records
@@ -800,10 +901,13 @@ export class FilingWorkspaceService {
     });
   }
 
-  /** POST /compliance-instances/:id/not-applicable — lead only, with a reason. */
+  /**
+   * POST /compliance-instances/:id/not-applicable — with a reason; a lead's
+   * call while the firm's waive check is on, else anyone on the filing.
+   */
   async markNotApplicable(ctx: RlsContext, id: string, reason: string): Promise<InstanceWorkspace> {
     return this.write(ctx, id, async (client, inst) => {
-      if (!inst.is_lead) {
+      if (!inst.is_lead && (await firmChecks(client)).waive_lead_only) {
         throw new ForbiddenException(
           'Only the engagement manager or partner can mark a filing Not applicable.',
         );
@@ -830,8 +934,12 @@ export class FilingWorkspaceService {
   /** POST /compliance-instances/:id/not-applicable/lift — back to its derived status. */
   async liftNotApplicable(ctx: RlsContext, id: string): Promise<InstanceWorkspace> {
     return this.write(ctx, id, async (client, inst) => {
-      if (!inst.is_lead)
-        throw new ForbiddenException('Only the engagement manager or partner can do this.');
+      if (!inst.is_lead) {
+        // A month taken off the portal comes back through Restore (a lead's).
+        if ((await firmChecks(client)).waive_lead_only || inst.notes?.startsWith('[removed]')) {
+          throw new ForbiddenException('Only the engagement manager or partner can do this.');
+        }
+      }
       if (inst.workflow_status !== 'not_applicable') return;
       await client.query(
         `UPDATE hsdg.compliance_instances
@@ -845,6 +953,79 @@ export class FilingWorkspaceService {
         action: 'filing.not_applicable_lifted',
         objectType: 'compliance_instance',
         objectId: id,
+      });
+    });
+  }
+
+  /**
+   * PATCH /compliance-instances/:id/lodge — add the acknowledgement or the
+   * reference a lodge was recorded without. Anyone on the filing fills in
+   * what is missing; a lead may also replace them.
+   */
+  async completeLodge(
+    ctx: RlsContext,
+    id: string,
+    dto: CompleteLodgeDto,
+  ): Promise<InstanceWorkspace> {
+    return this.write(ctx, id, async (client, inst) => {
+      const live = await client.query<{
+        id: string;
+        reference_kind: FilingReferenceKind;
+        reference_no: string | null;
+        ack_document_id: string | null;
+      }>(
+        `SELECT id, reference_kind, reference_no, ack_document_id FROM hsdg.filing_records
+          WHERE compliance_instance_id = $1 AND undone_at IS NULL`,
+        [id],
+      );
+      const rec = live.rows[0];
+      if (!rec) throw new ConflictException('This filing has no lodge to complete.');
+      const sets: string[] = [];
+      const values: unknown[] = [rec.id];
+      const before: Record<string, unknown> = {};
+      const after: Record<string, unknown> = {};
+      const replace = (what: string) =>
+        new ForbiddenException(
+          `Only the engagement partner or manager can replace the ${what} — undo the lodge instead.`,
+        );
+      if (dto.ackDocumentId && dto.ackDocumentId !== rec.ack_document_id) {
+        if (rec.ack_document_id && !inst.is_lead) throw replace('acknowledgement');
+        await this.requireFilingDocument(client, id, dto.ackDocumentId);
+        values.push(dto.ackDocumentId);
+        sets.push(`ack_document_id = $${values.length}`);
+        before.ackDocumentId = rec.ack_document_id;
+        after.ackDocumentId = dto.ackDocumentId;
+      }
+      const rawRef = dto.referenceNo?.trim();
+      if (rawRef) {
+        if (rec.reference_no && !inst.is_lead) throw replace('reference number');
+        const kind = dto.referenceKind ?? rec.reference_kind;
+        const ref = checkReference(kind, rawRef, inst.stream);
+        const loose = checkReference(FILING_REFERENCE_KIND.internal, rawRef, null);
+        const value = 'value' in ref ? ref.value : 'value' in loose ? loose.value : null;
+        if (!value || ('error' in ref && (await firmChecks(client)).lodge_reference_required)) {
+          throw new BadRequestException('error' in ref ? ref.error : 'Invalid reference.');
+        }
+        if (value !== rec.reference_no || kind !== rec.reference_kind) {
+          values.push(value);
+          sets.push(`reference_no = $${values.length}`);
+          values.push(kind);
+          sets.push(`reference_kind = $${values.length}`);
+          before.referenceNo = rec.reference_no;
+          after.referenceNo = value;
+        }
+      }
+      if (sets.length === 0) return;
+      await client.query(
+        `UPDATE hsdg.filing_records SET ${sets.join(', ')}, version = version + 1 WHERE id = $1`,
+        values,
+      );
+      await this.audit.recordWith(client, ctx, {
+        action: 'filing.lodge_completed',
+        objectType: 'compliance_instance',
+        objectId: id,
+        before,
+        after,
       });
     });
   }
@@ -1124,19 +1305,39 @@ export class FilingWorkspaceService {
     });
     const form = this.formOf(inst);
     const isAssignee = !!me && task?.assigned_to_employee_id === me;
-    const can = canFlags({
-      isLead: inst.is_lead,
-      isPartner: this.isPartner(ctx, inst),
-      isAssignee,
-      isMember: inst.is_member,
-      workflowStatus: inst.workflow_status,
-      isLocked: lock.isLocked || CLOSED_ENGAGEMENT.includes(inst.engagement_status),
-      hasLiveFiling: !!live,
-      liveRecordedAt: liveRow?.created_at ?? null,
-      now,
-    });
+    const can = canFlags(
+      {
+        isLead: inst.is_lead,
+        isPartner: this.isPartner(ctx, inst),
+        isAssignee,
+        isMember: inst.is_member,
+        workflowStatus: inst.workflow_status,
+        isLocked: lock.isLocked || CLOSED_ENGAGEMENT.includes(inst.engagement_status),
+        hasLiveFiling: !!live,
+        liveRecordedAt: liveRow?.created_at ?? null,
+        now,
+      },
+      await firmChecks(client),
+    );
 
     const warnings = await this.warnings(client, inst, figures.figures, live);
+    if (live) {
+      warnings.push(
+        ...lodgeWarnings({
+          referenceKind: live.referenceKind,
+          referenceNo: live.referenceNo,
+          ackDocumentId: live.ackDocumentId,
+          filedOn: live.filedOn,
+          today,
+          periodEnd: inst.period_end,
+          periodStart: inst.period_start,
+          stream: inst.stream,
+          isMeeting: isMeetingRule(inst.rule_code),
+          figuresMissing:
+            figuresRequiredToLodge(form) && !live.isNil && Object.keys(live.figures).length === 0,
+        }),
+      );
+    }
     const openRequired = checklist.filter(
       (c) => c.required && c.status === 'open' && c.autoTick !== 'lodge',
     ).length;
@@ -1450,6 +1651,8 @@ export class FilingWorkspaceService {
   private async summaryFiledLabel(client: PoolClient, inst: InstanceRow): Promise<string | null> {
     if (inst.section !== 'outward' && inst.section !== 'inward') return null;
     if (!inst.registration_id || !inst.period_start || !inst.period_end) return null;
+    // Outward and Inward stay editable while the firm's lock check is off.
+    if (!(await firmChecks(client)).lock_after_summary) return null;
     const { rows } = await client.query<{ label: string; period_key: string | null }>(
       `SELECT COALESCE(ci.form_label, rv.form_label, cr.name) AS label, ci.period_key
          FROM hsdg.compliance_instances ci
@@ -1498,6 +1701,31 @@ export class FilingWorkspaceService {
       [engagementId, employeeId],
     );
     if (!rows[0]) throw new BadRequestException('"Filed by" must be on the engagement team.');
+  }
+
+  /** "Filed by" anyone in the firm (the firm's check off): an active employee. */
+  private async requireEmployee(client: PoolClient, employeeId: string): Promise<void> {
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.employees WHERE id = $1 AND status = 'active'`,
+      [employeeId],
+    );
+    if (!rows[0]) throw new BadRequestException('"Filed by" must be someone in the firm.');
+  }
+
+  /** The acknowledgement: a live document uploaded to this filing. */
+  private async requireFilingDocument(
+    client: PoolClient,
+    id: string,
+    documentId: string,
+  ): Promise<void> {
+    const { rows } = await client.query(
+      `SELECT 1 FROM hsdg.documents
+        WHERE id = $1 AND compliance_instance_id = $2 AND status = 'active' AND deleted_at IS NULL`,
+      [documentId, id],
+    );
+    if (!rows[0]) {
+      throw new BadRequestException('Upload the acknowledgement to this filing first.');
+    }
   }
 
   /** The slot's label from the checklist; 400 when the filing has no such slot. */

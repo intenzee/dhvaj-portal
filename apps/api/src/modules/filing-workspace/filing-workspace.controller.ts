@@ -24,6 +24,7 @@ import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
 import { FilingCleanupService } from './filing-cleanup.service';
 import {
+  CompleteLodgeDto,
   CorrectionDto,
   FileDocumentDto,
   LodgeDto,
@@ -252,7 +253,9 @@ export class FilingWorkspaceController {
   @ApiOperation({
     summary: 'Record the filing (reference no., date, Nil, figures, acknowledgement)',
     description:
-      '409 unless Ready to file — a lead may lodge earlier. Closes the task and its clock.',
+      'Who may lodge, and what it needs, follows the firm’s checks (Admin → Checks); with ' +
+      'a check off the lodge goes ahead and the filing shows what is still to add. Closes ' +
+      'the task and its clock.',
   })
   lodge(
     @CurrentPrincipal() principal: Principal,
@@ -260,6 +263,20 @@ export class FilingWorkspaceController {
     @Body() dto: LodgeDto,
   ): Promise<InstanceWorkspace> {
     return this.workspace.lodge(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Patch(':id/lodge')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Add the acknowledgement or reference a lodge was recorded without',
+    description: 'Anyone on the filing fills in what is missing; a lead may also replace it.',
+  })
+  completeLodge(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: CompleteLodgeDto,
+  ): Promise<InstanceWorkspace> {
+    return this.workspace.completeLodge(rlsContextFromPrincipal(principal), id, dto);
   }
 
   @Post(':id/lodge/undo')

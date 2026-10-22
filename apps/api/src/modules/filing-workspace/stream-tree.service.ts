@@ -34,6 +34,8 @@ interface TreeRow {
   due: string;
   workflow_status: FilingStatus;
   filed_on: string | null;
+  ack_missing: boolean;
+  reference_missing: boolean;
   is_provisional: boolean;
   verification: string | null;
   required_done: number;
@@ -151,6 +153,8 @@ export class StreamTreeService {
                   ci.period_key, ci.financial_year,
                   COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)::text AS due,
                   ci.workflow_status, fr.filed_on::text, ci.is_provisional, rv.verification,
+                  (fr.id IS NOT NULL AND fr.ack_document_id IS NULL) AS ack_missing,
+                  (fr.id IS NOT NULL AND fr.reference_no IS NULL) AS reference_missing,
                   COALESCE(ck.required_done, 0) AS required_done, COALESCE(ck.required_total, 0) AS required_total,
                   ck.pending_label, ck.required_total IS NOT NULL AS has_items,
                   EXISTS (SELECT 1 FROM hsdg.tasks mt
@@ -225,6 +229,8 @@ export class StreamTreeService {
         requiredTotal: r.required_total,
         mine: r.mine,
         removed: r.removed,
+        ackMissing: r.ack_missing,
+        referenceMissing: r.reference_missing,
         ...(stream === 'roc'
           ? {
               dscWarning: CLOSED.has(r.workflow_status)

@@ -53,7 +53,13 @@ export interface FilingRunRow {
   internalDate: string | null;
   statutoryDate: string | null;
   /** The live filing record, once lodged. */
-  filed: { referenceNo: string; filedOn: string } | null;
+  filed: {
+    referenceNo: string | null;
+    filedOn: string;
+    /** Still to add: the acknowledgement or the reference (lodged while the checks are off). */
+    ackMissing: boolean;
+    referenceMissing: boolean;
+  } | null;
   /** The caller may lodge it inline (the preparer or an engagement lead). */
   canLodge: boolean;
   /** The caller may assign it (an engagement lead). */
