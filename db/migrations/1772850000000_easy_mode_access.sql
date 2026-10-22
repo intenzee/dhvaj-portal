@@ -133,6 +133,17 @@ CREATE POLICY tasks_update_member ON hsdg.tasks FOR UPDATE
   WITH CHECK (NOT hsdg.firm_check('task_assignee_only')
               AND hsdg.is_engagement_member(engagement_id));
 
+-- ── Time: a member who moves someone's task stops that person's clock ──────
+-- Only a running entry, and only to stop it — nothing else about it changes
+-- hands.
+CREATE POLICY time_entries_update_member ON hsdg.engagement_time_entries FOR UPDATE
+  USING (ended_at IS NULL
+         AND NOT hsdg.firm_check('task_assignee_only')
+         AND hsdg.is_engagement_member(engagement_id))
+  WITH CHECK (ended_at IS NOT NULL
+              AND NOT hsdg.firm_check('task_assignee_only')
+              AND hsdg.is_engagement_member(engagement_id));
+
 -- ── Team: a member adds an office colleague as a plain member ─────────────
 CREATE POLICY engagement_team_insert_member ON hsdg.engagement_team FOR INSERT
   WITH CHECK (NOT hsdg.firm_check('task_assign_team_only')
@@ -175,6 +186,7 @@ ALTER TABLE hsdg.engagements
          OR engagement_partner_id IS NOT NULL) NOT VALID;
 
 DROP POLICY IF EXISTS engagement_team_insert_member ON hsdg.engagement_team;
+DROP POLICY IF EXISTS time_entries_update_member ON hsdg.engagement_time_entries;
 DROP POLICY IF EXISTS tasks_update_member ON hsdg.tasks;
 DROP POLICY IF EXISTS tasks_insert_member ON hsdg.tasks;
 DROP POLICY IF EXISTS engagements_select_office ON hsdg.engagements;

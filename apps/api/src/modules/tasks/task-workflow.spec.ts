@@ -2,6 +2,7 @@ import { TASK_ACTION, TASK_STATUS, TIME_STOP_REASON, type TaskStatus } from '@hs
 import {
   actionForStatus,
   planTransition,
+  STRICT_TASK_CHECKS,
   statusAfterSystemClose,
   TransitionError,
   type TransitionInput,
@@ -257,5 +258,131 @@ describe('legacy status changes map onto transitions', () => {
     ['paused', 'todo', null],
   ] as const)('%s → %s = %s', (from, to, action) => {
     expect(actionForStatus(from as TaskStatus, to as TaskStatus)).toBe(action);
+  });
+});
+
+describe('relaxed firm checks', () => {
+  const relaxed = {
+    review: false,
+    assigneeOnly: false,
+    reasons: false,
+    reopenLeadOnly: false,
+    blockers: false,
+  };
+  const member = stranger;
+
+  it('a team member who is not the assignee may start, and an unassigned task is claimed', () => {
+    const p = planTransition(input({ actor: member, checks: relaxed }));
+    expect(p.toStatus).toBe(TASK_STATUS.inProgress);
+    expect(p.claim).toBe(false);
+    const claimed = planTransition(input({ actor: member, hasAssignee: false, checks: relaxed }));
+    expect(claimed.claim).toBe(true);
+  });
+
+  it('strict still refuses a non-assignee start', () => {
+    expect(code(() => planTransition(input({ actor: member, checks: STRICT_TASK_CHECKS })))).toBe(
+      'forbidden',
+    );
+  });
+
+  it('any member may pause, complete or cancel', () => {
+    for (const [action, status] of [
+      [TASK_ACTION.pause, TASK_STATUS.inProgress],
+      [TASK_ACTION.complete, TASK_STATUS.inProgress],
+      [TASK_ACTION.cancel, TASK_STATUS.todo],
+    ] as const) {
+      expect(
+        code(() => planTransition(input({ action, status, actor: member, checks: relaxed }))),
+      ).toBeUndefined();
+    }
+  });
+
+  it('a task with a reviewer may be completed directly when review is optional', () => {
+    const p = planTransition(
+      input({ action: TASK_ACTION.complete, status: TASK_STATUS.inProgress, checks: relaxed }),
+    );
+    expect(p.toStatus).toBe(TASK_STATUS.done);
+  });
+
+  it('send for review needs a reviewer named — none is defaulted', () => {
+    const base = {
+      action: TASK_ACTION.sendForReview,
+      status: TASK_STATUS.inProgress,
+      hasReviewer: false,
+      checks: relaxed,
+    };
+    expect(code(() => planTransition(input(base)))).toBe('bad_request');
+    const p = planTransition(input({ ...base, reviewerGiven: true }));
+    expect(p.defaultReviewer).toBe(false);
+    expect(p.toStatus).toBe(TASK_STATUS.inReview);
+  });
+
+  it('block and return go through without a reason', () => {
+    expect(
+      planTransition(
+        input({ action: TASK_ACTION.block, status: TASK_STATUS.inProgress, checks: relaxed }),
+      ).toStatus,
+    ).toBe(TASK_STATUS.blocked);
+    expect(
+      planTransition(
+        input({
+          action: TASK_ACTION.return,
+          status: TASK_STATUS.inReview,
+          actor: reviewer,
+          checks: relaxed,
+        }),
+      ).toStatus,
+    ).toBe(TASK_STATUS.todo);
+  });
+
+  it('open blockers warn instead of refusing', () => {
+    const p = planTransition(
+      input({
+        action: TASK_ACTION.complete,
+        status: TASK_STATUS.inProgress,
+        blockedByOpenCount: 2,
+        checks: relaxed,
+      }),
+    );
+    expect(p.toStatus).toBe(TASK_STATUS.done);
+    expect(p.warnings).toEqual(['Completed while 2 blocking task(s) are not done.']);
+  });
+
+  it('the team may reopen', () => {
+    expect(
+      planTransition(
+        input({
+          action: TASK_ACTION.reopen,
+          status: TASK_STATUS.done,
+          actor: member,
+          checks: relaxed,
+        }),
+      ).toStatus,
+    ).toBe(TASK_STATUS.todo);
+  });
+
+  it('nobody approves their own work', () => {
+    expect(
+      code(() =>
+        planTransition(
+          input({
+            action: TASK_ACTION.approve,
+            status: TASK_STATUS.inReview,
+            actor: assignee,
+            checks: relaxed,
+          }),
+        ),
+      ),
+    ).toBe('forbidden');
+    expect(
+      planTransition(
+        input({
+          action: TASK_ACTION.approve,
+          status: TASK_STATUS.inReview,
+          actor: member,
+          checks: relaxed,
+        }),
+      ).toStatus,
+    ).toBe(TASK_STATUS.done);
   });
 });
