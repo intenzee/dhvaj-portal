@@ -197,6 +197,104 @@ describe('People desk (e2e)', () => {
     });
   });
 
+  describe('the employee record (§4.3, §7.5)', () => {
+    it('keeps HR from linking or unlinking a login above Manager, or a partner’s record', async () => {
+      const userOf = async (email: string): Promise<string> =>
+        (await su.query<{ id: string }>(`SELECT id FROM hsdg.users WHERE email = $1`, [email]))
+          .rows[0]!.id;
+      // Unlinking a partner's login.
+      await http()
+        .patch(`/api/v1/employees/${partnerA}`)
+        .set(bearer(hr))
+        .send({ userId: null })
+        .expect(403);
+      // HR's own login onto someone else's record.
+      await http()
+        .patch(`/api/v1/employees/${articleNorth}`)
+        .set(bearer(hr))
+        .send({ userId: await userOf('hr@dhvaj.in') })
+        .expect((r) => expect([403, 409]).toContain(r.status));
+      // A partner's record with no login takes no login HR controls.
+      const partnerLogin = await userOf('partner.a@dhvaj.in');
+      await su.query(`UPDATE hsdg.employees SET user_id = NULL WHERE id = $1`, [partnerA]);
+      try {
+        const { rows } = await su.query<{ id: string }>(
+          `SELECT u.id FROM hsdg.users u
+             JOIN hsdg.user_roles ur ON ur.user_id = u.id
+             JOIN hsdg.roles r ON r.id = ur.role_id
+            WHERE r.slug = 'manager'
+              AND NOT EXISTS (SELECT 1 FROM hsdg.employees e WHERE e.user_id = u.id)
+            LIMIT 1`,
+        );
+        const spare =
+          rows[0]?.id ??
+          (
+            await su.query<{ id: string }>(
+              `WITH u AS (
+                 INSERT INTO hsdg.users (email, display_name, primary_office_id)
+                 SELECT $1, 'Spare Manager', primary_office_id FROM hsdg.users WHERE email = 'hr@dhvaj.in'
+                 RETURNING id)
+               INSERT INTO hsdg.user_roles (user_id, role_id)
+               SELECT u.id, r.id FROM u, hsdg.roles r WHERE r.slug = 'manager'
+               RETURNING user_id AS id`,
+              [`spare.${Date.now()}@dhvaj.in`],
+            )
+          ).rows[0]!.id;
+        await http()
+          .patch(`/api/v1/employees/${partnerA}`)
+          .set(bearer(hr))
+          .send({ userId: spare })
+          .expect(403);
+      } finally {
+        await su.query(`UPDATE hsdg.employees SET user_id = $2 WHERE id = $1`, [
+          partnerA,
+          partnerLogin,
+        ]);
+      }
+    });
+
+    it('shows HR and the MP the record’s own history, and nobody else', async () => {
+      const { rows } = await su.query<{ full_name: string }>(
+        `SELECT full_name FROM hsdg.employees WHERE id = $1`,
+        [articleNorth],
+      );
+      await http()
+        .patch(`/api/v1/employees/${articleNorth}`)
+        .set(bearer(hr))
+        .send({ fullName: `${rows[0]!.full_name} (HR)` })
+        .expect(200);
+      await http()
+        .patch(`/api/v1/employees/${articleNorth}`)
+        .set(bearer(hr))
+        .send({ fullName: rows[0]!.full_name })
+        .expect(200);
+      const history = (
+        await http()
+          .get(`/api/v1/people/employees/${articleNorth}/history`)
+          .set(bearer(hr))
+          .expect(200)
+      ).body as { action: string; objectType: string }[];
+      expect(history.filter((h) => h.action === 'employee.updated').length).toBeGreaterThanOrEqual(
+        2,
+      );
+      expect(history.every((h) => ['employee', 'articleship', 'user'].includes(h.objectType))).toBe(
+        true,
+      );
+      expect(history.some((h) => h.action.startsWith('auth.sign'))).toBe(false);
+      await http()
+        .get(`/api/v1/people/employees/${articleNorth}/history`)
+        .set(bearer(mp))
+        .expect(200);
+      await http()
+        .get(`/api/v1/people/employees/${articleNorth}/history`)
+        .set(bearer(pa))
+        .expect(403);
+      // The firm-wide audit log stays shut to HR.
+      const log = await http().get('/api/v1/audit').set(bearer(hr));
+      expect([403, 404]).toContain(log.status);
+    });
+  });
+
   describe('HR documents vault', () => {
     const file = Buffer.from('%PDF-1.4 appointment letter').toString('base64');
 

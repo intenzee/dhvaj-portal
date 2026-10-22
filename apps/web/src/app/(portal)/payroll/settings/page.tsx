@@ -134,6 +134,8 @@ function RulesForm({ record, editable }: { record: PaySettingsRecord; editable: 
     rules.pf.employeeRate,
     rules.pf.employerRate,
     rules.pf.epsRate,
+    rules.pf.edliRate ?? '0.5',
+    rules.pf.adminRate ?? '0.5',
     rules.esi.employeeRate,
     rules.esi.employerRate,
     rules.gratuityRate,
@@ -171,6 +173,8 @@ function RulesForm({ record, editable }: { record: PaySettingsRecord; editable: 
             {field('PF — employee %', rules.pf.employeeRate, (v) => setRules((r) => ({ ...r, pf: { ...r.pf, employeeRate: v } })))}
             {field('PF — firm %', rules.pf.employerRate, (v) => setRules((r) => ({ ...r, pf: { ...r.pf, employerRate: v } })))}
             {field('Of which pension %', rules.pf.epsRate, (v) => setRules((r) => ({ ...r, pf: { ...r.pf, epsRate: v } })))}
+            {field('EDLI %', rules.pf.edliRate ?? '0.5', (v) => setRules((r) => ({ ...r, pf: { ...r.pf, edliRate: v } })))}
+            {field('PF admin charges %', rules.pf.adminRate ?? '0.5', (v) => setRules((r) => ({ ...r, pf: { ...r.pf, adminRate: v } })))}
             {field('PF wage ceiling ₹', rules.pf.wageCeiling, (v) => setRules((r) => ({ ...r, pf: { ...r.pf, wageCeiling: v } })))}
           </div>
           {flag('The firm contributes on full PF wages, not just up to the ceiling', rules.pf.onFullWages, (v) =>

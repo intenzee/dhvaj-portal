@@ -55,8 +55,37 @@ describe('payroll engine', () => {
     expect(item(line, 'gratuity')).toBe('962.00');
     expect(line.deductions).toBe('2000.00');
     expect(line.net).toBe('38000.00');
-    // Cost: 40,000 + 1,800 + 962.
-    expect(line.employerCost).toBe('42762.00');
+    // EDLI and administration charges, 0.5% each of 15,000: the firm's cost.
+    expect(item(line, 'pf_edli')).toBe('75.00');
+    expect(item(line, 'pf_admin')).toBe('75.00');
+    // Cost: 40,000 + 1,800 + 75 + 75 + 962.
+    expect(line.employerCost).toBe('42912.00');
+  });
+
+  it('puts the whole employer PF into EPF for someone outside the pension scheme', () => {
+    // A first PF job after 1 Sep 2014 on wages above the ceiling (EPS para 6A).
+    const line = computePayLine(
+      { ...salary('20000', '10000', '10000'), epsMember: false },
+      { month: '2026-10', lossOfPayDays: 0, inputs: [] },
+      S,
+    );
+    expect(item(line, 'pf_eps')).toBeUndefined();
+    expect(item(line, 'pf_epf')).toBe('1800.00');
+    // EDLI still applies: it covers every PF member.
+    expect(item(line, 'pf_edli')).toBe('75.00');
+    expect(line.net).toBe('38000.00');
+  });
+
+  it('charges administration on full wages when the firm pays PF on them', () => {
+    const line = computePayLine(
+      salary('20000', '10000', '10000'),
+      { month: '2026-10', lossOfPayDays: 0, inputs: [] },
+      { ...S, pf: { ...S.pf, onFullWages: true } },
+    );
+    expect(item(line, 'pf', 'deduction')).toBe('2400.00');
+    expect(item(line, 'pf_admin')).toBe('100.00');
+    // EDLI stays on wages up to the ceiling.
+    expect(item(line, 'pf_edli')).toBe('75.00');
   });
 
   it('pays a joiner for the days on the rolls', () => {
