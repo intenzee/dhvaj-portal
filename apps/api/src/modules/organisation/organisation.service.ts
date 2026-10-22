@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,6 +15,7 @@ import type {
   CreateEmployeeInput,
   EmployeeFilter,
   EmployeeRecord,
+  EngagementLeadCandidate,
   UpdateEmployeeInput,
 } from './organisation.types';
 
@@ -124,6 +126,32 @@ export class OrganisationService {
         `${EMPLOYEE_SELECT} WHERE g.is_partner_grade ORDER BY e.full_name`,
       );
       return rows.map(mapEmployee);
+    });
+  }
+
+  /**
+   * Partners and managers in every office, for the Engagement Partner /
+   * Manager pickers. Not RLS-scoped by office (hsdg.engagement_lead_candidates
+   * is SECURITY DEFINER) but returns only id, name, grade and office.
+   */
+  async listEngagementLeads(ctx: RlsContext): Promise<EngagementLeadCandidate[]> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await client.query<{
+        id: string;
+        full_name: string;
+        grade_slug: GradeSlug;
+        grade_name: string;
+        is_partner_grade: boolean;
+        office_code: string;
+      }>(`SELECT * FROM hsdg.engagement_lead_candidates()`);
+      return rows.map((r) => ({
+        id: r.id,
+        fullName: r.full_name,
+        gradeSlug: r.grade_slug,
+        gradeName: r.grade_name,
+        isPartner: r.is_partner_grade,
+        officeCode: r.office_code,
+      }));
     });
   }
 
@@ -366,5 +394,14 @@ export function translatePgError(err: unknown): Error {
   if (code === '23503')
     return new BadRequestException('Referenced user, grade, or office does not exist.');
   if (code === '23514') return new BadRequestException('Employee data violates a constraint.');
+  // The database's copy of the HR login ceiling (employees_login_link_guard).
+  if (code === '42501') {
+    const message = (err as { message?: string }).message ?? '';
+    return new ForbiddenException(
+      message && !message.includes('row-level security')
+        ? message
+        : 'You can’t change this employee record.',
+    );
+  }
   return err as Error;
 }

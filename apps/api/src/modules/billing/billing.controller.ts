@@ -28,6 +28,7 @@ import {
   type InvoiceReminderResult,
   type InvoiceTimeEntry,
   type ReceiptRecord,
+  type ReversalRequest,
   type Paginated,
   type SetAsideFeesResult,
   type TdsImportResult,
@@ -37,7 +38,11 @@ import {
 } from '@hsdg/contracts';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { paginate } from '../../common/pagination/pagination.dto';
-import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
+import {
+  CurrentPrincipal,
+  RequireAnyPermission,
+  RequirePermissions,
+} from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { CommercialService } from '../commercial/commercial.service';
 import { GlobalInvoiceListQueryDto } from '../commercial/dto/commercial.dto';
@@ -58,7 +63,9 @@ import {
   RemindInvoiceDto,
   RemindTdsDto,
   RestoreFeeDto,
+  RequestReversalDto,
   RequestWriteOffDto,
+  ReversalListQueryDto,
   ReverseReceiptDto,
   SetAsideFeesDto,
   TdsMatchQueryDto,
@@ -68,6 +75,7 @@ import {
 } from './billing.dto';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesService } from './receivables.service';
+import { ReversalRequestsService } from './reversal-requests.service';
 import { TdsCreditsService } from './tds-credits.service';
 import { TimeBillingService } from './time-billing.service';
 import { UnbilledService } from './unbilled.service';
@@ -91,10 +99,11 @@ export class BillingController {
     private readonly unbilled: UnbilledService,
     private readonly tds: TdsCreditsService,
     private readonly time: TimeBillingService,
+    private readonly reversals: ReversalRequestsService,
   ) {}
 
   @Get('settings')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.billingManage)
   @ApiOperation({ summary: 'Who the firm is on its invoices: GSTIN, state, SAC, prefix, terms' })
   getSettings(@CurrentPrincipal() principal: Principal): Promise<BillingSettings> {
     this.requireOn(principal);
@@ -202,6 +211,59 @@ export class BillingController {
     return this.receipts.reverse(rlsContextFromPrincipal(principal), id, dto);
   }
 
+  // ── §3.5 · asking a partner to void an issued invoice or reverse a receipt ──
+
+  @Get('reversal-requests')
+  @ApiOperation({
+    summary: 'Requests to void an invoice or reverse a receipt (the client billers)',
+  })
+  listReversalRequests(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: ReversalListQueryDto,
+  ): Promise<ReversalRequest[]> {
+    this.requireOn(principal);
+    requireBillingReader(principal);
+    return this.reversals.list(rlsContextFromPrincipal(principal), {
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.invoiceId ? { invoiceId: query.invoiceId } : {}),
+      ...(query.receiptId ? { receiptId: query.receiptId } : {}),
+    });
+  }
+
+  @Post('reversal-requests')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Ask a partner to void an issued invoice or reverse a receipt' })
+  requestReversal(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: RequestReversalDto,
+  ): Promise<ReversalRequest> {
+    this.requireOn(principal);
+    return this.reversals.request(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Post('reversal-requests/:id/decision')
+  @RequirePermissions(PERMISSION.billingApprove)
+  @ApiOperation({ summary: 'Approve (the void or reversal happens now) or reject a request' })
+  decideReversal(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: DecideAdjustmentDto,
+  ): Promise<ReversalRequest> {
+    this.requireOn(principal);
+    return this.reversals.decide(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Post('reversal-requests/:id/withdraw')
+  @RequirePermissions(PERMISSION.billingManage)
+  @ApiOperation({ summary: 'Take back your own pending request' })
+  withdrawReversal(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<ReversalRequest> {
+    this.requireOn(principal);
+    return this.reversals.withdraw(rlsContextFromPrincipal(principal), id);
+  }
+
   @Get('clients/:entityId/statement')
   @ApiOperation({ summary: "A client's invoices, receipts, TDS and balance" })
   statement(
@@ -284,7 +346,7 @@ export class BillingController {
   }
 
   @Get('credit-notes/:id/pdf')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.billingManage)
   @ApiOperation({ summary: 'An approved (or voided) credit note as a PDF (CGST rule 53)' })
   async creditNotePdf(
     @CurrentPrincipal() principal: Principal,
@@ -408,7 +470,7 @@ export class BillingController {
   }
 
   @Get('engagements/:engagementId/fee-milestones')
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.engagementReadCommercial)
   @ApiOperation({ summary: "The engagement's fee milestones and events, with where each stands" })
   feeMilestones(
     @CurrentPrincipal() principal: Principal,
@@ -419,7 +481,8 @@ export class BillingController {
   }
 
   @Post('engagements/:engagementId/fee-milestones')
-  @RequirePermissions(PERMISSION.billingManage)
+  // Agreeing a fee is the partner's commercial call (spec §3.5), not billing.
+  @RequirePermissions(PERMISSION.feeAgree)
   @ApiOperation({ summary: 'Agree a fee on a milestone or an event; due on its date' })
   addFeeMilestone(
     @CurrentPrincipal() principal: Principal,
@@ -431,7 +494,7 @@ export class BillingController {
   }
 
   @Post('fee-milestones/:id/cancel')
-  @RequirePermissions(PERMISSION.billingManage)
+  @RequirePermissions(PERMISSION.feeAgree)
   @ApiOperation({ summary: 'Cancel a fee milestone that is on no live invoice' })
   cancelFeeMilestone(
     @CurrentPrincipal() principal: Principal,

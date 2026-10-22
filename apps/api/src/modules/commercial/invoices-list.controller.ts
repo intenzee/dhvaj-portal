@@ -6,7 +6,7 @@ import {
   type GlobalInvoiceRecord,
   type Paginated,
 } from '@hsdg/contracts';
-import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
+import { CurrentPrincipal, RequireAnyPermission } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { CommercialService } from './commercial.service';
@@ -14,7 +14,8 @@ import { GlobalInvoiceListQueryDto } from './dto/commercial.dto';
 
 /**
  * Firm-wide Billing & Collections view (spec §31). A cross-engagement invoice
- * list and rollup, gated by `report.read` (the management tier) and RLS-scoped
+ * list and rollup, gated by `report.read` (the management tier) or
+ * `billing.manage` (the Accountant, spec §7.4), and RLS-scoped
  * exactly like the per-engagement invoice list — the caller sees an invoice
  * only for an engagement they are on. Read-only: all writes stay on the
  * per-engagement commercial endpoints.
@@ -25,7 +26,7 @@ export class InvoicesListController {
   constructor(private readonly commercial: CommercialService) {}
 
   @Get()
-  @RequirePermissions(PERMISSION.reportRead)
+  @RequireAnyPermission(PERMISSION.reportRead, PERMISSION.billingManage)
   @ApiOperation({
     summary: 'List invoices across all accessible engagements (paginated)',
     description: 'RLS-scoped like the per-engagement list. Filter by status/overdueOnly/search.',
@@ -51,7 +52,7 @@ export class InvoicesListController {
   }
 
   @Get('summary')
-  @RequirePermissions(PERMISSION.reportRead)
+  @RequireAnyPermission(PERMISSION.reportRead, PERMISSION.billingManage)
   @ApiOperation({
     summary: 'Firm-wide billing rollup (counts + summed totals) over visible invoices',
   })

@@ -143,7 +143,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
               set_config($7, $8, true),
               set_config($9, $10, true),
               set_config($11, $12, true),
-              set_config($13, $14, true)`,
+              set_config($13, $14, true),
+              set_config($15, $16, true)`,
       [
         RLS_SETTINGS.userId,
         context.userId,
@@ -161,6 +162,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         this.ambient(CLS_CHANGE_SET),
         CHANGE_SET_SETTINGS.label,
         this.ambient(CLS_CHANGE_LABEL),
+        RLS_SETTINGS.roles,
+        (context.roles ?? []).join(','),
       ],
     );
   }

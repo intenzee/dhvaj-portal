@@ -4,6 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  assertAssignable,
+  assertOnboardable,
+  withVia,
+  type OnboardCeiling,
+} from './onboard-ceiling';
 import type { PoolClient } from 'pg';
 import { SYSTEM_ROLE, type RoleSlug } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -221,7 +227,12 @@ export class IdentityService {
     });
   }
 
-  async createUser(ctx: RlsContext, input: CreateUserInput): Promise<UserListItem> {
+  async createUser(
+    ctx: RlsContext,
+    input: CreateUserInput,
+    ceiling?: OnboardCeiling,
+  ): Promise<UserListItem> {
+    assertAssignable(ceiling, input.roles ?? []);
     return this.db.withRlsContext(ctx, async (client) => {
       const officeId = await this.resolveOfficeId(client, input.officeCode);
 
@@ -241,22 +252,29 @@ export class IdentityService {
       if (input.roles && input.roles.length > 0) {
         await this.replaceRoles(client, createdId, input.roles);
       }
+      await this.syncEmployee(client, ctx, createdId);
 
       const created = (await this.selectUser(client, createdId))!;
       await this.audit.recordWith(client, ctx, {
         action: 'user.created',
         objectType: 'user',
         objectId: createdId,
-        after: created,
+        after: withVia(created, ceiling),
       });
       return created;
     });
   }
 
-  async updateUser(ctx: RlsContext, id: string, input: UpdateUserInput): Promise<UserListItem> {
+  async updateUser(
+    ctx: RlsContext,
+    id: string,
+    input: UpdateUserInput,
+    ceiling?: OnboardCeiling,
+  ): Promise<UserListItem> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectUser(client, id);
       if (!before) throw new NotFoundException('User not found.');
+      assertOnboardable(ceiling, before);
 
       const sets: string[] = [];
       const params: unknown[] = [];
@@ -292,25 +310,37 @@ export class IdentityService {
         throw translateUserPgError(err);
       }
 
+      if (input.isActive === true && !before.isActive) {
+        await this.syncEmployee(client, ctx, id);
+      }
+
       const after = (await this.selectUser(client, id))!;
       await this.audit.recordWith(client, ctx, {
         action: 'user.updated',
         objectType: 'user',
         objectId: id,
         before,
-        after,
+        after: withVia(after, ceiling),
       });
       return after;
     });
   }
 
   /** Replace a user's full role set (idempotent). Records before/after roles. */
-  async setUserRoles(ctx: RlsContext, id: string, roles: RoleSlug[]): Promise<UserListItem> {
+  async setUserRoles(
+    ctx: RlsContext,
+    id: string,
+    roles: RoleSlug[],
+    ceiling?: OnboardCeiling,
+  ): Promise<UserListItem> {
+    assertAssignable(ceiling, roles);
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectUser(client, id);
       if (!before) throw new NotFoundException('User not found.');
+      assertOnboardable(ceiling, before);
 
       await this.replaceRoles(client, id, roles);
+      await this.syncEmployee(client, ctx, id);
 
       const after = (await this.selectUser(client, id))!;
       await this.audit.recordWith(client, ctx, {
@@ -318,7 +348,7 @@ export class IdentityService {
         objectType: 'user',
         objectId: id,
         before: { roles: before.roles },
-        after: { roles: after.roles },
+        after: withVia({ roles: after.roles }, ceiling),
       });
       return after;
     });
@@ -403,6 +433,28 @@ export class IdentityService {
          ON CONFLICT DO NOTHING`,
         [userId, roleId],
       );
+    }
+  }
+
+  /**
+   * Give a user the employee record their roles imply, so a new Partner or
+   * Manager can lead engagements straight away (Engagement Partner / Manager
+   * are employees at a grade, not roles) and anyone can file, log time and act
+   * on tasks (those need ctx_employee_id). Support roles get Staff grade. See
+   * hsdg.sync_employee_from_roles: links or creates, raises grade, never lowers.
+   */
+  private async syncEmployee(client: PoolClient, ctx: RlsContext, userId: string): Promise<void> {
+    const { rows } = await client.query<{ employee_id: string; action: string }>(
+      `SELECT employee_id, action FROM hsdg.sync_employee_from_roles($1)`,
+      [userId],
+    );
+    for (const row of rows) {
+      await this.audit.recordWith(client, ctx, {
+        action: row.action === 'created' ? 'employee.created' : 'employee.updated',
+        objectType: 'employee',
+        objectId: row.employee_id,
+        after: { userId, sync: row.action },
+      });
     }
   }
 

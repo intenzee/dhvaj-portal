@@ -72,8 +72,8 @@ const RECEIPT_BASE = `
          r.bank_account, r.status, r.reversed_reason, r.reversed_at,
          rb.full_name AS recorded_by_name, r.version, r.created_at
     FROM hsdg.receipts r
-    JOIN hsdg.entities e ON e.id = r.client_entity_id
-    LEFT JOIN hsdg.employees rb ON rb.id = r.recorded_by_employee_id`;
+    JOIN hsdg.entity_billing_profiles e ON e.id = r.client_entity_id
+    LEFT JOIN hsdg.employee_names rb ON rb.id = r.recorded_by_employee_id`;
 
 /**
  * PS-202 · money in from clients. A receipt is what reached the bank plus the
@@ -208,38 +208,46 @@ export class ReceiptsService {
 
   /** Reverse a receipt (a bounced cheque, a mistake): its invoices reopen. */
   reverse(ctx: RlsContext, id: string, input: ReverseReceiptInput): Promise<ReceiptRecord> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.load(client, id);
-      if (before.status === 'reversed') {
-        throw new BadRequestException('This receipt is already reversed.');
-      }
-      if (input.version !== undefined && input.version !== before.version) {
-        throw new ConflictException(
-          `Receipt was changed by someone else (expected v${input.version}, found v${before.version}).`,
-        );
-      }
-      try {
-        await client.query(
-          `UPDATE hsdg.receipts
-              SET status = 'reversed', reversed_reason = $2, reversed_at = now(),
-                  reversed_by_employee_id = $3, version = version + 1
-            WHERE id = $1`,
-          [id, input.reason.trim(), ctx.employeeId ?? null],
-        );
-      } catch (err) {
-        throw translateReceiptError(err);
-      }
-      const after = await this.load(client, id);
-      await this.audit.recordWith(client, ctx, {
-        action: 'receipt.reversed',
-        objectType: 'receipt',
-        objectId: id,
-        before: { status: before.status },
-        after: { status: after.status, invoices: before.allocations.map((a) => a.invoiceId) },
-        reason: input.reason.trim(),
-      });
-      return after;
+    return this.db.withRlsContext(ctx, (client) => this.reverseWith(client, ctx, id, input));
+  }
+
+  /** reverse inside the caller's transaction (an approved reversal request). */
+  async reverseWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    id: string,
+    input: ReverseReceiptInput,
+  ): Promise<ReceiptRecord> {
+    const before = await this.load(client, id);
+    if (before.status === 'reversed') {
+      throw new BadRequestException('This receipt is already reversed.');
+    }
+    if (input.version !== undefined && input.version !== before.version) {
+      throw new ConflictException(
+        `Receipt was changed by someone else (expected v${input.version}, found v${before.version}).`,
+      );
+    }
+    try {
+      await client.query(
+        `UPDATE hsdg.receipts
+            SET status = 'reversed', reversed_reason = $2, reversed_at = now(),
+                reversed_by_employee_id = $3, version = version + 1
+          WHERE id = $1`,
+        [id, input.reason.trim(), ctx.employeeId ?? null],
+      );
+    } catch (err) {
+      throw translateReceiptError(err);
+    }
+    const after = await this.load(client, id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'receipt.reversed',
+      objectType: 'receipt',
+      objectId: id,
+      before: { status: before.status },
+      after: { status: after.status, invoices: before.allocations.map((a) => a.invoiceId) },
+      reason: input.reason.trim(),
     });
+    return after;
   }
 
   /** Invoices, receipts, credits and the running balance for one client. */
@@ -405,7 +413,7 @@ export class ReceiptsService {
   /** The client's name, or 404 when the caller cannot see it. */
   private async assertClient(client: PoolClient, entityId: string): Promise<string> {
     const { rows } = await client.query<{ legal_name: string }>(
-      `SELECT legal_name FROM hsdg.entities WHERE id = $1`,
+      `SELECT legal_name FROM hsdg.entity_billing_profiles WHERE id = $1`,
       [entityId],
     );
     if (!rows[0]) throw new NotFoundException('Client not found.');

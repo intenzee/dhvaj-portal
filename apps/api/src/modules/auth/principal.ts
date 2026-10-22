@@ -33,6 +33,7 @@ export function rlsContextFromPrincipal(principal: Principal): RlsContext {
   return {
     userId: principal.userId,
     role: principal.effectiveRole ?? '',
+    roles: principal.roles,
     officeId: principal.officeId,
     ...(principal.employeeId ? { employeeId: principal.employeeId } : {}),
   };

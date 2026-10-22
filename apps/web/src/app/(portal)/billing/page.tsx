@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
@@ -17,6 +18,7 @@ import { humanize, formatDate, formatMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
+import { engagementHref } from '@/components/accounts/accounts';
 import { useBillingSettings } from '@/components/billing/invoice-gst';
 import { BillingSettingsCard } from '@/components/billing/billing-settings';
 import { RecordReceiptModal } from '@/components/billing/record-receipt-modal';
@@ -54,7 +56,11 @@ export default function BillingPage(): JSX.Element {
       </div>
     );
   }
-  return <Billing v2={v2} />;
+  return (
+    <Suspense fallback={<Spinner />}>
+      <Billing v2={v2} />
+    </Suspense>
+  );
 }
 
 function Billing({ v2 }: { v2: boolean }): JSX.Element {
@@ -62,9 +68,14 @@ function Billing({ v2 }: { v2: boolean }): JSX.Element {
   const { principal } = useAuth();
   const { settings } = useBillingSettings();
   const [recording, setRecording] = useState(false);
+  // The Accounts desk's queues link here as ?status=draft and ?overdue=1.
+  const params = useSearchParams();
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<string>('');
-  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [status, setStatus] = useState<string>(() => {
+    const s = params.get('status') ?? '';
+    return (INVOICE_STATUSES as readonly string[]).includes(s) ? s : '';
+  });
+  const [overdueOnly, setOverdueOnly] = useState(() => params.get('overdue') === '1');
   const [offset, setOffset] = useState(0);
 
   const reset = (fn: () => void): void => {
@@ -117,7 +128,7 @@ function Billing({ v2 }: { v2: boolean }): JSX.Element {
       cell: ({ row }) =>
         row.original.engagementCode ? (
           <Link
-            href={`/engagements/${row.original.engagementId}`}
+            href={engagementHref(principal, row.original.engagementId)}
             className="font-medium text-primary-700 hover:underline"
           >
             {row.original.engagementCode}

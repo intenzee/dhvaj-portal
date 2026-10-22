@@ -42,6 +42,20 @@ export default async function globalSetup(): Promise<void> {
   const client = new Client({ connectionString: superuserUrl });
   await client.connect();
   try {
+    // One DROP SCHEMA ... CASCADE locks every object in a single transaction,
+    // which outgrew Postgres's default lock table (64 × max_connections) as the
+    // schema grew. Drop the tables one per transaction first, then the rest.
+    const { rows: tables } = await client.query<{ name: string }>(
+      `SELECT quote_ident(relname) AS name FROM pg_class
+        WHERE relnamespace = to_regnamespace('hsdg') AND relkind IN ('r', 'p', 'v', 'm')`,
+    );
+    for (const t of tables) {
+      await client
+        .query(`DROP TABLE IF EXISTS hsdg.${t.name} CASCADE`)
+        .catch(() =>
+          client.query(`DROP VIEW IF EXISTS hsdg.${t.name} CASCADE`).catch(() => undefined),
+        );
+    }
     await client.query('DROP SCHEMA IF EXISTS hsdg CASCADE');
     await client.query('DROP TABLE IF EXISTS public.pgmigrations CASCADE');
   } finally {

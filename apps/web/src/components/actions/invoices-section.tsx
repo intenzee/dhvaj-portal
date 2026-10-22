@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, FileText, Send, CheckCircle2, Ban, Download, Wallet } from 'lucide-react';
+import { Plus, Trash2, FileText, Send, CheckCircle2, Ban, Download, Wallet, UserCheck } from 'lucide-react';
 import {
   BILLING_FREQUENCIES,
   FEATURE_FLAG,
@@ -13,6 +13,7 @@ import {
   gstSplit,
   type EngagementCommercial,
   type InvoiceDetail,
+  type InvoiceIssueRequest,
   type InvoiceRecord,
   type InvoiceStatus,
   type Paginated,
@@ -36,6 +37,12 @@ import {
 import { InvoiceAdjustments } from '@/components/billing/invoice-adjustments';
 import { InvoiceReminders } from '@/components/billing/invoice-reminders';
 import { FeeMilestones } from '@/components/billing/fee-milestones';
+import {
+  AskReversal,
+  PendingReversal,
+  mayAskReversal,
+  usePendingReversals,
+} from '@/components/billing/reversal-request';
 
 /** Format a decimal-string amount as money in the invoice's currency. */
 function money(amount: string | null | undefined, currency = 'INR'): string {
@@ -54,6 +61,9 @@ interface DraftLine {
   /** PS-201: GST rate, used once the firm's GST state is set. */
   gstRate: string;
 }
+
+/** The API's rule code when an ad-hoc line needs a partner to issue it. */
+const AD_HOC_RULE = 'AD_HOC_ISSUE_NEEDS_PARTNER';
 
 const blankLine = (): DraftLine => ({ description: '', quantity: '1', unitAmount: '0', gstRate: '18' });
 
@@ -282,7 +292,7 @@ function CommercialModal({
   );
 }
 
-function CreateInvoiceModal({
+export function CreateInvoiceModal({
   engagementId,
   onClose,
   onCreated,
@@ -472,7 +482,7 @@ function CreateInvoiceModal({
   );
 }
 
-function InvoiceDetailModal({
+export function InvoiceDetailModal({
   engagementId,
   invoiceId,
   onClose,
@@ -496,6 +506,9 @@ function InvoiceDetailModal({
   const [rate, setRate] = useState('18');
   const [voiding, setVoiding] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+  // Decision 9.3: an ad-hoc line is a partner's to issue; the rest ask.
+  const [asking, setAsking] = useState<string | null>(null);
+  const [askNote, setAskNote] = useState('');
 
   const key = ['engagement', engagementId, 'invoice', invoiceId] as const;
   const invoice = useQuery({
@@ -548,12 +561,34 @@ function InvoiceDetailModal({
       setVoidReason('');
       refresh();
     },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not update the invoice.', 'error'),
+    onError: (e) => {
+      if (e instanceof ApiError && e.body?.rule === AD_HOC_RULE) {
+        setAsking(e.message);
+        return;
+      }
+      toast(e instanceof ApiError ? e.message : 'Could not update the invoice.', 'error');
+    },
+  });
+  const requestIssue = useMutation({
+    mutationFn: () =>
+      apiFetch<InvoiceIssueRequest>(`/billing/invoices/${invoiceId}/request-issue`, {
+        method: 'POST',
+        body: askNote.trim() ? { note: askNote.trim() } : {},
+      }),
+    onSuccess: () => {
+      toast('Asked the engagement partner to issue it.');
+      setAsking(null);
+      setAskNote('');
+      void qc.invalidateQueries({ queryKey: ['billing', 'approvals'] });
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not send the request.', 'error'),
   });
 
   const inv = invoice.data;
   const isDraft = inv?.status === INVOICE_STATUS.draft;
   const may = inv ? invoiceActions(inv, principal?.permissions ?? [], receipts) : null;
+  const voidable = !!receipts && inv?.status === INVOICE_STATUS.issued;
+  const voidAsked = usePendingReversals(voidable).find((q) => q.invoiceId === invoiceId);
 
   return (
     <Modal
@@ -588,7 +623,7 @@ function InvoiceDetailModal({
               <Send className="h-4 w-4" /> Issue
             </Button>
           )}
-          {may?.voidIssued && !voiding && (
+          {may?.voidIssued && !voiding && !voidAsked && (
             <Button variant="secondary" onClick={() => setVoiding(true)} disabled={setStatus.isPending}>
               <Ban className="h-4 w-4" /> Void
             </Button>
@@ -636,6 +671,29 @@ function InvoiceDetailModal({
             <p className="rounded-md bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
               Voided{inv.voidedByName ? ` by ${inv.voidedByName}` : ''}: {inv.voidedReason}
             </p>
+          )}
+          {voidable && voidAsked && <PendingReversal request={voidAsked} />}
+          {voidable && !voidAsked && mayAskReversal(principal) && (
+            <AskReversal kind="invoice_void" targetId={invoiceId} />
+          )}
+          {asking && isDraft && (
+            <div className="space-y-2 rounded-md border border-line p-3">
+              <p className="text-sm text-ink-muted">{asking}</p>
+              <Field label="Note for the partner" hint="Optional: what the line is for, who agreed it.">
+                <Textarea
+                  rows={2}
+                  maxLength={1000}
+                  value={askNote}
+                  onChange={(e) => setAskNote(e.target.value)}
+                />
+              </Field>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setAsking(null)}>Cancel</Button>
+                <Button size="sm" onClick={() => requestIssue.mutate()} disabled={requestIssue.isPending}>
+                  <UserCheck className="h-4 w-4" /> Request issue
+                </Button>
+              </div>
+            </div>
           )}
           {voiding && (
             <div className="flex items-end gap-2 rounded-md border border-line p-3">

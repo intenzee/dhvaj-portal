@@ -22,7 +22,10 @@ FROM (VALUES
   ('partner.a@dhvaj.in','Partner A',        'NORTH', true),
   ('partner.b@dhvaj.in','Partner B',        'SOUTH', true),
   ('manager.x@dhvaj.in','Manager X',        'NORTH', false),
-  ('senior.y@dhvaj.in', 'Senior Y',         'SOUTH', false)
+  ('senior.y@dhvaj.in', 'Senior Y',         'SOUTH', false),
+  -- Desk roles (accountant-hr-roles spec): firm-wide, no client work.
+  ('accounts@dhvaj.in', 'Accounts A',       'NORTH', false),
+  ('hr@dhvaj.in',       'HR H',             'NORTH', false)
 ) AS v(email, display_name, office_code, mfa_required)
 JOIN hsdg.offices o ON o.code = v.office_code
 ON CONFLICT (email) DO NOTHING;
@@ -36,7 +39,9 @@ FROM (VALUES
   ('partner.a@dhvaj.in', 'partner'),
   ('partner.b@dhvaj.in', 'partner'),
   ('manager.x@dhvaj.in', 'manager'),
-  ('senior.y@dhvaj.in',  'senior')
+  ('senior.y@dhvaj.in',  'senior'),
+  ('accounts@dhvaj.in',  'accountant'),
+  ('hr@dhvaj.in',        'hr')
 ) AS v(email, role_slug)
 JOIN hsdg.users u ON u.email = v.email::citext
 JOIN hsdg.roles r ON r.slug = v.role_slug
@@ -57,7 +62,9 @@ FROM (VALUES
   ('EMP005', 'Manager X',        'manager.x@dhvaj.in', 'manager', 'NORTH', 'active', '2018-01-15'),
   ('EMP006', 'Senior Y',         'senior.y@dhvaj.in',  'senior',  'SOUTH', 'active', '2020-08-01'),
   ('EMP007', 'Article North',    NULL,                'article', 'NORTH', 'active', '2023-05-01'),
-  ('EMP008', 'Article South',    NULL,                'article', 'SOUTH', 'active', '2023-05-01')
+  ('EMP008', 'Article South',    NULL,                'article', 'SOUTH', 'active', '2023-05-01'),
+  ('EMP009', 'Accounts A',       'accounts@dhvaj.in', 'senior',  'NORTH', 'active', '2021-04-01'),
+  ('EMP010', 'HR H',             'hr@dhvaj.in',       'manager', 'NORTH', 'active', '2019-11-01')
 ) AS v(code, full_name, email, grade_slug, office_code, status, doj)
 JOIN hsdg.grades g ON g.slug = v.grade_slug
 JOIN hsdg.offices o ON o.code = v.office_code
@@ -75,7 +82,9 @@ WHERE e.reports_to_id IS NULL
     ('EMP005', 'EMP003'),  -- Manager X  -> Partner A
     ('EMP006', 'EMP004'),  -- Senior Y   -> Partner B
     ('EMP007', 'EMP005'),  -- Article N  -> Manager X
-    ('EMP008', 'EMP006')   -- Article S  -> Senior Y
+    ('EMP008', 'EMP006'),  -- Article S  -> Senior Y
+    ('EMP009', 'EMP001'),  -- Accounts A -> Managing Partner
+    ('EMP010', 'EMP001')   -- HR H       -> Managing Partner
   );
 
 -- Partner profiles.
