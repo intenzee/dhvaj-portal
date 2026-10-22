@@ -31,6 +31,7 @@ import { Pagination } from '@/components/pagination';
 import { SectionChips, useUrlSections } from '@/components/section-filter';
 import { engagementListPath } from '@/lib/list-paths';
 import { cn } from '@/lib/cn';
+import { StartFreshPanel } from '@/components/filing/start-fresh';
 
 const PAGE_SIZE = 25;
 
@@ -110,6 +111,8 @@ function EngagementsInner(): JSX.Element {
     ENGAGEMENT_KINDS.includes(initialKind as EngagementKind) ? (initialKind as EngagementKind) : '',
   );
   const [offset, setOffset] = useState(0);
+  const [startFresh, setStartFresh] = useState(false);
+  const isMp = principal?.effectiveRole === 'managing_partner';
   const [sections, setSectionsUrl] = useUrlSections();
   // The home panel's View all opens this page on my engagements only.
   const mine = params.get('mine') === 'true';
@@ -149,16 +152,31 @@ function EngagementsInner(): JSX.Element {
         title="Engagements"
         subtitle="Each engagement is one job for one client. You see the ones you are assigned to — click a row to open it."
         actions={
-          can(principal, PERMISSION.engagementCreate) && (
-            <Link
-              href="/engagements/new"
-              className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-700"
-            >
-              <Plus className="h-4 w-4" /> New engagement
-            </Link>
-          )
+          <div className="flex items-center gap-2">
+            {isMp && (
+              <button
+                type="button"
+                aria-expanded={startFresh}
+                onClick={() => setStartFresh((v) => !v)}
+                className="rounded-lg border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
+                title="Clear old overdue filings firm-wide"
+              >
+                Start fresh
+              </button>
+            )}
+            {can(principal, PERMISSION.engagementCreate) && (
+              <Link
+                href="/engagements/new"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-700"
+              >
+                <Plus className="h-4 w-4" /> New engagement
+              </Link>
+            )}
+          </div>
         }
       />
+
+      {isMp && startFresh && <StartFreshPanel onClose={() => setStartFresh(false)} />}
 
       {kindsOn && (
         <div className="mb-2 flex flex-wrap items-center gap-2" aria-label="Engagement kind">

@@ -277,6 +277,8 @@ export interface TreeItem {
   requiredTotal: number;
   /** WF-203: its open task is mine to prepare or review (the stream tab opens on its period). */
   mine: boolean;
+  /** Taken off the portal by "Remove this month" / Start fresh (Restore brings it back). */
+  removed?: boolean;
   /** ROC: a director's DSC lapses before the due date ("DSC of A Kumar expires 12 Nov 2026"). */
   dscWarning?: string | null;
 }
@@ -352,4 +354,21 @@ export interface LastPeriodView {
     /** The review points given each time the filing's task was returned. */
     reviewPoints: { at: string; byName: string | null; note: string }[];
   } | null;
+}
+
+/**
+ * Removing old filings from the portal: a period ("Remove this month") or,
+ * firm-wide, every overdue filing for a period that ended before a date
+ * ("Start fresh"). Nothing is deleted — open filings are waived (shown Not
+ * applicable), their open tasks cancelled and their open client requests
+ * waived; a removed period can be restored.
+ */
+export interface FilingCleanupResult {
+  filings: number;
+  tasks: number;
+  requests: number;
+  /** Start fresh only: true when nothing was changed (a preview). */
+  dryRun?: boolean;
+  /** Start fresh only: the first day kept; periods ending before it went. */
+  from?: string;
 }
