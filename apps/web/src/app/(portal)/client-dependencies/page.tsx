@@ -35,7 +35,8 @@ const columns: ColumnDef<MyClientDependency, unknown>[] = [
         <span className="text-ink-faint">—</span>
       ),
   },
-  { header: '', cell: ({ row }) => <ClientDependencyActions dep={row.original} /> },
+  // An empty header is no column id: TanStack throws without one.
+  { header: '', id: 'actions', cell: ({ row }) => <ClientDependencyActions dep={row.original} /> },
 ];
 
 export default function ClientDependenciesPage(): JSX.Element {
