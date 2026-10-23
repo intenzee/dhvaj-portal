@@ -8,10 +8,12 @@ import {
 import type { PoolClient } from 'pg';
 import {
   FEATURE_FLAG,
+  FIRM_CHECK,
   NOTIFICATION_TYPE,
   TASK_STATUS,
   TIME_STOP_REASON,
   type ClockState,
+  type FirmChecks,
   type TaskAction,
   type TaskStatus,
 } from '@hsdg/contracts';
@@ -22,6 +24,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { reviewerCandidates } from '../workflow-settings/default-reviewer';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
+import { firmChecks, isStrict } from '../workflow-settings/firm-checks';
 import {
   clockState,
   closeRunningFor,
@@ -35,8 +38,10 @@ import {
   actionForStatus,
   planTransition,
   TransitionError,
+  type TaskChecks,
   type TransitionPlan,
 } from './task-workflow';
+import { ensureOnEngagement } from './task-people';
 import type { TaskRecord } from './tasks.types';
 import { notLinkedToEmployee } from '../../common/errors/staff-link.messages';
 
@@ -55,7 +60,23 @@ export interface TransitionBody {
 export interface TransitionResult {
   task: TaskRecord;
   clock: ClockState;
+  /** It went through, but something is off (a check that is switched off). */
+  warnings: string[];
 }
+
+/** The task rules out of the firm's checks. */
+export function taskChecksOf(checks: FirmChecks): TaskChecks {
+  return {
+    review: isStrict(checks, FIRM_CHECK.reviewRequired),
+    assigneeOnly: isStrict(checks, FIRM_CHECK.taskAssigneeOnly),
+    reasons: isStrict(checks, FIRM_CHECK.taskReasonsRequired),
+    reopenLeadOnly: isStrict(checks, FIRM_CHECK.taskReopenLeadOnly),
+    blockers: isStrict(checks, FIRM_CHECK.taskBlockers),
+  };
+}
+
+/** What a client dependency says when Waiting on client was pressed without text. */
+const NO_CLIENT_NEED = 'Waiting on the client';
 
 interface TaskCtxRow {
   status: TaskStatus;
@@ -136,7 +157,12 @@ export class TaskWorkflowService {
         return res.task;
       }
       // A plain change (→ blocked without a client request, paused → todo …).
-      if (!row.is_lead && row.assigned_to_employee_id !== ctx.employeeId) {
+      const checks = await firmChecks(client);
+      if (
+        isStrict(checks, FIRM_CHECK.taskAssigneeOnly) &&
+        !row.is_lead &&
+        row.assigned_to_employee_id !== ctx.employeeId
+      ) {
         throw new ForbiddenException(
           'Only the assignee or an engagement lead may update this task.',
         );
@@ -160,6 +186,7 @@ export class TaskWorkflowService {
   ): Promise<TransitionResult> {
     const row = await this.loadTask(client, taskId, engagementId);
     const me = ctx.employeeId ?? null;
+    const checks = await firmChecks(client);
     let plan: TransitionPlan;
     try {
       plan = planTransition({
@@ -172,14 +199,27 @@ export class TaskWorkflowService {
         },
         hasAssignee: !!row.assigned_to_employee_id,
         hasReviewer: !!row.reviewer_employee_id,
+        reviewerGiven: !!body.reviewerEmployeeId,
         blockedByOpenCount: row.blocked_by_open,
         hasReason: !!body.reason?.trim(),
+        checks: taskChecksOf(checks),
       });
     } catch (err) {
       throw toHttp(err);
     }
     if (plan.open && !me) {
       throw new BadRequestException(notLinkedToEmployee('record time on this task'));
+    }
+    // Starting an unassigned task takes it.
+    const assigneeId = plan.claim && me ? me : row.assigned_to_employee_id;
+    if (assigneeId !== row.assigned_to_employee_id) {
+      await ensureOnEngagement(
+        client,
+        engagementId,
+        assigneeId!,
+        checks,
+        'Assign the task before starting work on it.',
+      );
     }
 
     // Reviewer: default on Send for review; a lead taking over a review.
@@ -195,15 +235,21 @@ export class TaskWorkflowService {
             manager: row.engagement_manager_id,
             partner: row.engagement_partner_id,
           },
-          row.assigned_to_employee_id,
+          assigneeId,
         );
       if (!reviewerId) {
         throw new BadRequestException('Choose a reviewer before sending this task for review.');
       }
-      if (reviewerId === row.assigned_to_employee_id) {
+      if (reviewerId === assigneeId) {
         throw new BadRequestException('The reviewer cannot be the person who did the work.');
       }
-      await this.requireMember(client, engagementId, reviewerId);
+      await ensureOnEngagement(
+        client,
+        engagementId,
+        reviewerId,
+        checks,
+        'The reviewer must be on the engagement (EP, manager or team).',
+      );
     }
     if (plan.takeReview) reviewerId = me;
 
@@ -244,6 +290,7 @@ export class TaskWorkflowService {
         sets.push(sql.replace('?', `$${params.length}`));
       }
     };
+    if (assigneeId !== row.assigned_to_employee_id) add('assigned_to_employee_id = ?', assigneeId);
     if (reviewerId !== row.reviewer_employee_id) add('reviewer_employee_id = ?', reviewerId);
     if (plan.review === 'sent') {
       add('sent_for_review_at = now()');
@@ -283,8 +330,8 @@ export class TaskWorkflowService {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
           engagementId,
-          body.reason!.trim(),
-          row.assigned_to_employee_id,
+          body.reason?.trim() || NO_CLIENT_NEED,
+          assigneeId,
           me,
           body.escalationDate ?? null,
           row.engagement_service_id,
@@ -326,12 +373,16 @@ export class TaskWorkflowService {
       objectType: 'task',
       objectId: taskId,
       before: { status: row.status },
-      after: { status: plan.toStatus, reason: eventReason },
+      after: {
+        status: plan.toStatus,
+        reason: eventReason,
+        ...(plan.warnings.length ? { warnings: plan.warnings } : {}),
+      },
     });
 
     const task = (await this.tasks.selectTask(client, taskId, engagementId))!;
     const clock = me ? await clockState(client, me) : { running: null, resumable: null };
-    return { task, clock };
+    return { task, clock, warnings: plan.warnings };
   }
 
   // ── internals ──────────────────────────────────────────────────────────
@@ -369,25 +420,6 @@ export class TaskWorkflowService {
       throw new ConflictException('This engagement is closed; its tasks can no longer change.');
     }
     return row;
-  }
-
-  private async requireMember(
-    client: PoolClient,
-    engagementId: string,
-    employeeId: string,
-  ): Promise<void> {
-    const { rows } = await client.query(
-      `SELECT 1 FROM hsdg.engagements e
-        WHERE e.id = $1 AND (e.engagement_partner_id = $2 OR e.engagement_manager_id = $2)
-       UNION
-       SELECT 1 FROM hsdg.engagement_team t WHERE t.engagement_id = $1 AND t.employee_id = $2`,
-      [engagementId, employeeId],
-    );
-    if (!rows[0]) {
-      throw new BadRequestException(
-        'The reviewer must be on the engagement (EP, manager or team).',
-      );
-    }
   }
 
   private async updateTask(

@@ -8,6 +8,7 @@ import { FEATURE_FLAG, TODAY_GROUP_LABEL, type TodayGroup, type TodayItem } from
 import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { taskContextFor } from '@/lib/engagement-context';
+import { useFirmChecks } from '@/lib/firm-checks';
 import { deadlineLabel, formatDate } from '@/lib/format';
 import { useWorkHref } from '@/lib/work-href';
 import { cn } from '@/lib/cn';
@@ -67,7 +68,8 @@ function TodayScreen(): JSX.Element {
 
   const rows = useMemo(() => todayRows(q.data), [q.data]);
   const drawerItems = useMemo(() => todayDrawerItems(rows, workHref), [rows, workHref]);
-  const ctx = useMemo(() => taskContextFor(principal, {}), [principal]);
+  const checks = useFirmChecks();
+  const ctx = useMemo(() => taskContextFor(principal, {}, checks), [principal, checks]);
   const [selected, setSelected] = useState(-1);
   const listRef = useRef<HTMLDivElement>(null);
 

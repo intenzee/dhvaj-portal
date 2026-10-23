@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import {
   ENGAGEMENT_STATUS,
+  FIRM_CHECK,
   PERMISSION,
   STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
@@ -35,6 +36,7 @@ import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
+import { useFirmChecks } from '@/lib/firm-checks';
 import type { EmployeeRow, EngagementLeadRow, EntityDetail } from '@/lib/types';
 import { EntityPicker, type Picked } from '@/components/entity-picker';
 import { PageHeader, Card, CardBody, Button, Spinner, Badge } from '@/components/ui';
@@ -65,7 +67,7 @@ export function shiftFinancialYear(fy: string, delta: number): string {
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
-const STEPS = ['Client', 'Kind', 'Details', 'Review'] as const;
+const STEPS = ['Client & kind', 'Details'] as const;
 const FY_RE = /^[0-9]{4}-[0-9]{2}$/;
 
 const KIND_OPTIONS: {
@@ -96,16 +98,24 @@ const KIND_OPTIONS: {
 ];
 
 /**
- * "New engagement" with kinds (spec Change 1, creation flow): client → kind →
- * the kind's details (with the independence check before submit) → review.
- * A client with an open Compliance engagement is offered "Add a year / stream"
- * on it instead of a second one.
+ * "New engagement" with kinds (spec Change 1, creation flow), in two steps:
+ * the client and the kind, then the kind's details with the independence check
+ * and Create. A client with an open Compliance engagement is offered "Add a
+ * year / stream" on it instead of a second one.
+ *
+ * The firm's checks decide what is asked for: with engagement_partner_required
+ * off an accepted engagement needs no partner picked (it defaults to a
+ * creating partner, else is left for later); with independence_ack_required
+ * off the warnings are shown for information and need no tick.
  */
 export function NewEngagementWizard(): JSX.Element {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
   const { principal } = useAuth();
+  const checks = useFirmChecks();
+  const partnerRequired = checks[FIRM_CHECK.engagementPartnerRequired];
+  const ackRequired = checks[FIRM_CHECK.independenceAckRequired];
   const currentFy = financialYearOf(new Date());
 
   const [step, setStep] = useState(0);
@@ -193,12 +203,12 @@ export function NewEngagementWizard(): JSX.Element {
           ...(kind === 'assignment' ? { serviceId } : {}),
         },
       }),
-    enabled: checkReady && step >= 2,
+    enabled: checkReady && step >= 1,
   });
   const findings = check.data?.findings ?? [];
   const block = check.data?.block ?? null;
   const needAck = findings.filter((f) => f.requiresAcknowledgement);
-  const acksOk = needAck.every((f) => acks.includes(f.rule));
+  const acksOk = !ackRequired || needAck.every((f) => acks.includes(f.rule));
 
   const people = employees.data?.items ?? [];
   const managers = leadCandidates.data ?? [];
@@ -206,10 +216,12 @@ export function NewEngagementWizard(): JSX.Element {
   const personName = (id: string): string =>
     (managers.find((p) => p.id === id) ?? people.find((p) => p.id === id))?.fullName ?? '—';
   // The API makes the creator the EP only when they are partner-grade; anyone
-  // else must pick a partner before an accepted engagement can be created.
+  // else must pick a partner before an accepted engagement can be created —
+  // unless the firm has the engagement_partner_required check off.
   const meIsPartner =
     !!principal?.employeeId && partners.some((p) => p.id === principal.employeeId);
-  const needsPartner = status === ENGAGEMENT_STATUS.accepted && !partnerId && !meIsPartner;
+  const needsPartner =
+    partnerRequired && status === ENGAGEMENT_STATUS.accepted && !partnerId && !meIsPartner;
 
   const assignmentServices = (services.data?.items ?? []).filter(
     (s) =>
@@ -322,10 +334,7 @@ export function NewEngagementWizard(): JSX.Element {
         ? FY_RE.test(financialYear) && !!serviceId
         : FY_RE.test(financialYear);
   const detailsOk = kindDetailsOk && !needsPartner;
-  const canNext =
-    (step === 0 && !!entity) ||
-    (step === 1 && !!kind && !(kind === 'compliance' && openCompliance)) ||
-    (step === 2 && detailsOk);
+  const canNext = !!entity && !!kind && !(kind === 'compliance' && openCompliance);
   const canSubmit = detailsOk && !block && acksOk && !check.isFetching && !create.isPending;
 
   return (
@@ -373,7 +382,7 @@ export function NewEngagementWizard(): JSX.Element {
             </Field>
           )}
 
-          {step === 1 && (
+          {step === 0 && entity && (
             <div className="space-y-3" role="radiogroup" aria-label="Engagement kind">
               {existing.isLoading && <Spinner label="Checking the client’s engagements…" />}
               {KIND_OPTIONS.map((opt) => {
@@ -428,7 +437,7 @@ export function NewEngagementWizard(): JSX.Element {
             </div>
           )}
 
-          {step === 2 && kind === 'statutory_audit' && (
+          {step === 1 && kind === 'statutory_audit' && (
             <>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Financial year audited" required hint="Format 2026-27">
@@ -443,6 +452,7 @@ export function NewEngagementWizard(): JSX.Element {
                   onChange={setStatus}
                   meIsPartner={meIsPartner}
                   canAccept={canAccept}
+                  partnerRequired={partnerRequired}
                 />
               </div>
               <LeadFields
@@ -462,7 +472,7 @@ export function NewEngagementWizard(): JSX.Element {
             </>
           )}
 
-          {step === 2 && kind === 'assignment' && (
+          {step === 1 && kind === 'assignment' && (
             <>
               <Field label="Service" required>
                 {services.isLoading ? (
@@ -494,6 +504,7 @@ export function NewEngagementWizard(): JSX.Element {
                   onChange={setStatus}
                   meIsPartner={meIsPartner}
                   canAccept={canAccept}
+                  partnerRequired={partnerRequired}
                 />
               </div>
               <LeadFields
@@ -509,7 +520,7 @@ export function NewEngagementWizard(): JSX.Element {
             </>
           )}
 
-          {step === 2 && kind === 'compliance' && (
+          {step === 1 && kind === 'compliance' && (
             <>
               <Field label="Years in scope" required hint="Fee per year is optional.">
                 <div className="space-y-2">
@@ -662,10 +673,11 @@ export function NewEngagementWizard(): JSX.Element {
             </>
           )}
 
-          {step === 2 && checkReady && (
+          {step === 1 && checkReady && (
             <IndependencePanel
               loading={check.isFetching}
               findings={findings}
+              ackRequired={ackRequired}
               acks={acks}
               onAck={(rule, on) =>
                 setAcks((a) => (on ? [...new Set([...a, rule])] : a.filter((x) => x !== rule)))
@@ -673,56 +685,44 @@ export function NewEngagementWizard(): JSX.Element {
             />
           )}
 
-          {step === 3 && (
-            <div className="space-y-3 text-sm">
+          {step === 1 && (
+            <div className="space-y-2 rounded-lg bg-surface-sunken p-3 text-sm">
               <Row label="Client" value={entity?.label ?? '—'} />
               <Row label="Kind" value={KIND_OPTIONS.find((k) => k.kind === kind)?.title ?? '—'} />
-              {kind === 'compliance' ? (
-                <>
-                  <Row
-                    label="Years in scope"
-                    value={years
-                      .map((y) => (y.fee ? `${y.financialYear} (₹${y.fee})` : y.financialYear))
-                      .join(', ')}
-                  />
-                  <div className="flex justify-between gap-4">
-                    <span className="text-ink-faint">Streams</span>
-                    <span className="flex flex-wrap justify-end gap-1.5">
-                      {streams.map((s) => (
-                        <Badge key={s} tone="info">
-                          {STREAM_LABEL[s]}
-                          {(registrations[s]?.length ?? 0) > 0 && ` · ${registrations[s]!.length}`}
-                        </Badge>
-                      ))}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Row label="Financial year" value={financialYear} />
-                  {kind === 'assignment' && (
-                    <Row
-                      label="Service"
-                      value={assignmentServices.find((s) => s.id === serviceId)?.name ?? '—'}
-                    />
-                  )}
-                  <Row label="Status" value={humanize(status)} />
-                </>
+              {kind === 'compliance' && streams.length > 0 && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-ink-faint">Streams</span>
+                  <span className="flex flex-wrap justify-end gap-1.5">
+                    {streams.map((s) => (
+                      <Badge key={s} tone="info">
+                        {STREAM_LABEL[s]}
+                        {(registrations[s]?.length ?? 0) > 0 && ` · ${registrations[s]!.length}`}
+                      </Badge>
+                    ))}
+                  </span>
+                </div>
               )}
+              {kind !== 'compliance' && <Row label="Status" value={humanize(status)} />}
               <Row
                 label="Partner"
-                value={partnerId ? personName(partnerId) : meIsPartner ? 'You (if accepted)' : '—'}
+                value={
+                  partnerId
+                    ? personName(partnerId)
+                    : meIsPartner
+                      ? 'You (if accepted)'
+                      : partnerRequired
+                        ? '—'
+                        : 'None yet — add one later'
+                }
               />
-              <Row label="Manager" value={managerId ? personName(managerId) : '—'} />
+              {managerId && <Row label="Manager" value={personName(managerId)} />}
               {block && (
                 <p className="flex gap-2 rounded-lg bg-danger-50 p-3 text-danger-700">
                   <ShieldAlert className="h-4 w-4 shrink-0" /> {block.message}
                 </p>
               )}
               {!acksOk && (
-                <p className="text-warning-700">
-                  Go back and tick the acknowledgement before creating.
-                </p>
+                <p className="text-warning-700">Tick the acknowledgement above before creating.</p>
               )}
               {kind === 'compliance' && (
                 <p className="text-ink-muted">
@@ -746,10 +746,7 @@ export function NewEngagementWizard(): JSX.Element {
               )}
             </Button>
             {step < STEPS.length - 1 ? (
-              <Button
-                disabled={!canNext || (step === 2 && (!!block || !acksOk))}
-                onClick={() => setStep((s) => s + 1)}
-              >
+              <Button disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
                 Next <ChevronRight className="h-4 w-4" />
               </Button>
             ) : (
@@ -770,11 +767,13 @@ function StatusField({
   onChange,
   meIsPartner,
   canAccept,
+  partnerRequired,
 }: {
   value: string;
   onChange: (v: string) => void;
   meIsPartner: boolean;
   canAccept: boolean;
+  partnerRequired: boolean;
 }): JSX.Element {
   return (
     <Field
@@ -784,7 +783,9 @@ function StatusField({
           ? 'The Engagement Partner you pick accepts it.'
           : meIsPartner
             ? '“Accepted” makes you the Engagement Partner if none is set.'
-            : '“Accepted” needs an Engagement Partner — pick one below.'
+            : partnerRequired
+              ? '“Accepted” needs an Engagement Partner — pick one below.'
+              : 'A partner can be picked now or later.'
       }
     >
       <Select value={value} onChange={(e) => onChange(e.target.value)}>
@@ -823,7 +824,9 @@ function LeadFields({
         hint={partnerRequired ? 'An accepted engagement needs one.' : undefined}
       >
         <Select value={partnerId} onChange={(e) => onPartner(e.target.value)}>
-          <option value="">{meIsPartner ? 'Me (default)' : '— choose a partner —'}</option>
+          <option value="">
+            {meIsPartner ? 'Me (default)' : partnerRequired ? '— choose a partner —' : '— later —'}
+          </option>
           {partners.map((p) => (
             <option key={p.id} value={p.id}>
               {p.fullName} · {p.officeCode}
@@ -849,11 +852,14 @@ function LeadFields({
 export function IndependencePanel({
   loading,
   findings,
+  ackRequired = true,
   acks,
   onAck,
 }: {
   loading: boolean;
   findings: IndependenceFinding[];
+  /** The independence_ack_required check: off, warnings are for information. */
+  ackRequired?: boolean;
   acks: IndependenceRule[];
   onAck: (rule: IndependenceRule, on: boolean) => void;
 }): JSX.Element {
@@ -899,7 +905,8 @@ export function IndependencePanel({
                   checked={acks.includes(f.rule)}
                   onChange={(e) => onAck(f.rule, e.target.checked)}
                 />
-                I acknowledge this as the engagement partner (recorded in Activity).
+                I acknowledge this as the engagement partner (recorded in Activity)
+                {!ackRequired && <span className="text-ink-faint"> · optional</span>}
               </label>
             )}
           </li>

@@ -19,6 +19,7 @@ import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { OpenNoticesWidget } from '@/components/notices/open-notices-widget';
 import { planningTeam, taskContextFor } from '@/lib/engagement-context';
+import { useFirmChecks } from '@/lib/firm-checks';
 import { useUrlState } from '@/lib/url-state';
 import { useWorkLinkFocus } from '@/lib/work-focus';
 import type { TaskActionContext } from '@/lib/work-types';
@@ -234,6 +235,7 @@ interface ActivityRecord {
 export default function EngagementDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const { principal } = useAuth();
+  const checks = useFirmChecks();
   const url = useUrlState();
   const { isOn, isLoading: flagsLoading } = useFeatureFlags();
   const tabsQ = useEngagementTabs(id);
@@ -320,7 +322,7 @@ export default function EngagementDetailPage(): JSX.Element {
 
   const e = eng.data;
   const me = principal?.employeeId ?? null;
-  const ctx: TaskActionContext = taskContextFor(principal, e);
+  const ctx: TaskActionContext = taskContextFor(principal, e, checks);
   const tabs = tabsQ.data;
   const leadsTeam = planningTeam(e);
 

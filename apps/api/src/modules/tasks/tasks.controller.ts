@@ -78,8 +78,13 @@ export class TasksController {
   }
 
   @Post(':id/tasks')
-  @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'Create a task (audited)' })
+  @RequirePermissions(PERMISSION.taskUpdate)
+  @ApiOperation({
+    summary: 'Create a task (audited)',
+    description:
+      'Engagement leads; any member while the task_assignee_only check is off. The assignee ' +
+      'may be anyone in the office while task_assign_team_only is off (they join the team).',
+  })
   create(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -89,8 +94,11 @@ export class TasksController {
   }
 
   @Patch(':id/tasks/:taskId')
-  @RequirePermissions(PERMISSION.engagementManage)
-  @ApiOperation({ summary: 'Update task fields incl. assignee/due (audited; lead only)' })
+  @RequirePermissions(PERMISSION.taskUpdate)
+  @ApiOperation({
+    summary: 'Update task fields incl. assignee/due (audited)',
+    description: 'Engagement leads; any member while the task_assignee_only check is off.',
+  })
   update(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -133,8 +141,10 @@ export class TasksController {
       'Change 3. Opens and closes time in the same transaction (Compliance engagements with ' +
       'ff_auto_time): start opens a work entry and closes whatever the caller had running; pause, ' +
       'block, send-for-review close it; start-review opens a review entry for the reviewer; ' +
-      'approve / return close it. block needs `reason` (raises a client request); return needs ' +
-      '`reason` (the review points). Also complete (no reviewer, or a lead), cancel, reopen (lead).',
+      'approve / return close it. block raises a client request; with the task_reasons_required ' +
+      'check on, block and return need `reason`. Also complete, cancel, reopen. Who may move a ' +
+      'task follows the firm’s checks (Admin → Workflow → Checks); a move made past a check ' +
+      'that is off comes back with `warnings`.',
   })
   transition(
     @CurrentPrincipal() principal: Principal,

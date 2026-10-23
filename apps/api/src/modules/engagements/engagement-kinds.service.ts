@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  FIRM_CHECK,
   STATUTORY_AUDIT_SERVICE_CODE,
   STREAMS,
   STREAM_LABEL,
@@ -27,6 +28,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { ComplianceGeneratorService } from '../compliance/compliance-generator.service';
+import { firmChecks, isStrict } from '../workflow-settings/firm-checks';
 import {
   evaluateIndependence,
   independenceBlock,
@@ -156,7 +158,8 @@ export class EngagementKindsService {
   }
 
   /** 409 when a hard rule blocks; 409 when a warning needs an acknowledgement
-   *  the caller did not give (only when `requireAcknowledgement`). */
+   *  the caller did not give (only when `requireAcknowledgement`). Hard ICAI
+   *  blocks apply whatever the firm's checks say. */
   enforce(
     findings: IndependenceFinding[],
     acknowledged: readonly string[] | undefined,
@@ -182,8 +185,16 @@ export class EngagementKindsService {
     }
   }
 
+  /** Whether warnings need a partner's tick before the work goes ahead — off,
+   *  they are shown and recorded for information only. */
+  async acknowledgementRequired(client: PoolClient): Promise<boolean> {
+    return isStrict(await firmChecks(client), FIRM_CHECK.independenceAckRequired);
+  }
+
   /** Store the outcomes on the engagement; an acknowledged warning carries who
-   *  ticked it (shown in Activity). Only a partner may acknowledge. */
+   *  ticked it (shown in Activity). Only a partner may acknowledge: while the
+   *  independence_ack_required check is off, anyone else's tick is not taken
+   *  and the warning is recorded unacknowledged. */
   async recordChecks(
     client: PoolClient,
     ctx: RlsContext,
@@ -191,12 +202,15 @@ export class EngagementKindsService {
     findings: readonly IndependenceFinding[],
     acknowledged: readonly string[] = [],
   ): Promise<void> {
-    const acks = findings.filter((f) => f.requiresAcknowledgement && acknowledged.includes(f.rule));
+    let acks = findings.filter((f) => f.requiresAcknowledgement && acknowledged.includes(f.rule));
     if (acks.length && !(await this.callerIsPartner(client, ctx))) {
-      throw new ForbiddenException('Only a partner can give this acknowledgement.');
+      if (await this.acknowledgementRequired(client)) {
+        throw new ForbiddenException('Only a partner can give this acknowledgement.');
+      }
+      acks = [];
     }
     for (const f of findings) {
-      const acked = f.requiresAcknowledgement === true && acknowledged.includes(f.rule);
+      const acked = acks.includes(f);
       await client.query(
         `INSERT INTO hsdg.engagement_independence_checks
            (engagement_id, rule_code, outcome, message, financial_year,
@@ -382,7 +396,11 @@ export class EngagementKindsService {
             ),
           )
         : evaluateIndependence({ ...base, financialYears: [input.financialYear] }, kc.facts);
-    this.enforce(findings, input.acknowledgedIndependenceRules, explicit);
+    this.enforce(
+      findings,
+      input.acknowledgedIndependenceRules,
+      explicit && (await this.acknowledgementRequired(client)),
+    );
 
     return {
       kind,
@@ -638,7 +656,11 @@ export class EngagementKindsService {
       },
       kc.facts,
     );
-    this.enforce(findings, input.acknowledgedIndependenceRules, true);
+    this.enforce(
+      findings,
+      input.acknowledgedIndependenceRules,
+      await this.acknowledgementRequired(client),
+    );
 
     await this.ensureStreamLines(client, engagementId, eng.office_id, 'active', streams);
     try {
@@ -778,7 +800,11 @@ export class EngagementKindsService {
           kc.facts,
         )
       : [];
-    this.enforce(findings, input.acknowledgedIndependenceRules, true);
+    this.enforce(
+      findings,
+      input.acknowledgedIndependenceRules,
+      await this.acknowledgementRequired(client),
+    );
 
     const given = input.streamRegistrations
       ? await this.validateRegistrations(client, eng.entity_id, streams, input.streamRegistrations)

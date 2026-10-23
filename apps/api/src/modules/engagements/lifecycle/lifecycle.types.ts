@@ -1,4 +1,4 @@
-import type { EngagementStatus, LifecycleAction } from '@hsdg/contracts';
+import type { EngagementStatus, FirmChecks, LifecycleAction } from '@hsdg/contracts';
 import type { RlsContext } from '../../../database/rls-context';
 import type { EngagementDetail } from '../engagements.types';
 
@@ -18,6 +18,8 @@ export interface LifecycleGuardContext {
   /** Resolved destination status — never null, even for 'resume'. */
   toStatus: EngagementStatus;
   input: LifecycleTransitionInput;
+  /** The firm's checks (Admin → Workflow → Checks) for guards that follow one. */
+  checks: FirmChecks;
 }
 
 /**

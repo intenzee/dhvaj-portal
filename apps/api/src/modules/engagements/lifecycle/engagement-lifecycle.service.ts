@@ -22,6 +22,7 @@ import { selectEngagementDetail } from '../engagement-detail.query';
 import { translatePgError } from '../engagements.service';
 import { TimeTrackingService } from '../time/time-tracking.service';
 import type { EngagementDetail, LifecycleHistoryRecord } from '../engagements.types';
+import { firmChecks } from '../../workflow-settings/firm-checks';
 import { LIFECYCLE_GUARDS } from './lifecycle-guards';
 import type { LifecycleTransitionInput } from './lifecycle.types';
 
@@ -113,8 +114,9 @@ export class EngagementLifecycleService {
         throw new BadRequestException(`Transition "${action}" has no configured destination.`);
       }
 
+      const checks = await firmChecks(client);
       for (const guard of LIFECYCLE_GUARDS[action]) {
-        await guard.check({ ctx, engagement: before, action, toStatus, input });
+        await guard.check({ ctx, engagement: before, action, toStatus, input, checks });
       }
 
       const sets: string[] = ['status = $1', 'version = version + 1'];
