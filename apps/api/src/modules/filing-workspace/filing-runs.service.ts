@@ -340,20 +340,31 @@ export class FilingRunsService {
     if (!inst.task_id) {
       if (!preparer)
         throw new BadRequestException('Choose a preparer — this filing has no task yet.');
-      await this.tasks.create(ctx, inst.engagement_id, {
-        title: inst.title,
-        assignedToEmployeeId: preparer,
-        ...(reviewer ? { reviewerEmployeeId: reviewer } : {}),
-        ...(inst.internal_date ? { dueDate: inst.internal_date } : {}),
-        complianceInstanceId: instanceId,
-      });
+      await this.tasks.create(
+        ctx,
+        inst.engagement_id,
+        {
+          title: inst.title,
+          assignedToEmployeeId: preparer,
+          ...(reviewer ? { reviewerEmployeeId: reviewer } : {}),
+          ...(inst.internal_date ? { dueDate: inst.internal_date } : {}),
+          complianceInstanceId: instanceId,
+        },
+        { callerAuthorised: true },
+      );
       return;
     }
-    await this.tasks.update(ctx, inst.engagement_id, inst.task_id, {
-      ...(who.preparerId !== undefined ? { assignedToEmployeeId: who.preparerId } : {}),
-      ...(who.reviewerId !== undefined ? { reviewerEmployeeId: who.reviewerId } : {}),
-      version: inst.task_version!,
-    });
+    await this.tasks.update(
+      ctx,
+      inst.engagement_id,
+      inst.task_id,
+      {
+        ...(who.preparerId !== undefined ? { assignedToEmployeeId: who.preparerId } : {}),
+        ...(who.reviewerId !== undefined ? { reviewerEmployeeId: who.reviewerId } : {}),
+        version: inst.task_version!,
+      },
+      { callerAuthorised: true },
+    );
   }
 
   private async loadForAssign(client: PoolClient, id: string): Promise<AssignInstanceRow> {

@@ -82,6 +82,15 @@ export interface TaskRow {
 const NOT_ON_TEAM =
   'A task can only be assigned to an employee on the engagement (EP, manager, or team).';
 
+export interface TaskEditOptions {
+  /**
+   * The caller has already decided who may (Filing runs: a lead, or the
+   * stream lead where the firm allows it), so the role pre-check is skipped;
+   * RLS still applies.
+   */
+  callerAuthorised?: boolean;
+}
+
 /** Who held engagement.manage when adding and editing tasks needed it. */
 const TASK_EDITOR_ROLES: string[] = [ROLE.managingPartner, ROLE.partner, ROLE.manager];
 
@@ -127,11 +136,16 @@ export class TasksService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async create(ctx: RlsContext, engagementId: string, input: CreateTaskInput): Promise<TaskRecord> {
+  async create(
+    ctx: RlsContext,
+    engagementId: string,
+    input: CreateTaskInput,
+    opts: TaskEditOptions = {},
+  ): Promise<TaskRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
       // The role comes first: a lead-only firm refuses a senior with 403
       // whether or not they can see the engagement.
-      const checks = await this.requireTaskEditor(client, ctx);
+      const checks = await this.requireTaskEditor(client, ctx, opts);
       await this.requireEngagement(client, engagementId);
       if (input.assignedToEmployeeId) {
         await ensureOnEngagement(
@@ -300,11 +314,12 @@ export class TasksService {
     engagementId: string,
     taskId: string,
     input: UpdateTaskInput,
+    opts: TaskEditOptions = {},
   ): Promise<TaskRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectTask(client, taskId, engagementId);
       if (!before) throw new NotFoundException('Task not found.');
-      const checks = await this.requireTaskEditor(client, ctx);
+      const checks = await this.requireTaskEditor(client, ctx, opts);
       if (input.assignedToEmployeeId) {
         await ensureOnEngagement(
           client,
@@ -645,9 +660,13 @@ export class TasksService {
    * task_assignee_only is on (RLS then keeps it to the engagement's leads);
    * with it off any member may (tasks_insert_member / tasks_update_member).
    */
-  private async requireTaskEditor(client: PoolClient, ctx: RlsContext): Promise<FirmChecks> {
+  private async requireTaskEditor(
+    client: PoolClient,
+    ctx: RlsContext,
+    opts: TaskEditOptions = {},
+  ): Promise<FirmChecks> {
     const checks = await firmChecks(client);
-    if (isStrict(checks, FIRM_CHECK.taskAssigneeOnly)) {
+    if (isStrict(checks, FIRM_CHECK.taskAssigneeOnly) && !opts.callerAuthorised) {
       const mine = new Set([ctx.role, ...(ctx.roles ?? [])]);
       if (!TASK_EDITOR_ROLES.some((r) => mine.has(r))) {
         throw new ForbiddenException('Only an engagement lead may add or edit tasks.');
