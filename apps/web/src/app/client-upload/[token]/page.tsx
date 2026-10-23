@@ -40,6 +40,8 @@ export default function ClientUploadPage(): JSX.Element {
   const fileRef = useRef<HTMLInputElement>(null);
   const [info, setInfo] = useState<UploadLinkInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  // The portal answers 404 while client upload is switched off — not the link's fault.
+  const [unavailable, setUnavailable] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -48,7 +50,8 @@ export default function ClientUploadPage(): JSX.Element {
     try {
       const data = await apiFetch<UploadLinkInfo>(`/client-upload/${token}`);
       setInfo(data);
-    } catch {
+    } catch (err) {
+      setUnavailable(err instanceof ApiError && err.status === 404);
       setInfo({
         valid: false,
         requestedInfo: null,
@@ -105,7 +108,13 @@ export default function ClientUploadPage(): JSX.Element {
 
         {loading && <p className="text-sm text-ink-muted">Loading…</p>}
 
-        {!loading && info && !info.valid && (
+        {!loading && info && !info.valid && unavailable && (
+          <div className="rounded-lg bg-danger-50 p-4 text-sm text-danger-700">
+            Uploading by link is not available right now. Please contact your engagement team.
+          </div>
+        )}
+
+        {!loading && info && !info.valid && !unavailable && (
           <div className="rounded-lg bg-danger-50 p-4 text-sm text-danger-700">
             This upload link is invalid or has expired. Please contact your engagement team for a
             new link.

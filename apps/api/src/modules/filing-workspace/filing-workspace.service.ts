@@ -434,7 +434,7 @@ export class FilingWorkspaceService {
     id: string,
     slot: string,
     dto: SlotRequestDto,
-  ): Promise<{ workspace: InstanceWorkspace; link: ClientUploadLinkCreated }> {
+  ): Promise<{ workspace: InstanceWorkspace; link: ClientUploadLinkCreated | null }> {
     let engagementId = '';
     let dependencyId = '';
     await this.write(ctx, id, async (client, inst) => {
@@ -477,10 +477,13 @@ export class FilingWorkspaceService {
         after: { slot, dependencyId },
       });
     });
-    // The link is minted in its own transaction (ClientUploadService owns it).
-    const link = await this.uploads.createLink(ctx, engagementId, dependencyId, {
-      ...(dto.ttlHours ? { ttlHours: dto.ttlHours } : {}),
-    });
+    // The link is minted in its own transaction (ClientUploadService owns it),
+    // and only while client upload is on — the request stands without one.
+    const link = this.uploads.enabled
+      ? await this.uploads.createLink(ctx, engagementId, dependencyId, {
+          ...(dto.ttlHours ? { ttlHours: dto.ttlHours } : {}),
+        })
+      : null;
     return { workspace: await this.get(ctx, id), link };
   }
 

@@ -95,6 +95,11 @@ services:
         value: https://portal.dhvaj.in
       - key: CORS_ORIGINS
         value: https://portal.dhvaj.in
+      # Upload links clients open without signing in (they land at
+      # WEB_PUBLIC_URL/client-upload/<token>). Off, every link says "expired".
+      # Keep in step with the web's NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED.
+      - key: CLIENT_UPLOAD_ENABLED
+        value: 'true'
 
       # ── Documents: SharePoint (durable; local disk is wiped on redeploy) ──
       - key: STORAGE_PROVIDER
@@ -153,4 +158,4 @@ services:
       - key: NEXT_PUBLIC_M365_ENABLED
         value: 'true'
       - key: NEXT_PUBLIC_CLIENT_UPLOAD_ENABLED
-        value: 'false'
+        value: 'true'
