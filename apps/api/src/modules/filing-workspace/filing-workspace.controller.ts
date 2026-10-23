@@ -207,7 +207,7 @@ export class FilingWorkspaceController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('slot') slot: string,
     @Body() dto: SlotRequestDto,
-  ): Promise<{ workspace: InstanceWorkspace; link: ClientUploadLinkCreated }> {
+  ): Promise<{ workspace: InstanceWorkspace; link: ClientUploadLinkCreated | null }> {
     return this.workspace.requestSlot(rlsContextFromPrincipal(principal), id, slot, dto);
   }
 
