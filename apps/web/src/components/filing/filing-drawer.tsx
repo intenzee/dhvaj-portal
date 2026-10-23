@@ -13,6 +13,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
+import { useFirmChecks } from '@/lib/firm-checks';
 import { planningTeam, taskContextFor } from '@/lib/engagement-context';
 import type { EngagementDetail } from '@/lib/types';
 import { useUrlState } from '@/lib/url-state';
@@ -247,6 +248,7 @@ function DrawerBody({
     queryFn: () => apiFetch<EngagementDetail>(`/engagements/${engagementId}`),
     enabled: !!engagementId,
   });
+  const checks = useFirmChecks();
 
   // Every change in the drawer replaces or refetches the workspace: refresh the list too.
   const seen = useRef<number | null>(null);
@@ -261,11 +263,13 @@ function DrawerBody({
 
   if (ws.isLoading || (engagementId && eng.isLoading)) return <Spinner />;
   if (!eng.data)
-    return <InstanceWorkspace instanceId={instanceId} ctx={taskContextFor(principal, {})} />;
+    return (
+      <InstanceWorkspace instanceId={instanceId} ctx={taskContextFor(principal, {}, checks)} />
+    );
   return (
     <InstanceWorkspace
       instanceId={instanceId}
-      ctx={taskContextFor(principal, eng.data)}
+      ctx={taskContextFor(principal, eng.data, checks)}
       team={planningTeam(eng.data)}
     />
   );

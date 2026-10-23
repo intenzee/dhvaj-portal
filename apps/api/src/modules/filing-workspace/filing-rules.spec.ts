@@ -120,6 +120,7 @@ describe('filing rules', () => {
       waive: false,
       edit: true,
       certify: false,
+      complete: false,
     });
     // Only a partner on the team ticks a certification line (UDIN).
     expect(canFlags({ ...base, isPartner: true }).certify).toBe(true);
@@ -139,7 +140,14 @@ describe('filing rules', () => {
         workflowStatus: 'filed',
         isLocked: true,
       }),
-    ).toEqual({ lodge: false, undo: true, waive: false, edit: false, certify: false });
+    ).toEqual({
+      lodge: false,
+      undo: true,
+      waive: false,
+      edit: false,
+      certify: false,
+      complete: true,
+    });
   });
 
   describe("with the firm's checks off", () => {
