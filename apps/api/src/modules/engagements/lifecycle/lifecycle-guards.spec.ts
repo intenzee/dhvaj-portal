@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { LIFECYCLE_ACTION, ROLE } from '@hsdg/contracts';
+import { LIFECYCLE_ACTION, RELAXED_FIRM_CHECKS, ROLE, STRICT_FIRM_CHECKS } from '@hsdg/contracts';
 import {
   epRequiredGuard,
   LIFECYCLE_GUARDS,
@@ -74,6 +74,7 @@ function ctx(overrides: Partial<LifecycleGuardContext> = {}): LifecycleGuardCont
     action: LIFECYCLE_ACTION.accept,
     toStatus: 'accepted',
     input: {},
+    checks: STRICT_FIRM_CHECKS,
     ...overrides,
   };
 }
@@ -87,6 +88,14 @@ describe('lifecycle guards', () => {
     it('rejects when there is no EP', () => {
       const c = ctx({ engagement: { ...ctx().engagement, engagementPartnerId: null } });
       expect(() => epRequiredGuard.check(c)).toThrow(BadRequestException);
+    });
+
+    it('lets an engagement be accepted without an EP while the check is off', () => {
+      const c = ctx({
+        engagement: { ...ctx().engagement, engagementPartnerId: null },
+        checks: RELAXED_FIRM_CHECKS,
+      });
+      expect(() => epRequiredGuard.check(c)).not.toThrow();
     });
   });
 

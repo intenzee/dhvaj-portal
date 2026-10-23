@@ -169,17 +169,21 @@ export class LodgeDto {
   @ApiPropertyOptional({
     example: 'AA191026123456Z',
     description:
-      'Required for a filing; a meeting (AGM, board meeting) defaults to an internal one.',
+      'Required while the firm’s reference check is on; a meeting (AGM, board meeting) ' +
+      'defaults to an internal one. Empty = none yet.',
   })
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(60)
   referenceNo?: string;
 
-  @ApiProperty({ example: '2026-10-20', description: 'Filed on — for a meeting, held on.' })
+  @ApiPropertyOptional({
+    example: '2026-10-20',
+    description: 'Filed on — for a meeting, held on. Defaults to today.',
+  })
+  @IsOptional()
   @IsDateString()
-  filedOn!: string;
+  filedOn?: string;
 
   @ApiPropertyOptional({
     description: 'AGM only: the auditor was appointed or re-appointed at this AGM (ADT-1 follows).',
@@ -226,15 +230,39 @@ export class LodgeDto {
   @Min(0)
   normalFeePaid?: number;
 
-  @ApiProperty({ description: 'The acknowledgement, uploaded to this filing first.' })
+  @ApiPropertyOptional({
+    description:
+      'The acknowledgement, uploaded to this filing first. Required while the firm’s ' +
+      'acknowledgement check is on; else it can be added later.',
+  })
+  @IsOptional()
   @IsUUID()
-  ackDocumentId!: string;
+  ackDocumentId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   @MaxLength(2000)
   remarks?: string;
+}
+
+/** PATCH /compliance-instances/:id/lodge — what a lodge was recorded without. */
+export class CompleteLodgeDto {
+  @ApiPropertyOptional({ description: 'The acknowledgement, uploaded to this filing first.' })
+  @IsOptional()
+  @IsUUID()
+  ackDocumentId?: string;
+
+  @ApiPropertyOptional({ example: 'AA191026123456Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  referenceNo?: string;
+
+  @ApiPropertyOptional({ enum: FILING_REFERENCE_KINDS })
+  @IsOptional()
+  @IsIn(FILING_REFERENCE_KINDS)
+  referenceKind?: FilingReferenceKind;
 }
 
 export class FileDocumentDto {

@@ -338,6 +338,8 @@ export async function syncAutoTicks(client: PoolClient, instanceId: string): Pro
                        WHERE t.source_compliance_instance_id = $1 AND t.status = 'done') AS reviewed,
               EXISTS (SELECT 1 FROM hsdg.filing_records fr
                        WHERE fr.compliance_instance_id = $1 AND fr.undone_at IS NULL) AS lodged,
+              -- While the firm's check is off, a review / lodge step ticked by hand stands.
+              NOT hsdg.firm_check('checklist_auto_steps') AS hand_ticks_stand,
               -- 'event': the year's AGM is recorded (and not voided) for this CIN.
               EXISTS (SELECT 1 FROM hsdg.compliance_instances ci
                         JOIN hsdg.compliance_events ev
@@ -369,13 +371,17 @@ export async function syncAutoTicks(client: PoolClient, instanceId: string): Pro
        FROM (SELECT i.id,
                     CASE i.auto_tick
                       WHEN 'review' THEN f.reviewed OR f.lodged
+                        OR (f.hand_ticks_stand AND i.status = 'done'
+                            AND i.done_by_employee_id IS NOT NULL)
                       -- a person's own tick (an OPC's member adoption) stands without an event
                       WHEN 'event' THEN f.agm_held
                         OR (i.status = 'done' AND i.done_by_employee_id IS NOT NULL)
                       -- committee meetings too, so a hand tick stands as well
                       WHEN 'meetings' THEN f.meetings_held
                         OR (i.status = 'done' AND i.done_by_employee_id IS NOT NULL)
-                      ELSE f.lodged END AS want
+                      ELSE f.lodged
+                        OR (f.hand_ticks_stand AND i.status = 'done'
+                            AND i.done_by_employee_id IS NOT NULL) END AS want
                FROM hsdg.instance_checklist_items i, facts f
               WHERE i.compliance_instance_id = $1
                 AND i.auto_tick IN ('review','lodge','event','meetings')
