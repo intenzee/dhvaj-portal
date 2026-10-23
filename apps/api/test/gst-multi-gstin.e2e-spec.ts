@@ -298,4 +298,108 @@ describe('GST with several GSTINs (e2e)', () => {
       });
     });
   });
+
+  describe('(d) removing a GSTIN recorded in error', () => {
+    let entityId: string;
+    let eng: string;
+    let right: string;
+    let wrong: string;
+
+    beforeAll(async () => {
+      const p = pan('K');
+      const entity = await createClient('Typo GST Traders', p, [
+        { registrationType: 'gstin', registrationNumber: gstin('19', p), stateCode: '19' },
+        { registrationType: 'gstin', registrationNumber: gstin('29', p), stateCode: '29' },
+      ]);
+      entityId = entity.id;
+      right = entity.registrations.find((r) => r.registrationNumber === gstin('19', p))!.id;
+      wrong = entity.registrations.find((r) => r.registrationNumber === gstin('29', p))!.id;
+      eng = (await createGstEngagement(entityId).expect(201)).body.id as string;
+    });
+
+    const firstFiling = (registrationId: string) =>
+      superuser(async (db) => {
+        const { rows } = await db.query<{ id: string; compliance_rule_id: string }>(
+          `SELECT id, compliance_rule_id FROM hsdg.compliance_instances
+            WHERE engagement_id = $1 AND registration_id = $2
+            ORDER BY period_key, id LIMIT 1`,
+          [eng, registrationId],
+        );
+        return rows[0]!;
+      });
+
+    it('takes its generated filings with it (was "A referenced record does not exist.")', async () => {
+      expect(Object.keys(await countsByRegistration(eng)).sort()).toEqual([right, wrong].sort());
+      const filing = await firstFiling(wrong);
+      const request = await superuser(
+        async (db) =>
+          (
+            await db.query<{ id: string }>(
+              `INSERT INTO hsdg.client_dependencies (engagement_id, compliance_instance_id, requested_info)
+               VALUES ($1, $2, 'Sales register') RETURNING id`,
+              [eng, filing.id],
+            )
+          ).rows[0]!.id,
+      );
+
+      const res = await http()
+        .delete(`/api/v1/entities/${entityId}/registrations/${wrong}`)
+        .set(bearer(pa))
+        .expect(200);
+      expect(res.body.registrations.map((r: { id: string }) => r.id)).toEqual([right]);
+
+      const counts = await countsByRegistration(eng);
+      expect(Object.keys(counts)).toEqual([right]);
+      expect(counts[right]).toMatchObject({ GST_GSTR1_M: 12, GST_GSTR3B_M: 12 });
+      // The client is no longer asked for data for a filing that is gone.
+      const left = await superuser(
+        async (db) =>
+          (
+            await db.query<{ status: string; compliance_instance_id: string | null }>(
+              `SELECT status, compliance_instance_id FROM hsdg.client_dependencies WHERE id = $1`,
+              [request],
+            )
+          ).rows[0],
+      );
+      expect(left).toEqual({ status: 'cancelled', compliance_instance_id: null });
+      // The calendar rebuilds cleanly without it.
+      await http()
+        .post(`/api/v1/engagements/${eng}/compliance/generate-calendar`)
+        .set(bearer(pa))
+        .send({})
+        .expect(200);
+      expect(Object.keys(await countsByRegistration(eng))).toEqual([right]);
+    });
+
+    it('refuses (409) a GSTIN with a return lodged in the portal', async () => {
+      const filing = await firstFiling(right);
+      // A lodging without its acknowledgement: the firm's checks are off for
+      // this insert only, and back as they were before it commits.
+      await superuser(async (db) => {
+        await db.query('BEGIN');
+        const { rows } = await db.query<{ strict_checks: object }>(
+          `SELECT strict_checks FROM hsdg.firm_settings`,
+        );
+        await db.query(`UPDATE hsdg.firm_settings SET strict_checks = '{}'::jsonb`);
+        await db.query(
+          `INSERT INTO hsdg.filing_records
+             (compliance_instance_id, engagement_id, registration_id, compliance_rule_id,
+              reference_kind, reference_no, filed_on)
+           VALUES ($1, $2, $3, $4, 'arn', 'AA1904261234567', '2026-05-11')`,
+          [filing.id, eng, right, filing.compliance_rule_id],
+        );
+        await db.query(`UPDATE hsdg.firm_settings SET strict_checks = $1::jsonb`, [
+          JSON.stringify(rows[0]!.strict_checks),
+        ]);
+        await db.query('COMMIT');
+      });
+      const res = await http()
+        .delete(`/api/v1/entities/${entityId}/registrations/${right}`)
+        .set(bearer(pa))
+        .expect(409);
+      expect(res.body.message).toMatch(/has a return lodged in the portal.*Cancelled instead/);
+      const entity = await http().get(`/api/v1/entities/${entityId}`).set(bearer(pa)).expect(200);
+      expect(entity.body.registrations.map((r: { id: string }) => r.id)).toEqual([right]);
+    });
+  });
 });

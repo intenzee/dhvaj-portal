@@ -177,7 +177,11 @@ export function RemoveRegistrationButton({
       className="rounded p-1 text-ink-faint hover:bg-surface-sunken hover:text-danger-600 disabled:opacity-50"
       disabled={remove.isPending}
       onClick={() => {
-        if (window.confirm(`Remove ${label} from this client? This cannot be undone.`)) {
+        if (
+          window.confirm(
+            `Remove ${label} from this client? Its filings in the portal go with it. This cannot be undone.`,
+          )
+        ) {
           remove.mutate();
         }
       }}
