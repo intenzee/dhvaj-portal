@@ -19,6 +19,7 @@ import { can } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { useToast } from '@/lib/toast';
 import { useUrlState } from '@/lib/url-state';
+import { useFirmChecks } from '@/lib/firm-checks';
 import { deadlineLabel, formatDate } from '@/lib/format';
 import type { EmployeeRow } from '@/lib/types';
 import { cn } from '@/lib/cn';
@@ -98,7 +99,16 @@ function RunsScreen(): JSX.Element {
   );
   const runQ = runQuery(scope, form?.rule ?? '', form?.periodKey ?? '');
   const run = useQuery({ ...runQ, enabled: on && !!form });
-  const rows = useMemo(() => run.data?.items ?? [], [run.data]);
+  // "To tidy up": filings lodged without their acknowledgement or reference.
+  const tidy = url.get('tidy') === '1';
+  const rows = useMemo(
+    () =>
+      (run.data?.items ?? []).filter(
+        (r) => !tidy || (r.filed && (r.filed.ackMissing || r.filed.referenceMissing)),
+      ),
+    [run.data, tidy],
+  );
+  const checks = useFirmChecks();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignOpen, setAssignOpen] = useState(false);
@@ -201,6 +211,19 @@ function RunsScreen(): JSX.Element {
               {label}
             </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={tidy}
+            onClick={() => url.set({ tidy: tidy ? null : '1', open: null })}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium transition',
+              tidy
+                ? 'border-warning-600 bg-warning-600 text-white'
+                : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-raised',
+            )}
+          >
+            Filed — ack/ref missing
+          </button>
         </div>
       </div>
 
@@ -280,9 +303,7 @@ function RunsScreen(): JSX.Element {
         </div>
       )}
 
-      {toSend.length > 0 && (
-        <RemindersToSend reminders={toSend} onDismiss={() => setToSend([])} />
-      )}
+      {toSend.length > 0 && <RemindersToSend reminders={toSend} onDismiss={() => setToSend([])} />}
 
       {(forms.isLoading || run.isLoading || flags.isLoading) && (
         <Spinner label="Loading the run…" />
@@ -294,7 +315,13 @@ function RunsScreen(): JSX.Element {
         <EmptyState>No filings are due around today for the engagements you can see.</EmptyState>
       )}
 
-      {run.data && rows.length === 0 && <EmptyState>No filings in this run.</EmptyState>}
+      {run.data && rows.length === 0 && (
+        <EmptyState>
+          {tidy
+            ? 'Every lodged filing in this run has its acknowledgement and reference.'
+            : 'No filings in this run.'}
+        </EmptyState>
+      )}
       {run.data && rows.length > 0 && (
         <Card className="p-0">
           <div className="scroll-slim overflow-x-auto">
@@ -328,6 +355,7 @@ function RunsScreen(): JSX.Element {
                     row={r}
                     ticked={selected.has(r.instanceId)}
                     open={drawer.openId === r.instanceId}
+                    lodgeAnyStage={!checks.lodge_ready_to_file}
                     onTick={() => setSelected((s) => toggleSelection(s, [r.instanceId]))}
                     onOpen={() => drawer.open(r.instanceId)}
                   />
@@ -358,12 +386,15 @@ function RunRow({
   open,
   onTick,
   onOpen,
+  lodgeAnyStage = false,
 }: {
   row: FilingRunRow;
   ticked: boolean;
   open: boolean;
   onTick: () => void;
   onOpen: () => void;
+  /** The firm lets a filing be lodged before it is Ready to file. */
+  lodgeAnyStage?: boolean;
 }): JSX.Element {
   const data = dataLabel(r.data);
   const href = workItemHref(r.link);
@@ -420,12 +451,25 @@ function RunRow({
         {r.filed ? (
           <span title={`Filed ${formatDate(r.filed.filedOn)}`}>
             <Badge tone="success">Filed</Badge>
-            <span className="ml-1.5 font-mono text-xs text-ink-muted">{r.filed.referenceNo}</span>
+            {r.filed.referenceNo && (
+              <span className="ml-1.5 font-mono text-xs text-ink-muted">{r.filed.referenceNo}</span>
+            )}
+            {(r.filed.ackMissing || r.filed.referenceMissing) && (
+              <button type="button" className="ml-1.5" onClick={onOpen}>
+                <Badge tone="warn">
+                  {r.filed.ackMissing && r.filed.referenceMissing
+                    ? 'Ack & ref to add'
+                    : r.filed.ackMissing
+                      ? 'Ack to add'
+                      : 'Ref to add'}
+                </Badge>
+              </button>
+            )}
           </span>
         ) : (
           <span className="inline-flex items-center gap-2">
             <FilingStatusBadge status={r.workflowStatus} />
-            {r.canLodge && r.workflowStatus === 'ready_to_file' && (
+            {r.canLodge && (lodgeAnyStage || r.workflowStatus === 'ready_to_file') && (
               <Button size="sm" variant="subtle" onClick={onOpen}>
                 Lodge
               </Button>

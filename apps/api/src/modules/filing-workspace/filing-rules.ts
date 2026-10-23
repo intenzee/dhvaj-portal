@@ -197,7 +197,14 @@ export function canFlags(
     now: Date;
   },
   checks: FirmChecks = STRICT_FIRM_CHECKS,
-): { lodge: boolean; undo: boolean; waive: boolean; edit: boolean; certify: boolean } {
+): {
+  lodge: boolean;
+  undo: boolean;
+  waive: boolean;
+  edit: boolean;
+  certify: boolean;
+  complete: boolean;
+} {
   const open = !input.hasLiveFiling && input.workflowStatus !== 'not_applicable';
   return {
     lodge: open && mayLodge(input, checks).ok,
@@ -219,6 +226,8 @@ export function canFlags(
       !input.hasLiveFiling,
     edit: input.isMember && !input.isLocked,
     certify: input.isPartner && input.isMember && !input.isLocked,
+    // Fill in the acknowledgement or reference a lodge was recorded without.
+    complete: input.hasLiveFiling && (input.isMember || input.isLead),
   };
 }
 
