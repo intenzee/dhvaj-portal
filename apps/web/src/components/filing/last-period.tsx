@@ -92,16 +92,26 @@ function PreviousPeriod({ p }: { p: Previous }): JSX.Element {
         <p>
           Filed {formatDate(p.filing.filedOn)}
           {p.filing.filedByName ? ` by ${p.filing.filedByName}` : ''} ·{' '}
-          {REFERENCE[p.filing.referenceKind]}{' '}
-          <span className="font-mono">{p.filing.referenceNo}</span>
+          {p.filing.referenceNo ? (
+            <>
+              {REFERENCE[p.filing.referenceKind]}{' '}
+              <span className="font-mono">{p.filing.referenceNo}</span>
+            </>
+          ) : (
+            <span className="text-warning-700">reference to be added</span>
+          )}
           {p.filing.isNil && ' · nil'}{' '}
-          <button
-            type="button"
-            className="text-primary-700 underline-offset-2 hover:underline"
-            onClick={() => download(p.filing!.ackDocumentId, 'acknowledgement')}
-          >
-            acknowledgement
-          </button>
+          {p.filing.ackDocumentId ? (
+            <button
+              type="button"
+              className="text-primary-700 underline-offset-2 hover:underline"
+              onClick={() => download(p.filing!.ackDocumentId!, 'acknowledgement')}
+            >
+              acknowledgement
+            </button>
+          ) : (
+            <span className="text-warning-700">· acknowledgement to be added</span>
+          )}
         </p>
       ) : (
         <p className="text-ink-muted">Not filed.</p>

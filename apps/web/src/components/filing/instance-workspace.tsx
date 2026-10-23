@@ -19,11 +19,18 @@ import { apiFetch, ApiError, downloadFile } from '@/lib/api';
 import { blobToBase64 } from '@/lib/file-kind';
 import { formatDate, formatMoney, humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
+import { useFirmChecks } from '@/lib/firm-checks';
 import type { TaskActionContext, WorkTask } from '@/lib/work-types';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { TaskActions } from '@/components/tasks/task-actions';
-import { FilingStatusBadge, boardMeetingsText, daysLeftText, dueTone, filingEnd } from './filing-status';
+import {
+  FilingStatusBadge,
+  boardMeetingsText,
+  daysLeftText,
+  dueTone,
+  filingEnd,
+} from './filing-status';
 import { ClientChase } from './client-chase';
 import { LastPeriod } from './last-period';
 import { RegistrationLogin } from '@/components/entities/portal-login';
@@ -79,8 +86,19 @@ export function InstanceWorkspace({
   });
 
   const write = useMutation({
-    mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: unknown; method?: string }) =>
-      apiFetch<Workspace>(`/compliance-instances/${instanceId}${path}`, { method, body: body ?? {} }),
+    mutationFn: ({
+      path,
+      body,
+      method = 'POST',
+    }: {
+      path: string;
+      body?: unknown;
+      method?: string;
+    }) =>
+      apiFetch<Workspace>(`/compliance-instances/${instanceId}${path}`, {
+        method,
+        body: body ?? {},
+      }),
     onSuccess: (ws) => {
       qc.setQueryData(workspaceKey(instanceId), ws);
       void qc.invalidateQueries({ queryKey: ['filing', 'tree'] });
@@ -101,7 +119,9 @@ export function InstanceWorkspace({
 
   if (q.isLoading) return <Spinner />;
   if (q.isError || !q.data) {
-    return <p className="text-sm text-danger-700">{errText(q.error, 'Could not load this filing.')}</p>;
+    return (
+      <p className="text-sm text-danger-700">{errText(q.error, 'Could not load this filing.')}</p>
+    );
   }
   const ws = q.data;
   const inst = ws.instance;
@@ -125,11 +145,15 @@ export function InstanceWorkspace({
         </ul>
       )}
       {inst.isLocked && inst.lockedReason && (
-        <p className="rounded-md bg-surface-sunken px-2.5 py-1.5 text-xs text-ink-muted">🔒 {inst.lockedReason}</p>
+        <p className="rounded-md bg-surface-sunken px-2.5 py-1.5 text-xs text-ink-muted">
+          🔒 {inst.lockedReason}
+        </p>
       )}
       {inst.workflowStatus === 'not_applicable' && (
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-surface-sunken px-2.5 py-1.5 text-xs">
-          <span>Not applicable{inst.notApplicableReason ? ` — ${inst.notApplicableReason}` : ''}.</span>
+          <span>
+            Not applicable{inst.notApplicableReason ? ` — ${inst.notApplicableReason}` : ''}.
+          </span>
           {ws.can.waive && (
             <Button
               size="sm"
@@ -159,13 +183,30 @@ export function InstanceWorkspace({
         onUploaded={(next) => qc.setQueryData(workspaceKey(instanceId), next)}
       />
       <ClientChase instance={inst} />
-      <ClientRequests ws={ws} editable={editable} isLead={ctx.isLead} busy={write.isPending} run={run} />
+      <ClientRequests
+        ws={ws}
+        editable={editable}
+        isLead={ctx.isLead}
+        busy={write.isPending}
+        run={run}
+      />
       {ws.figureSchema.length > 0 && (
         <Figures ws={ws} editable={editable} busy={write.isPending} run={run} />
       )}
 
       {ws.filing ? (
-        <FiledRecord filing={ws.filing} end={filingEnd(inst.stream, inst.section, inst.ruleCode)} canUndo={ws.can.undo} busy={write.isPending} run={run} engagementId={inst.engagementId} />
+        <FiledRecord
+          ws={ws}
+          filing={ws.filing}
+          end={filingEnd(inst.stream, inst.section, inst.ruleCode)}
+          canUndo={ws.can.undo}
+          canComplete={ws.can.complete}
+          isLead={ctx.isLead}
+          busy={write.isPending}
+          run={run}
+          engagementId={inst.engagementId}
+          onUploaded={(next) => qc.setQueryData(workspaceKey(instanceId), next)}
+        />
       ) : (
         ws.can.lodge && (
           <LodgeForm
@@ -186,8 +227,9 @@ export function InstanceWorkspace({
               .filter((f) => f.undoneAt)
               .map((f) => (
                 <li key={f.id}>
-                  {REFERENCE_LABEL[f.referenceKind]} {f.referenceNo} · filed {formatDate(f.filedOn)} · undone{' '}
-                  {formatDate(f.undoneAt)} by {f.undoneByName ?? '—'}: {f.undoReason}
+                  {f.referenceNo ? `${REFERENCE_LABEL[f.referenceKind]} ${f.referenceNo} · ` : ''}
+                  filed {formatDate(f.filedOn)} · undone {formatDate(f.undoneAt)} by{' '}
+                  {f.undoneByName ?? '—'}: {f.undoReason}
                 </li>
               ))}
           </ul>
@@ -260,7 +302,8 @@ function WorkspaceHeader({
         {inst.isProvisional && <Badge tone="warn">Provisional dates</Badge>}
         {inst.chargeWindow?.status === 'fee_window' && (
           <Badge tone="warn">
-            Late — within the additional-fee window until {formatDate(inst.chargeWindow.feeWindowEnds)}
+            Late — within the additional-fee window until{' '}
+            {formatDate(inst.chargeWindow.feeWindowEnds)}
           </Badge>
         )}
         {inst.chargeWindow?.status === 'beyond_window' && (
@@ -281,10 +324,15 @@ function WorkspaceHeader({
           <dt className="text-ink-muted">Statutory date</dt>
           <dd>
             {formatDate(inst.statutoryDueDate)}
-            {!filed && <span className={`ml-1 ${dueTone(inst.daysLeft)}`}>({daysLeftText(inst.daysLeft)})</span>}
+            {!filed && (
+              <span className={`ml-1 ${dueTone(inst.daysLeft)}`}>
+                ({daysLeftText(inst.daysLeft)})
+              </span>
+            )}
             {inst.extension && (
               <span className="block text-ink-muted">
-                Extended from {formatDate(inst.extension.originalDueDate)} by {inst.extension.reference}
+                Extended from {formatDate(inst.extension.originalDueDate)} by{' '}
+                {inst.extension.reference}
                 {inst.extension.notes?.startsWith('Verify') && ' · Verify'}
               </span>
             )}
@@ -317,26 +365,37 @@ function WorkspaceHeader({
       {inst.statutoryAudit && (
         <p className="text-xs text-ink-muted">
           We are the statutory auditor:{' '}
-          <a className="text-primary-700 underline-offset-2 hover:underline" href={`/engagements/${inst.statutoryAudit.engagementId}`}>
+          <a
+            className="text-primary-700 underline-offset-2 hover:underline"
+            href={`/engagements/${inst.statutoryAudit.engagementId}`}
+          >
             audit report
           </a>{' '}
-          {inst.statutoryAudit.reportDate ? `signed on ${formatDate(inst.statutoryAudit.reportDate)}` : 'not signed yet'}.
+          {inst.statutoryAudit.reportDate
+            ? `signed on ${formatDate(inst.statutoryAudit.reportDate)}`
+            : 'not signed yet'}
+          .
         </p>
       )}
       {inst.lateCharges && (!filed || inst.lateCharges.basis !== 'gst') && (
         <p className="text-xs text-danger-700">
           {inst.lateCharges.daysLate} days late{filed ? ' when filed' : ''} — indicative{' '}
-          {inst.lateCharges.basis === 'gst' ? 'late fee' : 'additional fee'} {formatMoney(inst.lateCharges.lateFee)}
+          {inst.lateCharges.basis === 'gst' ? 'late fee' : 'additional fee'}{' '}
+          {formatMoney(inst.lateCharges.lateFee)}
           {inst.lateCharges.basis === 'per_day' && ' (₹100 a day)'}
           {inst.lateCharges.basis === 'slab' &&
             ` (${inst.lateCharges.multiple}× the normal fee of ${formatMoney(inst.lateCharges.normalFee ?? 0)})`}
-          {inst.lateCharges.interest != null && `, interest ${formatMoney(inst.lateCharges.interest)}`}
+          {inst.lateCharges.interest != null &&
+            `, interest ${formatMoney(inst.lateCharges.interest)}`}
           {inst.lateCharges.verify && ' · Verify'}. A hint only; nothing is posted.
         </p>
       )}
       {inst.lateFeeNote && <p className="text-xs text-ink-muted">{inst.lateFeeNote}</p>}
       {task && (
-        <div data-task-id={task.id} className="flex flex-wrap items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
+        <div
+          data-task-id={task.id}
+          className="flex flex-wrap items-center gap-2 rounded-md border border-line px-2.5 py-1.5"
+        >
           <span className="text-xs text-ink-muted">
             Task: <span className="text-ink">{task.title}</span> · {humanize(task.status)}
           </span>
@@ -373,7 +432,11 @@ function AssignWork({
       apiFetch(`/engagements/${inst.engagementId}/tasks`, {
         method: 'POST',
         body: {
-          title: [inst.formLabel ?? inst.ruleName, inst.periodKey ?? inst.financialYear, inst.registrationNumber]
+          title: [
+            inst.formLabel ?? inst.ruleName,
+            inst.periodKey ?? inst.financialYear,
+            inst.registrationNumber,
+          ]
             .filter(Boolean)
             .join(' · '),
           assignedToEmployeeId: preparer,
@@ -439,16 +502,24 @@ function Checklist({
   busy: boolean;
   run: Run;
 }): JSX.Element | null {
+  const checks = useFirmChecks();
   const [naFor, setNaFor] = useState<string | null>(null);
   const [udinFor, setUdinFor] = useState<string | null>(null);
   if (items.length === 0) return null;
   const required = items.filter((i) => i.required);
   const done = required.filter((i) => i.status !== 'open').length;
-  const patch = (i: ChecklistItem, status: ChecklistItem['status'], naReason?: string, note?: string) =>
+  const patch = (
+    i: ChecklistItem,
+    status: ChecklistItem['status'],
+    naReason?: string,
+    note?: string,
+  ) =>
     run(
       `/items/${i.id}`,
       { status, version: i.version, ...(naReason ? { naReason } : {}), ...(note ? { note } : {}) },
-      status === 'open' ? `${i.label}: reopened.` : `${i.label}: ${status === 'done' ? 'done' : 'not applicable'}.`,
+      status === 'open'
+        ? `${i.label}: reopened.`
+        : `${i.label}: ${status === 'done' ? 'done' : 'not applicable'}.`,
       'PATCH',
     );
   return (
@@ -473,38 +544,60 @@ function Checklist({
                 }
                 onChange={(e) => {
                   // A partner's line takes the UDIN inline before it ticks.
-                  if (e.target.checked && i.tickedBy === 'partner') setUdinFor(udinFor === i.id ? null : i.id);
+                  if (e.target.checked && i.tickedBy === 'partner')
+                    setUdinFor(udinFor === i.id ? null : i.id);
                   else void patch(i, e.target.checked ? 'done' : 'open');
                 }}
               />
-              <span className={i.status === 'not_applicable' ? 'text-ink-muted line-through' : ''}>{i.label}</span>
+              <span className={i.status === 'not_applicable' ? 'text-ink-muted line-through' : ''}>
+                {i.label}
+              </span>
               {i.required && <span className="text-[10px] text-danger-600">required</span>}
-              {i.tickedBy === 'partner' && <span className="text-[10px] text-primary-700">partner ticks</span>}
+              {i.tickedBy === 'partner' && (
+                <span className="text-[10px] text-primary-700">partner ticks</span>
+              )}
               {i.autoTick === 'event' ? (
-                <span className="text-[10px] text-ink-muted">ticks when the meeting is recorded</span>
+                <span className="text-[10px] text-ink-muted">
+                  ticks when the meeting is recorded
+                </span>
               ) : i.autoTick === 'meetings' ? (
-                <span className="text-[10px] text-ink-muted">ticks when the year’s board meetings are recorded</span>
+                <span className="text-[10px] text-ink-muted">
+                  ticks when the year’s board meetings are recorded
+                </span>
               ) : (
                 i.autoTick && <span className="text-[10px] text-ink-muted">auto: {i.autoTick}</span>
               )}
               <span className="ml-auto text-xs text-ink-muted">
                 {i.status === 'done' && i.doneByName && `${i.doneByName}, ${formatDate(i.doneAt)}`}
-                {i.status === 'done' && i.doneNote && ` · ${i.tickedBy === 'partner' ? 'UDIN ' : ''}${i.doneNote}`}
-                {i.status === 'not_applicable' && `N/A — ${i.naReason ?? ''}`}
+                {i.status === 'done' &&
+                  i.doneNote &&
+                  ` · ${i.tickedBy === 'partner' ? 'UDIN ' : ''}${i.doneNote}`}
+                {i.status === 'not_applicable' && (i.naReason ? `N/A — ${i.naReason}` : 'N/A')}
               </span>
               {editable && i.status === 'open' && (
-                <Button size="sm" variant="ghost" onClick={() => setNaFor(naFor === i.id ? null : i.id)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setNaFor(naFor === i.id ? null : i.id)}
+                >
                   N/A
                 </Button>
               )}
               {editable && i.status === 'not_applicable' && (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void patch(i, 'open')}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void patch(i, 'open')}
+                >
                   Undo N/A
                 </Button>
               )}
             </div>
             {i.boardMeetings && (
-              <p className="mt-0.5 pl-6 text-xs text-ink-muted">{boardMeetingsText(i.boardMeetings)}</p>
+              <p className="mt-0.5 pl-6 text-xs text-ink-muted">
+                {boardMeetingsText(i.boardMeetings)}
+              </p>
             )}
             {i.carried && i.status === 'open' && (
               // WF-303: last period's answer, pre-filled — the preparer confirms it.
@@ -522,7 +615,12 @@ function Checklist({
                     disabled={busy}
                     aria-label={`Confirm ${i.label} as last period`}
                     onClick={() =>
-                      void patch(i, i.carried!.status, i.carried!.naReason ?? undefined, i.carried!.note ?? undefined)
+                      void patch(
+                        i,
+                        i.carried!.status,
+                        i.carried!.naReason ?? undefined,
+                        i.carried!.note ?? undefined,
+                      )
                     }
                   >
                     Confirm
@@ -550,6 +648,7 @@ function Checklist({
                 placeholder="Why this item does not apply"
                 busy={busy}
                 startOpen
+                optional={!checks.checklist_na_lead_only}
                 onSubmit={(reason) =>
                   patch(i, 'not_applicable', reason).then((ok) => {
                     if (ok) setNaFor(null);
@@ -583,7 +682,9 @@ function Slots({
   if (ws.slots.length === 0) return null;
   return (
     <section aria-label="Documents">
-      <h5 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">Documents</h5>
+      <h5 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        Documents
+      </h5>
       <ul className="divide-y divide-line rounded-md border border-line">
         {ws.slots.map((s) => (
           <SlotRow
@@ -687,10 +788,13 @@ function SlotRow({
         {slot.openRequest && (
           <Badge tone="warn">
             Requested from client {formatDate(slot.openRequest.requestedAt)}
-            {slot.openRequest.escalationDate && ` · escalate ${formatDate(slot.openRequest.escalationDate)}`}
+            {slot.openRequest.escalationDate &&
+              ` · escalate ${formatDate(slot.openRequest.escalationDate)}`}
           </Badge>
         )}
-        {slot.openRequest && isLead && <ReceivedButton ws={ws} dependencyId={slot.openRequest.dependencyId} />}
+        {slot.openRequest && isLead && (
+          <ReceivedButton ws={ws} dependencyId={slot.openRequest.dependencyId} />
+        )}
         {editable && !isNa && (
           <span className="ml-auto flex flex-wrap gap-1">
             <input
@@ -703,11 +807,21 @@ function SlotRow({
                 if (f) void upload(f);
               }}
             />
-            <Button size="sm" variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={uploading}
+              onClick={() => fileRef.current?.click()}
+            >
               {uploading ? 'Uploading…' : 'Upload'}
             </Button>
             {!slot.openRequest && (
-              <Button size="sm" variant="secondary" aria-expanded={asking} onClick={() => setAsking(!asking)}>
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-expanded={asking}
+                onClick={() => setAsking(!asking)}
+              >
                 Request from client
               </Button>
             )}
@@ -717,7 +831,12 @@ function SlotRow({
               </Button>
             )}
             {item && (
-              <Button size="sm" variant="ghost" aria-expanded={naOpen} onClick={() => setNaOpen(!naOpen)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={naOpen}
+                onClick={() => setNaOpen(!naOpen)}
+              >
                 N/A
               </Button>
             )}
@@ -732,13 +851,17 @@ function SlotRow({
                 type="button"
                 className="text-primary-700 underline-offset-2 hover:underline"
                 onClick={() =>
-                  void downloadFile(`/engagements/${engagementId}/documents/${d.id}/download`, d.filename ?? d.title)
+                  void downloadFile(
+                    `/engagements/${engagementId}/documents/${d.id}/download`,
+                    d.filename ?? d.title,
+                  )
                 }
               >
                 {d.filename ?? d.title}
               </button>
               <span className="text-ink-muted">
-                {formatDate(d.uploadedAt)} · {d.fromClient ? 'from client' : (d.uploadedByName ?? '—')}
+                {formatDate(d.uploadedAt)} ·{' '}
+                {d.fromClient ? 'from client' : (d.uploadedByName ?? '—')}
               </span>
             </li>
           ))}
@@ -819,7 +942,9 @@ function ClientRequests({
   run: Run;
 }): JSX.Element | null {
   const inst = ws.instance;
-  const open = (ws.clientRequests ?? []).filter((r) => !r.slotCode || r.slotCode === DSC_REQUEST_CODE);
+  const open = (ws.clientRequests ?? []).filter(
+    (r) => !r.slotCode || r.slotCode === DSC_REQUEST_CODE,
+  );
   const canAskDsc =
     editable &&
     inst.stream === 'roc' &&
@@ -829,11 +954,17 @@ function ClientRequests({
   if (open.length === 0 && !canAskDsc) return null;
   return (
     <section aria-label="From the client" className="space-y-1">
-      <h5 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">From the client</h5>
+      <h5 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        From the client
+      </h5>
       {open.length > 0 && (
         <ul className="divide-y divide-line rounded-md border border-line">
           {open.map((r) => (
-            <li key={r.dependencyId} data-request-id={r.dependencyId} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5">
+            <li
+              key={r.dependencyId}
+              data-request-id={r.dependencyId}
+              className="flex flex-wrap items-center gap-2 px-2.5 py-1.5"
+            >
               <span>{r.requestedInfo}</span>
               <Badge tone="warn">
                 Requested {formatDate(r.requestedAt)}
@@ -859,7 +990,13 @@ function ClientRequests({
 }
 
 /** A lead records that the client sent what was asked; the filing leaves Awaiting data. */
-function ReceivedButton({ ws, dependencyId }: { ws: Workspace; dependencyId: string }): JSX.Element {
+function ReceivedButton({
+  ws,
+  dependencyId,
+}: {
+  ws: Workspace;
+  dependencyId: string;
+}): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
   const [saving, setSaving] = useState(false);
@@ -867,10 +1004,13 @@ function ReceivedButton({ ws, dependencyId }: { ws: Workspace; dependencyId: str
   async function received() {
     setSaving(true);
     try {
-      await apiFetch(`/engagements/${inst.engagementId}/client-dependencies/${dependencyId}/receive`, {
-        method: 'POST',
-        body: { fully: true },
-      });
+      await apiFetch(
+        `/engagements/${inst.engagementId}/client-dependencies/${dependencyId}/receive`,
+        {
+          method: 'POST',
+          body: { fully: true },
+        },
+      );
       await qc.invalidateQueries({ queryKey: workspaceKey(inst.id) });
       void qc.invalidateQueries({ queryKey: ['filing', 'tree'] });
       toast('Marked received.');
@@ -923,7 +1063,10 @@ function Figures({
   run: Run;
 }): JSX.Element {
   const [values, setValues] = useState(() => figureState(ws.figureSchema, ws.figures));
-  useEffect(() => setValues(figureState(ws.figureSchema, ws.figures)), [ws.figureSchema, ws.figures]);
+  useEffect(
+    () => setValues(figureState(ws.figureSchema, ws.figures)),
+    [ws.figureSchema, ws.figures],
+  );
   const groups = useMemo(() => {
     const m = new Map<string, FigureField[]>();
     for (const f of ws.figureSchema) {
@@ -981,7 +1124,8 @@ function Figures({
 export function referenceError(kind: FilingReferenceKind, no: string): string | null {
   const v = no.trim();
   if (!v) return 'Enter the reference number.';
-  if (kind === 'arn' && !/^[A-Z0-9]{15}$/.test(v)) return 'An ARN is 15 upper-case letters and digits.';
+  if (kind === 'arn' && !/^[A-Z0-9]{15}$/.test(v))
+    return 'An ARN is 15 upper-case letters and digits.';
   return null;
 }
 
@@ -1001,6 +1145,7 @@ function LodgeForm({
   onUploaded: (ws: Workspace) => void;
 }): JSX.Element {
   const toast = useToast();
+  const checks = useFirmChecks();
   const [open, setOpen] = useState(false);
   const [filedBy, setFiledBy] = useState(me ?? '');
   const [uploading, setUploading] = useState(false);
@@ -1009,6 +1154,11 @@ function LodgeForm({
   // A meeting closes with a held-on date in its period and the minutes; no SRN.
   const meeting = isMeetingRule(ws.instance.ruleCode);
   const agm = ws.instance.ruleCode === 'ROC_AGM' || ws.instance.ruleCode === 'ROC_FIRST_AGM';
+  // With the firm's checks off the reference and acknowledgement may follow
+  // the lodge, and the date rules are warnings.
+  const refRequired = !meeting && checks.lodge_reference_required;
+  const ackRequired = checks.lodge_ack_required;
+  const quick = !meeting && !agm && !refRequired && !ackRequired;
   const [auditorAppointed, setAuditorAppointed] = useState(false);
   const [normalFeePaid, setNormalFeePaid] = useState('');
   const [referenceKind, setReferenceKind] = useState<FilingReferenceKind>(
@@ -1035,13 +1185,22 @@ function LodgeForm({
     () =>
       [...ws.slots]
         .sort((a, b) => Number(b.slotCode.startsWith('ACK')) - Number(a.slotCode.startsWith('ACK')))
-        .flatMap((s) => s.documents.map((d) => ({ id: d.id, label: `${s.label}: ${d.filename ?? d.title}` }))),
+        .flatMap((s) =>
+          s.documents.map((d) => ({
+            id: d.id,
+            label: `${s.label}: ${d.filename ?? d.title}`,
+            ack: s.slotCode.startsWith('ACK'),
+          })),
+        ),
     [ws.slots],
   );
   const [ackDocumentId, setAckDocumentId] = useState('');
+  // "Add later" chosen on purpose stays chosen.
+  const [ackLater, setAckLater] = useState(false);
   useEffect(() => {
-    if (!docs.some((d) => d.id === ackDocumentId)) setAckDocumentId(docs[0]?.id ?? '');
-  }, [docs, ackDocumentId]);
+    if (docs.some((d) => d.id === ackDocumentId) || (ackLater && !ackRequired)) return;
+    setAckDocumentId((ackRequired ? docs[0] : docs.find((d) => d.ack))?.id ?? '');
+  }, [docs, ackDocumentId, ackLater, ackRequired]);
 
   async function uploadAck(file: File) {
     if (!ackSlot) return;
@@ -1052,7 +1211,11 @@ function LodgeForm({
         `/compliance-instances/${ws.instance.id}/slots/${encodeURIComponent(ackSlot.slotCode)}/documents`,
         {
           method: 'POST',
-          body: { filename: file.name, contentType: file.type || undefined, contentBase64: await blobToBase64(file) },
+          body: {
+            filename: file.name,
+            contentType: file.type || undefined,
+            contentBase64: await blobToBase64(file),
+          },
         },
       );
       onUploaded(next);
@@ -1069,14 +1232,38 @@ function LodgeForm({
   }
 
   if (!open) {
+    if (!quick) {
+      return (
+        <Button onClick={() => setOpen(true)} aria-expanded={false}>
+          {end.action}
+        </Button>
+      );
+    }
+    // One step: filed today; the acknowledgement and reference can follow.
     return (
-      <Button onClick={() => setOpen(true)} aria-expanded={false}>
-        {end.action}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          disabled={busy}
+          onClick={() =>
+            void run(
+              '/lodge',
+              { filedOn: today() },
+              `${end.done === 'Filed' ? 'Marked filed' : end.done} — add the acknowledgement and reference when you have them.`,
+            )
+          }
+        >
+          {end.done === 'Filed' ? 'Mark filed' : `Mark ${end.done.toLowerCase()}`}
+        </Button>
+        <Button variant="secondary" onClick={() => setOpen(true)} aria-expanded={false}>
+          With details…
+        </Button>
+      </div>
     );
   }
   const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
   const refErr = referenceNo ? referenceError(referenceKind, referenceNo) : null;
+  // A reference in the wrong shape blocks only while the reference check is on.
+  const refBlocks = !!refErr && checks.lodge_reference_required;
   const people = team;
   return (
     <form
@@ -1088,14 +1275,18 @@ function LodgeForm({
           '/lodge',
           {
             referenceKind,
-            ...(referenceNo.trim() || !meeting ? { referenceNo: referenceNo.trim() } : {}),
+            ...(referenceNo.trim() ? { referenceNo: referenceNo.trim() } : {}),
             filedOn,
             ...(meeting ? {} : { isNil }),
             ...(agm ? { auditorAppointed } : {}),
             ...(num(normalFeePaid) != null ? { normalFeePaid: num(normalFeePaid) } : {}),
-            ackDocumentId,
+            ...(ackDocumentId ? { ackDocumentId } : {}),
             ...(filedBy && filedBy !== me ? { filedByEmployeeId: filedBy } : {}),
-            ...(ws.figureSchema.length ? { figures: figurePayload(ws.figureSchema, figureState(ws.figureSchema, ws.figures)) } : {}),
+            ...(ws.figureSchema.length
+              ? {
+                  figures: figurePayload(ws.figureSchema, figureState(ws.figureSchema, ws.figures)),
+                }
+              : {}),
             ...(num(lateFeePaid) != null ? { lateFeePaid: num(lateFeePaid) } : {}),
             ...(num(interestPaid) != null ? { interestPaid: num(interestPaid) } : {}),
             ...(remarks.trim() ? { remarks: remarks.trim() } : {}),
@@ -1109,7 +1300,10 @@ function LodgeForm({
       </h5>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <Field label="Reference type">
-          <Select value={referenceKind} onChange={(e) => setReferenceKind(e.target.value as FilingReferenceKind)}>
+          <Select
+            value={referenceKind}
+            onChange={(e) => setReferenceKind(e.target.value as FilingReferenceKind)}
+          >
             {FILING_REFERENCE_KINDS.map((k) => (
               <option key={k} value={k}>
                 {REFERENCE_LABEL[k]}
@@ -1119,26 +1313,44 @@ function LodgeForm({
         </Field>
         <Field
           label="Reference no."
-          required={!meeting}
-          hint={meeting && !referenceNo ? `Defaults to MTG-${filedOn}.` : undefined}
+          required={refRequired}
+          hint={
+            meeting && !referenceNo
+              ? `Defaults to MTG-${filedOn}.`
+              : !refRequired && !referenceNo
+                ? 'Optional — add it later if you don’t have it yet.'
+                : undefined
+          }
         >
           <Input
             value={referenceNo}
             onChange={(e) =>
-              setReferenceNo(referenceKind === 'arn' ? e.target.value.toUpperCase() : e.target.value)
+              setReferenceNo(
+                referenceKind === 'arn' ? e.target.value.toUpperCase() : e.target.value,
+              )
             }
             maxLength={referenceKind === 'arn' ? 15 : 60}
-            aria-invalid={!!refErr}
-            required={!meeting}
+            aria-invalid={refBlocks}
+            required={refRequired}
           />
-          {refErr && <span className="mt-1 block text-xs text-danger-700">{refErr}</span>}
+          {refErr && (
+            <span
+              className={`mt-1 block text-xs ${refBlocks ? 'text-danger-700' : 'text-warning-700'}`}
+            >
+              {refErr}
+            </span>
+          )}
         </Field>
         <Field label={meeting ? 'Held on' : 'Filed on'} required>
           <Input
             type="date"
             value={filedOn}
-            min={(meeting ? ws.instance.periodStart : ws.instance.periodEnd) ?? undefined}
-            max={today()}
+            min={
+              checks.lodge_date_rules
+                ? ((meeting ? ws.instance.periodStart : ws.instance.periodEnd) ?? undefined)
+                : undefined
+            }
+            max={checks.lodge_date_rules ? today() : undefined}
             onChange={(e) => setFiledOn(e.target.value)}
             required
           />
@@ -1157,11 +1369,27 @@ function LodgeForm({
         )}
         <Field
           label={meeting ? 'Minutes' : 'Acknowledgement'}
-          required
-          hint={docs.length ? undefined : meeting ? 'Upload the minutes.' : 'Upload the acknowledgement.'}
+          required={ackRequired}
+          hint={
+            !ackRequired
+              ? 'Optional — add it later if you don’t have it yet.'
+              : docs.length
+                ? undefined
+                : meeting
+                  ? 'Upload the minutes.'
+                  : 'Upload the acknowledgement.'
+          }
         >
-          <Select value={ackDocumentId} onChange={(e) => setAckDocumentId(e.target.value)} required>
-            {docs.length === 0 && <option value="">No documents yet</option>}
+          <Select
+            value={ackDocumentId}
+            onChange={(e) => {
+              setAckDocumentId(e.target.value);
+              setAckLater(e.target.value === '');
+            }}
+            required={ackRequired}
+          >
+            {!ackRequired && <option value="">Add later</option>}
+            {ackRequired && docs.length === 0 && <option value="">No documents yet</option>}
             {docs.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.label}
@@ -1184,22 +1412,35 @@ function LodgeForm({
         </Field>
         {!meeting && ws.instance.stream === 'roc' && (
           <Field label="Normal fee paid">
-            <Input inputMode="decimal" value={normalFeePaid} onChange={(e) => setNormalFeePaid(e.target.value)} />
+            <Input
+              inputMode="decimal"
+              value={normalFeePaid}
+              onChange={(e) => setNormalFeePaid(e.target.value)}
+            />
           </Field>
         )}
         {!meeting && (
           <Field label={ws.instance.stream === 'roc' ? 'Additional fee paid' : 'Late fee paid'}>
-            <Input inputMode="decimal" value={lateFeePaid} onChange={(e) => setLateFeePaid(e.target.value)} />
+            <Input
+              inputMode="decimal"
+              value={lateFeePaid}
+              onChange={(e) => setLateFeePaid(e.target.value)}
+            />
           </Field>
         )}
         {!meeting && ws.instance.stream !== 'roc' && (
           <Field label="Interest paid">
-            <Input inputMode="decimal" value={interestPaid} onChange={(e) => setInterestPaid(e.target.value)} />
+            <Input
+              inputMode="decimal"
+              value={interestPaid}
+              onChange={(e) => setInterestPaid(e.target.value)}
+            />
           </Field>
         )}
         {!meeting && (
           <label className="flex items-center gap-2 self-end pb-2 text-sm">
-            <input type="checkbox" checked={isNil} onChange={(e) => setIsNil(e.target.checked)} /> Nil return
+            <input type="checkbox" checked={isNil} onChange={(e) => setIsNil(e.target.checked)} />{' '}
+            Nil return
           </label>
         )}
         {agm && (
@@ -1220,7 +1461,13 @@ function LodgeForm({
         <Button
           type="submit"
           size="sm"
-          disabled={busy || uploading || !!refErr || (!meeting && !referenceNo.trim()) || !ackDocumentId}
+          disabled={
+            busy ||
+            uploading ||
+            refBlocks ||
+            (refRequired && !referenceNo.trim()) ||
+            (ackRequired && !ackDocumentId)
+          }
         >
           {meeting ? 'Record meeting' : 'Lodge'}
         </Button>
@@ -1233,27 +1480,48 @@ function LodgeForm({
 }
 
 function FiledRecord({
+  ws,
   filing,
   end,
   canUndo,
+  canComplete,
+  isLead,
   busy,
   run,
   engagementId,
+  onUploaded,
 }: {
+  ws: Workspace;
   filing: FilingRecordView;
   end: { done: string };
   canUndo: boolean;
+  canComplete: boolean;
+  isLead: boolean;
   busy: boolean;
   run: Run;
   engagementId: string;
+  onUploaded: (ws: Workspace) => void;
 }): JSX.Element {
   return (
-    <section aria-label="Filed" className="space-y-1 rounded-md border border-success-500/30 bg-success-50/50 p-2.5 text-xs">
+    <section
+      aria-label="Filed"
+      className="space-y-1 rounded-md border border-success-500/30 bg-success-50/50 p-2.5 text-xs"
+    >
       <p className="text-sm font-medium text-success-700">
-        {end.done} {formatDate(filing.filedOn)} · {REFERENCE_LABEL[filing.referenceKind]}{' '}
-        <span className="font-mono">{filing.referenceNo}</span>
+        {end.done} {formatDate(filing.filedOn)}
+        {filing.referenceNo && (
+          <>
+            {' '}
+            · {REFERENCE_LABEL[filing.referenceKind]}{' '}
+            <span className="font-mono">{filing.referenceNo}</span>
+          </>
+        )}
         {filing.isNil && ' · Nil'}
-        {filing.isLate && <Badge tone="warn" className="ml-2">{end.done} late</Badge>}
+        {filing.isLate && (
+          <Badge tone="warn" className="ml-2">
+            {end.done} late
+          </Badge>
+        )}
       </p>
       <p className="text-ink-muted">
         By {filing.filedByName ?? '—'} · recorded {formatDate(filing.recordedAt)}
@@ -1262,15 +1530,30 @@ function FiledRecord({
         {filing.interestPaid != null && ` · interest ${formatMoney(filing.interestPaid)}`}
       </p>
       {filing.remarks && <p>{filing.remarks}</p>}
-      <button
-        type="button"
-        className="text-primary-700 underline-offset-2 hover:underline"
-        onClick={() =>
-          void downloadFile(`/engagements/${engagementId}/documents/${filing.ackDocumentId}/download`, 'acknowledgement')
-        }
-      >
-        Acknowledgement
-      </button>
+      {filing.ackDocumentId && (
+        <button
+          type="button"
+          className="text-primary-700 underline-offset-2 hover:underline"
+          onClick={() =>
+            void downloadFile(
+              `/engagements/${engagementId}/documents/${filing.ackDocumentId}/download`,
+              'acknowledgement',
+            )
+          }
+        >
+          Acknowledgement
+        </button>
+      )}
+      {canComplete && (
+        <CompleteLodge
+          ws={ws}
+          filing={filing}
+          isLead={isLead}
+          busy={busy}
+          run={run}
+          onUploaded={onUploaded}
+        />
+      )}
       {canUndo && (
         <ReasonAction
           label="Undo lodge"
@@ -1280,6 +1563,198 @@ function FiledRecord({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * The acknowledgement and reference a lodge was recorded without: anyone on
+ * the filing adds them here (an upload into the acknowledgement slot becomes
+ * the acknowledgement); a lead may also change them.
+ */
+function CompleteLodge({
+  ws,
+  filing,
+  isLead,
+  busy,
+  run,
+  onUploaded,
+}: {
+  ws: Workspace;
+  filing: FilingRecordView;
+  isLead: boolean;
+  busy: boolean;
+  run: Run;
+  onUploaded: (ws: Workspace) => void;
+}): JSX.Element | null {
+  const toast = useToast();
+  const missingAck = !filing.ackDocumentId;
+  const missingRef = !filing.referenceNo;
+  const [editing, setEditing] = useState(false);
+  const [referenceKind, setReferenceKind] = useState<FilingReferenceKind>(filing.referenceKind);
+  const [referenceNo, setReferenceNo] = useState(filing.referenceNo ?? '');
+  const [ackDocumentId, setAckDocumentId] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const ackSlot = ws.slots.find((sl) => sl.slotCode.startsWith('ACK')) ?? null;
+  const docs = ws.slots.flatMap((s) =>
+    s.documents
+      .filter((d) => d.id !== filing.ackDocumentId)
+      .map((d) => ({ id: d.id, label: `${s.label}: ${d.filename ?? d.title}` })),
+  );
+  const showRef = missingRef || editing;
+  const showAck = missingAck || editing;
+
+  if (!missingAck && !missingRef && !isLead) return null;
+  if (!missingAck && !missingRef && !editing) {
+    return (
+      <button
+        type="button"
+        className="ml-3 text-primary-700 underline-offset-2 hover:underline"
+        onClick={() => setEditing(true)}
+      >
+        Change acknowledgement / reference
+      </button>
+    );
+  }
+
+  async function uploadAck(file: File) {
+    if (!ackSlot) return;
+    setUploading(true);
+    try {
+      const next = await apiFetch<Workspace>(
+        `/compliance-instances/${ws.instance.id}/slots/${encodeURIComponent(ackSlot.slotCode)}/documents`,
+        {
+          method: 'POST',
+          body: {
+            filename: file.name,
+            contentType: file.type || undefined,
+            contentBase64: await blobToBase64(file),
+          },
+        },
+      );
+      onUploaded(next);
+      toast('Acknowledgement added.');
+    } catch (err) {
+      toast(errText(err, 'Upload failed.'), 'error');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const refErr = referenceNo.trim() ? referenceError(referenceKind, referenceNo) : null;
+  return (
+    <div
+      aria-label="Complete the lodge"
+      className="mt-2 space-y-2 rounded-md border border-warning-500/30 bg-warning-50/60 p-2.5"
+    >
+      <p className="font-medium text-warning-700">
+        {missingAck && missingRef
+          ? 'Still to add: the acknowledgement and the reference number.'
+          : missingAck
+            ? 'Still to add: the acknowledgement.'
+            : missingRef
+              ? 'Still to add: the reference number.'
+              : 'Change the acknowledgement or reference.'}
+      </p>
+      {showRef && (
+        <form
+          aria-label="Add reference"
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(
+              '/lodge',
+              { referenceNo: referenceNo.trim(), referenceKind },
+              'Reference saved.',
+              'PATCH',
+            ).then((ok) => ok && setEditing(false));
+          }}
+        >
+          <Field label="Reference type">
+            <Select
+              value={referenceKind}
+              onChange={(e) => setReferenceKind(e.target.value as FilingReferenceKind)}
+            >
+              {FILING_REFERENCE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {REFERENCE_LABEL[k]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Reference no.">
+            <Input
+              value={referenceNo}
+              onChange={(e) =>
+                setReferenceNo(
+                  referenceKind === 'arn' ? e.target.value.toUpperCase() : e.target.value,
+                )
+              }
+              maxLength={referenceKind === 'arn' ? 15 : 60}
+            />
+            {refErr && <span className="mt-1 block text-xs text-warning-700">{refErr}</span>}
+          </Field>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={busy || !referenceNo.trim() || referenceNo.trim() === filing.referenceNo}
+          >
+            Save reference
+          </Button>
+        </form>
+      )}
+      {showAck && (
+        <div className="flex flex-wrap items-end gap-2" aria-label="Add acknowledgement">
+          {missingAck && ackSlot && (
+            <label className="text-xs">
+              <span className="mb-1 block font-medium text-ink">Upload the acknowledgement</span>
+              <input
+                type="file"
+                aria-label="Upload acknowledgement"
+                disabled={uploading || busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadAck(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          )}
+          {docs.length > 0 && (
+            <>
+              <Field
+                label={missingAck && ackSlot ? 'or use a document already here' : 'Acknowledgement'}
+              >
+                <Select value={ackDocumentId} onChange={(e) => setAckDocumentId(e.target.value)}>
+                  <option value="">Choose a document</option>
+                  {docs.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy || !ackDocumentId}
+                onClick={() =>
+                  void run('/lodge', { ackDocumentId }, 'Acknowledgement saved.', 'PATCH').then(
+                    (ok) => ok && setEditing(false),
+                  )
+                }
+              >
+                Use as acknowledgement
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+      {editing && (
+        <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -1301,7 +1776,9 @@ function Corrections({
   return (
     <section aria-label="Corrections" className="space-y-1">
       <div className="flex items-center gap-2">
-        <h5 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Corrections</h5>
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          Corrections
+        </h5>
         {ws.filing && ws.can.edit && (
           <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
             {open ? '−' : '+'} Record a correction
@@ -1313,7 +1790,9 @@ function Corrections({
           {ws.corrections.map((c) => (
             <li key={c.id}>
               {formatDate(c.createdAt)} · {c.createdByName ?? '—'}: {c.note}
-              {c.correctedInLabel && <span className="text-ink-muted"> — corrected in {c.correctedInLabel}</span>}
+              {c.correctedInLabel && (
+                <span className="text-ink-muted"> — corrected in {c.correctedInLabel}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -1342,7 +1821,11 @@ function Corrections({
             placeholder="What was wrong and how it is corrected"
             aria-label="Correction note"
           />
-          <Select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Corrected in">
+          <Select
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            aria-label="Corrected in"
+          >
             <option value="">Corrected in — not yet</option>
             {targets.map((t) => (
               <option key={t.id} value={t.id}>
@@ -1365,12 +1848,15 @@ function ReasonAction({
   placeholder,
   busy,
   startOpen = false,
+  optional = false,
   onSubmit,
 }: {
   label: string;
   placeholder: string;
   busy: boolean;
   startOpen?: boolean;
+  /** The reason may be left blank. */
+  optional?: boolean;
   onSubmit: (reason: string) => Promise<boolean>;
 }): JSX.Element {
   const [open, setOpen] = useState(startOpen);
@@ -1387,7 +1873,7 @@ function ReasonAction({
       className="mt-1 flex flex-wrap items-center gap-2"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!reason.trim()) return;
+        if (!reason.trim() && !optional) return;
         void onSubmit(reason.trim()).then((ok) => {
           if (ok) {
             setReason('');
@@ -1401,10 +1887,10 @@ function ReasonAction({
         className="min-w-[16rem] flex-1"
         value={reason}
         onChange={(e) => setReason(e.target.value)}
-        placeholder={placeholder}
+        placeholder={optional ? `${placeholder} (optional)` : placeholder}
         aria-label={placeholder}
       />
-      <Button size="sm" type="submit" disabled={busy || !reason.trim()}>
+      <Button size="sm" type="submit" disabled={busy || (!optional && !reason.trim())}>
         {label}
       </Button>
       {!startOpen && (

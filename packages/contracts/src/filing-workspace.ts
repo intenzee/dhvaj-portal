@@ -266,7 +266,15 @@ export interface InstanceWorkspace {
   /** Open client requests (roc-mca §10: MGT-8, MR-3, the director's DSC …). */
   clientRequests?: WorkspaceClientRequest[];
   /** certify: tick a partner's line (CERT, with the UDIN). */
-  can: { lodge: boolean; undo: boolean; waive: boolean; edit: boolean; certify: boolean };
+  can: {
+    lodge: boolean;
+    undo: boolean;
+    waive: boolean;
+    edit: boolean;
+    certify: boolean;
+    /** Add the acknowledgement or reference a lodge was recorded without. */
+    complete: boolean;
+  };
 }
 
 /** One filing in the stream tree. */

@@ -190,7 +190,12 @@ describe('Filing runs page', () => {
       row('2', { canAssign: false }),
       row('3', {
         workflowStatus: 'filed',
-        filed: { referenceNo: 'AA190926000001X', filedOn: '2026-10-10' },
+        filed: {
+          referenceNo: 'AA190926000001X',
+          filedOn: '2026-10-10',
+          ackMissing: false,
+          referenceMissing: false,
+        },
       }),
     ],
   };
