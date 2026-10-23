@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { PoolClient } from 'pg';
+import type { PoolClient, QueryResult } from 'pg';
 import {
   ENTITY_STATUS,
   MISSING_INFO_LABEL,
@@ -642,12 +642,34 @@ export class EntitiesService {
       if (sets.length === 0) throw new BadRequestException('No registration fields to update.');
 
       params.push(registrationId, entityId);
-      const result = await client.query(
-        `UPDATE hsdg.entity_registrations SET ${sets.join(', ')}
-         WHERE id = $${params.length - 1} AND entity_id = $${params.length}`,
-        params,
-      );
-      if ((result.rowCount ?? 0) === 0) {
+      const update = (): Promise<QueryResult> =>
+        client.query(
+          `UPDATE hsdg.entity_registrations SET ${sets.join(', ')}
+           WHERE id = $${params.length - 1} AND entity_id = $${params.length}`,
+          params,
+        );
+      let result: QueryResult | undefined;
+      if (input.registrationNumber === undefined) {
+        result = await update();
+      } else {
+        const current = await client.query<{ registration_type: string }>(
+          `SELECT registration_type FROM hsdg.entity_registrations WHERE id = $1 AND entity_id = $2`,
+          [registrationId, entityId],
+        );
+        const type = current.rows[0]?.registration_type;
+        if (type) {
+          await this.withRegistrationNumber(
+            client,
+            entityId,
+            type,
+            input.registrationNumber,
+            async () => {
+              result = await update();
+            },
+          );
+        }
+      }
+      if ((result?.rowCount ?? 0) === 0) {
         throw new NotFoundException('Registration not found for this entity.');
       }
       await this.flagReassessmentIfComplete(client, entityId);
@@ -1031,7 +1053,57 @@ export class EntitiesService {
     }
   }
 
+  /**
+   * Run a write that sets a registration number; if the number is already
+   * recorded (unique firm-wide), say on which client — it may be another
+   * office's, which the caller cannot see.
+   */
+  private async withRegistrationNumber(
+    client: PoolClient,
+    entityId: string,
+    type: string,
+    number: string,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    await client.query('SAVEPOINT registration_number');
+    try {
+      await work();
+    } catch (err) {
+      const e = err as { code?: string; constraint?: string };
+      if (e.code !== '23505' || e.constraint !== 'entity_registrations_number_unique') throw err;
+      await client.query('ROLLBACK TO SAVEPOINT registration_number');
+      const { rows } = await client.query<{ entity_id: string; legal_name: string }>(
+        `SELECT entity_id, legal_name FROM hsdg.registration_holder($1, $2)`,
+        [type, number],
+      );
+      const label = `${type === 'other' ? 'Registration' : type.toUpperCase()} ${number}`;
+      const holder = rows[0];
+      if (!holder) throw new ConflictException(`${label} is already recorded.`);
+      if (holder.entity_id === entityId) {
+        throw new ConflictException(`${label} is already recorded on this client.`);
+      }
+      throw new ConflictException(
+        `${label} is already recorded on ${holder.legal_name}. If it was put there by mistake, remove it from that client first.`,
+      );
+    }
+    await client.query('RELEASE SAVEPOINT registration_number');
+  }
+
   private async insertRegistration(
+    client: PoolClient,
+    entityId: string,
+    reg: RegistrationInput,
+  ): Promise<void> {
+    await this.withRegistrationNumber(
+      client,
+      entityId,
+      reg.registrationType,
+      reg.registrationNumber,
+      () => this.insertRegistrationRow(client, entityId, reg),
+    );
+  }
+
+  private async insertRegistrationRow(
     client: PoolClient,
     entityId: string,
     reg: RegistrationInput,
