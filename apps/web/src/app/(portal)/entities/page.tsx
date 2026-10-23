@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { PERMISSION, type MissingFilter, type Paginated } from '@hsdg/contracts';
-import { Plus, Upload } from 'lucide-react';
+import { FileSpreadsheet, Plus, Upload } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -18,6 +18,7 @@ import { Pagination } from '@/components/pagination';
 import { SectionChips, useUrlSections } from '@/components/section-filter';
 import { entityListPath } from '@/lib/list-paths';
 import { MISSING_FILTER_OPTIONS, MissingDataMarker } from '@/components/entities/missing-data';
+import { ExportClientMasterButton } from '@/components/entities/client-master';
 
 const PAGE_SIZE = 25;
 
@@ -73,9 +74,17 @@ function EntitiesInner(): JSX.Element {
         title="Clients"
         subtitle="Companies, firms and individuals we work for. Click a client to see everything we do for them."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {can(principal, PERMISSION.entityManage) && (
               <>
+                <ExportClientMasterButton />
+                {can(principal, PERMISSION.credentialManage) && (
+                  <Link href="/entities/master">
+                    <Button variant="secondary">
+                      <FileSpreadsheet className="h-4 w-4" /> Import client master
+                    </Button>
+                  </Link>
+                )}
                 {can(principal, PERMISSION.credentialManage) && (
                   <Link href="/entities/import">
                     <Button variant="secondary">
