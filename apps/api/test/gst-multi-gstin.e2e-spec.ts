@@ -402,4 +402,53 @@ describe('GST with several GSTINs (e2e)', () => {
       expect(entity.body.registrations.map((r: { id: string }) => r.id)).toEqual([right]);
     });
   });
+
+  describe('(e) a GSTIN already recorded on a client', () => {
+    it('names the client holding it, even one of another office', async () => {
+      // South's client, which Partner A (North) cannot see.
+      const p = pan('L');
+      const taken = gstin('29', p);
+      const pb = await token('partner.b@dhvaj.in');
+      const south = await http()
+        .post('/api/v1/entities')
+        .set(bearer(pb))
+        .send({
+          legalName: `Southern Holder ${p} Pvt Ltd`,
+          typeSlug: 'private_limited',
+          officeCode: 'SOUTH',
+          pan: p,
+          registrations: [{ registrationType: 'gstin', registrationNumber: taken }],
+        })
+        .expect(201);
+      await http().get(`/api/v1/entities/${south.body.id}`).set(bearer(pa)).expect(404);
+
+      const mine = await createClient('Northern Adder', pan('M'), [
+        { registrationType: 'gstin', registrationNumber: gstin('07', p) },
+      ]);
+      const add = (registrationNumber: string) =>
+        http()
+          .post(`/api/v1/entities/${mine.id}/registrations`)
+          .set(bearer(pa))
+          .send({ registrationType: 'gstin', registrationNumber });
+
+      const other = await add(taken).expect(409);
+      expect(other.body.message).toBe(
+        `GSTIN ${taken} is already recorded on Southern Holder ${p} Pvt Ltd. If it was put there by mistake, remove it from that client first.`,
+      );
+      const own = await add(gstin('07', p)).expect(409);
+      expect(own.body.message).toBe(`GSTIN ${gstin('07', p)} is already recorded on this client.`);
+
+      // Changing a number to one already recorded says the same.
+      const edit = await http()
+        .patch(`/api/v1/entities/${mine.id}/registrations/${mine.registrations[0]!.id}`)
+        .set(bearer(pa))
+        .send({ registrationNumber: taken })
+        .expect(409);
+      expect(edit.body.message).toMatch(`already recorded on Southern Holder ${p} Pvt Ltd`);
+
+      // A new GSTIN still goes in.
+      const ok = await add(gstin('09', p)).expect(201);
+      expect(ok.body.registrations).toHaveLength(2);
+    });
+  });
 });
