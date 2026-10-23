@@ -68,6 +68,12 @@ export class ClientUploadService {
     dependencyId: string,
     opts: { ttlHours?: number; maxUploads?: number },
   ): Promise<ClientUploadLinkCreated> {
+    // A link minted while the public page is off could only ever say "expired".
+    if (!this.enabled) {
+      throw new BadRequestException(
+        'Client upload links are switched off for the portal (CLIENT_UPLOAD_ENABLED).',
+      );
+    }
     const token = randomBytes(32).toString('base64url');
     const tokenHash = sha256Hex(token);
     const ttlHours = opts.ttlHours ?? this.config.get('CLIENT_UPLOAD_DEFAULT_TTL_HOURS');

@@ -761,7 +761,7 @@ function SlotRow({
   async function request(e?: FormEvent) {
     e?.preventDefault();
     try {
-      const res = await apiFetch<{ workspace: Workspace; link: UploadLink }>(
+      const res = await apiFetch<{ workspace: Workspace; link: UploadLink | null }>(
         `/compliance-instances/${ws.instance.id}/slots/${encodeURIComponent(slot.slotCode)}/request`,
         {
           method: 'POST',
@@ -772,9 +772,14 @@ function SlotRow({
         },
       );
       onUploaded(res.workspace);
-      setLink(`${window.location.origin}/client-upload/${res.link.token}`);
       setAsking(false);
-      toast('Request raised — share the upload link with the client.');
+      // No link while client upload is switched off: the request still stands.
+      if (res.link) {
+        setLink(`${window.location.origin}/client-upload/${res.link.token}`);
+        toast('Request raised — share the upload link with the client.');
+      } else {
+        toast('Request raised.');
+      }
     } catch (err) {
       toast(errText(err, 'Could not raise the request.'), 'error');
     }
