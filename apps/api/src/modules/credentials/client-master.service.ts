@@ -11,6 +11,7 @@ import type { PoolClient } from 'pg';
 import {
   CLIENT_IMPORT_ACTION,
   CLIENT_MASTER_SAVED_PASSWORD,
+  normalizeGstin,
   STREAMS,
   STREAM_LABEL,
   credentialLabel,
@@ -804,7 +805,10 @@ class RowPlanner {
     const e = src.code ? this.byCode.get(src.code) : undefined;
     if (!e || src.badIds.length === 0) return src;
     const regs = this.regsOf.get(e.id) ?? [];
-    const on = (id: string) => e.pan === id || regs.some((r) => r.registration_number === id);
+    // As the sheet reads them: no spaces, upper case.
+    const on = (id: string) =>
+      normalizeGstin(e.pan ?? '') === id ||
+      regs.some((r) => normalizeGstin(r.registration_number) === id);
     if (!src.badIds.every((b) => on(b.id))) return src;
     const bad = new Set(src.badIds.map((b) => b.id));
     return {
