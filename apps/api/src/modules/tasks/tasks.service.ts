@@ -129,8 +129,10 @@ export class TasksService {
 
   async create(ctx: RlsContext, engagementId: string, input: CreateTaskInput): Promise<TaskRecord> {
     return this.db.withRlsContext(ctx, async (client) => {
-      await this.requireEngagement(client, engagementId);
+      // The role comes first: a lead-only firm refuses a senior with 403
+      // whether or not they can see the engagement.
       const checks = await this.requireTaskEditor(client, ctx);
+      await this.requireEngagement(client, engagementId);
       if (input.assignedToEmployeeId) {
         await ensureOnEngagement(
           client,
