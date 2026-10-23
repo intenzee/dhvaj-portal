@@ -4,6 +4,8 @@ import { EngagementsModule } from '../engagements/engagements.module';
 import { EntitiesModule } from '../entities/entities.module';
 import { ClientImportController } from './client-import.controller';
 import { ClientImportService } from './client-import.service';
+import { ClientMasterController } from './client-master.controller';
+import { ClientMasterService } from './client-master.service';
 import { ClientReturnsController } from './client-returns.controller';
 import { ClientReturnsService } from './client-returns.service';
 import { CredentialCipher } from './credential-cipher';
@@ -17,7 +19,18 @@ import { CredentialsService } from './credentials.service';
  */
 @Module({
   imports: [AuditModule, EntitiesModule, EngagementsModule],
-  controllers: [CredentialsController, ClientImportController, ClientReturnsController],
-  providers: [CredentialCipher, CredentialsService, ClientImportService, ClientReturnsService],
+  controllers: [
+    CredentialsController,
+    ClientImportController,
+    ClientMasterController,
+    ClientReturnsController,
+  ],
+  providers: [
+    CredentialCipher,
+    CredentialsService,
+    ClientImportService,
+    ClientMasterService,
+    ClientReturnsService,
+  ],
 })
 export class CredentialsModule {}
