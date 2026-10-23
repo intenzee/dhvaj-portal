@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import { TASK_PRIORITIES } from '@hsdg/contracts';
+import { FIRM_CHECK, TASK_PRIORITIES, type Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
+import { useFirmChecks } from '@/lib/firm-checks';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
-import type { TeamMember } from '@/lib/types';
+import type { EmployeeRow, TeamMember } from '@/lib/types';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select } from '@/components/form';
@@ -28,6 +29,17 @@ export function CreateTaskModal({
   const [assignee, setAssignee] = useState('');
   const [outOfScope, setOutOfScope] = useState(false);
   const [billable, setBillable] = useState(false);
+  // With task_assign_team_only off, anyone in the office may take the task —
+  // they join the team when it is created.
+  const teamOnly = useFirmChecks()[FIRM_CHECK.taskAssignTeamOnly];
+  const office = useQuery({
+    queryKey: ['employees', 'active'],
+    queryFn: () => apiFetch<Paginated<EmployeeRow>>('/employees?limit=100&status=active'),
+    enabled: open && !teamOnly,
+    staleTime: 60_000,
+  });
+  const onTeam = new Set(team.map((m) => m.employeeId));
+  const others = teamOnly ? [] : (office.data?.items ?? []).filter((p) => !onTeam.has(p.id));
 
   const reset = (): void => {
     setTitle('');
@@ -100,14 +112,32 @@ export function CreateTaskModal({
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </Field>
           </div>
-          <Field label="Assignee" hint="Must be on the engagement team (EP, manager, or member).">
+          <Field
+            label="Assignee"
+            hint={
+              teamOnly
+                ? 'Must be on the engagement team (EP, manager, or member).'
+                : 'Anyone in the office — someone not on the team joins it.'
+            }
+          >
             <Select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
               <option value="">Unassigned</option>
-              {team.map((m) => (
-                <option key={m.employeeId} value={m.employeeId}>
-                  {m.employeeName}
-                </option>
-              ))}
+              <optgroup label="Team">
+                {team.map((m) => (
+                  <option key={m.employeeId} value={m.employeeId}>
+                    {m.employeeName}
+                  </option>
+                ))}
+              </optgroup>
+              {others.length > 0 && (
+                <optgroup label="Office">
+                  {others.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.fullName} · {p.gradeName}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </Select>
           </Field>
           <div className="space-y-1.5 rounded-lg border border-line bg-surface-sunken/40 p-3">

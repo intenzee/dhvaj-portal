@@ -1,4 +1,12 @@
-import type { TaskAction, TaskPriority, TaskStatus, WorkType } from '@hsdg/contracts';
+import {
+  FIRM_CHECK,
+  type FirmCheckKey,
+  type FirmChecks,
+  type TaskAction,
+  type TaskPriority,
+  type TaskStatus,
+  type WorkType,
+} from '@hsdg/contracts';
 
 /**
  * Change 3 — a task as the engagement task list returns it (stream, reviewer,
@@ -51,6 +59,13 @@ export interface TaskActionContext {
   me: string | null;
   /** The caller leads the engagement (partner / manager). */
   isLead: boolean;
+  /** The firm's checks (useFirmChecks). Left out, every check is on. */
+  checks?: FirmChecks;
+}
+
+/** A check is on (the old rule holds); with no checks given, all are on. */
+function strict(ctx: TaskActionContext, key: FirmCheckKey): boolean {
+  return ctx.checks ? ctx.checks[key] === true : true;
 }
 
 /** Plain-language button label per transition. */
@@ -80,17 +95,23 @@ export function taskActionLabel(action: TaskAction, status: string): string {
 export function availableTaskActions(task: WorkTask, ctx: TaskActionContext): TaskAction[] {
   const isAssignee = !!ctx.me && task.assignedToId === ctx.me;
   const isReviewer = !!ctx.me && task.reviewerId === ctx.me;
-  const canWork = isAssignee || ctx.isLead;
-  const canReview = isReviewer || ctx.isLead;
-  // Done without review only when there is no reviewer, unless a lead closes it.
-  const canComplete = ctx.isLead || (isAssignee && !task.reviewerId);
+  // With task_assignee_only off, anyone who can see the task is on the team and may move it.
+  const assigneeOnly = strict(ctx, FIRM_CHECK.taskAssigneeOnly);
+  const review = strict(ctx, FIRM_CHECK.reviewRequired);
+  const canStart = assigneeOnly ? isAssignee : !!ctx.me;
+  const canWork = !assigneeOnly || isAssignee || ctx.isLead;
+  const canReview = !assigneeOnly || isReviewer || ctx.isLead;
+  // Done without review only when there is no reviewer, unless a lead closes it
+  // (or review is optional).
+  const canComplete = canWork && (ctx.isLead || !review || !task.reviewerId);
+  const ownWork = isAssignee && !isReviewer && !ctx.isLead;
   const out: TaskAction[] = [];
   switch (task.status) {
     case 'todo':
     case 'paused':
     case 'blocked':
     case 'in_progress':
-      if (isAssignee && task.status !== 'in_progress') out.push('start');
+      if (canStart && task.status !== 'in_progress') out.push('start');
       if (canWork && task.status === 'in_progress') out.push('pause');
       if (canWork && task.status !== 'blocked') out.push('block', 'send-for-review');
       if (canComplete) out.push('complete');
@@ -99,12 +120,13 @@ export function availableTaskActions(task: WorkTask, ctx: TaskActionContext): Ta
     case 'in_review':
       if (canReview && !task.reviewStartedAt && !(isAssignee && !ctx.isLead))
         out.push('start-review');
-      if (canReview) out.push('approve', 'return');
+      if (canReview && !(ownWork && !assigneeOnly)) out.push('approve');
+      if (canReview) out.push('return');
       if (canWork) out.push('cancel');
       break;
     case 'done':
     case 'cancelled':
-      if (ctx.isLead) out.push('reopen');
+      if (ctx.isLead || (!strict(ctx, FIRM_CHECK.taskReopenLeadOnly) && !!ctx.me)) out.push('reopen');
       break;
     default:
       break;
@@ -114,3 +136,16 @@ export function availableTaskActions(task: WorkTask, ctx: TaskActionContext): Ta
 
 /** Transitions that need a typed reason (review points / what the client owes). */
 export const ACTIONS_NEEDING_REASON: TaskAction[] = ['return', 'block'];
+
+/** Whether the reason for this transition must be filled in (task_reasons_required). */
+export function reasonRequired(action: TaskAction, ctx: TaskActionContext): boolean {
+  return ACTIONS_NEEDING_REASON.includes(action) && strict(ctx, FIRM_CHECK.taskReasonsRequired);
+}
+
+/**
+ * Send for review asks who should review when review is optional and the task
+ * has no reviewer yet — nobody is picked for you.
+ */
+export function needsReviewerPick(task: WorkTask, ctx: TaskActionContext): boolean {
+  return !strict(ctx, FIRM_CHECK.reviewRequired) && !task.reviewerId;
+}
