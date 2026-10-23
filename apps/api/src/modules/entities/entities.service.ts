@@ -1612,7 +1612,7 @@ function mapSummary(row: SummaryRow): EntitySummary {
 
 /** Map PostgreSQL constraint/RLS violations to clean HTTP errors. */
 export function translatePgError(err: unknown): Error {
-  const e = err as { code?: string; constraint?: string };
+  const e = err as { code?: string; constraint?: string; message?: string };
   if (e.code === '23505') {
     if (e.constraint?.includes('pan')) {
       return new ConflictException('An entity with this PAN already exists.');
@@ -1629,6 +1629,10 @@ export function translatePgError(err: unknown): Error {
     return new ConflictException('A duplicate value violates a unique constraint.');
   }
   if (e.code === '23503') return new BadRequestException('A referenced record does not exist.');
+  // restrict_violation — a registration with a lodged return (its delete trigger says why).
+  if (e.code === '23001') {
+    return new ConflictException(e.message ?? 'This record is still in use.');
+  }
   if (e.code === '23514')
     return new BadRequestException('A value violates a constraint (check the format).');
   // new row violates row-level security policy — writing outside your office.
