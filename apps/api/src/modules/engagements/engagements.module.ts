@@ -3,6 +3,9 @@ import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { StatutoryAuditModule } from '../statutory-audit/statutory-audit.module';
 import { ComplianceModule } from '../compliance/compliance.module';
+import { StorageModule } from '../documents/storage/storage.module';
+import { EngagementPurgeService } from './purge/engagement-purge.service';
+import { EngagementPurgeController } from './purge/engagement-purge.controller';
 import { EngagementKindsService } from './engagement-kinds.service';
 import { EngagementKindsController, StreamsController } from './engagement-kinds.controller';
 import { EngagementsService } from './engagements.service';
@@ -30,7 +33,13 @@ import { EngagementTabsController } from './tabs/engagement-tabs.controller';
  * completion — see ADR-0011 and ADR-0012.
  */
 @Module({
-  imports: [AuditModule, NotificationsModule, StatutoryAuditModule, ComplianceModule],
+  imports: [
+    AuditModule,
+    NotificationsModule,
+    StatutoryAuditModule,
+    ComplianceModule,
+    StorageModule,
+  ],
   controllers: [
     EngagementKindsController,
     StreamsController,
@@ -41,6 +50,7 @@ import { EngagementTabsController } from './tabs/engagement-tabs.controller';
     EngagementTimeAutoController,
     EngagementActivityController,
     EngagementTabsController,
+    EngagementPurgeController,
   ],
   providers: [
     EngagementsService,
@@ -53,6 +63,7 @@ import { EngagementTabsController } from './tabs/engagement-tabs.controller';
     TimeCloserScheduler,
     ActivityService,
     EngagementTabsService,
+    EngagementPurgeService,
   ],
   exports: [
     EngagementsService,
