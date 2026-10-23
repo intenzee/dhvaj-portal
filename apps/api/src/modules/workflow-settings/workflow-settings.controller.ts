@@ -6,9 +6,17 @@ import {
   type FormInternalDueUpdate,
   type WorkflowSettings,
 } from '@hsdg/contracts';
-import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
+import {
+  CurrentPrincipal,
+  RequireAnyPermission,
+  RequirePermissions,
+} from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
-import { UpdateFormInternalDueDto, UpdateWorkflowSettingsDto } from './workflow-settings.dto';
+import {
+  UpdateFirmChecksDto,
+  UpdateFormInternalDueDto,
+  UpdateWorkflowSettingsDto,
+} from './workflow-settings.dto';
 import { WorkflowSettingsService } from './workflow-settings.service';
 
 /** Staff Workflow · Questions for the partners (Admin → Workflow). */
@@ -17,13 +25,14 @@ import { WorkflowSettingsService } from './workflow-settings.service';
 export class WorkflowSettingsController {
   constructor(private readonly settings: WorkflowSettingsService) {}
 
+  // Staff, and the administrator, who switches the firm's checks.
   @Get()
-  @RequirePermissions(PERMISSION.engagementRead)
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.userManage)
   @ApiOperation({
     summary: "The firm's workflow policy",
     description:
       'Default reviewer, which clients articles see, how client reminders go, who may ' +
-      'bulk-assign, and the client chasing days.',
+      "bulk-assign, the client chasing days, and the firm's checks.",
   })
   get(@CurrentPrincipal() principal: Principal): Promise<WorkflowSettings> {
     return this.settings.get(rlsContextFromPrincipal(principal));
@@ -37,6 +46,21 @@ export class WorkflowSettingsController {
     @Body() dto: UpdateWorkflowSettingsDto,
   ): Promise<WorkflowSettings> {
     return this.settings.update(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Patch('checks')
+  @RequireAnyPermission(PERMISSION.engagementRead, PERMISSION.userManage)
+  @ApiOperation({
+    summary: "Switch the firm's checks on or off (managing partner or administrator; audited)",
+    description:
+      'Each check is a rule the portal enforces while it is on; while it is off the work ' +
+      'goes ahead with a warning. All start off.',
+  })
+  updateChecks(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: UpdateFirmChecksDto,
+  ): Promise<WorkflowSettings> {
+    return this.settings.updateChecks(rlsContextFromPrincipal(principal), dto);
   }
 
   @Get('internal-due')

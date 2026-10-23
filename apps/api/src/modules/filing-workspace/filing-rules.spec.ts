@@ -1,3 +1,4 @@
+import { RELAXED_FIRM_CHECKS } from '@hsdg/contracts';
 import {
   canFlags,
   checkFiledOn,
@@ -8,6 +9,8 @@ import {
   isAnnualKey,
   lastMonthOfQuarter,
   lockState,
+  lodgeWarnings,
+  mayLodge,
   nextActionText,
   periodLabel,
   workspacePeriodLabel,
@@ -117,6 +120,7 @@ describe('filing rules', () => {
       waive: false,
       edit: true,
       certify: false,
+      complete: false,
     });
     // Only a partner on the team ticks a certification line (UDIN).
     expect(canFlags({ ...base, isPartner: true }).certify).toBe(true);
@@ -136,7 +140,102 @@ describe('filing rules', () => {
         workflowStatus: 'filed',
         isLocked: true,
       }),
-    ).toEqual({ lodge: false, undo: true, waive: false, edit: false, certify: false });
+    ).toEqual({
+      lodge: false,
+      undo: true,
+      waive: false,
+      edit: false,
+      certify: false,
+      complete: true,
+    });
+  });
+
+  describe("with the firm's checks off", () => {
+    const relaxed = RELAXED_FIRM_CHECKS;
+    const base = {
+      isLead: false,
+      isPartner: false,
+      isAssignee: false,
+      isMember: true,
+      workflowStatus: 'not_started',
+      isLocked: false,
+      hasLiveFiling: false,
+      liveRecordedAt: null,
+      now: new Date('2026-10-23T10:00:00Z'),
+    };
+
+    it('anyone on the filing lodges at any stage and marks it Not applicable', () => {
+      expect(canFlags(base, relaxed)).toMatchObject({ lodge: true, waive: true, edit: true });
+      expect(canFlags({ ...base, isMember: false }, relaxed)).toMatchObject({
+        lodge: false,
+        waive: false,
+      });
+      expect(mayLodge(base, relaxed)).toEqual({ ok: true });
+      // Only the one check on: the stage still matters, not who.
+      expect(mayLodge(base, { lodge_assignee_only: false, lodge_ready_to_file: true }).ok).toBe(
+        false,
+      );
+      expect(mayLodge(base, { lodge_assignee_only: true, lodge_ready_to_file: false }).ok).toBe(
+        false,
+      );
+    });
+
+    it('anyone on the filing undoes a lodge within 7 days; then a partner', () => {
+      const recordedAt = new Date('2026-10-20T10:00:00Z');
+      const undo = (now: string, who: Partial<typeof base> = {}) =>
+        undoAllowed(
+          {
+            isLead: false,
+            isPartner: false,
+            isMember: true,
+            ...who,
+            recordedAt,
+            now: new Date(now),
+          },
+          relaxed,
+        ).ok;
+      expect(undo('2026-10-27T09:00:00Z')).toBe(true);
+      expect(undo('2026-10-27T11:00:00Z')).toBe(false);
+      expect(undo('2026-10-27T11:00:00Z', { isLead: true })).toBe(false);
+      expect(undo('2027-01-01T00:00:00Z', { isPartner: true })).toBe(true);
+      expect(undo('2026-10-21T00:00:00Z', { isMember: false })).toBe(false);
+    });
+
+    it("leaves Outward and Inward editable after the month's 3B", () => {
+      const input = {
+        workflowStatus: 'in_preparation',
+        section: 'outward',
+        summaryFiledLabel: 'GSTR-3B Sep 2026',
+      };
+      expect(lockState(input).isLocked).toBe(true);
+      expect(lockState(input, relaxed).isLocked).toBe(false);
+      expect(lockState({ ...input, workflowStatus: 'filed' }, relaxed).isLocked).toBe(true);
+    });
+
+    it('lists what a lodge still lacks', () => {
+      const w = (over: Partial<Parameters<typeof lodgeWarnings>[0]> = {}) =>
+        lodgeWarnings({
+          referenceKind: 'arn',
+          referenceNo: 'AA0710261234567',
+          ackDocumentId: 'doc',
+          filedOn: '2026-10-11',
+          today: '2026-10-23',
+          periodEnd: '2026-09-30',
+          periodStart: '2026-09-01',
+          stream: 'gst',
+          isMeeting: false,
+          figuresMissing: false,
+          ...over,
+        }).map((x) => x.code);
+      expect(w()).toEqual([]);
+      expect(w({ ackDocumentId: null, referenceNo: null })).toEqual([
+        'ack_missing',
+        'reference_missing',
+      ]);
+      expect(w({ referenceNo: 'AA07' })).toEqual(['reference_format']);
+      expect(w({ filedOn: '2026-09-15' })).toEqual(['filed_date']);
+      expect(w({ figuresMissing: true })).toEqual(['figures_missing']);
+    });
   });
 
   it('lays out the financial year and its quarters', () => {

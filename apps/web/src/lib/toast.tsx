@@ -1,10 +1,11 @@
 'use client';
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from './cn';
 
-type ToastType = 'success' | 'error';
+/** warning: it went ahead, but something is off (a firm check that is switched off). */
+type ToastType = 'success' | 'error' | 'warning';
 interface ToastItem {
   id: number;
   message: string;
@@ -31,11 +32,17 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
             key={t.id}
             className={cn(
               'pointer-events-auto flex items-start gap-2.5 rounded-lg border bg-surface px-3.5 py-3 text-sm shadow-pop',
-              t.type === 'success' ? 'border-success-500/30' : 'border-danger-500/30',
+              t.type === 'success'
+                ? 'border-success-500/30'
+                : t.type === 'warning'
+                  ? 'border-warning-500/30'
+                  : 'border-danger-500/30',
             )}
           >
             {t.type === 'success' ? (
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success-600" />
+            ) : t.type === 'warning' ? (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-600" />
             ) : (
               <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger-600" />
             )}

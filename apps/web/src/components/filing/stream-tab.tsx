@@ -18,7 +18,15 @@ import type { TaskActionContext } from '@/lib/work-types';
 import { defaultPeriodKey } from '@/lib/period-choice';
 import { rememberPlace } from '@/lib/last-place';
 import { todayIst } from '@/components/work/my-task-columns';
-import { Button, Card, CardBody, CardHeader, CardTitle, EmptyState, Spinner } from '@/components/ui';
+import {
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Spinner,
+} from '@/components/ui';
 import { Select } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 import { WorkList } from '@/components/tasks/work-list';
@@ -40,7 +48,8 @@ export function pillTone(item: Pick<TreeItem, 'workflowStatus' | 'isOverdue' | '
       ? 'border-warning-500/30 bg-warning-50 text-warning-700'
       : 'border-success-500/30 bg-success-50 text-success-700';
   }
-  if (item.workflowStatus === 'not_applicable') return 'border-line bg-surface-sunken text-ink-muted line-through';
+  if (item.workflowStatus === 'not_applicable')
+    return 'border-line bg-surface-sunken text-ink-muted line-through';
   if (item.isOverdue) return 'border-danger-500/30 bg-danger-50 text-danger-700';
   if (item.workflowStatus === 'not_started') return 'border-line bg-surface-raised text-ink-muted';
   return 'border-primary-500/30 bg-primary-50 text-primary-700';
@@ -52,7 +61,15 @@ export function periodParam(stream: Stream, periodKey: string): { key: 'm' | 'p'
   return m ? { key: 'm', value: m } : { key: 'p', value: periodKey };
 }
 
-function Pill({ item, stream, label }: { item: TreeItem; stream: Stream; label?: string }): JSX.Element {
+function Pill({
+  item,
+  stream,
+  label,
+}: {
+  item: TreeItem;
+  stream: Stream;
+  label?: string;
+}): JSX.Element {
   const done = filingEnd(stream, item.section, item.ruleCode).done.toLowerCase();
   return (
     <span
@@ -66,6 +83,24 @@ function Pill({ item, stream, label }: { item: TreeItem; stream: Stream; label?:
         </span>
       )}
       {item.workflowStatus === 'filed' && <span aria-hidden>✓</span>}
+      {(item.ackMissing || item.referenceMissing) && (
+        <span
+          className="text-warning-700"
+          title={
+            item.ackMissing && item.referenceMissing
+              ? 'The acknowledgement and reference are still to be added.'
+              : item.ackMissing
+                ? 'The acknowledgement is still to be added.'
+                : 'The reference number is still to be added.'
+          }
+        >
+          {item.ackMissing && item.referenceMissing
+            ? 'ack & ref?'
+            : item.ackMissing
+              ? 'ack?'
+              : 'ref?'}
+        </span>
+      )}
       {item.dscWarning && (
         <span className="text-warning-700" aria-label={item.dscWarning}>
           DSC
@@ -111,13 +146,16 @@ export function StreamTab({
     staleTime: 60_000,
   });
   const registrationId =
-    regQ.data?.registrations.find((r) => r.number === gstin)?.id ?? regQ.data?.registrationId ?? null;
+    regQ.data?.registrations.find((r) => r.number === gstin)?.id ??
+    regQ.data?.registrationId ??
+    null;
   const qs = new URLSearchParams();
   if (registrationId) qs.set('registrationId', registrationId);
   if (fyParam) qs.set('fy', fyParam);
   const q = useQuery({
     queryKey: ['filing', 'tree', engagementId, stream, qs.toString()],
-    queryFn: () => apiFetch<StreamTree>(`/engagements/${engagementId}/streams/${stream}/tree?${qs.toString()}`),
+    queryFn: () =>
+      apiFetch<StreamTree>(`/engagements/${engagementId}/streams/${stream}/tree?${qs.toString()}`),
     enabled: regQ.isSuccess,
   });
 
@@ -175,7 +213,11 @@ export function StreamTab({
   if (regQ.isLoading || q.isLoading) return <Spinner />;
   const err = regQ.error ?? q.error;
   if (err || !tree) {
-    return <EmptyState>{err instanceof ApiError ? err.message : 'Could not load this stream.'}</EmptyState>;
+    return (
+      <EmptyState>
+        {err instanceof ApiError ? err.message : 'Could not load this stream.'}
+      </EmptyState>
+    );
   }
 
   // A GST / TDS stream with no registration behind it has nothing to file:
@@ -183,18 +225,27 @@ export function StreamTab({
   const regTypes = STREAM_REGISTRATION_TYPES[stream];
   const hasFilings =
     tree.annual.length > 0 ||
-    tree.periods.some((p) => p.items.length > 0 || Object.values(p.sections).some((x) => x?.length));
-  if (stream !== 'roc' && !regTypes.includes('entity') && tree.registrations.length === 0 && !hasFilings) {
+    tree.periods.some(
+      (p) => p.items.length > 0 || Object.values(p.sections).some((x) => x?.length),
+    );
+  if (
+    stream !== 'roc' &&
+    !regTypes.includes('entity') &&
+    tree.registrations.length === 0 &&
+    !hasFilings
+  ) {
     const kind = regTypes.join(' / ').toUpperCase();
     return (
       <Card>
         <CardBody className="space-y-3">
           <p className="text-sm text-ink">
-            No {kind} on this engagement yet, so there are no {STREAM_LABEL[stream]} returns to show.
+            No {kind} on this engagement yet, so there are no {STREAM_LABEL[stream]} returns to
+            show.
           </p>
           <p className="text-xs text-ink-muted">
-            {STREAM_LABEL[stream]} returns are built per {kind}. Add the client’s {kind} on the client’s
-            page (Registrations) — the calendar rebuilds itself — or rebuild it here once it is on file.
+            {STREAM_LABEL[stream]} returns are built per {kind}. Add the client’s {kind} on the
+            client’s page (Registrations) — the calendar rebuilds itself — or rebuild it here once
+            it is on file.
           </p>
           {ctx.isLead && (
             <div className="flex items-center gap-3">
@@ -224,7 +275,12 @@ export function StreamTab({
     stream === 'roc' ? (
       <RocEvents engagementId={engagementId} isLead={ctx.isLead} financialYear={fy ?? null} />
     ) : null;
-  if (rocPanel && tree.registrations.length === 0 && tree.annual.length === 0 && tree.periods.length === 0) {
+  if (
+    rocPanel &&
+    tree.registrations.length === 0 &&
+    tree.annual.length === 0 &&
+    tree.periods.length === 0
+  ) {
     return rocPanel;
   }
 
@@ -244,7 +300,9 @@ export function StreamTab({
                   aria-selected={active}
                   onClick={() => url.set({ gstin: r.number, m: null, p: null })}
                   className={`rounded-md border px-2.5 py-1 text-xs ${
-                    active ? 'border-primary-600 bg-primary-600 text-white' : 'border-line hover:border-primary-600/60'
+                    active
+                      ? 'border-primary-600 bg-primary-600 text-white'
+                      : 'border-line hover:border-primary-600/60'
                   }`}
                 >
                   <span className="font-mono">{r.number}</span>
@@ -257,7 +315,8 @@ export function StreamTab({
         )}
         {tree.registrations.length === 1 && (
           <span className="text-xs text-ink-muted">
-            {tree.registrations[0]!.label} <span className="font-mono">{tree.registrations[0]!.number}</span>
+            {tree.registrations[0]!.label}{' '}
+            <span className="font-mono">{tree.registrations[0]!.number}</span>
           </span>
         )}
         <Select
@@ -344,13 +403,22 @@ export function StreamTab({
                           {sectioned
                             ? GST_SECTIONS.flatMap((s) =>
                                 (p.sections[s.key] ?? []).map((i) => (
-                                  <Pill key={i.instanceId} item={i} stream={stream} label={`${s.label}: ${i.label}`} />
+                                  <Pill
+                                    key={i.instanceId}
+                                    item={i}
+                                    stream={stream}
+                                    label={`${s.label}: ${i.label}`}
+                                  />
                                 )),
                               )
-                            : p.items.map((i) => <Pill key={i.instanceId} item={i} stream={stream} />)}
+                            : p.items.map((i) => (
+                                <Pill key={i.instanceId} item={i} stream={stream} />
+                              ))}
                         </span>
                         {p.nextAction && (
-                          <span className="ml-auto text-xs text-ink-muted">Next: {p.nextAction}</span>
+                          <span className="ml-auto text-xs text-ink-muted">
+                            Next: {p.nextAction}
+                          </span>
                         )}
                       </button>
                       {ctx.isLead && (
@@ -363,19 +431,33 @@ export function StreamTab({
                       )}
                     </div>
                     {open && (
-                      <div data-open-period={p.periodKey} className="border-l-4 border-l-primary-600 bg-surface-sunken/40 px-4 py-3">
+                      <div
+                        data-open-period={p.periodKey}
+                        className="border-l-4 border-l-primary-600 bg-surface-sunken/40 px-4 py-3"
+                      >
                         {sectioned ? (
                           <div className="grid gap-4 lg:grid-cols-3">
                             {GST_SECTIONS.map((s) => (
-                              <section key={s.key} aria-label={s.label} data-part={s.key} className="min-w-0 space-y-3">
-                                <h4 data-part-heading className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                              <section
+                                key={s.key}
+                                aria-label={s.label}
+                                data-part={s.key}
+                                className="min-w-0 space-y-3"
+                              >
+                                <h4
+                                  data-part-heading
+                                  className="text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                                >
                                   {s.label}
                                 </h4>
                                 {(p.sections[s.key] ?? []).length === 0 ? (
                                   <p className="text-xs text-ink-muted">Nothing due.</p>
                                 ) : (
                                   (p.sections[s.key] ?? []).map((i) => (
-                                    <div key={i.instanceId} className="rounded-lg border border-line bg-surface p-3">
+                                    <div
+                                      key={i.instanceId}
+                                      className="rounded-lg border border-line bg-surface p-3"
+                                    >
                                       <InstanceWorkspace
                                         instanceId={i.instanceId}
                                         ctx={ctx}
@@ -391,12 +473,15 @@ export function StreamTab({
                         ) : (
                           <div className="space-y-3">
                             {p.items.map((i) => (
-                              <div key={i.instanceId} className="rounded-lg border border-line bg-surface p-3">
+                              <div
+                                key={i.instanceId}
+                                className="rounded-lg border border-line bg-surface p-3"
+                              >
                                 <InstanceWorkspace
                                   instanceId={i.instanceId}
                                   ctx={ctx}
                                   correctionTargets={targetsFor(p)}
-                                        team={team}
+                                  team={team}
                                 />
                               </div>
                             ))}

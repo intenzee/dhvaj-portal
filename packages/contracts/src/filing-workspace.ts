@@ -37,6 +37,8 @@ export const FILING_REFERENCE_KINDS: FilingReferenceKind[] = Object.values(FILIN
 
 /** A lead may undo a lodge within this many hours; after that only a partner. */
 export const LODGE_UNDO_LEAD_HOURS = 24;
+/** While the firm's undo check is off, anyone on the filing may undo it within this many days. */
+export const LODGE_UNDO_TEAM_DAYS = 7;
 
 export interface ChecklistItem {
   id: string;
@@ -116,7 +118,8 @@ export interface FigureField {
 export interface FilingRecordView {
   id: string;
   referenceKind: FilingReferenceKind;
-  referenceNo: string;
+  /** Null while the reference is still to be added (the firm's check is off). */
+  referenceNo: string | null;
   filedOn: string;
   filedById: string | null;
   filedByName: string | null;
@@ -126,7 +129,8 @@ export interface FilingRecordView {
   interestPaid: number | null;
   /** ROC: the normal filing fee (the additional fee is lateFeePaid). */
   normalFeePaid: number | null;
-  ackDocumentId: string;
+  /** Null while the acknowledgement is still to be added (the firm's check is off). */
+  ackDocumentId: string | null;
   remarks: string | null;
   recordedAt: string;
   /** Filed after the statutory date (as extended). Not a status. */
@@ -152,7 +156,13 @@ export interface CrossCheckWarning {
     | 'itc_exceeds_2b'
     | 'lut_missing'
     | 'required_open'
-    | 'dsc_expiring';
+    | 'dsc_expiring'
+    // A lodge recorded while the firm's checks are off, still to tidy up.
+    | 'ack_missing'
+    | 'reference_missing'
+    | 'reference_format'
+    | 'filed_date'
+    | 'figures_missing';
   message: string;
 }
 
@@ -256,7 +266,15 @@ export interface InstanceWorkspace {
   /** Open client requests (roc-mca §10: MGT-8, MR-3, the director's DSC …). */
   clientRequests?: WorkspaceClientRequest[];
   /** certify: tick a partner's line (CERT, with the UDIN). */
-  can: { lodge: boolean; undo: boolean; waive: boolean; edit: boolean; certify: boolean };
+  can: {
+    lodge: boolean;
+    undo: boolean;
+    waive: boolean;
+    edit: boolean;
+    certify: boolean;
+    /** Add the acknowledgement or reference a lodge was recorded without. */
+    complete: boolean;
+  };
 }
 
 /** One filing in the stream tree. */
@@ -281,6 +299,9 @@ export interface TreeItem {
   removed?: boolean;
   /** ROC: a director's DSC lapses before the due date ("DSC of A Kumar expires 12 Nov 2026"). */
   dscWarning?: string | null;
+  /** Filed, but the acknowledgement or the reference number is still to be added. */
+  ackMissing?: boolean;
+  referenceMissing?: boolean;
 }
 
 export interface TreePeriod {
@@ -334,11 +355,11 @@ export interface LastPeriodView {
     /** The filed reference (the latest lodge not undone). */
     filing: {
       referenceKind: FilingReferenceKind;
-      referenceNo: string;
+      referenceNo: string | null;
       filedOn: string;
       filedByName: string | null;
       isNil: boolean;
-      ackDocumentId: string;
+      ackDocumentId: string | null;
     } | null;
     checklist: {
       itemCode: string;

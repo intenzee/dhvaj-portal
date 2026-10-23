@@ -33,16 +33,47 @@ export interface TransitionActor {
   isLead: boolean;
 }
 
+/**
+ * The firm's task checks (Admin → Workflow → Checks). Each true keeps the old
+ * rule; false lets the work through, with a warning where something is off.
+ */
+export interface TaskChecks {
+  /** review_required — a reviewer is defaulted on Send for review, and a task
+   *  with a reviewer goes through review before Done. */
+  review: boolean;
+  /** task_assignee_only — only the assignee (or a lead) moves the task. */
+  assigneeOnly: boolean;
+  /** task_reasons_required — review points / the client's need are written down. */
+  reasons: boolean;
+  /** task_reopen_lead_only — only a lead reopens a finished task. */
+  reopenLeadOnly: boolean;
+  /** task_blockers — a task waiting on another cannot be completed. */
+  blockers: boolean;
+}
+
+/** Every check on: the rules as they were before the checks could be switched off. */
+export const STRICT_TASK_CHECKS: TaskChecks = {
+  review: true,
+  assigneeOnly: true,
+  reasons: true,
+  reopenLeadOnly: true,
+  blockers: true,
+};
+
 export interface TransitionInput {
   action: TaskAction;
   status: TaskStatus;
   actor: TransitionActor;
   hasAssignee: boolean;
   hasReviewer: boolean;
+  /** A reviewer was named with the request (Send for review). */
+  reviewerGiven?: boolean;
   /** Open tasks this one depends on (a task cannot be done while any is open). */
   blockedByOpenCount: number;
   /** Non-empty reason text supplied with the request. */
   hasReason: boolean;
+  /** Defaults to every check on. */
+  checks?: TaskChecks;
 }
 
 export interface TransitionPlan {
@@ -63,6 +94,10 @@ export interface TransitionPlan {
   completion: 'set' | 'clear' | null;
   /** Raise a client dependency (Waiting on client). */
   raiseDependency: boolean;
+  /** Starting an unassigned task makes the caller its assignee. */
+  claim: boolean;
+  /** Went ahead, but something is off (the check for it is switched off). */
+  warnings: string[];
 }
 
 export type TransitionErrorCode = 'forbidden' | 'invalid_state' | 'bad_request';
@@ -90,6 +125,8 @@ function base(toStatus: TaskStatus): TransitionPlan {
     review: null,
     completion: null,
     raiseDependency: false,
+    claim: false,
+    warnings: [],
   };
 }
 
@@ -102,24 +139,36 @@ function requireFrom(status: TaskStatus, allowed: TaskStatus[], what: string): v
   }
 }
 
-function requireAssigneeOrLead(actor: TransitionActor, what: string): void {
-  if (!actor.isAssignee && !actor.isLead) {
+/** Seeing the task makes the caller a member (RLS), so with the check off anyone may. */
+function requireAssigneeOrLead(actor: TransitionActor, checks: TaskChecks, what: string): void {
+  if (checks.assigneeOnly && !actor.isAssignee && !actor.isLead) {
     throw new TransitionError('forbidden', `Only the assignee or an engagement lead may ${what}.`);
   }
 }
 
-function requireReviewerOrLead(actor: TransitionActor, what: string): void {
-  if (!actor.isReviewer && !actor.isLead) {
+function requireReviewerOrLead(actor: TransitionActor, checks: TaskChecks, what: string): void {
+  if (checks.assigneeOnly && !actor.isReviewer && !actor.isLead) {
     throw new TransitionError('forbidden', `Only the reviewer or an engagement lead may ${what}.`);
   }
+}
+
+/** Open blockers refuse completion, or warn while the check is off. */
+function blockerWarnings(input: TransitionInput, checks: TaskChecks): string[] {
+  if (input.blockedByOpenCount === 0) return [];
+  const message = `${input.blockedByOpenCount} blocking task(s) are not done.`;
+  if (checks.blockers) {
+    throw new TransitionError('invalid_state', `Cannot complete: ${message}`);
+  }
+  return [`Completed while ${message}`];
 }
 
 /** Plan a transition, or throw a TransitionError. Pure. */
 export function planTransition(input: TransitionInput): TransitionPlan {
   const { action, status, actor } = input;
+  const checks = input.checks ?? STRICT_TASK_CHECKS;
   switch (action) {
     case TASK_ACTION.start: {
-      if (!actor.isAssignee) {
+      if (checks.assigneeOnly && !actor.isAssignee) {
         throw new TransitionError(
           'forbidden',
           input.hasAssignee
@@ -128,10 +177,15 @@ export function planTransition(input: TransitionInput): TransitionPlan {
         );
       }
       requireFrom(status, [S.todo, S.paused, S.blocked, S.inProgress], 'start work on');
-      return { ...base(S.inProgress), open: TIME_ENTRY_KIND.work, completion: 'clear' };
+      return {
+        ...base(S.inProgress),
+        open: TIME_ENTRY_KIND.work,
+        completion: 'clear',
+        claim: !input.hasAssignee,
+      };
     }
     case TASK_ACTION.pause: {
-      requireAssigneeOrLead(actor, 'pause this task');
+      requireAssigneeOrLead(actor, checks, 'pause this task');
       requireFrom(status, [S.inProgress], 'pause');
       return {
         ...base(S.paused),
@@ -139,9 +193,9 @@ export function planTransition(input: TransitionInput): TransitionPlan {
       };
     }
     case TASK_ACTION.block: {
-      requireAssigneeOrLead(actor, 'mark this task as waiting on the client');
+      requireAssigneeOrLead(actor, checks, 'mark this task as waiting on the client');
       requireFrom(status, [S.todo, S.inProgress, S.paused], 'mark as waiting on client');
-      if (!input.hasReason) {
+      if (checks.reasons && !input.hasReason) {
         throw new TransitionError('bad_request', 'Say what is needed from the client.');
       }
       return {
@@ -151,18 +205,23 @@ export function planTransition(input: TransitionInput): TransitionPlan {
       };
     }
     case TASK_ACTION.sendForReview: {
-      requireAssigneeOrLead(actor, 'send this task for review');
+      requireAssigneeOrLead(actor, checks, 'send this task for review');
       requireFrom(status, [S.todo, S.inProgress, S.paused], 'send for review');
+      // With review optional nobody is picked for you: asking for a review
+      // means naming who should do it.
+      if (!checks.review && !input.hasReviewer && !input.reviewerGiven) {
+        throw new TransitionError('bad_request', 'Pick who should review this task.');
+      }
       return {
         ...base(S.inReview),
         close: { kinds: [TIME_ENTRY_KIND.work], reason: TIME_STOP_REASON.submittedForReview },
         notify: 'reviewer',
-        defaultReviewer: !input.hasReviewer,
+        defaultReviewer: checks.review && !input.hasReviewer,
         review: 'sent',
       };
     }
     case TASK_ACTION.startReview: {
-      requireReviewerOrLead(actor, 'start the review');
+      requireReviewerOrLead(actor, checks, 'start the review');
       requireFrom(status, [S.inReview], 'start reviewing');
       if (actor.isAssignee && !actor.isLead) {
         throw new TransitionError('forbidden', 'You cannot review your own work.');
@@ -175,25 +234,24 @@ export function planTransition(input: TransitionInput): TransitionPlan {
       };
     }
     case TASK_ACTION.approve: {
-      requireReviewerOrLead(actor, 'approve this task');
+      requireReviewerOrLead(actor, checks, 'approve this task');
       requireFrom(status, [S.inReview], 'approve');
-      if (input.blockedByOpenCount > 0) {
-        throw new TransitionError(
-          'invalid_state',
-          `Cannot complete: ${input.blockedByOpenCount} blocking task(s) are not done.`,
-        );
+      if (!checks.assigneeOnly && actor.isAssignee && !actor.isReviewer && !actor.isLead) {
+        throw new TransitionError('forbidden', 'You cannot approve your own work.');
       }
+      const warnings = blockerWarnings(input, checks);
       return {
         ...base(S.done),
         close: { kinds: [TIME_ENTRY_KIND.review], reason: TIME_STOP_REASON.reviewApproved },
         review: 'cleared',
         completion: 'set',
+        warnings,
       };
     }
     case TASK_ACTION.return: {
-      requireReviewerOrLead(actor, 'return this task');
+      requireReviewerOrLead(actor, checks, 'return this task');
       requireFrom(status, [S.inReview], 'return');
-      if (!input.hasReason) {
+      if (checks.reasons && !input.hasReason) {
         throw new TransitionError('bad_request', 'Give the review points when returning a task.');
       }
       return {
@@ -204,20 +262,15 @@ export function planTransition(input: TransitionInput): TransitionPlan {
       };
     }
     case TASK_ACTION.complete: {
-      requireAssigneeOrLead(actor, 'complete this task');
+      requireAssigneeOrLead(actor, checks, 'complete this task');
       requireFrom(status, WORKABLE, 'complete');
-      if (input.hasReviewer && !actor.isLead) {
+      if (checks.review && input.hasReviewer && !actor.isLead) {
         throw new TransitionError(
           'forbidden',
           'This task has a reviewer — send it for review instead of marking it done.',
         );
       }
-      if (input.blockedByOpenCount > 0) {
-        throw new TransitionError(
-          'invalid_state',
-          `Cannot complete: ${input.blockedByOpenCount} blocking task(s) are not done.`,
-        );
-      }
+      const warnings = blockerWarnings(input, checks);
       return {
         ...base(S.done),
         close: {
@@ -226,10 +279,11 @@ export function planTransition(input: TransitionInput): TransitionPlan {
         },
         review: 'cleared',
         completion: 'set',
+        warnings,
       };
     }
     case TASK_ACTION.cancel: {
-      requireAssigneeOrLead(actor, 'cancel this task');
+      requireAssigneeOrLead(actor, checks, 'cancel this task');
       requireFrom(status, [...WORKABLE, S.inReview], 'cancel');
       return {
         ...base(S.cancelled),
@@ -242,7 +296,7 @@ export function planTransition(input: TransitionInput): TransitionPlan {
       };
     }
     case TASK_ACTION.reopen: {
-      if (!actor.isLead) {
+      if (checks.reopenLeadOnly && !actor.isLead) {
         throw new TransitionError('forbidden', 'Only an engagement lead may reopen a task.');
       }
       requireFrom(status, [S.done, S.cancelled], 'reopen');

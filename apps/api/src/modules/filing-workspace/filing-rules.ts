@@ -6,8 +6,12 @@
 import {
   FILING_REFERENCE_KIND,
   LODGE_UNDO_LEAD_HOURS,
+  LODGE_UNDO_TEAM_DAYS,
+  STRICT_FIRM_CHECKS,
   calendarHalfLabel,
+  type CrossCheckWarning,
   type FilingReferenceKind,
+  type FirmChecks,
 } from '@hsdg/contracts';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -85,17 +89,37 @@ export function meetingReference(heldOn: string): string {
   return `MTG-${heldOn}`;
 }
 
-/** Undo a lodge: a lead within 24 hours, a partner any time. Reason required. */
-export function undoAllowed(input: {
-  isLead: boolean;
-  isPartner: boolean;
-  recordedAt: Date;
-  now: Date;
-}): { ok: true } | { ok: false; why: string } {
+/**
+ * Undo a lodge: a partner any time. With the firm's undo check on, a lead
+ * within 24 hours; with it off, anyone on the filing within 7 days. Reason
+ * required either way.
+ */
+export function undoAllowed(
+  input: {
+    isLead: boolean;
+    isPartner: boolean;
+    isMember?: boolean;
+    recordedAt: Date;
+    now: Date;
+  },
+  checks: Pick<FirmChecks, 'undo_lead_only'> = STRICT_FIRM_CHECKS,
+): { ok: true } | { ok: false; why: string } {
   if (input.isPartner) return { ok: true };
+  const hours = (input.now.getTime() - input.recordedAt.getTime()) / 3_600_000;
+  if (!checks.undo_lead_only) {
+    if (!input.isLead && !input.isMember) {
+      return { ok: false, why: 'Only someone working on this engagement can undo a lodge.' };
+    }
+    if (hours > LODGE_UNDO_TEAM_DAYS * 24) {
+      return {
+        ok: false,
+        why: `After ${LODGE_UNDO_TEAM_DAYS} days only a partner can undo a lodge.`,
+      };
+    }
+    return { ok: true };
+  }
   if (!input.isLead)
     return { ok: false, why: 'Only the engagement manager or partner can undo a lodge.' };
-  const hours = (input.now.getTime() - input.recordedAt.getTime()) / 3_600_000;
   if (hours > LODGE_UNDO_LEAD_HOURS) {
     return {
       ok: false,
@@ -107,51 +131,151 @@ export function undoAllowed(input: {
 
 /**
  * A filing is read-only once it is filed or waived; a month's Outward and
- * Inward become read-only for slots and figures once that month's 3B is filed.
+ * Inward become read-only for slots and figures once that month's 3B is filed
+ * — while the firm's lock_after_summary check is on.
  */
-export function lockState(input: {
-  workflowStatus: string;
-  section: string | null;
-  summaryFiledLabel: string | null;
-}): { isLocked: boolean; reason: string | null } {
+export function lockState(
+  input: {
+    workflowStatus: string;
+    section: string | null;
+    summaryFiledLabel: string | null;
+  },
+  checks: Pick<FirmChecks, 'lock_after_summary'> = STRICT_FIRM_CHECKS,
+): { isLocked: boolean; reason: string | null } {
   if (input.workflowStatus === 'filed')
     return { isLocked: true, reason: 'Filed — undo the lodge to change it.' };
   if (input.workflowStatus === 'not_applicable') {
     return { isLocked: true, reason: 'Marked not applicable.' };
   }
-  if ((input.section === 'outward' || input.section === 'inward') && input.summaryFiledLabel) {
+  if (
+    checks.lock_after_summary &&
+    (input.section === 'outward' || input.section === 'inward') &&
+    input.summaryFiledLabel
+  ) {
     return { isLocked: true, reason: `${input.summaryFiledLabel} is filed for this period.` };
   }
   return { isLocked: false, reason: null };
 }
 
-export function canFlags(input: {
-  isLead: boolean;
-  isPartner: boolean;
-  isAssignee: boolean;
-  isMember: boolean;
-  workflowStatus: string;
-  isLocked: boolean;
-  hasLiveFiling: boolean;
-  liveRecordedAt: Date | null;
-  now: Date;
-}): { lodge: boolean; undo: boolean; waive: boolean; edit: boolean; certify: boolean } {
+/**
+ * Who may lodge: with lodge_assignee_only on, the assignee or a lead (else
+ * anyone on the filing); with lodge_ready_to_file on, staff only once it is
+ * Ready to file (a lead any time).
+ */
+export function mayLodge(
+  input: { isLead: boolean; isAssignee: boolean; isMember: boolean; workflowStatus: string },
+  checks: Pick<FirmChecks, 'lodge_assignee_only' | 'lodge_ready_to_file'> = STRICT_FIRM_CHECKS,
+): { ok: true } | { ok: false; why: string } {
+  if (checks.lodge_assignee_only ? !input.isLead && !input.isAssignee : !input.isMember) {
+    return {
+      ok: false,
+      why: checks.lodge_assignee_only
+        ? 'Only the person this filing is assigned to, or the engagement partner or manager, ' +
+          'can lodge it. Ask the engagement manager to assign the filing to you.'
+        : 'Only someone working on this engagement can lodge it.',
+    };
+  }
+  if (checks.lodge_ready_to_file && !input.isLead && input.workflowStatus !== 'ready_to_file') {
+    return {
+      ok: false,
+      why: 'This filing is not Ready to file yet — it needs the reviewer’s approval first.',
+    };
+  }
+  return { ok: true };
+}
+
+export function canFlags(
+  input: {
+    isLead: boolean;
+    isPartner: boolean;
+    isAssignee: boolean;
+    isMember: boolean;
+    workflowStatus: string;
+    isLocked: boolean;
+    hasLiveFiling: boolean;
+    liveRecordedAt: Date | null;
+    now: Date;
+  },
+  checks: FirmChecks = STRICT_FIRM_CHECKS,
+): {
+  lodge: boolean;
+  undo: boolean;
+  waive: boolean;
+  edit: boolean;
+  certify: boolean;
+  complete: boolean;
+} {
   const open = !input.hasLiveFiling && input.workflowStatus !== 'not_applicable';
   return {
-    lodge: open && (input.isLead || (input.isAssignee && input.workflowStatus === 'ready_to_file')),
+    lodge: open && mayLodge(input, checks).ok,
     undo:
       input.hasLiveFiling &&
       !!input.liveRecordedAt &&
-      undoAllowed({
-        isLead: input.isLead,
-        isPartner: input.isPartner,
-        recordedAt: input.liveRecordedAt,
-        now: input.now,
-      }).ok,
-    waive: input.isLead && !input.hasLiveFiling,
+      undoAllowed(
+        {
+          isLead: input.isLead,
+          isPartner: input.isPartner,
+          isMember: input.isMember,
+          recordedAt: input.liveRecordedAt,
+          now: input.now,
+        },
+        checks,
+      ).ok,
+    waive:
+      (checks.waive_lead_only ? input.isLead : input.isMember || input.isLead) &&
+      !input.hasLiveFiling,
     edit: input.isMember && !input.isLocked,
     certify: input.isPartner && input.isMember && !input.isLocked,
+    // Fill in the acknowledgement or reference a lodge was recorded without.
+    complete: input.hasLiveFiling && (input.isMember || input.isLead),
   };
+}
+
+/**
+ * What a live lodge still lacks — recorded while the firm's checks were off —
+ * so the team can tidy it up: the acknowledgement, the reference, a reference
+ * in the wrong shape, a filing date outside the period's rules, the figures.
+ */
+export function lodgeWarnings(input: {
+  referenceKind: FilingReferenceKind;
+  referenceNo: string | null;
+  ackDocumentId: string | null;
+  filedOn: string;
+  today: string;
+  periodEnd: string | null;
+  periodStart: string | null;
+  stream: string | null;
+  isMeeting: boolean;
+  figuresMissing: boolean;
+}): CrossCheckWarning[] {
+  const out: CrossCheckWarning[] = [];
+  if (!input.ackDocumentId) {
+    out.push({
+      code: 'ack_missing',
+      message: 'Filed — the acknowledgement is still to be added.',
+    });
+  }
+  if (!input.referenceNo) {
+    out.push({
+      code: 'reference_missing',
+      message: 'Filed — the reference number is still to be added.',
+    });
+  } else {
+    const ref = checkReference(input.referenceKind, input.referenceNo, input.stream);
+    if ('error' in ref)
+      out.push({ code: 'reference_format', message: `Check the reference: ${ref.error}` });
+  }
+  const dateRule = checkFiledOn(
+    input.filedOn,
+    input.today,
+    input.periodEnd,
+    input.isMeeting ? { periodStart: input.periodStart } : undefined,
+  );
+  if (dateRule) out.push({ code: 'filed_date', message: `Check the date: ${dateRule}` });
+  if (input.figuresMissing) {
+    out.push({ code: 'figures_missing', message: 'Filed — the figures are still to be entered.' });
+  }
+  return out;
 }
 
 /** The twelve month keys of a financial year '2026-27', April to March. */
