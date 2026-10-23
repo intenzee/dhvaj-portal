@@ -415,94 +415,102 @@ export class EntitiesService {
   }
 
   async updateEntity(ctx: RlsContext, id: string, input: UpdateEntityInput): Promise<EntityDetail> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectDetail(client, id);
-      if (!before) throw new NotFoundException('Entity not found.');
+    return this.db.withRlsContext(ctx, (client) => this.updateEntityWith(client, ctx, id, input));
+  }
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
-      const set = (col: string, val: unknown): void => {
-        params.push(val);
-        sets.push(`${col} = $${params.length}`);
-      };
+  /** updateEntity inside the caller's transaction (the client master import). */
+  async updateEntityWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    id: string,
+    input: UpdateEntityInput,
+  ): Promise<EntityDetail> {
+    const before = await this.selectDetail(client, id);
+    if (!before) throw new NotFoundException('Entity not found.');
 
-      if (input.legalName !== undefined) set('legal_name', input.legalName);
-      if (input.displayName !== undefined) set('display_name', input.displayName);
-      if (input.tradeName !== undefined) set('trade_name', input.tradeName);
-      if (input.shortName !== undefined) set('short_name', input.shortName);
-      if (input.typeSlug !== undefined) {
-        set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
-      }
-      if (input.officeCode !== undefined) {
-        set('home_office_id', await this.resolveOfficeId(client, input.officeCode));
-      }
-      if (input.clientId !== undefined) set('client_id', input.clientId);
-      if (input.pan !== undefined) set('pan', input.pan);
-      if (input.parentEntityId !== undefined) set('parent_entity_id', input.parentEntityId);
-      if (input.status !== undefined) set('status', input.status);
-      if (input.legalStatus !== undefined) set('legal_status', input.legalStatus);
-      if (input.regulatoryProfileStatus !== undefined)
-        set('regulatory_profile_status', input.regulatoryProfileStatus);
-      if (input.listingStatus !== undefined) set('listing_status', input.listingStatus);
-      if (input.currentAccountingFramework !== undefined)
-        set('current_accounting_framework', input.currentAccountingFramework);
-      if (input.countryOfIncorporation !== undefined)
-        set('country_of_incorporation', input.countryOfIncorporation);
-      if (input.incorporationDate !== undefined) set('incorporation_date', input.incorporationDate);
-      if (input.roc !== undefined) set('roc', input.roc);
-      if (input.authorisedCapital !== undefined) set('authorised_capital', input.authorisedCapital);
-      if (input.paidUpCapital !== undefined) set('paid_up_capital', input.paidUpCapital);
-      if (input.llpContribution !== undefined) set('llp_contribution', input.llpContribution);
-      if (input.businessDescription !== undefined)
-        set('business_description', input.businessDescription);
-      if (input.activities) {
-        const a = input.activities;
-        if (a.manufacturing !== undefined) set('act_manufacturing', a.manufacturing);
-        if (a.trading !== undefined) set('act_trading', a.trading);
-        if (a.services !== undefined) set('act_services', a.services);
-        if (a.import !== undefined) set('act_import', a.import);
-        if (a.export !== undefined) set('act_export', a.export);
-        if (a.ecommerce !== undefined) set('act_ecommerce', a.ecommerce);
-        if (a.regulated !== undefined) set('act_regulated', a.regulated);
-      }
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const set = (col: string, val: unknown): void => {
+      params.push(val);
+      sets.push(`${col} = $${params.length}`);
+    };
 
-      if (sets.length === 0) return before;
+    if (input.legalName !== undefined) set('legal_name', input.legalName);
+    if (input.displayName !== undefined) set('display_name', input.displayName);
+    if (input.tradeName !== undefined) set('trade_name', input.tradeName);
+    if (input.shortName !== undefined) set('short_name', input.shortName);
+    if (input.typeSlug !== undefined) {
+      set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
+    }
+    if (input.officeCode !== undefined) {
+      set('home_office_id', await this.resolveOfficeId(client, input.officeCode));
+    }
+    if (input.clientId !== undefined) set('client_id', input.clientId);
+    if (input.pan !== undefined) set('pan', input.pan);
+    if (input.parentEntityId !== undefined) set('parent_entity_id', input.parentEntityId);
+    if (input.status !== undefined) set('status', input.status);
+    if (input.legalStatus !== undefined) set('legal_status', input.legalStatus);
+    if (input.regulatoryProfileStatus !== undefined)
+      set('regulatory_profile_status', input.regulatoryProfileStatus);
+    if (input.listingStatus !== undefined) set('listing_status', input.listingStatus);
+    if (input.currentAccountingFramework !== undefined)
+      set('current_accounting_framework', input.currentAccountingFramework);
+    if (input.countryOfIncorporation !== undefined)
+      set('country_of_incorporation', input.countryOfIncorporation);
+    if (input.incorporationDate !== undefined) set('incorporation_date', input.incorporationDate);
+    if (input.roc !== undefined) set('roc', input.roc);
+    if (input.authorisedCapital !== undefined) set('authorised_capital', input.authorisedCapital);
+    if (input.paidUpCapital !== undefined) set('paid_up_capital', input.paidUpCapital);
+    if (input.llpContribution !== undefined) set('llp_contribution', input.llpContribution);
+    if (input.businessDescription !== undefined)
+      set('business_description', input.businessDescription);
+    if (input.activities) {
+      const a = input.activities;
+      if (a.manufacturing !== undefined) set('act_manufacturing', a.manufacturing);
+      if (a.trading !== undefined) set('act_trading', a.trading);
+      if (a.services !== undefined) set('act_services', a.services);
+      if (a.import !== undefined) set('act_import', a.import);
+      if (a.export !== undefined) set('act_export', a.export);
+      if (a.ecommerce !== undefined) set('act_ecommerce', a.ecommerce);
+      if (a.regulated !== undefined) set('act_regulated', a.regulated);
+    }
 
-      sets.push('version = version + 1');
-      params.push(id);
-      const idParam = `$${params.length}`;
-      let versionClause = '';
-      if (input.version !== undefined) {
-        params.push(input.version);
-        versionClause = ` AND version = $${params.length}`;
-      }
+    if (sets.length === 0) return before;
 
-      let updated: number;
-      try {
-        const result = await client.query(
-          `UPDATE hsdg.entities SET ${sets.join(', ')} WHERE id = ${idParam}${versionClause}`,
-          params,
-        );
-        updated = result.rowCount ?? 0;
-      } catch (err) {
-        throw translatePgError(err);
-      }
-      if (updated === 0) {
-        throw new ConflictException(
-          'Entity was modified by someone else. Refresh and retry (stale version).',
-        );
-      }
+    sets.push('version = version + 1');
+    params.push(id);
+    const idParam = `$${params.length}`;
+    let versionClause = '';
+    if (input.version !== undefined) {
+      params.push(input.version);
+      versionClause = ` AND version = $${params.length}`;
+    }
 
-      const after = await this.selectDetail(client, id);
-      await this.audit.recordWith(client, ctx, {
-        action: 'entity.updated',
-        objectType: 'entity',
-        objectId: id,
-        before,
-        after,
-      });
-      return after!;
+    let updated: number;
+    try {
+      const result = await client.query(
+        `UPDATE hsdg.entities SET ${sets.join(', ')} WHERE id = ${idParam}${versionClause}`,
+        params,
+      );
+      updated = result.rowCount ?? 0;
+    } catch (err) {
+      throw translatePgError(err);
+    }
+    if (updated === 0) {
+      throw new ConflictException(
+        'Entity was modified by someone else. Refresh and retry (stale version).',
+      );
+    }
+
+    const after = await this.selectDetail(client, id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.updated',
+      objectType: 'entity',
+      objectId: id,
+      before,
+      after,
     });
+    return after!;
   }
 
   /**
@@ -811,6 +819,36 @@ export class EntitiesService {
   // ── Addresses (§8/§31) ────────────────────────────────────────────────────
   async addAddress(ctx: RlsContext, entityId: string, input: AddressInput): Promise<EntityDetail> {
     return this.mutateChild(ctx, entityId, 'entity.address_added', (client) =>
+      this.insertAddress(client, entityId, input),
+    );
+  }
+
+  /**
+   * The client master import filling a contact's or an address's empty
+   * fields (never overwriting one), in the caller's transaction. Audited.
+   */
+  async fillChildWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    kind: 'contact' | 'address',
+    childId: string,
+    patch: Record<string, string>,
+  ): Promise<EntityDetail> {
+    const table = kind === 'contact' ? 'entity_contacts' : 'entity_addresses';
+    return this.mutateChildWith(client, ctx, entityId, `entity.${kind}_updated`, () =>
+      this.updateChildRow(client, table, 'entity_id', entityId, childId, patch),
+    );
+  }
+
+  /** addAddress inside the caller's transaction (the client master import). */
+  async addAddressWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    input: AddressInput,
+  ): Promise<EntityDetail> {
+    return this.mutateChildWith(client, ctx, entityId, 'entity.address_added', () =>
       this.insertAddress(client, entityId, input),
     );
   }
