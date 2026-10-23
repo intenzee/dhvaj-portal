@@ -1,3 +1,5 @@
+// The slot's Request mints an upload link only while client upload is on.
+import './client-upload-env';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Client } from 'pg';
