@@ -1,5 +1,11 @@
 import type { Config } from 'tailwindcss';
 
+/** The theme-aware shades of a status hue (globals.css sets both themes). */
+const flipping = (hue: string): Record<string, string> =>
+  Object.fromEntries(
+    [50, 100, 200, 300, 800].map((s) => [s, `rgb(var(--${hue}-${s}) / <alpha-value>)`]),
+  );
+
 /**
  * HSDG design system — matches the practice-cockpit direction: an Inter type
  * scale, a corporate blue primary with semantic status colours, and a dark navy
@@ -24,21 +30,41 @@ const config: Config = {
           DEFAULT: 'rgb(var(--line) / <alpha-value>)',
           strong: 'rgb(var(--line-strong) / <alpha-value>)',
         },
-        // Primary (corporate blue) + supporting accents.
+        // Primary (corporate blue) + supporting accents. The tints (50–300) and
+        // the deepest text shade (800) are CSS variables flipped by `.dark`, so
+        // every use — bg-success-50/50, border-warning-200, text-warning-800 —
+        // reads on a dark surface without a per-class override. 400–700 stay
+        // fixed: they are solid buttons and badges with white text.
         primary: {
-          50: '#eff6ff',
-          100: '#dbeafe',
-          200: '#bfdbfe',
+          ...flipping('primary'),
+          400: '#60a5fa',
           500: '#3b82f6',
           600: '#2563eb',
           700: '#1d4ed8',
-          800: '#1e40af',
           900: '#1e3a8a',
         },
         secondary: { 500: '#1da5e9', 600: '#0e8fd0' },
-        success: { 50: '#ecfdf5', 500: '#16a34a', 600: '#15803d', 700: '#166534' },
-        warning: { 50: '#fffbeb', 500: '#f59e0b', 600: '#d97706', 700: '#b45309' },
-        danger: { 50: '#fef2f2', 500: '#ef4444', 600: '#dc2626', 700: '#b91c1c' },
+        success: {
+          ...flipping('success'),
+          400: '#4ade80',
+          500: '#16a34a',
+          600: '#15803d',
+          700: '#166534',
+        },
+        warning: {
+          ...flipping('warning'),
+          400: '#fbbf24',
+          500: '#f59e0b',
+          600: '#d97706',
+          700: '#b45309',
+        },
+        danger: {
+          ...flipping('danger'),
+          400: '#f87171',
+          500: '#ef4444',
+          600: '#dc2626',
+          700: '#b91c1c',
+        },
         // Dark navy sidebar.
         sidebar: {
           DEFAULT: '#0b1220',
