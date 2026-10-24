@@ -97,7 +97,7 @@ const result: MergeClientsResult = {
   archivedCode: 'ENT00011',
   movedEngagements: 0,
   folded: { from: 'ENG-0007', into: 'ENG-0002', filings: 4, tasks: 2, filingsLeft: 1 },
-  counts: { registrations: 2 },
+  counts: { registrations: 2, invoicesLeft: 1 },
   stayed: [{ kind: 'engagement', code: 'ENG-0009', reason: 'Signed off' }],
 };
 
@@ -150,6 +150,12 @@ describe('MergeClientsModal', () => {
     });
     expect(await screen.findByText(/ENT00011 is merged into ENT00042/)).toBeInTheDocument();
     expect(screen.getByText(/ENG-0009/)).toHaveTextContent('ENG-0009: Signed off');
+    expect(screen.getByText('2 registrations moved.')).toBeInTheDocument();
+    expect(screen.getByText('1 invoice')).toBeInTheDocument();
+    expect(screen.queryByText(/left moved/)).not.toBeInTheDocument();
+    // The pages behind the popup refresh only once the summary is closed.
+    expect(onMerged).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByText('Close', { selector: 'button' }));
     expect(onMerged).toHaveBeenCalledWith(result);
   });
 
@@ -194,13 +200,15 @@ describe('a GSTIN already on another client', () => {
     expect(duplicateConflictOf(new Error('x'))).toBeNull();
   });
 
-  it('names the holder on the add-registration form and opens the merge on the two', async () => {
+  it('names the holder on the add-registration form, merges the two, then closes the form', async () => {
     apiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (path === '/entities/pvt/merge') return Promise.resolve(result);
       if (opts?.method === 'POST')
         return Promise.reject(new ApiError(409, conflict.message, conflict));
       return routePreview(path);
     });
-    render(wrap(<AddRegistrationModal entityId="pvt" onClose={jest.fn()} />));
+    const onClose = jest.fn();
+    render(wrap(<AddRegistrationModal entityId="pvt" onClose={onClose} />));
     await userEvent.type(screen.getByPlaceholderText('27AAACA1234A1Z5'), '06AAKFT1234Q1Z5');
     await userEvent.click(screen.getByRole('button', { name: 'Add registration' }));
 
@@ -214,6 +222,15 @@ describe('a GSTIN already on another client', () => {
     await userEvent.click(screen.getByRole('button', { name: /Merge these clients/ }));
     expect(await screen.findByRole('region', { name: 'Client to keep' })).toBeInTheDocument();
     expect(apiFetch).toHaveBeenCalledWith('/entities/pvt/merge-preview?with=firm');
+
+    // The identifier is now on this client: nothing is left to add.
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Merge into ENT00042' }));
+    await screen.findByText(/ENT00011 is merged into ENT00042/);
+    expect(onClose).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByText('Close', { selector: 'button' }));
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('offers no merge when the holder is in an office the person cannot open', async () => {
@@ -367,6 +384,7 @@ describe('client master import', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Merge into ENT00042' }));
 
     await screen.findByText(/ENT00011 is merged into ENT00042/);
+    await userEvent.click(screen.getByText('Close', { selector: 'button' }));
     const previews = apiFetch.mock.calls.filter(([p]) => p === '/client-imports/master/preview');
     expect(previews).toHaveLength(2);
   });
