@@ -27,6 +27,7 @@ import {
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
   SECURITY_TYPES,
+  type DuplicateClientConflict,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -35,6 +36,7 @@ import { useToast } from '@/lib/toast';
 import type { ClientRow, DuplicateCandidate, EntityType, Industry, OfficeRow } from '@/lib/types';
 import { Card, CardBody, Button, Spinner, Badge, PageHeader } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { DuplicateConflictNotice, VerdictBadge, duplicateConflictOf } from './merge-clients-modal';
 
 type Kind = 'individual' | 'legal_entity';
 interface RegRow {
@@ -271,6 +273,8 @@ export function AddClientWizard(): JSX.Element {
   const missing = useMemo(() => computeMissing(s, typeCategory), [s, typeCategory]);
 
   const payload = useMemo(() => buildPayload(s), [s]);
+  // A PAN / GSTIN already on another client: name it rather than a bare toast.
+  const [conflict, setConflict] = useState<DuplicateClientConflict | null>(null);
   const create = useMutation({
     mutationFn: () => apiFetch<{ id: string }>('/entities', { method: 'POST', body: payload }),
     onSuccess: (data) => {
@@ -278,8 +282,11 @@ export function AddClientWizard(): JSX.Element {
       qc.invalidateQueries({ queryKey: ['entities'] });
       router.push(`/entities/${data.id}`);
     },
-    onError: (err) =>
-      toast(err instanceof ApiError ? err.message : 'Could not create the entity.', 'error'),
+    onError: (err) => {
+      const dupe = duplicateConflictOf(err);
+      setConflict(dupe);
+      if (!dupe) toast(err instanceof ApiError ? err.message : 'Could not create the entity.', 'error');
+    },
   });
 
   const canCreate = s.legalName.trim().length > 0 && !!s.typeSlug && !!s.officeCode && panValid;
@@ -326,6 +333,8 @@ export function AddClientWizard(): JSX.Element {
             {step === 9 && <RegulatoryProfileStep />}
             {step === 10 && <ContactsStep s={s} set={set} />}
             {step === 11 && <ReviewStep s={s} missing={missing} typeName={kindTypes.find((t) => t.slug === s.typeSlug)?.name ?? s.typeSlug} />}
+
+            {conflict && <DuplicateConflictNotice conflict={conflict} entityId={null} />}
 
             <div className="flex items-center justify-between border-t border-line pt-4">
               <Button variant="ghost" onClick={() => (step === 0 ? router.back() : setStep(step - 1))}>
@@ -424,13 +433,19 @@ function Step1({
           </div>
           <ul className="space-y-1">
             {dupes.map((d) => (
-              <li key={d.id} className="flex items-center justify-between text-sm">
-                <Link href={`/entities/${d.id}`} className="text-primary-700 hover:underline">
-                  {d.legalName} <span className="text-ink-faint">({d.entityCode})</span>
-                </Link>
-                <Badge tone={d.matchReason === 'pan' ? 'danger' : 'warn'}>
-                  {d.matchReason === 'pan' ? 'Same PAN' : 'Similar name'}
-                </Badge>
+              <li key={d.id} className="text-sm">
+                <div className="flex items-center justify-between">
+                  <Link href={`/entities/${d.id}`} className="text-primary-700 hover:underline">
+                    {d.legalName} <span className="text-ink-faint">({d.entityCode})</span>
+                  </Link>
+                  <span className="flex items-center gap-1.5">
+                    <Badge tone={d.matchReason === 'pan' ? 'danger' : 'warn'}>
+                      {d.matchReason === 'pan' ? 'Same PAN' : 'Similar name'}
+                    </Badge>
+                    {d.verdict && <VerdictBadge verdict={d.verdict} />}
+                  </span>
+                </div>
+                {d.reasons?.[0] && <div className="text-xs text-ink-muted">{d.reasons[0]}</div>}
               </li>
             ))}
           </ul>
