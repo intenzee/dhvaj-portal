@@ -70,17 +70,22 @@ BEGIN
 END $$;
 
 -- ── Frozen billing rows: the client may follow a merge, nothing else ─────
-CREATE OR REPLACE FUNCTION hsdg.merge_moves_only_client(p_new jsonb, p_old jsonb)
+-- A generated column (receipts.net_amount, credit_notes.total) is still NULL
+-- in a BEFORE trigger's NEW, so it is left out of the comparison too.
+CREATE OR REPLACE FUNCTION hsdg.merge_moves_only_client(p_table regclass, p_new jsonb, p_old jsonb)
   RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT hsdg.merging_clients()
-     AND (p_new - ARRAY['client_entity_id', 'updated_at'])
-         = (p_old - ARRAY['client_entity_id', 'updated_at'])
+     AND (p_new - ARRAY['client_entity_id', 'updated_at'] - g.cols)
+         = (p_old - ARRAY['client_entity_id', 'updated_at'] - g.cols)
+    FROM (SELECT COALESCE(array_agg(attname::text), '{}') AS cols
+            FROM pg_attribute
+           WHERE attrelid = p_table AND attgenerated <> '' AND NOT attisdropped) g
 $$;
 
 CREATE OR REPLACE FUNCTION hsdg.receipt_guard() RETURNS trigger
   LANGUAGE plpgsql AS $$
 BEGIN
-  IF hsdg.merge_moves_only_client(to_jsonb(NEW), to_jsonb(OLD)) THEN
+  IF hsdg.merge_moves_only_client(TG_RELID, to_jsonb(NEW), to_jsonb(OLD)) THEN
     RETURN NEW;
   END IF;
   IF (NEW.client_entity_id, NEW.received_on, NEW.mode, NEW.reference, NEW.gross_amount,
@@ -107,7 +112,7 @@ DECLARE
                            'voided_by_employee_id', 'voided_at', 'pdf_storage_reference'];
   v_void text[] := ARRAY['void_reason', 'voided_by_employee_id', 'voided_at'];
 BEGIN
-  IF hsdg.merge_moves_only_client(to_jsonb(NEW), to_jsonb(OLD)) THEN
+  IF hsdg.merge_moves_only_client(TG_RELID, to_jsonb(NEW), to_jsonb(OLD)) THEN
     RETURN NEW;
   END IF;
   IF (to_jsonb(NEW) - v_moving) IS DISTINCT FROM (to_jsonb(OLD) - v_moving) THEN
@@ -130,7 +135,7 @@ $$;
 CREATE OR REPLACE FUNCTION hsdg.fee_billing_release_only() RETURNS trigger
   LANGUAGE plpgsql SET search_path = hsdg, pg_temp AS $$
 BEGIN
-  IF hsdg.merge_moves_only_client(to_jsonb(NEW), to_jsonb(OLD)) THEN
+  IF hsdg.merge_moves_only_client(TG_RELID, to_jsonb(NEW), to_jsonb(OLD)) THEN
     RETURN NEW;
   END IF;
   IF OLD.released_at IS NOT NULL OR NEW.released_at IS NULL
@@ -145,7 +150,7 @@ $$;
 CREATE OR REPLACE FUNCTION hsdg.time_billing_release_only() RETURNS trigger
   LANGUAGE plpgsql AS $$
 BEGIN
-  IF hsdg.merge_moves_only_client(to_jsonb(NEW), to_jsonb(OLD)) THEN
+  IF hsdg.merge_moves_only_client(TG_RELID, to_jsonb(NEW), to_jsonb(OLD)) THEN
     RETURN NEW;
   END IF;
   IF OLD.released_at IS NOT NULL OR NEW.released_at IS NULL
@@ -160,7 +165,7 @@ $$;
 CREATE OR REPLACE FUNCTION hsdg.fee_waiver_decision_guard() RETURNS trigger
   LANGUAGE plpgsql SET search_path = hsdg, pg_temp AS $$
 BEGIN
-  IF hsdg.merge_moves_only_client(to_jsonb(NEW), to_jsonb(OLD)) THEN
+  IF hsdg.merge_moves_only_client(TG_RELID, to_jsonb(NEW), to_jsonb(OLD)) THEN
     RETURN NEW;
   END IF;
   IF (to_jsonb(NEW) - ARRAY['status', 'decided_by_employee_id', 'decided_at', 'decision_note',
@@ -186,7 +191,7 @@ $$;
 CREATE OR REPLACE FUNCTION hsdg.billing_reversal_request_frozen() RETURNS trigger
   LANGUAGE plpgsql SET search_path = hsdg, pg_temp AS $$
 BEGIN
-  IF hsdg.merge_moves_only_client(to_jsonb(NEW), to_jsonb(OLD)) THEN
+  IF hsdg.merge_moves_only_client(TG_RELID, to_jsonb(NEW), to_jsonb(OLD)) THEN
     RETURN NEW;
   END IF;
   IF OLD.status <> 'pending' THEN
@@ -761,7 +766,7 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS hsdg.merge_moves_only_client(jsonb, jsonb);
+DROP FUNCTION IF EXISTS hsdg.merge_moves_only_client(regclass, jsonb, jsonb);
 
 DO $$
 DECLARE p record;

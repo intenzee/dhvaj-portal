@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   HttpException,
   Injectable,
   ServiceUnavailableException,
@@ -130,9 +129,9 @@ function engagementWarning(p: ClientImportGstEngagement): string | null {
 
 function failureMessage(err: unknown): string {
   const e = err as { code?: string };
-  if (err instanceof ConflictException || e.code === '23505')
-    return 'This PAN, GSTIN or TAN is already on a client in another office that you cannot see.';
+  // A PAN / GSTIN on another client names that client (holderConflict).
   if (err instanceof HttpException) return err.message;
+  if (e.code === '23505') return 'This PAN, GSTIN or TAN is already on another client.';
   return 'Could not be saved.';
 }
 
@@ -938,7 +937,7 @@ function crossCheck(
             ...c.warnings,
             ...twins.map(
               (e) =>
-                `"${e.legal_name}" (${e.entity_code}) in the portal looks like the same client; if it is, delete it.`,
+                `"${e.legal_name}" (${e.entity_code}) in the portal looks like the same client; if it is, merge the two on the client's page.`,
             ),
           ],
         }

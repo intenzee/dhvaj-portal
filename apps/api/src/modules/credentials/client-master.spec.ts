@@ -146,6 +146,23 @@ describe('export → import round trip', () => {
     expect(loginProblems).toHaveLength(1);
     expect(loginProblems[0]!.message).toContain('Nowhere');
   });
+
+  it('reads a GSTIN typed with a stray dash or dot', async () => {
+    const good = gstin('07', SUNRISE);
+    const file = await fillClientMaster(
+      template,
+      [
+        {
+          legalName: 'Dashed Ltd',
+          gstin: `${good.slice(0, 14)}-${good[14]}`,
+          otherGstins: `${gstin('27', SUNRISE).slice(0, 2)}.${gstin('27', SUNRISE).slice(2)}`,
+        },
+      ],
+      [],
+    );
+    const [row] = parseClientMaster(file).rows;
+    expect(row).toMatchObject({ error: null, pan: SUNRISE, gstins: [good, gstin('27', SUNRISE)] });
+  });
 });
 
 describe('fillSheetXml', () => {

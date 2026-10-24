@@ -119,6 +119,9 @@ const groupBy = <T>(items: T[], key: (t: T) => string): Map<string, T[]> => {
   return m;
 };
 
+/** A registration number as the sheet reads it: a stray dash, dot or space is a typing slip. */
+const bareNumber = (n: string): string => n.replace(/[-.\s]/g, '').toUpperCase();
+
 /** The one to show and fill: the primary, else the first. */
 const primaryOf = <T extends { is_primary: boolean }>(items: T[] | undefined): T | undefined =>
   items?.find((i) => i.is_primary) ?? items?.[0];
@@ -797,7 +800,7 @@ class RowPlanner {
       p.entities.filter((e) => !e.merged_into_id),
       (e) => parseClientName(e.legal_name).words[0] ?? '',
     );
-    this.regByNumber = new Map(p.regs.map((r) => [r.registration_number, r]));
+    this.regByNumber = new Map(p.regs.map((r) => [bareNumber(r.registration_number), r]));
     this.regsOf = groupBy(p.regs, (r) => r.entity_id);
     this.contactsOf = groupBy(p.contacts, (c) => c.entity_id);
     this.addressesOf = groupBy(p.addresses, (a) => a.entity_id);
@@ -819,7 +822,8 @@ class RowPlanner {
     const e = src.code ? this.byCode.get(src.code) : undefined;
     if (!e || src.badIds.length === 0) return src;
     const regs = this.regsOf.get(e.id) ?? [];
-    const on = (id: string) => e.pan === id || regs.some((r) => r.registration_number === id);
+    const on = (id: string) =>
+      e.pan === id || regs.some((r) => bareNumber(r.registration_number) === bareNumber(id));
     if (!src.badIds.every((b) => on(b.id))) return src;
     const bad = new Set(src.badIds.map((b) => b.id));
     return {
@@ -882,13 +886,13 @@ class RowPlanner {
       note(e.id, 'code');
     }
     for (const g of src.gstins) {
-      const r = this.regByNumber.get(g);
+      const r = this.regByNumber.get(bareNumber(g));
       if (r) note(r.entity_id, 'gstin');
     }
     if (src.pan)
       for (const e of this.p.entities)
         if (e.pan === src.pan && !e.merged_into_id) note(e.id, 'pan');
-    const tanReg = src.tan ? this.regByNumber.get(src.tan) : undefined;
+    const tanReg = src.tan ? this.regByNumber.get(bareNumber(src.tan)) : undefined;
     if (tanReg) note(tanReg.entity_id, 'tan');
     if (found.size === 0) {
       const named = this.p.entities.filter(
@@ -1109,7 +1113,7 @@ class RowPlanner {
     if (src.gstFrequency) {
       const wanted = SCHEME[src.gstFrequency];
       for (const g of src.gstins.length ? src.gstins : gstins) {
-        const reg = this.regByNumber.get(g);
+        const reg = this.regByNumber.get(bareNumber(g));
         const has = reg ? this.p.schemes.get(reg.id) : undefined;
         if (!has) schemeGstins.push(g);
         else if (has !== wanted)
@@ -1148,7 +1152,8 @@ class RowPlanner {
     changes: ClientMasterChange[],
     warnings: string[],
   ): RegistrationInput[] {
-    const has = (n: string) => regs.some((r) => r.registration_number === n);
+    const has = (n: string) =>
+      regs.some((r) => bareNumber(r.registration_number) === bareNumber(n));
     const ofType = (t: string) => regs.filter((r) => r.registration_type === t);
     const out: RegistrationInput[] = [];
     let principal = ofType('gstin').length === 0;
