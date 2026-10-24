@@ -331,8 +331,9 @@ function readRow(
     badIds.push({ id: typedPan, message: `PAN ${typedPan} is not a valid PAN.` });
   const gstins = [
     ...new Set(
+      // A stray dash or dot inside a GSTIN ('07AADCZ0569K1Z-X') is a typing slip.
       [get('gstin'), ...get('otherGstins').split(/[\s,;/]+/)]
-        .map((g) => normalizeGstin(g))
+        .map((g) => normalizeGstin(g.replace(/[-.]/g, '')))
         .filter(Boolean),
     ),
   ];

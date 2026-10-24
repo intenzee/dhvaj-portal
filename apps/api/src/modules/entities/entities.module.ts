@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { EntitiesService } from './entities.service';
+import { ClientMergeService } from './client-merge.service';
 import { EntitiesController } from './entities.controller';
 import { EntityTypesController } from './entity-types.controller';
 import { IndustriesController } from './industries.controller';
@@ -13,7 +14,7 @@ import { IndustriesController } from './industries.controller';
 @Module({
   imports: [AuditModule, ComplianceModule],
   controllers: [EntitiesController, EntityTypesController, IndustriesController],
-  providers: [EntitiesService],
+  providers: [EntitiesService, ClientMergeService],
   exports: [EntitiesService],
 })
 export class EntitiesModule {}

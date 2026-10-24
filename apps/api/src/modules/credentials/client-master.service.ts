@@ -2,7 +2,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   BadRequestException,
-  ConflictException,
   HttpException,
   Injectable,
   ServiceUnavailableException,
@@ -49,6 +48,7 @@ import {
   type ParsedMaster,
 } from './client-master';
 import { nameKey, normalizeHeader } from './client-workbook';
+import { parseClientName, sameClient } from '../entities/client-names';
 
 /** More rows than this is not a client list. */
 const MAX_ROWS = 3000;
@@ -73,6 +73,8 @@ interface PortalEntity {
   incorporation_date: string | null;
   office_code: string | null;
   status: string;
+  /** Set when it was merged into another client: its code then means the keeper. */
+  merged_into_id: string | null;
 }
 interface PortalReg {
   id: string;
@@ -116,6 +118,9 @@ const groupBy = <T>(items: T[], key: (t: T) => string): Map<string, T[]> => {
   for (const t of items) m.set(key(t), [...(m.get(key(t)) ?? []), t]);
   return m;
 };
+
+/** A registration number as the sheet reads it: a stray dash, dot or space is a typing slip. */
+const bareNumber = (n: string): string => n.replace(/[-.\s]/g, '').toUpperCase();
 
 /** The one to show and fill: the primary, else the first. */
 const primaryOf = <T extends { is_primary: boolean }>(items: T[] | undefined): T | undefined =>
@@ -170,9 +175,9 @@ const emptyTally = (): Tally => ({
 
 function failureMessage(err: unknown): string {
   const e = err as { code?: string };
-  if (err instanceof ConflictException || e.code === '23505')
-    return 'This PAN, GSTIN, TAN or CIN is already on a client in another office that you cannot see.';
+  // A PAN / GSTIN on another client names that client (holderConflict).
   if (err instanceof HttpException) return err.message;
+  if (e.code === '23505') return 'This PAN, GSTIN, TAN or CIN is already on another client.';
   return 'Could not be saved.';
 }
 
@@ -371,7 +376,8 @@ export class ClientMasterService {
     const entities = await client.query<PortalEntity>(
       `SELECT e.id, e.entity_code, e.legal_name, e.trade_name, e.pan, et.slug AS type_slug,
               et.name AS type_name, et.category, e.legal_status,
-              e.incorporation_date::text AS incorporation_date, o.code AS office_code, e.status
+              e.incorporation_date::text AS incorporation_date, o.code AS office_code, e.status,
+              e.merged_into_id
          FROM hsdg.entities e
          LEFT JOIN hsdg.entity_types et ON et.id = e.entity_type_id
          LEFT JOIN hsdg.offices o ON o.id = e.home_office_id
@@ -773,6 +779,8 @@ class RowPlanner {
   private readonly taken = new Map<string, number>();
   /** A new client's PAN / GSTIN → its sheet row. */
   private readonly newKeys = new Map<string, number>();
+  /** Live (not merged) clients by the first word of their name, for look-alikes. */
+  private readonly byFirstWord: Map<string, PortalEntity[]>;
 
   constructor(
     private readonly p: Portal,
@@ -780,9 +788,19 @@ class RowPlanner {
     private readonly defaultOffice: string,
     private readonly employeeOf: Map<string, string>,
   ) {
-    this.byCode = new Map(p.entities.map((e) => [e.entity_code.toUpperCase(), e]));
     this.byId = new Map(p.entities.map((e) => [e.id, e]));
-    this.regByNumber = new Map(p.regs.map((r) => [r.registration_number, r]));
+    // A merged client's code still finds its client: the one it was merged into.
+    this.byCode = new Map(
+      p.entities.map((e) => [
+        e.entity_code.toUpperCase(),
+        (e.merged_into_id && this.byId.get(e.merged_into_id)) || e,
+      ]),
+    );
+    this.byFirstWord = groupBy(
+      p.entities.filter((e) => !e.merged_into_id),
+      (e) => parseClientName(e.legal_name).words[0] ?? '',
+    );
+    this.regByNumber = new Map(p.regs.map((r) => [bareNumber(r.registration_number), r]));
     this.regsOf = groupBy(p.regs, (r) => r.entity_id);
     this.contactsOf = groupBy(p.contacts, (c) => c.entity_id);
     this.addressesOf = groupBy(p.addresses, (a) => a.entity_id);
@@ -804,7 +822,9 @@ class RowPlanner {
     const e = src.code ? this.byCode.get(src.code) : undefined;
     if (!e || src.badIds.length === 0) return src;
     const regs = this.regsOf.get(e.id) ?? [];
-    const on = (id: string) => e.pan === id || regs.some((r) => r.registration_number === id);
+    const on = (id: string) =>
+      bareNumber(e.pan ?? '') === bareNumber(id) ||
+      regs.some((r) => bareNumber(r.registration_number) === bareNumber(id));
     if (!src.badIds.every((b) => on(b.id))) return src;
     const bad = new Set(src.badIds.map((b) => b.id));
     return {
@@ -847,6 +867,7 @@ class RowPlanner {
       partnerId: null,
       leadId: null,
       loginRows: [],
+      duplicate: null,
     };
     if (src.error) return base;
     const error = (message: string): Planned => ({ ...base, error: message });
@@ -859,24 +880,37 @@ class RowPlanner {
     if (src.code) {
       const e = this.byCode.get(src.code);
       if (!e) return error(`Client code ${src.code} is not in the portal, or not in your office.`);
+      if (e.entity_code.toUpperCase() !== src.code)
+        base.warnings.push(
+          `${src.code} was merged into ${e.entity_code}; the row goes to ${e.entity_code}.`,
+        );
       note(e.id, 'code');
     }
     for (const g of src.gstins) {
-      const r = this.regByNumber.get(g);
+      const r = this.regByNumber.get(bareNumber(g));
       if (r) note(r.entity_id, 'gstin');
     }
-    if (src.pan) for (const e of this.p.entities) if (e.pan === src.pan) note(e.id, 'pan');
-    const tanReg = src.tan ? this.regByNumber.get(src.tan) : undefined;
+    if (src.pan)
+      for (const e of this.p.entities)
+        if (e.pan === src.pan && !e.merged_into_id) note(e.id, 'pan');
+    const tanReg = src.tan ? this.regByNumber.get(bareNumber(src.tan)) : undefined;
     if (tanReg) note(tanReg.entity_id, 'tan');
     if (found.size === 0) {
       const named = this.p.entities.filter(
-        (e) => nameKey(e.legal_name) === nameKey(src.legalName) && (!e.pan || !src.pan),
+        (e) =>
+          !e.merged_into_id &&
+          nameKey(e.legal_name) === nameKey(src.legalName) &&
+          (!e.pan || !src.pan),
       );
       if (named.length > 1)
         return error(
           `${named.length} clients in the portal are called "${src.legalName}"; put the Client code in the row.`,
         );
       if (named[0]) note(named[0].id, 'name');
+    }
+    if (found.size === 2) {
+      const [a, b] = [...found.keys()].map((k) => this.byId.get(k));
+      if (a && b) return this.twoClients(base, a, b);
     }
     if (found.size > 1)
       return error(
@@ -902,7 +936,58 @@ class RowPlanner {
         return error(`Row ${earlier} has the same ${key.length === 10 ? 'PAN' : 'GSTIN'} ${key}.`);
     }
     for (const key of [src.pan, ...src.gstins].filter(Boolean)) this.newKeys.set(key, src.row);
-    return this.create(base);
+    return this.create({ ...base, warnings: [...base.warnings, ...this.lookAlikes(src)] });
+  }
+
+  /**
+   * The row's code, GSTIN, PAN or TAN lead to two portal clients. When the
+   * two are one legal entity (a shared PAN, or names that agree) the person
+   * is offered the merge; the row imports once they are one.
+   */
+  private twoClients(base: Planned, a: PortalEntity, b: PortalEntity): Planned {
+    const ids = (e: PortalEntity) => ({
+      name: e.legal_name,
+      pan: e.pan,
+      gstins: (this.regsOf.get(e.id) ?? [])
+        .filter((r) => r.registration_type === 'gstin')
+        .map((r) => r.registration_number),
+    });
+    const { verdict, reasons } = sameClient(ids(a), ids(b));
+    const both = `${a.entity_code} ${a.legal_name} and ${b.entity_code} ${b.legal_name}`;
+    if (verdict === 'different')
+      return {
+        ...base,
+        error: `The row's code, GSTIN, PAN or TAN are on two different clients (${both}). ${reasons[0]}`,
+      };
+    return {
+      ...base,
+      error: `The row's code, GSTIN, PAN or TAN are on ${both}, which look like one client entered twice. Merge them, then preview again.`,
+      duplicate: {
+        entityIds: [a.id, b.id],
+        entityCodes: [a.entity_code, b.entity_code],
+        verdict,
+        reasons,
+      },
+    };
+  }
+
+  /** A new client that looks like one already in the portal: say which, so it is not added twice. */
+  private lookAlikes(src: MasterRow): string[] {
+    const first = parseClientName(src.legalName).words[0];
+    if (!first) return [];
+    const out: string[] = [];
+    for (const e of this.byFirstWord.get(first) ?? []) {
+      const { verdict } = sameClient(
+        { name: src.legalName, pan: src.pan, gstins: src.gstins },
+        { name: e.legal_name, pan: e.pan },
+      );
+      if (verdict === 'probable' || verdict === 'possible')
+        out.push(
+          `Looks like ${e.entity_code} ${e.legal_name} in the portal; if it is that client, put ${e.entity_code} in the Client code column.`,
+        );
+      if (out.length === 2) break;
+    }
+    return out;
   }
 
   private create(base: Planned): Planned {
@@ -971,8 +1056,18 @@ class RowPlanner {
     const changes: ClientMasterChange[] = [];
     const patch: UpdateEntityInput = {};
     if (src.legalName && src.legalName !== e.legal_name) {
-      patch.legalName = src.legalName;
-      changes.push(change('Legal name', e.legal_name, src.legalName));
+      const sheet = parseClientName(src.legalName);
+      const portal = parseClientName(e.legal_name);
+      // "3Aces Technologies - Delhi" for "3Aces Technologies": the sheet
+      // names the office's registration, not a new name.
+      if (sheet.key === portal.key && sheet.form === portal.form && sheet.place && !portal.place)
+        warnings.push(
+          `The sheet's name adds a place (${sheet.place.text}); the portal's name "${e.legal_name}" is kept.`,
+        );
+      else {
+        patch.legalName = src.legalName;
+        changes.push(change('Legal name', e.legal_name, src.legalName));
+      }
     }
     if (src.tradeName && src.tradeName !== (e.trade_name ?? '')) {
       patch.tradeName = src.tradeName;
@@ -1019,7 +1114,7 @@ class RowPlanner {
     if (src.gstFrequency) {
       const wanted = SCHEME[src.gstFrequency];
       for (const g of src.gstins.length ? src.gstins : gstins) {
-        const reg = this.regByNumber.get(g);
+        const reg = this.regByNumber.get(bareNumber(g));
         const has = reg ? this.p.schemes.get(reg.id) : undefined;
         if (!has) schemeGstins.push(g);
         else if (has !== wanted)
@@ -1058,7 +1153,8 @@ class RowPlanner {
     changes: ClientMasterChange[],
     warnings: string[],
   ): RegistrationInput[] {
-    const has = (n: string) => regs.some((r) => r.registration_number === n);
+    const has = (n: string) =>
+      regs.some((r) => bareNumber(r.registration_number) === bareNumber(n));
     const ofType = (t: string) => regs.filter((r) => r.registration_type === t);
     const out: RegistrationInput[] = [];
     let principal = ofType('gstin').length === 0;
@@ -1314,5 +1410,6 @@ function toRow(r: Planned): ClientMasterRow {
     logins: r.logins,
     warnings: r.warnings,
     error: r.error,
+    duplicate: r.duplicate,
   };
 }

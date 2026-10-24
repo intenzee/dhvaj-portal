@@ -13,6 +13,7 @@ import {
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
   ROLE,
+  type DuplicateClientConflict,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
@@ -24,6 +25,7 @@ import type { EntityDetail, EntityType, OfficeRow } from '@/lib/types';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { DuplicateConflictNotice, duplicateConflictOf } from './merge-clients-modal';
 
 /** Manage buttons shown on Client 360 for users who can manage entities. */
 export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.Element | null {
@@ -218,6 +220,7 @@ export function EditEntityModal({
   );
   const [businessDescription, setBusinessDescription] = useState(entity.businessDescription ?? '');
   const [activities, setActivities] = useState(entity.activities);
+  const [conflict, setConflict] = useState<DuplicateClientConflict | null>(null);
 
   const types = useQuery({
     queryKey: ['entity-types'],
@@ -261,8 +264,12 @@ export function EditEntityModal({
       invalidate();
       onClose();
     },
-    onError: (err) =>
-      toast(err instanceof ApiError ? err.message : 'Could not update the entity.', 'error'),
+    onError: (err) => {
+      const dupe = duplicateConflictOf(err);
+      setConflict(dupe);
+      if (!dupe)
+        toast(err instanceof ApiError ? err.message : 'Could not update the entity.', 'error');
+    },
   });
 
   return (
@@ -286,6 +293,9 @@ export function EditEntityModal({
       }
     >
       <div className="space-y-3">
+        {conflict && (
+          <DuplicateConflictNotice conflict={conflict} entityId={entity.id} onMerged={onClose} />
+        )}
         <Field label="Legal name" required>
           <Input value={legalName} onChange={(e) => setLegalName(e.target.value)} />
         </Field>
@@ -416,6 +426,7 @@ export function AddRegistrationModal({
   const [registrationNumber, setRegistrationNumber] = useState('');
   const [status, setStatus] = useState<string>('active');
   const [validFrom, setValidFrom] = useState('');
+  const [conflict, setConflict] = useState<DuplicateClientConflict | null>(null);
 
   const add = useMutation({
     mutationFn: () =>
@@ -433,8 +444,12 @@ export function AddRegistrationModal({
       invalidate();
       onClose();
     },
-    onError: (err) =>
-      toast(err instanceof ApiError ? err.message : 'Could not add the registration.', 'error'),
+    onError: (err) => {
+      const dupe = duplicateConflictOf(err);
+      setConflict(dupe);
+      if (!dupe)
+        toast(err instanceof ApiError ? err.message : 'Could not add the registration.', 'error');
+    },
   });
 
   return (
@@ -457,6 +472,9 @@ export function AddRegistrationModal({
       }
     >
       <div className="space-y-3">
+        {conflict && (
+          <DuplicateConflictNotice conflict={conflict} entityId={entityId} onMerged={onClose} />
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type" required>
             <Select value={registrationType} onChange={(e) => setRegistrationType(e.target.value)}>

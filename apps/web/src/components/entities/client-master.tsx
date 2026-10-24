@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Download, FileSpreadsheet, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Download, FileSpreadsheet, GitMerge, ShieldCheck } from 'lucide-react';
 import {
   CLIENT_IMPORT_ACTION,
   STREAM_LABEL,
@@ -21,6 +21,7 @@ import type { OfficeRow } from '@/lib/types';
 import { Badge, Button, Card, CardBody } from '@/components/ui';
 import { Field, Select } from '@/components/form';
 import { ACTION_LABEL } from './client-import';
+import { MergeClientsModal, VerdictBadge } from './merge-clients-modal';
 
 /**
  * The Client Master workbook: Export gives every client in the firm's
@@ -64,14 +65,15 @@ export function masterButtonLabel(p: ClientMasterPreview): string {
 export function masterEngagementLabel(e: ClientMasterEngagement): string {
   const services = e.streams.map((s) => STREAM_LABEL[s]).join(', ');
   if (e.action === 'create') return `New Compliance engagement ${e.financialYear}: ${services}`;
-  if (e.action === 'add_year') return `${e.financialYear} added to ${e.engagementCode}: ${services}`;
+  if (e.action === 'add_year')
+    return `${e.financialYear} added to ${e.engagementCode}: ${services}`;
   if (e.action === 'add_streams')
     return `${services} added to ${e.engagementCode} for ${e.financialYear}`;
   return `Already in ${e.engagementCode} for ${e.financialYear}`;
 }
 
 const hasProblem = (r: ClientMasterRow): boolean =>
-  r.action === CLIENT_IMPORT_ACTION.error || r.warnings.length > 0;
+  r.action === CLIENT_IMPORT_ACTION.error || r.warnings.length > 0 || !!r.duplicate;
 
 /** "Export client master": the clients in the workbook, ready to fill. */
 export function ExportClientMasterButton({
@@ -178,12 +180,11 @@ export function ClientMaster(): JSX.Element {
         <CardBody className="space-y-3">
           <ol className="ml-4 list-decimal space-y-1 text-sm text-ink-muted">
             <li>
-              Export the client master: every client with what the portal has, the gaps left
-              empty.
+              Export the client master: every client with what the portal has, the gaps left empty.
             </li>
             <li>
-              Fill in the empty cells in Excel, and add a row for each new client. The check
-              columns at the end flag a mistyped PAN or GSTIN before you import.
+              Fill in the empty cells in Excel, and add a row for each new client. The check columns
+              at the end flag a mistyped PAN or GSTIN before you import.
             </li>
             <li>Choose the filled file below, read the preview, then import.</li>
           </ol>
@@ -216,9 +217,9 @@ export function ClientMaster(): JSX.Element {
           </div>
           <p className="flex items-start gap-2 text-xs text-ink-muted">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success-600" />
-            The file is read on the server and not kept. An empty cell never removes anything;
-            a PAN already on a client is never replaced. Passwords on the Logins sheet are
-            encrypted before saving — delete the file afterwards if you typed any.
+            The file is read on the server and not kept. An empty cell never removes anything; a PAN
+            already on a client is never replaced. Passwords on the Logins sheet are encrypted
+            before saving — delete the file afterwards if you typed any.
           </p>
         </CardBody>
       </Card>
@@ -238,8 +239,8 @@ export function ClientMaster(): JSX.Element {
           {blocked && (
             <p className="flex items-center gap-2 rounded-md bg-warning-50 px-3 py-2 text-sm text-warning-700">
               <AlertTriangle className="h-4 w-4" />
-              This server has no encryption key yet, so the logins cannot be saved. Clear the
-              Logins sheet, or ask the administrator to set CREDENTIALS_KEYS.
+              This server has no encryption key yet, so the logins cannot be saved. Clear the Logins
+              sheet, or ask the administrator to set CREDENTIALS_KEYS.
             </p>
           )}
           {p.loginProblems.length > 0 && (
@@ -308,7 +309,12 @@ export function ClientMaster(): JSX.Element {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <MasterRowView key={r.row} r={r} />
+                  <MasterRowView
+                    key={r.row}
+                    r={r}
+                    // The row now meets one client: read the file again.
+                    onMerged={() => preview.mutate()}
+                  />
                 ))}
                 {rows.length === 0 && (
                   <tr>
@@ -341,7 +347,9 @@ export function ClientMaster(): JSX.Element {
   );
 }
 
-function MasterRowView({ r }: { r: ClientMasterRow }): JSX.Element {
+function MasterRowView({ r, onMerged }: { r: ClientMasterRow; onMerged: () => void }): JSX.Element {
+  const [merging, setMerging] = useState(false);
+  const dupe = r.duplicate;
   return (
     <tr className="border-t border-line align-top">
       <td className="px-3 py-2 text-xs text-ink-faint">{r.row}</td>
@@ -385,6 +393,25 @@ function MasterRowView({ r }: { r: ClientMasterRow }): JSX.Element {
             {w}
           </span>
         ))}
+        {dupe && (
+          <span className="mt-1.5 block rounded-md bg-warning-50 px-2 py-1.5 text-xs">
+            <span className="flex flex-wrap items-center gap-1.5 text-warning-700">
+              Meets two clients: {dupe.entityCodes[0]} and {dupe.entityCodes[1]}
+              <VerdictBadge verdict={dupe.verdict} />
+            </span>
+            {dupe.reasons[0] && <span className="block text-ink-muted">{dupe.reasons[0]}</span>}
+            <Button size="sm" variant="secondary" className="mt-1" onClick={() => setMerging(true)}>
+              <GitMerge className="h-3.5 w-3.5" /> Merge these clients
+            </Button>
+          </span>
+        )}
+        {merging && dupe && (
+          <MergeClientsModal
+            clientIds={dupe.entityIds}
+            onClose={() => setMerging(false)}
+            onMerged={onMerged}
+          />
+        )}
       </td>
     </tr>
   );
