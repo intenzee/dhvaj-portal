@@ -94,6 +94,7 @@ export * from './firm-checks';
 export * from './search';
 export * from './feature-rollout';
 export * from './credentials';
+export * from './client-merge';
 export * from './client-master';
 export * from './notices';
 export * from './billing';
