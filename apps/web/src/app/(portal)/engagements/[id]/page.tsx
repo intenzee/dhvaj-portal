@@ -8,6 +8,7 @@ import { FolderOpen } from 'lucide-react';
 import {
   ENGAGEMENT_KIND,
   FEATURE_FLAG,
+  ROLE,
   STREAM_LABEL,
   TASK_STATUS,
   type EngagementTabs,
@@ -16,6 +17,7 @@ import {
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { hasRole } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { OpenNoticesWidget } from '@/components/notices/open-notices-widget';
 import { planningTeam, taskContextFor } from '@/lib/engagement-context';
@@ -333,12 +335,22 @@ export default function EngagementDetailPage(): JSX.Element {
         title={`${e.engagementCode} · ${e.entityName}`}
         subtitle={`${e.serviceName} · ${e.financialYear} ${e.periodLabel} · ${e.officeCode}`}
         actions={
-          <Link
-            href={`/entities/${e.entityId}`}
-            className="rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
-          >
-            Client 360 →
-          </Link>
+          <div className="flex items-center gap-2">
+            {hasRole(principal, ROLE.admin) && (
+              <Link
+                href={`/admin?purge=${encodeURIComponent(e.engagementCode)}`}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-danger-700 hover:bg-danger-50"
+              >
+                Delete permanently…
+              </Link>
+            )}
+            <Link
+              href={`/entities/${e.entityId}`}
+              className="rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
+            >
+              Client 360 →
+            </Link>
+          </div>
         }
       />
       <NextUpStrip engagementId={e.id} />
