@@ -188,3 +188,46 @@ describe('audit-file facts link to the field that fixes them', () => {
     expect(screen.getAllByRole('link')).toHaveLength(2);
   });
 });
+
+describe('Client 360 — a client merged into another', () => {
+  it('points to the kept client and offers nothing to edit', async () => {
+    search = '';
+    apiFetch.mockImplementation((url: string) => {
+      if (url === '/entities/ent1')
+        return Promise.resolve({
+          ...entity,
+          status: 'archived',
+          mergedInto: {
+            id: 'ent2',
+            entityCode: 'ENT00002',
+            legalName: 'Acme Private Limited',
+            mergedAt: '2026-10-24T09:00:00Z',
+          },
+        });
+      if (url.startsWith('/engagements')) return Promise.resolve({ items: [], total: 0 });
+      if (url.startsWith('/credentials'))
+        return Promise.resolve({ vaultReady: true, items: [], recentAccess: [] });
+      if (url.startsWith('/client-returns'))
+        return Promise.resolve({ periods: [], forms: [], lines: [] });
+      return Promise.resolve([]);
+    });
+    render(wrap(<EntityDetailPage />));
+    expect(
+      await screen.findByRole('link', { name: 'Acme Private Limited (ENT00002)' }),
+    ).toHaveAttribute('href', '/entities/ent2');
+    expect(screen.queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Merge with another client/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /CIN not recorded/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Add$/ })).not.toBeInTheDocument();
+  });
+
+  it('offers the merge on a live client', async () => {
+    search = '';
+    render(wrap(<EntityDetailPage />));
+    expect(
+      await screen.findByRole('button', { name: /Merge with another client/ }),
+    ).toBeInTheDocument();
+  });
+});
