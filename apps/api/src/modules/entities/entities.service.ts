@@ -12,6 +12,7 @@ import {
   REGULATORY_PROFILE_STATUS,
   ROLE,
   type ContactType,
+  type DuplicateClientConflict,
   type MissingInfoCode,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -20,6 +21,7 @@ import type { PageParams, PageResult } from '../../common/pagination/pagination.
 import { AuditService } from '../audit/audit.service';
 import { ComplianceGeneratorService } from '../compliance/compliance-generator.service';
 import { engagementInSectionsSql } from '../../common/sections';
+import { sameClient } from './client-names';
 import type {
   AddressInput,
   BusinessActivityInput,
@@ -196,7 +198,8 @@ export class EntitiesService {
     filter: EntityFilter,
     page: PageParams,
   ): Promise<PageResult<EntitySummary>> {
-    const conditions: string[] = [];
+    // A client merged into another is reached through its keeper, not listed.
+    const conditions: string[] = ['e.merged_into_id IS NULL'];
     const params: unknown[] = [];
     if (filter.status) {
       params.push(filter.status);
@@ -291,28 +294,41 @@ export class EntitiesService {
         score: number;
         match_reason: 'pan' | 'name';
       }>(
-        `SELECT id, entity_code, legal_name, pan, score, match_reason FROM (
+        // One row per client: a PAN match outranks the same client's name match.
+        `SELECT * FROM (
+         SELECT DISTINCT ON (id) id, entity_code, legal_name, pan, score, match_reason FROM (
            SELECT id, entity_code, legal_name, pan, 1.0::float AS score, 'pan' AS match_reason
            FROM hsdg.entities
-           WHERE $1::text IS NOT NULL AND pan = $1
+           WHERE $1::text IS NOT NULL AND pan = $1 AND merged_into_id IS NULL
            UNION
            SELECT id, entity_code, legal_name, pan,
                   similarity(lower(legal_name), lower($2)) AS score, 'name' AS match_reason
            FROM hsdg.entities
            WHERE $2::text IS NOT NULL AND similarity(lower(legal_name), lower($2)) > 0.3
+             AND merged_into_id IS NULL
          ) matches
+         ORDER BY id, score DESC
+         ) best
          ORDER BY score DESC, legal_name
          LIMIT 10`,
         [args.pan ?? null, args.legalName ?? null],
       );
-      return rows.map((r) => ({
-        id: r.id,
-        entityCode: r.entity_code,
-        legalName: r.legal_name,
-        pan: r.pan,
-        score: Number(r.score),
-        matchReason: r.match_reason,
-      }));
+      return rows.map((r) => {
+        const { verdict, reasons } = sameClient(
+          { name: args.legalName ?? r.legal_name, pan: args.pan ?? null },
+          { name: r.legal_name, pan: r.pan },
+        );
+        return {
+          id: r.id,
+          entityCode: r.entity_code,
+          legalName: r.legal_name,
+          pan: r.pan,
+          score: Number(r.score),
+          matchReason: r.match_reason,
+          verdict,
+          reasons,
+        };
+      });
     });
   }
 
@@ -328,6 +344,7 @@ export class EntitiesService {
   ): Promise<EntityDetail> {
     const typeId = await this.resolveTypeId(client, input.typeSlug);
     const officeId = await this.resolveOfficeId(client, input.officeCode);
+    if (input.pan) await this.assertPanFree(client, null, input.pan);
 
     let entityId: string;
     try {
@@ -415,94 +432,105 @@ export class EntitiesService {
   }
 
   async updateEntity(ctx: RlsContext, id: string, input: UpdateEntityInput): Promise<EntityDetail> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const before = await this.selectDetail(client, id);
-      if (!before) throw new NotFoundException('Entity not found.');
+    return this.db.withRlsContext(ctx, (client) => this.updateEntityWith(client, ctx, id, input));
+  }
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
-      const set = (col: string, val: unknown): void => {
-        params.push(val);
-        sets.push(`${col} = $${params.length}`);
-      };
+  /** updateEntity inside the caller's transaction (the client master import). */
+  async updateEntityWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    id: string,
+    input: UpdateEntityInput,
+  ): Promise<EntityDetail> {
+    const before = await this.selectDetail(client, id);
+    if (!before) throw new NotFoundException('Entity not found.');
 
-      if (input.legalName !== undefined) set('legal_name', input.legalName);
-      if (input.displayName !== undefined) set('display_name', input.displayName);
-      if (input.tradeName !== undefined) set('trade_name', input.tradeName);
-      if (input.shortName !== undefined) set('short_name', input.shortName);
-      if (input.typeSlug !== undefined) {
-        set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
-      }
-      if (input.officeCode !== undefined) {
-        set('home_office_id', await this.resolveOfficeId(client, input.officeCode));
-      }
-      if (input.clientId !== undefined) set('client_id', input.clientId);
-      if (input.pan !== undefined) set('pan', input.pan);
-      if (input.parentEntityId !== undefined) set('parent_entity_id', input.parentEntityId);
-      if (input.status !== undefined) set('status', input.status);
-      if (input.legalStatus !== undefined) set('legal_status', input.legalStatus);
-      if (input.regulatoryProfileStatus !== undefined)
-        set('regulatory_profile_status', input.regulatoryProfileStatus);
-      if (input.listingStatus !== undefined) set('listing_status', input.listingStatus);
-      if (input.currentAccountingFramework !== undefined)
-        set('current_accounting_framework', input.currentAccountingFramework);
-      if (input.countryOfIncorporation !== undefined)
-        set('country_of_incorporation', input.countryOfIncorporation);
-      if (input.incorporationDate !== undefined) set('incorporation_date', input.incorporationDate);
-      if (input.roc !== undefined) set('roc', input.roc);
-      if (input.authorisedCapital !== undefined) set('authorised_capital', input.authorisedCapital);
-      if (input.paidUpCapital !== undefined) set('paid_up_capital', input.paidUpCapital);
-      if (input.llpContribution !== undefined) set('llp_contribution', input.llpContribution);
-      if (input.businessDescription !== undefined)
-        set('business_description', input.businessDescription);
-      if (input.activities) {
-        const a = input.activities;
-        if (a.manufacturing !== undefined) set('act_manufacturing', a.manufacturing);
-        if (a.trading !== undefined) set('act_trading', a.trading);
-        if (a.services !== undefined) set('act_services', a.services);
-        if (a.import !== undefined) set('act_import', a.import);
-        if (a.export !== undefined) set('act_export', a.export);
-        if (a.ecommerce !== undefined) set('act_ecommerce', a.ecommerce);
-        if (a.regulated !== undefined) set('act_regulated', a.regulated);
-      }
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const set = (col: string, val: unknown): void => {
+      params.push(val);
+      sets.push(`${col} = $${params.length}`);
+    };
 
-      if (sets.length === 0) return before;
+    if (input.legalName !== undefined) set('legal_name', input.legalName);
+    if (input.displayName !== undefined) set('display_name', input.displayName);
+    if (input.tradeName !== undefined) set('trade_name', input.tradeName);
+    if (input.shortName !== undefined) set('short_name', input.shortName);
+    if (input.typeSlug !== undefined) {
+      set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
+    }
+    if (input.officeCode !== undefined) {
+      set('home_office_id', await this.resolveOfficeId(client, input.officeCode));
+    }
+    if (input.clientId !== undefined) set('client_id', input.clientId);
+    if (input.pan !== undefined) {
+      if (input.pan) await this.assertPanFree(client, id, input.pan);
+      set('pan', input.pan);
+    }
+    if (input.parentEntityId !== undefined) set('parent_entity_id', input.parentEntityId);
+    if (input.status !== undefined) set('status', input.status);
+    if (input.legalStatus !== undefined) set('legal_status', input.legalStatus);
+    if (input.regulatoryProfileStatus !== undefined)
+      set('regulatory_profile_status', input.regulatoryProfileStatus);
+    if (input.listingStatus !== undefined) set('listing_status', input.listingStatus);
+    if (input.currentAccountingFramework !== undefined)
+      set('current_accounting_framework', input.currentAccountingFramework);
+    if (input.countryOfIncorporation !== undefined)
+      set('country_of_incorporation', input.countryOfIncorporation);
+    if (input.incorporationDate !== undefined) set('incorporation_date', input.incorporationDate);
+    if (input.roc !== undefined) set('roc', input.roc);
+    if (input.authorisedCapital !== undefined) set('authorised_capital', input.authorisedCapital);
+    if (input.paidUpCapital !== undefined) set('paid_up_capital', input.paidUpCapital);
+    if (input.llpContribution !== undefined) set('llp_contribution', input.llpContribution);
+    if (input.businessDescription !== undefined)
+      set('business_description', input.businessDescription);
+    if (input.activities) {
+      const a = input.activities;
+      if (a.manufacturing !== undefined) set('act_manufacturing', a.manufacturing);
+      if (a.trading !== undefined) set('act_trading', a.trading);
+      if (a.services !== undefined) set('act_services', a.services);
+      if (a.import !== undefined) set('act_import', a.import);
+      if (a.export !== undefined) set('act_export', a.export);
+      if (a.ecommerce !== undefined) set('act_ecommerce', a.ecommerce);
+      if (a.regulated !== undefined) set('act_regulated', a.regulated);
+    }
 
-      sets.push('version = version + 1');
-      params.push(id);
-      const idParam = `$${params.length}`;
-      let versionClause = '';
-      if (input.version !== undefined) {
-        params.push(input.version);
-        versionClause = ` AND version = $${params.length}`;
-      }
+    if (sets.length === 0) return before;
 
-      let updated: number;
-      try {
-        const result = await client.query(
-          `UPDATE hsdg.entities SET ${sets.join(', ')} WHERE id = ${idParam}${versionClause}`,
-          params,
-        );
-        updated = result.rowCount ?? 0;
-      } catch (err) {
-        throw translatePgError(err);
-      }
-      if (updated === 0) {
-        throw new ConflictException(
-          'Entity was modified by someone else. Refresh and retry (stale version).',
-        );
-      }
+    sets.push('version = version + 1');
+    params.push(id);
+    const idParam = `$${params.length}`;
+    let versionClause = '';
+    if (input.version !== undefined) {
+      params.push(input.version);
+      versionClause = ` AND version = $${params.length}`;
+    }
 
-      const after = await this.selectDetail(client, id);
-      await this.audit.recordWith(client, ctx, {
-        action: 'entity.updated',
-        objectType: 'entity',
-        objectId: id,
-        before,
-        after,
-      });
-      return after!;
+    let updated: number;
+    try {
+      const result = await client.query(
+        `UPDATE hsdg.entities SET ${sets.join(', ')} WHERE id = ${idParam}${versionClause}`,
+        params,
+      );
+      updated = result.rowCount ?? 0;
+    } catch (err) {
+      throw translatePgError(err);
+    }
+    if (updated === 0) {
+      throw new ConflictException(
+        'Entity was modified by someone else. Refresh and retry (stale version).',
+      );
+    }
+
+    const after = await this.selectDetail(client, id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.updated',
+      objectType: 'entity',
+      objectId: id,
+      before,
+      after,
     });
+    return after!;
   }
 
   /**
@@ -814,6 +842,36 @@ export class EntitiesService {
       this.insertAddress(client, entityId, input),
     );
   }
+
+  /**
+   * The client master import filling a contact's or an address's empty
+   * fields (never overwriting one), in the caller's transaction. Audited.
+   */
+  async fillChildWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    kind: 'contact' | 'address',
+    childId: string,
+    patch: Record<string, string>,
+  ): Promise<EntityDetail> {
+    const table = kind === 'contact' ? 'entity_contacts' : 'entity_addresses';
+    return this.mutateChildWith(client, ctx, entityId, `entity.${kind}_updated`, () =>
+      this.updateChildRow(client, table, 'entity_id', entityId, childId, patch),
+    );
+  }
+
+  /** addAddress inside the caller's transaction (the client master import). */
+  async addAddressWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    input: AddressInput,
+  ): Promise<EntityDetail> {
+    return this.mutateChildWith(client, ctx, entityId, 'entity.address_added', () =>
+      this.insertAddress(client, entityId, input),
+    );
+  }
   async updateAddress(
     ctx: RlsContext,
     entityId: string,
@@ -1053,6 +1111,62 @@ export class EntitiesService {
     }
   }
 
+  /** A PAN is one legal entity: if another client has it, say which (409 duplicate_client). */
+  private async assertPanFree(client: PoolClient, entityId: string | null, pan: string) {
+    const { rows } = await client.query<{ entity_id: string }>(
+      `SELECT entity_id FROM hsdg.client_holding('pan', $1)`,
+      [pan],
+    );
+    if (rows[0] && rows[0].entity_id !== entityId) {
+      throw await this.holderConflict(client, entityId, 'pan', pan.trim().toUpperCase());
+    }
+  }
+
+  /**
+   * The 409 for a PAN or registration number another client holds. It names
+   * that client (it may be another office's) and carries `duplicate_client`,
+   * so the web can offer to merge the two: the same number on two clients
+   * usually means one client entered twice under different names.
+   */
+  async holderConflict(
+    client: PoolClient,
+    entityId: string | null,
+    type: string,
+    value: string,
+  ): Promise<ConflictException> {
+    const label = `${type === 'other' ? 'Registration' : type.toUpperCase()} ${value}`;
+    const { rows } = await client.query<{
+      entity_id: string;
+      entity_code: string;
+      legal_name: string;
+    }>(`SELECT entity_id, entity_code, legal_name FROM hsdg.client_holding($1, $2)`, [type, value]);
+    const holder = rows[0];
+    if (!holder) return new ConflictException(`${label} is already recorded.`);
+    if (holder.entity_id === entityId) {
+      return new ConflictException(`${label} is already recorded on this client.`);
+    }
+    const seen = await client.query(`SELECT 1 FROM hsdg.entities WHERE id = $1`, [
+      holder.entity_id,
+    ]);
+    const body: DuplicateClientConflict = {
+      code: 'duplicate_client',
+      message:
+        `${label} is already on ${holder.legal_name} (${holder.entity_code}). ` +
+        (entityId
+          ? 'If they are one client, merge them; if it was put there by mistake, remove it from that client first.'
+          : 'Open that client instead of adding it again.'),
+      entityId,
+      holder: {
+        id: holder.entity_id,
+        entityCode: holder.entity_code,
+        legalName: holder.legal_name,
+        visible: (seen.rowCount ?? 0) > 0,
+      },
+      identifier: { type, value },
+    };
+    return new ConflictException(body);
+  }
+
   /**
    * Run a write that sets a registration number; if the number is already
    * recorded (unique firm-wide), say on which client — it may be another
@@ -1072,19 +1186,7 @@ export class EntitiesService {
       const e = err as { code?: string; constraint?: string };
       if (e.code !== '23505' || e.constraint !== 'entity_registrations_number_unique') throw err;
       await client.query('ROLLBACK TO SAVEPOINT registration_number');
-      const { rows } = await client.query<{ entity_id: string; legal_name: string }>(
-        `SELECT entity_id, legal_name FROM hsdg.registration_holder($1, $2)`,
-        [type, number],
-      );
-      const label = `${type === 'other' ? 'Registration' : type.toUpperCase()} ${number}`;
-      const holder = rows[0];
-      if (!holder) throw new ConflictException(`${label} is already recorded.`);
-      if (holder.entity_id === entityId) {
-        throw new ConflictException(`${label} is already recorded on this client.`);
-      }
-      throw new ConflictException(
-        `${label} is already recorded on ${holder.legal_name}. If it was put there by mistake, remove it from that client first.`,
-      );
+      throw await this.holderConflict(client, entityId, type, number);
     }
     await client.query('RELEASE SAVEPOINT registration_number');
   }
@@ -1235,6 +1337,17 @@ export class EntitiesService {
        WHERE er.from_entity_id = $1 ORDER BY er.relationship_type`,
       [id],
     );
+    const merged = await client.query<{
+      id: string;
+      entity_code: string;
+      legal_name: string;
+      merged_at: string;
+    }>(
+      `SELECT k.id, k.entity_code, k.legal_name, d.merged_at
+       FROM hsdg.entities d JOIN hsdg.entities k ON k.id = d.merged_into_id
+       WHERE d.id = $1`,
+      [id],
+    );
     const acts = await client.query<BusinessActivityRow>(
       `SELECT ba.id, ba.industry_id, i.slug AS industry_slug, i.name AS industry_name,
               ba.nic_code_id, nc.code AS nic_code, ba.is_primary, ba.notes
@@ -1361,6 +1474,14 @@ export class EntitiesService {
         source: a.source,
         notes: a.notes,
       })),
+      mergedInto: merged.rows[0]
+        ? {
+            id: merged.rows[0].id,
+            entityCode: merged.rows[0].entity_code,
+            legalName: merged.rows[0].legal_name,
+            mergedAt: merged.rows[0].merged_at,
+          }
+        : null,
     };
     return detail;
   }

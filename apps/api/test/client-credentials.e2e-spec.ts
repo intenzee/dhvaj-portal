@@ -767,9 +767,14 @@ describe('Client portal credentials (e2e)', () => {
     expect(row('Jayant Gupta').warnings).toContain(
       `"${t} Jaynat Gupta" will be renamed "${t} Jayant Gupta".`,
     );
-    expect(row('GRIID- Chandigarh').entityName).toBe(`${t} GRIID Chandigarh`);
-    expect(row('GRIID- Chandigarh').warnings.join(' ')).toMatch(
-      new RegExp(`"${t} Griid" \\(.+\\) in the portal looks like the same client`),
+    // "- Chandigarh" is the place (its GST state), not part of the name: the
+    // row is Griid, and the earlier "GRIID Chandigarh" looks like a duplicate.
+    expect(row('GRIID')).toMatchObject({ action: 'update_client', entityName: `${t} Griid` });
+    expect(row('GRIID').gst.map((g) => g.stateCode)).toEqual(['04']);
+    expect(row('GRIID').warnings.join(' ')).toMatch(
+      new RegExp(
+        `"${t} GRIID Chandigarh" \\(.+\\) in the portal looks like the same client; if it is, merge the two`,
+      ),
     );
     expect(row('Kumar')).toMatchObject({ action: 'error' });
     expect(row('Kumar').error).toMatch(/could be .*Kumar Agencies.* or .*Kumar Agro/);

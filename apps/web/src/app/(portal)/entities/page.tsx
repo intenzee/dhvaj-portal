@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import { PERMISSION, type MissingFilter, type Paginated } from '@hsdg/contracts';
-import { Plus, Upload } from 'lucide-react';
+import { FileSpreadsheet, Plus, Upload } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -18,6 +18,9 @@ import { Pagination } from '@/components/pagination';
 import { SectionChips, useUrlSections } from '@/components/section-filter';
 import { entityListPath } from '@/lib/list-paths';
 import { MISSING_FILTER_OPTIONS, MissingDataMarker } from '@/components/entities/missing-data';
+import { ExportClientMasterButton } from '@/components/entities/client-master';
+import { PossibleDuplicatesList } from '@/components/entities/duplicate-clients';
+import { useDuplicates } from '@/components/entities/merge-clients-modal';
 
 const PAGE_SIZE = 25;
 
@@ -49,6 +52,9 @@ function EntitiesInner(): JSX.Element {
   const [offset, setOffset] = useState(0);
   const [missing, setMissing] = useState<MissingFilter | ''>('');
   const [sections, setSectionsUrl] = useUrlSections();
+  const [view, setView] = useState<'all' | 'duplicates'>('all');
+  const dupes = useDuplicates();
+  const dupeCount = dupes.data?.length ?? 0;
 
   const onSearch = (v: string): void => {
     setSearch(v);
@@ -73,9 +79,17 @@ function EntitiesInner(): JSX.Element {
         title="Clients"
         subtitle="Companies, firms and individuals we work for. Click a client to see everything we do for them."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {can(principal, PERMISSION.entityManage) && (
               <>
+                <ExportClientMasterButton />
+                {can(principal, PERMISSION.credentialManage) && (
+                  <Link href="/entities/master">
+                    <Button variant="secondary">
+                      <FileSpreadsheet className="h-4 w-4" /> Import client master
+                    </Button>
+                  </Link>
+                )}
                 {can(principal, PERMISSION.credentialManage) && (
                   <Link href="/entities/import">
                     <Button variant="secondary">
@@ -94,60 +108,96 @@ function EntitiesInner(): JSX.Element {
         }
       />
 
-      <SectionChips value={sections} onChange={setSections} className="mb-3" />
-      <div className="mb-4 flex flex-wrap gap-2">
-        <input
-          value={search}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search by name or PAN…"
-          className="w-full max-w-sm rounded-md border border-line-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-        />
-        <select
-          aria-label="Missing data"
-          value={missing}
-          onChange={(e) => {
-            setMissing(e.target.value as MissingFilter | '');
-            setOffset(0);
-          }}
-          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+      {(dupeCount > 0 || view === 'duplicates') && (
+        <div
+          role="tablist"
+          aria-label="Clients view"
+          className="mb-3 flex gap-1 border-b border-line"
         >
-          {MISSING_FILTER_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
+          {(
+            [
+              ['all', 'All clients'],
+              ['duplicates', `Possible duplicates (${dupeCount})`],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              role="tab"
+              type="button"
+              aria-selected={view === v}
+              onClick={() => setView(v)}
+              className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${
+                view === v
+                  ? 'border-primary-600 font-medium text-primary-700'
+                  : 'border-transparent text-ink-muted hover:text-ink'
+              }`}
+            >
+              {label}
+            </button>
           ))}
-        </select>
-      </div>
+        </div>
+      )}
 
-      <Card className="p-0">
-        {q.isLoading && (
-          <div className="p-4">
-            <Spinner />
+      {view === 'duplicates' ? (
+        <PossibleDuplicatesList />
+      ) : (
+        <>
+          <SectionChips value={sections} onChange={setSections} className="mb-3" />
+          <div className="mb-4 flex flex-wrap gap-2">
+            <input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search by name or PAN…"
+              className="w-full max-w-sm rounded-md border border-line-strong px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <select
+              aria-label="Missing data"
+              value={missing}
+              onChange={(e) => {
+                setMissing(e.target.value as MissingFilter | '');
+                setOffset(0);
+              }}
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              {MISSING_FILTER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
-        {q.data && (
-          <DataTable
-            columns={columns}
-            data={q.data.items}
-            empty={
-              missing
-                ? 'No clients match this missing-data filter.'
-                : sections.length
-                  ? 'No clients in this section match.'
-                  : 'No entities match your search.'
-            }
-            onRowClick={(row) => router.push(`/entities/${row.id}`)}
-          />
-        )}
-      </Card>
-      {q.data && (
-        <Pagination
-          total={q.data.total}
-          limit={PAGE_SIZE}
-          offset={offset}
-          onOffsetChange={setOffset}
-          unit="entities"
-        />
+
+          <Card className="p-0">
+            {q.isLoading && (
+              <div className="p-4">
+                <Spinner />
+              </div>
+            )}
+            {q.data && (
+              <DataTable
+                columns={columns}
+                data={q.data.items}
+                empty={
+                  missing
+                    ? 'No clients match this missing-data filter.'
+                    : sections.length
+                      ? 'No clients in this section match.'
+                      : 'No entities match your search.'
+                }
+                onRowClick={(row) => router.push(`/entities/${row.id}`)}
+              />
+            )}
+          </Card>
+          {q.data && (
+            <Pagination
+              total={q.data.total}
+              limit={PAGE_SIZE}
+              offset={offset}
+              onOffsetChange={setOffset}
+              unit="entities"
+            />
+          )}
+        </>
       )}
     </div>
   );

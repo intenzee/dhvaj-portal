@@ -8,7 +8,6 @@ import {
   isValidTan,
   normalizeGstin,
   panOfGstin,
-  stateCodeFromName,
   stateOfGstin,
   usernameHint,
   type ClientImportLogin,
@@ -19,6 +18,7 @@ import {
   type ReturnForm,
   type ReturnMark,
 } from '@hsdg/contracts';
+import { similarNames, splitPlaceFromName, withinOneEdit } from '../entities/client-names';
 
 /**
  * ADR-0035 — reading the firm's login workbook. Pure: workbook bytes in,
@@ -194,24 +194,8 @@ export function parseFrequency(cell: string): GstFrequency | null {
   return null;
 }
 
-/**
- * "ABC Traders (Delhi)" → { name: 'ABC Traders', state: '07' }. A bracket that
- * is not a state ("Ram Kumar (HUF)") stays in the name. Pure — tested.
- */
-export function splitStateFromName(raw: string): { name: string; state: string | null } {
-  const full = raw.replace(/\s+/g, ' ').trim();
-  const bracket = /^(.*?)\s*[([]\s*([^)\]]+?)\s*[)\]]\s*$/.exec(full);
-  if (bracket?.[1]) {
-    const state = stateCodeFromName(bracket[2]!);
-    if (state) return { name: bracket[1], state };
-  }
-  const dash = /^(.*?)\s+[-–]\s+([A-Za-z .&]+)$/.exec(full);
-  if (dash?.[1]) {
-    const state = stateCodeFromName(dash[2]!);
-    if (state) return { name: dash[1], state };
-  }
-  return { name: full, state: null };
-}
+/** "ABC Traders (Delhi)" → { name: 'ABC Traders', state: '07' }. Pure — tested. */
+export const splitStateFromName = splitPlaceFromName;
 
 /** For matching names across sheets and with the portal: letters and digits only. */
 export function nameKey(name: string): string {
@@ -231,35 +215,7 @@ function nameWords(name: string): string[] {
     .filter((w) => w && !LEGAL_FORM_WORDS.has(w));
 }
 
-/** At most one letter added, dropped, changed or swapped with the next between a and b. */
-function withinOneEdit(a: string, b: string): boolean {
-  if (Math.abs(a.length - b.length) > 1) return false;
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
-  if (a.length === b.length)
-    return (
-      a.slice(i + 1) === b.slice(i + 1) ||
-      (a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2))
-    );
-  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
-}
-
-/**
- * Whether two sheets probably name the same client: equal but for the legal
- * form, one letter apart in a long name ('Cosmotrendz' / 'Cosmotrendez'), or
- * one the leading words of the other ('griid' / 'GRIID Chandigarh'). Pure — tested.
- */
-export function similarNames(a: string, b: string): boolean {
-  const wa = nameWords(a);
-  const wb = nameWords(b);
-  const ka = wa.join('');
-  const kb = wb.join('');
-  if (!ka || !kb) return false;
-  if (ka === kb) return true;
-  if (Math.min(ka.length, kb.length) >= 8 && withinOneEdit(ka, kb)) return true;
-  const [short, long] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
-  return short.join('').length >= 4 && short.every((w, i) => long[i] === w);
-}
+export { similarNames };
 
 /**
  * Whether two names start with the same word, give or take a letter

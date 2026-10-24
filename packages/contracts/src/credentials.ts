@@ -246,21 +246,125 @@ const STATE_ALIASES: Record<string, string> = {
   ts: '36',
   hyderabad: '36',
   ap: '37',
+  // Cities and spellings seen after a client's name ("GRIID- Chandigarh").
+  srinagar: '01',
+  shimla: '02',
+  mohali: '03',
+  ludhiana: '03',
+  amritsar: '03',
+  jalandhar: '03',
+  patiala: '03',
+  dehradun: '05',
+  haridwar: '05',
+  panchkula: '06',
+  sonipat: '06',
+  sonepat: '06',
+  karnal: '06',
+  ambala: '06',
+  panipat: '06',
+  rohtak: '06',
+  delhincr: '07',
+  jodhpur: '08',
+  udaipur: '08',
+  kota: '08',
+  kanpur: '09',
+  varanasi: '09',
+  agra: '09',
+  meerut: '09',
+  prayagraj: '09',
+  allahabad: '09',
+  patna: '10',
+  guwahati: '18',
+  ranchi: '20',
+  jamshedpur: '20',
+  bhubaneswar: '21',
+  raipur: '22',
+  indore: '23',
+  bhopal: '23',
+  gujrat: '24',
+  vadodara: '24',
+  baroda: '24',
+  rajkot: '24',
+  gandhinagar: '24',
+  silvassa: '26',
+  nagpur: '27',
+  thane: '27',
+  navimumbai: '27',
+  nashik: '27',
+  mysore: '29',
+  mysuru: '29',
+  panaji: '30',
+  panjim: '30',
+  kochi: '32',
+  cochin: '32',
+  ernakulam: '32',
+  trivandrum: '32',
+  thiruvananthapuram: '32',
+  coimbatore: '33',
+  madurai: '33',
+  secunderabad: '36',
+  visakhapatnam: '37',
+  vizag: '37',
+  vijayawada: '37',
+  leh: '38',
 };
+
+const stateKey = (raw: string): string =>
+  raw
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z]/g, '');
 
 /** 'Delhi', 'New Delhi', 'MH', 'Mumbai' → '07', '27', '27'; null when not a state. Pure — tested. */
 export function stateCodeFromName(raw: string): string | null {
   const code = raw.trim();
   if (/^\d{2}$/.test(code)) return GST_STATES[code] ? code : null;
-  const key = raw
-    .toLowerCase()
-    .replace(/&/g, 'and')
-    .replace(/[^a-z]/g, '');
+  const key = stateKey(raw);
   if (!key) return null;
   for (const [code, name] of Object.entries(GST_STATES)) {
-    if (name.toLowerCase().replace(/[^a-z]/g, '') === key) return code;
+    if (stateKey(name) === key) return code;
   }
   return STATE_ALIASES[key] ?? null;
+}
+
+/** Letters to add, drop or change to turn a into b. */
+function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j += 1)
+      cur[j] = Math.min(
+        prev[j]! + 1,
+        cur[j - 1]! + 1,
+        prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+/**
+ * stateCodeFromName, forgiving a typo: 'Gurjrat' → '24', 'Chandigrah' → '04'.
+ * Two letters off in a long name, one in a short one, and only when a single
+ * state is that close. For a word someone set apart as a place ("Name
+ * (Gurjrat)"), not for free text. Pure — tested.
+ */
+export function guessStateCode(raw: string): string | null {
+  const exact = stateCodeFromName(raw);
+  if (exact) return exact;
+  const key = stateKey(raw);
+  if (key.length < 4) return null;
+  const allowed = key.length >= 6 ? 2 : 1;
+  const close = new Set<string>();
+  const names: [string, string][] = [
+    ...Object.entries(GST_STATES).map(([code, name]): [string, string] => [stateKey(name), code]),
+    ...Object.entries(STATE_ALIASES).filter(([k]) => k.length >= 4),
+  ];
+  for (const [name, code] of names) {
+    if (Math.abs(name.length - key.length) <= allowed && editDistance(name, key) <= allowed)
+      close.add(code);
+  }
+  return close.size === 1 ? [...close][0]! : null;
 }
 
 /**
