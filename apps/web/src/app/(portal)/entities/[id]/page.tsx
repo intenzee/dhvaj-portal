@@ -52,6 +52,8 @@ import {
   missingInfoSection,
 } from '@/components/entities/client-master-forms';
 import { Button } from '@/components/ui';
+import { MergeWithClientButton } from '@/components/entities/merge-clients-modal';
+import { MergedIntoBanner, PossibleDuplicateBanner } from '@/components/entities/duplicate-clients';
 
 const inr = (n: number | null): string => (n === null ? '—' : `₹${n.toLocaleString('en-IN')}`);
 
@@ -61,7 +63,7 @@ export default function EntityDetailPage(): JSX.Element {
   const router = useRouter();
   const params = useSearchParams();
   const { principal } = useAuth();
-  const canManage = can(principal, PERMISSION.entityManage);
+  const mayManage = can(principal, PERMISSION.entityManage);
   const { isOn } = useFeatureFlags();
   // `?edit=<section>` (from an audit file's "add on client master" link) opens
   // that section's form straight away; `?fy=` picks the year for figures.
@@ -97,6 +99,8 @@ export default function EntityDetailPage(): JSX.Element {
     return <EmptyState>Client not found, or you don&rsquo;t have access to it.</EmptyState>;
 
   const e = entity.data;
+  // A merged client is archived: read-only, its work lives on the kept one.
+  const canManage = mayManage && !e.mergedInto;
   const currentFinancials = e.financialProfiles.filter((f) => f.isCurrent);
 
   return (
@@ -105,8 +109,18 @@ export default function EntityDetailPage(): JSX.Element {
         back={{ href: '/entities', label: 'Clients' }}
         title={e.legalName}
         subtitle={`${e.entityCode} · ${e.typeName}${e.tradeName ? ` · ${e.tradeName}` : ''}`}
-        actions={<EntityDetailActions entity={e} />}
+        actions={
+          canManage ? (
+            <div className="flex flex-wrap gap-2">
+              <EntityDetailActions entity={e} />
+              <MergeWithClientButton entityId={e.id} />
+            </div>
+          ) : undefined
+        }
       />
+
+      {e.mergedInto && <MergedIntoBanner mergedInto={e.mergedInto} />}
+      {canManage && <PossibleDuplicateBanner entityId={e.id} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={e.status} />
@@ -221,7 +235,7 @@ export default function EntityDetailPage(): JSX.Element {
                 </div>
               </div>
             ))}
-            {logins.data && <ClientLogins entityId={id} data={logins.data} />}
+            {logins.data && !e.mergedInto && <ClientLogins entityId={id} data={logins.data} />}
             <CredentialAccessNote data={logins.data} />
           </CardBody>
         </Card>
@@ -252,7 +266,7 @@ export default function EntityDetailPage(): JSX.Element {
 
       <ClientReturnsCard entityId={e.id} />
 
-      {isOn(FEATURE_FLAG.calendarV2) && <ComplianceProfilesCard entityId={e.id} />}
+      {isOn(FEATURE_FLAG.calendarV2) && !e.mergedInto && <ComplianceProfilesCard entityId={e.id} />}
 
       {/* Year-wise financials (§16) */}
       <Card id={SECTION_ANCHOR.financials}>

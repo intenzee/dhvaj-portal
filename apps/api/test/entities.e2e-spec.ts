@@ -107,14 +107,26 @@ describe('Entity Master (e2e)', () => {
   });
 
   describe('duplicate detection', () => {
-    it('finds an exact PAN match and a fuzzy name match', async () => {
-      const res = await request(app.getHttpServer())
+    it('finds an exact PAN match and a fuzzy name match, one row per client', async () => {
+      const mp = await token('mp@dhvaj.in');
+      const both = await request(app.getHttpServer())
         .get('/api/v1/entities/duplicate-check?legalName=Acme%20Manufactring&pan=AAACA1234A')
-        .set(bearer(await token('mp@dhvaj.in')))
+        .set(bearer(mp))
         .expect(200);
-      const reasons = (res.body as Array<{ matchReason: string }>).map((r) => r.matchReason);
-      expect(reasons).toContain('pan');
-      expect(reasons).toContain('name');
+      const acme = (both.body as Array<{ pan: string | null; matchReason: string }>).filter(
+        (r) => r.pan === 'AAACA1234A',
+      );
+      expect(acme.map((r) => r.matchReason)).toEqual(['pan']);
+
+      const byName = await request(app.getHttpServer())
+        .get('/api/v1/entities/duplicate-check?legalName=Acme%20Manufactring')
+        .set(bearer(mp))
+        .expect(200);
+      expect(byName.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ pan: 'AAACA1234A', matchReason: 'name' }),
+        ]),
+      );
     });
   });
 

@@ -1,4 +1,6 @@
 import type {
+  ClientVerdict,
+  MergedInto,
   WorkSection,
   AccountingFramework,
   AddressType,
@@ -208,6 +210,8 @@ export interface EntityDetail extends EntitySummary {
   businessActivities: BusinessActivityRecord[];
   listings: ListingRecord[];
   regulatoryAttributes: RegulatoryAttributeRecord[];
+  /** Set when this client was merged into another and archived. */
+  mergedInto: MergedInto | null;
 }
 
 export interface DuplicateCandidate {
@@ -217,6 +221,9 @@ export interface DuplicateCandidate {
   pan: string | null;
   score: number;
   matchReason: 'pan' | 'name';
+  /** How sure the name / PAN reading is that it is the same client. */
+  verdict: ClientVerdict;
+  reasons: string[];
 }
 
 export interface RegistrationInput {

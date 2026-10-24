@@ -433,8 +433,15 @@ describe('GST with several GSTINs (e2e)', () => {
 
       const other = await add(taken).expect(409);
       expect(other.body.message).toBe(
-        `GSTIN ${taken} is already recorded on Southern Holder ${p} Pvt Ltd. If it was put there by mistake, remove it from that client first.`,
+        `GSTIN ${taken} is already on Southern Holder ${p} Pvt Ltd (${south.body.entityCode}). If they are one client, merge them; if it was put there by mistake, remove it from that client first.`,
       );
+      // Named for the merge popup, though Partner A cannot open it.
+      expect(other.body).toMatchObject({
+        code: 'duplicate_client',
+        entityId: mine.id,
+        holder: { id: south.body.id, visible: false },
+        identifier: { type: 'gstin', value: taken },
+      });
       const own = await add(gstin('07', p)).expect(409);
       expect(own.body.message).toBe(`GSTIN ${gstin('07', p)} is already recorded on this client.`);
 
@@ -444,7 +451,7 @@ describe('GST with several GSTINs (e2e)', () => {
         .set(bearer(pa))
         .send({ registrationNumber: taken })
         .expect(409);
-      expect(edit.body.message).toMatch(`already recorded on Southern Holder ${p} Pvt Ltd`);
+      expect(edit.body.message).toMatch(`already on Southern Holder ${p} Pvt Ltd`);
 
       // A new GSTIN still goes in.
       const ok = await add(gstin('09', p)).expect(201);
