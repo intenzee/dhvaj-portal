@@ -5,6 +5,8 @@
  */
 import type {
   BillingModel,
+  ClientVerdict,
+  MergedInto,
   ClientDependencyStatus,
   ComplianceStatus,
   EngagementConfidentiality,
@@ -163,6 +165,9 @@ export interface DuplicateCandidate {
   pan: string | null;
   score: number;
   matchReason: 'pan' | 'name';
+  /** The API's reading of the two names and identifiers; `different` still listed when the PAN or name matched. */
+  verdict: ClientVerdict;
+  reasons: string[];
 }
 
 export interface Registration {
@@ -280,6 +285,8 @@ export interface MissingInfoItem {
   severity: 'required' | 'recommended';
 }
 export interface EntityDetail extends EntityRow {
+  /** Set once this client was merged into another and archived. */
+  mergedInto: MergedInto | null;
   displayName: string | null;
   tradeName: string | null;
   shortName: string | null;

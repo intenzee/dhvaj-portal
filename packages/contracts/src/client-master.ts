@@ -8,6 +8,7 @@
  * The headings are the contract with the template the export fills
  * (scripts/client-master/build_template.py) — change one, change both.
  */
+import type { ClientVerdict } from './client-merge';
 import type { ClientImportAction } from './credentials';
 import type { Stream } from './engagement-restructure';
 
@@ -115,6 +116,20 @@ export interface ClientMasterRow {
   logins: number;
   warnings: string[];
   error: string | null;
+  /**
+   * The row's identifiers lead to two portal clients that look like one
+   * (its GSTIN on one, its PAN or code on the other): merge them, then
+   * preview again. Null when the row points at one client or none.
+   */
+  duplicate: ClientMasterDuplicate | null;
+}
+
+export interface ClientMasterDuplicate {
+  /** The client the row's code (or first identifier) found, then the other. */
+  entityIds: [string, string];
+  entityCodes: [string, string];
+  verdict: ClientVerdict;
+  reasons: string[];
 }
 
 export interface ClientMasterPreview {

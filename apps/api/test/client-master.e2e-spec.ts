@@ -280,7 +280,8 @@ describe('Client Master workbook (e2e)', () => {
       engagementsCreated: 2,
       engagementsExtended: 0,
     });
-    expect(result.failed).toEqual([
+    // Only this suite's rows: other suites' clients (odd test GSTINs) are in the export too.
+    expect(result.failed.filter((f) => f.name.startsWith(tag))).toEqual([
       expect.objectContaining({
         name: `${tag} Typo Traders`,
         message: expect.stringMatching(/GSTIN/),
