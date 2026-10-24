@@ -73,7 +73,7 @@ END $$;
 -- A generated column (receipts.net_amount, credit_notes.total) is still NULL
 -- in a BEFORE trigger's NEW, so it is left out of the comparison too.
 CREATE OR REPLACE FUNCTION hsdg.merge_moves_only_client(p_table regclass, p_new jsonb, p_old jsonb)
-  RETURNS boolean LANGUAGE sql STABLE AS $$
+  RETURNS boolean LANGUAGE sql STABLE SET search_path = hsdg, pg_catalog AS $$
   SELECT hsdg.merging_clients()
      AND (p_new - ARRAY['client_entity_id', 'updated_at'] - g.cols)
          = (p_old - ARRAY['client_entity_id', 'updated_at'] - g.cols)
@@ -261,7 +261,10 @@ BEGIN
     RETURN QUERY
       SELECT e.id, e.entity_code, e.legal_name
         FROM hsdg.entity_registrations r JOIN hsdg.entities e ON e.id = r.entity_id
-       WHERE r.registration_type = p_type AND r.registration_number = p_value
+       WHERE r.registration_type = p_type
+         -- As the import reads them: spaces, dashes and dots are not part of the number.
+         AND upper(regexp_replace(r.registration_number, '[-.\s]', '', 'g'))
+             = upper(regexp_replace(p_value, '[-.\s]', '', 'g'))
        LIMIT 1;
   END IF;
   PERFORM set_config('hsdg.finding_pan_holder', '', true);
@@ -274,6 +277,21 @@ GRANT EXECUTE ON FUNCTION hsdg.client_holding(text, text) TO hsdg_app;
 -- p_take: the archived client's values to keep, by column ("legal_name": true).
 -- Any column the keeper has empty takes the archived client's value anyway.
 -- Returns what moved, what stayed and why, for the API to report.
+-- Whether an engagement, moved to p_keep, would carry a service line p_keep
+-- already has for the same year and period (engagement_services_identity_unique).
+-- The merge preview asks the same question through this function.
+CREATE FUNCTION hsdg.merge_line_clashes(p_engagement uuid, p_keep uuid)
+  RETURNS boolean LANGUAGE sql STABLE SET search_path = hsdg, pg_temp AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM engagement_services l
+      JOIN engagement_services o
+        ON o.entity_id = p_keep AND o.status <> 'cancelled' AND o.service_id = l.service_id
+       AND o.financial_year = l.financial_year AND o.period_label = l.period_label
+     WHERE l.engagement_id = p_engagement AND l.status <> 'cancelled')
+$$;
+REVOKE ALL ON FUNCTION hsdg.merge_line_clashes(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION hsdg.merge_line_clashes(uuid, uuid) TO hsdg_app;
+
 CREATE FUNCTION hsdg.merge_entities(p_keep uuid, p_drop uuid, p_take jsonb DEFAULT '{}')
   RETURNS jsonb
   LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = hsdg, pg_temp AS $$
@@ -308,8 +326,10 @@ BEGIN
   END IF;
   PERFORM set_config('hsdg.merging_clients', 'on', true);
 
-  SELECT * INTO k FROM entities WHERE id = p_keep FOR UPDATE;
-  SELECT * INTO d FROM entities WHERE id = p_drop FOR UPDATE;
+  -- Both locked in id order, so A→B and B→A at once wait instead of deadlocking.
+  PERFORM 1 FROM entities WHERE id IN (p_keep, p_drop) ORDER BY id FOR UPDATE;
+  SELECT * INTO k FROM entities WHERE id = p_keep;
+  SELECT * INTO d FROM entities WHERE id = p_drop;
   IF k.id IS NULL OR d.id IS NULL THEN
     RAISE EXCEPTION 'Client not found.' USING ERRCODE = 'P0002';
   END IF;
@@ -451,10 +471,12 @@ BEGIN
   -- ── The two Compliance engagements become one ──
   SELECT id INTO ck FROM engagements
    WHERE entity_id = p_keep AND kind = 'compliance'
-     AND status NOT IN ('closed', 'merged', 'cancelled', 'declined', 'withdrawn');
+     AND status NOT IN ('closed', 'merged', 'cancelled', 'declined', 'withdrawn')
+   ORDER BY created_at, id LIMIT 1;
   SELECT id INTO cd FROM engagements
    WHERE entity_id = p_drop AND kind = 'compliance'
-     AND status NOT IN ('closed', 'merged', 'cancelled', 'declined', 'withdrawn');
+     AND status NOT IN ('closed', 'merged', 'cancelled', 'declined', 'withdrawn')
+   ORDER BY created_at, id LIMIT 1;
   IF ck IS NOT NULL AND cd IS NOT NULL THEN
     -- Years: one row per FY on the keeper's; streams and registrations unite.
     UPDATE compliance_engagement_years ky
@@ -570,14 +592,7 @@ BEGIN
   FOR eng IN
     SELECT e.id, e.engagement_code, e.status FROM engagements e WHERE e.entity_id = p_drop ORDER BY e.created_at
   LOOP
-    IF EXISTS (
-      SELECT 1 FROM engagement_services l
-        JOIN engagements e ON e.id = l.engagement_id
-        JOIN engagement_services o
-          ON o.entity_id = p_keep AND o.status <> 'cancelled' AND o.service_id = l.service_id
-         AND o.financial_year IS NOT DISTINCT FROM e.financial_year
-         AND o.period_label IS NOT DISTINCT FROM e.period_label
-       WHERE l.engagement_id = eng.id AND l.status <> 'cancelled') THEN
+    IF hsdg.merge_line_clashes(eng.id, p_keep) THEN
       stayed := stayed || jsonb_build_array(jsonb_build_object(
         'kind', 'engagement', 'code', eng.engagement_code,
         'reason', 'The kept client already has the same service for the same year.'));
@@ -626,7 +641,11 @@ BEGIN
    WHERE x.client_entity_id = p_drop AND NOT EXISTS (
      SELECT 1 FROM receipts r WHERE r.id = ANY (x.receipt_ids) AND r.client_entity_id = p_drop);
   SELECT count(*) INTO n FROM invoices WHERE client_entity_id = p_drop;
-  counts := counts || jsonb_build_object('invoicesLeft', n);
+  IF n > 0 THEN
+    stayed := stayed || jsonb_build_array(jsonb_build_object(
+      'kind', 'invoices', 'count', n,
+      'reason', 'Billed on an engagement that stays on the archived client.'));
+  END IF;
 
   -- ── The archived client ──
   DELETE FROM entity_duplicate_dismissals
@@ -654,6 +673,7 @@ GRANT EXECUTE ON FUNCTION hsdg.merge_entities(uuid, uuid, jsonb) TO hsdg_app;
 
 DROP FUNCTION IF EXISTS hsdg.merge_entities(uuid, uuid, jsonb);
 DROP FUNCTION IF EXISTS hsdg.client_holding(text, text);
+DROP FUNCTION IF EXISTS hsdg.merge_line_clashes(uuid, uuid);
 DROP POLICY IF EXISTS entities_pan_holder_select ON hsdg.entities;
 DROP TABLE IF EXISTS hsdg.entity_duplicate_dismissals;
 

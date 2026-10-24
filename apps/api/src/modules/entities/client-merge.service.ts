@@ -134,11 +134,12 @@ export class ClientMergeService {
     if (unknown.length) throw new BadRequestException(`Cannot take ${unknown.join(', ')}.`);
     return this.db.withRlsContext(ctx, async (client) => {
       // The merge runs as the owner; the caller must see both clients and be
-      // able to write them (office scope), which an RLS-checked touch proves.
+      // able to write them (office scope). FOR UPDATE is checked against the
+      // UPDATE policies, and locking in id order keeps two merges from deadlocking.
       const keep = await this.side(client, keepId);
       const drop = await this.side(client, dropId);
       const writable = await client.query(
-        `UPDATE hsdg.entities SET updated_at = updated_at WHERE id = ANY($1::uuid[]) RETURNING id`,
+        `SELECT id FROM hsdg.entities WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
         [[keepId, dropId]],
       );
       if ((writable.rowCount ?? 0) < 2)
@@ -179,6 +180,14 @@ export class ClientMergeService {
           },
         },
         after: { take, ...result },
+      });
+      // The archived client's own history says where it went.
+      await this.audit.recordWith(client, ctx, {
+        action: 'entity.merged_into',
+        objectType: 'entity',
+        objectId: dropId,
+        before: { code: drop.row.entity_code, legalName: drop.row.legal_name },
+        after: { keptId: keepId, keptCode: keep.row.entity_code },
       });
       return result;
     });
@@ -347,12 +356,7 @@ export class ClientMergeService {
               (SELECT k.engagement_code FROM hsdg.engagements k
                 WHERE k.entity_id = $2 AND k.kind = 'compliance' AND k.status <> ALL($3::text[])
                 LIMIT 1) AS keeper_compliance,
-              EXISTS (
-                SELECT 1 FROM hsdg.engagement_services l
-                  JOIN hsdg.engagement_services o
-                    ON o.entity_id = $2 AND o.status <> 'cancelled' AND o.service_id = l.service_id
-                   AND o.financial_year = l.financial_year AND o.period_label = l.period_label
-                 WHERE l.engagement_id = e.id AND l.status <> 'cancelled') AS clashes
+              hsdg.merge_line_clashes(e.id, $2) AS clashes
          FROM hsdg.engagements e
          LEFT JOIN hsdg.services s ON s.id = e.service_id
         WHERE e.entity_id = $1

@@ -294,7 +294,9 @@ export class EntitiesService {
         score: number;
         match_reason: 'pan' | 'name';
       }>(
-        `SELECT id, entity_code, legal_name, pan, score, match_reason FROM (
+        // One row per client: a PAN match outranks the same client's name match.
+        `SELECT * FROM (
+         SELECT DISTINCT ON (id) id, entity_code, legal_name, pan, score, match_reason FROM (
            SELECT id, entity_code, legal_name, pan, 1.0::float AS score, 'pan' AS match_reason
            FROM hsdg.entities
            WHERE $1::text IS NOT NULL AND pan = $1 AND merged_into_id IS NULL
@@ -305,6 +307,8 @@ export class EntitiesService {
            WHERE $2::text IS NOT NULL AND similarity(lower(legal_name), lower($2)) > 0.3
              AND merged_into_id IS NULL
          ) matches
+         ORDER BY id, score DESC
+         ) best
          ORDER BY score DESC, legal_name
          LIMIT 10`,
         [args.pan ?? null, args.legalName ?? null],
