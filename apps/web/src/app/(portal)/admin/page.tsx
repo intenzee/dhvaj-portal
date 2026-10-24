@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { FEATURE_FLAG, PERMISSION } from '@hsdg/contracts';
+import { useEffect, useState } from 'react';
+import { FEATURE_FLAG, PERMISSION, ROLE } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
-import { can } from '@/lib/principal';
+import { can, hasRole } from '@/lib/principal';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { cn } from '@/lib/cn';
 import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui';
@@ -22,6 +22,7 @@ import { WorkflowSection } from '@/components/admin/workflow-section';
 import { ChecksSection } from '@/components/admin/checks-section';
 import { RolloutSection } from '@/components/admin/rollout-section';
 import { NoticeTypesSection } from '@/components/admin/notice-types-section';
+import { EngagementPurgeSection } from '@/components/admin/engagement-purge-section';
 
 type Tab =
   | 'users'
@@ -37,7 +38,8 @@ type Tab =
   | 'workflow'
   | 'checks'
   | 'notice-types'
-  | 'rollout';
+  | 'rollout'
+  | 'delete-engagement';
 
 export default function AdministrationPage(): JSX.Element {
   const { principal } = useAuth();
@@ -46,6 +48,16 @@ export default function AdministrationPage(): JSX.Element {
   // Partners come here only for the workflow policy.
   const [tab, setTab] = useState<Tab>(administers ? 'users' : 'workflow');
   const { isOn } = useFeatureFlags();
+  const purges = hasRole(principal, ROLE.admin);
+  // An engagement's "Delete permanently" link lands here with its code.
+  const [purgeCode, setPurgeCode] = useState('');
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('purge');
+    if (code && purges) {
+      setPurgeCode(code);
+      setTab('delete-engagement');
+    }
+  }, [purges]);
 
   // Nav already gates the whole section on user.manage or workflow.manage; this
   // is defence in depth (the API enforces every rule regardless of the UI).
@@ -107,6 +119,8 @@ export default function AdministrationPage(): JSX.Element {
       : []),
     // Each Staff Workflow phase, office by office (user.manage — MP / admin).
     ...(administers ? [{ id: 'rollout' as const, label: 'Rollout' }] : []),
+    // Deleting an engagement opened by mistake rests with the administrator alone.
+    ...(purges ? [{ id: 'delete-engagement' as const, label: 'Delete engagement' }] : []),
   ];
 
   return (
@@ -158,6 +172,8 @@ export default function AdministrationPage(): JSX.Element {
             <NoticeTypesSection />
           ) : tab === 'rollout' ? (
             <RolloutSection />
+          ) : tab === 'delete-engagement' ? (
+            <EngagementPurgeSection key={purgeCode} initialCode={purgeCode} />
           ) : tab === 'signals' ? (
             <div className="space-y-8">
               <PlanningSignalLibrarySection />
