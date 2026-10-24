@@ -97,7 +97,7 @@ const result: MergeClientsResult = {
   archivedCode: 'ENT00011',
   movedEngagements: 0,
   folded: { from: 'ENG-0007', into: 'ENG-0002', filings: 4, tasks: 2, filingsLeft: 1 },
-  counts: { registrations: 2 },
+  counts: { registrations: 2, invoicesLeft: 1 },
   stayed: [{ kind: 'engagement', code: 'ENG-0009', reason: 'Signed off' }],
 };
 
@@ -150,6 +150,12 @@ describe('MergeClientsModal', () => {
     });
     expect(await screen.findByText(/ENT00011 is merged into ENT00042/)).toBeInTheDocument();
     expect(screen.getByText(/ENG-0009/)).toHaveTextContent('ENG-0009: Signed off');
+    expect(screen.getByText('2 registrations moved.')).toBeInTheDocument();
+    expect(screen.getByText('1 invoice')).toBeInTheDocument();
+    expect(screen.queryByText(/left moved/)).not.toBeInTheDocument();
+    // The pages behind the popup refresh only once the summary is closed.
+    expect(onMerged).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByText('Close', { selector: 'button' }));
     expect(onMerged).toHaveBeenCalledWith(result);
   });
 
@@ -367,6 +373,7 @@ describe('client master import', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Merge into ENT00042' }));
 
     await screen.findByText(/ENT00011 is merged into ENT00042/);
+    await userEvent.click(screen.getByText('Close', { selector: 'button' }));
     const previews = apiFetch.mock.calls.filter(([p]) => p === '/client-imports/master/preview');
     expect(previews).toHaveLength(2);
   });

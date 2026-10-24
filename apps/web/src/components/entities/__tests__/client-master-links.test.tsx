@@ -221,6 +221,8 @@ describe('Client 360 — a client merged into another', () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /CIN not recorded/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Add$/ })).not.toBeInTheDocument();
+    // Its logins moved to the kept client; none are added here.
+    expect(screen.queryByText(/Add .* login/)).not.toBeInTheDocument();
   });
 
   it('offers the merge on a live client', async () => {
@@ -229,5 +231,6 @@ describe('Client 360 — a client merged into another', () => {
     expect(
       await screen.findByRole('button', { name: /Merge with another client/ }),
     ).toBeInTheDocument();
+    expect(await screen.findByText(/Add Income-tax \(PAN\) login/)).toBeInTheDocument();
   });
 });
