@@ -33,7 +33,7 @@
 -- caller sees both clients before calling it.
 --
 -- Also: entity_duplicate_dismissals ("these two are not the same client"),
--- and pan_holder — which client holds a PAN, across offices, by name.
+-- and client_holding — which client holds a PAN or registration, across offices.
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- Up Migration
@@ -231,23 +231,39 @@ CREATE POLICY entity_duplicate_dismissals_rw ON hsdg.entity_duplicate_dismissals
   WITH CHECK (EXISTS (SELECT 1 FROM hsdg.entities e WHERE e.id = entity_a_id)
               AND EXISTS (SELECT 1 FROM hsdg.entities e WHERE e.id = entity_b_id));
 
--- ── Which client a PAN is on, across offices ─────────────────────────────
+-- ── Which client holds a PAN / GSTIN / TAN / CIN, across offices ──────────
+-- registration_holder names the client; the merge popup also needs its code,
+-- and the same answer for a PAN. Only id, code and name are returned, and
+-- only to a signed-in user.
 CREATE POLICY entities_pan_holder_select ON hsdg.entities
   FOR SELECT TO hsdg_migrator
   USING (current_setting('hsdg.finding_pan_holder', true) = 'on');
 
-CREATE FUNCTION hsdg.pan_holder(p_pan text)
-  RETURNS TABLE (entity_id uuid, legal_name text)
+CREATE FUNCTION hsdg.client_holding(p_type text, p_value text)
+  RETURNS TABLE (entity_id uuid, entity_code text, legal_name text)
   LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = hsdg, pg_temp AS $$
 #variable_conflict use_column
 BEGIN
   IF hsdg.ctx_user_id() IS NULL THEN RETURN; END IF;
   PERFORM set_config('hsdg.finding_pan_holder', 'on', true);
-  RETURN QUERY SELECT e.id, e.legal_name FROM hsdg.entities e WHERE e.pan = upper(btrim(p_pan)) LIMIT 1;
+  PERFORM set_config('hsdg.finding_registration_holder', 'on', true);
+  IF p_type = 'pan' THEN
+    RETURN QUERY
+      SELECT e.id, e.entity_code, e.legal_name FROM hsdg.entities e
+       WHERE e.pan = upper(btrim(p_value))
+       ORDER BY (e.merged_into_id IS NULL) DESC LIMIT 1;
+  ELSE
+    RETURN QUERY
+      SELECT e.id, e.entity_code, e.legal_name
+        FROM hsdg.entity_registrations r JOIN hsdg.entities e ON e.id = r.entity_id
+       WHERE r.registration_type = p_type AND r.registration_number = p_value
+       LIMIT 1;
+  END IF;
   PERFORM set_config('hsdg.finding_pan_holder', '', true);
+  PERFORM set_config('hsdg.finding_registration_holder', '', true);
 END $$;
-REVOKE ALL ON FUNCTION hsdg.pan_holder(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION hsdg.pan_holder(text) TO hsdg_app;
+REVOKE ALL ON FUNCTION hsdg.client_holding(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION hsdg.client_holding(text, text) TO hsdg_app;
 
 -- ── The merge ────────────────────────────────────────────────────────────
 -- p_take: the archived client's values to keep, by column ("legal_name": true).
@@ -632,7 +648,7 @@ GRANT EXECUTE ON FUNCTION hsdg.merge_entities(uuid, uuid, jsonb) TO hsdg_app;
 -- Down Migration
 
 DROP FUNCTION IF EXISTS hsdg.merge_entities(uuid, uuid, jsonb);
-DROP FUNCTION IF EXISTS hsdg.pan_holder(text);
+DROP FUNCTION IF EXISTS hsdg.client_holding(text, text);
 DROP POLICY IF EXISTS entities_pan_holder_select ON hsdg.entities;
 DROP TABLE IF EXISTS hsdg.entity_duplicate_dismissals;
 
