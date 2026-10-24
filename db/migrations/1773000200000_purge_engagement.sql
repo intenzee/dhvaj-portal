@@ -49,11 +49,13 @@ BEGIN
 END $$;
 
 -- An issued invoice's lines stay locked, except while an engagement is purged.
+-- Any role can set hsdg.purging, so the app role itself never gets past.
 CREATE OR REPLACE FUNCTION hsdg.invoice_line_guard_draft() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE st text;
 BEGIN
-  IF TG_OP = 'DELETE' AND current_setting('hsdg.purging', true) = 'on' THEN
+  IF TG_OP = 'DELETE' AND current_setting('hsdg.purging', true) = 'on'
+     AND current_user <> 'hsdg_app' THEN
     RETURN OLD;
   END IF;
   SELECT i.status INTO st FROM hsdg.invoices i WHERE i.id = COALESCE(NEW.invoice_id, OLD.invoice_id);
