@@ -2,7 +2,11 @@ import { VersioningType } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
-import { API_VERSION } from '@hsdg/contracts';
+import {
+  API_VERSION,
+  CLIENT_MASTER_PASSWORDS_MASKED_HEADER,
+  CLIENT_MASTER_PASSWORDS_SHOWN_HEADER,
+} from '@hsdg/contracts';
 import { buildValidationPipe } from '../common/validation';
 import { AllExceptionsFilter } from '../common/errors/all-exceptions.filter';
 import { AppConfigService } from '../config/config.module';
@@ -74,6 +78,12 @@ export function configureApp(app: NestExpressApplication): {
   app.enableCors({
     origin: config.corsOrigins,
     credentials: true,
+    // A download's name, and what the Client Master export with passwords held.
+    exposedHeaders: [
+      'content-disposition',
+      CLIENT_MASTER_PASSWORDS_SHOWN_HEADER,
+      CLIENT_MASTER_PASSWORDS_MASKED_HEADER,
+    ],
   });
 
   if (serveDocs) {

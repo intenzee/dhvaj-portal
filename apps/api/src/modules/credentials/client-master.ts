@@ -4,6 +4,7 @@ import {
   CLIENT_MASTER_COLUMNS,
   CLIENT_MASTER_EXAMPLE_CODE,
   CLIENT_MASTER_FIELDS,
+  CLIENT_MASTER_LOGIN_CELLS,
   CLIENT_MASTER_LOGIN_COLUMNS,
   CLIENT_MASTER_SAVED_PASSWORD,
   CLIENT_MASTER_STREAM_FIELDS,
@@ -83,8 +84,12 @@ export interface MasterRow {
   partnerEmail: string;
   leadEmail: string;
   warnings: string[];
-  /** A PAN, GSTIN or TAN that is not valid, and why — forgiven when the client already has it. */
-  badIds: { id: string; message: string }[];
+  /**
+   * A PAN, GSTIN or TAN that is not valid — or (clash) a GSTIN of another
+   * PAN — and why: forgiven when the client already has it (and, for a
+   * clash, the PAN too).
+   */
+  badIds: { id: string; message: string; clash?: boolean }[];
   /** The row's other errors. */
   errors: string[];
   /** Every error, as one sentence list. */
@@ -99,6 +104,8 @@ export interface MasterLogin {
   account: CredentialAccount;
   /** The GSTIN or TAN it is for ('' = the client's main one). */
   target: string;
+  /** The Clients row it was typed on (its login columns), or null for the Logins sheet. */
+  clientRow: number | null;
   /** Kept only in memory until sealed. */
   username: string;
   password: string;
@@ -114,6 +121,12 @@ export interface ParsedMaster {
 
 const text = (cell: unknown): string =>
   cell === null || cell === undefined ? '' : String(cell).trim().replace(/\s+/g, ' ');
+/** A user ID or password: as typed, only trimmed. */
+const secretText = (cell: unknown): string =>
+  cell === null || cell === undefined ? '' : String(cell).trim();
+/** A login the export listed masked: already in the portal, nothing to do. */
+const isSavedLogin = (username: string, password: string): boolean =>
+  password === CLIENT_MASTER_SAVED_PASSWORD || username.includes('•');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CIN_RE = /^[LU][0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$/;
@@ -254,6 +267,8 @@ export function parseClientMaster(bytes: Buffer): ParsedMaster {
       'No "Clients" sheet with a "Legal name *" heading: use the Client Master file from Export client master.',
     );
   const rows: MasterRow[] = [];
+  const logins: MasterLogin[] = [];
+  const loginProblems: ParsedMaster['loginProblems'] = [];
   for (const r of clients.rows) {
     const get = (f: ClientMasterField): string => {
       const i = clients.cols.get(f);
@@ -265,24 +280,50 @@ export function parseClientMaster(bytes: Buffer): ParsedMaster {
     };
     if (CLIENT_MASTER_FIELDS.every((f) => get(f) === '')) continue;
     if (get('code').toUpperCase() === CLIENT_MASTER_EXAMPLE_CODE) continue;
-    rows.push(readRow(r.row, get, raw));
+    const row = readRow(r.row, get, raw);
+    rows.push(row);
+    for (const cell of CLIENT_MASTER_LOGIN_CELLS) {
+      const username = secretText(raw(cell.user));
+      const password = secretText(raw(cell.password));
+      if ((!username && !password) || isSavedLogin(username, password)) continue;
+      const label = credentialLabel(cell.portal, cell.account);
+      if (!username || !password) {
+        loginProblems.push({
+          row: r.row,
+          message: `${label} login: both the user ID and the password are needed.`,
+        });
+        continue;
+      }
+      logins.push({
+        row: r.row,
+        code: row.code,
+        name: row.legalName,
+        portal: cell.portal,
+        account: cell.account,
+        target: '',
+        clientRow: r.row,
+        username,
+        password,
+      });
+    }
   }
 
-  const logins: MasterLogin[] = [];
-  const loginProblems: ParsedMaster['loginProblems'] = [];
   const sheet = sheetWith(book, 'Logins', CLIENT_MASTER_LOGIN_COLUMNS, 'username');
   for (const r of sheet?.rows ?? []) {
     const get = (f: ClientMasterLoginField): string => {
       const i = sheet!.cols.get(f);
-      return i === undefined ? '' : text(r.cells[i]);
+      return i === undefined
+        ? ''
+        : f === 'username' || f === 'password'
+          ? secretText(r.cells[i])
+          : text(r.cells[i]);
     };
     const fields = Object.keys(CLIENT_MASTER_LOGIN_COLUMNS) as ClientMasterLoginField[];
     if (fields.every((f) => get(f) === '')) continue;
     if (get('code').toUpperCase() === CLIENT_MASTER_EXAMPLE_CODE) continue;
     const username = get('username');
     const password = get('password');
-    // A login the export listed: already in the portal, nothing to do.
-    if (password === CLIENT_MASTER_SAVED_PASSWORD || username.includes('•')) continue;
+    if (isSavedLogin(username, password)) continue;
     const kind = LOGIN_KINDS.find(
       (k) => normalizeHeader(k.label) === normalizeHeader(get('portal')),
     );
@@ -304,6 +345,7 @@ export function parseClientMaster(bytes: Buffer): ParsedMaster {
       portal: kind!.portal,
       account: kind!.account,
       target: get('target').replace(/\s+/g, '').toUpperCase(),
+      clientRow: null,
       username,
       password,
     });
@@ -346,12 +388,16 @@ function readRow(
   // Only a GSTIN that passes its check says the PAN.
   const pan = typedPan || (gstins[0] && isValidGstin(gstins[0]) ? panOfGstin(gstins[0]) : '');
   const otherPan = gstins.find((g) => isValidGstin(g) && panOfGstin(g) !== pan);
-  if (isValidPan(pan) && otherPan)
-    errors.push(
-      typedPan && gstins[0] && panOfGstin(gstins[0]) !== typedPan
-        ? `PAN ${typedPan} does not match the GSTIN ${gstins[0]} (its PAN is ${panOfGstin(gstins[0])}).`
+  if (isValidPan(pan) && otherPan) {
+    const mainDiffers = Boolean(typedPan && gstins[0] && panOfGstin(gstins[0]) !== typedPan);
+    badIds.push({
+      id: mainDiffers ? gstins[0]! : otherPan,
+      clash: true,
+      message: mainDiffers
+        ? `PAN ${typedPan} does not match the GSTIN ${gstins[0]} (its PAN is ${panOfGstin(gstins[0]!)}).`
         : `GSTIN ${otherPan} is of PAN ${panOfGstin(otherPan)}, not ${pan}: another client.`,
-    );
+    });
+  }
 
   const tan = get('tan').replace(/\s+/g, '').toUpperCase();
   if (tan && !isValidTan(tan)) badIds.push({ id: tan, message: `TAN ${tan} is not a valid TAN.` });

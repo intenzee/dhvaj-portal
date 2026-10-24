@@ -9,7 +9,7 @@
  * (scripts/client-master/build_template.py) — change one, change both.
  */
 import type { ClientVerdict } from './client-merge';
-import type { ClientImportAction } from './credentials';
+import type { ClientImportAction, CredentialAccount, CredentialPortal } from './credentials';
 import type { Stream } from './engagement-restructure';
 
 /** 'Clients' sheet headings (row 4), in column order from A. */
@@ -45,9 +45,40 @@ export const CLIENT_MASTER_COLUMNS = {
   mis: 'MIS',
   partnerEmail: 'Engagement partner (email)',
   leadEmail: 'Lead / in-charge (email)',
+  // The client's main logins, on its own row (v2). Others: the Logins sheet.
+  gstUser: 'GST user ID',
+  gstPassword: 'GST password',
+  itUser: 'Income-tax user ID (PAN)',
+  itPassword: 'Income-tax password (PAN)',
+  itTanUser: 'Income-tax user ID (TAN)',
+  itTanPassword: 'Income-tax password (TAN)',
+  tracesUser: 'TRACES user ID (TAN)',
+  tracesPassword: 'TRACES password',
+  mcaUser: 'MCA user ID',
+  mcaPassword: 'MCA password',
+  ewayUser: 'E-way bill user ID',
+  ewayPassword: 'E-way bill password',
 } as const;
 export type ClientMasterField = keyof typeof CLIENT_MASTER_COLUMNS;
 export const CLIENT_MASTER_FIELDS = Object.keys(CLIENT_MASTER_COLUMNS) as ClientMasterField[];
+
+/**
+ * The login columns of the Clients sheet: each pair is the client's main
+ * login on that portal — the main GSTIN's, the PAN's, the main TAN's.
+ */
+export const CLIENT_MASTER_LOGIN_CELLS: readonly {
+  portal: CredentialPortal;
+  account: CredentialAccount;
+  user: ClientMasterField;
+  password: ClientMasterField;
+}[] = [
+  { portal: 'gst', account: 'main', user: 'gstUser', password: 'gstPassword' },
+  { portal: 'income_tax', account: 'main', user: 'itUser', password: 'itPassword' },
+  { portal: 'income_tax', account: 'tan', user: 'itTanUser', password: 'itTanPassword' },
+  { portal: 'traces', account: 'deductor', user: 'tracesUser', password: 'tracesPassword' },
+  { portal: 'mca', account: 'main', user: 'mcaUser', password: 'mcaPassword' },
+  { portal: 'eway_bill', account: 'main', user: 'ewayUser', password: 'ewayPassword' },
+];
 
 /** The Yes / No service columns and the stream each opens. */
 export const CLIENT_MASTER_STREAM_FIELDS: Record<Stream, ClientMasterField> = {
@@ -70,8 +101,16 @@ export const CLIENT_MASTER_LOGIN_COLUMNS = {
 } as const;
 export type ClientMasterLoginField = keyof typeof CLIENT_MASTER_LOGIN_COLUMNS;
 
-/** What the export writes for a login it already has (never the password itself). */
+/** What the export writes for a login it already has, unless asked for the passwords. */
 export const CLIENT_MASTER_SAVED_PASSWORD = '(saved in portal)';
+
+/**
+ * GET /client-imports/master/export?passwords=true answers with these
+ * headers: the logins written in full, and those left masked (a client
+ * whose logins the caller may not see).
+ */
+export const CLIENT_MASTER_PASSWORDS_SHOWN_HEADER = 'x-passwords-shown';
+export const CLIENT_MASTER_PASSWORDS_MASKED_HEADER = 'x-passwords-masked';
 /** The example row's client code; the import skips it. */
 export const CLIENT_MASTER_EXAMPLE_CODE = 'EXAMPLE';
 
