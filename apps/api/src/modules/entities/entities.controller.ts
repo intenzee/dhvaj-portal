@@ -12,11 +12,19 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type Paginated } from '@hsdg/contracts';
+import {
+  PERMISSION,
+  type DuplicatePair,
+  type MergeClientsResult,
+  type MergePreview,
+  type Paginated,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { EntitiesService } from './entities.service';
+import { ClientMergeService } from './client-merge.service';
+import { DismissDuplicateDto, MergeClientsDto } from './dto/merge-clients.dto';
 import type {
   DuplicateCandidate,
   EntityDetail,
@@ -39,7 +47,10 @@ import { RegulatoryAttributeDto } from './dto/add-regulatory-attribute.dto';
 @ApiTags('entities')
 @Controller('entities')
 export class EntitiesController {
-  constructor(private readonly entities: EntitiesService) {}
+  constructor(
+    private readonly entities: EntitiesService,
+    private readonly merges: ClientMergeService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSION.entityRead)
@@ -82,6 +93,58 @@ export class EntitiesController {
       ...(legalName ? { legalName } : {}),
       ...(pan ? { pan: pan.toUpperCase() } : {}),
     });
+  }
+
+  @Get('duplicates')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Clients that look like one entered twice',
+    description:
+      'Pairs of live clients the caller sees that share a PAN, GSTIN, TAN or CIN, or whose names agree once legal form and place are set aside. Pairs marked "not the same client" are left out.',
+  })
+  duplicates(@CurrentPrincipal() principal: Principal): Promise<DuplicatePair[]> {
+    return this.merges.duplicates(rlsContextFromPrincipal(principal));
+  }
+
+  @Post('duplicates/dismiss')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Mark two clients as not the same client (audited)' })
+  async dismissDuplicate(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: DismissDuplicateDto,
+  ): Promise<void> {
+    await this.merges.dismiss(rlsContextFromPrincipal(principal), dto.aId, dto.bId, dto.note);
+  }
+
+  @Get(':id/merge-preview')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'What merging another client into this one would do',
+    description:
+      'Whether the two are one client and why, which to keep, the values they differ on, and what happens to each engagement of the one archived.',
+  })
+  mergePreview(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query('with', new ParseUUIDPipe()) withId: string,
+  ): Promise<MergePreview> {
+    return this.merges.preview(rlsContextFromPrincipal(principal), id, withId);
+  }
+
+  @Post(':id/merge')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Merge another client into this one (audited)',
+    description:
+      'Registrations, contacts, logins, engagements and their billing move to this client; the other is archived and points here. Two different PANs are never merged.',
+  })
+  merge(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: MergeClientsDto,
+  ): Promise<MergeClientsResult> {
+    return this.merges.merge(rlsContextFromPrincipal(principal), id, dto.dropId, dto.take);
   }
 
   @Get(':id')
