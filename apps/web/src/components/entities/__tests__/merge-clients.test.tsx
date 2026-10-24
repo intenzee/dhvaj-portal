@@ -200,13 +200,15 @@ describe('a GSTIN already on another client', () => {
     expect(duplicateConflictOf(new Error('x'))).toBeNull();
   });
 
-  it('names the holder on the add-registration form and opens the merge on the two', async () => {
+  it('names the holder on the add-registration form, merges the two, then closes the form', async () => {
     apiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (path === '/entities/pvt/merge') return Promise.resolve(result);
       if (opts?.method === 'POST')
         return Promise.reject(new ApiError(409, conflict.message, conflict));
       return routePreview(path);
     });
-    render(wrap(<AddRegistrationModal entityId="pvt" onClose={jest.fn()} />));
+    const onClose = jest.fn();
+    render(wrap(<AddRegistrationModal entityId="pvt" onClose={onClose} />));
     await userEvent.type(screen.getByPlaceholderText('27AAACA1234A1Z5'), '06AAKFT1234Q1Z5');
     await userEvent.click(screen.getByRole('button', { name: 'Add registration' }));
 
@@ -220,6 +222,15 @@ describe('a GSTIN already on another client', () => {
     await userEvent.click(screen.getByRole('button', { name: /Merge these clients/ }));
     expect(await screen.findByRole('region', { name: 'Client to keep' })).toBeInTheDocument();
     expect(apiFetch).toHaveBeenCalledWith('/entities/pvt/merge-preview?with=firm');
+
+    // The identifier is now on this client: nothing is left to add.
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Merge into ENT00042' }));
+    await screen.findByText(/ENT00011 is merged into ENT00042/);
+    expect(onClose).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByText('Close', { selector: 'button' }));
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('offers no merge when the holder is in an office the person cannot open', async () => {

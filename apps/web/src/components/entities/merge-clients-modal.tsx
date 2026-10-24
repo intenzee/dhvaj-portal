@@ -93,10 +93,13 @@ export function useDismissDuplicate() {
 export function DuplicateConflictNotice({
   conflict,
   entityId,
+  onMerged,
 }: {
   conflict: DuplicateClientConflict;
   /** The client being edited; null when creating one. */
   entityId: string | null;
+  /** After the merge summary closes: the refused form has nothing left to save. */
+  onMerged?: () => void;
 }): JSX.Element {
   const [merging, setMerging] = useState(false);
   const { holder, identifier } = conflict;
@@ -131,7 +134,11 @@ export function DuplicateConflictNotice({
         </Button>
       )}
       {merging && entityId && (
-        <MergeClientsModal clientIds={[entityId, holder.id]} onClose={() => setMerging(false)} />
+        <MergeClientsModal
+          clientIds={[entityId, holder.id]}
+          onClose={() => setMerging(false)}
+          onMerged={onMerged}
+        />
       )}
     </div>
   );
