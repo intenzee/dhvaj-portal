@@ -1,6 +1,23 @@
-import { Body, Controller, Get, HttpCode, Post, StreamableFile } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PERMISSION, type ClientMasterPreview, type ClientMasterResult } from '@hsdg/contracts';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  Post,
+  Query,
+  Res,
+  StreamableFile,
+} from '@nestjs/common';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
+import {
+  CLIENT_MASTER_PASSWORDS_MASKED_HEADER,
+  CLIENT_MASTER_PASSWORDS_SHOWN_HEADER,
+  PERMISSION,
+  type ClientMasterPreview,
+  type ClientMasterResult,
+} from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { ClientMasterDto } from './dto/client-master.dto';
@@ -17,10 +34,23 @@ export class ClientMasterController {
   @Get('export')
   @RequirePermissions(PERMISSION.entityManage)
   @ApiOperation({
-    summary: 'Every client you can see in the Client Master workbook (logins masked, no passwords)',
+    summary:
+      'Every client you can see in the Client Master workbook, its main logins on its row — masked, or with passwords=true written in full where you may reveal them (each one logged)',
   })
-  async export(@CurrentPrincipal() principal: Principal): Promise<StreamableFile> {
-    const f = await this.master.export(rlsContextFromPrincipal(principal));
+  @ApiQuery({ name: 'passwords', required: false, type: Boolean })
+  async export(
+    @CurrentPrincipal() principal: Principal,
+    @Query('passwords') passwords: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const withPasswords = passwords === 'true' || passwords === '1';
+    if (withPasswords && !principal.permissions.includes(PERMISSION.credentialReveal))
+      throw new ForbiddenException('Seeing client passwords needs the credential.reveal right.');
+    const f = await this.master.export(rlsContextFromPrincipal(principal), {
+      passwords: withPasswords,
+    });
+    res.setHeader(CLIENT_MASTER_PASSWORDS_SHOWN_HEADER, String(f.passwordsShown));
+    res.setHeader(CLIENT_MASTER_PASSWORDS_MASKED_HEADER, String(f.passwordsMasked));
     return new StreamableFile(f.data, {
       type: xlsx,
       disposition: `attachment; filename="${f.filename}"`,

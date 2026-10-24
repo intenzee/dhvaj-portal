@@ -7,7 +7,8 @@
 
 The headings on row 4 of 'Clients' and row 3 of 'Logins' are the contract with
 apps/api/src/modules/credentials/client-master.ts (CLIENT_MASTER_COLUMNS in
-@hsdg/contracts): change one, change both. Version: client-master v1.
+@hsdg/contracts): change one, change both. Version: client-master v2 (v2 added the
+login columns AF:AQ; a v1 file still imports).
 """
 import sys
 from datetime import date
@@ -91,7 +92,8 @@ EXAMPLE = fill("E3F2FD")
 TITLE = fill("1F3A5F")
 GROUPS = {
     "Client": fill("1F3A5F"), "Registrations": fill("2E5E4E"), "Contact": fill("5B4B8A"),
-    "Address": fill("7A4E2D"), "Engagement": fill("8A2D4E"), "Checks (fill themselves)": fill("4A4A4A"),
+    "Address": fill("7A4E2D"), "Engagement": fill("8A2D4E"), "Logins": fill("3D5A80"),
+    "Checks (fill themselves)": fill("4A4A4A"),
 }
 thin = Side(style="thin", color="C9CED6")
 BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -157,6 +159,15 @@ for col, w in {"A": 30, "B": 16, "C": 14, "E": 15, "F": 24, "H": 20, "I": 20,
 ls.sheet_properties.tabColor = "9AA5B1"
 
 # ── Clients ───────────────────────────────────────────────────────────────
+LOGIN_PAIRS = [
+    ("GST user ID", "GST password", "The main GSTIN's GST portal login. Other GSTINs' logins: 'Logins' sheet."),
+    ("Income-tax user ID (PAN)", "Income-tax password (PAN)", "Income-tax e-filing login of the PAN (user ID is usually the PAN)."),
+    ("Income-tax user ID (TAN)", "Income-tax password (TAN)", "Income-tax e-filing login of the main TAN."),
+    ("TRACES user ID (TAN)", "TRACES password", "TRACES deductor login of the main TAN."),
+    ("MCA user ID", "MCA password", "MCA V3 login used for the company / LLP."),
+    ("E-way bill user ID", "E-way bill password", "E-way bill portal login of the main GSTIN."),
+]
+LOGIN_HEADERS = {h for u, pw, _ in LOGIN_PAIRS for h in (u, pw)}
 cs = wb.create_sheet("Clients", 0)
 # (group, header, width, kind, note)   kind: in | auto | hide
 COLS = [
@@ -191,6 +202,10 @@ COLS = [
     ("Engagement", "MIS", 7, "in", ""),
     ("Engagement", "Engagement partner (email)", 24, "in", "Portal login email. Blank = you."),
     ("Engagement", "Lead / in-charge (email)", 24, "in", "Portal login email of the staff member running it."),
+    # (user ID header, password header, note) — the client's main logins (CLIENT_MASTER_LOGIN_CELLS)
+    *[c for u, pw, note in LOGIN_PAIRS
+      for c in (("Logins", u, 18, "in", note), ("Logins", pw, 16, "in", "Encrypted when imported. "
+                "Export shows '(saved in portal)' unless you choose Export with passwords."))],
     ("Checks (fill themselves)", "Row type", 13, "auto", ""),
     ("Checks (fill themselves)", "PAN to use", 13, "auto", "Your PAN, or the one inside the GSTIN."),
     ("Checks (fill themselves)", "Entity type to use", 26, "auto", ""),
@@ -301,6 +316,8 @@ def formulas(r):
                 f'IF(AND({yes("TDS / TCS")},TRIM({c["TAN"]})=""),"TDS needs a TAN; ","")',
                 f'IF(AND({yes("ROC / MCA")},{cat}<>"",{cat}<>"company",{cat}<>"llp"),"ROC is only for a company / LLP; ","")',
                 f'IF(AND({yes("ROC / MCA")},OR({cat}="company",{cat}="llp"),TRIM({c["CIN / LLPIN"]})=""),"ROC needs the CIN / LLPIN; ","")',
+                *[f'IF((TRIM({c[u]})="")<>(TRIM({c[pw]})=""),"{u.split(" user ID")[0]} login needs both user ID and password; ","")'
+                  for u, pw, _ in LOGIN_PAIRS],
             ])
         ),
         "Ready for engagement?": (f'=IF(NOT({filled}),"",IF({iss}<>"","✖ "&LEFT({iss},LEN({iss})-2),'
@@ -325,7 +342,7 @@ def write_row(r, values=None, example=False):
         cell.border = BORDER
         cell.alignment = Alignment(vertical="top", wrap_text=(h == "Ready for engagement?"))
         if h in ("PAN", "GSTIN (main)", "TAN", "Pincode", "Mobile", "Client code", "CIN / LLPIN",
-                 "Other GSTINs", "Home office code"):
+                 "Other GSTINs", "Home office code") or h in LOGIN_HEADERS:
             cell.number_format = "@"
         if h == "Date of incorporation / birth":
             cell.number_format = "DD-MM-YYYY"
@@ -341,6 +358,8 @@ write_row(5, {
     "Financial year": "2026-27", "GST": "Yes", "GST return frequency": "Monthly", "TDS / TCS": "Yes",
     "Income Tax": "Yes", "ROC / MCA": "No", "Bookkeeping": "No", "MIS": "No",
     "Engagement partner (email)": "", "Lead / in-charge (email)": "",
+    "GST user ID": "sharma_gst", "GST password": "••••••••",
+    "Income-tax user ID (PAN)": EX_PAN, "Income-tax password (PAN)": "••••••••",
 }, example=True)
 cs.cell(row=5, column=1).comment = Comment(
     "Example row — the import skips any row whose Client code is EXAMPLE. Overwrite or delete it.", "DHVAJ")
@@ -401,11 +420,12 @@ cs.sheet_properties.tabColor = "1F3A5F"
 
 # ── Logins ────────────────────────────────────────────────────────────────
 lg = wb.create_sheet("Logins", 1)
-lg["A1"] = "Portal logins (optional) — one row per login"
+lg["A1"] = "More portal logins (optional) — other GSTINs, TRACES taxpayer, E-invoice; one row per login"
 lg["A1"].font, lg["A1"].fill = f(bold=True, color="FFFFFF", size=13), TITLE
 lg.merge_cells("A1:G1")
-lg["A2"] = ("Passwords are sealed (encrypted) when imported. Export NEVER writes passwords — this sheet comes out "
-            "with user IDs masked. Keep this file private and delete the passwords once imported.")
+lg["A2"] = ("A client's main logins go on its own row on 'Clients' (Logins columns). Passwords are sealed "
+            "(encrypted) when imported. Export masks them unless you choose Export with passwords — such a file "
+            "holds real passwords: share it only with people who may see them, and delete it after use.")
 lg["A2"].font = f(italic=True, color="8A2D2D")
 lg["A2"].alignment = WRAP
 lg.merge_cells("A2:G2")
@@ -484,8 +504,14 @@ rows = [
                          "needs a CIN / LLPIN and is only for companies and LLPs."),
     ("p", "Several GSTINs", "Same PAN in several states = ONE client. Put the main GSTIN in 'GSTIN (main)' and "
                             "the rest in 'Other GSTINs', separated by commas."),
-    ("p", "Logins", "Optional. 'Logins' sheet, one row per portal login. Passwords are encrypted on import and "
-                    "are never exported."),
+    ("p", "Logins", "Optional. Each client's main logins — GST, Income-tax (PAN), Income-tax (TAN), TRACES, "
+                    "MCA, E-way bill — go in the 'Logins' columns of its row on 'Clients'. Logins of other "
+                    "GSTINs, TRACES taxpayer and E-invoice go on the 'Logins' sheet. Passwords are encrypted "
+                    "on import."),
+    ("p", "Reading logins", "Export client master masks every password as '(saved in portal)' — importing that "
+                            "back changes nothing. Export with passwords writes them in full for the clients "
+                            "whose logins you may see (your office as partner, or your engagements); the rest "
+                            "stay masked. Every password exported is logged against your name."),
     ("", "", ""),
     ("h2", "Import (Excel → portal)", ""),
     ("p", "1.", "Clients → Import client master, then choose this file."),
@@ -500,7 +526,7 @@ rows = [
     ("p", "Entity type guess", "From the PAN's 4th letter: C company, P proprietorship, F firm, H HUF, A/B AOP, "
                                "T trust. Pick the real type in 'Entity type' if the guess is wrong "
                                "(e.g. LLP, public company, individual)."),
-    ("p", "Template version", "client-master v1"),
+    ("p", "Template version", "client-master v2"),
 ]
 for i, (kind, b, c) in enumerate(rows, start=1):
     rm.cell(row=i, column=2, value=b)

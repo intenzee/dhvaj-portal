@@ -3,9 +3,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Download, FileSpreadsheet, GitMerge, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  Download,
+  FileSpreadsheet,
+  GitMerge,
+  KeyRound,
+  ShieldCheck,
+} from 'lucide-react';
 import {
   CLIENT_IMPORT_ACTION,
+  CLIENT_MASTER_PASSWORDS_MASKED_HEADER,
+  CLIENT_MASTER_PASSWORDS_SHOWN_HEADER,
+  PERMISSION,
   STREAM_LABEL,
   type ClientImportAction,
   type ClientMasterEngagement,
@@ -16,6 +26,7 @@ import {
 } from '@hsdg/contracts';
 import { ApiError, apiFetch, downloadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { can } from '@/lib/principal';
 import { blobToBase64 } from '@/lib/file-kind';
 import type { OfficeRow } from '@/lib/types';
 import { Badge, Button, Card, CardBody } from '@/components/ui';
@@ -74,6 +85,75 @@ export function masterEngagementLabel(e: ClientMasterEngagement): string {
 
 const hasProblem = (r: ClientMasterRow): boolean =>
   r.action === CLIENT_IMPORT_ACTION.error || r.warnings.length > 0 || !!r.duplicate;
+
+/** '12 passwords written in full · 3 left masked'. Pure — tested. */
+export function passwordExportLine(shown: number, masked: number): string {
+  const parts = [`${plural(shown, 'password')} written in full`];
+  if (masked) parts.push(`${masked} left masked (clients whose logins you may not see)`);
+  return parts.join(' · ');
+}
+
+/**
+ * "Export with passwords": the same workbook with each login written in
+ * full, for the clients whose logins the person may reveal. Shown only with
+ * credential.reveal; the warning sits inline, not in a pop-up.
+ */
+export function ExportWithPasswords(): JSX.Element | null {
+  const { principal } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!can(principal, PERMISSION.credentialReveal)) return null;
+  const run = async (): Promise<void> => {
+    setBusy(true);
+    setDone(null);
+    setFailed(null);
+    try {
+      const headers = await downloadFile(
+        '/client-imports/master/export?passwords=true',
+        'DHVAJ-Client-Master-with-passwords.xlsx',
+      );
+      setDone(
+        passwordExportLine(
+          Number(headers.get(CLIENT_MASTER_PASSWORDS_SHOWN_HEADER) ?? 0),
+          Number(headers.get(CLIENT_MASTER_PASSWORDS_MASKED_HEADER) ?? 0),
+        ),
+      );
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 0;
+      setFailed(
+        status === 429
+          ? 'Exported with passwords 5 times in the last hour — try again later.'
+          : status === 403
+            ? 'You do not have the right to see client passwords.'
+            : 'The export failed — try again.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="secondary" onClick={() => void run()} disabled={busy}>
+          <KeyRound className="h-4 w-4" />
+          {busy ? 'Exporting…' : 'Export with passwords'}
+        </Button>
+        <span className="text-xs text-warning-700">
+          Writes each login in full for the clients whose logins you may see; the rest stay masked.
+          Every password exported is logged against your name. The file then holds real passwords —
+          share it only with people who may see them, and delete it after use.
+        </span>
+      </div>
+      {done && <p className="mt-1.5 text-xs text-success-700">{done}</p>}
+      {failed && (
+        <p role="alert" className="mt-1.5 text-xs text-danger-700">
+          {failed}
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** "Export client master": the clients in the workbook, ready to fill. */
 export function ExportClientMasterButton({
@@ -183,12 +263,15 @@ export function ClientMaster(): JSX.Element {
               Export the client master: every client with what the portal has, the gaps left empty.
             </li>
             <li>
-              Fill in the empty cells in Excel, and add a row for each new client. The check columns
-              at the end flag a mistyped PAN or GSTIN before you import.
+              Fill in the empty cells in Excel, and add a row for each new client — its GST,
+              Income-tax, TRACES, MCA and E-way bill logins go in the Logins columns of its row. The
+              check columns at the end flag a mistyped PAN or GSTIN, or a login missing its
+              password.
             </li>
             <li>Choose the filled file below, read the preview, then import.</li>
           </ol>
           <ExportClientMasterButton />
+          <ExportWithPasswords />
           <div className="grid gap-3 sm:grid-cols-[1fr_14rem]">
             <Field
               label="Filled client master"
@@ -218,8 +301,9 @@ export function ClientMaster(): JSX.Element {
           <p className="flex items-start gap-2 text-xs text-ink-muted">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success-600" />
             The file is read on the server and not kept. An empty cell never removes anything; a PAN
-            already on a client is never replaced. Passwords on the Logins sheet are encrypted
-            before saving — delete the file afterwards if you typed any.
+            already on a client is never replaced. Passwords — in a row&apos;s Logins columns or on
+            the Logins sheet — are encrypted before saving; a masked “(saved in portal)” changes
+            nothing. Delete the file afterwards if it holds passwords.
           </p>
         </CardBody>
       </Card>
@@ -239,15 +323,15 @@ export function ClientMaster(): JSX.Element {
           {blocked && (
             <p className="flex items-center gap-2 rounded-md bg-warning-50 px-3 py-2 text-sm text-warning-700">
               <AlertTriangle className="h-4 w-4" />
-              This server has no encryption key yet, so the logins cannot be saved. Clear the Logins
-              sheet, or ask the administrator to set CREDENTIALS_KEYS.
+              This server has no encryption key yet, so the logins cannot be saved. Clear the login
+              columns and the Logins sheet, or ask the administrator to set CREDENTIALS_KEYS.
             </p>
           )}
           {p.loginProblems.length > 0 && (
             <div className="rounded-md bg-warning-50 px-3 py-2 text-sm text-warning-700">
               <p className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4" />
-                {plural(p.loginProblems.length, 'Logins row')} will be skipped:
+                {plural(p.loginProblems.length, 'login')} will be skipped:
               </p>
               <ul className="ml-6 list-disc text-xs">
                 {p.loginProblems.map((l) => (
