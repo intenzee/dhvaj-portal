@@ -309,26 +309,22 @@ export class EntitiesService {
          LIMIT 10`,
         [args.pan ?? null, args.legalName ?? null],
       );
-      // A PAN and a trigram match can name the same row; keep the PAN one.
-      const seen = new Set<string>();
-      return rows
-        .filter((r) => !seen.has(r.id) && seen.add(r.id))
-        .map((r) => {
-          const { verdict, reasons } = sameClient(
-            { name: args.legalName ?? r.legal_name, pan: args.pan ?? null },
-            { name: r.legal_name, pan: r.pan },
-          );
-          return {
-            id: r.id,
-            entityCode: r.entity_code,
-            legalName: r.legal_name,
-            pan: r.pan,
-            score: Number(r.score),
-            matchReason: r.match_reason,
-            verdict,
-            reasons,
-          };
-        });
+      return rows.map((r) => {
+        const { verdict, reasons } = sameClient(
+          { name: args.legalName ?? r.legal_name, pan: args.pan ?? null },
+          { name: r.legal_name, pan: r.pan },
+        );
+        return {
+          id: r.id,
+          entityCode: r.entity_code,
+          legalName: r.legal_name,
+          pan: r.pan,
+          score: Number(r.score),
+          matchReason: r.match_reason,
+          verdict,
+          reasons,
+        };
+      });
     });
   }
 
