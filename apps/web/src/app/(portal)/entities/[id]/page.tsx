@@ -235,7 +235,7 @@ export default function EntityDetailPage(): JSX.Element {
                 </div>
               </div>
             ))}
-            {logins.data && <ClientLogins entityId={id} data={logins.data} />}
+            {logins.data && !e.mergedInto && <ClientLogins entityId={id} data={logins.data} />}
             <CredentialAccessNote data={logins.data} />
           </CardBody>
         </Card>
@@ -266,7 +266,7 @@ export default function EntityDetailPage(): JSX.Element {
 
       <ClientReturnsCard entityId={e.id} />
 
-      {isOn(FEATURE_FLAG.calendarV2) && <ComplianceProfilesCard entityId={e.id} />}
+      {isOn(FEATURE_FLAG.calendarV2) && !e.mergedInto && <ComplianceProfilesCard entityId={e.id} />}
 
       {/* Year-wise financials (§16) */}
       <Card id={SECTION_ANCHOR.financials}>

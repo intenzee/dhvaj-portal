@@ -301,15 +301,21 @@ export function MergeClientsModal({
       const body: MergeClientsRequest = { dropId, ...(take.size ? { take: [...take] } : {}) };
       return apiFetch<MergeClientsResult>(`/entities/${keepId}/merge`, { method: 'POST', body });
     },
-    onSuccess: (r) => {
-      setResult(r);
-      void qc.invalidateQueries({ queryKey: ['entities'] });
-      void qc.invalidateQueries({ queryKey: ['entity', r.keptId] });
-      void qc.invalidateQueries({ queryKey: ['entity', r.archivedId] });
-      void qc.invalidateQueries({ queryKey: ['entity-merge'] });
-      onMerged?.(r);
-    },
+    onSuccess: setResult,
   });
+
+  // The refresh waits for the summary to close: the archived client's page,
+  // the duplicates list and the import row all drop what hosts this popup.
+  const finish = (): void => {
+    if (result) {
+      void qc.invalidateQueries({ queryKey: ['entities'] });
+      void qc.invalidateQueries({ queryKey: ['entity', result.keptId] });
+      void qc.invalidateQueries({ queryKey: ['entity', result.archivedId] });
+      void qc.invalidateQueries({ queryKey: ['entity-merge'], refetchType: 'none' });
+      onMerged?.(result);
+    }
+    onClose();
+  };
 
   // Nothing shows until the preview is the order to show (no flash of the other keeper).
   const current = p && p.keep.id === keepId && !flipToRecommended ? p : undefined;
@@ -320,17 +326,17 @@ export function MergeClientsModal({
     return (
       <Modal
         open
-        onClose={onClose}
+        onClose={finish}
         size="lg"
         title="Clients merged"
         footer={
           <>
-            <Button variant="secondary" onClick={onClose}>
+            <Button variant="secondary" onClick={finish}>
               Close
             </Button>
             <Button
               onClick={() => {
-                onClose();
+                finish();
                 router.push(`/entities/${result.keptId}`);
               }}
             >
@@ -656,10 +662,14 @@ function PlanStep({
 }
 
 function MergeResultSummary({ result }: { result: MergeClientsResult }): JSX.Element {
-  const counts = useMemo(
-    () => Object.entries(result.counts).filter(([, n]) => n > 0),
-    [result.counts],
-  );
+  // "invoicesLeft" and the like count what did not move.
+  const [counts, left] = useMemo(() => {
+    const all = Object.entries(result.counts).filter(([, n]) => n > 0);
+    return [
+      all.filter(([k]) => !k.endsWith('Left')),
+      all.filter(([k]) => k.endsWith('Left')).map(([k, n]) => [k.slice(0, -4), n] as const),
+    ];
+  }, [result.counts]);
   return (
     <div className="space-y-3 text-sm">
       <p className="flex items-center gap-1.5 font-medium text-success-700">
@@ -684,10 +694,13 @@ function MergeResultSummary({ result }: { result: MergeClientsResult }): JSX.Ele
           </li>
         )}
       </ul>
-      {result.stayed.length > 0 && (
+      {(result.stayed.length > 0 || left.length > 0) && (
         <div className="rounded-lg border border-warning-200 bg-warning-50 p-3">
           <div className="font-semibold text-warning-700">Stayed on {result.archivedCode}</div>
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink">
+            {left.map(([k, n]) => (
+              <li key={`left-${k}`}>{countLabel(k, n)}</li>
+            ))}
             {result.stayed.map((s, i) => (
               <li key={`${s.kind}-${s.code ?? i}`}>
                 {s.code ?? (s.count !== undefined ? countLabel(s.kind, s.count) : humanize(s.kind))}
