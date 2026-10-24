@@ -84,6 +84,8 @@ describe('Merging two clients that are one (e2e)', () => {
   let moved: { id: string; engagementCode: string };
   let clash: { id: string; engagementCode: string };
   let invoiceId: string;
+  let firmWas:
+    { gstin: string | null; state_code: string | null; invoice_prefix: string } | undefined;
 
   beforeAll(async () => {
     await seedIdentityFixtures();
@@ -92,6 +94,12 @@ describe('Merging two clients that are one (e2e)', () => {
     await su.connect();
     mp = await token('mp@dhvaj.in');
     pa = await token('partner.a@dhvaj.in');
+    // Issuing an invoice needs the firm's GSTIN; afterAll puts the settings back.
+    firmWas = (
+      await su.query<{ gstin: string | null; state_code: string | null; invoice_prefix: string }>(
+        `SELECT gstin, state_code, invoice_prefix FROM hsdg.firm_settings`,
+      )
+    ).rows[0];
     const settings = await http().get('/api/v1/billing/settings').set(bearer(mp)).expect(200);
     await http()
       .patch('/api/v1/billing/settings')
@@ -167,6 +175,11 @@ describe('Merging two clients that are one (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (firmWas)
+      await su.query(
+        `UPDATE hsdg.firm_settings SET gstin = $1, state_code = $2, invoice_prefix = $3`,
+        [firmWas.gstin, firmWas.state_code, firmWas.invoice_prefix],
+      );
     await su?.end();
     await app?.close();
   });
@@ -257,6 +270,23 @@ describe('Merging two clients that are one (e2e)', () => {
   });
 
   it('merges: registrations, engagements and billing move; the archived one points to the kept', async () => {
+    const work = async () =>
+      (
+        await su.query<{ engagement_id: string; filings: number; tasks: number }>(
+          `SELECT e.id AS engagement_id,
+                  (SELECT count(*)::int FROM hsdg.compliance_instances i WHERE i.engagement_id = e.id) AS filings,
+                  (SELECT count(*)::int FROM hsdg.tasks t WHERE t.engagement_id = e.id) AS tasks
+             FROM hsdg.engagements e WHERE e.id = ANY($1::uuid[])`,
+          [[keepCompliance, dropCompliance.id]],
+        )
+      ).rows.reduce<Record<string, { filings: number; tasks: number }>>(
+        (m, r) => ({ ...m, [r.engagement_id]: { filings: r.filings, tasks: r.tasks } }),
+        {},
+      );
+    const before = await work();
+    // The archived one's second year and TDS give it filings the keeper lacks.
+    expect(before[dropCompliance.id]!.filings).toBeGreaterThan(before[keepCompliance]!.filings);
+
     const res = await http()
       .post(`/api/v1/entities/${keep.id}/merge`)
       .set(bearer(pa))
@@ -269,8 +299,17 @@ describe('Merging two clients that are one (e2e)', () => {
       archivedId: drop.id,
       archivedCode: drop.entityCode,
       folded: { from: dropCompliance.engagementCode },
-      counts: expect.objectContaining({ registrations: 1, receipts: 1, invoicesLeft: 0 }),
+      counts: expect.objectContaining({ registrations: 1, receipts: 1 }),
     });
+    // Its filings the keeper lacked moved, with their tasks; the rest stayed behind.
+    const after = await work();
+    const f = r.folded!;
+    expect(f.filings).toBeGreaterThan(0);
+    expect(f.filings + f.filingsLeft).toBe(before[dropCompliance.id]!.filings);
+    expect(after[keepCompliance]!.filings).toBe(before[keepCompliance]!.filings + f.filings);
+    expect(after[dropCompliance.id]!.filings).toBe(f.filingsLeft);
+    expect(after[keepCompliance]!.tasks).toBe(before[keepCompliance]!.tasks + f.tasks);
+    expect(after[dropCompliance.id]!.tasks).toBe(before[dropCompliance.id]!.tasks - f.tasks);
     // The folded Compliance engagement and the GST one moved; the clashing one stayed.
     expect(r.movedEngagements).toBe(2);
     expect(r.stayed).toEqual([
@@ -327,10 +366,12 @@ describe('Merging two clients that are one (e2e)', () => {
     expect(byId[clash.id]).toMatchObject({ entity_id: drop.id });
 
     const audit = await su.query(
-      `SELECT 1 FROM hsdg.audit_events WHERE action = 'entity.merged' AND object_id = $1`,
-      [keep.id],
+      `SELECT action FROM hsdg.audit_events
+        WHERE (action = 'entity.merged' AND object_id = $1)
+           OR (action = 'entity.merged_into' AND object_id = $2)`,
+      [keep.id, drop.id],
     );
-    expect(audit.rowCount).toBe(1);
+    expect(audit.rows.map((x) => x.action).sort()).toEqual(['entity.merged', 'entity.merged_into']);
   });
 
   it('leaves the archived client out of the list and the duplicates, and will not merge it again', async () => {
@@ -403,6 +444,19 @@ describe('Merging two clients that are one (e2e)', () => {
       legalName: `${tag} Cosmo Trends (Delhi`,
       tradeName: 'Cosmo',
     });
+  });
+
+  it('every table under row security lets the merge move the client rows', async () => {
+    const { rows } = await su.query<{ t: string }>(
+      `SELECT c.relname AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'hsdg' AND c.relkind IN ('r', 'p') AND c.relrowsecurity
+          AND NOT EXISTS (SELECT 1 FROM pg_policies p
+                           WHERE p.schemaname = 'hsdg' AND p.tablename = c.relname
+                             AND 'hsdg_migrator' = ANY (p.roles))
+        ORDER BY 1`,
+    );
+    // A table here needs a "<table>_client_merge" policy (see the client_merge migration).
+    expect(rows.map((r) => r.t)).toEqual([]);
   });
 
   it('is for those who manage clients', async () => {
