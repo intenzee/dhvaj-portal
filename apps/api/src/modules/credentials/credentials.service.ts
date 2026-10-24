@@ -361,4 +361,47 @@ export class CredentialsService {
       return { id, portal: row.portal, account: row.account, ...secret };
     });
   }
+
+  /**
+   * Every login the caller may reveal (as a single reveal decides), opened,
+   * by its id — for the Client Master export with passwords. The database
+   * logs each one; the caller's transaction must commit for the log to stay.
+   */
+  async openForExportWith(client: PoolClient): Promise<Map<string, CredentialSecret>> {
+    if (!this.cipher.ready) throw new ServiceUnavailableException(NOT_READY);
+    let rows: {
+      id: string;
+      ciphertext: Buffer;
+      iv: Buffer;
+      auth_tag: Buffer;
+      key_version: number;
+      entity_id: string;
+      portal: CredentialPortal;
+      account: CredentialAccount;
+    }[];
+    try {
+      ({ rows } = await client.query(`SELECT * FROM hsdg.export_client_credentials()`));
+    } catch (err) {
+      if (((err as { message?: string }).message ?? '').includes('credential_rate_limited'))
+        throw new HttpException(
+          'Exported with passwords 5 times in the last hour. Try again later.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      throw err;
+    }
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        this.cipher.open(
+          {
+            ciphertext: r.ciphertext,
+            iv: r.iv,
+            authTag: r.auth_tag,
+            keyVersion: r.key_version,
+          },
+          credentialAad(r.id, r.entity_id, r.portal, r.account),
+        ),
+      ]),
+    );
+  }
 }

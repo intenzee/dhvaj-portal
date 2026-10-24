@@ -9,6 +9,7 @@ import {
 import type { PoolClient } from 'pg';
 import {
   CLIENT_IMPORT_ACTION,
+  CLIENT_MASTER_LOGIN_CELLS,
   CLIENT_MASTER_SAVED_PASSWORD,
   STREAMS,
   STREAM_LABEL,
@@ -36,6 +37,7 @@ import type {
   RegistrationInput,
   UpdateEntityInput,
 } from '../entities/entities.types';
+import type { CredentialSecret } from './credential-cipher';
 import { CredentialsService } from './credentials.service';
 import {
   fillClientMaster,
@@ -181,6 +183,81 @@ function failureMessage(err: unknown): string {
   return 'Could not be saved.';
 }
 
+interface ExportCredential {
+  id: string;
+  entity_id: string;
+  portal: CredentialPortal;
+  account: CredentialAccount;
+  username_hint: string;
+  registration_number: string | null;
+}
+
+export interface MasterExport {
+  data: Buffer;
+  filename: string;
+  clients: number;
+  /** Logins written in full / masked. Without passwords, every login is masked. */
+  passwordsShown: number;
+  passwordsMasked: number;
+}
+
+/**
+ * Puts each client's logins in the workbook: the first of each kind on its
+ * Clients row when it is for the client's main GSTIN / TAN (or has none),
+ * every other on the Logins sheet. A login is written in full only when
+ * `secrets` has it. Pure — tested through the export.
+ */
+function placeLogins(
+  clients: MasterExportClient[],
+  entities: PortalEntity[],
+  regs: PortalReg[],
+  creds: ExportCredential[],
+  secrets: Map<string, CredentialSecret>,
+): { logins: MasterExportLogin[]; shown: number; masked: number } {
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  const rowOf = new Map(clients.map((c) => [c.code as string, c]));
+  const regsOf = groupBy(regs, (r) => r.entity_id);
+  const logins: MasterExportLogin[] = [];
+  let shown = 0;
+  let masked = 0;
+  for (const c of creds) {
+    const e = byId.get(c.entity_id);
+    const row = e && e.status !== 'archived' ? rowOf.get(e.entity_code) : undefined;
+    if (!e || !row) continue;
+    const secret = secrets.get(c.id);
+    if (secret) shown += 1;
+    else masked += 1;
+    const username = secret?.username ?? c.username_hint;
+    const password = secret?.password ?? CLIENT_MASTER_SAVED_PASSWORD;
+    const cell = CLIENT_MASTER_LOGIN_CELLS.find(
+      (k) => k.portal === c.portal && k.account === c.account,
+    );
+    if (cell && !row[cell.user]) {
+      const own = regsOf.get(e.id) ?? [];
+      const onGstin = c.portal === 'gst' || c.portal === 'eway_bill';
+      const onTan = c.account === 'tan' || c.account === 'deductor';
+      const main = onGstin ? row.gstin : onTan ? row.tan : null;
+      const hasAny = own.some((r) => r.registration_type === (onGstin ? 'gstin' : 'tan'));
+      const fits =
+        !(onGstin || onTan) || (c.registration_number ? c.registration_number === main : !hasAny);
+      if (fits) {
+        row[cell.user] = username;
+        row[cell.password] = password;
+        continue;
+      }
+    }
+    logins.push({
+      code: e.entity_code,
+      name: e.legal_name,
+      portal: credentialLabel(c.portal, c.account),
+      target: c.registration_number ?? '',
+      username,
+      password,
+    });
+  }
+  return { logins, shown, masked };
+}
+
 const change = (
   field: string,
   from: string | null | undefined,
@@ -202,7 +279,8 @@ function clientMasterTemplate(): Buffer {
  * The Client Master workbook: Export gives every client the caller can see
  * in the firm's template — its PAN, GSTINs, TAN, CIN, contact, address, GST
  * frequency, its open Compliance engagement's latest year and services, and
- * its logins (masked) — so the gaps show; Import reads it back.
+ * its logins (masked, or in full when asked and allowed) — so the gaps show;
+ * Import reads it back.
  *
  * Import matches each row to a portal client by Client code, else its
  * GSTIN, PAN or TAN, else its exact name; a row with none is a new client.
@@ -211,7 +289,8 @@ function clientMasterTemplate(): Buffer {
  * in, never replaced, and registrations are only added. A contact's or an
  * address's empty fields are filled. A financial year with services
  * creates the client's Compliance engagement, or adds the year or the
- * services to its open one. Logins are sealed as the login import does.
+ * services to its open one. Logins — typed in a row's login columns or on
+ * the Logins sheet — are sealed as the login import does.
  * Preview first; the import re-reads the same file, each row commits on its
  * own, and importing again only fills what is still missing.
  */
@@ -228,9 +307,15 @@ export class ClientMasterService {
 
   // ── Export ─────────────────────────────────────────────────────────────
 
-  async export(ctx: RlsContext): Promise<{ data: Buffer; filename: string; clients: number }> {
-    const { clients, logins } = await this.db
-      .withRlsContext(ctx, async (client) => {
+  /**
+   * The workbook. Each client's main logins go on its row, the rest on the
+   * Logins sheet — masked (the user ID's hint, "(saved in portal)"), or with
+   * `passwords` in full for every client whose logins the caller may reveal.
+   */
+  async export(ctx: RlsContext, opts: { passwords?: boolean } = {}): Promise<MasterExport> {
+    const { clients, creds, entities, regs, secrets } = await this.db.withRlsContext(
+      ctx,
+      async (client) => {
         const p = await this.portal(client);
         const covers = await client.query<{
           entity_id: string;
@@ -255,50 +340,44 @@ export class ClientMasterService {
           ORDER BY e.entity_id, y.financial_year DESC`,
           [ENDED],
         );
-        const creds = await client.query<{
-          entity_id: string;
-          portal: CredentialPortal;
-          account: CredentialAccount;
-          username_hint: string;
-          registration_number: string | null;
-        }>(
-          `SELECT c.entity_id, c.portal, c.account, c.username_hint, r.registration_number
+        const creds = await client.query<ExportCredential>(
+          `SELECT c.id, c.entity_id, c.portal, c.account, c.username_hint, r.registration_number
            FROM hsdg.client_credentials c
            LEFT JOIN hsdg.entity_registrations r ON r.id = c.registration_id
-          ORDER BY c.portal, c.account, r.registration_number`,
+          ORDER BY c.portal, c.account, r.registration_number NULLS FIRST, c.created_at`,
         );
-        return { ...this.exportRows(p, covers.rows), logins: creds.rows, entities: p.entities };
-      })
-      .then((r) => ({
-        clients: r.clients,
-        logins: (() => {
-          const byId = new Map(r.entities.map((e) => [e.id, e]));
-          return r.logins.flatMap((c): MasterExportLogin[] => {
-            const e = byId.get(c.entity_id);
-            return e && e.status !== 'archived'
-              ? [
-                  {
-                    code: e.entity_code,
-                    name: e.legal_name,
-                    portal: credentialLabel(c.portal, c.account),
-                    target: c.registration_number ?? '',
-                    username: c.username_hint,
-                    password: CLIENT_MASTER_SAVED_PASSWORD,
-                  },
-                ]
-              : [];
-          });
-        })(),
-      }));
+        const secrets = opts.passwords
+          ? await this.credentials.openForExportWith(client)
+          : new Map<string, CredentialSecret>();
+        return {
+          ...this.exportRows(p, covers.rows),
+          creds: creds.rows,
+          entities: p.entities,
+          regs: p.regs,
+          secrets,
+        };
+      },
+    );
+    const placed = placeLogins(clients, entities, regs, creds, secrets);
 
-    const data = await fillClientMaster(clientMasterTemplate(), clients, logins);
+    const data = await fillClientMaster(clientMasterTemplate(), clients, placed.logins);
     await this.audit.record(ctx, {
-      action: 'client_master.exported',
+      action: opts.passwords ? 'client_master.exported_with_passwords' : 'client_master.exported',
       objectType: 'client_import',
-      after: { clients: clients.length, logins: logins.length },
+      after: {
+        clients: clients.length,
+        logins: placed.shown + placed.masked,
+        ...(opts.passwords ? { passwordsShown: placed.shown, passwordsMasked: placed.masked } : {}),
+      },
     });
     const day = new Date().toISOString().slice(0, 10);
-    return { data, filename: `DHVAJ-Client-Master-${day}.xlsx`, clients: clients.length };
+    return {
+      data,
+      filename: `DHVAJ-Client-Master-${day}${opts.passwords ? '-with-passwords' : ''}.xlsx`,
+      clients: clients.length,
+      passwordsShown: placed.shown,
+      passwordsMasked: placed.masked,
+    };
   }
 
   private exportRows(
@@ -439,7 +518,7 @@ export class ClientMasterService {
     );
     if (!this.credentials.vaultReady && live.some((r) => r.loginRows.length))
       throw new ServiceUnavailableException(
-        'The file has logins but this server has no encryption key (CREDENTIALS_KEYS), so they cannot be saved. Ask the administrator to set it, or clear the Logins sheet, then import again.',
+        'The file has logins but this server has no encryption key (CREDENTIALS_KEYS), so they cannot be saved. Ask the administrator to set it, or clear the login columns and the Logins sheet, then import again.',
       );
 
     const result: ClientMasterResult = {
@@ -825,8 +904,11 @@ class RowPlanner {
     const on = (id: string) =>
       bareNumber(e.pan ?? '') === bareNumber(id) ||
       regs.some((r) => bareNumber(r.registration_number) === bareNumber(id));
-    if (!src.badIds.every((b) => on(b.id))) return src;
-    const bad = new Set(src.badIds.map((b) => b.id));
+    // A clash the portal already holds: its PAN and that GSTIN, both on the client.
+    const held = (b: MasterRow['badIds'][number]) =>
+      on(b.id) && (!b.clash || (!!src.pan && bareNumber(e.pan ?? '') === src.pan));
+    if (!src.badIds.every(held)) return src;
+    const bad = new Set(src.badIds.filter((b) => !b.clash).map((b) => b.id));
     return {
       ...src,
       gstins: src.gstins.filter((g) => !bad.has(g)),
@@ -838,6 +920,12 @@ class RowPlanner {
         ...[...bad].map(
           (id) => `${id} in the portal is not valid; check it on the client's page (left as is).`,
         ),
+        ...src.badIds
+          .filter((b) => b.clash)
+          .map(
+            (b) =>
+              `${b.message} Both are on the client in the portal; check its page (left as is).`,
+          ),
       ],
     };
   }
@@ -1353,7 +1441,17 @@ function attachLogins(
     if (r.entityCode) byCode.set(r.entityCode.toUpperCase(), r);
   }
   const regsOf = groupBy(p.regs, (r) => r.entity_id);
+  const byRow = new Map(rows.map((r) => [r.row, r]));
   for (const l of parsed.logins) {
+    // Typed on the client's own row: that row, whatever its code or name.
+    if (l.clientRow !== null) {
+      const own = byRow.get(l.clientRow);
+      if (own) {
+        own.loginRows.push(l);
+        own.logins += 1;
+      }
+      continue;
+    }
     const named = l.name ? (byName.get(nameKey(l.name)) ?? []) : [];
     const r =
       (l.code && byCode.get(l.code.toUpperCase())) || (named.length === 1 ? named[0] : null);

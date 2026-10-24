@@ -147,6 +147,78 @@ describe('export → import round trip', () => {
     expect(loginProblems[0]!.message).toContain('Nowhere');
   });
 
+  it("reads the logins typed on a client's row, as typed, and skips the masked ones", async () => {
+    const file = await fillClientMaster(
+      template,
+      [
+        {
+          code: 'CL-0001',
+          legalName: 'Sunrise Foods Private Limited',
+          gstin: gstin('07', SUNRISE),
+          gstUser: 'sunrise_gst',
+          gstPassword: ' Pass  word#1 ',
+          itUser: SUNRISE,
+          itPassword: '12345678',
+          // Exported masked: already in the portal.
+          tracesUser: 'DE•••5A',
+          tracesPassword: CLIENT_MASTER_SAVED_PASSWORD,
+          // Half a login.
+          mcaUser: 'sunrise_mca',
+        },
+      ],
+      [],
+    );
+    const { rows, logins, loginProblems } = parseClientMaster(file);
+    expect(rows[0]!.error).toBeNull();
+    expect(logins).toEqual([
+      expect.objectContaining({
+        row: 6,
+        clientRow: 6,
+        code: 'CL-0001',
+        portal: 'gst',
+        account: 'main',
+        target: '',
+        username: 'sunrise_gst',
+        password: 'Pass  word#1',
+      }),
+      expect.objectContaining({
+        clientRow: 6,
+        portal: 'income_tax',
+        account: 'main',
+        username: SUNRISE,
+        password: '12345678',
+      }),
+    ]);
+    expect(loginProblems).toEqual([
+      { row: 6, message: 'MCA login: both the user ID and the password are needed.' },
+    ]);
+  });
+
+  it('still reads a v1 file, without the login columns', () => {
+    const v1 = Object.values(CLIENT_MASTER_COLUMNS).slice(0, 31);
+    expect(v1[30]).toBe('Lead / in-charge (email)');
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['DHVAJ Client Master'],
+      [],
+      [],
+      v1,
+      ['EXAMPLE', 'Sharma Traders'],
+      ['', 'Old Format Traders', '', '', BHARAT],
+    ]);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, ws, 'Clients');
+    const parsed = parseClientMaster(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }));
+    expect(parsed.rows).toEqual([
+      expect.objectContaining({
+        row: 6,
+        legalName: 'Old Format Traders',
+        pan: BHARAT,
+        error: null,
+      }),
+    ]);
+    expect(parsed.logins).toEqual([]);
+  });
+
   it('reads a GSTIN typed with a stray dash or dot', async () => {
     const good = gstin('07', SUNRISE);
     const file = await fillClientMaster(

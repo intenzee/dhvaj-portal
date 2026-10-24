@@ -124,7 +124,8 @@ export async function fetchBlob(
  * The API needs a bearer token, so we fetch the blob (not a plain <a href>) and
  * trigger a save via an object URL.
  */
-export async function downloadFile(path: string, fallbackName = 'download'): Promise<void> {
+/** Saves the file the API answers with; returns the response's headers. */
+export async function downloadFile(path: string, fallbackName = 'download'): Promise<Headers> {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
@@ -145,4 +146,5 @@ export async function downloadFile(path: string, fallbackName = 'download'): Pro
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  return res.headers;
 }
