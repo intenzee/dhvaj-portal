@@ -608,14 +608,23 @@ describe('Client portal credentials (e2e)', () => {
     const { rows } = await su.query<{ id: string }>(
       `SELECT id FROM hsdg.users WHERE email = 'partner.a@dhvaj.in'`,
     );
-    await su.query(
+    const filled = await su.query<{ id: string }>(
       `INSERT INTO hsdg.credential_access_log (credential_id, entity_id, user_id, role)
        SELECT c.id, c.entity_id, $2, 'partner' FROM hsdg.client_credentials c, generate_series(1, 60)
-        WHERE c.id = $1`,
+        WHERE c.id = $1
+       RETURNING id`,
       [loginId, rows[0]!.id],
     );
-    await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(pa)).expect(429);
-    await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(mp)).expect(200);
+    try {
+      await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(pa)).expect(429);
+      await http().post(`/api/v1/credentials/${loginId}/reveal`).set(bearer(mp)).expect(200);
+    } finally {
+      // The suites share one database: left in, these 60 hold Partner A at the
+      // limit for an hour, and a later suite's reveal (client-master) gets 429.
+      await su.query(`DELETE FROM hsdg.credential_access_log WHERE id = ANY ($1)`, [
+        filled.rows.map((r) => r.id),
+      ]);
+    }
   });
 
   it("adds the marked year, or GST, to the client's open Compliance engagement", async () => {
