@@ -823,7 +823,8 @@ class RowPlanner {
     if (!e || src.badIds.length === 0) return src;
     const regs = this.regsOf.get(e.id) ?? [];
     const on = (id: string) =>
-      e.pan === id || regs.some((r) => bareNumber(r.registration_number) === bareNumber(id));
+      bareNumber(e.pan ?? '') === bareNumber(id) ||
+      regs.some((r) => bareNumber(r.registration_number) === bareNumber(id));
     if (!src.badIds.every((b) => on(b.id))) return src;
     const bad = new Set(src.badIds.map((b) => b.id));
     return {
