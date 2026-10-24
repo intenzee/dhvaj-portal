@@ -222,7 +222,8 @@ describe('PS-201 GST invoices (e2e)', () => {
       const seqs = numbers.map((n) => Number(n.split('/')[2])).sort((a, b) => a - b);
       expect(seqs[49]! - seqs[0]!).toBe(49);
       expect(new Set(numbers.map((n) => n.split('/')[1])).size).toBe(1);
-    });
+      // 100 requests: ~5 s locally, past jest's 30 s on a busy CI runner.
+    }, 120_000);
   });
 
   describe('voiding', () => {
