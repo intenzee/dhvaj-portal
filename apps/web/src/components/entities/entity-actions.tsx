@@ -293,7 +293,9 @@ export function EditEntityModal({
       }
     >
       <div className="space-y-3">
-        {conflict && <DuplicateConflictNotice conflict={conflict} entityId={entity.id} />}
+        {conflict && (
+          <DuplicateConflictNotice conflict={conflict} entityId={entity.id} onMerged={onClose} />
+        )}
         <Field label="Legal name" required>
           <Input value={legalName} onChange={(e) => setLegalName(e.target.value)} />
         </Field>
@@ -470,7 +472,9 @@ export function AddRegistrationModal({
       }
     >
       <div className="space-y-3">
-        {conflict && <DuplicateConflictNotice conflict={conflict} entityId={entityId} />}
+        {conflict && (
+          <DuplicateConflictNotice conflict={conflict} entityId={entityId} onMerged={onClose} />
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type" required>
             <Select value={registrationType} onChange={(e) => setRegistrationType(e.target.value)}>
