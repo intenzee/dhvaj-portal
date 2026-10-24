@@ -174,6 +174,24 @@ describe('Engagement purge after a client merge (e2e)', () => {
     await app?.close();
   });
 
+  it('keeps an issued invoice’s lines locked to the app, even with hsdg.purging set', async () => {
+    const appDb = new Client({ connectionString: process.env.DATABASE_URL });
+    await appDb.connect();
+    try {
+      await appDb.query('BEGIN');
+      await appDb.query(
+        `SELECT set_config('hsdg.role', 'managing_partner', true),
+                set_config('hsdg.purging', 'on', true)`,
+      );
+      await expect(
+        appDb.query(`DELETE FROM hsdg.invoice_line_items WHERE invoice_id = $1`, [invoiceId]),
+      ).rejects.toThrow(/Only a draft invoice's lines can change/);
+    } finally {
+      await appDb.query('ROLLBACK');
+      await appDb.end();
+    }
+  });
+
   it('deletes the engagement that moved, with its issued invoice; the receipt stays', async () => {
     await purge(moved);
     expect(await exists('engagements', 'id', moved.id)).toBe(0);
