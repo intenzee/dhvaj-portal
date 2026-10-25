@@ -6,6 +6,7 @@ import { ClientMergeService } from './client-merge.service';
 import { EntitiesController } from './entities.controller';
 import { EntityTypesController } from './entity-types.controller';
 import { IndustriesController } from './industries.controller';
+import { StreamRegistrationController } from './stream-registration.controller';
 
 /**
  * Entity master: client entities, their statutory registrations and contacts.
@@ -13,7 +14,12 @@ import { IndustriesController } from './industries.controller';
  */
 @Module({
   imports: [AuditModule, ComplianceModule],
-  controllers: [EntitiesController, EntityTypesController, IndustriesController],
+  controllers: [
+    EntitiesController,
+    EntityTypesController,
+    IndustriesController,
+    StreamRegistrationController,
+  ],
   providers: [EntitiesService, ClientMergeService],
   exports: [EntitiesService],
 })

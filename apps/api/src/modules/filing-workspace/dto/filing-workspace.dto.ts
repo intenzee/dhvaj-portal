@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBase64,
   IsBoolean,
   IsDateString,
@@ -20,6 +22,7 @@ import {
 import {
   CHECKLIST_ITEM_STATUSES,
   FILING_REFERENCE_KINDS,
+  PRIOR_FILED_TOKEN_RE,
   STREAMS,
   type ChecklistItemStatus,
   type FilingReferenceKind,
@@ -51,6 +54,16 @@ export class PeriodParamDto extends StreamParamDto {
   @ApiProperty({ example: '2024-12', description: "A month, or a quarter '2026-27:Q2'." })
   @Matches(/^[A-Za-z0-9:-]{1,24}$/)
   periodKey!: string;
+}
+
+/** "Filed before the portal" on a stream tab: months 'YYYY-MM', the year 'FY:YYYY-YY'. */
+export class PriorFiledDto {
+  @ApiProperty({ example: ['2026-04', '2026-05', 'FY:2025-26'] })
+  @IsArray()
+  @ArrayMaxSize(400)
+  @IsString({ each: true })
+  @Matches(PRIOR_FILED_TOKEN_RE, { each: true, message: 'Each period is 2026-04 or FY:2026-27.' })
+  periods!: string[];
 }
 
 export class PeriodCleanupDto {

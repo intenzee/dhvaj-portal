@@ -28,6 +28,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { ComplianceGeneratorService } from '../compliance/compliance-generator.service';
+import { normalisePriorFiled, PriorFiledService } from '../compliance/prior-filed.service';
 import { firmChecks, isStrict } from '../workflow-settings/firm-checks';
 import {
   evaluateIndependence,
@@ -89,6 +90,8 @@ export interface CreatePlan {
   streams: Stream[];
   years: ComplianceYearInput[];
   registrations: Partial<Record<Stream, string[]>>;
+  /** Filed before the portal, checked against the streams in scope. */
+  priorFiled: Partial<Record<Stream, string[]>>;
   findings: IndependenceFinding[];
 }
 
@@ -100,6 +103,7 @@ export interface CreateKindRequest {
   years?: ComplianceYearInput[];
   streams?: Stream[];
   streamRegistrations?: Partial<Record<Stream, string[]>>;
+  priorFiled?: Partial<Record<Stream, string[]>>;
   acknowledgedIndependenceRules?: string[];
 }
 
@@ -115,6 +119,7 @@ export class EngagementKindsService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly generator: ComplianceGeneratorService,
+    private readonly priorFiled: PriorFiledService,
   ) {}
 
   // ── client facts ────────────────────────────────────────────────────────
@@ -365,11 +370,16 @@ export class EngagementKindsService {
       if (new Set(years.map((y) => y.financialYear)).size !== years.length) {
         throw new BadRequestException('A financial year is listed twice.');
       }
-    } else if (input.years?.length || input.streams?.length) {
+    } else if (
+      input.years?.length ||
+      input.streams?.length ||
+      Object.keys(input.priorFiled ?? {}).length
+    ) {
       throw new BadRequestException(
         'Years and streams in scope belong to Compliance engagements only.',
       );
     }
+    const priorFiled = kind === 'compliance' ? normalisePriorFiled(input.priorFiled, streams) : {};
 
     const kc = await this.kindContext(client, input.entityId);
     if (kind === 'compliance') {
@@ -419,6 +429,7 @@ export class EngagementKindsService {
               input.streamRegistrations,
             )
           : {},
+      priorFiled,
       findings,
     };
   }
@@ -461,6 +472,8 @@ export class EngagementKindsService {
           engagementId,
           plan.years.map((y) => y.financialYear),
         );
+        // Periods the client filed before the portal start out Filed.
+        await this.priorFiled.markWith(client, ctx, engagementId, plan.priorFiled);
       }
     }
     await this.recordChecks(client, ctx, engagementId, plan.findings, acknowledged);

@@ -20,9 +20,12 @@ import {
 import {
   ENGAGEMENT_STATUS,
   FIRM_CHECK,
+  PENDING_REGISTRATION_STREAMS,
   PERMISSION,
   STREAM_LABEL,
+  STREAM_PRIOR_FILED_GRAIN,
   STREAM_REGISTRATION_TYPES,
+  fyMonthKeys,
   type EngagementKind,
   type IndependenceCheckResult,
   type IndependenceFinding,
@@ -42,6 +45,10 @@ import { EntityPicker, type Picked } from '@/components/entity-picker';
 import { PageHeader, Card, CardBody, Button, Spinner, Badge } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
 import { cn } from '@/lib/cn';
+import { ExpandToggle } from '@/components/inline-panel';
+import { AddGstinDialog } from '@/components/filing/add-gstin-dialog';
+import { PriorFiledPicker } from '@/components/filing/prior-filed-picker';
+import { todayIst } from '@/components/work/my-task-columns';
 
 interface ServiceOption {
   id: string;
@@ -61,6 +68,39 @@ export function financialYearOf(d: Date): string {
   const start = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
+/**
+ * The "filed before the portal" tokens worth sending: streams still picked,
+ * months and annual returns of years still in scope (pure; exported for tests).
+ */
+export function priorFiledFor(
+  picked: Partial<Record<Stream, string[]>>,
+  streams: readonly Stream[],
+  years: readonly string[],
+): Partial<Record<Stream, string[]>> {
+  const ok = new Set(years.flatMap((fy) => [...fyMonthKeys(fy), `FY:${fy}`]));
+  const out: Partial<Record<Stream, string[]>> = {};
+  for (const s of streams) {
+    const tokens = (picked[s] ?? []).filter((t) => ok.has(t));
+    if (tokens.length > 0) out[s] = tokens;
+  }
+  return out;
+}
+
+/** "6 months", "2 quarters + annual" — what a stream's tokens come to. */
+export function priorFiledSummary(stream: Stream, tokens: readonly string[]): string {
+  const months = tokens.filter((t) => !t.startsWith('FY:')).length;
+  const years = tokens.length - months;
+  const parts: string[] = [];
+  if (months > 0) {
+    if (STREAM_PRIOR_FILED_GRAIN[stream] === 'quarter') {
+      const q = Math.floor(months / 3);
+      parts.push(`${q} quarter${q === 1 ? '' : 's'}`);
+    } else parts.push(`${months} month${months === 1 ? '' : 's'}`);
+  }
+  if (years > 0) parts.push(years === 1 ? 'annual' : `${years} years’ annual`);
+  return parts.join(' + ');
+}
+
 /** The FY `delta` years away from `fy`. */
 export function shiftFinancialYear(fy: string, delta: number): string {
   const start = Number(fy.slice(0, 4)) + delta;
@@ -142,9 +182,14 @@ export function NewEngagementWizard(): JSX.Element {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [registrations, setRegistrations] = useState<Partial<Record<Stream, string[]>>>({});
   const [leads, setLeads] = useState<Partial<Record<Stream, string>>>({});
+  // Filed before the portal: {stream: tokens} and which streams show the picker.
+  const [priorFiled, setPriorFiled] = useState<Partial<Record<Stream, string[]>>>({});
+  const [priorOpen, setPriorOpen] = useState<Partial<Record<Stream, boolean>>>({});
+  const [gstinFor, setGstinFor] = useState<Stream | null>(null);
   // Independence
   const [acks, setAcks] = useState<IndependenceRule[]>([]);
 
+  const canManageClients = can(principal, PERMISSION.entityManage);
   const entityDetail = useQuery({
     queryKey: ['entity', entity?.id],
     queryFn: () => apiFetch<EntityDetail>(`/entities/${entity!.id}`),
@@ -268,6 +313,25 @@ export function NewEngagementWizard(): JSX.Element {
       );
     });
 
+  const validYears = years.map((y) => y.financialYear).filter((fy) => FY_RE.test(fy));
+  const priorToSend = priorFiledFor(priorFiled, streams, validYears);
+
+  /** The client's GSTIN, added from the wizard; then ticked for the stream. */
+  const addGstin = async (stream: Stream, gstin: string): Promise<void> => {
+    const detail = await apiFetch<EntityDetail>(`/entities/${entity!.id}/registrations`, {
+      method: 'POST',
+      body: { registrationType: 'gstin', registrationNumber: gstin, stateCode: gstin.slice(0, 2) },
+    });
+    qc.setQueryData(['entity', entity!.id], detail);
+    const added = detail.registrations.find(
+      (r) => r.registrationType.toLowerCase() === 'gstin' && r.registrationNumber === gstin,
+    );
+    if (added) {
+      setRegistrations((m) => ({ ...m, [stream]: [...(m[stream] ?? []), added.id] }));
+    }
+    toast(`GSTIN ${gstin} added to the client.`);
+  };
+
   const create = useMutation({
     mutationFn: () => {
       const common = {
@@ -297,6 +361,7 @@ export function NewEngagementWizard(): JSX.Element {
               streamLeads: Object.fromEntries(
                 streams.filter((s) => leads[s]).map((s) => [s, leads[s]]),
               ),
+              ...(Object.keys(priorToSend).length > 0 ? { priorFiled: priorToSend } : {}),
             }
           : kind === 'statutory_audit'
             ? { ...common, financialYear, periodLabel: 'FY', engagementType: 'audit' }
@@ -366,6 +431,14 @@ export function NewEngagementWizard(): JSX.Element {
         ))}
       </ol>
 
+      {gstinFor && entity && (
+        <AddGstinDialog
+          clientName={entity.label}
+          onClose={() => setGstinFor(null)}
+          onSave={(gstin) => addGstin(gstinFor, gstin)}
+        />
+      )}
+
       <Card>
         <CardBody className="space-y-4">
           {step === 0 && (
@@ -375,6 +448,7 @@ export function NewEngagementWizard(): JSX.Element {
                 onChange={(v) => {
                   setEntity(v);
                   setRegistrations({});
+                  setPriorFiled({});
                   setAcks([]);
                 }}
                 exclude={new Set()}
@@ -602,12 +676,33 @@ export function NewEngagementWizard(): JSX.Element {
                             <div className="space-y-2 border-t border-line px-3 py-2">
                               {!byEntity &&
                                 (regs.length === 0 ? (
-                                  <p className="text-xs text-warning-700">
-                                    No{' '}
-                                    {STREAM_REGISTRATION_TYPES[sc.stream].join(' / ').toUpperCase()}{' '}
-                                    on the client record yet — add it on the client, then tick it on
-                                    the Services tab.
-                                  </p>
+                                  PENDING_REGISTRATION_STREAMS.includes(sc.stream) ? (
+                                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-warning-50 px-2 py-1.5 text-xs text-warning-700">
+                                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                      <span className="min-w-0 flex-1">
+                                        GSTIN missing — the {sc.label} months are built without it,
+                                        and the {sc.label} tab asks for it until it is filled in.
+                                      </span>
+                                      {canManageClients && (
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={() => setGstinFor(sc.stream)}
+                                        >
+                                          Add GSTIN now
+                                        </Button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-warning-700">
+                                      No{' '}
+                                      {STREAM_REGISTRATION_TYPES[sc.stream]
+                                        .join(' / ')
+                                        .toUpperCase()}{' '}
+                                      on the client record yet — add it on the client, then tick it
+                                      on the Services tab.
+                                    </p>
+                                  )
                                 ) : (
                                   <div className="flex flex-wrap gap-2">
                                     {regs.map((r) => (
@@ -652,6 +747,42 @@ export function NewEngagementWizard(): JSX.Element {
                                   ))}
                                 </Select>
                               </label>
+                              <div className="space-y-2">
+                                <button
+                                  type="button"
+                                  className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink"
+                                  aria-expanded={!!priorOpen[sc.stream]}
+                                  onClick={() =>
+                                    setPriorOpen((m) => ({ ...m, [sc.stream]: !m[sc.stream] }))
+                                  }
+                                >
+                                  <ExpandToggle open={!!priorOpen[sc.stream]} />
+                                  Already filed before the portal?
+                                  {(priorToSend[sc.stream]?.length ?? 0) > 0 && (
+                                    <span className="text-success-700">
+                                      {priorFiledSummary(sc.stream, priorToSend[sc.stream]!)} ticked
+                                    </span>
+                                  )}
+                                </button>
+                                {priorOpen[sc.stream] && (
+                                  <div className="rounded-md bg-surface-sunken p-2">
+                                    <p className="mb-2 text-xs text-ink-muted">
+                                      Tick the periods the client already filed — they are created
+                                      as Filed, so they never show overdue.
+                                    </p>
+                                    <PriorFiledPicker
+                                      stream={sc.stream}
+                                      financialYears={validYears}
+                                      value={priorFiled[sc.stream] ?? []}
+                                      onChange={(tokens) =>
+                                        setPriorFiled((m) => ({ ...m, [sc.stream]: tokens }))
+                                      }
+                                      today={todayIst()}
+                                      label={`${sc.label} filed before the portal`}
+                                    />
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -701,6 +832,14 @@ export function NewEngagementWizard(): JSX.Element {
                     ))}
                   </span>
                 </div>
+              )}
+              {kind === 'compliance' && Object.keys(priorToSend).length > 0 && (
+                <Row
+                  label="Filed before the portal"
+                  value={(Object.keys(priorToSend) as Stream[])
+                    .map((s) => `${STREAM_LABEL[s]}: ${priorFiledSummary(s, priorToSend[s]!)}`)
+                    .join(' · ')}
+                />
               )}
               {kind !== 'compliance' && <Row label="Status" value={humanize(status)} />}
               <Row

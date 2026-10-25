@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
+  STREAM_REGISTRATION_TYPES,
   dscWarningText,
   type CinProfileAttributes,
   type FilingStatus,
@@ -109,6 +110,17 @@ export class StreamTreeService {
         (query.registrationId && registrations.find((r) => r.id === query.registrationId)?.id) ||
         registrations[0]?.id ||
         null;
+      // GST months built before the client's GSTIN was on file.
+      const waiting = await client.query<{ pending: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM hsdg.compliance_instances ci
+             JOIN hsdg.compliance_rule_versions rv ON rv.id = ci.compliance_rule_version_id
+            WHERE ci.engagement_id = $1 AND rv.stream = $2 AND ci.registration_id IS NULL
+              AND rv.registration_scope = ANY($3::text[])
+              AND ci.workflow_status <> 'not_applicable') AS pending`,
+        [engagementId, stream, STREAM_REGISTRATION_TYPES[stream]],
+      );
+      const registrationPending = !!waiting.rows[0]?.pending;
 
       // Years in scope, newest first; default = the FY of the earliest open item.
       const years = await client.query<{ fy: string; first_open: string | null }>(
@@ -140,6 +152,7 @@ export class StreamTreeService {
         stream,
         registrations,
         registrationId,
+        registrationPending,
         financialYears,
         financialYear,
         annual: [],
