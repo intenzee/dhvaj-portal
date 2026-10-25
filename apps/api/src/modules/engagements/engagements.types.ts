@@ -177,6 +177,8 @@ export interface CreateEngagementInput {
   streams?: Stream[];
   streamRegistrations?: Partial<Record<Stream, string[]>>;
   streamLeads?: Partial<Record<Stream, string>>;
+  /** Filed before the portal: {stream: 'YYYY-MM' | 'FY:YYYY-YY'}. */
+  priorFiled?: Partial<Record<Stream, string[]>>;
   acknowledgedIndependenceRules?: IndependenceRule[];
 }
 

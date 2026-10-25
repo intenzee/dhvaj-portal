@@ -172,6 +172,15 @@ export class CreateEngagementDto {
   streamLeads?: Partial<Record<Stream, string>>;
 
   @ApiPropertyOptional({
+    description:
+      'Filed before the portal — {stream: periods}: months 2026-04, the year FY:2026-27. Their filings are created Filed.',
+    example: { gst: ['2026-04', '2026-05'] },
+  })
+  @IsOptional()
+  @IsObject()
+  priorFiled?: Partial<Record<Stream, string[]>>;
+
+  @ApiPropertyOptional({
     enum: Object.values(INDEPENDENCE_RULE),
     isArray: true,
     description: 'Warnings the partner acknowledges (e.g. NON_COMPANY_AUDIT_ACK).',

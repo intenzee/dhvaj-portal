@@ -329,6 +329,8 @@ export interface StreamTree {
   stream: Stream;
   registrations: TreeRegistration[];
   registrationId: string | null;
+  /** Filings here wait on a registration the client has not given yet (no GSTIN). */
+  registrationPending: boolean;
   financialYears: string[];
   financialYear: string | null;
   annual: TreeItem[];

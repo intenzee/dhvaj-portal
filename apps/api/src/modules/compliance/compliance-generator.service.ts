@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  PENDING_REGISTRATION_STREAMS,
   STREAM_REGISTRATION_TYPES,
   qrmpCategoryForGstin,
   defaultCompanySubtype,
@@ -516,6 +517,11 @@ export class ComplianceGeneratorService {
         const streamRegs = activeRegs.filter(
           (r) => types.includes(r.registration_type) && (!chosen || chosen.includes(r.id)),
         );
+        // No GSTIN on the client yet: the GST months are built all the same,
+        // on "registration pending", and move onto the GSTIN once it is added.
+        const pendingRegistration =
+          PENDING_REGISTRATION_STREAMS.includes(stream) &&
+          !activeRegs.some((r) => types.includes(r.registration_type));
         for (const [ruleId, versions] of rules) {
           if (versions[0]!.stream !== stream) continue;
           for (const target of this.targets(
@@ -523,6 +529,7 @@ export class ComplianceGeneratorService {
             streamRegs,
             profiles.rows,
             year.financial_year,
+            pendingRegistration,
           )) {
             for (const period of rulePeriods(versions, year.financial_year)) {
               const d = this.desiredFor({
@@ -549,12 +556,14 @@ export class ComplianceGeneratorService {
     });
   }
 
-  /** Who a rule runs on in one year: registrations, the PAN / entity, or directors. */
+  /** Who a rule runs on in one year: registrations, the PAN / entity, or directors
+   *  — or, with `pendingRegistration`, the registration still to be added. */
   private targets(
     v: VersionRow,
     streamRegs: readonly Registration[],
     profiles: readonly ProfileRow[],
     financialYear: string,
+    pendingRegistration = false,
   ): Array<{
     registration: Registration | null;
     periodSuffix: string | null;
@@ -577,6 +586,7 @@ export class ComplianceGeneratorService {
             .map((d) => ({ registration: r, periodSuffix: `:DIN:${d.din}`, scope }));
         });
     }
+    if (pendingRegistration) return [{ registration: null, periodSuffix: null, scope }];
     return streamRegs
       .filter((r) => r.registration_type === scope)
       .map((r) => ({ registration: r, periodSuffix: null, scope }));
@@ -670,10 +680,31 @@ export class ComplianceGeneratorService {
     const toRelabel: Array<{ id: string; formLabel: string | null }> = [];
     const seen = new Set<string>();
 
+    // Filings built while the registration was pending are taken over by the
+    // registration's own (status, checklist and work kept) — the first
+    // registration to want each one, if the client added several at once.
+    const pendingByKey = new Map(
+      existing
+        .filter((x) => x.registration_id === null)
+        .map((x) => [keyOf(x.compliance_rule_id, null, x.period_key), x]),
+    );
     for (const d of desired) {
       const key = keyOf(d.ruleId, d.registrationId, d.periodKey);
       seen.add(key);
       const x = byKey.get(key);
+      if (!x && d.registrationId) {
+        const pendingKey = keyOf(d.ruleId, null, d.periodKey);
+        const p = pendingByKey.get(pendingKey);
+        if (p && !seen.has(pendingKey)) {
+          seen.add(pendingKey);
+          const generatorNa =
+            p.workflow_status === 'not_applicable' &&
+            (p.notes === GENERATOR_NA_NOTE || p.notes === STREAM_ENDED_NOTE);
+          toMove.push({ id: p.id, d, reopen: generatorNa });
+          if (p.form_label !== d.formLabel) toRelabel.push({ id: p.id, formLabel: d.formLabel });
+          continue;
+        }
+      }
       if (!x) {
         toInsert.push(d);
         continue;
