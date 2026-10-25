@@ -15,6 +15,7 @@ import {
   PERMISSION,
   type FilingCleanupResult,
   type InstanceWorkspace,
+  type PriorFiledResult,
   type StreamTree,
 } from '@hsdg/contracts';
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
@@ -23,6 +24,7 @@ import type { ClientUploadLinkCreated } from '../documents/client-upload/client-
 import { FilingWorkspaceService } from './filing-workspace.service';
 import { StreamTreeService } from './stream-tree.service';
 import { FilingCleanupService } from './filing-cleanup.service';
+import { PriorFiledService } from '../compliance/prior-filed.service';
 import {
   CompleteLodgeDto,
   CorrectionDto,
@@ -31,6 +33,7 @@ import {
   PatchChecklistItemDto,
   PeriodCleanupDto,
   PeriodParamDto,
+  PriorFiledDto,
   ReasonDto,
   SaveFiguresDto,
   SlotRequestDto,
@@ -51,6 +54,7 @@ export class EngagementStreamsController {
     private readonly trees: StreamTreeService,
     private readonly workspace: FilingWorkspaceService,
     private readonly cleanup: FilingCleanupService,
+    private readonly priorFiled: PriorFiledService,
   ) {}
 
   /**
@@ -107,6 +111,43 @@ export class EngagementStreamsController {
       params.stream,
       params.periodKey,
       dto.registrationId ?? null,
+    );
+  }
+
+  /**
+   * "Filed before the portal" — months (or the year's annual returns) the
+   * client filed before the portal: their open filings are marked Filed, no
+   * lodgement. Lead only; Undo puts back only filings marked this way.
+   */
+  @Post(':id/streams/:stream/prior-filed')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Mark periods filed before the portal (lead)' })
+  markPriorFiled(
+    @CurrentPrincipal() principal: Principal,
+    @Param() params: StreamParamDto,
+    @Body() dto: PriorFiledDto,
+  ): Promise<PriorFiledResult> {
+    return this.priorFiled.mark(
+      rlsContextFromPrincipal(principal),
+      params.id,
+      params.stream,
+      dto.periods,
+    );
+  }
+
+  @Post(':id/streams/:stream/prior-filed/undo')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Put back periods marked filed before the portal (lead)' })
+  undoPriorFiled(
+    @CurrentPrincipal() principal: Principal,
+    @Param() params: StreamParamDto,
+    @Body() dto: PriorFiledDto,
+  ): Promise<PriorFiledResult> {
+    return this.priorFiled.undo(
+      rlsContextFromPrincipal(principal),
+      params.id,
+      params.stream,
+      dto.periods,
     );
   }
 

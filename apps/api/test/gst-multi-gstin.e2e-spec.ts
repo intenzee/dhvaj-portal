@@ -16,6 +16,8 @@ delete process.env.FEATURE_FLAGS;
  *   GSTINs' GSTR-1 for a month share them). It is now keyed per registration.
  * - A GSTIN added (or activated) after the engagement exists rebuilds the
  *   client's open Compliance calendars, so its filings appear.
+ * - A client with no GSTIN yet still gets its GST months ("GSTIN missing");
+ *   they move onto the GSTIN, worked state and all, when it is added.
  * - POST /engagements/:id/compliance/generate-calendar is unflagged.
  */
 describe('GST with several GSTINs (e2e)', () => {
@@ -35,6 +37,7 @@ describe('GST with several GSTINs (e2e)', () => {
   type Tree = {
     registrations: Array<{ id: string; number: string; stateCode: string | null }>;
     registrationId: string | null;
+    registrationPending: boolean;
     financialYear: string | null;
     periods: TreePeriod[];
     annual: TreeItem[];
@@ -224,14 +227,21 @@ describe('GST with several GSTINs (e2e)', () => {
       eng = res.body.id as string;
     });
 
-    it('starts with no GSTIN and no GST filings', async () => {
+    let pendingIds: string[];
+
+    it('starts with no GSTIN: the GST months are built without it, flagged GSTIN missing', async () => {
       const t = await gstTree(eng);
       expect(t.registrations).toEqual([]);
       expect(t.registrationId).toBeNull();
-      expect(allItems(t)).toEqual([]);
+      expect(t.registrationPending).toBe(true);
+      expectSectionedYear(t);
+      expect(Object.keys(await countsByRegistration(eng))).toEqual(['none']);
+      pendingIds = allItems(t)
+        .map((i) => i.instanceId)
+        .sort();
     });
 
-    it('adding a GSTIN puts it and its sectioned filings on the GST tab', async () => {
+    it('adding a GSTIN moves the same filings onto it', async () => {
       const added = await http()
         .post(`/api/v1/entities/${entityId}/registrations`)
         .set(bearer(pa))
@@ -244,7 +254,15 @@ describe('GST with several GSTINs (e2e)', () => {
       const t = await gstTree(eng);
       expect(t.registrations.map((r) => r.id)).toEqual([reg]);
       expect(t.registrationId).toBe(reg);
+      expect(t.registrationPending).toBe(false);
       expectSectionedYear(t);
+      // Moved, not rebuilt: the same rows, nothing left without a GSTIN.
+      expect(
+        allItems(t)
+          .map((i) => i.instanceId)
+          .sort(),
+      ).toEqual(pendingIds);
+      expect(Object.keys(await countsByRegistration(eng))).toEqual([reg]);
     });
 
     it('a second GSTIN, added pending and then made active, joins the first', async () => {
