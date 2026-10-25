@@ -9,11 +9,15 @@ import type { PoolClient, QueryResult } from 'pg';
 import {
   ENTITY_STATUS,
   MISSING_INFO_LABEL,
+  PENDING_REGISTRATION_STREAMS,
   REGULATORY_PROFILE_STATUS,
   ROLE,
+  STREAM_REGISTRATION_TYPES,
   type ContactType,
   type DuplicateClientConflict,
   type MissingInfoCode,
+  type RegistrationType,
+  type Stream,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -633,6 +637,48 @@ export class EntitiesService {
       await this.insertRegistration(client, entityId, input);
       await this.flagReassessmentIfComplete(client, entityId);
       await this.regenerateCalendars(client, entityId);
+    });
+  }
+
+  /**
+   * The registration a stream has been waiting on (a GST engagement opened
+   * before the client's GSTIN was on file), entered from the engagement: its
+   * leads may add it as well as those who manage clients. The calendar
+   * rebuilds and the pending filings move onto the GSTIN, work kept.
+   */
+  async addStreamRegistration(
+    ctx: RlsContext,
+    engagementId: string,
+    stream: Stream,
+    input: { registrationNumber: string; stateCode?: string },
+    managesClients: boolean,
+  ): Promise<EntityDetail> {
+    if (!PENDING_REGISTRATION_STREAMS.includes(stream)) {
+      throw new BadRequestException('Only a GST stream can wait on its registration.');
+    }
+    return this.db.withRlsContext(ctx, async (client) => {
+      const { rows } = await client.query<{ entity_id: string; kind: string; is_lead: boolean }>(
+        `SELECT e.entity_id, e.kind, hsdg.is_engagement_lead(e.id) AS is_lead
+           FROM hsdg.engagements e WHERE e.id = $1`,
+        [engagementId],
+      );
+      const eng = rows[0];
+      if (!eng) throw new NotFoundException('Engagement not found.');
+      if (eng.kind !== 'compliance') {
+        throw new BadRequestException('Only a Compliance engagement has a GST stream.');
+      }
+      if (!managesClients && !eng.is_lead) {
+        throw new ForbiddenException(
+          'Only the engagement’s partner or manager can add the client’s GSTIN here — or ask a partner to add it on the client’s page.',
+        );
+      }
+      const number = input.registrationNumber.trim().toUpperCase();
+      return this.addRegistrationWith(client, ctx, eng.entity_id, {
+        registrationType: STREAM_REGISTRATION_TYPES[stream][0] as RegistrationType,
+        registrationNumber: number,
+        stateCode: input.stateCode ?? number.slice(0, 2),
+        status: 'active',
+      });
     });
   }
 

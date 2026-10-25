@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  PENDING_REGISTRATION_STREAMS,
   STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
   type PeriodSection,
@@ -34,6 +35,8 @@ import { filingEnd, filingStatusLabel } from './filing-status';
 import { InstanceWorkspace } from './instance-workspace';
 import { RocEvents } from './roc-events';
 import { PeriodCleanup } from './period-cleanup';
+import { GstinMissingBanner } from './gstin-missing-banner';
+import { PriorFiledPanel } from './prior-filed-panel';
 
 const GST_SECTIONS: { key: PeriodSection; label: string }[] = [
   { key: 'outward', label: 'Outward' },
@@ -137,6 +140,7 @@ export function StreamTab({
   const gstin = url.get('gstin');
   const fyParam = url.get('fy') ?? defaultFy ?? null;
   const [annualOpen, setAnnualOpen] = useState<string | null>(null);
+  const [priorOpen, setPriorOpen] = useState(false);
 
   // The tree resolves the registration from ?gstin by number, so a pasted
   // link survives re-seeding; the first fetch tells us the id.
@@ -228,6 +232,9 @@ export function StreamTab({
     tree.periods.some(
       (p) => p.items.length > 0 || Object.values(p.sections).some((x) => x?.length),
     );
+  // GST is built even without a GSTIN: say the months are not built yet and
+  // offer to build them now, with the GSTIN to follow.
+  const canWaitOnRegistration = PENDING_REGISTRATION_STREAMS.includes(stream);
   if (
     stream !== 'roc' &&
     !regTypes.includes('entity') &&
@@ -236,36 +243,61 @@ export function StreamTab({
   ) {
     const kind = regTypes.join(' / ').toUpperCase();
     return (
-      <Card>
-        <CardBody className="space-y-3">
-          <p className="text-sm text-ink">
-            No {kind} on this engagement yet, so there are no {STREAM_LABEL[stream]} returns to
-            show.
-          </p>
-          <p className="text-xs text-ink-muted">
-            {STREAM_LABEL[stream]} returns are built per {kind}. Add the client’s {kind} on the
-            client’s page (Registrations) — the calendar rebuilds itself — or rebuild it here once
-            it is on file.
-          </p>
-          {ctx.isLead && (
-            <div className="flex items-center gap-3">
-              <Button size="sm" onClick={() => rebuild.mutate()} disabled={rebuild.isPending}>
-                {rebuild.isPending ? 'Rebuilding…' : 'Rebuild calendar'}
-              </Button>
-              {rebuild.isSuccess && rebuild.data.created === 0 && (
-                <span className="text-xs text-warning-700">
-                  Still nothing to file — check the client has an active {kind}.
-                </span>
-              )}
-              {rebuild.error && (
-                <span className="text-xs text-danger-700">
-                  {rebuild.error instanceof ApiError ? rebuild.error.message : 'Could not rebuild.'}
-                </span>
-              )}
-            </div>
-          )}
-        </CardBody>
-      </Card>
+      <div className="space-y-3">
+        {canWaitOnRegistration && (
+          <GstinMissingBanner engagementId={engagementId} isLead={ctx.isLead} />
+        )}
+        <Card>
+          <CardBody className="space-y-3">
+            {canWaitOnRegistration ? (
+              <>
+                <p className="text-sm text-ink">
+                  The {STREAM_LABEL[stream]} months for this engagement have not been built yet.
+                </p>
+                <p className="text-xs text-ink-muted">
+                  Build them now — they are worked without the {kind} until it is added, then move
+                  onto it — or add the {kind} first.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-ink">
+                  No {kind} on this engagement yet, so there are no {STREAM_LABEL[stream]} returns
+                  to show.
+                </p>
+                <p className="text-xs text-ink-muted">
+                  {STREAM_LABEL[stream]} returns are built per {kind}. Add the client’s {kind} on
+                  the client’s page (Registrations) — the calendar rebuilds itself — or rebuild it
+                  here once it is on file.
+                </p>
+              </>
+            )}
+            {ctx.isLead && (
+              <div className="flex items-center gap-3">
+                <Button size="sm" onClick={() => rebuild.mutate()} disabled={rebuild.isPending}>
+                  {rebuild.isPending
+                    ? 'Building…'
+                    : canWaitOnRegistration
+                      ? `Build ${STREAM_LABEL[stream]} months`
+                      : 'Rebuild calendar'}
+                </Button>
+                {rebuild.isSuccess && rebuild.data.created === 0 && (
+                  <span className="text-xs text-warning-700">
+                    Still nothing to file — check the client has an active {kind}.
+                  </span>
+                )}
+                {rebuild.error && (
+                  <span className="text-xs text-danger-700">
+                    {rebuild.error instanceof ApiError
+                      ? rebuild.error.message
+                      : 'Could not rebuild.'}
+                  </span>
+                )}
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      </div>
     );
   }
 
@@ -287,6 +319,9 @@ export function StreamTab({
   let lastQuarter: string | null = null;
   return (
     <div className="space-y-4">
+      {tree.registrationPending && canWaitOnRegistration && (
+        <GstinMissingBanner engagementId={engagementId} isLead={ctx.isLead} />
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {tree.registrations.length > 1 && (
           <div role="tablist" aria-label="Registration" className="flex flex-wrap gap-1">
@@ -319,8 +354,19 @@ export function StreamTab({
             <span className="font-mono">{tree.registrations[0]!.number}</span>
           </span>
         )}
+        <span className="ml-auto" />
+        {ctx.isLead && fy && (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={priorOpen}
+            onClick={() => setPriorOpen((o) => !o)}
+          >
+            <ExpandToggle open={priorOpen} /> Filed before the portal
+          </Button>
+        )}
         <Select
-          className="ml-auto w-auto"
+          className="w-auto"
           aria-label="Financial year"
           value={fy ?? ''}
           onChange={(e) => url.set({ fy: e.target.value, m: null, p: null })}
@@ -332,6 +378,14 @@ export function StreamTab({
           ))}
         </Select>
       </div>
+      {priorOpen && fy && (
+        <PriorFiledPanel
+          engagementId={engagementId}
+          stream={stream}
+          financialYear={fy}
+          onDone={() => setPriorOpen(false)}
+        />
+      )}
 
       {tree.annual.length > 0 && (
         <Card data-part="annual">

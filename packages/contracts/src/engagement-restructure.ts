@@ -91,6 +91,145 @@ export const STREAM_REGISTRATION_TYPES: Record<Stream, readonly string[]> = {
   mis: ['entity'],
 };
 
+/**
+ * Streams whose calendar is built even before the client's registration is on
+ * file: the filings wait on "registration pending" and move onto the
+ * registration (status and work kept) as soon as it is added.
+ */
+export const PENDING_REGISTRATION_STREAMS: readonly Stream[] = ['gst'];
+
+/**
+ * "Filed before the portal" — how a stream's periods are offered when a
+ * Compliance engagement is created (or later, on the stream's tab): GST,
+ * bookkeeping and MIS by month, the rest by quarter, plus the year's annual
+ * returns where the stream has any. A choice is sent as tokens: 'YYYY-MM' for
+ * each month it covers, 'FY:YYYY-YY' for the year's annual returns.
+ */
+export const STREAM_PRIOR_FILED_GRAIN: Record<Stream, 'month' | 'quarter'> = {
+  gst: 'month',
+  bookkeeping: 'month',
+  mis: 'month',
+  tds: 'quarter',
+  income_tax: 'quarter',
+  roc: 'quarter',
+};
+export const STREAM_HAS_ANNUAL_RETURNS: Record<Stream, boolean> = {
+  gst: true,
+  tds: true,
+  income_tax: true,
+  roc: true,
+  bookkeeping: false,
+  mis: false,
+};
+export const PRIOR_FILED_TOKEN_RE = /^([0-9]{4}-(0[1-9]|1[0-2])|FY:[0-9]{4}-[0-9]{2})$/;
+
+/** Filings marked filed (or put back) by a "filed before the portal" choice. */
+export interface PriorFiledResult {
+  filings: number;
+  /** Per stream, for the toast. */
+  byStream: Partial<Record<Stream, number>>;
+}
+
+export interface PriorFiledChoice {
+  /** Stable key for the UI. */
+  key: string;
+  label: string;
+  /** What choosing it sends. */
+  tokens: string[];
+  /** First month of the period ('YYYY-MM'): later than this month cannot be filed yet. */
+  firstMonth: string;
+}
+
+const MONTH_ABBR = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** The twelve months of FY '2026-27' as 'YYYY-MM', April first. */
+export function fyMonthKeys(financialYear: string): string[] {
+  const start = Number(financialYear.slice(0, 4));
+  return Array.from({ length: 12 }, (_, i) => {
+    const m = ((3 + i) % 12) + 1;
+    const y = i < 9 ? start : start + 1;
+    return `${y}-${String(m).padStart(2, '0')}`;
+  });
+}
+
+/** The periods a stream offers for "filed before the portal" in one year. */
+export function priorFiledChoices(
+  stream: Stream,
+  financialYear: string,
+): { periods: PriorFiledChoice[]; annual: PriorFiledChoice | null } {
+  const months = fyMonthKeys(financialYear);
+  const label = (k: string): string => `${MONTH_ABBR[Number(k.slice(5, 7)) - 1]} ${k.slice(2, 4)}`;
+  const periods =
+    STREAM_PRIOR_FILED_GRAIN[stream] === 'month'
+      ? months.map((k) => ({ key: k, label: label(k), tokens: [k], firstMonth: k }))
+      : [0, 1, 2, 3].map((q) => {
+          const ms = months.slice(q * 3, q * 3 + 3);
+          return {
+            key: `${financialYear}:Q${q + 1}`,
+            label: `Q${q + 1} (${label(ms[0]!).slice(0, 3)}–${label(ms[2]!).slice(0, 3)})`,
+            tokens: ms,
+            firstMonth: ms[0]!,
+          };
+        });
+  const annual = STREAM_HAS_ANNUAL_RETURNS[stream]
+    ? {
+        key: financialYear,
+        label: `Annual returns FY ${financialYear}`,
+        tokens: [`FY:${financialYear}`],
+        firstMonth: months[11]!,
+      }
+    : null;
+  return { periods, annual };
+}
+
+/**
+ * Whether "filed before the portal" tokens cover one filing: an annual (or
+ * per-director) filing by its year's token, any other by every month of its
+ * period. Event and on-demand filings never.
+ */
+export function priorFiledCovers(
+  tokens: ReadonlySet<string>,
+  f: {
+    periodKey: string | null;
+    financialYear: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+  },
+): boolean {
+  if (!f.periodKey || f.periodKey.startsWith('EVT:') || !f.financialYear) return false;
+  if (f.periodKey === f.financialYear || f.periodKey.startsWith(`${f.financialYear}:DIN:`)) {
+    return tokens.has(`FY:${f.financialYear}`);
+  }
+  if (!f.periodStart || !f.periodEnd) return false;
+  let y = Number(f.periodStart.slice(0, 4));
+  let m = Number(f.periodStart.slice(5, 7));
+  const end = f.periodEnd.slice(0, 7);
+  for (let i = 0; i < 36; i += 1) {
+    const key = `${y}-${String(m).padStart(2, '0')}`;
+    if (!tokens.has(key)) return false;
+    if (key >= end) return true;
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return false;
+}
+
 /** Workflow status of every filing item, shared by GST, TDS, Income Tax and ROC
  *  (compliance_instances.workflow_status). "Filed late" is not a status — it is
  *  shown whenever the filing date is after the statutory date (as extended). */

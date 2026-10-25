@@ -15,6 +15,7 @@ import { GovernmentExtensionsController } from './government-extensions.controll
 import { ComplianceGeneratorService } from './compliance-generator.service';
 import { ComplianceCalendarV2Service } from './compliance-calendar-v2.service';
 import { seedChecklistForInstance } from './compliance-checklist';
+import { PriorFiledService } from './prior-filed.service';
 import {
   ComplianceRuleVerifyController,
   EngagementCalendarV2Controller,
@@ -48,6 +49,7 @@ import {
     GovernmentExtensionsService,
     ComplianceGeneratorService,
     ComplianceCalendarV2Service,
+    PriorFiledService,
   ],
   exports: [
     ComplianceRulesService,
@@ -55,6 +57,7 @@ import {
     GovernmentExtensionsService,
     ComplianceGeneratorService,
     ComplianceCalendarV2Service,
+    PriorFiledService,
   ],
 })
 export class ComplianceModule implements OnModuleInit {
