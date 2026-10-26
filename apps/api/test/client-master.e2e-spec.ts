@@ -91,6 +91,20 @@ describe('Client Master workbook (e2e)', () => {
   const put = (ws: XLSX.WorkSheet, ref: string, v: string) => {
     ws[ref] = { t: 's', v };
   };
+  /**
+   * Leaves only this suite's clients on the Clients sheet. Others in the shared
+   * database (the seeded LLP with a company PAN) are offered their PAN's type
+   * (CM-3), and importing them would change them under the other suites.
+   */
+  const keepOwnRows = (ws: XLSX.WorkSheet) => {
+    const others = new Set<string>();
+    for (let r = 6; r < 5000; r++) {
+      const name = ws[`B${r}`]?.v;
+      if (name !== undefined && !String(name).startsWith(tag)) others.add(String(r));
+    }
+    for (const ref of Object.keys(ws))
+      if (/^[A-Z]+\d+$/.test(ref) && others.has(ref.replace(/^[A-Z]+/, ''))) delete ws[ref];
+  };
   const body = (file: Buffer) => ({
     filename: 'master.xlsx',
     contentBase64: file.toString('base64'),
@@ -173,12 +187,16 @@ describe('Client Master workbook (e2e)', () => {
         pan: CLASH_PAN,
       })
       .expect(201);
+    // The PAN guard (CM-1) stops new rows like it, so it is written past it.
+    await su.query('BEGIN');
+    await su.query('SET LOCAL session_replication_role = replica');
     await su.query(
       `INSERT INTO hsdg.entity_registrations
          (entity_id, registration_type, registration_number, state_code, is_principal)
        VALUES ($1, 'gstin', $2, '07', true)`,
       [clash.body.id, CLASH_GSTIN],
     );
+    await su.query('COMMIT');
   });
 
   afterAll(async () => {
@@ -218,7 +236,10 @@ describe('Client Master workbook (e2e)', () => {
     }) as Buffer;
     const p = await preview(untouched);
     expect(p.counts.create_client).toBe(0);
-    expect(p.rows.filter((r) => r.action === 'update_client')).toEqual([]);
+    // Only older clients whose type disagrees with their PAN are offered a change (CM-3).
+    expect(p.rows.filter((r) => r.action === 'update_client' && r.name.startsWith(tag))).toEqual(
+      [],
+    );
     expect(named(p, `${tag} Old Pvt Ltd`)).toMatchObject({
       action: 'unchanged',
       entityId: oldId,
@@ -241,6 +262,7 @@ describe('Client Master workbook (e2e)', () => {
   it('previews a filled export row by row, never returning a password', async () => {
     const book = XLSX.read(await download(pa), { type: 'buffer' });
     const ws = book.Sheets.Clients!;
+    keepOwnRows(ws);
     const r = rowOf(ws, oldCode);
     put(ws, `F${r}`, OLD_GSTIN);
     put(ws, `H${r}`, OLD_TAN);
@@ -313,7 +335,12 @@ describe('Client Master workbook (e2e)', () => {
       logins: 1,
       engagement: { action: 'create', streams: ['gst'] },
     });
-    expect(created.warnings).toContain('Entity type taken from the PAN: Partnership Firm.');
+    expect(created.changes).toContainEqual(
+      expect.objectContaining({
+        field: 'Firm type',
+        to: expect.stringMatching(/^Partnership Firm \(/),
+      }),
+    );
     expect(named(p, `${tag} Typo Traders`).action).toBe('error');
   });
 

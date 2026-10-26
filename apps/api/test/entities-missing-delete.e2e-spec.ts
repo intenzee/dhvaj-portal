@@ -147,6 +147,9 @@ describe('Clients: missing data and delete (e2e)', () => {
       [id, `08${pan}1Z5`],
     );
     expect(await codes()).not.toContain('gstin');
+    // The login above is not sealed with the vault key: left behind, a later
+    // export with passwords (client-master) would fail to open it.
+    await su.query(`DELETE FROM hsdg.client_credentials WHERE entity_id = $1`, [id]);
   });
 
   it('lets only the Managing Partner delete a client', async () => {

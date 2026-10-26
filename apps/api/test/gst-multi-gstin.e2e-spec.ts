@@ -440,9 +440,19 @@ describe('GST with several GSTINs (e2e)', () => {
         .expect(201);
       await http().get(`/api/v1/entities/${south.body.id}`).set(bearer(pa)).expect(404);
 
-      const mine = await createClient('Northern Adder', pan('M'), [
-        { registrationType: 'gstin', registrationNumber: gstin('07', p) },
-      ]);
+      // Its GSTINs carry South's PAN, so it has no PAN of its own (CM-1): another office of one business.
+      const mine = (
+        await http()
+          .post('/api/v1/entities')
+          .set(bearer(pa))
+          .send({
+            legalName: `Northern Adder ${p} Pvt Ltd`,
+            typeSlug: 'private_limited',
+            officeCode: 'NORTH',
+            registrations: [{ registrationType: 'gstin', registrationNumber: gstin('07', p) }],
+          })
+          .expect(201)
+      ).body as { id: string; registrations: Array<{ id: string }> };
       const add = (registrationNumber: string) =>
         http()
           .post(`/api/v1/entities/${mine.id}/registrations`)

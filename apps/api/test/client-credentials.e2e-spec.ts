@@ -276,7 +276,7 @@ describe('Client portal credentials (e2e)', () => {
     );
     expect(p).toMatchObject({ engagementsToCreate: 1, noGstin: 1 });
     expect(p.rows[2]!.error).toMatch(/not a valid GSTIN/);
-    expect(p.rows[3]).toMatchObject({ typeSlug: 'proprietorship', typeGuessed: false });
+    expect(p.rows[3]).toMatchObject({ typeSlug: 'individual', typeGuessed: false });
     expect(p.logins).toBe(8);
   });
 
