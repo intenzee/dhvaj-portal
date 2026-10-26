@@ -6,6 +6,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { AdjustmentsService } from './adjustments.service';
 import { BillingController } from './billing.controller';
 import { BillingSettingsService } from './billing-settings.service';
+import { ClientFeesController } from './client-fees.controller';
+import { ClientFeesService } from './client-fees.service';
 import { ReceiptsService } from './receipts.service';
 import { ReceivablesController } from './receivables.controller';
 import { ReceivablesService } from './receivables.service';
@@ -18,9 +20,10 @@ import { UnbilledService } from './unbilled.service';
 /** Practice Services Phase 2 · Fees to cash (PS-201 onwards). */
 @Module({
   imports: [AuditModule, CommercialModule, NotificationsModule, StorageModule],
-  controllers: [BillingController, ReceivablesController],
+  controllers: [BillingController, ReceivablesController, ClientFeesController],
   providers: [
     BillingSettingsService,
+    ClientFeesService,
     ReceiptsService,
     AdjustmentsService,
     ReceivablesService,

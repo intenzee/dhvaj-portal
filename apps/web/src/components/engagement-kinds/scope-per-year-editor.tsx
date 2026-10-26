@@ -7,7 +7,9 @@ import {
   FIRM_CHECK,
   STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
+  feeWithPeriod,
   type ComplianceEngagementYear,
+  type FeePeriod,
   type IndependenceCheckResult,
   type IndependenceFinding,
   type IndependenceRule,
@@ -21,6 +23,7 @@ import { useFirmChecks } from '@/lib/firm-checks';
 import type { EntityDetail } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardBody, Button, Spinner, Badge } from '@/components/ui';
 import { Field, Input } from '@/components/form';
+import { FeeInput } from '@/components/billing/fee-input';
 import { IndependencePanel, shiftFinancialYear } from './new-engagement-wizard';
 
 type Regs = Partial<Record<Stream, string[]>>;
@@ -157,6 +160,7 @@ function YearEditor({
   const editable = canManage && !closed;
 
   const [fee, setFee] = useState(year.feeAmount?.toString() ?? '');
+  const [feePeriod, setFeePeriod] = useState<FeePeriod>(year.feePeriod ?? 'annual');
   const [s144, setS144] = useState(year.s144ApprovalRef ?? '');
   const [on, setOn] = useState<Stream[]>(year.streams);
   const [regs, setRegs] = useState<Regs>(year.streamRegistrations);
@@ -165,6 +169,7 @@ function YearEditor({
   // A save refetches the year; start again from what the server holds.
   useEffect(() => {
     setFee(year.feeAmount?.toString() ?? '');
+    setFeePeriod(year.feePeriod ?? 'annual');
     setS144(year.s144ApprovalRef ?? '');
     setOn(year.streams);
     setRegs(year.streamRegistrations);
@@ -182,6 +187,7 @@ function YearEditor({
   const feeValue = fee.trim() === '' ? null : Number(fee);
   const detailsDirty =
     feeValue !== (year.feeAmount ?? null) ||
+    feePeriod !== (year.feePeriod ?? 'annual') ||
     (s144.trim() || null) !== (year.s144ApprovalRef ?? null);
 
   const check = useQuery({
@@ -302,21 +308,19 @@ function YearEditor({
       {!expanded ? (
         <p className="px-3 py-2 text-sm text-ink-muted">
           {year.streams.map((st) => STREAM_LABEL[st]).join(' · ')}
-          {year.feeAmount != null && ` — fee ₹${year.feeAmount.toLocaleString('en-IN')}`}
+          {year.feeAmount != null && ` — fee ${feeWithPeriod(year.feeAmount, year.feePeriod)}`}
         </p>
       ) : (
         <>
           <div className="grid gap-3 px-3 py-3 sm:grid-cols-2">
-            <Field label="Fee (₹)">
-              <Input
-                type="number"
-                min={0}
-                inputMode="decimal"
-                value={fee}
-                disabled={!editable}
-                onChange={(e) => setFee(e.target.value)}
-              />
-            </Field>
+            <FeeInput
+              id={`fee-${year.id}`}
+              amount={fee}
+              period={feePeriod}
+              onAmount={setFee}
+              onPeriod={setFeePeriod}
+              disabled={!editable}
+            />
             <Field label="s.144 approval reference">
               <Input
                 value={s144}
@@ -337,6 +341,7 @@ function YearEditor({
                   onClick={() =>
                     saveDetails.mutate({
                       feeAmount: feeValue,
+                      feePeriod,
                       s144ApprovalRef: s144.trim() || null,
                     })
                   }

@@ -5,6 +5,7 @@
  * Overview widgets (next 30 days, overdue, waiting on client, hours vs
  * budget, unbilled).
  */
+import type { FeePeriod } from './commercial';
 import type { EngagementKind, FilingStatus, PeriodSection, Stream } from './engagement-restructure';
 
 export interface StreamScope {
@@ -49,8 +50,11 @@ export interface EngagementOverview {
   hoursThisYear: number;
   /** Sum of the year's per-stream budget hours (null = no budget set). */
   budgetHoursThisYear: number | null;
-  /** The year's agreed fee (compliance_engagement_years.fee_amount). */
+  /** The year's value of the agreed fee: fee_amount × periods in a year (CM-4). */
   feeAmount: number | null;
+  /** CM-4 · the fee as typed, for `feePeriod` (₹5,000 / month). */
+  feePerPeriod: number | null;
+  feePeriod: FeePeriod | null;
   /** Issued + paid invoices dated in the year. */
   invoicedAmount: number;
   /** fee − invoiced, never below 0; null when no fee is set. */

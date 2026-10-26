@@ -4,7 +4,10 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
   STREAM_LABEL,
+  feeWithPeriod,
+  rupees,
   type ActivityPage,
+  type EngagementOverview,
   type EngagementTabs,
   type OverviewDueItem,
   type Stream,
@@ -138,7 +141,7 @@ export function OverviewWidgets({
             value={`${hours(o.hoursThisYear)}${o.budgetHoursThisYear ? ` of ${hours(o.budgetHoursThisYear)}` : ''}`}
             warn={!!o.budgetHoursThisYear && o.hoursThisYear > o.budgetHoursThisYear}
           />
-          <Stat label="Fee" value={o.feeAmount != null ? formatMoney(o.feeAmount) : '—'} />
+          <Stat label="Fee" value={feeLabel(o)} />
           <Stat label="Invoiced" value={formatMoney(o.invoicedAmount)} />
           <Stat label="Unbilled" value={o.unbilledAmount != null ? formatMoney(o.unbilledAmount) : '—'} />
         </CardBody>
@@ -166,6 +169,14 @@ export function OverviewWidgets({
       </Card>
     </div>
   );
+}
+
+/** CM-4 · "₹5,000 / month (₹60,000 a year)"; a yearly fee as before. */
+function feeLabel(o: EngagementOverview): string {
+  if (o.feeAmount == null) return '—';
+  if (!o.feePeriod || o.feePeriod === 'annual' || o.feePerPeriod == null) return formatMoney(o.feeAmount);
+  if (o.feePeriod === 'one_time') return feeWithPeriod(o.feePerPeriod, o.feePeriod);
+  return `${feeWithPeriod(o.feePerPeriod, o.feePeriod)} (${rupees(o.feeAmount)} a year)`;
 }
 
 function Stat({ label, value, warn }: { label: string; value: string; warn?: boolean }): JSX.Element {
