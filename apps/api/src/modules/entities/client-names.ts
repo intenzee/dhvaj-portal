@@ -1,6 +1,8 @@
 import {
   GST_STATES,
   guessStateCode,
+  LEGAL_FORMS,
+  type LegalForm,
   isValidGstin,
   normalizeGstin,
   panOfGstin,
@@ -16,14 +18,7 @@ import {
 
 /** The legal form a name (or a PAN) says. `firm` and `proprietor` are loose — people write "Firm" for a company. */
 export type NameForm =
-  | 'company'
-  | 'llp'
-  | 'firm'
-  | 'proprietor'
-  | 'huf'
-  | 'trust'
-  | 'society'
-  | 'aop'
+  | LegalForm
   /** A PAN's F: a partnership firm or an LLP. */
   | 'firm_or_llp';
 
@@ -43,21 +38,8 @@ export interface ParsedClientName {
   qualifier: string | null;
 }
 
-/** Legal-form phrases, longest first, as a regex over a lower-cased name's tail. */
-const FORMS: [RegExp, NameForm][] = [
-  [/one\s*person\s*company(\s*\(?\s*opc\s*\)?)?$|\(?\s*\bopc\s*\)?$/, 'company'],
-  [/\(?\s*\bp\s*\)?\s*\.?\s*ltd\.?$/, 'company'],
-  [/\bpvt\.?\s*ltd\.?$|\bprivate\s*limited$|\bpvt\.?\s*limited$|\bprivate\s*ltd\.?$/, 'company'],
-  [/\bprivatelimited$|\bpvtltd$/, 'company'],
-  [/\b(public\s*)?(limited|ltd\.?)$/, 'company'],
-  [/\bpvt\.?$/, 'company'],
-  [/\bl\.?\s*l\.?\s*p\.?$|\blimited\s*liability\s*partnership$/, 'llp'],
-  [/\(?\s*\bhuf\s*\)?$|\bhindu\s*undivided\s*family$/, 'huf'],
-  [/\(?\s*\bprop(\.|rietor(ship)?)?\s*\)?$/, 'proprietor'],
-  [/\(?\s*\b(partnership\s*)?firm\s*\)?$|\bpartnership$/, 'firm'],
-  [/\btrust$/, 'trust'],
-  [/\bsociety$/, 'society'],
-];
+/** Legal-form phrases, longest first (shared with the web through @hsdg/contracts). */
+const FORMS = LEGAL_FORMS;
 
 const SEPARATOR = /\s+[-–]\s*|\s*[-–]\s+|\s*,\s*/;
 
