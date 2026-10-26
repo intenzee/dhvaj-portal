@@ -195,6 +195,10 @@ export interface Registration {
   verifiedAt?: string | null;
   documentRef?: string | null;
   branchId?: string | null;
+  /** CM-2: the state's name, from the code. */
+  stateName?: string | null;
+  /** CM-2: who kept a state that differs from the GSTIN's prefix, and when. */
+  stateMismatch?: { byName: string | null; at: string } | null;
 }
 export interface Contact {
   id: string;
@@ -244,6 +248,8 @@ export interface Address {
   country: string;
   isPrimary: boolean;
   branchId?: string | null;
+  /** CM-2: the GST state code beside the free-text state. */
+  stateCode?: string | null;
 }
 export interface EntityRelationship {
   id: string;

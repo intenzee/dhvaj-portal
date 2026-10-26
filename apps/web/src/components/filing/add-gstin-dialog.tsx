@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input } from '@/components/form';
+import { gstStateLabel } from '@/components/entities/gst-state-select';
 
 /** "27AAACA1234A1Z5" → the state code, when it looks like a GSTIN at all. */
 export function stateCodeOfGstin(gstin: string): string | null {
@@ -81,7 +82,7 @@ export function AddGstinDialog({
             value.length === 0
               ? '15 characters, e.g. 27AAACA1234A1Z5.'
               : valid
-                ? `State code ${state}.`
+                ? `State ${gstStateLabel(state)}.`
                 : value.length < 15
                   ? `${15 - value.length} more character${15 - value.length === 1 ? '' : 's'}.`
                   : 'That is not a valid GSTIN.'

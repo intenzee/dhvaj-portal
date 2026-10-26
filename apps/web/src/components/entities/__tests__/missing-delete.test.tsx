@@ -90,22 +90,24 @@ describe('Clients list', () => {
   it('marks incomplete clients and filters by a missing item', async () => {
     apiFetch.mockImplementation((path: string) =>
       Promise.resolve(
-        path.includes('missing=pan')
-          ? { items: [row({ missingInfo: [pan] })], total: 1, limit: 25, offset: 0 }
-          : {
-              items: [
-                row({ missingInfo: [pan, regs] }),
-                row({
-                  id: 'e2',
-                  entityCode: 'CL-0002',
-                  legalName: 'Complete Co',
-                  pan: 'AAAPS1234C',
-                }),
-              ],
-              total: 2,
-              limit: 25,
-              offset: 0,
-            },
+        path.startsWith('/teams')
+          ? []
+          : path.includes('missing=pan')
+            ? { items: [row({ missingInfo: [pan] })], total: 1, limit: 25, offset: 0 }
+            : {
+                items: [
+                  row({ missingInfo: [pan, regs] }),
+                  row({
+                    id: 'e2',
+                    entityCode: 'CL-0002',
+                    legalName: 'Complete Co',
+                    pan: 'AAAPS1234C',
+                  }),
+                ],
+                total: 2,
+                limit: 25,
+                offset: 0,
+              },
       ),
     );
     render(wrap(<EntitiesPage />));

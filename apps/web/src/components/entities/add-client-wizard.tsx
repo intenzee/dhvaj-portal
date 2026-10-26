@@ -41,6 +41,7 @@ import { Card, CardBody, Button, Spinner, Badge, PageHeader } from '@/components
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { DuplicateConflictNotice, VerdictBadge, duplicateConflictOf } from './merge-clients-modal';
 import { GstinHint, gstinBlocks } from './gstin-hint';
+import { GstStateSelect, OUTSIDE_INDIA } from './gst-state-select';
 
 type Kind = 'individual' | 'legal_entity';
 interface RegRow {
@@ -49,6 +50,8 @@ interface RegRow {
   status: string;
   applicability: string;
   stateCode: string;
+  /** CM-2: a state that differs from the GSTIN's prefix, confirmed with Keep. */
+  stateAck: boolean;
   validFrom: string;
 }
 interface ContactRow {
@@ -131,6 +134,7 @@ const emptyReg = (): RegRow => ({
   status: 'active',
   applicability: 'unknown',
   stateCode: '',
+  stateAck: false,
   validFrom: '',
 });
 const emptyContact = (): ContactRow => ({
@@ -689,8 +693,14 @@ function RegistrationsStep({
                 ))}
               </Select>
             </Field>
-            <Field label="State code">
-              <Input value={r.stateCode} onChange={(e) => update(i, { stateCode: e.target.value })} placeholder="27" />
+            <Field label="State">
+              <GstStateSelect
+                value={r.stateCode}
+                onChange={(code) => update(i, { stateCode: code })}
+                gstin={r.registrationType === 'gstin' ? r.registrationNumber : null}
+                acknowledged={r.stateAck}
+                onAcknowledge={(ack) => update(i, { stateAck: ack })}
+              />
             </Field>
             <Field label="Valid from">
               <Input type="date" value={r.validFrom} onChange={(e) => update(i, { validFrom: e.target.value })} />
@@ -735,7 +745,7 @@ function AddressesStep({
               <Input value={a.city} onChange={(e) => update(i, { city: e.target.value })} />
             </Field>
             <Field label="State">
-              <Input value={a.state} onChange={(e) => update(i, { state: e.target.value })} />
+              <GstStateSelect value={a.state} onChange={(code) => update(i, { state: code })} allowOutside />
             </Field>
             <Field label="Pincode">
               <Input value={a.pincode} onChange={(e) => update(i, { pincode: e.target.value })} placeholder="400001" />
@@ -1144,6 +1154,7 @@ function buildPayload(s: State): Record<string, unknown> {
               status: r.status,
               applicability: r.applicability,
               ...(clean(r.stateCode) ? { stateCode: r.stateCode.trim() } : {}),
+              ...(r.stateAck ? { stateMismatchAcknowledged: true } : {}),
               ...(r.validFrom ? { validFrom: r.validFrom } : {}),
             })),
         }
@@ -1156,7 +1167,11 @@ function buildPayload(s: State): Record<string, unknown> {
               addressType: a.addressType,
               line1: a.line1.trim(),
               ...(clean(a.city) ? { city: a.city.trim() } : {}),
-              ...(clean(a.state) ? { state: a.state.trim() } : {}),
+              ...(a.state === OUTSIDE_INDIA
+                ? { state: 'Outside India' }
+                : clean(a.state)
+                  ? { stateCode: a.state.trim() }
+                  : {}),
               ...(clean(a.pincode) ? { pincode: a.pincode.trim() } : {}),
               isPrimary: a.isPrimary,
             })),

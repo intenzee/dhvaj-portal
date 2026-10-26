@@ -55,6 +55,10 @@ export interface RegistrationRecord {
   documentRef: string | null;
   /** The office (CM-6) this registration is of; null = the whole client. */
   branchId: string | null;
+  /** CM-2: the state's name, from GST_STATES. */
+  stateName: string | null;
+  /** CM-2: who confirmed a state that differs from the GSTIN's prefix, and when. */
+  stateMismatch: { byName: string | null; at: string } | null;
 }
 
 export interface ContactRecord {
@@ -147,6 +151,8 @@ export interface AddressRecord {
   country: string;
   isPrimary: boolean;
   branchId: string | null;
+  /** CM-2: the GST state code beside the free-text state. */
+  stateCode: string | null;
 }
 
 export interface RelationshipRecord {
@@ -257,6 +263,8 @@ export interface RegistrationInput {
   isPrincipal?: boolean;
   applicability?: RegistrationApplicability;
   documentRef?: string;
+  /** CM-2: keep a state that differs from the GSTIN's prefix. */
+  stateMismatchAcknowledged?: boolean;
 }
 
 /** Partial update to an existing registration (the §34 "obtained later" flow). */
@@ -273,6 +281,8 @@ export interface UpdateRegistrationInput {
   isPrincipal?: boolean;
   applicability?: RegistrationApplicability;
   documentRef?: string | null;
+  /** CM-2: keep a state that differs from the GSTIN's prefix. */
+  stateMismatchAcknowledged?: boolean;
 }
 
 export interface ContactInput {
@@ -319,6 +329,8 @@ export interface AddressInput {
   pincode?: string;
   country?: string;
   isPrimary?: boolean;
+  /** CM-2: the GST state code; the state text follows from it when not given. */
+  stateCode?: string | null;
 }
 
 export interface RelationshipInput {
@@ -373,6 +385,8 @@ export interface UpdateAddressInput {
   pincode?: string | null;
   country?: string;
   isPrimary?: boolean;
+  /** CM-2: the GST state code; the state text follows from it when not given. */
+  stateCode?: string | null;
 }
 
 export interface RegulatoryAttributeInput {

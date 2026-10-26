@@ -45,7 +45,9 @@ describe('checkTaxIds', () => {
   const codes = (input: Parameters<typeof checkTaxIds>[0]) => checkTaxIds(input).map((i) => i.code);
 
   it('passes a GSTIN of the same PAN', () => {
-    expect(checkTaxIds({ pan: 'AADCD1234K', gstins: [{ number: g('07', 'AADCD1234K') }] })).toEqual([]);
+    expect(checkTaxIds({ pan: 'AADCD1234K', gstins: [{ number: g('07', 'AADCD1234K') }] })).toEqual(
+      [],
+    );
   });
 
   it('blocks a GSTIN of another PAN', () => {
@@ -72,12 +74,18 @@ describe('checkTaxIds', () => {
 
   it('asks to confirm a state that differs from the code', () => {
     const [issue] = checkTaxIds({ gstins: [{ number: g('07', 'AADCD1234K'), stateCode: '06' }] });
-    expect(issue).toMatchObject({ code: 'STATE_MISMATCH', severity: 'confirm', expected: '07', actual: '06' });
+    expect(issue).toMatchObject({
+      code: 'STATE_MISMATCH',
+      severity: 'confirm',
+      expected: '07',
+      actual: '06',
+    });
   });
 });
 
 describe('firmTypeFromIds', () => {
-  const slug = (input: Parameters<typeof firmTypeFromIds>[0]) => firmTypeFromIds(input)?.slug ?? null;
+  const slug = (input: Parameters<typeof firmTypeFromIds>[0]) =>
+    firmTypeFromIds(input)?.slug ?? null;
 
   it.each([
     ['AADCD1234K', 'private_limited'],
@@ -97,8 +105,12 @@ describe('firmTypeFromIds', () => {
   });
 
   it('D1: a company named Public Limited or OPC keeps that', () => {
-    expect(slug({ pan: 'AADCD1234K', nameOrTypedType: 'Hero MotoCorp Public Limited' })).toBe('public_limited');
-    expect(slug({ pan: 'AADCD1234K', nameOrTypedType: 'Neha Gupta OPC Private Limited' })).toBe('opc');
+    expect(slug({ pan: 'AADCD1234K', nameOrTypedType: 'Hero MotoCorp Public Limited' })).toBe(
+      'public_limited',
+    );
+    expect(slug({ pan: 'AADCD1234K', nameOrTypedType: 'Neha Gupta OPC Private Limited' })).toBe(
+      'opc',
+    );
   });
 
   it('D2: P is a proprietorship only with a business registration', () => {
@@ -138,14 +150,18 @@ describe('company names', () => {
   });
 
   it('adds Private Limited, keeping a trailing place last', () => {
-    expect(withCompanySuffix('Drift Logistics', 'private_limited')).toBe('Drift Logistics Private Limited');
+    expect(withCompanySuffix('Drift Logistics', 'private_limited')).toBe(
+      'Drift Logistics Private Limited',
+    );
     expect(withCompanySuffix('Drift Logistics (Delhi', 'private_limited')).toBe(
       'Drift Logistics Private Limited (Delhi',
     );
     expect(withCompanySuffix('GRIID - Chandigarh', 'private_limited')).toBe(
       'GRIID Private Limited - Chandigarh',
     );
-    expect(withCompanySuffix('Sharma - Sons', 'private_limited')).toBe('Sharma - Sons Private Limited');
+    expect(withCompanySuffix('Sharma - Sons', 'private_limited')).toBe(
+      'Sharma - Sons Private Limited',
+    );
   });
 
   it('leaves other types alone', () => {

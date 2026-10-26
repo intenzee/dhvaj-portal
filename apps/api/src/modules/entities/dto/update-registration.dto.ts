@@ -10,6 +10,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
+  GST_STATES,
   REGISTRATION_APPLICABILITIES,
   REGISTRATION_SOURCES,
   REGISTRATION_STATUSES,
@@ -17,6 +18,9 @@ import {
   type RegistrationSource,
   type RegistrationStatus,
 } from '@hsdg/contracts';
+import { normaliseStateCode } from '../registration-state';
+
+const GST_STATE_CODES = Object.keys(GST_STATES);
 
 /**
  * Partial update to an existing registration — the §34 "obtained later" flow:
@@ -32,10 +36,11 @@ export class UpdateRegistrationDto {
   @MaxLength(40)
   registrationNumber?: string;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ nullable: true, description: 'GST state code; a state name is read.' })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? normaliseStateCode(value) : value))
   @ValidateIf((_o, v) => v !== null)
-  @IsString()
+  @IsIn(GST_STATE_CODES, { message: 'stateCode must be a GST state code such as 07' })
   stateCode?: string | null;
 
   @ApiPropertyOptional({ enum: REGISTRATION_STATUSES })
@@ -93,4 +98,11 @@ export class UpdateRegistrationDto {
   @ValidateIf((_o, v) => v !== null)
   @IsString()
   documentRef?: string | null;
+
+  @ApiPropertyOptional({
+    description: "CM-2: keep a state that differs from the GSTIN's first two digits.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  stateMismatchAcknowledged?: boolean;
 }

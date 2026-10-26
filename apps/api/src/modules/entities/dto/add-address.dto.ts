@@ -1,7 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
-import { ADDRESS_TYPES, type AddressType } from '@hsdg/contracts';
+import { ADDRESS_TYPES, GST_STATES, type AddressType } from '@hsdg/contracts';
+import { normaliseStateCode } from '../registration-state';
+
+const GST_STATE_CODES = Object.keys(GST_STATES);
 
 export class AddressDto {
   @ApiPropertyOptional({ enum: ADDRESS_TYPES, default: 'registered' })
@@ -43,6 +46,13 @@ export class AddressDto {
   @IsOptional()
   @IsBoolean()
   isPrimary?: boolean;
+
+  @ApiPropertyOptional({ example: '07', nullable: true, description: 'CM-2: GST state code.' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? normaliseStateCode(value) : value))
+  @ValidateIf((_o, v) => v !== null)
+  @IsIn(GST_STATE_CODES, { message: 'stateCode must be a GST state code such as 07' })
+  stateCode?: string | null;
 }
 
 /** Partial update — every field optional; nullable ones may be cleared. */
@@ -91,4 +101,11 @@ export class UpdateAddressDto {
   @IsOptional()
   @IsBoolean()
   isPrimary?: boolean;
+
+  @ApiPropertyOptional({ example: '07', nullable: true, description: 'CM-2: GST state code.' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? normaliseStateCode(value) : value))
+  @ValidateIf((_o, v) => v !== null)
+  @IsIn(GST_STATE_CODES, { message: 'stateCode must be a GST state code such as 07' })
+  stateCode?: string | null;
 }
