@@ -5,6 +5,7 @@
  */
 import type {
   BillingModel,
+  ClientTeamRef,
   ClientVerdict,
   MergedInto,
   ClientDependencyStatus,
@@ -149,6 +150,8 @@ export interface EntityRow {
   clientId?: string | null;
   /** What the client's master still lacks (the list's marker, the client page's card). */
   missingInfo: MissingInfoItem[];
+  /** CM-8: the client's team, if any. */
+  team?: ClientTeamRef | null;
 }
 
 export interface EntityType {

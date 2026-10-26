@@ -260,6 +260,7 @@ export class EngagementsService {
       throw translatePgError(err);
     }
     await this.addCreatorToTeam(client, ctx, id, epId, managerId);
+    await this.addMembersOnCreate(client, id, epId, managerId, input.teamMemberEmployeeIds);
     await this.kinds.completeCreate(
       client,
       ctx,
@@ -703,6 +704,34 @@ export class EngagementsService {
        ON CONFLICT (engagement_id, employee_id) DO NOTHING`,
       [engagementId, ctx.employeeId],
     );
+  }
+
+  /** CM-8: the people the wizard staffs from the client team, as members.
+   *  The EP and manager already lead it; a leaver is skipped. Staffing is
+   *  the lead's to do, so a creator RLS will not let staff it skips this
+   *  step rather than lose the engagement. */
+  private async addMembersOnCreate(
+    client: PoolClient,
+    engagementId: string,
+    epId: string | null,
+    managerId: string | null,
+    employeeIds: string[] | undefined,
+  ): Promise<void> {
+    const ids = [...new Set(employeeIds ?? [])].filter((e) => e !== epId && e !== managerId);
+    if (!ids.length) return;
+    await client.query('SAVEPOINT create_team_members');
+    try {
+      await client.query(
+        `INSERT INTO hsdg.engagement_team (engagement_id, employee_id, role_on_engagement)
+         SELECT $1, p.id, 'member' FROM hsdg.team_people() p
+          WHERE p.id = ANY($2::uuid[]) AND p.is_active
+         ON CONFLICT (engagement_id, employee_id) DO NOTHING`,
+        [engagementId, ids],
+      );
+      await client.query('RELEASE SAVEPOINT create_team_members');
+    } catch {
+      await client.query('ROLLBACK TO SAVEPOINT create_team_members');
+    }
   }
 
   /** Classify the caller's grade for accountability defaulting (partner ⇒ EP,

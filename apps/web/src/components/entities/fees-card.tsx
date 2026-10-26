@@ -52,7 +52,9 @@ export function FeesCard({ entityId }: { entityId: string }): JSX.Element | null
           </p>
         )}
         {fees.data && fees.data.rows.length === 0 && (
-          <p className="text-sm text-ink-faint">No open engagement has a year in scope for this FY.</p>
+          <p className="text-sm text-ink-faint">
+            No open engagement has a year in scope for this FY.
+          </p>
         )}
         {fees.data && fees.data.rows.length > 0 && (
           <table className="w-full text-sm">
@@ -69,7 +71,12 @@ export function FeesCard({ entityId }: { entityId: string }): JSX.Element | null
             </thead>
             <tbody>
               {fees.data.rows.map((r) => (
-                <FeeRow key={r.engagementId} entityId={entityId} row={r} canEdit={fees.data.canEdit} />
+                <FeeRow
+                  key={r.engagementId}
+                  entityId={entityId}
+                  row={r}
+                  canEdit={fees.data.canEdit}
+                />
               ))}
             </tbody>
           </table>
@@ -109,7 +116,8 @@ function FeeRow({
       setEditing(false);
       void qc.invalidateQueries({ queryKey: ['entity', entityId, 'fees'] });
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not save the fee.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not save the fee.', 'error'),
   });
 
   const bad = amount.trim() !== '' && (Number.isNaN(Number(amount)) || Number(amount) < 0);
@@ -117,7 +125,10 @@ function FeeRow({
   return (
     <tr className="border-t border-line/60 align-top">
       <td className="py-1.5 pr-4">
-        <Link href={`/engagements/${row.engagementId}`} className="font-medium text-ink hover:underline">
+        <Link
+          href={`/engagements/${row.engagementId}`}
+          className="font-medium text-ink hover:underline"
+        >
           {row.serviceName}
         </Link>
         <div className="text-xs text-ink-faint">{row.engagementCode}</div>
@@ -170,7 +181,12 @@ function FeeRow({
         {canEdit &&
           (editing ? (
             <div className="flex justify-end gap-1">
-              <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setEditing(false)}
+                disabled={save.isPending}
+              >
                 Cancel
               </Button>
               <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending || bad}>
@@ -178,7 +194,12 @@ function FeeRow({
               </Button>
             </div>
           ) : (
-            <Button size="sm" variant="ghost" onClick={() => setEditing(true)} aria-label="Edit fee">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setEditing(true)}
+              aria-label="Edit fee"
+            >
               <Pencil className="h-3.5 w-3.5" />
             </Button>
           ))}

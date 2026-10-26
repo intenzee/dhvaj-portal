@@ -29,6 +29,7 @@ import {
   Gauge,
   Banknote,
   ScrollText,
+  UsersRound,
   type LucideIcon,
 } from 'lucide-react';
 import type { Principal } from './principal';
@@ -295,6 +296,14 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: GraduationCap,
         hint: 'The articleship register: principal, registration, term, leave and completion.',
         permission: PERMISSION.employeeManage,
+        ready: true,
+      },
+      {
+        label: 'Client teams',
+        href: '/people/teams',
+        icon: UsersRound,
+        hint: 'A partner and associates for a set of clients; new engagements start with them.',
+        permission: PERMISSION.teamRead,
         ready: true,
       },
       {

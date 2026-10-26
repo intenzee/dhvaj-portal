@@ -1,6 +1,11 @@
 'use client';
 
-import { FEE_PERIODS, FEE_PERIOD_UNIT, type BillingFrequency, type FeePeriod } from '@hsdg/contracts';
+import {
+  FEE_PERIODS,
+  FEE_PERIOD_UNIT,
+  type BillingFrequency,
+  type FeePeriod,
+} from '@hsdg/contracts';
 import { Input, Select } from '@/components/form';
 import { feeArithmetic } from '@/lib/fees';
 

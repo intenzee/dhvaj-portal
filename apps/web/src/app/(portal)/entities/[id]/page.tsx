@@ -37,6 +37,7 @@ import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import { ClientReturnsCard } from '@/components/entities/client-returns';
 import { FeesCard } from '@/components/entities/fees-card';
+import { ClientTeamLine } from '@/components/teams/client-team-line';
 import {
   ClientLogins,
   CredentialAccessNote,
@@ -121,6 +122,7 @@ export default function EntityDetailPage(): JSX.Element {
       />
 
       {e.mergedInto && <MergedIntoBanner mergedInto={e.mergedInto} />}
+      {!e.mergedInto && <ClientTeamLine entityId={e.id} team={e.team} />}
       {canManage && <PossibleDuplicateBanner entityId={e.id} />}
 
       <div className="flex flex-wrap items-center gap-2">
