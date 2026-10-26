@@ -71,6 +71,7 @@ import type {
   ClientTeamRef,
 } from '@hsdg/contracts';
 
+import { addressState, registrationState, stateMismatchError } from './registration-state';
 // Summary-level columns, shared by the list and detail selects so mapSummary
 // can consume either. Aliased to stable names.
 const ENTITY_SUMMARY_COLS = `
@@ -863,7 +864,8 @@ export class EntitiesService {
       };
       if (input.registrationNumber !== undefined)
         set('registration_number', input.registrationNumber);
-      if (input.stateCode !== undefined) set('state_code', input.stateCode);
+      if (input.stateCode !== undefined || input.registrationNumber !== undefined)
+        await this.setRegistrationState(client, ctx, entityId, registrationId, input, set);
       if (input.status !== undefined) set('status', input.status);
       if (input.validFrom !== undefined) set('valid_from', input.validFrom);
       if (input.validTo !== undefined) set('valid_to', input.validTo);
@@ -918,6 +920,54 @@ export class EntitiesService {
       await this.flagReassessmentIfComplete(client, entityId);
       await this.regenerateCalendars(client, entityId);
     });
+  }
+
+  /**
+   * CM-2: the state an edited registration keeps. A new GSTIN without a
+   * chosen state takes its prefix; a state that differs from the prefix
+   * needs the flag, unless it was already confirmed for this same GSTIN.
+   */
+  private async setRegistrationState(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    registrationId: string,
+    input: UpdateRegistrationInput,
+    set: (col: string, val: unknown) => void,
+  ): Promise<void> {
+    const { rows } = await client.query<{
+      registration_type: string;
+      registration_number: string;
+      state_code: string | null;
+      acked: boolean;
+    }>(
+      `SELECT registration_type, registration_number, state_code,
+              state_mismatch_ack_at IS NOT NULL AS acked
+         FROM hsdg.entity_registrations WHERE id = $1 AND entity_id = $2`,
+      [registrationId, entityId],
+    );
+    const cur = rows[0];
+    if (!cur) return;
+    const number = input.registrationNumber ?? cur.registration_number;
+    const chosen =
+      input.stateCode !== undefined
+        ? input.stateCode
+        : input.registrationNumber !== undefined && cur.registration_type === 'gstin'
+          ? null
+          : cur.state_code;
+    const state = registrationState(cur.registration_type, number, chosen);
+    set('state_code', state.stateCode);
+    if (!state.mismatch) {
+      set('state_mismatch_ack_by', null);
+      set('state_mismatch_ack_at', null);
+      return;
+    }
+    const alreadyConfirmed =
+      cur.acked && number === cur.registration_number && state.stateCode === cur.state_code;
+    if (alreadyConfirmed) return;
+    if (!input.stateMismatchAcknowledged) throw stateMismatchError(number, state.mismatch);
+    set('state_mismatch_ack_at', new Date());
+    set('state_mismatch_ack_by', ctx.employeeId ?? null);
   }
 
   /** Mark a registration Verified after review (§11). */
@@ -1099,10 +1149,10 @@ export class EntitiesService {
         line1: input.line1,
         line2: input.line2,
         city: input.city,
-        state: input.state,
         pincode: input.pincode,
         country: input.country,
         is_primary: input.isPrimary,
+        ...addressState(input),
       }),
     );
   }
@@ -1552,18 +1602,24 @@ export class EntitiesService {
     entityId: string,
     reg: RegistrationInput,
   ): Promise<void> {
+    const state = registrationState(reg.registrationType, reg.registrationNumber, reg.stateCode);
+    if (state.mismatch && !reg.stateMismatchAcknowledged)
+      throw stateMismatchError(reg.registrationNumber, state.mismatch);
     await client.query(
       `INSERT INTO hsdg.entity_registrations
          (entity_id, registration_type, registration_number, state_code, status,
           valid_from, valid_to, jurisdiction, registration_date, issuing_authority,
-          source, is_principal, applicability, document_ref)
+          source, is_principal, applicability, document_ref,
+          state_mismatch_ack_by, state_mismatch_ack_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-               COALESCE($11,'client'),COALESCE($12,true),COALESCE($13,'unknown'),$14)`,
+               COALESCE($11,'client'),COALESCE($12,true),COALESCE($13,'unknown'),$14,
+               CASE WHEN $15::boolean THEN hsdg.ctx_employee_id() END,
+               CASE WHEN $15::boolean THEN now() END)`,
       [
         entityId,
         reg.registrationType,
         reg.registrationNumber,
-        reg.stateCode ?? null,
+        state.stateCode,
         reg.status ?? 'active',
         reg.validFrom ?? null,
         reg.validTo ?? null,
@@ -1574,6 +1630,7 @@ export class EntitiesService {
         reg.isPrincipal ?? null,
         reg.applicability ?? null,
         reg.documentRef ?? null,
+        !!state.mismatch,
       ],
     );
   }
@@ -1630,13 +1687,18 @@ export class EntitiesService {
       verified_at: string | null;
       document_ref: string | null;
       branch_id: string | null;
+      state_mismatch_ack_at: Date | null;
+      state_mismatch_ack_name: string | null;
     }>(
-      `SELECT id, registration_type, registration_number, state_code, status, valid_from,
-              valid_to, jurisdiction, registration_date, issuing_authority, source,
-              is_principal, applicability, verified, verified_by, verified_at, document_ref,
-              branch_id
-       FROM hsdg.entity_registrations WHERE entity_id = $1
-       ORDER BY registration_type, is_principal DESC`,
+      `SELECT r.id, r.registration_type, r.registration_number, r.state_code, r.status,
+              r.valid_from, r.valid_to, r.jurisdiction, r.registration_date,
+              r.issuing_authority, r.source, r.is_principal, r.applicability, r.verified,
+              r.verified_by, r.verified_at, r.document_ref, r.branch_id,
+              r.state_mismatch_ack_at, ack.full_name AS state_mismatch_ack_name
+       FROM hsdg.entity_registrations r
+       LEFT JOIN hsdg.employees ack ON ack.id = r.state_mismatch_ack_by
+       WHERE r.entity_id = $1
+       ORDER BY r.registration_type, r.is_principal DESC`,
       [id],
     );
     const branches = await client.query<{
@@ -1691,8 +1753,11 @@ export class EntitiesService {
        ORDER BY financial_year DESC, is_current DESC, created_at DESC`,
       [id],
     );
-    const addresses = await client.query<AddressRow & { branch_id: string | null }>(
-      `SELECT id, address_type, line1, line2, city, state, pincode, country, is_primary, branch_id
+    const addresses = await client.query<
+      AddressRow & { branch_id: string | null; state_code: string | null }
+    >(
+      `SELECT id, address_type, line1, line2, city, state, pincode, country, is_primary, branch_id,
+              state_code
        FROM hsdg.entity_addresses WHERE entity_id = $1 ORDER BY is_primary DESC, address_type`,
       [id],
     );
@@ -1774,6 +1839,10 @@ export class EntitiesService {
         verifiedAt: r.verified_at,
         documentRef: r.document_ref,
         branchId: r.branch_id,
+        stateName: r.state_code ? (GST_STATES[r.state_code] ?? null) : null,
+        stateMismatch: r.state_mismatch_ack_at
+          ? { byName: r.state_mismatch_ack_name, at: r.state_mismatch_ack_at.toISOString() }
+          : null,
       })),
       contacts: contacts.rows.map((c) => ({
         id: c.id,
@@ -1801,6 +1870,7 @@ export class EntitiesService {
         country: a.country,
         isPrimary: a.is_primary,
         branchId: a.branch_id,
+        stateCode: a.state_code,
       })),
       relationships: rels.rows.map((r) => ({
         id: r.id,
@@ -1873,20 +1943,24 @@ export class EntitiesService {
     entityId: string,
     a: AddressInput,
   ): Promise<void> {
+    const st = addressState({ stateCode: a.stateCode, state: a.state ?? null });
     await client.query(
       `INSERT INTO hsdg.entity_addresses
-         (entity_id, address_type, line1, line2, city, state, pincode, country, is_primary)
-       VALUES ($1,COALESCE($2,'registered'),$3,$4,$5,$6,$7,COALESCE($8,'IN'),COALESCE($9,false))`,
+         (entity_id, address_type, line1, line2, city, state, pincode, country, is_primary,
+          state_code)
+       VALUES ($1,COALESCE($2,'registered'),$3,$4,$5,$6,$7,COALESCE($8,'IN'),COALESCE($9,false),
+               $10)`,
       [
         entityId,
         a.addressType ?? null,
         a.line1,
         a.line2 ?? null,
         a.city ?? null,
-        a.state ?? null,
+        st.state ?? null,
         a.pincode ?? null,
         a.country ?? null,
         a.isPrimary ?? null,
+        st.state_code ?? null,
       ],
     );
   }

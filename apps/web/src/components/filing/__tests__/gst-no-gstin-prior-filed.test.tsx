@@ -41,7 +41,7 @@ describe('GstinMissingBanner', () => {
     const save = screen.getByRole('button', { name: 'Save GSTIN' });
     expect(save).toBeDisabled();
     fireEvent.change(screen.getByLabelText('GSTIN'), { target: { value: GSTIN.toLowerCase() } });
-    expect(screen.getByText('State code 27.')).toBeInTheDocument();
+    expect(screen.getByText('State 27 · Maharashtra.')).toBeInTheDocument();
     fireEvent.click(save);
 
     await waitFor(() =>

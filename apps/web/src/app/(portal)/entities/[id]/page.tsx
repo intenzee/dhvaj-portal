@@ -15,7 +15,7 @@ import { AlertTriangle, Plus, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { apiFetch } from '@/lib/api';
-import { humanize } from '@/lib/format';
+import { formatDate, humanize } from '@/lib/format';
 import type { EntityDetail, EngagementRow } from '@/lib/types';
 import {
   PageHeader,
@@ -214,6 +214,15 @@ export default function EntityDetailPage(): JSX.Element {
                   <div>
                     <span className="text-ink-muted">{humanize(r.registrationType)}</span>{' '}
                     <span className="font-medium text-ink">{r.registrationNumber}</span>
+                    {r.stateName && <span className="text-ink-muted"> · {r.stateName}</span>}
+                    {r.stateMismatch && (
+                      <span
+                        className="ml-1.5"
+                        title={`Confirmed by ${r.stateMismatch.byName ?? 'someone'} on ${formatDate(r.stateMismatch.at)}`}
+                      >
+                        <Badge tone="warn">State differs from GSTIN</Badge>
+                      </span>
+                    )}
                     {!office && <OfficeBadge entity={e} branchId={r.branchId} />}
                     {logins.data &&
                       loginTargetsOf(r).map((t) => (

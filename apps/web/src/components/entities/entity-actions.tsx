@@ -33,6 +33,7 @@ import {
   taxIdConflictOf,
   type TaxIdConflict,
 } from './gstin-hint';
+import { GstStateSelect } from './gst-state-select';
 
 /** Manage buttons shown on Client 360 for users who can manage entities. */
 export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.Element | null {
@@ -446,6 +447,8 @@ export function AddRegistrationModal({
   const [registrationNumber, setRegistrationNumber] = useState('');
   const [status, setStatus] = useState<string>('active');
   const [validFrom, setValidFrom] = useState('');
+  const [stateCode, setStateCode] = useState('');
+  const [stateAck, setStateAck] = useState(false);
   const [conflict, setConflict] = useState<DuplicateClientConflict | null>(null);
   const [taxConflict, setTaxConflict] = useState<TaxIdConflict | null>(null);
   const clash = registrationType === 'gstin' && gstinBlocks(registrationNumber, pan);
@@ -459,6 +462,8 @@ export function AddRegistrationModal({
           registrationNumber: registrationNumber.trim().toUpperCase(),
           status,
           ...(validFrom ? { validFrom } : {}),
+          ...(stateCode ? { stateCode } : {}),
+          ...(stateAck ? { stateMismatchAcknowledged: true } : {}),
         },
       }),
     onSuccess: () => {
@@ -528,9 +533,20 @@ export function AddRegistrationModal({
           />
           {registrationType === 'gstin' && <GstinHint value={registrationNumber} pan={pan} />}
         </Field>
-        <Field label="Valid from">
-          <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="State">
+            <GstStateSelect
+              value={stateCode}
+              onChange={setStateCode}
+              gstin={registrationType === 'gstin' ? registrationNumber : null}
+              acknowledged={stateAck}
+              onAcknowledge={setStateAck}
+            />
+          </Field>
+          <Field label="Valid from">
+            <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+          </Field>
+        </div>
       </div>
     </Modal>
   );
