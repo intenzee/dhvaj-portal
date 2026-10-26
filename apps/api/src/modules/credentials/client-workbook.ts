@@ -2,7 +2,8 @@ import * as XLSX from 'xlsx';
 import {
   GST_STATES,
   credentialLabel,
-  entityTypeFromPan,
+  firmTypeFromIds,
+  withCompanySuffix,
   isValidGstin,
   isValidPan,
   isValidTan,
@@ -633,13 +634,12 @@ export function entityTypeFromName(name: string): string | null {
   return null;
 }
 
-function typeOf(pan: string | null, name: string): string | null {
-  const fromName = entityTypeFromName(name);
-  const fromPan = pan ? entityTypeFromPan(pan) : null;
-  if (fromPan === 'private_limited' && (fromName === 'public_limited' || fromName === 'opc'))
-    return fromName;
-  if (fromPan === 'partnership' && fromName === 'llp') return 'llp';
-  return fromPan ?? fromName;
+/** The PAN's type (CM-3, with D1–D3), else what the name says. */
+function typeOf(pan: string | null, name: string, hasGstin: boolean): string | null {
+  return (
+    firmTypeFromIds({ pan, nameOrTypedType: name, hasBusinessRegistration: hasGstin })?.slug ??
+    entityTypeFromName(name)
+  );
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -872,11 +872,18 @@ export function clientsOfWorkbook(
         'Several GST rows have neither a GSTIN nor a state in the name, e.g. "Name (Delhi)".',
       );
 
-    c.typeSlug = typeOf(c.pan, c.name);
+    c.typeSlug = typeOf(
+      c.pan,
+      c.name,
+      // A GSTIN or a TAN is a business registration (D2).
+      c.gst.some((g) => g.gstin) || Boolean(c.tan),
+    );
     if (!c.typeSlug && defaultTypeSlug) {
       c.typeSlug = defaultTypeSlug;
       c.typeGuessed = true;
     }
+    const named = withCompanySuffix(c.name, c.typeSlug);
+    if (named !== c.name) c.warnings.push(`Name: ${c.name} → ${named} (company PAN).`);
   }
   const sheetOrder = new Map(book.sheets.map((s, i) => [s.name, i]));
   const first = (c: WorkbookClient) => c.sources[0]!;

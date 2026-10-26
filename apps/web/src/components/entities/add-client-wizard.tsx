@@ -27,7 +27,9 @@ import {
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
   SECURITY_TYPES,
+  firmTypeFromIds,
   readGstin,
+  withCompanySuffix,
   type DuplicateClientConflict,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -91,6 +93,9 @@ interface State {
   pan: string;
   /** The PAN was filled from the first GSTIN typed (CM-1). */
   panFromGstin?: boolean;
+  /** The entity type was set from the PAN / GSTIN (CM-3); cleared when the person picks one. */
+  typeFromPan?: boolean;
+  typeTouched?: boolean;
   countryOfIncorporation: string;
   incorporationDate: string;
   status: string;
@@ -241,6 +246,27 @@ export function AddClientWizard(): JSX.Element {
   useEffect(() => {
     if (kindTypes[0] && !kindTypes.some((t) => t.slug === s.typeSlug)) set('typeSlug', kindTypes[0].slug);
   }, [kindTypes]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The PAN (or a GSTIN's 6th letter) sets the type until the person picks one (CM-3).
+  const gstinNumbers = s.registrations
+    .filter((r) => r.registrationType === 'gstin')
+    .map((r) => r.registrationNumber)
+    .join(',');
+  useEffect(() => {
+    if (s.typeTouched || !types.data) return;
+    const gstins = gstinNumbers ? gstinNumbers.split(',') : [];
+    const fromPan = firmTypeFromIds({
+      pan: s.pan,
+      gstins,
+      nameOrTypedType: s.legalName,
+      hasBusinessRegistration: gstins.some((g) => readGstin(g).valid),
+    });
+    const type = fromPan && types.data.find((t) => t.slug === fromPan.slug);
+    if (!type) return;
+    const kind: Kind = ['individual', 'proprietorship'].includes(type.category) ? 'individual' : 'legal_entity';
+    if (kind !== s.kind) set('kind', kind);
+    if (type.slug !== s.typeSlug) set('typeSlug', type.slug);
+    set('typeFromPan', true);
+  }, [s.pan, gstinNumbers, s.legalName, types.data, s.typeTouched]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!s.officeCode && offices.data?.[0]) set('officeCode', offices.data[0].code);
   }, [offices.data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -419,7 +445,10 @@ function Step1({
           {(['legal_entity', 'individual'] as Kind[]).map((k) => (
             <button
               key={k}
-              onClick={() => set('kind', k)}
+              onClick={() => {
+                set('kind', k);
+                set('typeTouched', true);
+              }}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-sm',
                 s.kind === k ? 'border-primary-500 bg-primary-50 font-medium text-primary-700' : 'border-line text-ink-muted',
@@ -433,6 +462,11 @@ function Step1({
 
       <Field label="Legal name" required>
         <Input value={s.legalName} onChange={(e) => set('legalName', e.target.value)} placeholder="Acme Manufacturing Pvt Ltd" />
+        {withCompanySuffix(s.legalName.trim(), s.typeSlug) !== s.legalName.trim() && (
+          <p className="mt-1 text-xs text-ink-muted">
+            Will be saved as <span className="font-medium text-ink">{withCompanySuffix(s.legalName.trim(), s.typeSlug)}</span>
+          </p>
+        )}
       </Field>
 
       {dupes.length > 0 && (
@@ -471,8 +505,15 @@ function Step1({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Entity type" required>
-          <Select value={s.typeSlug} onChange={(e) => set('typeSlug', e.target.value)}>
+        <Field label="Entity type" required hint={s.typeFromPan ? 'From PAN — change it if the PAN is not the whole story.' : undefined}>
+          <Select
+            value={s.typeSlug}
+            onChange={(e) => {
+              set('typeSlug', e.target.value);
+              set('typeFromPan', false);
+              set('typeTouched', true);
+            }}
+          >
             {kindTypes.map((t) => (
               <option key={t.id} value={t.slug}>
                 {t.name}
@@ -1073,7 +1114,8 @@ function buildPayload(s: State): Record<string, unknown> {
     regulatoryAttributes.push({ attributeCode: 'is_government_company', valueBoolean: true });
 
   return {
-    legalName: s.legalName.trim(),
+    // A private company's name carries "Private Limited" (CM-5).
+    legalName: withCompanySuffix(s.legalName.trim(), s.typeSlug),
     ...(clean(s.displayName) ? { displayName: s.displayName.trim() } : {}),
     ...(clean(s.tradeName) ? { tradeName: s.tradeName.trim() } : {}),
     ...(clean(s.shortName) ? { shortName: s.shortName.trim() } : {}),

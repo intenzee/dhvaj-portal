@@ -14,8 +14,12 @@ import {
   REGULATORY_PROFILE_STATUS,
   ROLE,
   STREAM_REGISTRATION_TYPES,
+  ENTITY_TYPE_SOURCE,
   TAX_ID_ERROR,
   cleanPan,
+  firmTypeFromIds,
+  typeAgreesWithPan,
+  type EntityTypeSource,
   panFromGstins,
   readGstin,
   type ContactType,
@@ -366,6 +370,16 @@ export class EntitiesService {
     }
     await this.assertGstinsMatchPan(client, input.pan ?? null, gstins);
     if (input.pan) await this.assertPanFree(client, null, input.pan);
+    // The type's source (CM-3): the PAN's when it is what the PAN says, else the person's.
+    const panType = firmTypeFromIds({
+      pan: input.pan,
+      gstins,
+      nameOrTypedType: input.legalName,
+      hasBusinessRegistration: gstins.length > 0,
+    });
+    const typeSource: EntityTypeSource =
+      input.entityTypeSource ??
+      (panType?.slug === input.typeSlug ? ENTITY_TYPE_SOURCE.pan : ENTITY_TYPE_SOURCE.manual);
 
     let entityId: string;
     try {
@@ -414,6 +428,14 @@ export class EntitiesService {
         ],
       );
       entityId = rows[0]!.id;
+      await client.query(
+        `UPDATE hsdg.entities
+            SET entity_type_source = $2,
+                entity_type_set_by = CASE WHEN $2 = 'manual' THEN $3::uuid END,
+                entity_type_set_at = now()
+          WHERE id = $1`,
+        [entityId, typeSource, ctx.userId],
+      );
 
       for (const reg of input.registrations ?? []) {
         await this.insertRegistration(client, entityId, reg);
@@ -477,8 +499,48 @@ export class EntitiesService {
     if (input.displayName !== undefined) set('display_name', input.displayName);
     if (input.tradeName !== undefined) set('trade_name', input.tradeName);
     if (input.shortName !== undefined) set('short_name', input.shortName);
-    if (input.typeSlug !== undefined) {
-      set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
+    let typeChanged = false;
+    if (input.typeSlug !== undefined && input.typeSlug !== before.typeSlug) {
+      const source = input.entityTypeSource ?? ENTITY_TYPE_SOURCE.manual;
+      // A type set by hand on Client 360 beats the PAN and any import (CM-3).
+      const keepManual =
+        source !== ENTITY_TYPE_SOURCE.manual && before.entityTypeSource === ENTITY_TYPE_SOURCE.manual;
+      if (!keepManual) {
+        const pan = input.pan !== undefined ? input.pan : before.pan;
+        if (
+          source === ENTITY_TYPE_SOURCE.manual &&
+          !input.typeMismatchAcknowledged &&
+          !typeAgreesWithPan(input.typeSlug, pan)
+        ) {
+          const says = firmTypeFromIds({
+            pan,
+            nameOrTypedType: input.legalName ?? before.legalName,
+            hasBusinessRegistration: before.registrations.some(
+              (r) => r.registrationType === 'gstin' && r.status === 'active',
+            ),
+          });
+          throw new UnprocessableEntityException({
+            code: TAX_ID_ERROR.typePanMismatch,
+            message: `${says?.reason ?? `PAN ${pan} says another type.`} Save this type anyway?`,
+            expected: says?.slug ?? null,
+            actual: input.typeSlug,
+          });
+        }
+        set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
+        set('entity_type_source', source);
+        set('entity_type_set_by', source === ENTITY_TYPE_SOURCE.manual ? ctx.userId : null);
+        sets.push('entity_type_set_at = now()');
+        typeChanged = true;
+      }
+    } else if (
+      input.typeSlug !== undefined &&
+      input.entityTypeSource === ENTITY_TYPE_SOURCE.manual &&
+      before.entityTypeSource !== ENTITY_TYPE_SOURCE.manual
+    ) {
+      // The same type confirmed by hand: record it as the person's.
+      set('entity_type_source', ENTITY_TYPE_SOURCE.manual);
+      set('entity_type_set_by', ctx.userId);
+      sets.push('entity_type_set_at = now()');
     }
     if (input.officeCode !== undefined) {
       set('home_office_id', await this.resolveOfficeId(client, input.officeCode));
@@ -545,6 +607,8 @@ export class EntitiesService {
         'Entity was modified by someone else. Refresh and retry (stale version).',
       );
     }
+    // The type decides which compliances apply.
+    if (typeChanged) await this.flagReassessmentIfComplete(client, id);
 
     const after = await this.selectDetail(client, id);
     await this.audit.recordWith(client, ctx, {
@@ -1492,6 +1556,16 @@ export class EntitiesService {
        ORDER BY registration_type, is_principal DESC`,
       [id],
     );
+    const typeSource = await client.query<{
+      entity_type_source: EntityTypeSource;
+      entity_type_set_at: string | null;
+      set_by_name: string | null;
+    }>(
+      `SELECT e.entity_type_source, e.entity_type_set_at, u.display_name AS set_by_name
+         FROM hsdg.entities e LEFT JOIN hsdg.users u ON u.id = e.entity_type_set_by
+        WHERE e.id = $1`,
+      [id],
+    );
     const contacts = await client.query<{
       id: string;
       full_name: string;
@@ -1679,6 +1753,9 @@ export class EntitiesService {
             mergedAt: merged.rows[0].merged_at,
           }
         : null,
+      entityTypeSource: typeSource.rows[0]?.entity_type_source ?? ENTITY_TYPE_SOURCE.legacy,
+      entityTypeSetBy: typeSource.rows[0]?.set_by_name ?? null,
+      entityTypeSetAt: typeSource.rows[0]?.entity_type_set_at ?? null,
     };
     return detail;
   }

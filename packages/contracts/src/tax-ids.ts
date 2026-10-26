@@ -306,6 +306,22 @@ export function firmTypeFromIds(input: FirmTypeInput): FirmTypeResult | null {
   }
 }
 
+/** Where a client's firm type came from. Precedence: manual > pan > import > legacy (CM-3). */
+export const ENTITY_TYPE_SOURCE = {
+  pan: 'pan',
+  manual: 'manual',
+  import: 'import',
+  legacy: 'legacy',
+} as const;
+export type EntityTypeSource = (typeof ENTITY_TYPE_SOURCE)[keyof typeof ENTITY_TYPE_SOURCE];
+
+export const ENTITY_TYPE_SOURCE_LABEL: Record<EntityTypeSource, string> = {
+  pan: 'From PAN',
+  manual: 'Set by hand',
+  import: 'From import',
+  legacy: 'Set before PAN rules',
+};
+
 // ── "Private Limited" on company names ───────────────────────────────────
 
 const PLACE_TAIL = /^(.*?)(\s*(?:[([]\s*[^()[\]]+[)\]]?|\s[-–]\s*[A-Za-z .&]+))\s*$/;

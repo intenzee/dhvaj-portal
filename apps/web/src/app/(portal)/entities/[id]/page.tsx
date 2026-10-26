@@ -34,6 +34,7 @@ import {
   RemoveRegistrationButton,
 } from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
+import { FirmTypeCard } from '@/components/entities/firm-type-card';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import { ClientReturnsCard } from '@/components/entities/client-returns';
 import {
@@ -174,6 +175,7 @@ export default function EntityDetailPage(): JSX.Element {
 
       <div id={SECTION_ANCHOR.details} className="grid gap-4 lg:grid-cols-3">
         <Fact label="PAN" value={e.pan ?? 'Pending'} />
+        <FirmTypeCard entity={e} canManage={canManage} />
         <Fact
           label="Legal / operational status"
           value={e.legalStatus ? humanize(e.legalStatus) : 'Not assessed'}
