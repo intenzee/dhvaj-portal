@@ -26,6 +26,13 @@ import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { DuplicateConflictNotice, duplicateConflictOf } from './merge-clients-modal';
+import {
+  GstinHint,
+  TaxIdConflictNotice,
+  gstinBlocks,
+  taxIdConflictOf,
+  type TaxIdConflict,
+} from './gstin-hint';
 
 /** Manage buttons shown on Client 360 for users who can manage entities. */
 export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.Element | null {
@@ -60,7 +67,7 @@ export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.E
 
       {open === 'edit' && <EditEntityModal entity={entity} onClose={() => setOpen(null)} />}
       {open === 'registration' && (
-        <AddRegistrationModal entityId={entity.id} onClose={() => setOpen(null)} />
+        <AddRegistrationModal entityId={entity.id} pan={entity.pan} onClose={() => setOpen(null)} />
       )}
       {open === 'contact' && <AddContactModal entityId={entity.id} onClose={() => setOpen(null)} />}
       {open === 'delete' && <DeleteClientModal entity={entity} onClose={() => setOpen(null)} />}
@@ -221,6 +228,7 @@ export function EditEntityModal({
   const [businessDescription, setBusinessDescription] = useState(entity.businessDescription ?? '');
   const [activities, setActivities] = useState(entity.activities);
   const [conflict, setConflict] = useState<DuplicateClientConflict | null>(null);
+  const [taxConflict, setTaxConflict] = useState<TaxIdConflict | null>(null);
 
   const types = useQuery({
     queryKey: ['entity-types'],
@@ -234,8 +242,9 @@ export function EditEntityModal({
   const panValid = pan === '' || PAN_REGEX.test(pan.trim().toUpperCase());
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: (ack?: boolean) => {
       const body: Record<string, unknown> = { version: entity.version };
+      if (ack) body.typeMismatchAcknowledged = true;
       if (legalName.trim() !== entity.legalName) body.legalName = legalName.trim();
       if ((displayName.trim() || null) !== (entity.displayName ?? null))
         body.displayName = displayName.trim() || null;
@@ -265,9 +274,16 @@ export function EditEntityModal({
       onClose();
     },
     onError: (err) => {
+      // A type the PAN disagrees with: ask once, then save it as set by hand (CM-3).
+      if (err instanceof ApiError && err.body?.code === 'TYPE_PAN_MISMATCH') {
+        if (window.confirm(err.message)) save.mutate(true);
+        return;
+      }
       const dupe = duplicateConflictOf(err);
+      const tax = taxIdConflictOf(err);
       setConflict(dupe);
-      if (!dupe)
+      setTaxConflict(tax);
+      if (!dupe && !tax)
         toast(err instanceof ApiError ? err.message : 'Could not update the entity.', 'error');
     },
   });
@@ -285,7 +301,7 @@ export function EditEntityModal({
           </Button>
           <Button
             disabled={legalName.trim().length === 0 || !panValid || save.isPending}
-            onClick={() => save.mutate()}
+            onClick={() => save.mutate(false)}
           >
             {save.isPending ? 'Saving…' : 'Save changes'}
           </Button>
@@ -296,6 +312,7 @@ export function EditEntityModal({
         {conflict && (
           <DuplicateConflictNotice conflict={conflict} entityId={entity.id} onMerged={onClose} />
         )}
+        {taxConflict && <TaxIdConflictNotice conflict={taxConflict} />}
         <Field label="Legal name" required>
           <Input value={legalName} onChange={(e) => setLegalName(e.target.value)} />
         </Field>
@@ -412,9 +429,12 @@ export function EditEntityModal({
 
 export function AddRegistrationModal({
   entityId,
+  pan,
   onClose,
 }: {
   entityId: string;
+  /** The client's PAN: a GSTIN of another PAN is refused before it is sent (CM-1). */
+  pan?: string | null;
   onClose: () => void;
 }): JSX.Element {
   const toast = useToast();
@@ -427,6 +447,8 @@ export function AddRegistrationModal({
   const [status, setStatus] = useState<string>('active');
   const [validFrom, setValidFrom] = useState('');
   const [conflict, setConflict] = useState<DuplicateClientConflict | null>(null);
+  const [taxConflict, setTaxConflict] = useState<TaxIdConflict | null>(null);
+  const clash = registrationType === 'gstin' && gstinBlocks(registrationNumber, pan);
 
   const add = useMutation({
     mutationFn: () =>
@@ -446,8 +468,10 @@ export function AddRegistrationModal({
     },
     onError: (err) => {
       const dupe = duplicateConflictOf(err);
+      const tax = taxIdConflictOf(err);
       setConflict(dupe);
-      if (!dupe)
+      setTaxConflict(tax);
+      if (!dupe && !tax)
         toast(err instanceof ApiError ? err.message : 'Could not add the registration.', 'error');
     },
   });
@@ -463,7 +487,7 @@ export function AddRegistrationModal({
             Cancel
           </Button>
           <Button
-            disabled={registrationNumber.trim().length === 0 || add.isPending}
+            disabled={registrationNumber.trim().length === 0 || clash || add.isPending}
             onClick={() => add.mutate()}
           >
             {add.isPending ? 'Adding…' : 'Add registration'}
@@ -475,6 +499,7 @@ export function AddRegistrationModal({
         {conflict && (
           <DuplicateConflictNotice conflict={conflict} entityId={entityId} onMerged={onClose} />
         )}
+        {taxConflict && <TaxIdConflictNotice conflict={taxConflict} />}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type" required>
             <Select value={registrationType} onChange={(e) => setRegistrationType(e.target.value)}>
@@ -501,6 +526,7 @@ export function AddRegistrationModal({
             onChange={(e) => setRegistrationNumber(e.target.value.toUpperCase())}
             placeholder="27AAACA1234A1Z5"
           />
+          {registrationType === 'gstin' && <GstinHint value={registrationNumber} pan={pan} />}
         </Field>
         <Field label="Valid from">
           <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
