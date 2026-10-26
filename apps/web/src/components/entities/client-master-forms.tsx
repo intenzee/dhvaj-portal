@@ -66,7 +66,7 @@ export function ClientMasterModal({
     case 'details':
       return <EditEntityModal entity={entity} onClose={onClose} />;
     case 'registrations':
-      return <AddRegistrationModal entityId={entity.id} onClose={onClose} />;
+      return <AddRegistrationModal entityId={entity.id} pan={entity.pan} onClose={onClose} />;
     case 'contacts':
       return <AddContactModal entityId={entity.id} onClose={onClose} />;
     case 'financials':

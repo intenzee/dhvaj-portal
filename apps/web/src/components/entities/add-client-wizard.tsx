@@ -27,6 +27,7 @@ import {
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
   SECURITY_TYPES,
+  readGstin,
   type DuplicateClientConflict,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -37,6 +38,7 @@ import type { ClientRow, DuplicateCandidate, EntityType, Industry, OfficeRow } f
 import { Card, CardBody, Button, Spinner, Badge, PageHeader } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { DuplicateConflictNotice, VerdictBadge, duplicateConflictOf } from './merge-clients-modal';
+import { GstinHint, gstinBlocks } from './gstin-hint';
 
 type Kind = 'individual' | 'legal_entity';
 interface RegRow {
@@ -87,6 +89,8 @@ interface State {
   officeCode: string;
   clientId: string;
   pan: string;
+  /** The PAN was filled from the first GSTIN typed (CM-1). */
+  panFromGstin?: boolean;
   countryOfIncorporation: string;
   incorporationDate: string;
   status: string;
@@ -289,7 +293,12 @@ export function AddClientWizard(): JSX.Element {
     },
   });
 
-  const canCreate = s.legalName.trim().length > 0 && !!s.typeSlug && !!s.officeCode && panValid;
+  // A GSTIN of another PAN can never be saved (CM-1).
+  const gstinClash = s.registrations.some(
+    (r) => r.registrationType === 'gstin' && gstinBlocks(r.registrationNumber, s.pan),
+  );
+  const canCreate =
+    s.legalName.trim().length > 0 && !!s.typeSlug && !!s.officeCode && panValid && !gstinClash;
 
   if (types.isLoading || offices.isLoading) return <Spinner label="Loading…" />;
 
@@ -505,10 +514,22 @@ function Step1({
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label="PAN" hint={s.pan && !panValid ? 'Invalid PAN.' : 'Optional; add later if pending.'}>
+        <Field
+          label="PAN"
+          hint={
+            s.pan && !panValid
+              ? 'Invalid PAN.'
+              : s.panFromGstin
+                ? 'PAN taken from the GSTIN.'
+                : 'Optional; add later if pending.'
+          }
+        >
           <Input
             value={s.pan}
-            onChange={(e) => set('pan', e.target.value.toUpperCase())}
+            onChange={(e) => {
+              set('pan', e.target.value.toUpperCase());
+              set('panFromGstin', false);
+            }}
             placeholder="AAACA1234A"
             className={s.pan && !panValid ? 'border-danger-400' : undefined}
           />
@@ -582,8 +603,17 @@ function RegistrationsStep({
   s: State;
   set: <K extends keyof State>(k: K, v: State[K]) => void;
 }): JSX.Element {
-  const update = (i: number, patch: Partial<RegRow>): void =>
-    set('registrations', s.registrations.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const update = (i: number, patch: Partial<RegRow>): void => {
+    const next = s.registrations.map((r, j) => (j === i ? { ...r, ...patch } : r));
+    set('registrations', next);
+    // A client with no PAN takes it from its first valid GSTIN.
+    const row = next[i]!;
+    const read = readGstin(row.registrationNumber);
+    if (row.registrationType === 'gstin' && read.valid && read.pan && !s.pan.trim()) {
+      set('pan', read.pan);
+      set('panFromGstin', true);
+    }
+  };
   return (
     <div className="space-y-3">
       <p className="text-sm text-ink-muted">
@@ -602,6 +632,7 @@ function RegistrationsStep({
             </Field>
             <Field label="Number">
               <Input value={r.registrationNumber} onChange={(e) => update(i, { registrationNumber: e.target.value.toUpperCase() })} />
+              {r.registrationType === 'gstin' && <GstinHint value={r.registrationNumber} pan={s.pan} />}
             </Field>
             <Field label="Status">
               <Select value={r.status} onChange={(e) => update(i, { status: e.target.value })}>

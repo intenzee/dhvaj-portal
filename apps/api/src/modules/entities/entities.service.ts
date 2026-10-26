@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { PoolClient, QueryResult } from 'pg';
 import {
@@ -13,6 +14,10 @@ import {
   REGULATORY_PROFILE_STATUS,
   ROLE,
   STREAM_REGISTRATION_TYPES,
+  TAX_ID_ERROR,
+  cleanPan,
+  panFromGstins,
+  readGstin,
   type ContactType,
   type DuplicateClientConflict,
   type MissingInfoCode,
@@ -348,6 +353,18 @@ export class EntitiesService {
   ): Promise<EntityDetail> {
     const typeId = await this.resolveTypeId(client, input.typeSlug);
     const officeId = await this.resolveOfficeId(client, input.officeCode);
+    const gstins = (input.registrations ?? [])
+      .filter((r) => r.registrationType === 'gstin' && (r.status ?? 'active') === 'active')
+      .map((r) => r.registrationNumber);
+    // A client with no PAN takes it from its first GSTIN (CM-1).
+    const panFromGstin = !input.pan ? panFromGstins(gstins) : null;
+    if (panFromGstin) {
+      const taken = await client.query(`SELECT 1 FROM hsdg.client_holding('pan', $1)`, [
+        panFromGstin,
+      ]);
+      if ((taken.rowCount ?? 0) === 0) input = { ...input, pan: panFromGstin };
+    }
+    await this.assertGstinsMatchPan(client, input.pan ?? null, gstins);
     if (input.pan) await this.assertPanFree(client, null, input.pan);
 
     let entityId: string;
@@ -468,7 +485,10 @@ export class EntitiesService {
     }
     if (input.clientId !== undefined) set('client_id', input.clientId);
     if (input.pan !== undefined) {
-      if (input.pan) await this.assertPanFree(client, id, input.pan);
+      if (input.pan) {
+        await this.assertPanFree(client, id, input.pan);
+        await this.assertPanFitsGstins(client, id, input.pan);
+      }
       set('pan', input.pan);
     }
     if (input.parentEntityId !== undefined) set('parent_entity_id', input.parentEntityId);
@@ -634,6 +654,8 @@ export class EntitiesService {
     input: RegistrationInput,
   ): Promise<EntityDetail> {
     return this.mutateChildWith(client, ctx, entityId, 'entity.registration_added', async () => {
+      if (input.registrationType === 'gstin' && (input.status ?? 'active') === 'active')
+        await this.guardGstinForEntity(client, ctx, entityId, input.registrationNumber, null);
       await this.insertRegistration(client, entityId, input);
       await this.flagReassessmentIfComplete(client, entityId);
       await this.regenerateCalendars(client, entityId);
@@ -731,6 +753,14 @@ export class EntitiesService {
           [registrationId, entityId],
         );
         const type = current.rows[0]?.registration_type;
+        if (type === 'gstin')
+          await this.guardGstinForEntity(
+            client,
+            ctx,
+            entityId,
+            input.registrationNumber,
+            registrationId,
+          );
         if (type) {
           await this.withRegistrationNumber(
             client,
@@ -1155,6 +1185,127 @@ export class EntitiesService {
         await client.query('ROLLBACK TO SAVEPOINT registration_regen');
       }
     }
+  }
+
+  /**
+   * A GSTIN carries its client's PAN (characters 3–12): one of another PAN
+   * belongs to another legal entity and is never saved (CM-1). 422
+   * PAN_GSTIN_MISMATCH, naming the client that holds that PAN if any.
+   */
+  private async assertGstinsMatchPan(
+    client: PoolClient,
+    pan: string | null,
+    gstins: string[],
+  ): Promise<void> {
+    const own = cleanPan(pan);
+    let first: string | null = own;
+    for (const number of gstins) {
+      const read = readGstin(number);
+      if (!read.pan) continue;
+      if (first && read.pan !== first) {
+        throw await this.panMismatch(client, read.gstin, first, read.pan, own !== null);
+      }
+      first ??= read.pan;
+    }
+  }
+
+  private async panMismatch(
+    client: PoolClient,
+    gstin: string,
+    expected: string,
+    actual: string,
+    againstPan: boolean,
+  ): Promise<UnprocessableEntityException> {
+    const { rows } = await client.query<{
+      entity_id: string;
+      entity_code: string;
+      legal_name: string;
+    }>(`SELECT entity_id, entity_code, legal_name FROM hsdg.client_holding('pan', $1)`, [actual]);
+    const holder = rows[0];
+    const lead = againstPan
+      ? `GSTIN ${gstin} is for PAN ${actual}, but the client's PAN is ${expected}.`
+      : `GSTIN ${gstin} is for PAN ${actual}, but the client's other GSTIN is for ${expected}. One client has one PAN.`;
+    const tail = holder
+      ? ` PAN ${actual} belongs to ${holder.legal_name} (${holder.entity_code}). Add this GSTIN there, or combine the two as offices.`
+      : '';
+    return new UnprocessableEntityException({
+      code: againstPan ? TAX_ID_ERROR.panGstinMismatch : TAX_ID_ERROR.gstinsDifferentPan,
+      message: lead + tail,
+      expected,
+      actual,
+      ...(holder
+        ? { holder: { id: holder.entity_id, entityCode: holder.entity_code, legalName: holder.legal_name } }
+        : {}),
+    });
+  }
+
+  /**
+   * A GSTIN added to (or changed on) a client: its PAN must be the client's.
+   * A client with no PAN yet takes it from the GSTIN, audited as such.
+   */
+  private async guardGstinForEntity(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    number: string,
+    exceptRegistrationId: string | null,
+  ): Promise<void> {
+    const { rows } = await client.query<{ pan: string | null; others: string[] }>(
+      `SELECT e.pan,
+              COALESCE(array_agg(r.registration_number) FILTER (WHERE r.id IS NOT NULL), '{}') AS others
+         FROM hsdg.entities e
+         LEFT JOIN hsdg.entity_registrations r
+           ON r.entity_id = e.id AND r.registration_type = 'gstin' AND r.status = 'active'
+          AND r.id IS DISTINCT FROM $2::uuid
+        WHERE e.id = $1
+        GROUP BY e.pan`,
+      [entityId, exceptRegistrationId],
+    );
+    const row = rows[0];
+    if (!row) return;
+    if (row.pan) {
+      await this.assertGstinsMatchPan(client, row.pan, [number]);
+      return;
+    }
+    await this.assertGstinsMatchPan(client, null, [...row.others, number]);
+    const read = readGstin(number);
+    if (!read.valid || !read.pan) return;
+    const taken = await client.query(`SELECT 1 FROM hsdg.client_holding('pan', $1)`, [read.pan]);
+    if ((taken.rowCount ?? 0) > 0) return;
+    await client.query(
+      `UPDATE hsdg.entities SET pan = $1, version = version + 1 WHERE id = $2 AND pan IS NULL`,
+      [read.pan, entityId],
+    );
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.pan_set_from_gstin',
+      objectType: 'entity',
+      objectId: entityId,
+      after: { pan: read.pan, gstin: read.gstin },
+    });
+  }
+
+  /** A client's PAN may change only when none of its active GSTINs is for another PAN. */
+  private async assertPanFitsGstins(client: PoolClient, entityId: string, pan: string) {
+    const want = cleanPan(pan);
+    const { rows } = await client.query<{ registration_number: string }>(
+      `SELECT registration_number FROM hsdg.entity_registrations
+        WHERE entity_id = $1 AND registration_type = 'gstin' AND status = 'active'
+        ORDER BY registration_number`,
+      [entityId],
+    );
+    const clash = rows
+      .map((r) => r.registration_number)
+      .filter((n) => {
+        const read = readGstin(n);
+        return read.pan !== null && read.pan !== want;
+      });
+    if (clash.length === 0) return;
+    throw new UnprocessableEntityException({
+      code: TAX_ID_ERROR.panGstinMismatch,
+      message: `Remove or move GSTIN${clash.length > 1 ? 's' : ''} ${clash.join(' and ')} first: ${clash.length > 1 ? 'they are' : 'it is'} for another PAN.`,
+      expected: want,
+      actual: readGstin(clash[0]).pan,
+    });
   }
 
   /** A PAN is one legal entity: if another client has it, say which (409 duplicate_client). */
@@ -1872,6 +2023,10 @@ export function translatePgError(err: unknown): Error {
   if (e.code === '23001') {
     return new ConflictException(e.message ?? 'This record is still in use.');
   }
+  if (e.code === '23514' && e.constraint === 'registration_pan_mismatch')
+    return new UnprocessableEntityException({ code: 'PAN_GSTIN_MISMATCH', message: e.message });
+  if (e.code === '23514' && e.constraint === 'entity_pan_gstin_mismatch')
+    return new UnprocessableEntityException({ code: 'PAN_GSTIN_MISMATCH', message: e.message });
   if (e.code === '23514')
     return new BadRequestException('A value violates a constraint (check the format).');
   // new row violates row-level security policy — writing outside your office.

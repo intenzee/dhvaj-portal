@@ -688,6 +688,11 @@ export function clientsOfWorkbook(
     c.pan ??= pan;
     c.sources.push({ sheet: line.sheet, row: line.row });
     if (!line.name) fail(c, `Row ${line.row} has no client name.`);
+    if (validGstin && isValidPan(line.pan) && line.pan !== panOfGstin(gstin))
+      fail(
+        c,
+        `Row ${line.row}: GSTIN ${gstin} is for PAN ${panOfGstin(gstin)}, but the row's PAN is ${line.pan}.`,
+      );
     if (gstin && !validGstin)
       fail(
         c,
