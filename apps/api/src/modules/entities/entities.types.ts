@@ -23,6 +23,7 @@ import type {
   RelationshipType,
   SecurityType,
   EntityTypeSource,
+  ClientBranch,
 } from '@hsdg/contracts';
 
 export interface EntityTypeRecord {
@@ -51,6 +52,8 @@ export interface RegistrationRecord {
   verifiedBy: string | null;
   verifiedAt: string | null;
   documentRef: string | null;
+  /** The office (CM-6) this registration is of; null = the whole client. */
+  branchId: string | null;
 }
 
 export interface ContactRecord {
@@ -65,6 +68,7 @@ export interface ContactRecord {
   contactType: ContactType | null;
   isPortalUser: boolean;
   portalRole: string | null;
+  branchId: string | null;
 }
 
 /** Year-wise financial facts (§16/§17). Append-only: one current row per FY. */
@@ -121,6 +125,8 @@ export interface EntitySummary {
   parentEntityId: string | null;
   incorporationDate: string | null;
   registrationCount: number;
+  /** Live offices (CM-6); 0 = not set up. */
+  branchCount: number;
   primaryContactName: string | null;
   /** Progressive-completion signal (§5/§27/§28); absence is never "N/A". */
   missingInfo: MissingInfoItem[];
@@ -137,6 +143,7 @@ export interface AddressRecord {
   pincode: string | null;
   country: string;
   isPrimary: boolean;
+  branchId: string | null;
 }
 
 export interface RelationshipRecord {
@@ -217,6 +224,8 @@ export interface EntityDetail extends EntitySummary {
   entityTypeSource: EntityTypeSource;
   entityTypeSetBy: string | null;
   entityTypeSetAt: string | null;
+  /** Live and closed offices (CM-6); head office first. */
+  branches: ClientBranch[];
 }
 
 export interface DuplicateCandidate {

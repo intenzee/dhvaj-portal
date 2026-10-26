@@ -9,6 +9,7 @@ import {
 import type { PoolClient, QueryResult } from 'pg';
 import {
   ENTITY_STATUS,
+  GST_STATES,
   MISSING_INFO_LABEL,
   PENDING_REGISTRATION_STREAMS,
   REGULATORY_PROFILE_STATUS,
@@ -22,6 +23,7 @@ import {
   type EntityTypeSource,
   panFromGstins,
   readGstin,
+  officeLabel,
   type ContactType,
   type DuplicateClientConflict,
   type MissingInfoCode,
@@ -112,6 +114,8 @@ const ENTITY_SUMMARY_SELECT = `
          e.business_description, e.act_manufacturing, e.act_trading, e.act_services,
          e.act_import, e.act_export, e.act_ecommerce, e.act_regulated,
          (SELECT count(*) FROM hsdg.entity_registrations r WHERE r.entity_id = e.id) AS registration_count,
+         (SELECT count(*) FROM hsdg.entity_branches b
+            WHERE b.entity_id = e.id AND b.archived_at IS NULL) AS branch_count,
          (SELECT ec.full_name FROM hsdg.entity_contacts ec
             WHERE ec.entity_id = e.id AND ec.is_primary LIMIT 1) AS primary_contact_name,
          ${missingInfoSql('e', 'et.category')} AS missing_info
@@ -144,6 +148,7 @@ interface SummaryRow {
   type_category: string;
   parent_entity_id: string | null;
   registration_count: string;
+  branch_count?: string;
   primary_contact_name: string | null;
   missing_info: MissingInfoCode[];
 }
@@ -262,6 +267,9 @@ export class EntitiesService {
         `SELECT sub.*,
                 (SELECT count(*) FROM hsdg.entity_registrations r WHERE r.entity_id = sub.id)
                   AS registration_count,
+                (SELECT count(*) FROM hsdg.entity_branches b
+                   WHERE b.entity_id = sub.id AND b.archived_at IS NULL)
+                  AS branch_count,
                 (SELECT ec.full_name FROM hsdg.entity_contacts ec
                    WHERE ec.entity_id = sub.id AND ec.is_primary LIMIT 1)
                   AS primary_contact_name,
@@ -289,6 +297,11 @@ export class EntitiesService {
 
   async getEntityById(ctx: RlsContext, id: string): Promise<EntityDetail | null> {
     return this.db.withRlsContext(ctx, (client) => this.selectDetail(client, id));
+  }
+
+  /** The detail inside the caller's transaction (offices, CM-6). */
+  async detailWith(client: PoolClient, id: string): Promise<EntityDetail | null> {
+    return this.selectDetail(client, id);
   }
 
   async checkDuplicates(
@@ -504,7 +517,8 @@ export class EntitiesService {
       const source = input.entityTypeSource ?? ENTITY_TYPE_SOURCE.manual;
       // A type set by hand on Client 360 beats the PAN and any import (CM-3).
       const keepManual =
-        source !== ENTITY_TYPE_SOURCE.manual && before.entityTypeSource === ENTITY_TYPE_SOURCE.manual;
+        source !== ENTITY_TYPE_SOURCE.manual &&
+        before.entityTypeSource === ENTITY_TYPE_SOURCE.manual;
       if (!keepManual) {
         const pan = input.pan !== undefined ? input.pan : before.pan;
         if (
@@ -711,6 +725,56 @@ export class EntitiesService {
   }
 
   /** addRegistration inside the caller's transaction (the client import). */
+  /**
+   * A GSTIN added to a client that already has offices (CM-6) gets an office
+   * of its own, named for the place or its state; a client without offices is
+   * left for "Set up offices". Returns the office id, or null.
+   */
+  async officeForGstinWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    gstin: string,
+    place: string | null,
+  ): Promise<string | null> {
+    const { rows } = await client.query<{
+      reg_id: string | null;
+      branch_id: string | null;
+      labels: string[] | null;
+    }>(
+      `SELECT r.id AS reg_id, r.branch_id,
+              (SELECT array_agg(lower(b.label)) FROM hsdg.entity_branches b
+                WHERE b.entity_id = $1 AND b.archived_at IS NULL) AS labels
+         FROM (SELECT 1) one
+         LEFT JOIN hsdg.entity_registrations r
+           ON r.entity_id = $1 AND r.registration_type = 'gstin' AND r.registration_number = $2`,
+      [entityId, gstin],
+    );
+    const row = rows[0];
+    if (!row?.reg_id || row.branch_id || !row.labels?.length) return null;
+    const stateCode = readGstin(gstin).stateCode;
+    const base = officeLabel(place, stateCode ? (GST_STATES[stateCode] ?? null) : null);
+    let label = base;
+    for (let n = 2; row.labels.includes(label.toLowerCase()); n += 1) label = `${base} ${n}`;
+    const ins = await client.query<{ id: string }>(
+      `INSERT INTO hsdg.entity_branches (entity_id, label, state_code, created_by)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [entityId, label, stateCode, ctx.userId],
+    );
+    const branchId = ins.rows[0]!.id;
+    await client.query(`UPDATE hsdg.entity_registrations SET branch_id = $1 WHERE id = $2`, [
+      branchId,
+      row.reg_id,
+    ]);
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.branch_added',
+      objectType: 'entity',
+      objectId: entityId,
+      after: { id: branchId, label, stateCode, gstin },
+    });
+    return branchId;
+  }
+
   async addRegistrationWith(
     client: PoolClient,
     ctx: RlsContext,
@@ -1298,7 +1362,13 @@ export class EntitiesService {
       expected,
       actual,
       ...(holder
-        ? { holder: { id: holder.entity_id, entityCode: holder.entity_code, legalName: holder.legal_name } }
+        ? {
+            holder: {
+              id: holder.entity_id,
+              entityCode: holder.entity_code,
+              legalName: holder.legal_name,
+            },
+          }
         : {}),
     });
   }
@@ -1548,12 +1618,27 @@ export class EntitiesService {
       verified_by: string | null;
       verified_at: string | null;
       document_ref: string | null;
+      branch_id: string | null;
     }>(
       `SELECT id, registration_type, registration_number, state_code, status, valid_from,
               valid_to, jurisdiction, registration_date, issuing_authority, source,
-              is_principal, applicability, verified, verified_by, verified_at, document_ref
+              is_principal, applicability, verified, verified_by, verified_at, document_ref,
+              branch_id
        FROM hsdg.entity_registrations WHERE entity_id = $1
        ORDER BY registration_type, is_principal DESC`,
+      [id],
+    );
+    const branches = await client.query<{
+      id: string;
+      label: string;
+      state_code: string | null;
+      is_head_office: boolean;
+      archived_at: string | null;
+      version: number;
+    }>(
+      `SELECT id, label, state_code, is_head_office, archived_at, version
+         FROM hsdg.entity_branches WHERE entity_id = $1
+        ORDER BY archived_at NULLS FIRST, is_head_office DESC, lower(label)`,
       [id],
     );
     const typeSource = await client.query<{
@@ -1578,9 +1663,10 @@ export class EntitiesService {
       contact_type: ContactType | null;
       is_portal_user: boolean;
       portal_role: string | null;
+      branch_id: string | null;
     }>(
       `SELECT id, full_name, designation, email, phone, is_primary, is_signatory,
-              department, contact_type, is_portal_user, portal_role
+              department, contact_type, is_portal_user, portal_role, branch_id
        FROM hsdg.entity_contacts WHERE entity_id = $1 ORDER BY is_primary DESC, full_name`,
       [id],
     );
@@ -1594,8 +1680,8 @@ export class EntitiesService {
        ORDER BY financial_year DESC, is_current DESC, created_at DESC`,
       [id],
     );
-    const addresses = await client.query<AddressRow>(
-      `SELECT id, address_type, line1, line2, city, state, pincode, country, is_primary
+    const addresses = await client.query<AddressRow & { branch_id: string | null }>(
+      `SELECT id, address_type, line1, line2, city, state, pincode, country, is_primary, branch_id
        FROM hsdg.entity_addresses WHERE entity_id = $1 ORDER BY is_primary DESC, address_type`,
       [id],
     );
@@ -1676,6 +1762,7 @@ export class EntitiesService {
         verifiedBy: r.verified_by,
         verifiedAt: r.verified_at,
         documentRef: r.document_ref,
+        branchId: r.branch_id,
       })),
       contacts: contacts.rows.map((c) => ({
         id: c.id,
@@ -1689,6 +1776,7 @@ export class EntitiesService {
         contactType: c.contact_type,
         isPortalUser: c.is_portal_user,
         portalRole: c.portal_role,
+        branchId: c.branch_id,
       })),
       financialProfiles: fins.rows.map(mapFinancial),
       addresses: addresses.rows.map((a) => ({
@@ -1701,6 +1789,7 @@ export class EntitiesService {
         pincode: a.pincode,
         country: a.country,
         isPrimary: a.is_primary,
+        branchId: a.branch_id,
       })),
       relationships: rels.rows.map((r) => ({
         id: r.id,
@@ -1756,6 +1845,14 @@ export class EntitiesService {
       entityTypeSource: typeSource.rows[0]?.entity_type_source ?? ENTITY_TYPE_SOURCE.legacy,
       entityTypeSetBy: typeSource.rows[0]?.set_by_name ?? null,
       entityTypeSetAt: typeSource.rows[0]?.entity_type_set_at ?? null,
+      branches: branches.rows.map((b) => ({
+        id: b.id,
+        label: b.label,
+        stateCode: b.state_code,
+        isHeadOffice: b.is_head_office,
+        archivedAt: b.archived_at,
+        version: b.version,
+      })),
     };
     return detail;
   }
@@ -2067,6 +2164,7 @@ function mapSummary(row: SummaryRow): EntitySummary {
     parentEntityId: row.parent_entity_id,
     incorporationDate: row.incorporation_date,
     registrationCount: Number(row.registration_count),
+    branchCount: Number(row.branch_count ?? 0),
     primaryContactName: row.primary_contact_name,
     missingInfo: row.missing_info.map((code) => ({
       code,

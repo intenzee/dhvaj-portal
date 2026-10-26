@@ -21,6 +21,7 @@ import { MISSING_FILTER_OPTIONS, MissingDataMarker } from '@/components/entities
 import { ExportClientMasterButton } from '@/components/entities/client-master';
 import { PossibleDuplicatesList } from '@/components/entities/duplicate-clients';
 import { useDuplicates } from '@/components/entities/merge-clients-modal';
+import { OfficesToCombineList, useBranchCandidates } from '@/components/entities/offices-review';
 
 const PAGE_SIZE = 25;
 
@@ -37,7 +38,19 @@ const columns: ColumnDef<EntityRow, unknown>[] = [
     header: 'PAN',
     cell: ({ row }) => row.original.pan ?? <span className="text-ink-faint">—</span>,
   },
-  { header: 'Registrations', cell: ({ row }) => row.original.registrationCount },
+  {
+    header: 'Registrations',
+    cell: ({ row }) => (
+      <span className="flex items-center gap-1.5">
+        {row.original.registrationCount}
+        {(row.original.branchCount ?? 0) > 1 && (
+          <span className="rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-ink-muted">
+            {row.original.branchCount} offices
+          </span>
+        )}
+      </span>
+    ),
+  },
   {
     header: 'Missing data',
     cell: ({ row }) => <MissingDataMarker items={row.original.missingInfo} />,
@@ -52,9 +65,11 @@ function EntitiesInner(): JSX.Element {
   const [offset, setOffset] = useState(0);
   const [missing, setMissing] = useState<MissingFilter | ''>('');
   const [sections, setSectionsUrl] = useUrlSections();
-  const [view, setView] = useState<'all' | 'duplicates'>('all');
+  const [view, setView] = useState<'all' | 'duplicates' | 'offices'>('all');
   const dupes = useDuplicates();
   const dupeCount = dupes.data?.length ?? 0;
+  const offices = useBranchCandidates();
+  const officeCount = offices.data?.length ?? 0;
 
   const onSearch = (v: string): void => {
     setSearch(v);
@@ -108,7 +123,7 @@ function EntitiesInner(): JSX.Element {
         }
       />
 
-      {(dupeCount > 0 || view === 'duplicates') && (
+      {(dupeCount > 0 || officeCount > 0 || view !== 'all') && (
         <div
           role="tablist"
           aria-label="Clients view"
@@ -118,6 +133,7 @@ function EntitiesInner(): JSX.Element {
             [
               ['all', 'All clients'],
               ['duplicates', `Possible duplicates (${dupeCount})`],
+              ['offices', `Offices to combine (${officeCount})`],
             ] as const
           ).map(([v, label]) => (
             <button
@@ -140,6 +156,8 @@ function EntitiesInner(): JSX.Element {
 
       {view === 'duplicates' ? (
         <PossibleDuplicatesList />
+      ) : view === 'offices' ? (
+        <OfficesToCombineList />
       ) : (
         <>
           <SectionChips value={sections} onChange={setSections} className="mb-3" />

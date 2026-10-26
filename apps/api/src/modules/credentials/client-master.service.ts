@@ -613,6 +613,14 @@ export class ClientMasterService {
       for (const reg of r.newRegs) {
         await this.entities.addRegistrationWith(client, ctx, entityId!, reg);
         tally.registrationsAdded += 1;
+        if (reg.registrationType === 'gstin')
+          await this.entities.officeForGstinWith(
+            client,
+            ctx,
+            entityId!,
+            reg.registrationNumber,
+            r.src.legalName ? (parseClientName(r.src.legalName).place?.text ?? null) : null,
+          );
       }
       for (const [kind, op] of [
         ['contact', r.contactOp],
@@ -1118,7 +1126,9 @@ class RowPlanner {
       change('Client', null, `New, in office ${base.officeCode}`),
     ];
     if (fromPan && type && typed && typed.slug !== fromPan.slug)
-      changes.push(change('Firm type', `Sheet said ${typed.name}`, `${type.name} (${fromPan.reason})`));
+      changes.push(
+        change('Firm type', `Sheet said ${typed.name}`, `${type.name} (${fromPan.reason})`),
+      );
     else if (fromPan && type && !typed)
       changes.push(change('Firm type', null, `${type.name} (${fromPan.reason})`));
     const plannedName = withCompanySuffix(src.legalName, typeSlug);
@@ -1325,7 +1335,16 @@ class RowPlanner {
         source: 'client',
       });
       principal = false;
-      changes.push(change('GSTIN', null, g));
+      const states = new Set(ofType('gstin').map((r) => r.registration_number.slice(0, 2)));
+      changes.push(
+        change(
+          'GSTIN',
+          null,
+          states.size && !states.has(g.slice(0, 2))
+            ? `${g} (another state: an office of this client)`
+            : g,
+        ),
+      );
     }
     if (src.tan && !has(src.tan)) {
       const other = ofType('tan')[0];

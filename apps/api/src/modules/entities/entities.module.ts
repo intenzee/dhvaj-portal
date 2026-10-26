@@ -3,6 +3,7 @@ import { AuditModule } from '../audit/audit.module';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { EntitiesService } from './entities.service';
 import { ClientMergeService } from './client-merge.service';
+import { BranchesService } from './branches.service';
 import { EntitiesController } from './entities.controller';
 import { EntityTypesController } from './entity-types.controller';
 import { IndustriesController } from './industries.controller';
@@ -20,7 +21,7 @@ import { StreamRegistrationController } from './stream-registration.controller';
     IndustriesController,
     StreamRegistrationController,
   ],
-  providers: [EntitiesService, ClientMergeService],
+  providers: [EntitiesService, ClientMergeService, BranchesService],
   exports: [EntitiesService],
 })
 export class EntitiesModule {}
