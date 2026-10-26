@@ -14,6 +14,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
+  type BranchCandidate,
   type DuplicatePair,
   type MergeClientsResult,
   type MergePreview,
@@ -24,6 +25,8 @@ import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { EntitiesService } from './entities.service';
 import { ClientMergeService } from './client-merge.service';
+import { BranchesService } from './branches.service';
+import { AddBranchDto, CombineBranchesDto, UpdateBranchDto } from './dto/branches.dto';
 import { DismissDuplicateDto, MergeClientsDto } from './dto/merge-clients.dto';
 import type {
   DuplicateCandidate,
@@ -50,6 +53,7 @@ export class EntitiesController {
   constructor(
     private readonly entities: EntitiesService,
     private readonly merges: ClientMergeService,
+    private readonly branches: BranchesService,
   ) {}
 
   @Get()
@@ -116,6 +120,66 @@ export class EntitiesController {
     @Body() dto: DismissDuplicateDto,
   ): Promise<void> {
     await this.merges.dismiss(rlsContextFromPrincipal(principal), dto.aId, dto.bId, dto.note);
+  }
+
+  @Get('branch-candidates')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Clients that should be one client with offices (CM-6)',
+    description:
+      'Live clients of one PAN registered in different states or named the same but for a place, and single clients with two or more GSTINs and no offices yet. Pairs marked "not offices of one business" are left out.',
+  })
+  branchCandidates(@CurrentPrincipal() principal: Principal): Promise<BranchCandidate[]> {
+    return this.branches.candidates(rlsContextFromPrincipal(principal));
+  }
+
+  @Post('branch-candidates/dismiss')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Mark two clients as not offices of one business (audited)' })
+  async dismissBranchCandidate(
+    @CurrentPrincipal() principal: Principal,
+    @Body() dto: DismissDuplicateDto,
+  ): Promise<void> {
+    await this.branches.dismiss(rlsContextFromPrincipal(principal), dto.aId, dto.bId);
+  }
+
+  @Post(':id/combine-branches')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Combine clients of one PAN into this one, with offices (audited)',
+    description:
+      'Each other client is merged in; each GSTIN becomes an office; the kept client may take a new name. One transaction.',
+  })
+  combineBranches(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: CombineBranchesDto,
+  ): Promise<EntityDetail> {
+    return this.branches.combine(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Post(':id/branches')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Add an office to a client (audited)' })
+  addBranch(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AddBranchDto,
+  ): Promise<EntityDetail> {
+    return this.branches.add(rlsContextFromPrincipal(principal), id, dto);
+  }
+
+  @Patch(':id/branches/:branchId')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: 'Rename, make head office, close or reopen an office (audited)' })
+  updateBranch(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('branchId', new ParseUUIDPipe()) branchId: string,
+    @Body() dto: UpdateBranchDto,
+  ): Promise<EntityDetail> {
+    return this.branches.update(rlsContextFromPrincipal(principal), id, branchId, dto);
   }
 
   @Get(':id/merge-preview')

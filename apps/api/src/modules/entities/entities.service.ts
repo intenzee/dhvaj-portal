@@ -4,15 +4,26 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { PoolClient, QueryResult } from 'pg';
 import {
   ENTITY_STATUS,
+  GST_STATES,
   MISSING_INFO_LABEL,
   PENDING_REGISTRATION_STREAMS,
   REGULATORY_PROFILE_STATUS,
   ROLE,
   STREAM_REGISTRATION_TYPES,
+  ENTITY_TYPE_SOURCE,
+  TAX_ID_ERROR,
+  cleanPan,
+  firmTypeFromIds,
+  typeAgreesWithPan,
+  type EntityTypeSource,
+  panFromGstins,
+  readGstin,
+  officeLabel,
   type ContactType,
   type DuplicateClientConflict,
   type MissingInfoCode,
@@ -104,6 +115,8 @@ const ENTITY_SUMMARY_SELECT = `
          e.business_description, e.act_manufacturing, e.act_trading, e.act_services,
          e.act_import, e.act_export, e.act_ecommerce, e.act_regulated,
          (SELECT count(*) FROM hsdg.entity_registrations r WHERE r.entity_id = e.id) AS registration_count,
+         (SELECT count(*) FROM hsdg.entity_branches b
+            WHERE b.entity_id = e.id AND b.archived_at IS NULL) AS branch_count,
          (SELECT ec.full_name FROM hsdg.entity_contacts ec
             WHERE ec.entity_id = e.id AND ec.is_primary LIMIT 1) AS primary_contact_name,
          ${missingInfoSql('e', 'et.category')} AS missing_info,
@@ -137,6 +150,7 @@ interface SummaryRow {
   type_category: string;
   parent_entity_id: string | null;
   registration_count: string;
+  branch_count?: string;
   primary_contact_name: string | null;
   missing_info: MissingInfoCode[];
   team_id: string | null;
@@ -263,6 +277,9 @@ export class EntitiesService {
         `SELECT sub.*,
                 (SELECT count(*) FROM hsdg.entity_registrations r WHERE r.entity_id = sub.id)
                   AS registration_count,
+                (SELECT count(*) FROM hsdg.entity_branches b
+                   WHERE b.entity_id = sub.id AND b.archived_at IS NULL)
+                  AS branch_count,
                 (SELECT ec.full_name FROM hsdg.entity_contacts ec
                    WHERE ec.entity_id = sub.id AND ec.is_primary LIMIT 1)
                   AS primary_contact_name,
@@ -291,6 +308,11 @@ export class EntitiesService {
 
   async getEntityById(ctx: RlsContext, id: string): Promise<EntityDetail | null> {
     return this.db.withRlsContext(ctx, (client) => this.selectDetail(client, id));
+  }
+
+  /** The detail inside the caller's transaction (offices, CM-6). */
+  async detailWith(client: PoolClient, id: string): Promise<EntityDetail | null> {
+    return this.selectDetail(client, id);
   }
 
   async checkDuplicates(
@@ -359,7 +381,29 @@ export class EntitiesService {
   ): Promise<EntityDetail> {
     const typeId = await this.resolveTypeId(client, input.typeSlug);
     const officeId = await this.resolveOfficeId(client, input.officeCode);
+    const gstins = (input.registrations ?? [])
+      .filter((r) => r.registrationType === 'gstin' && (r.status ?? 'active') === 'active')
+      .map((r) => r.registrationNumber);
+    // A client with no PAN takes it from its first GSTIN (CM-1).
+    const panFromGstin = !input.pan ? panFromGstins(gstins) : null;
+    if (panFromGstin) {
+      const taken = await client.query(`SELECT 1 FROM hsdg.client_holding('pan', $1)`, [
+        panFromGstin,
+      ]);
+      if ((taken.rowCount ?? 0) === 0) input = { ...input, pan: panFromGstin };
+    }
+    await this.assertGstinsMatchPan(client, input.pan ?? null, gstins);
     if (input.pan) await this.assertPanFree(client, null, input.pan);
+    // The type's source (CM-3): the PAN's when it is what the PAN says, else the person's.
+    const panType = firmTypeFromIds({
+      pan: input.pan,
+      gstins,
+      nameOrTypedType: input.legalName,
+      hasBusinessRegistration: gstins.length > 0,
+    });
+    const typeSource: EntityTypeSource =
+      input.entityTypeSource ??
+      (panType?.slug === input.typeSlug ? ENTITY_TYPE_SOURCE.pan : ENTITY_TYPE_SOURCE.manual);
 
     let entityId: string;
     try {
@@ -408,6 +452,14 @@ export class EntitiesService {
         ],
       );
       entityId = rows[0]!.id;
+      await client.query(
+        `UPDATE hsdg.entities
+            SET entity_type_source = $2,
+                entity_type_set_by = CASE WHEN $2 = 'manual' THEN $3::uuid END,
+                entity_type_set_at = now()
+          WHERE id = $1`,
+        [entityId, typeSource, ctx.userId],
+      );
 
       for (const reg of input.registrations ?? []) {
         await this.insertRegistration(client, entityId, reg);
@@ -471,15 +523,59 @@ export class EntitiesService {
     if (input.displayName !== undefined) set('display_name', input.displayName);
     if (input.tradeName !== undefined) set('trade_name', input.tradeName);
     if (input.shortName !== undefined) set('short_name', input.shortName);
-    if (input.typeSlug !== undefined) {
-      set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
+    let typeChanged = false;
+    if (input.typeSlug !== undefined && input.typeSlug !== before.typeSlug) {
+      const source = input.entityTypeSource ?? ENTITY_TYPE_SOURCE.manual;
+      // A type set by hand on Client 360 beats the PAN and any import (CM-3).
+      const keepManual =
+        source !== ENTITY_TYPE_SOURCE.manual &&
+        before.entityTypeSource === ENTITY_TYPE_SOURCE.manual;
+      if (!keepManual) {
+        const pan = input.pan !== undefined ? input.pan : before.pan;
+        if (
+          source === ENTITY_TYPE_SOURCE.manual &&
+          !input.typeMismatchAcknowledged &&
+          !typeAgreesWithPan(input.typeSlug, pan)
+        ) {
+          const says = firmTypeFromIds({
+            pan,
+            nameOrTypedType: input.legalName ?? before.legalName,
+            hasBusinessRegistration: before.registrations.some(
+              (r) => r.registrationType === 'gstin' && r.status === 'active',
+            ),
+          });
+          throw new UnprocessableEntityException({
+            code: TAX_ID_ERROR.typePanMismatch,
+            message: `${says?.reason ?? `PAN ${pan} says another type.`} Save this type anyway?`,
+            expected: says?.slug ?? null,
+            actual: input.typeSlug,
+          });
+        }
+        set('entity_type_id', await this.resolveTypeId(client, input.typeSlug));
+        set('entity_type_source', source);
+        set('entity_type_set_by', source === ENTITY_TYPE_SOURCE.manual ? ctx.userId : null);
+        sets.push('entity_type_set_at = now()');
+        typeChanged = true;
+      }
+    } else if (
+      input.typeSlug !== undefined &&
+      input.entityTypeSource === ENTITY_TYPE_SOURCE.manual &&
+      before.entityTypeSource !== ENTITY_TYPE_SOURCE.manual
+    ) {
+      // The same type confirmed by hand: record it as the person's.
+      set('entity_type_source', ENTITY_TYPE_SOURCE.manual);
+      set('entity_type_set_by', ctx.userId);
+      sets.push('entity_type_set_at = now()');
     }
     if (input.officeCode !== undefined) {
       set('home_office_id', await this.resolveOfficeId(client, input.officeCode));
     }
     if (input.clientId !== undefined) set('client_id', input.clientId);
     if (input.pan !== undefined) {
-      if (input.pan) await this.assertPanFree(client, id, input.pan);
+      if (input.pan) {
+        await this.assertPanFree(client, id, input.pan);
+        await this.assertPanFitsGstins(client, id, input.pan);
+      }
       set('pan', input.pan);
     }
     if (input.parentEntityId !== undefined) set('parent_entity_id', input.parentEntityId);
@@ -536,6 +632,8 @@ export class EntitiesService {
         'Entity was modified by someone else. Refresh and retry (stale version).',
       );
     }
+    // The type decides which compliances apply.
+    if (typeChanged) await this.flagReassessmentIfComplete(client, id);
 
     const after = await this.selectDetail(client, id);
     await this.audit.recordWith(client, ctx, {
@@ -638,6 +736,56 @@ export class EntitiesService {
   }
 
   /** addRegistration inside the caller's transaction (the client import). */
+  /**
+   * A GSTIN added to a client that already has offices (CM-6) gets an office
+   * of its own, named for the place or its state; a client without offices is
+   * left for "Set up offices". Returns the office id, or null.
+   */
+  async officeForGstinWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    gstin: string,
+    place: string | null,
+  ): Promise<string | null> {
+    const { rows } = await client.query<{
+      reg_id: string | null;
+      branch_id: string | null;
+      labels: string[] | null;
+    }>(
+      `SELECT r.id AS reg_id, r.branch_id,
+              (SELECT array_agg(lower(b.label)) FROM hsdg.entity_branches b
+                WHERE b.entity_id = $1 AND b.archived_at IS NULL) AS labels
+         FROM (SELECT 1) one
+         LEFT JOIN hsdg.entity_registrations r
+           ON r.entity_id = $1 AND r.registration_type = 'gstin' AND r.registration_number = $2`,
+      [entityId, gstin],
+    );
+    const row = rows[0];
+    if (!row?.reg_id || row.branch_id || !row.labels?.length) return null;
+    const stateCode = readGstin(gstin).stateCode;
+    const base = officeLabel(place, stateCode ? (GST_STATES[stateCode] ?? null) : null);
+    let label = base;
+    for (let n = 2; row.labels.includes(label.toLowerCase()); n += 1) label = `${base} ${n}`;
+    const ins = await client.query<{ id: string }>(
+      `INSERT INTO hsdg.entity_branches (entity_id, label, state_code, created_by)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [entityId, label, stateCode, ctx.userId],
+    );
+    const branchId = ins.rows[0]!.id;
+    await client.query(`UPDATE hsdg.entity_registrations SET branch_id = $1 WHERE id = $2`, [
+      branchId,
+      row.reg_id,
+    ]);
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.branch_added',
+      objectType: 'entity',
+      objectId: entityId,
+      after: { id: branchId, label, stateCode, gstin },
+    });
+    return branchId;
+  }
+
   async addRegistrationWith(
     client: PoolClient,
     ctx: RlsContext,
@@ -645,6 +793,8 @@ export class EntitiesService {
     input: RegistrationInput,
   ): Promise<EntityDetail> {
     return this.mutateChildWith(client, ctx, entityId, 'entity.registration_added', async () => {
+      if (input.registrationType === 'gstin' && (input.status ?? 'active') === 'active')
+        await this.guardGstinForEntity(client, ctx, entityId, input.registrationNumber, null);
       await this.insertRegistration(client, entityId, input);
       await this.flagReassessmentIfComplete(client, entityId);
       await this.regenerateCalendars(client, entityId);
@@ -742,6 +892,14 @@ export class EntitiesService {
           [registrationId, entityId],
         );
         const type = current.rows[0]?.registration_type;
+        if (type === 'gstin')
+          await this.guardGstinForEntity(
+            client,
+            ctx,
+            entityId,
+            input.registrationNumber,
+            registrationId,
+          );
         if (type) {
           await this.withRegistrationNumber(
             client,
@@ -1168,6 +1326,133 @@ export class EntitiesService {
     }
   }
 
+  /**
+   * A GSTIN carries its client's PAN (characters 3–12): one of another PAN
+   * belongs to another legal entity and is never saved (CM-1). 422
+   * PAN_GSTIN_MISMATCH, naming the client that holds that PAN if any.
+   */
+  private async assertGstinsMatchPan(
+    client: PoolClient,
+    pan: string | null,
+    gstins: string[],
+  ): Promise<void> {
+    const own = cleanPan(pan);
+    let first: string | null = own;
+    for (const number of gstins) {
+      const read = readGstin(number);
+      if (!read.pan) continue;
+      if (first && read.pan !== first) {
+        throw await this.panMismatch(client, read.gstin, first, read.pan, own !== null);
+      }
+      first ??= read.pan;
+    }
+  }
+
+  private async panMismatch(
+    client: PoolClient,
+    gstin: string,
+    expected: string,
+    actual: string,
+    againstPan: boolean,
+  ): Promise<UnprocessableEntityException> {
+    const { rows } = await client.query<{
+      entity_id: string;
+      entity_code: string;
+      legal_name: string;
+    }>(`SELECT entity_id, entity_code, legal_name FROM hsdg.client_holding('pan', $1)`, [actual]);
+    const holder = rows[0];
+    const lead = againstPan
+      ? `GSTIN ${gstin} is for PAN ${actual}, but the client's PAN is ${expected}.`
+      : `GSTIN ${gstin} is for PAN ${actual}, but the client's other GSTIN is for ${expected}. One client has one PAN.`;
+    const tail = holder
+      ? ` PAN ${actual} belongs to ${holder.legal_name} (${holder.entity_code}). Add this GSTIN there, or combine the two as offices.`
+      : '';
+    return new UnprocessableEntityException({
+      code: againstPan ? TAX_ID_ERROR.panGstinMismatch : TAX_ID_ERROR.gstinsDifferentPan,
+      message: lead + tail,
+      expected,
+      actual,
+      ...(holder
+        ? {
+            holder: {
+              id: holder.entity_id,
+              entityCode: holder.entity_code,
+              legalName: holder.legal_name,
+            },
+          }
+        : {}),
+    });
+  }
+
+  /**
+   * A GSTIN added to (or changed on) a client: its PAN must be the client's.
+   * A client with no PAN yet takes it from the GSTIN, audited as such.
+   */
+  private async guardGstinForEntity(
+    client: PoolClient,
+    ctx: RlsContext,
+    entityId: string,
+    number: string,
+    exceptRegistrationId: string | null,
+  ): Promise<void> {
+    const { rows } = await client.query<{ pan: string | null; others: string[] }>(
+      `SELECT e.pan,
+              COALESCE(array_agg(r.registration_number) FILTER (WHERE r.id IS NOT NULL), '{}') AS others
+         FROM hsdg.entities e
+         LEFT JOIN hsdg.entity_registrations r
+           ON r.entity_id = e.id AND r.registration_type = 'gstin' AND r.status = 'active'
+          AND r.id IS DISTINCT FROM $2::uuid
+        WHERE e.id = $1
+        GROUP BY e.pan`,
+      [entityId, exceptRegistrationId],
+    );
+    const row = rows[0];
+    if (!row) return;
+    if (row.pan) {
+      await this.assertGstinsMatchPan(client, row.pan, [number]);
+      return;
+    }
+    await this.assertGstinsMatchPan(client, null, [...row.others, number]);
+    const read = readGstin(number);
+    if (!read.valid || !read.pan) return;
+    const taken = await client.query(`SELECT 1 FROM hsdg.client_holding('pan', $1)`, [read.pan]);
+    if ((taken.rowCount ?? 0) > 0) return;
+    await client.query(
+      `UPDATE hsdg.entities SET pan = $1, version = version + 1 WHERE id = $2 AND pan IS NULL`,
+      [read.pan, entityId],
+    );
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.pan_set_from_gstin',
+      objectType: 'entity',
+      objectId: entityId,
+      after: { pan: read.pan, gstin: read.gstin },
+    });
+  }
+
+  /** A client's PAN may change only when none of its active GSTINs is for another PAN. */
+  private async assertPanFitsGstins(client: PoolClient, entityId: string, pan: string) {
+    const want = cleanPan(pan);
+    const { rows } = await client.query<{ registration_number: string }>(
+      `SELECT registration_number FROM hsdg.entity_registrations
+        WHERE entity_id = $1 AND registration_type = 'gstin' AND status = 'active'
+        ORDER BY registration_number`,
+      [entityId],
+    );
+    const clash = rows
+      .map((r) => r.registration_number)
+      .filter((n) => {
+        const read = readGstin(n);
+        return read.pan !== null && read.pan !== want;
+      });
+    if (clash.length === 0) return;
+    throw new UnprocessableEntityException({
+      code: TAX_ID_ERROR.panGstinMismatch,
+      message: `Remove or move GSTIN${clash.length > 1 ? 's' : ''} ${clash.join(' and ')} first: ${clash.length > 1 ? 'they are' : 'it is'} for another PAN.`,
+      expected: want,
+      actual: readGstin(clash[0]).pan,
+    });
+  }
+
   /** A PAN is one legal entity: if another client has it, say which (409 duplicate_client). */
   private async assertPanFree(client: PoolClient, entityId: string | null, pan: string) {
     const { rows } = await client.query<{ entity_id: string }>(
@@ -1344,12 +1629,37 @@ export class EntitiesService {
       verified_by: string | null;
       verified_at: string | null;
       document_ref: string | null;
+      branch_id: string | null;
     }>(
       `SELECT id, registration_type, registration_number, state_code, status, valid_from,
               valid_to, jurisdiction, registration_date, issuing_authority, source,
-              is_principal, applicability, verified, verified_by, verified_at, document_ref
+              is_principal, applicability, verified, verified_by, verified_at, document_ref,
+              branch_id
        FROM hsdg.entity_registrations WHERE entity_id = $1
        ORDER BY registration_type, is_principal DESC`,
+      [id],
+    );
+    const branches = await client.query<{
+      id: string;
+      label: string;
+      state_code: string | null;
+      is_head_office: boolean;
+      archived_at: string | null;
+      version: number;
+    }>(
+      `SELECT id, label, state_code, is_head_office, archived_at, version
+         FROM hsdg.entity_branches WHERE entity_id = $1
+        ORDER BY archived_at NULLS FIRST, is_head_office DESC, lower(label)`,
+      [id],
+    );
+    const typeSource = await client.query<{
+      entity_type_source: EntityTypeSource;
+      entity_type_set_at: string | null;
+      set_by_name: string | null;
+    }>(
+      `SELECT e.entity_type_source, e.entity_type_set_at, u.display_name AS set_by_name
+         FROM hsdg.entities e LEFT JOIN hsdg.users u ON u.id = e.entity_type_set_by
+        WHERE e.id = $1`,
       [id],
     );
     const contacts = await client.query<{
@@ -1364,9 +1674,10 @@ export class EntitiesService {
       contact_type: ContactType | null;
       is_portal_user: boolean;
       portal_role: string | null;
+      branch_id: string | null;
     }>(
       `SELECT id, full_name, designation, email, phone, is_primary, is_signatory,
-              department, contact_type, is_portal_user, portal_role
+              department, contact_type, is_portal_user, portal_role, branch_id
        FROM hsdg.entity_contacts WHERE entity_id = $1 ORDER BY is_primary DESC, full_name`,
       [id],
     );
@@ -1380,8 +1691,8 @@ export class EntitiesService {
        ORDER BY financial_year DESC, is_current DESC, created_at DESC`,
       [id],
     );
-    const addresses = await client.query<AddressRow>(
-      `SELECT id, address_type, line1, line2, city, state, pincode, country, is_primary
+    const addresses = await client.query<AddressRow & { branch_id: string | null }>(
+      `SELECT id, address_type, line1, line2, city, state, pincode, country, is_primary, branch_id
        FROM hsdg.entity_addresses WHERE entity_id = $1 ORDER BY is_primary DESC, address_type`,
       [id],
     );
@@ -1462,6 +1773,7 @@ export class EntitiesService {
         verifiedBy: r.verified_by,
         verifiedAt: r.verified_at,
         documentRef: r.document_ref,
+        branchId: r.branch_id,
       })),
       contacts: contacts.rows.map((c) => ({
         id: c.id,
@@ -1475,6 +1787,7 @@ export class EntitiesService {
         contactType: c.contact_type,
         isPortalUser: c.is_portal_user,
         portalRole: c.portal_role,
+        branchId: c.branch_id,
       })),
       financialProfiles: fins.rows.map(mapFinancial),
       addresses: addresses.rows.map((a) => ({
@@ -1487,6 +1800,7 @@ export class EntitiesService {
         pincode: a.pincode,
         country: a.country,
         isPrimary: a.is_primary,
+        branchId: a.branch_id,
       })),
       relationships: rels.rows.map((r) => ({
         id: r.id,
@@ -1539,6 +1853,17 @@ export class EntitiesService {
             mergedAt: merged.rows[0].merged_at,
           }
         : null,
+      entityTypeSource: typeSource.rows[0]?.entity_type_source ?? ENTITY_TYPE_SOURCE.legacy,
+      entityTypeSetBy: typeSource.rows[0]?.set_by_name ?? null,
+      entityTypeSetAt: typeSource.rows[0]?.entity_type_set_at ?? null,
+      branches: branches.rows.map((b) => ({
+        id: b.id,
+        label: b.label,
+        stateCode: b.state_code,
+        isHeadOffice: b.is_head_office,
+        archivedAt: b.archived_at,
+        version: b.version,
+      })),
     };
     return detail;
   }
@@ -1850,6 +2175,7 @@ function mapSummary(row: SummaryRow): EntitySummary {
     parentEntityId: row.parent_entity_id,
     incorporationDate: row.incorporation_date,
     registrationCount: Number(row.registration_count),
+    branchCount: Number(row.branch_count ?? 0),
     primaryContactName: row.primary_contact_name,
     missingInfo: row.missing_info.map((code) => ({
       code,
@@ -1884,6 +2210,10 @@ export function translatePgError(err: unknown): Error {
   if (e.code === '23001') {
     return new ConflictException(e.message ?? 'This record is still in use.');
   }
+  if (e.code === '23514' && e.constraint === 'registration_pan_mismatch')
+    return new UnprocessableEntityException({ code: 'PAN_GSTIN_MISMATCH', message: e.message });
+  if (e.code === '23514' && e.constraint === 'entity_pan_gstin_mismatch')
+    return new UnprocessableEntityException({ code: 'PAN_GSTIN_MISMATCH', message: e.message });
   if (e.code === '23514')
     return new BadRequestException('A value violates a constraint (check the format).');
   // new row violates row-level security policy — writing outside your office.

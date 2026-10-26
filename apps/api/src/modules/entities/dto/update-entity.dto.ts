@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -161,6 +162,13 @@ export class UpdateEntityDto {
   @ValidateIf((_o, v) => v !== null)
   @IsDateString()
   incorporationDate?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Save a firm type the PAN disagrees with, after the confirm prompt (CM-3).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  typeMismatchAcknowledged?: boolean;
 
   @ApiPropertyOptional({
     description: 'Expected version for optimistic concurrency (stale ⇒ 409).',

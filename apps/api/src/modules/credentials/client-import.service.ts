@@ -15,6 +15,7 @@ import {
   type ClientImportRow,
   returnPeriodFinancialYear,
   usernameHint,
+  withCompanySuffix,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -269,8 +270,9 @@ export class ClientImportService {
 
     if (c.action === CLIENT_IMPORT_ACTION.createClient) {
       const detail = await this.entities.createEntityWith(client, ctx, {
-        legalName: c.name,
+        legalName: withCompanySuffix(c.name, c.typeSlug),
         typeSlug: c.typeSlug!,
+        ...(c.typeGuessed ? { entityTypeSource: 'import' as const } : {}),
         officeCode,
         ...(c.pan ? { pan: c.pan } : {}),
         registrations: [

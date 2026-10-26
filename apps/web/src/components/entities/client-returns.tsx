@@ -148,18 +148,34 @@ export function ReturnsGrid({
 }
 
 /** On the client page: its GST return history, when the workbook had any. */
-export function ClientReturnsCard({ entityId }: { entityId: string }): JSX.Element | null {
+export function ClientReturnsCard({
+  entityId,
+  registrationIds,
+}: {
+  entityId: string;
+  /** One office's GSTINs (CM-6); omitted = every GSTIN of the client. */
+  registrationIds?: string[];
+}): JSX.Element | null {
   const q = useClientReturns(entityId);
-  if (!q.data || q.data.lines.length === 0) return null;
-  const { filed, notApplicable } = returnCounts(q.data.lines);
-  const updated = q.data.lines.reduce((a, l) => (l.updatedAt > a ? l.updatedAt : a), '');
+  const data =
+    q.data && registrationIds
+      ? {
+          ...q.data,
+          lines: q.data.lines.filter(
+            (l) => l.registrationId && registrationIds.includes(l.registrationId),
+          ),
+        }
+      : q.data;
+  if (!data || data.lines.length === 0) return null;
+  const { filed, notApplicable } = returnCounts(data.lines);
+  const updated = data.lines.reduce((a, l) => (l.updatedAt > a ? l.updatedAt : a), '');
   return (
     <Card id="gst-returns">
       <CardHeader>
         <CardTitle>GST returns filed</CardTitle>
       </CardHeader>
       <CardBody className="space-y-2">
-        <ReturnsGrid data={q.data} />
+        <ReturnsGrid data={data} />
         <p className="text-xs text-ink-faint">
           {filed} filed · {notApplicable} NA — as marked in the firm&rsquo;s GST sheet
           {updated && `, imported ${new Date(updated).toLocaleDateString('en-IN')}`}. The months of
