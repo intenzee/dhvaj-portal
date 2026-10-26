@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   NotFoundException,
@@ -10,11 +12,17 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  DATA_CHECKS,
   PERMISSION,
   type BranchCandidate,
+  type DataCheck,
+  type DataCheckApplyResult,
+  type DataCheckCount,
+  type DataCheckRow,
   type DuplicatePair,
   type MergeClientsResult,
   type MergePreview,
@@ -26,6 +34,8 @@ import { paginate } from '../../common/pagination/pagination.dto';
 import { EntitiesService } from './entities.service';
 import { ClientMergeService } from './client-merge.service';
 import { BranchesService } from './branches.service';
+import { DataChecksService } from './data-checks.service';
+import { ApplyDataCheckDto, DataCheckPageDto } from './dto/data-checks.dto';
 import { AddBranchDto, CombineBranchesDto, UpdateBranchDto } from './dto/branches.dto';
 import { DismissDuplicateDto, MergeClientsDto } from './dto/merge-clients.dto';
 import type {
@@ -54,6 +64,7 @@ export class EntitiesController {
     private readonly entities: EntitiesService,
     private readonly merges: ClientMergeService,
     private readonly branches: BranchesService,
+    private readonly dataChecks: DataChecksService,
   ) {}
 
   @Get()
@@ -120,6 +131,59 @@ export class EntitiesController {
     @Body() dto: DismissDuplicateDto,
   ): Promise<void> {
     await this.merges.dismiss(rlsContextFromPrincipal(principal), dto.aId, dto.bId, dto.note);
+  }
+
+  @Get('data-checks')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Clients breaking the CM-1 to CM-8 rules: a count per check (CM-9)',
+  })
+  dataCheckCounts(@CurrentPrincipal() principal: Principal): Promise<DataCheckCount[]> {
+    return this.dataChecks.counts(rlsContextFromPrincipal(principal));
+  }
+
+  @Get('data-checks/:check/csv')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: "One check's rows as CSV, for the partners (CM-9)" })
+  async dataCheckCsv(
+    @CurrentPrincipal() principal: Principal,
+    @Param('check') check: string,
+  ): Promise<StreamableFile> {
+    const csv = await this.dataChecks.csv(rlsContextFromPrincipal(principal), checkOf(check));
+    return new StreamableFile(Buffer.from(csv, 'utf8'), {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="data-check-${check}.csv"`,
+    });
+  }
+
+  @Get('data-checks/:check')
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({ summary: "One check's rows, with current and proposed values (CM-9)" })
+  dataCheckRows(
+    @CurrentPrincipal() principal: Principal,
+    @Param('check') check: string,
+    @Query() q: DataCheckPageDto,
+  ): Promise<Paginated<DataCheckRow>> {
+    return this.dataChecks.rows(rlsContextFromPrincipal(principal), checkOf(check), q.page);
+  }
+
+  @Post('data-checks/:check/apply')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSION.entityManage)
+  @ApiOperation({
+    summary: 'Apply the proposed fix to the reviewed clients (CM-9, audited)',
+    description:
+      'Each client is fixed in its own transaction through the form service methods; the response lists each result, and one failure never stops the rest.',
+  })
+  applyDataCheck(
+    @CurrentPrincipal() principal: Principal,
+    @Param('check') check: string,
+    @Body() dto: ApplyDataCheckDto,
+  ): Promise<DataCheckApplyResult[]> {
+    const c = checkOf(check);
+    if (c === 'client_without_team' && !principal.permissions.includes(PERMISSION.teamManage))
+      throw new ForbiddenException('Assigning client teams needs the team.manage permission.');
+    return this.dataChecks.apply(rlsContextFromPrincipal(principal), c, dto);
   }
 
   @Get('branch-candidates')
@@ -496,4 +560,10 @@ export class EntitiesController {
   ): Promise<EntityDetail> {
     return this.entities.removeRegulatoryAttribute(rlsContextFromPrincipal(principal), id, childId);
   }
+}
+
+/** A data check named in the path (CM-9). */
+function checkOf(raw: string): DataCheck {
+  if ((DATA_CHECKS as readonly string[]).includes(raw)) return raw as DataCheck;
+  throw new BadRequestException(`Unknown data check "${raw}".`);
 }
