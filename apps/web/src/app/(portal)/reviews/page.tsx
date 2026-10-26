@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
-import type { EngagementRow } from '@/lib/types';
+import { servicesLabel, type EngagementRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge } from '@/components/ui';
 import { DataTable } from '@/components/data-table';
 import { cn } from '@/lib/cn';
@@ -18,14 +18,20 @@ type Filter = 'all' | 'review' | 'signoff';
 function reviewState(e: EngagementRow): { label: string; tone: string } {
   if (e.isSignedOff) return { label: 'Signed off', tone: 'success' };
   if (e.openReviewPointCount > 0) return { label: 'Review points open', tone: 'warn' };
-  if (e.effectiveReviewModel.requiresEpSignoff) return { label: 'Awaiting EP sign-off', tone: 'info' };
+  if (e.effectiveReviewModel.requiresEpSignoff)
+    return { label: 'Awaiting EP sign-off', tone: 'info' };
   return { label: 'Manager completion', tone: 'neutral' };
 }
 
 const columns: ColumnDef<EngagementRow, unknown>[] = [
-  { header: 'Code', cell: ({ row }) => <span className="font-medium text-primary-700">{row.original.engagementCode}</span> },
+  {
+    header: 'Code',
+    cell: ({ row }) => (
+      <span className="font-medium text-primary-700">{row.original.engagementCode}</span>
+    ),
+  },
   { header: 'Client', accessorKey: 'entityName' },
-  { header: 'Service', accessorKey: 'serviceName' },
+  { header: 'Service', cell: ({ row }) => servicesLabel(row.original) },
   { header: 'Review model', cell: ({ row }) => row.original.effectiveReviewModel.name },
   {
     header: 'Review state',
@@ -39,7 +45,12 @@ const columns: ColumnDef<EngagementRow, unknown>[] = [
 function ReviewsInner(): JSX.Element {
   const params = useSearchParams();
   const router = useRouter();
-  const initial: Filter = params.get('filter') === 'signoff' ? 'signoff' : params.get('filter') === 'high-risk' ? 'review' : 'all';
+  const initial: Filter =
+    params.get('filter') === 'signoff'
+      ? 'signoff'
+      : params.get('filter') === 'high-risk'
+        ? 'review'
+        : 'all';
   const [filter, setFilter] = useState<Filter>(initial);
 
   const q = useQuery({
@@ -89,7 +100,11 @@ function ReviewsInner(): JSX.Element {
       </div>
 
       <Card className="p-0">
-        {q.isLoading && <div className="p-4"><Spinner /></div>}
+        {q.isLoading && (
+          <div className="p-4">
+            <Spinner />
+          </div>
+        )}
         {q.data && (
           <DataTable
             columns={columns}

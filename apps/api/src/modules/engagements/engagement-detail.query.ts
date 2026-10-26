@@ -225,7 +225,9 @@ export interface EngagementRow {
   client_overdue_count: number;
 }
 
-export function mapEngagement(row: EngagementRow & { team_count: string }): EngagementSummary {
+export function mapEngagement(
+  row: EngagementRow & { team_count: string; service_names?: string[] | null },
+): EngagementSummary {
   return {
     id: row.id,
     engagementCode: row.engagement_code,
@@ -237,6 +239,7 @@ export function mapEngagement(row: EngagementRow & { team_count: string }): Enga
     serviceId: row.service_id,
     serviceCode: row.service_code,
     serviceName: row.service_name,
+    serviceNames: row.service_names?.length ? row.service_names : [row.service_name],
     financialYear: row.financial_year,
     periodLabel: row.period_label,
     officeId: row.office_id,

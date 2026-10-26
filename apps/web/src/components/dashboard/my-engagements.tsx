@@ -6,7 +6,7 @@ import type { Paginated } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDate } from '@/lib/format';
-import { myEngagementRole, type EngagementRow } from '@/lib/types';
+import { myEngagementRole, servicesLabel, type EngagementRow } from '@/lib/types';
 import { Panel, Spinner, EmptyState, Badge } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { SectionSelect, useStoredSections } from '@/components/section-filter';
@@ -19,7 +19,9 @@ export function MyEngagementsPanel(): JSX.Element {
   const q = useQuery({
     queryKey: ['engagements', 'mine', 'glance', sections],
     queryFn: () =>
-      apiFetch<Paginated<EngagementRow>>(engagementListPath({ limit: 8, offset: 0, mine: true, sections })),
+      apiFetch<Paginated<EngagementRow>>(
+        engagementListPath({ limit: 8, offset: 0, mine: true, sections }),
+      ),
   });
 
   return (
@@ -29,11 +31,17 @@ export function MyEngagementsPanel(): JSX.Element {
       toolbar={<SectionSelect value={sections} onChange={setSections} />}
       bodyClassName="p-0"
     >
-      {q.isLoading && <div className="p-5"><Spinner /></div>}
+      {q.isLoading && (
+        <div className="p-5">
+          <Spinner />
+        </div>
+      )}
       {q.data && q.data.items.length === 0 && (
         <div className="p-5">
           <EmptyState>
-            {sections.length ? 'None of your engagements are in this section.' : 'No engagements assigned to you.'}
+            {sections.length
+              ? 'None of your engagements are in this section.'
+              : 'No engagements assigned to you.'}
           </EmptyState>
         </div>
       )}
@@ -61,14 +69,18 @@ export function MyEngagementsPanel(): JSX.Element {
                     <div className="font-medium text-ink">{e.entityName}</div>
                     <div className="text-xs text-ink-faint">{e.engagementCode}</div>
                   </td>
-                  <td className="px-3 py-2.5 text-ink-muted">{e.serviceName}</td>
+                  <td className="px-3 py-2.5 text-ink-muted">{servicesLabel(e)}</td>
                   <td className="px-3 py-2.5 text-ink-muted">
                     {e.financialYear} {e.periodLabel !== 'FY' ? e.periodLabel : ''}
                   </td>
-                  <td className="px-3 py-2.5"><StatusBadge status={e.status} /></td>
+                  <td className="px-3 py-2.5">
+                    <StatusBadge status={e.status} />
+                  </td>
                   <td className="px-3 py-2.5 text-ink-muted">{formatDate(e.plannedEndDate)}</td>
                   <td className="px-5 py-2.5">
-                    <Badge tone="neutral">{myEngagementRole(e, principal?.employeeId ?? null)}</Badge>
+                    <Badge tone="neutral">
+                      {myEngagementRole(e, principal?.employeeId ?? null)}
+                    </Badge>
                   </td>
                 </tr>
               ))}

@@ -48,6 +48,8 @@ export interface EngagementSummary {
   serviceId: string;
   serviceCode: string;
   serviceName: string;
+  /** Every service the engagement carries, the primary first ("TDS / TCS", "GST"). */
+  serviceNames: string[];
   financialYear: string;
   periodLabel: string;
   officeId: string;

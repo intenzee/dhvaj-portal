@@ -133,10 +133,14 @@ export class EngagementsService {
 
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<
-        EngagementRow & { team_count: string; total_count: string }
+        EngagementRow & { team_count: string; total_count: string; service_names: string[] | null }
       >(
         `SELECT sub.*,
-                (SELECT count(*) FROM hsdg.engagement_team t WHERE t.engagement_id = sub.id) AS team_count
+                (SELECT count(*) FROM hsdg.engagement_team t WHERE t.engagement_id = sub.id) AS team_count,
+                (SELECT array_agg(s2.name ORDER BY es.is_primary DESC, s2.name)
+                   FROM hsdg.engagement_services es
+                   JOIN hsdg.services s2 ON s2.id = es.service_id
+                  WHERE es.engagement_id = sub.id AND es.status <> 'cancelled') AS service_names
          FROM (${ENGAGEMENT_BASE} ${where}
                ORDER BY eng.created_at DESC
                LIMIT ${limitParam} OFFSET ${offsetParam}) sub`,
