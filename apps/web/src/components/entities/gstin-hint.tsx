@@ -59,7 +59,7 @@ export function GstinHint({
       className={cn(
         'mt-1 text-xs',
         v.tone === 'ok' && 'text-ink-muted',
-        v.tone === 'warn' && 'text-warn-700',
+        v.tone === 'warn' && 'text-warning-700',
         v.tone === 'block' && 'text-danger-600',
         className,
       )}

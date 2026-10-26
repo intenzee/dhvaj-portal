@@ -242,8 +242,9 @@ export function EditEntityModal({
   const panValid = pan === '' || PAN_REGEX.test(pan.trim().toUpperCase());
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: (ack?: boolean) => {
       const body: Record<string, unknown> = { version: entity.version };
+      if (ack) body.typeMismatchAcknowledged = true;
       if (legalName.trim() !== entity.legalName) body.legalName = legalName.trim();
       if ((displayName.trim() || null) !== (entity.displayName ?? null))
         body.displayName = displayName.trim() || null;
@@ -273,6 +274,11 @@ export function EditEntityModal({
       onClose();
     },
     onError: (err) => {
+      // A type the PAN disagrees with: ask once, then save it as set by hand (CM-3).
+      if (err instanceof ApiError && err.body?.code === 'TYPE_PAN_MISMATCH') {
+        if (window.confirm(err.message)) save.mutate(true);
+        return;
+      }
       const dupe = duplicateConflictOf(err);
       const tax = taxIdConflictOf(err);
       setConflict(dupe);
@@ -295,7 +301,7 @@ export function EditEntityModal({
           </Button>
           <Button
             disabled={legalName.trim().length === 0 || !panValid || save.isPending}
-            onClick={() => save.mutate()}
+            onClick={() => save.mutate(false)}
           >
             {save.isPending ? 'Saving…' : 'Save changes'}
           </Button>

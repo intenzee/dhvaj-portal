@@ -13,8 +13,12 @@ import {
   CLIENT_MASTER_SAVED_PASSWORD,
   STREAMS,
   STREAM_LABEL,
+  ENTITY_TYPE_SOURCE,
   credentialLabel,
+  firmTypeFromIds,
+  withCompanySuffix,
   type ClientImportAction,
+  type EntityTypeSource,
   type ClientMasterChange,
   type ClientMasterEngagement,
   type ClientMasterPreview,
@@ -71,6 +75,8 @@ interface PortalEntity {
   type_slug: string | null;
   type_name: string | null;
   category: string | null;
+  /** Where its type came from (CM-3): a 'manual' type is never changed by an import. */
+  entity_type_source: EntityTypeSource;
   legal_status: string | null;
   incorporation_date: string | null;
   office_code: string | null;
@@ -142,6 +148,10 @@ type ChildOp<I> = { add: I } | { fill: { id: string; patch: Record<string, strin
 interface Planned extends ClientMasterRow {
   src: MasterRow;
   typeSlug: string | null;
+  /** Where typeSlug came from: the PAN, else the sheet (CM-3). */
+  typeSource: EntityTypeSource;
+  /** The legal name to save: the sheet's, with "Private Limited" added for a company (CM-5). */
+  plannedName: string;
   officeCode: string;
   patch: UpdateEntityInput;
   newRegs: RegistrationInput[];
@@ -454,7 +464,7 @@ export class ClientMasterService {
     );
     const entities = await client.query<PortalEntity>(
       `SELECT e.id, e.entity_code, e.legal_name, e.trade_name, e.pan, et.slug AS type_slug,
-              et.name AS type_name, et.category, e.legal_status,
+              et.name AS type_name, et.category, e.entity_type_source, e.legal_status,
               e.incorporation_date::text AS incorporation_date, o.code AS office_code, e.status,
               e.merged_into_id
          FROM hsdg.entities e
@@ -579,8 +589,9 @@ export class ClientMasterService {
     if (r.action === CLIENT_IMPORT_ACTION.createClient) {
       const add = <I>(op: ChildOp<I>): I[] => (op && 'add' in op ? [op.add] : []);
       const detail = await this.entities.createEntityWith(client, ctx, {
-        legalName: r.src.legalName,
+        legalName: r.plannedName || r.src.legalName,
         typeSlug: r.typeSlug!,
+        entityTypeSource: r.typeSource,
         officeCode: r.officeCode,
         ...(r.src.tradeName ? { tradeName: r.src.tradeName } : {}),
         ...(r.src.pan ? { pan: r.src.pan } : {}),
@@ -946,6 +957,8 @@ class RowPlanner {
       error: src.error,
       src,
       typeSlug: null,
+      typeSource: ENTITY_TYPE_SOURCE.import,
+      plannedName: src.legalName,
       officeCode: src.officeCode || this.defaultOffice,
       patch: {},
       newRegs: [],
@@ -1081,23 +1094,36 @@ class RowPlanner {
   private create(base: Planned): Planned {
     const { src } = base;
     const typed = src.entityType ? this.typeOf(src.entityType) : undefined;
-    if (src.entityType && !typed)
+    // The PAN (or a GSTIN's 6th letter) decides the type, whatever the sheet says (CM-3).
+    const fromPan = firmTypeFromIds({
+      pan: src.pan,
+      gstins: src.gstins,
+      nameOrTypedType: `${src.legalName} ${src.entityType}`,
+      hasBusinessRegistration: src.gstins.length > 0,
+    });
+    if (src.entityType && !typed && !fromPan)
       return { ...base, error: `Entity type "${src.entityType}" is not one of the list.` };
-    const typeSlug = typed?.slug ?? src.guessedTypeSlug;
+    const typeSlug = fromPan?.slug ?? typed?.slug ?? null;
     if (!typeSlug)
       return {
         ...base,
-        error: 'Entity type is missing and the PAN does not say it: pick one in the row.',
+        error: 'Entity type is missing and no PAN or GSTIN says it: pick one in the row.',
       };
     if (!this.officeCodes.has(base.officeCode))
       return { ...base, error: `Home office code "${base.officeCode}" is not an office.` };
     const type = this.p.types.find((t) => t.slug === typeSlug);
     const warnings = [...base.warnings];
-    if (!typed && type) warnings.push(`Entity type taken from the PAN: ${type.name}.`);
 
     const changes: ClientMasterChange[] = [
       change('Client', null, `New, in office ${base.officeCode}`),
     ];
+    if (fromPan && type && typed && typed.slug !== fromPan.slug)
+      changes.push(change('Firm type', `Sheet said ${typed.name}`, `${type.name} (${fromPan.reason})`));
+    else if (fromPan && type && !typed)
+      changes.push(change('Firm type', null, `${type.name} (${fromPan.reason})`));
+    const plannedName = withCompanySuffix(src.legalName, typeSlug);
+    if (plannedName !== src.legalName)
+      changes.push(change('Name', src.legalName, `${plannedName} (company PAN)`));
     if (src.pan) changes.push(change('PAN', null, src.pan));
     const newRegs = this.newRegistrations(src, [], changes, warnings);
     const contactOp: ChildOp<ContactInput> = src.contact
@@ -1115,6 +1141,8 @@ class RowPlanner {
       ...base,
       action: CLIENT_IMPORT_ACTION.createClient,
       typeSlug,
+      typeSource: fromPan ? ENTITY_TYPE_SOURCE.pan : ENTITY_TYPE_SOURCE.import,
+      plannedName,
       changes,
       newRegs,
       contactOp,
@@ -1162,14 +1190,53 @@ class RowPlanner {
       changes.push(change('Trade name', e.trade_name, src.tradeName));
     }
     let category = e.category;
-    if (src.entityType) {
-      const t = this.typeOf(src.entityType);
-      if (!t) warnings.push(`Entity type "${src.entityType}" is not one of the list; kept as is.`);
-      else if (t.slug !== e.type_slug) {
+    const typed = src.entityType ? this.typeOf(src.entityType) : undefined;
+    if (src.entityType && !typed)
+      warnings.push(`Entity type "${src.entityType}" is not one of the list; kept as is.`);
+    const portalGstinNumbers = (this.regsOf.get(e.id) ?? [])
+      .filter((r) => r.registration_type === 'gstin')
+      .map((r) => r.registration_number);
+    // PAN beats the sheet; a type set by hand in the portal beats both (CM-3).
+    const fromPan = firmTypeFromIds({
+      pan: src.pan || e.pan,
+      gstins: [...src.gstins, ...portalGstinNumbers],
+      nameOrTypedType: `${src.legalName || e.legal_name} ${src.entityType}`,
+      hasBusinessRegistration: src.gstins.length + portalGstinNumbers.length > 0,
+    });
+    const wanted = fromPan?.slug ?? typed?.slug;
+    if (wanted && wanted !== e.type_slug) {
+      const t = this.p.types.find((x) => x.slug === wanted);
+      if (e.entity_type_source === ENTITY_TYPE_SOURCE.manual)
+        warnings.push(
+          `Firm type ${e.type_name} was set by hand in the portal; it is kept (the ${fromPan ? 'PAN' : 'sheet'} says ${t?.name ?? wanted}).`,
+        );
+      else if (t) {
         patch.typeSlug = t.slug;
+        patch.entityTypeSource = fromPan ? ENTITY_TYPE_SOURCE.pan : ENTITY_TYPE_SOURCE.import;
         category = t.category;
-        changes.push(change('Entity type', e.type_name, t.name));
+        changes.push(
+          change(
+            'Firm type',
+            typed && fromPan && typed.slug !== fromPan.slug
+              ? `${e.type_name ?? '—'} (sheet said ${typed.name})`
+              : e.type_name,
+            fromPan ? `${t.name} (${fromPan.reason})` : t.name,
+          ),
+        );
       }
+    }
+    // "Private Limited" on a company's name, proposed so it is seen before the import (CM-5).
+    const finalType = patch.typeSlug ?? e.type_slug;
+    const nameNow = patch.legalName ?? e.legal_name;
+    const suffixed = withCompanySuffix(nameNow, finalType);
+    if (suffixed === e.legal_name && patch.legalName !== undefined) {
+      // The sheet only dropped the suffix the portal's name already has.
+      delete patch.legalName;
+      const at = changes.findIndex((c) => c.field === 'Legal name');
+      if (at >= 0) changes.splice(at, 1);
+    } else if (suffixed !== nameNow) {
+      patch.legalName = suffixed;
+      changes.push(change('Name', nameNow, `${suffixed} (company PAN)`));
     }
     if (src.pan && !e.pan) {
       patch.pan = src.pan;
@@ -1223,6 +1290,8 @@ class RowPlanner {
       entityCode: e.entity_code,
       matchedBy,
       typeSlug: patch.typeSlug ?? e.type_slug,
+      typeSource: patch.entityTypeSource ?? e.entity_type_source,
+      plannedName: patch.legalName ?? e.legal_name,
       changes,
       patch,
       newRegs,

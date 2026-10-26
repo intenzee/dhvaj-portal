@@ -324,9 +324,10 @@ describe('the firm login workbook (ADR-0035)', () => {
     expect(by('Half Login').logins).toEqual([]);
     expect(by('Mohan Stores')).toMatchObject({ typeSlug: 'proprietorship', typeGuessed: true });
     expect(by('Mohan Stores').gst[0]!.stateCode).toBe('27');
+    // D2: a P PAN with no GSTIN or TAN is an individual.
     expect(by('Kiran Sharma')).toMatchObject({
       pan: 'KIRPS1234K',
-      typeSlug: 'proprietorship',
+      typeSlug: 'individual',
       email: null,
     });
     expect(by('Kiran Sharma').warnings.join()).toMatch(/not an address/);

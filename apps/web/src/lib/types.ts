@@ -7,6 +7,7 @@ import type {
   BillingModel,
   ClientVerdict,
   MergedInto,
+  EntityTypeSource,
   ClientDependencyStatus,
   ComplianceStatus,
   EngagementConfidentiality,
@@ -321,6 +322,10 @@ export interface EntityDetail extends EntityRow {
   businessActivities: BusinessActivity[];
   listings: Listing[];
   regulatoryAttributes: RegulatoryAttribute[];
+  /** Where the firm type came from (CM-3), and who set it by hand and when. */
+  entityTypeSource: EntityTypeSource;
+  entityTypeSetBy: string | null;
+  entityTypeSetAt: string | null;
 }
 
 export interface Industry {

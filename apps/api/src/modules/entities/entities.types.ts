@@ -22,6 +22,7 @@ import type {
   RelationshipStatus,
   RelationshipType,
   SecurityType,
+  EntityTypeSource,
 } from '@hsdg/contracts';
 
 export interface EntityTypeRecord {
@@ -212,6 +213,10 @@ export interface EntityDetail extends EntitySummary {
   regulatoryAttributes: RegulatoryAttributeRecord[];
   /** Set when this client was merged into another and archived. */
   mergedInto: MergedInto | null;
+  /** Where the firm type came from (CM-3), and who set it by hand and when. */
+  entityTypeSource: EntityTypeSource;
+  entityTypeSetBy: string | null;
+  entityTypeSetAt: string | null;
 }
 
 export interface DuplicateCandidate {
@@ -411,6 +416,8 @@ export interface CreateEntityInput {
   listings?: ListingInput[];
   regulatoryAttributes?: RegulatoryAttributeInput[];
   financialProfiles?: FinancialProfileInput[];
+  /** Server-side callers only (imports): where typeSlug came from. Default: pan when it equals the PAN's type, else manual. */
+  entityTypeSource?: EntityTypeSource;
 }
 
 export interface UpdateEntityInput {
@@ -437,6 +444,10 @@ export interface UpdateEntityInput {
   llpContribution?: number | null;
   businessDescription?: string | null;
   version?: number;
+  /** A person saving a type the PAN disagrees with, after the confirm (CM-3). */
+  typeMismatchAcknowledged?: boolean;
+  /** Server-side callers only (imports): where typeSlug came from; a person's change is manual. */
+  entityTypeSource?: EntityTypeSource;
 }
 
 export interface EntityFilter {
