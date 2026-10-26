@@ -377,6 +377,51 @@ export function sameClient(a: ClientIdentity, b: ClientIdentity): SameClientResu
   return { verdict: match === 'prefix' ? 'possible' : 'probable', reasons };
 }
 
+/**
+ * Whether two clients are offices of one business rather than one client
+ * entered twice (CM-6), and why; null when they are not. "GRIID - Chandigarh"
+ * and "GRIID": the same name but for a place. Two clients of one PAN
+ * registered in different states, likewise. A shared GSTIN is the same office
+ * entered twice (a duplicate); different PANs or legal forms are two
+ * businesses. Pure — tested.
+ */
+export function officesOfOneBusiness(a: ClientIdentity, b: ClientIdentity): string[] | null {
+  const ga = gstinsOf(a);
+  const gb = gstinsOf(b);
+  if (ga.some((g) => gb.includes(g))) return null;
+  const pansA = new Set([panOf(a), ...ga.map(panOfGstin)].filter(Boolean));
+  const pansB = new Set([panOf(b), ...gb.map(panOfGstin)].filter(Boolean));
+  const sharedPan = [...pansA].find((p) => pansB.has(p)) ?? null;
+  if (pansA.size && pansB.size && !sharedPan) return null;
+
+  const na = parseClientName(a.name);
+  const nb = parseClientName(b.name);
+  if (formsConflict(na.form ?? formOfPan(panOf(a)), nb.form ?? formOfPan(panOf(b)))) return null;
+  const match = matchNames(na, nb);
+  const placeA = na.place?.text.toLowerCase() ?? '';
+  const placeB = nb.place?.text.toLowerCase() ?? '';
+  if ((match === 'equal' || match === 'typo') && placeA !== placeB) {
+    const [plain, placed] = na.place && !nb.place ? [b, a] : [a, b];
+    const place = (na.place && !nb.place ? na : nb).place ?? na.place;
+    return [
+      na.place && nb.place
+        ? `"${a.name}" and "${b.name}" are one name written for two places (${na.place.text}, ${nb.place.text}): offices of one business.`
+        : `"${placed.name}" is "${plain.name}" with a place (${place!.text}): an office of the same business, not a second client.`,
+      ...(sharedPan ? [`Same PAN ${sharedPan}.`] : []),
+    ];
+  }
+  if (sharedPan) {
+    const states = (gs: string[]) => new Set(gs.map((g) => g.slice(0, 2)));
+    const sa = states(ga);
+    const sb = states(gb);
+    if (sa.size && sb.size && [...sb].some((s) => !sa.has(s)))
+      return [
+        `Same PAN ${sharedPan}, registered for GST in different states: offices of one business.`,
+      ];
+  }
+  return null;
+}
+
 function describeMatch(m: NameMatch, a: ParsedClientName, b: ParsedClientName): string | null {
   const extras = (n: ParsedClientName): string[] =>
     [n.formText, n.place?.text, n.qualifier].filter((x): x is string => Boolean(x));

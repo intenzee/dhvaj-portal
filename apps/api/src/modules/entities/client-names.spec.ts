@@ -1,5 +1,6 @@
-import { guessStateCode } from '@hsdg/contracts';
+import { gstinCheckChar, guessStateCode } from '@hsdg/contracts';
 import {
+  officesOfOneBusiness,
   formsConflict,
   matchNames,
   parseClientName,
@@ -301,5 +302,43 @@ describe('sameClient — the DHVAJ client master', () => {
       'probable: Drift Logistics Private Limited / Drifts Logistics Private Limited (Delhi',
       'probable: GRIID / GRIID- Chandigarh',
     ]);
+  });
+});
+
+describe('officesOfOneBusiness (CM-6)', () => {
+  const gst = (state: string, pan: string): string => {
+    const first14 = `${state}${pan}1Z`;
+    return `${first14}${gstinCheckChar(first14)}`;
+  };
+  it('reads a name with a place beside the plain name as an office, PAN or no PAN', () => {
+    const r = officesOfOneBusiness({ name: 'GRIID- Chandigarh' }, { name: 'GRIID' });
+    expect(r?.[0]).toMatch(/"GRIID- Chandigarh" is "GRIID" with a place \(Chandigarh\)/);
+  });
+  it('reads one name for two places as offices', () => {
+    expect(
+      officesOfOneBusiness({ name: 'ABC Traders (Delhi)' }, { name: 'ABC Traders - Gujarat' }),
+    ).not.toBeNull();
+  });
+  it('reads one PAN in two states as offices', () => {
+    const r = officesOfOneBusiness(
+      { name: 'Drift Logistics', pan: 'AADCD1234K', gstins: [gst('27', 'AADCD1234K')] },
+      { name: 'Drift Logistics Pvt Ltd', gstins: [gst('07', 'AADCD1234K')] },
+    );
+    expect(r?.[0]).toMatch(/different states/);
+  });
+  it('leaves a shared GSTIN, two PANs and the same name without a place to the duplicate check', () => {
+    expect(
+      officesOfOneBusiness(
+        { name: 'GRIID - Delhi', gstins: [gst('07', 'AADCD1234K')] },
+        { name: 'GRIID', gstins: [gst('07', 'AADCD1234K')] },
+      ),
+    ).toBeNull();
+    expect(
+      officesOfOneBusiness(
+        { name: 'GRIID - Delhi', pan: 'AADCD1234K' },
+        { name: 'GRIID', pan: 'BAOPG6013Q' },
+      ),
+    ).toBeNull();
+    expect(officesOfOneBusiness({ name: 'GRIID' }, { name: 'Griid' })).toBeNull();
   });
 });

@@ -54,7 +54,7 @@ import {
   type ParsedMaster,
 } from './client-master';
 import { nameKey, normalizeHeader } from './client-workbook';
-import { parseClientName, sameClient } from '../entities/client-names';
+import { officesOfOneBusiness, parseClientName, sameClient } from '../entities/client-names';
 
 /** More rows than this is not a client list. */
 const MAX_ROWS = 3000;
@@ -1086,11 +1086,13 @@ class RowPlanner {
     if (!first) return [];
     const out: string[] = [];
     for (const e of this.byFirstWord.get(first) ?? []) {
-      const { verdict } = sameClient(
-        { name: src.legalName, pan: src.pan, gstins: src.gstins },
-        { name: e.legal_name, pan: e.pan },
-      );
-      if (verdict === 'probable' || verdict === 'possible')
+      const row = { name: src.legalName, pan: src.pan, gstins: src.gstins };
+      const portal = { name: e.legal_name, pan: e.pan };
+      if (officesOfOneBusiness(row, portal))
+        out.push(
+          `Looks like an office of ${e.entity_code} ${e.legal_name}; to add it as that client's office, put ${e.entity_code} in the Client code column.`,
+        );
+      else if (['probable', 'possible'].includes(sameClient(row, portal).verdict))
         out.push(
           `Looks like ${e.entity_code} ${e.legal_name} in the portal; if it is that client, put ${e.entity_code} in the Client code column.`,
         );

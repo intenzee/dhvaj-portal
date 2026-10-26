@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PERMISSION, type BranchCandidate } from '@hsdg/contracts';
+import { Building2 } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
@@ -32,6 +33,8 @@ export function useBranchCandidates() {
 }
 
 const cardKey = (c: BranchCandidate): string => `${c.kind}:${c.keepId}`;
+const officeKey = (o: BranchCandidate['offices'][number]): string =>
+  o.registrationId ?? `client:${o.entityId}`;
 
 export function OfficesToCombineList(): JSX.Element {
   const q = useBranchCandidates();
@@ -69,7 +72,7 @@ export function OfficesToCombineList(): JSX.Element {
             <div className="min-w-0 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-ink">{c.proposedName}</span>
-                <Badge tone="neutral">PAN {c.pan}</Badge>
+                {c.pan && <Badge tone="neutral">PAN {c.pan}</Badge>}
                 <Badge tone={c.kind === 'combine' ? 'warn' : 'info'}>
                   {c.kind === 'combine' ? `${c.clients.length} clients` : 'Set up offices'}
                 </Badge>
@@ -88,7 +91,7 @@ export function OfficesToCombineList(): JSX.Element {
                 ))}
               </ul>
               <p className="text-xs text-ink-faint">
-                Offices: {c.offices.map((o) => `${o.label} (${o.gstin})`).join(' · ')}
+                Offices: {c.offices.map((o) => `${o.label} (${o.gstin ?? 'no GSTIN'})`).join(' · ')}
               </p>
               {c.reasons.length > 0 && (
                 <p className="text-xs text-ink-faint">{c.reasons.join(' ')}</p>
@@ -131,6 +134,8 @@ export function CombineOfficesModal({
   const [offices, setOffices] = useState(candidate.offices.map((o) => ({ ...o })));
   const others = candidate.clients.filter((c) => c.id !== candidate.keepId);
   const keeper = candidate.clients.find((c) => c.id === candidate.keepId);
+  const codeOf = (id: string): string =>
+    candidate.clients.find((c) => c.id === id)?.entityCode ?? '';
   const labels = offices.map((o) => o.label.trim().toLowerCase());
   const clash = labels.some((l, i) => !l || labels.indexOf(l) !== i);
 
@@ -142,6 +147,7 @@ export function CombineOfficesModal({
           others: others.map((o) => ({ entityId: o.id })),
           offices: offices.map((o) => ({
             registrationId: o.registrationId,
+            entityId: o.registrationId ? null : o.entityId,
             label: o.label.trim(),
             isHeadOffice: o.isHeadOffice,
           })),
@@ -204,10 +210,12 @@ export function CombineOfficesModal({
         <div className="space-y-2">
           <p className="font-medium text-ink">Offices</p>
           {offices.map((o, i) => (
-            <div key={o.registrationId} className="flex flex-wrap items-center gap-2">
-              <span className="w-44 shrink-0 font-mono text-xs text-ink-muted">{o.gstin}</span>
+            <div key={officeKey(o)} className="flex flex-wrap items-center gap-2">
+              <span className="w-44 shrink-0 font-mono text-xs text-ink-muted">
+                {o.gstin ?? `No GSTIN · ${codeOf(o.entityId)}`}
+              </span>
               <Input
-                aria-label={`Office name for ${o.gstin}`}
+                aria-label={`Office name for ${o.gstin ?? codeOf(o.entityId)}`}
                 value={o.label}
                 maxLength={80}
                 className="min-w-[10rem] flex-1"
@@ -234,5 +242,71 @@ export function CombineOfficesModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * On a client's page: this client looks like an office of the same business
+ * as others ("GRIID - Chandigarh" beside "GRIID"); offer to combine them as
+ * offices, or to mark them separate businesses.
+ */
+export function PossibleOfficeBanner({ entityId }: { entityId: string }): JSX.Element | null {
+  const q = useBranchCandidates();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const card = (q.data ?? []).find(
+    (c) => c.kind === 'combine' && c.clients.some((x) => x.id === entityId),
+  );
+  const dismiss = useMutation({
+    mutationFn: async (c: BranchCandidate) => {
+      for (const other of c.clients.filter((x) => x.id !== c.keepId))
+        await apiFetch<void>('/entities/branch-candidates/dismiss', {
+          method: 'POST',
+          body: { aId: c.keepId, bId: other.id },
+        });
+    },
+    onSuccess: () => {
+      toast('Marked as separate businesses.');
+      void qc.invalidateQueries({ queryKey: BRANCH_CANDIDATES_KEY });
+    },
+    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not dismiss.', 'error'),
+  });
+  if (!card) return null;
+  const others = card.clients.filter((x) => x.id !== entityId);
+  return (
+    <div className="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2.5 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Building2 className="h-4 w-4 text-primary-700" />
+        <span className="font-semibold text-primary-700">Possible office of the same business</span>
+      </div>
+      <p className="mt-1 text-ink">
+        {others.map((o, i) => (
+          <span key={o.id}>
+            {i > 0 && ', '}
+            <Link href={`/entities/${o.id}`} className="text-primary-700 hover:underline">
+              {o.legalName} ({o.entityCode})
+            </Link>
+          </span>
+        ))}
+      </p>
+      {card.reasons.length > 0 && (
+        <p className="text-xs text-ink-muted">{card.reasons.join(' ')}</p>
+      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button size="sm" onClick={() => setOpen(true)}>
+          Combine as offices
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={dismiss.isPending}
+          onClick={() => dismiss.mutate(card)}
+        >
+          Separate businesses
+        </Button>
+      </div>
+      {open && <CombineOfficesModal candidate={card} onClose={() => setOpen(false)} />}
+    </div>
   );
 }

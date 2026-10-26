@@ -29,26 +29,28 @@ export interface BranchCandidateClient {
   };
 }
 
-/** An office the card proposes: one per active GSTIN. */
+/** An office the card proposes: one per active GSTIN, or per client without one. */
 export interface BranchCandidateOffice {
-  registrationId: string;
-  gstin: string;
+  /** null for a client without a GSTIN: that client is the office. */
+  registrationId: string | null;
+  gstin: string | null;
   stateCode: string | null;
-  /** The client the GSTIN is on today. */
+  /** The client the GSTIN (or the office) is on today. */
   entityId: string;
   label: string;
   isHeadOffice: boolean;
 }
 
 export type BranchCandidateKind =
-  /** Two or more clients of one PAN: combine into one client with offices. */
+  /** Offices of one business entered as clients ("GRIID", "GRIID - Chandigarh"): combine. */
   | 'combine'
   /** One client with two or more GSTINs and no offices yet. */
   | 'setup';
 
 export interface BranchCandidate {
   kind: BranchCandidateKind;
-  pan: string;
+  /** The business's PAN, when any of the clients has one. */
+  pan: string | null;
   /** The proposed keeper first. */
   clients: BranchCandidateClient[];
   keepId: string;
@@ -61,7 +63,13 @@ export interface BranchCandidate {
 export interface CombineBranchesInput {
   /** The clients merged into the kept one (none for a 'setup' card). */
   others: { entityId: string }[];
-  offices: { registrationId: string; label: string; isHeadOffice: boolean }[];
+  /** Each office: a GSTIN of the clients, or a client without one (`entityId`). */
+  offices: {
+    registrationId?: string | null;
+    entityId?: string | null;
+    label: string;
+    isHeadOffice: boolean;
+  }[];
   legalName?: string;
 }
 
