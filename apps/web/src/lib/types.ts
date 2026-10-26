@@ -37,6 +37,8 @@ export interface EngagementRow {
   entityName: string;
   serviceCode: string;
   serviceName: string;
+  /** Every service on the engagement, the primary first. */
+  serviceNames?: string[];
   financialYear: string;
   periodLabel: string;
   status: EngagementStatus;
@@ -51,6 +53,11 @@ export interface EngagementRow {
   internallyOverdueTaskCount: number;
   effectiveReviewModel: { slug: string; name: string; requiresEpSignoff: boolean };
   version: number;
+}
+
+/** Every service on an engagement for a list cell: 'TDS / TCS, GST'. */
+export function servicesLabel(e: Pick<EngagementRow, 'serviceName' | 'serviceNames'>): string {
+  return (e.serviceNames?.length ? e.serviceNames : [e.serviceName]).join(', ');
 }
 
 /** The caller's role on an engagement, for "My Engagements — At a Glance". */

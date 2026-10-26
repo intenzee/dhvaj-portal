@@ -16,7 +16,7 @@ import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { apiFetch } from '@/lib/api';
 import { formatDate, humanize } from '@/lib/format';
-import type { EntityDetail, EngagementRow } from '@/lib/types';
+import { servicesLabel, type EntityDetail, type EngagementRow } from '@/lib/types';
 import {
   PageHeader,
   Spinner,
@@ -542,7 +542,7 @@ const engagementCols: ColumnDef<EngagementRow, unknown>[] = [
       <span className="font-medium text-primary-700">{row.original.engagementCode}</span>
     ),
   },
-  { header: 'Service', accessorKey: 'serviceName' },
+  { header: 'Service', cell: ({ row }) => servicesLabel(row.original) },
   {
     header: 'Period',
     cell: ({ row }) => `${row.original.financialYear} ${row.original.periodLabel}`,

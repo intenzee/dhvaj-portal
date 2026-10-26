@@ -23,6 +23,7 @@ function ctx(overrides: Partial<LifecycleGuardContext> = {}): LifecycleGuardCont
       serviceId: 's1',
       serviceCode: 'STAT_AUDIT',
       serviceName: 'Statutory Audit',
+      serviceNames: ['Statutory Audit'],
       financialYear: '2024-25',
       periodLabel: 'FY',
       officeId: 'o1',

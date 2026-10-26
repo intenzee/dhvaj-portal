@@ -22,7 +22,7 @@ import { useAuth } from '@/lib/auth';
 import { can } from '@/lib/principal';
 import { apiFetch } from '@/lib/api';
 import { humanize } from '@/lib/format';
-import type { EngagementRow } from '@/lib/types';
+import { servicesLabel, type EngagementRow } from '@/lib/types';
 import { PageHeader, Spinner, Card, Badge } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
@@ -67,7 +67,7 @@ const columns: ColumnDef<EngagementRow, unknown>[] = [
     header: 'Service',
     cell: ({ row }) => (
       <span>
-        {row.original.serviceName}
+        {servicesLabel(row.original)}
         <span className="ml-1 text-ink-faint">
           · {row.original.financialYear} {row.original.periodLabel}
         </span>
