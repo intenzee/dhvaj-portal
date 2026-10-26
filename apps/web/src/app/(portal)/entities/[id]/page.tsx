@@ -35,6 +35,7 @@ import {
 } from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { FirmTypeCard } from '@/components/entities/firm-type-card';
+import { OfficeBadge, OfficeTabs, inOffice, useOfficeTab } from '@/components/entities/offices';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import { ClientReturnsCard } from '@/components/entities/client-returns';
 import {
@@ -83,6 +84,7 @@ export default function EntityDetailPage(): JSX.Element {
     queryFn: () => apiFetch<Paginated<EngagementRow>>(`/engagements?entityId=${id}&limit=100`),
   });
   const logins = useCredentials({ entityId: id });
+  const { office, setOffice } = useOfficeTab(entity.data);
 
   useEffect(() => {
     if (!editing || !entity.data) return;
@@ -190,6 +192,8 @@ export default function EntityDetailPage(): JSX.Element {
         {e.paidUpCapital !== null && <Fact label="Paid-up capital" value={inr(e.paidUpCapital)} />}
       </div>
 
+      <OfficeTabs entity={e} office={office} onChange={setOffice} canManage={canManage} />
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Card id={SECTION_ANCHOR.registrations}>
           <CardHeader className="flex flex-row items-center justify-between">
@@ -200,43 +204,46 @@ export default function EntityDetailPage(): JSX.Element {
             {e.registrations.length === 0 && (
               <p className="text-ink-faint">No registrations recorded.</p>
             )}
-            {e.registrations.map((r) => (
-              <div key={r.id} className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="text-ink-muted">{humanize(r.registrationType)}</span>{' '}
-                  <span className="font-medium text-ink">{r.registrationNumber}</span>
-                  {logins.data &&
-                    loginTargetsOf(r).map((t) => (
-                      <PortalLogin
-                        key={`${t.portal}-${t.account}`}
-                        entityId={id}
-                        target={t}
-                        credential={loginFor(logins.data, t)}
-                        vaultReady={logins.data.vaultReady}
-                      />
-                    ))}
+            {e.registrations
+              .filter((r) => inOffice(r, office))
+              .map((r) => (
+                <div key={r.id} className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-ink-muted">{humanize(r.registrationType)}</span>{' '}
+                    <span className="font-medium text-ink">{r.registrationNumber}</span>
+                    {!office && <OfficeBadge entity={e} branchId={r.branchId} />}
+                    {logins.data &&
+                      loginTargetsOf(r).map((t) => (
+                        <PortalLogin
+                          key={`${t.portal}-${t.account}`}
+                          entityId={id}
+                          target={t}
+                          credential={loginFor(logins.data, t)}
+                          vaultReady={logins.data.vaultReady}
+                        />
+                      ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Badge
+                      tone={
+                        r.status === 'active'
+                          ? 'success'
+                          : r.status === 'pending'
+                            ? 'warn'
+                            : 'neutral'
+                      }
+                    >
+                      {humanize(r.status)}
+                    </Badge>
+                    {r.verified && (
+                      <span title="Verified" className="text-success-600">
+                        <ShieldCheck className="h-4 w-4" />
+                      </span>
+                    )}
+                    {canManage && <RemoveRegistrationButton entityId={e.id} registration={r} />}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <Badge
-                    tone={
-                      r.status === 'active'
-                        ? 'success'
-                        : r.status === 'pending'
-                          ? 'warn'
-                          : 'neutral'
-                    }
-                  >
-                    {humanize(r.status)}
-                  </Badge>
-                  {r.verified && (
-                    <span title="Verified" className="text-success-600">
-                      <ShieldCheck className="h-4 w-4" />
-                    </span>
-                  )}
-                  {canManage && <RemoveRegistrationButton entityId={e.id} registration={r} />}
-                </div>
-              </div>
-            ))}
+              ))}
             {logins.data && !e.mergedInto && <ClientLogins entityId={id} data={logins.data} />}
             <CredentialAccessNote data={logins.data} />
           </CardBody>
@@ -249,24 +256,33 @@ export default function EntityDetailPage(): JSX.Element {
           </CardHeader>
           <CardBody className="space-y-2 text-sm">
             {e.contacts.length === 0 && <p className="text-ink-faint">No contacts recorded.</p>}
-            {e.contacts.map((c) => (
-              <div key={c.id} className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-ink">{c.fullName}</span>
-                  {c.designation && <span className="ml-2 text-ink-faint">{c.designation}</span>}
+            {e.contacts
+              .filter((c) => inOffice(c, office))
+              .map((c) => (
+                <div key={c.id} className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium text-ink">{c.fullName}</span>
+                    {c.designation && <span className="ml-2 text-ink-faint">{c.designation}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {c.email && <span className="text-ink-muted">{c.email}</span>}
+                    {c.isPrimary && <Badge tone="info">Primary</Badge>}
+                    {c.isPortalUser && <Badge tone="neutral">Portal</Badge>}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {c.email && <span className="text-ink-muted">{c.email}</span>}
-                  {c.isPrimary && <Badge tone="info">Primary</Badge>}
-                  {c.isPortalUser && <Badge tone="neutral">Portal</Badge>}
-                </div>
-              </div>
-            ))}
+              ))}
           </CardBody>
         </Card>
       </div>
 
-      <ClientReturnsCard entityId={e.id} />
+      <ClientReturnsCard
+        entityId={e.id}
+        registrationIds={
+          office
+            ? e.registrations.filter((r) => r.branchId === office.id).map((r) => r.id)
+            : undefined
+        }
+      />
 
       {isOn(FEATURE_FLAG.calendarV2) && !e.mergedInto && <ComplianceProfilesCard entityId={e.id} />}
 
@@ -314,14 +330,16 @@ export default function EntityDetailPage(): JSX.Element {
           title="Addresses"
           empty="No addresses."
         >
-          {e.addresses.map((a) => (
-            <Row
-              key={a.id}
-              left={humanize(a.addressType)}
-              right={[a.line1, a.city, a.pincode].filter(Boolean).join(', ')}
-              badge={a.isPrimary ? 'Primary' : undefined}
-            />
-          ))}
+          {e.addresses
+            .filter((a) => inOffice(a, office))
+            .map((a) => (
+              <Row
+                key={a.id}
+                left={humanize(a.addressType)}
+                right={[a.line1, a.city, a.pincode].filter(Boolean).join(', ')}
+                badge={a.isPrimary ? 'Primary' : undefined}
+              />
+            ))}
         </ListCard>
         <ListCard
           id={SECTION_ANCHOR.relationships}
