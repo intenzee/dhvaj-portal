@@ -95,16 +95,19 @@ describe('Compliance scheduler (e2e)', () => {
     await scheduler.runSweep();
 
     // The engagement lead was notified the statutory date passed — proof the
-    // job ran firm-wide under a real managing-partner context.
-    const res = await request(app.getHttpServer())
-      .get('/api/v1/notifications?limit=100')
-      .set(bearer(pa))
-      .expect(200);
-    expect(
-      (res.body.items as Array<{ type: string; engagementId: string }>).some(
-        (n) => n.type === 'statutory_deadline_overdue' && n.engagementId === eng,
-      ),
-    ).toBe(true);
+    // job ran firm-wide under a real managing-partner context. One sweep stamps
+    // all its notifications with the same time, and after the other suites the
+    // lead has over a page of them, so every page is read.
+    const overdue: Array<{ engagementId: string }> = [];
+    for (let offset = 0; ; offset += 100) {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/notifications?type=statutory_deadline_overdue&limit=100&offset=${offset}`)
+        .set(bearer(pa))
+        .expect(200);
+      overdue.push(...(res.body.items as Array<{ engagementId: string }>));
+      if (offset + 100 >= (res.body.total as number)) break;
+    }
+    expect(overdue.some((n) => n.engagementId === eng)).toBe(true);
   });
 
   it('rolls the recurring-work horizon without an HTTP principal', async () => {
