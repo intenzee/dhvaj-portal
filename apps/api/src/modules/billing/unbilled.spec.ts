@@ -174,3 +174,62 @@ describe('PS-206 dueFeeItems', () => {
     expect(dueFeeItems(terms({ billingModel: 'pro_bono', milestones }), '2026-10-17')).toEqual([]);
   });
 });
+
+describe('CM-4 fee period', () => {
+  const year = (feeAmount: string, feePeriod: FeeTerms['years'][number]['feePeriod']) => ({
+    id: 'y1',
+    financialYear: '2026-27',
+    feeAmount,
+    feePeriod,
+    billingModel: null,
+    closed: false,
+  });
+  const yearEnd = '2027-03-31';
+
+  it('₹5,000 per month billed monthly is 12 items of ₹5,000', () => {
+    const items = dueFeeItems(
+      terms({ retainerAmount: null, years: [year('5000.00', 'monthly')] }),
+      yearEnd,
+    );
+    expect(items).toHaveLength(12);
+    expect(new Set(items.map((i) => i.amount))).toEqual(new Set(['5000.00']));
+  });
+
+  it('₹5,000 per month billed quarterly is 4 items of ₹15,000', () => {
+    const items = dueFeeItems(
+      terms({ frequency: 'quarterly', retainerAmount: null, years: [year('5000.00', 'monthly')] }),
+      yearEnd,
+    );
+    expect(items.map((i) => i.amount)).toEqual(['15000.00', '15000.00', '15000.00', '15000.00']);
+  });
+
+  it('₹1,00,000 per year billed monthly is unchanged: 11 × ₹8,333.33 and ₹8,333.37', () => {
+    const items = dueFeeItems(
+      terms({ retainerAmount: null, years: [year('100000.00', 'annual')] }),
+      yearEnd,
+    );
+    expect(items.slice(0, 11).every((i) => i.amount === '8333.33')).toBe(true);
+    expect(items[11]!.amount).toBe('8333.37');
+  });
+
+  it('a one-time fee is one item, whatever the invoicing frequency', () => {
+    const items = dueFeeItems(
+      terms({ retainerAmount: null, years: [year('25000.00', 'one_time')] }),
+      yearEnd,
+    );
+    expect(items.map((i) => [i.key, i.amount])).toEqual([['year:y1:2026-27', '25000.00']]);
+  });
+
+  it('never configured: a monthly fee is invoiced monthly, a half-yearly one once a year', () => {
+    const monthly = dueFeeItems(
+      terms({ frequency: null, retainerAmount: null, years: [year('5000.00', 'monthly')] }),
+      yearEnd,
+    );
+    expect(monthly).toHaveLength(12);
+    const half = dueFeeItems(
+      terms({ frequency: null, retainerAmount: null, years: [year('30000.00', 'half_yearly')] }),
+      yearEnd,
+    );
+    expect(half.map((i) => i.amount)).toEqual(['60000.00']);
+  });
+});

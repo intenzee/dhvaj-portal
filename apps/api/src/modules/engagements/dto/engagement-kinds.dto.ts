@@ -18,9 +18,11 @@ import {
 import {
   BILLING_MODELS,
   ENGAGEMENT_KINDS,
+  FEE_PERIODS,
   INDEPENDENCE_RULE,
   STREAMS,
   type EngagementKind,
+  type FeePeriod,
   type IndependenceRule,
   type Stream,
 } from '@hsdg/contracts';
@@ -35,11 +37,16 @@ export class ComplianceYearDto {
   @Matches(FY, { message: FY_MESSAGE })
   financialYear!: string;
 
-  @ApiPropertyOptional({ description: 'Fee for the year (₹).' })
+  @ApiPropertyOptional({ description: 'Fee (₹) for each `feePeriod`.' })
   @IsOptional()
   @IsNumber()
   @Min(0)
   feeAmount?: number | null;
+
+  @ApiPropertyOptional({ enum: FEE_PERIODS, description: 'CM-4 · what period the fee is for.' })
+  @IsOptional()
+  @IsIn(FEE_PERIODS)
+  feePeriod?: FeePeriod;
 
   @ApiPropertyOptional({ enum: BILLING_MODELS })
   @IsOptional()
@@ -101,6 +108,11 @@ export class UpdateComplianceYearDto {
   @IsNumber()
   @Min(0)
   feeAmount?: number | null;
+
+  @ApiPropertyOptional({ enum: FEE_PERIODS, description: 'CM-4 · what period the fee is for.' })
+  @IsOptional()
+  @IsIn(FEE_PERIODS)
+  feePeriod?: FeePeriod;
 
   @ApiPropertyOptional({ enum: BILLING_MODELS })
   @IsOptional()

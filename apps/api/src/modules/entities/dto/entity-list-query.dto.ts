@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import {
   ENTITY_STATUSES,
   MISSING_FILTERS,
@@ -44,4 +44,9 @@ export class EntityListQueryDto extends PaginationQueryDto {
   /** Clients with a live engagement in any of these sections (GST, Statutory Audit, …). */
   @SectionQuery()
   section?: WorkSection[];
+
+  @ApiPropertyOptional({ description: "CM-8: a team id, 'none' (no team) or 'mine'." })
+  @IsOptional()
+  @Matches(/^(none|mine|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i)
+  team?: string;
 }

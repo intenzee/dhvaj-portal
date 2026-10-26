@@ -130,6 +130,10 @@ export const PERMISSION = {
   payrollReadSummary: 'payroll.read_summary',
   /** One's own payslips, structure, tax and bank-change requests. */
   payrollReadOwn: 'payroll.read_own',
+  /** CM-8: create and change client teams and assign them to clients (D9). */
+  teamManage: 'team.manage',
+  /** CM-8: see client teams, their people and their clients — every staff role. */
+  teamRead: 'team.read',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

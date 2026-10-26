@@ -11,9 +11,13 @@ import { detectKind } from '@/lib/file-kind';
  */
 export const isM365Enabled = process.env.NEXT_PUBLIC_M365_ENABLED === 'true';
 
-/** Files Microsoft 365 shows: Word, Excel, CSV and PDF. */
+/**
+ * Files Microsoft 365 shows: Word, Excel and CSV. PDFs stay in the browser's own
+ * viewer — SharePoint's embed view redirects to login.microsoftonline.com, which
+ * refuses to be framed.
+ */
 export function isM365File(filename: string): boolean {
-  return ['excel', 'word', 'pdf', 'csv'].includes(detectKind(null, filename));
+  return ['excel', 'word', 'csv'].includes(detectKind(null, filename));
 }
 
 export interface M365EditorSession {

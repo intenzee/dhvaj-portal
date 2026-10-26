@@ -132,65 +132,76 @@ export class ClientMergeService {
     if (keepId === dropId) throw new BadRequestException('Choose two different clients.');
     const unknown = take.filter((f) => !(MERGE_TAKE_FIELDS as readonly string[]).includes(f));
     if (unknown.length) throw new BadRequestException(`Cannot take ${unknown.join(', ')}.`);
-    return this.db.withRlsContext(ctx, async (client) => {
-      // The merge runs as the owner; the caller must see both clients and be
-      // able to write them (office scope). FOR UPDATE is checked against the
-      // UPDATE policies, and locking in id order keeps two merges from deadlocking.
-      const keep = await this.side(client, keepId);
-      const drop = await this.side(client, dropId);
-      const writable = await client.query(
-        `SELECT id FROM hsdg.entities WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
-        [[keepId, dropId]],
-      );
-      if ((writable.rowCount ?? 0) < 2)
-        throw new ForbiddenException('You can merge only clients of your own office.');
+    return this.db.withRlsContext(ctx, (client) =>
+      this.mergeWith(client, ctx, keepId, dropId, take),
+    );
+  }
 
-      let out: {
-        keptId: string;
-        archivedId: string;
-        movedEngagements: number;
-        folded: MergeClientsResult['folded'];
-        counts: Record<string, number>;
-        stayed: MergeClientsResult['stayed'];
-      };
-      try {
-        const { rows } = await client.query<{ r: typeof out }>(
-          `SELECT hsdg.merge_entities($1, $2, $3::jsonb) AS r`,
-          [keepId, dropId, JSON.stringify(Object.fromEntries(take.map((f) => [f, true])))],
-        );
-        out = rows[0]!.r;
-      } catch (err) {
-        throw mergeError(err);
-      }
-      const result: MergeClientsResult = {
-        ...out,
-        keptCode: keep.row.entity_code,
-        archivedCode: drop.row.entity_code,
-      };
-      await this.audit.recordWith(client, ctx, {
-        action: 'entity.merged',
-        objectType: 'entity',
-        objectId: keepId,
-        before: {
-          kept: { code: keep.row.entity_code, legalName: keep.row.legal_name, pan: keep.row.pan },
-          archived: {
-            code: drop.row.entity_code,
-            legalName: drop.row.legal_name,
-            pan: drop.row.pan,
-          },
+  /** merge inside the caller's transaction (combining offices, CM-6). */
+  async mergeWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    keepId: string,
+    dropId: string,
+    take: MergeTakeField[] = [],
+  ): Promise<MergeClientsResult> {
+    // The merge runs as the owner; the caller must see both clients and be
+    // able to write them (office scope). FOR UPDATE is checked against the
+    // UPDATE policies, and locking in id order keeps two merges from deadlocking.
+    const keep = await this.side(client, keepId);
+    const drop = await this.side(client, dropId);
+    const writable = await client.query(
+      `SELECT id FROM hsdg.entities WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+      [[keepId, dropId]],
+    );
+    if ((writable.rowCount ?? 0) < 2)
+      throw new ForbiddenException('You can merge only clients of your own office.');
+
+    let out: {
+      keptId: string;
+      archivedId: string;
+      movedEngagements: number;
+      folded: MergeClientsResult['folded'];
+      counts: Record<string, number>;
+      stayed: MergeClientsResult['stayed'];
+    };
+    try {
+      const { rows } = await client.query<{ r: typeof out }>(
+        `SELECT hsdg.merge_entities($1, $2, $3::jsonb) AS r`,
+        [keepId, dropId, JSON.stringify(Object.fromEntries(take.map((f) => [f, true])))],
+      );
+      out = rows[0]!.r;
+    } catch (err) {
+      throw mergeError(err);
+    }
+    const result: MergeClientsResult = {
+      ...out,
+      keptCode: keep.row.entity_code,
+      archivedCode: drop.row.entity_code,
+    };
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.merged',
+      objectType: 'entity',
+      objectId: keepId,
+      before: {
+        kept: { code: keep.row.entity_code, legalName: keep.row.legal_name, pan: keep.row.pan },
+        archived: {
+          code: drop.row.entity_code,
+          legalName: drop.row.legal_name,
+          pan: drop.row.pan,
         },
-        after: { take, ...result },
-      });
-      // The archived client's own history says where it went.
-      await this.audit.recordWith(client, ctx, {
-        action: 'entity.merged_into',
-        objectType: 'entity',
-        objectId: dropId,
-        before: { code: drop.row.entity_code, legalName: drop.row.legal_name },
-        after: { keptId: keepId, keptCode: keep.row.entity_code },
-      });
-      return result;
+      },
+      after: { take, ...result },
     });
+    // The archived client's own history says where it went.
+    await this.audit.recordWith(client, ctx, {
+      action: 'entity.merged_into',
+      objectType: 'entity',
+      objectId: dropId,
+      before: { code: drop.row.entity_code, legalName: drop.row.legal_name },
+      after: { keptId: keepId, keptCode: keep.row.entity_code },
+    });
+    return result;
   }
 
   /**
@@ -218,7 +229,8 @@ export class ClientMergeService {
           ORDER BY e.entity_code`,
       );
       const dismissed = await client.query<{ a: string; b: string }>(
-        `SELECT entity_a_id AS a, entity_b_id AS b FROM hsdg.entity_duplicate_dismissals`,
+        `SELECT entity_a_id AS a, entity_b_id AS b FROM hsdg.entity_duplicate_dismissals
+          WHERE kind = 'duplicate'`,
       );
       const skip = new Set(dismissed.rows.map((d) => `${d.a}|${d.b}`));
 
@@ -279,20 +291,27 @@ export class ClientMergeService {
     });
   }
 
-  async dismiss(ctx: RlsContext, aId: string, bId: string, note?: string): Promise<void> {
+  async dismiss(
+    ctx: RlsContext,
+    aId: string,
+    bId: string,
+    note?: string,
+    kind: 'duplicate' | 'branch' = 'duplicate',
+  ): Promise<void> {
     if (aId === bId) throw new BadRequestException('Choose two different clients.');
     const [a, b] = aId < bId ? [aId, bId] : [bId, aId];
     await this.db.withRlsContext(ctx, async (client) => {
       await this.side(client, a);
       await this.side(client, b);
       await client.query(
-        `INSERT INTO hsdg.entity_duplicate_dismissals (entity_a_id, entity_b_id, dismissed_by_user_id, note)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (entity_a_id, entity_b_id) DO NOTHING`,
-        [a, b, ctx.userId, note?.trim() || null],
+        `INSERT INTO hsdg.entity_duplicate_dismissals
+           (entity_a_id, entity_b_id, dismissed_by_user_id, note, kind)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (entity_a_id, entity_b_id, kind) DO NOTHING`,
+        [a, b, ctx.userId, note?.trim() || null, kind],
       );
       await this.audit.recordWith(client, ctx, {
-        action: 'entity.duplicate_dismissed',
+        action: kind === 'branch' ? 'entity.branches_dismissed' : 'entity.duplicate_dismissed',
         objectType: 'entity',
         objectId: a,
         after: { otherEntityId: b, note: note?.trim() || null },

@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   STREAMS,
+  annualFee,
   type EngagementKind,
   type EngagementTabs,
+  type FeePeriod,
   type FilingStatus,
   type OverviewDueItem,
   type PeriodSection,
@@ -187,6 +189,7 @@ export class EngagementTabsService {
         month_s: string;
         year_s: string;
         fee: string | null;
+        fee_period: FeePeriod | null;
         budget: string | null;
         invoiced: string;
       }>(
@@ -200,6 +203,8 @@ export class EngagementTabsService {
                AND (te.started_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $3::date AND $4::date)::text AS year_s,
            (SELECT y.fee_amount::text FROM hsdg.compliance_engagement_years y
              WHERE y.engagement_id = $1 AND y.financial_year = $5) AS fee,
+           (SELECT y.fee_period FROM hsdg.compliance_engagement_years y
+             WHERE y.engagement_id = $1 AND y.financial_year = $5) AS fee_period,
            (SELECT (SELECT sum(v::numeric) FROM jsonb_each_text(y.budget_hours) AS b(k, v))::text
               FROM hsdg.compliance_engagement_years y
              WHERE y.engagement_id = $1 AND y.financial_year = $5) AS budget,
@@ -209,7 +214,9 @@ export class EngagementTabsService {
         [engagementId, today, range.from, range.to, fy],
       );
       const m = money.rows[0]!;
-      const fee = m.fee === null ? null : Number(m.fee);
+      // CM-4: the fee is typed per period; the overview works on its year's value.
+      const yearFee = annualFee(m.fee, m.fee_period);
+      const fee = yearFee === null ? null : Number(yearFee);
       const invoiced = Number(m.invoiced);
       const hours = (s: string) => Math.round((Number(s) / 3600) * 10) / 10;
 
@@ -233,6 +240,8 @@ export class EngagementTabsService {
           hoursThisYear: hours(m.year_s),
           budgetHoursThisYear: m.budget === null ? null : Number(m.budget),
           feeAmount: fee,
+          feePerPeriod: m.fee === null ? null : Number(m.fee),
+          feePeriod: m.fee === null ? null : (m.fee_period ?? 'annual'),
           invoicedAmount: invoiced,
           unbilledAmount:
             fee === null ? null : Math.max(0, Math.round((fee - invoiced) * 100) / 100),

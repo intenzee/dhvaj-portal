@@ -4,7 +4,10 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
   STREAM_LABEL,
+  feeWithPeriod,
+  rupees,
   type ActivityPage,
+  type EngagementOverview,
   type EngagementTabs,
   type OverviewDueItem,
   type Stream,
@@ -58,7 +61,8 @@ export function OverviewWidgets({
   const o = tabs.overview;
   const pinned = useQuery({
     queryKey: ['engagement', engagementId, 'activity', 'pinned'],
-    queryFn: () => apiFetch<ActivityPage>(`/engagements/${engagementId}/activity?pinned=true&limit=10`),
+    queryFn: () =>
+      apiFetch<ActivityPage>(`/engagements/${engagementId}/activity?pinned=true&limit=10`),
   });
   const DueList = ({ items, empty }: { items: OverviewDueItem[]; empty: string }) =>
     items.length === 0 ? (
@@ -67,7 +71,10 @@ export function OverviewWidgets({
       <ul className="divide-y divide-line text-sm">
         {items.map((d) => (
           <li key={d.instanceId} className="flex flex-wrap items-center gap-2 py-1.5">
-            <Link href={workItemHref(dueItemRef(engagementId, d))} className="font-medium text-primary-700 hover:underline">
+            <Link
+              href={workItemHref(dueItemRef(engagementId, d))}
+              className="font-medium text-primary-700 hover:underline"
+            >
               {d.label}
             </Link>
             <span className="text-xs text-ink-muted">
@@ -115,9 +122,13 @@ export function OverviewWidgets({
                 <li key={w.id} className="flex flex-wrap items-center gap-2 py-1.5">
                   <span className="text-ink">{w.requestedInfo}</span>
                   {w.stream && (
-                    <span className="text-xs text-ink-muted">{STREAM_LABEL[w.stream as Stream] ?? w.stream}</span>
+                    <span className="text-xs text-ink-muted">
+                      {STREAM_LABEL[w.stream as Stream] ?? w.stream}
+                    </span>
                   )}
-                  <span className={`ml-auto text-xs ${w.isOverdue ? 'font-semibold text-danger-700' : 'text-ink-muted'}`}>
+                  <span
+                    className={`ml-auto text-xs ${w.isOverdue ? 'font-semibold text-danger-700' : 'text-ink-muted'}`}
+                  >
                     asked {formatDate(w.requestDate)}
                     {w.escalationDate && ` · escalate ${formatDate(w.escalationDate)}`}
                   </span>
@@ -129,7 +140,9 @@ export function OverviewWidgets({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Hours and fees{tabs.financialYear ? ` · FY ${tabs.financialYear}` : ''}</CardTitle>
+          <CardTitle>
+            Hours and fees{tabs.financialYear ? ` · FY ${tabs.financialYear}` : ''}
+          </CardTitle>
         </CardHeader>
         <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
           <Stat label="This month" value={hours(o.hoursThisMonth)} />
@@ -138,9 +151,12 @@ export function OverviewWidgets({
             value={`${hours(o.hoursThisYear)}${o.budgetHoursThisYear ? ` of ${hours(o.budgetHoursThisYear)}` : ''}`}
             warn={!!o.budgetHoursThisYear && o.hoursThisYear > o.budgetHoursThisYear}
           />
-          <Stat label="Fee" value={o.feeAmount != null ? formatMoney(o.feeAmount) : '—'} />
+          <Stat label="Fee" value={feeLabel(o)} />
           <Stat label="Invoiced" value={formatMoney(o.invoicedAmount)} />
-          <Stat label="Unbilled" value={o.unbilledAmount != null ? formatMoney(o.unbilledAmount) : '—'} />
+          <Stat
+            label="Unbilled"
+            value={o.unbilledAmount != null ? formatMoney(o.unbilledAmount) : '—'}
+          />
         </CardBody>
       </Card>
       <Card className="lg:col-span-2">
@@ -168,7 +184,24 @@ export function OverviewWidgets({
   );
 }
 
-function Stat({ label, value, warn }: { label: string; value: string; warn?: boolean }): JSX.Element {
+/** CM-4 · "₹5,000 / month (₹60,000 a year)"; a yearly fee as before. */
+function feeLabel(o: EngagementOverview): string {
+  if (o.feeAmount == null) return '—';
+  if (!o.feePeriod || o.feePeriod === 'annual' || o.feePerPeriod == null)
+    return formatMoney(o.feeAmount);
+  if (o.feePeriod === 'one_time') return feeWithPeriod(o.feePerPeriod, o.feePeriod);
+  return `${feeWithPeriod(o.feePerPeriod, o.feePeriod)} (${rupees(o.feeAmount)} a year)`;
+}
+
+function Stat({
+  label,
+  value,
+  warn,
+}: {
+  label: string;
+  value: string;
+  warn?: boolean;
+}): JSX.Element {
   return (
     <div>
       <div className="text-xs uppercase tracking-wide text-ink-faint">{label}</div>
@@ -188,9 +221,14 @@ export function StreamLeadsCard({ tabs }: { tabs: EngagementTabs }): JSX.Element
       <CardBody>
         <ul className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
           {tabs.streams.map((s) => (
-            <li key={s.stream} className="flex items-center justify-between rounded-md border border-line px-3 py-2">
+            <li
+              key={s.stream}
+              className="flex items-center justify-between rounded-md border border-line px-3 py-2"
+            >
               <span className="font-medium">{STREAM_LABEL[s.stream as Stream] ?? s.stream}</span>
-              <span className={s.leadName ? 'text-ink' : 'text-ink-muted'}>{s.leadName ?? 'No lead set'}</span>
+              <span className={s.leadName ? 'text-ink' : 'text-ink-muted'}>
+                {s.leadName ?? 'No lead set'}
+              </span>
             </li>
           ))}
         </ul>
