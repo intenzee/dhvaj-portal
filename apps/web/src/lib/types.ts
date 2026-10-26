@@ -5,8 +5,11 @@
  */
 import type {
   BillingModel,
+  ClientTeamRef,
   ClientVerdict,
   MergedInto,
+  EntityTypeSource,
+  ClientBranch,
   ClientDependencyStatus,
   ComplianceStatus,
   EngagementConfidentiality,
@@ -143,12 +146,15 @@ export interface EntityRow {
   pan: string | null;
   primaryContactName: string | null;
   registrationCount: number;
+  branchCount?: number;
   legalStatus?: string | null;
   regulatoryProfileStatus?: string;
   listingStatus?: string;
   clientId?: string | null;
   /** What the client's master still lacks (the list's marker, the client page's card). */
   missingInfo: MissingInfoItem[];
+  /** CM-8: the client's team, if any. */
+  team?: ClientTeamRef | null;
 }
 
 export interface EntityType {
@@ -188,6 +194,11 @@ export interface Registration {
   verifiedBy?: string | null;
   verifiedAt?: string | null;
   documentRef?: string | null;
+  branchId?: string | null;
+  /** CM-2: the state's name, from the code. */
+  stateName?: string | null;
+  /** CM-2: who kept a state that differs from the GSTIN's prefix, and when. */
+  stateMismatch?: { byName: string | null; at: string } | null;
 }
 export interface Contact {
   id: string;
@@ -201,6 +212,7 @@ export interface Contact {
   contactType?: string | null;
   isPortalUser?: boolean;
   portalRole?: string | null;
+  branchId?: string | null;
 }
 export interface FinancialProfile {
   id: string;
@@ -235,6 +247,9 @@ export interface Address {
   pincode: string | null;
   country: string;
   isPrimary: boolean;
+  branchId?: string | null;
+  /** CM-2: the GST state code beside the free-text state. */
+  stateCode?: string | null;
 }
 export interface EntityRelationship {
   id: string;
@@ -321,6 +336,12 @@ export interface EntityDetail extends EntityRow {
   businessActivities: BusinessActivity[];
   listings: Listing[];
   regulatoryAttributes: RegulatoryAttribute[];
+  /** Where the firm type came from (CM-3), and who set it by hand and when. */
+  entityTypeSource: EntityTypeSource;
+  entityTypeSetBy: string | null;
+  entityTypeSetAt: string | null;
+  /** Offices (CM-6): live first, head office first. */
+  branches: ClientBranch[];
 }
 
 export interface Industry {

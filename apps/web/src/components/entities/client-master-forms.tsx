@@ -19,6 +19,7 @@ import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select } from '@/components/form';
 import { AddContactModal, AddRegistrationModal, EditEntityModal } from './entity-actions';
+import { GstStateSelect, OUTSIDE_INDIA } from './gst-state-select';
 
 /**
  * Every part of the client master the audit file reads, editable from Client
@@ -66,7 +67,7 @@ export function ClientMasterModal({
     case 'details':
       return <EditEntityModal entity={entity} onClose={onClose} />;
     case 'registrations':
-      return <AddRegistrationModal entityId={entity.id} onClose={onClose} />;
+      return <AddRegistrationModal entityId={entity.id} pan={entity.pan} onClose={onClose} />;
     case 'contacts':
       return <AddContactModal entityId={entity.id} onClose={onClose} />;
     case 'financials':
@@ -269,7 +270,11 @@ export function AddressModal({
           addressType,
           line1: line1.trim(),
           ...(city.trim() ? { city: city.trim() } : {}),
-          ...(state.trim() ? { state: state.trim() } : {}),
+          ...(state === OUTSIDE_INDIA
+            ? { state: 'Outside India' }
+            : state
+              ? { stateCode: state }
+              : {}),
           ...(pincode.trim() ? { pincode: pincode.trim() } : {}),
         },
       }),
@@ -308,7 +313,7 @@ export function AddressModal({
             <Input value={city} onChange={(e) => setCity(e.target.value)} />
           </Field>
           <Field label="State">
-            <Input value={state} onChange={(e) => setState(e.target.value)} />
+            <GstStateSelect value={state} onChange={setState} allowOutside />
           </Field>
           <Field label="PIN code">
             <Input value={pincode} onChange={(e) => setPincode(e.target.value)} />

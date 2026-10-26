@@ -20,6 +20,7 @@ jest.mock('next/navigation', () => ({
   useParams: () => ({ id: 'ent1' }),
   useRouter: () => ({ push: jest.fn(), replace }),
   useSearchParams: () => new URLSearchParams(search),
+  usePathname: () => '/entities/ent1',
 }));
 
 function wrap(ui: ReactNode): ReactNode {
@@ -108,6 +109,7 @@ beforeEach(() => {
       return Promise.resolve({ vaultReady: true, items: [], recentAccess: [] });
     if (url.startsWith('/client-returns'))
       return Promise.resolve({ periods: [], forms: [], lines: [] });
+    if (url.endsWith('/fees')) return Promise.resolve({ financialYear: '2026-27', rows: [] });
     return Promise.resolve([]);
   });
 });
@@ -209,6 +211,7 @@ describe('Client 360 — a client merged into another', () => {
         return Promise.resolve({ vaultReady: true, items: [], recentAccess: [] });
       if (url.startsWith('/client-returns'))
         return Promise.resolve({ periods: [], forms: [], lines: [] });
+      if (url.endsWith('/fees')) return Promise.resolve({ financialYear: '2026-27', rows: [] });
       return Promise.resolve([]);
     });
     render(wrap(<EntityDetailPage />));

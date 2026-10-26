@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   ArrayUnique,
   IsArray,
@@ -86,6 +87,16 @@ export class CreateEngagementDto {
   @IsOptional()
   @IsUUID()
   engagementManagerEmployeeId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: "CM-8: staff these people as members (the client team's associates).",
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('all', { each: true })
+  teamMemberEmployeeIds?: string[];
 
   @ApiPropertyOptional({ enum: ENGAGEMENT_STATUSES, default: 'prospect' })
   @IsOptional()

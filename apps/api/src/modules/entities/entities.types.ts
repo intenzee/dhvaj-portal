@@ -22,6 +22,9 @@ import type {
   RelationshipStatus,
   RelationshipType,
   SecurityType,
+  ClientTeamRef,
+  EntityTypeSource,
+  ClientBranch,
 } from '@hsdg/contracts';
 
 export interface EntityTypeRecord {
@@ -50,6 +53,12 @@ export interface RegistrationRecord {
   verifiedBy: string | null;
   verifiedAt: string | null;
   documentRef: string | null;
+  /** The office (CM-6) this registration is of; null = the whole client. */
+  branchId: string | null;
+  /** CM-2: the state's name, from GST_STATES. */
+  stateName: string | null;
+  /** CM-2: who confirmed a state that differs from the GSTIN's prefix, and when. */
+  stateMismatch: { byName: string | null; at: string } | null;
 }
 
 export interface ContactRecord {
@@ -64,6 +73,7 @@ export interface ContactRecord {
   contactType: ContactType | null;
   isPortalUser: boolean;
   portalRole: string | null;
+  branchId: string | null;
 }
 
 /** Year-wise financial facts (§16/§17). Append-only: one current row per FY. */
@@ -120,10 +130,14 @@ export interface EntitySummary {
   parentEntityId: string | null;
   incorporationDate: string | null;
   registrationCount: number;
+  /** Live offices (CM-6); 0 = not set up. */
+  branchCount: number;
   primaryContactName: string | null;
   /** Progressive-completion signal (§5/§27/§28); absence is never "N/A". */
   missingInfo: MissingInfoItem[];
   version: number;
+  /** CM-8: the client's team, if any. */
+  team: ClientTeamRef | null;
 }
 
 export interface AddressRecord {
@@ -136,6 +150,9 @@ export interface AddressRecord {
   pincode: string | null;
   country: string;
   isPrimary: boolean;
+  branchId: string | null;
+  /** CM-2: the GST state code beside the free-text state. */
+  stateCode: string | null;
 }
 
 export interface RelationshipRecord {
@@ -212,6 +229,12 @@ export interface EntityDetail extends EntitySummary {
   regulatoryAttributes: RegulatoryAttributeRecord[];
   /** Set when this client was merged into another and archived. */
   mergedInto: MergedInto | null;
+  /** Where the firm type came from (CM-3), and who set it by hand and when. */
+  entityTypeSource: EntityTypeSource;
+  entityTypeSetBy: string | null;
+  entityTypeSetAt: string | null;
+  /** Live and closed offices (CM-6); head office first. */
+  branches: ClientBranch[];
 }
 
 export interface DuplicateCandidate {
@@ -240,6 +263,8 @@ export interface RegistrationInput {
   isPrincipal?: boolean;
   applicability?: RegistrationApplicability;
   documentRef?: string;
+  /** CM-2: keep a state that differs from the GSTIN's prefix. */
+  stateMismatchAcknowledged?: boolean;
 }
 
 /** Partial update to an existing registration (the §34 "obtained later" flow). */
@@ -256,6 +281,8 @@ export interface UpdateRegistrationInput {
   isPrincipal?: boolean;
   applicability?: RegistrationApplicability;
   documentRef?: string | null;
+  /** CM-2: keep a state that differs from the GSTIN's prefix. */
+  stateMismatchAcknowledged?: boolean;
 }
 
 export interface ContactInput {
@@ -302,6 +329,8 @@ export interface AddressInput {
   pincode?: string;
   country?: string;
   isPrimary?: boolean;
+  /** CM-2: the GST state code; the state text follows from it when not given. */
+  stateCode?: string | null;
 }
 
 export interface RelationshipInput {
@@ -356,6 +385,8 @@ export interface UpdateAddressInput {
   pincode?: string | null;
   country?: string;
   isPrimary?: boolean;
+  /** CM-2: the GST state code; the state text follows from it when not given. */
+  stateCode?: string | null;
 }
 
 export interface RegulatoryAttributeInput {
@@ -411,6 +442,8 @@ export interface CreateEntityInput {
   listings?: ListingInput[];
   regulatoryAttributes?: RegulatoryAttributeInput[];
   financialProfiles?: FinancialProfileInput[];
+  /** Server-side callers only (imports): where typeSlug came from. Default: pan when it equals the PAN's type, else manual. */
+  entityTypeSource?: EntityTypeSource;
 }
 
 export interface UpdateEntityInput {
@@ -437,6 +470,10 @@ export interface UpdateEntityInput {
   llpContribution?: number | null;
   businessDescription?: string | null;
   version?: number;
+  /** A person saving a type the PAN disagrees with, after the confirm (CM-3). */
+  typeMismatchAcknowledged?: boolean;
+  /** Server-side callers only (imports): where typeSlug came from; a person's change is manual. */
+  entityTypeSource?: EntityTypeSource;
 }
 
 export interface EntityFilter {
@@ -448,4 +485,6 @@ export interface EntityFilter {
   section?: WorkSection[];
   /** Something missing from the master ('any'), nothing ('none'), or one item. */
   missing?: MissingFilter;
+  /** CM-8: a team id, 'none' (no team) or 'mine' (a team I am on). */
+  team?: string;
 }

@@ -180,6 +180,8 @@ export interface CreateEngagementInput {
   /** Filed before the portal: {stream: 'YYYY-MM' | 'FY:YYYY-YY'}. */
   priorFiled?: Partial<Record<Stream, string[]>>;
   acknowledgedIndependenceRules?: IndependenceRule[];
+  /** CM-8: people to staff as members (the wizard pre-fills the client team's associates). */
+  teamMemberEmployeeIds?: string[];
 }
 
 /**

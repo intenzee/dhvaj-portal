@@ -8,6 +8,7 @@
  * compliance_engagement_years. Every row in a stream tab is a compliance
  * instance carrying a FILING_STATUS and, for GST, a PERIOD_SECTION.
  */
+import type { FeePeriod } from './commercial';
 import type { WorkItemRef } from './work-links';
 
 /** What kind of engagement this is (engagements.kind). */
@@ -497,7 +498,14 @@ export interface ComplianceEngagementYear {
   streams: Stream[];
   /** {stream: registration ids} */
   streamRegistrations: Partial<Record<Stream, string[]>>;
+  /** The fee as typed, for `feePeriod`. */
   feeAmount: number | null;
+  /** CM-4 · what period `feeAmount` is for; `annual` on rows from before CM-4. */
+  feePeriod: FeePeriod;
+  /** CM-4 · the year's value of the fee (rupees, '60000.00'); null when no fee. */
+  annualFee: string | null;
+  /** CM-4 · null until someone saves the fee with its period (CM-9 lists those). */
+  feePeriodSetAt: string | null;
   billingModel: string | null;
   budgetHours: Partial<Record<Stream, number>>;
   engagementLetterRef: string | null;
@@ -867,6 +875,8 @@ export interface StreamCatalogueEntry {
 export interface ComplianceYearInput {
   financialYear: string;
   feeAmount?: number | null;
+  /** CM-4 · defaults to `annual`. */
+  feePeriod?: FeePeriod;
   billingModel?: string | null;
   budgetHours?: Partial<Record<Stream, number>>;
   engagementLetterRef?: string | null;

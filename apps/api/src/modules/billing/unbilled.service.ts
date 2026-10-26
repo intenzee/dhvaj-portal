@@ -596,7 +596,8 @@ export class UnbilledService {
               COALESCE((
                 SELECT json_agg(json_build_object(
                          'id', y.id, 'financialYear', y.financial_year,
-                         'feeAmount', y.fee_amount::text, 'billingModel', y.billing_model,
+                         'feeAmount', y.fee_amount::text, 'feePeriod', y.fee_period,
+                         'billingModel', y.billing_model,
                          'closed', y.status = 'closed') ORDER BY y.financial_year)
                   FROM hsdg.compliance_engagement_years y
                  WHERE y.engagement_id = e.id AND y.fee_amount > 0), '[]'::json) AS years,

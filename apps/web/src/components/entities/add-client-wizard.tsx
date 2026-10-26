@@ -27,6 +27,9 @@ import {
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
   SECURITY_TYPES,
+  firmTypeFromIds,
+  readGstin,
+  withCompanySuffix,
   type DuplicateClientConflict,
 } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -37,6 +40,8 @@ import type { ClientRow, DuplicateCandidate, EntityType, Industry, OfficeRow } f
 import { Card, CardBody, Button, Spinner, Badge, PageHeader } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
 import { DuplicateConflictNotice, VerdictBadge, duplicateConflictOf } from './merge-clients-modal';
+import { GstinHint, gstinBlocks } from './gstin-hint';
+import { GstStateSelect, OUTSIDE_INDIA } from './gst-state-select';
 
 type Kind = 'individual' | 'legal_entity';
 interface RegRow {
@@ -45,6 +50,8 @@ interface RegRow {
   status: string;
   applicability: string;
   stateCode: string;
+  /** CM-2: a state that differs from the GSTIN's prefix, confirmed with Keep. */
+  stateAck: boolean;
   validFrom: string;
 }
 interface ContactRow {
@@ -87,6 +94,11 @@ interface State {
   officeCode: string;
   clientId: string;
   pan: string;
+  /** The PAN was filled from the first GSTIN typed (CM-1). */
+  panFromGstin?: boolean;
+  /** The entity type was set from the PAN / GSTIN (CM-3); cleared when the person picks one. */
+  typeFromPan?: boolean;
+  typeTouched?: boolean;
   countryOfIncorporation: string;
   incorporationDate: string;
   status: string;
@@ -122,6 +134,7 @@ const emptyReg = (): RegRow => ({
   status: 'active',
   applicability: 'unknown',
   stateCode: '',
+  stateAck: false,
   validFrom: '',
 });
 const emptyContact = (): ContactRow => ({
@@ -237,6 +250,27 @@ export function AddClientWizard(): JSX.Element {
   useEffect(() => {
     if (kindTypes[0] && !kindTypes.some((t) => t.slug === s.typeSlug)) set('typeSlug', kindTypes[0].slug);
   }, [kindTypes]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The PAN (or a GSTIN's 6th letter) sets the type until the person picks one (CM-3).
+  const gstinNumbers = s.registrations
+    .filter((r) => r.registrationType === 'gstin')
+    .map((r) => r.registrationNumber)
+    .join(',');
+  useEffect(() => {
+    if (s.typeTouched || !types.data) return;
+    const gstins = gstinNumbers ? gstinNumbers.split(',') : [];
+    const fromPan = firmTypeFromIds({
+      pan: s.pan,
+      gstins,
+      nameOrTypedType: s.legalName,
+      hasBusinessRegistration: gstins.some((g) => readGstin(g).valid),
+    });
+    const type = fromPan && types.data.find((t) => t.slug === fromPan.slug);
+    if (!type) return;
+    const kind: Kind = ['individual', 'proprietorship'].includes(type.category) ? 'individual' : 'legal_entity';
+    if (kind !== s.kind) set('kind', kind);
+    if (type.slug !== s.typeSlug) set('typeSlug', type.slug);
+    set('typeFromPan', true);
+  }, [s.pan, gstinNumbers, s.legalName, types.data, s.typeTouched]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!s.officeCode && offices.data?.[0]) set('officeCode', offices.data[0].code);
   }, [offices.data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -289,7 +323,12 @@ export function AddClientWizard(): JSX.Element {
     },
   });
 
-  const canCreate = s.legalName.trim().length > 0 && !!s.typeSlug && !!s.officeCode && panValid;
+  // A GSTIN of another PAN can never be saved (CM-1).
+  const gstinClash = s.registrations.some(
+    (r) => r.registrationType === 'gstin' && gstinBlocks(r.registrationNumber, s.pan),
+  );
+  const canCreate =
+    s.legalName.trim().length > 0 && !!s.typeSlug && !!s.officeCode && panValid && !gstinClash;
 
   if (types.isLoading || offices.isLoading) return <Spinner label="Loading…" />;
 
@@ -410,7 +449,10 @@ function Step1({
           {(['legal_entity', 'individual'] as Kind[]).map((k) => (
             <button
               key={k}
-              onClick={() => set('kind', k)}
+              onClick={() => {
+                set('kind', k);
+                set('typeTouched', true);
+              }}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-sm',
                 s.kind === k ? 'border-primary-500 bg-primary-50 font-medium text-primary-700' : 'border-line text-ink-muted',
@@ -424,6 +466,11 @@ function Step1({
 
       <Field label="Legal name" required>
         <Input value={s.legalName} onChange={(e) => set('legalName', e.target.value)} placeholder="Acme Manufacturing Pvt Ltd" />
+        {withCompanySuffix(s.legalName.trim(), s.typeSlug) !== s.legalName.trim() && (
+          <p className="mt-1 text-xs text-ink-muted">
+            Will be saved as <span className="font-medium text-ink">{withCompanySuffix(s.legalName.trim(), s.typeSlug)}</span>
+          </p>
+        )}
       </Field>
 
       {dupes.length > 0 && (
@@ -462,8 +509,15 @@ function Step1({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Entity type" required>
-          <Select value={s.typeSlug} onChange={(e) => set('typeSlug', e.target.value)}>
+        <Field label="Entity type" required hint={s.typeFromPan ? 'From PAN — change it if the PAN is not the whole story.' : undefined}>
+          <Select
+            value={s.typeSlug}
+            onChange={(e) => {
+              set('typeSlug', e.target.value);
+              set('typeFromPan', false);
+              set('typeTouched', true);
+            }}
+          >
             {kindTypes.map((t) => (
               <option key={t.id} value={t.slug}>
                 {t.name}
@@ -505,10 +559,22 @@ function Step1({
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label="PAN" hint={s.pan && !panValid ? 'Invalid PAN.' : 'Optional; add later if pending.'}>
+        <Field
+          label="PAN"
+          hint={
+            s.pan && !panValid
+              ? 'Invalid PAN.'
+              : s.panFromGstin
+                ? 'PAN taken from the GSTIN.'
+                : 'Optional; add later if pending.'
+          }
+        >
           <Input
             value={s.pan}
-            onChange={(e) => set('pan', e.target.value.toUpperCase())}
+            onChange={(e) => {
+              set('pan', e.target.value.toUpperCase());
+              set('panFromGstin', false);
+            }}
             placeholder="AAACA1234A"
             className={s.pan && !panValid ? 'border-danger-400' : undefined}
           />
@@ -582,8 +648,17 @@ function RegistrationsStep({
   s: State;
   set: <K extends keyof State>(k: K, v: State[K]) => void;
 }): JSX.Element {
-  const update = (i: number, patch: Partial<RegRow>): void =>
-    set('registrations', s.registrations.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const update = (i: number, patch: Partial<RegRow>): void => {
+    const next = s.registrations.map((r, j) => (j === i ? { ...r, ...patch } : r));
+    set('registrations', next);
+    // A client with no PAN takes it from its first valid GSTIN.
+    const row = next[i]!;
+    const read = readGstin(row.registrationNumber);
+    if (row.registrationType === 'gstin' && read.valid && read.pan && !s.pan.trim()) {
+      set('pan', read.pan);
+      set('panFromGstin', true);
+    }
+  };
   return (
     <div className="space-y-3">
       <p className="text-sm text-ink-muted">
@@ -602,6 +677,7 @@ function RegistrationsStep({
             </Field>
             <Field label="Number">
               <Input value={r.registrationNumber} onChange={(e) => update(i, { registrationNumber: e.target.value.toUpperCase() })} />
+              {r.registrationType === 'gstin' && <GstinHint value={r.registrationNumber} pan={s.pan} />}
             </Field>
             <Field label="Status">
               <Select value={r.status} onChange={(e) => update(i, { status: e.target.value })}>
@@ -617,8 +693,14 @@ function RegistrationsStep({
                 ))}
               </Select>
             </Field>
-            <Field label="State code">
-              <Input value={r.stateCode} onChange={(e) => update(i, { stateCode: e.target.value })} placeholder="27" />
+            <Field label="State">
+              <GstStateSelect
+                value={r.stateCode}
+                onChange={(code) => update(i, { stateCode: code })}
+                gstin={r.registrationType === 'gstin' ? r.registrationNumber : null}
+                acknowledged={r.stateAck}
+                onAcknowledge={(ack) => update(i, { stateAck: ack })}
+              />
             </Field>
             <Field label="Valid from">
               <Input type="date" value={r.validFrom} onChange={(e) => update(i, { validFrom: e.target.value })} />
@@ -663,7 +745,7 @@ function AddressesStep({
               <Input value={a.city} onChange={(e) => update(i, { city: e.target.value })} />
             </Field>
             <Field label="State">
-              <Input value={a.state} onChange={(e) => update(i, { state: e.target.value })} />
+              <GstStateSelect value={a.state} onChange={(code) => update(i, { state: code })} allowOutside />
             </Field>
             <Field label="Pincode">
               <Input value={a.pincode} onChange={(e) => update(i, { pincode: e.target.value })} placeholder="400001" />
@@ -1042,7 +1124,8 @@ function buildPayload(s: State): Record<string, unknown> {
     regulatoryAttributes.push({ attributeCode: 'is_government_company', valueBoolean: true });
 
   return {
-    legalName: s.legalName.trim(),
+    // A private company's name carries "Private Limited" (CM-5).
+    legalName: withCompanySuffix(s.legalName.trim(), s.typeSlug),
     ...(clean(s.displayName) ? { displayName: s.displayName.trim() } : {}),
     ...(clean(s.tradeName) ? { tradeName: s.tradeName.trim() } : {}),
     ...(clean(s.shortName) ? { shortName: s.shortName.trim() } : {}),
@@ -1071,6 +1154,7 @@ function buildPayload(s: State): Record<string, unknown> {
               status: r.status,
               applicability: r.applicability,
               ...(clean(r.stateCode) ? { stateCode: r.stateCode.trim() } : {}),
+              ...(r.stateAck ? { stateMismatchAcknowledged: true } : {}),
               ...(r.validFrom ? { validFrom: r.validFrom } : {}),
             })),
         }
@@ -1083,7 +1167,11 @@ function buildPayload(s: State): Record<string, unknown> {
               addressType: a.addressType,
               line1: a.line1.trim(),
               ...(clean(a.city) ? { city: a.city.trim() } : {}),
-              ...(clean(a.state) ? { state: a.state.trim() } : {}),
+              ...(a.state === OUTSIDE_INDIA
+                ? { state: 'Outside India' }
+                : clean(a.state)
+                  ? { stateCode: a.state.trim() }
+                  : {}),
               ...(clean(a.pincode) ? { pincode: a.pincode.trim() } : {}),
               isPrimary: a.isPrimary,
             })),

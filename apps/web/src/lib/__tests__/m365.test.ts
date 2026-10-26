@@ -1,8 +1,18 @@
-import { editorWindowFeatures, fetchM365Session, m365EmbedUrl, m365OpenUrl } from '../m365';
+import { editorWindowFeatures, fetchM365Session, isM365File, m365EmbedUrl, m365OpenUrl } from '../m365';
 
 jest.mock('../api', () => ({ apiFetch: jest.fn() }));
 
 const LINK = 'https://contoso.sharepoint.com/:w:/s/Portal/IQCAw?e=abc';
+
+describe('isM365File', () => {
+  it('keeps PDFs in the browser viewer and sends Word, Excel and CSV to Microsoft 365', () => {
+    expect(isM365File('a.pdf')).toBe(false);
+    expect(isM365File('A.PDF')).toBe(false);
+    expect(isM365File('a.docx')).toBe(true);
+    expect(isM365File('a.xlsx')).toBe(true);
+    expect(isM365File('a.csv')).toBe(true);
+  });
+});
 
 describe('Microsoft 365 links', () => {
   it('frames the read-only embed view, keeping the link token', () => {

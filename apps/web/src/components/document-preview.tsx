@@ -1,7 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type Ref } from 'react';
-import { Download, X, FileQuestion, Pencil, Save, Loader2, Maximize2, Minimize2 } from 'lucide-react';
+import {
+  Download,
+  X,
+  FileQuestion,
+  Pencil,
+  Save,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  ExternalLink,
+} from 'lucide-react';
 import { apiFetch, fetchBlob, downloadFile, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
@@ -100,8 +110,8 @@ export function DocumentPreview({
   }, []);
   const downloadPath = `/engagements/${engagementId}/documents/${doc.id}/download`;
 
-  // Office/PDF files open in Microsoft 365 (SharePoint Online) — the firm's only
-  // embedded editor. If it is switched off or unreachable, the built-in viewers
+  // Word, Excel and CSV files open in Microsoft 365 (SharePoint Online) — the
+  // firm's only embedded editor. PDFs always use the browser's own viewer. If it is switched off or unreachable, the built-in viewers
   // show the file and say why Microsoft 365 is not open.
   const [m365Failed, setM365Failed] = useState<string | null>(null);
   const guessName = doc.currentFilename ?? doc.title;
@@ -122,8 +132,15 @@ export function DocumentPreview({
     setState({ loading: true });
     (async () => {
       try {
-        const { blob, contentType, filename } = await fetchBlob(downloadPath);
+        const fetched = await fetchBlob(downloadPath);
         if (cancelled) return;
+        const { contentType, filename } = fetched;
+        // Storage often answers application/octet-stream, which makes the browser
+        // download a PDF instead of drawing it — so give the bytes the PDF type.
+        const blob =
+          detectKind(contentType, filename ?? guessName) === 'pdf' && fetched.blob.type !== 'application/pdf'
+            ? new Blob([fetched.blob], { type: 'application/pdf' })
+            : fetched.blob;
         objectUrl = URL.createObjectURL(blob);
         setState({ loading: false, blob, contentType, filename, url: objectUrl });
       } catch (err) {
@@ -135,7 +152,7 @@ export function DocumentPreview({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [downloadPath, reloadKey, liveEditor]);
+  }, [downloadPath, reloadKey, liveEditor, guessName]);
 
   const requestClose = useCallback(() => {
     if (!liveEditor && mode === 'edit' && dirty && !window.confirm('Discard unsaved changes?')) return;
@@ -241,6 +258,11 @@ export function DocumentPreview({
                   {saving ? 'Saving…' : 'Save new version'}
                 </Button>
               </>
+            )}
+            {kind === 'pdf' && state.url && (
+              <Button size="sm" variant="secondary" onClick={() => window.open(state.url, '_blank', 'noopener')}>
+                <ExternalLink className="h-4 w-4" /> Open in new tab
+              </Button>
             )}
             {(liveEditor || mode === 'view') && (
               <Button size="sm" variant="secondary" onClick={() => void download()}>

@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsDateString, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import {
+  GST_STATES,
   REGISTRATION_APPLICABILITIES,
   REGISTRATION_SOURCES,
   REGISTRATION_STATUSES,
@@ -11,6 +12,9 @@ import {
   type RegistrationStatus,
   type RegistrationType,
 } from '@hsdg/contracts';
+import { normaliseStateCode } from '../registration-state';
+
+const GST_STATE_CODES = Object.keys(GST_STATES);
 
 export class RegistrationDto {
   @ApiProperty({ enum: REGISTRATION_TYPES, example: 'gstin' })
@@ -23,9 +27,10 @@ export class RegistrationDto {
   @MaxLength(40)
   registrationNumber!: string;
 
-  @ApiPropertyOptional({ example: '27', description: 'State code (GSTIN).' })
+  @ApiPropertyOptional({ example: '27', description: 'GST state code; a state name is read.' })
   @IsOptional()
-  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? normaliseStateCode(value) : value))
+  @IsIn(GST_STATE_CODES, { message: 'stateCode must be a GST state code such as 07' })
   stateCode?: string;
 
   @ApiPropertyOptional({ enum: REGISTRATION_STATUSES, default: 'active' })
@@ -84,4 +89,11 @@ export class RegistrationDto {
   @IsOptional()
   @IsString()
   documentRef?: string;
+
+  @ApiPropertyOptional({
+    description: "CM-2: keep a state that differs from the GSTIN's first two digits.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  stateMismatchAcknowledged?: boolean;
 }
