@@ -20,7 +20,13 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { legalStatusLabel } from '../credentials/client-master';
-import { cleanGstin, parseClientName, sameClient, type ClientIdentity } from './client-names';
+import {
+  cleanGstin,
+  parseClientName,
+  officesOfOneBusiness,
+  sameClient,
+  type ClientIdentity,
+} from './client-names';
 
 /** Engagements no longer in progress: they move, but are not "work in hand". */
 const OPEN_EXCLUDED = ['closed', 'merged', 'cancelled', 'declined', 'withdrawn'];
@@ -277,6 +283,8 @@ export class ClientMergeService {
             const key = `${rows[a]!.id}|${rows[b]!.id}`;
             if (seen.has(key) || skip.has(key)) continue;
             seen.add(key);
+            // Offices of one business go to "Offices to combine", not here.
+            if (officesOfOneBusiness(idents[a]!, idents[b]!)) continue;
             const { verdict, reasons } = sameClient(idents[a]!, idents[b]!);
             if (verdict === 'different') continue;
             pairs.push({ a: brief(a), b: brief(b), verdict, reasons });

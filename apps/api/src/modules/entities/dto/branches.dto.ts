@@ -21,9 +21,18 @@ class CombineOtherDto {
 }
 
 class CombineOfficeDto {
-  @ApiProperty({ format: 'uuid' })
+  @ApiPropertyOptional({ format: 'uuid', description: 'A GSTIN of the clients being combined.' })
+  @IsOptional()
   @IsUUID()
-  registrationId!: string;
+  registrationId?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'A client without a GSTIN that is this office.',
+  })
+  @IsOptional()
+  @IsUUID()
+  entityId?: string | null;
 
   @ApiProperty({ maxLength: 80 })
   @IsString()

@@ -36,6 +36,7 @@ import {
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { FirmTypeCard } from '@/components/entities/firm-type-card';
 import { OfficeBadge, OfficeTabs, inOffice, useOfficeTab } from '@/components/entities/offices';
+import { PossibleOfficeBanner } from '@/components/entities/offices-review';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import { ClientReturnsCard } from '@/components/entities/client-returns';
 import { FeesCard } from '@/components/entities/fees-card';
@@ -127,6 +128,7 @@ export default function EntityDetailPage(): JSX.Element {
       {e.mergedInto && <MergedIntoBanner mergedInto={e.mergedInto} />}
       {!e.mergedInto && <ClientTeamLine entityId={e.id} team={e.team} />}
       {canManage && <PossibleDuplicateBanner entityId={e.id} />}
+      {canManage && <PossibleOfficeBanner entityId={e.id} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={e.status} />
