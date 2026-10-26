@@ -104,3 +104,4 @@ export * from './payroll-tax-api';
 export * from './accounts';
 export * from './people';
 export * from './finance';
+export * from './tax-ids';
