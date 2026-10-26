@@ -36,6 +36,7 @@ import {
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import { ClientReturnsCard } from '@/components/entities/client-returns';
+import { FeesCard } from '@/components/entities/fees-card';
 import {
   ClientLogins,
   CredentialAccessNote,
@@ -263,6 +264,8 @@ export default function EntityDetailPage(): JSX.Element {
           </CardBody>
         </Card>
       </div>
+
+      {!e.mergedInto && <FeesCard entityId={e.id} />}
 
       <ClientReturnsCard entityId={e.id} />
 

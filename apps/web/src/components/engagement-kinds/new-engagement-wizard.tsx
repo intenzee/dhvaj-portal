@@ -27,6 +27,7 @@ import {
   STREAM_REGISTRATION_TYPES,
   fyMonthKeys,
   type EngagementKind,
+  type FeePeriod,
   type IndependenceCheckResult,
   type IndependenceFinding,
   type IndependenceRule,
@@ -38,6 +39,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
+import { FeeInput } from '@/components/billing/fee-input';
 import { can } from '@/lib/principal';
 import { useFirmChecks } from '@/lib/firm-checks';
 import type { EmployeeRow, EngagementLeadRow, EntityDetail } from '@/lib/types';
@@ -61,6 +63,8 @@ interface ServiceOption {
 interface YearDraft {
   financialYear: string;
   fee: string;
+  /** CM-4 · what period the fee is for. */
+  feePeriod: FeePeriod;
 }
 
 /** Indian FY containing `d`, e.g. "2026-27" (the year rolls over in April). */
@@ -178,7 +182,7 @@ export function NewEngagementWizard(): JSX.Element {
   const [serviceId, setServiceId] = useState('');
   const [periodLabel, setPeriodLabel] = useState('FY');
   // Compliance
-  const [years, setYears] = useState<YearDraft[]>([{ financialYear: currentFy, fee: '' }]);
+  const [years, setYears] = useState<YearDraft[]>([{ financialYear: currentFy, fee: '', feePeriod: 'annual' }]);
   const [streams, setStreams] = useState<Stream[]>([]);
   const [registrations, setRegistrations] = useState<Partial<Record<Stream, string[]>>>({});
   const [leads, setLeads] = useState<Partial<Record<Stream, string>>>({});
@@ -308,7 +312,7 @@ export function NewEngagementWizard(): JSX.Element {
       const sorted = [...ys].sort((a, b) => a.financialYear.localeCompare(b.financialYear));
       const edge = delta < 0 ? sorted[0] : sorted[sorted.length - 1];
       const fy = shiftFinancialYear(edge?.financialYear ?? currentFy, delta);
-      return [...ys, { financialYear: fy, fee: '' }].sort((a, b) =>
+      return [...ys, { financialYear: fy, fee: '', feePeriod: ys[ys.length - 1]?.feePeriod ?? 'annual' }].sort((a, b) =>
         a.financialYear.localeCompare(b.financialYear),
       );
     });
@@ -351,6 +355,7 @@ export function NewEngagementWizard(): JSX.Element {
               years: years.map((y) => ({
                 financialYear: y.financialYear,
                 feeAmount: y.fee.trim() === '' ? undefined : Number(y.fee),
+                ...(y.fee.trim() === '' ? {} : { feePeriod: y.feePeriod }),
               })),
               streams,
               streamRegistrations: Object.fromEntries(
@@ -599,10 +604,10 @@ export function NewEngagementWizard(): JSX.Element {
               <Field label="Years in scope" required hint="Fee per year is optional.">
                 <div className="space-y-2">
                   {years.map((y, i) => (
-                    <div key={y.financialYear + i} className="flex items-center gap-2">
+                    <div key={y.financialYear + i} className="flex items-start gap-2">
                       <Input
                         aria-label="Financial year"
-                        className="w-28"
+                        className="mt-6 w-28"
                         value={y.financialYear}
                         onChange={(e) =>
                           setYears((ys) =>
@@ -612,23 +617,27 @@ export function NewEngagementWizard(): JSX.Element {
                           )
                         }
                       />
-                      <Input
-                        aria-label={`Fee for ${y.financialYear}`}
-                        className="flex-1"
-                        inputMode="decimal"
-                        placeholder="Fee (₹)"
-                        value={y.fee}
-                        onChange={(e) =>
-                          setYears((ys) =>
-                            ys.map((x, j) => (j === i ? { ...x, fee: e.target.value } : x)),
-                          )
-                        }
-                      />
+                      <div className="min-w-0 flex-1">
+                        <FeeInput
+                          id={`fee-${i}`}
+                          label={`Fee for ${y.financialYear}`}
+                          amount={y.fee}
+                          period={y.feePeriod}
+                          onAmount={(v) =>
+                            setYears((ys) => ys.map((x, j) => (j === i ? { ...x, fee: v } : x)))
+                          }
+                          onPeriod={(p) =>
+                            setYears((ys) =>
+                              ys.map((x, j) => (j === i ? { ...x, feePeriod: p } : x)),
+                            )
+                          }
+                        />
+                      </div>
                       {years.length > 1 && (
                         <button
                           type="button"
                           aria-label={`Remove ${y.financialYear}`}
-                          className="text-ink-faint hover:text-danger-600"
+                          className="mt-8 text-ink-faint hover:text-danger-600"
                           onClick={() => setYears((ys) => ys.filter((_, j) => j !== i))}
                         >
                           <X className="h-4 w-4" />

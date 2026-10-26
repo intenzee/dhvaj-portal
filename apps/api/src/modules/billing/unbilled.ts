@@ -1,4 +1,12 @@
-import { fromPaise, toPaise, type BillingFrequency, type UnbilledItem } from '@hsdg/contracts';
+import {
+  annualFee,
+  frequencyOfFeePeriod,
+  fromPaise,
+  toPaise,
+  type BillingFrequency,
+  type FeePeriod,
+  type UnbilledItem,
+} from '@hsdg/contracts';
 
 /** Billing models with no fixed fee to bill. */
 const NOT_FIXED = new Set(['time_and_material', 'pro_bono', 'not_billed']);
@@ -20,7 +28,10 @@ export interface FeeTerms {
   years: {
     id: string;
     financialYear: string;
+    /** The fee as typed, for `feePeriod`. */
     feeAmount: string | null;
+    /** CM-4 · what period the fee is for; annual when absent. */
+    feePeriod?: FeePeriod | null;
     billingModel: string | null;
     closed: boolean;
   }[];
@@ -181,11 +192,15 @@ function retainerItems(t: FeeTerms, asOf: string, billingFrom: string | null): U
 /** A compliance year's fee, shared over its months or quarters (the last takes the paise). */
 function yearItems(t: FeeTerms, asOf: string, billingFrom: string | null): UnbilledItem[] {
   const out: UnbilledItem[] = [];
-  // Never configured: the year's fee is billed in one.
-  const f: BillingFrequency = t.frequency ?? 'annual';
   for (const y of t.years) {
-    const fee = y.feeAmount ? toPaise(y.feeAmount) : 0n;
+    // CM-4: the fee is typed per period; its year's value is what is shared out.
+    const typed = annualFee(y.feeAmount, y.feePeriod);
+    const fee = typed ? toPaise(typed) : 0n;
     if (fee <= 0n || NOT_FIXED.has(y.billingModel ?? t.billingModel ?? '')) continue;
+    // Never configured: the fee period says how often (a monthly fee monthly, else once a year).
+    // A one-time fee is billed once in its year, whatever the invoicing frequency.
+    const f: BillingFrequency =
+      y.feePeriod === 'one_time' ? 'one_time' : (t.frequency ?? frequencyOfFeePeriod(y.feePeriod));
     const fy = Number(y.financialYear.slice(0, 4));
     const year = financialYear(fy);
     const keyOf = (p: Period) => `year:${y.id}:${p.suffix}`;

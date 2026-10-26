@@ -8,6 +8,8 @@
  * each line optionally tied to a configured component.
  */
 
+import { formatInr, fromPaise, toPaise } from './billing';
+
 /** How often the engagement is billed (spec §31 "Billing Frequency"). */
 export const BILLING_FREQUENCY = {
   monthly: 'monthly',
@@ -20,6 +22,99 @@ export const BILLING_FREQUENCY = {
 } as const;
 export type BillingFrequency = (typeof BILLING_FREQUENCY)[keyof typeof BILLING_FREQUENCY];
 export const BILLING_FREQUENCIES: BillingFrequency[] = Object.values(BILLING_FREQUENCY);
+
+/**
+ * CM-4 · the period a typed fee is for (compliance_engagement_years.fee_period).
+ * Rows from before CM-4 are `annual`, which is how they were always billed.
+ */
+export const FEE_PERIOD = {
+  monthly: 'monthly',
+  quarterly: 'quarterly',
+  halfYearly: 'half_yearly',
+  annual: 'annual',
+  oneTime: 'one_time',
+} as const;
+export type FeePeriod = (typeof FEE_PERIOD)[keyof typeof FEE_PERIOD];
+export const FEE_PERIODS: FeePeriod[] = Object.values(FEE_PERIOD);
+
+/** The word after "per" in `₹ 5,000 per month`. */
+export const FEE_PERIOD_UNIT: Record<FeePeriod, string> = {
+  monthly: 'month',
+  quarterly: 'quarter',
+  half_yearly: 'half-year',
+  annual: 'year',
+  one_time: 'one-time',
+};
+
+const PERIODS_IN_YEAR: Record<FeePeriod, bigint> = {
+  monthly: 12n,
+  quarterly: 4n,
+  half_yearly: 2n,
+  annual: 1n,
+  one_time: 1n,
+};
+
+/** A fee typed per period, as its year's value in rupees ('60000.00'); null when no fee. */
+export function annualFee(
+  amount: string | number | null | undefined,
+  period: FeePeriod | null | undefined,
+): string | null {
+  if (amount === null || amount === undefined || amount === '') return null;
+  return fromPaise(toPaise(amount) * PERIODS_IN_YEAR[period ?? 'annual']);
+}
+
+/** '5000' → '₹5,000'; paise kept only when there are some. Pure — tested. */
+export function rupees(amount: string | number): string {
+  return `₹${formatInr(amount).replace(/\.00$/, '')}`;
+}
+
+/** `₹5,000 / month`, `₹60,000 / year`, `₹25,000 one-time`. */
+export function feeWithPeriod(
+  amount: string | number | null | undefined,
+  period: FeePeriod | null | undefined,
+): string {
+  if (amount === null || amount === undefined || amount === '') return '—';
+  const p = period ?? 'annual';
+  return p === 'one_time' ? `${rupees(amount)} one-time` : `${rupees(amount)} / ${FEE_PERIOD_UNIT[p]}`;
+}
+
+/** CM-4 · one row of Client 360's Fees card: an open engagement's fee for the year. */
+export interface ClientFeeRow {
+  engagementId: string;
+  engagementCode: string;
+  serviceName: string;
+  financialYear: string;
+  /** The fee as typed, for `feePeriod`; null when none is set. */
+  feeAmount: string | null;
+  feePeriod: FeePeriod;
+  /** engagement_commercial.billing_frequency; null when never set up. */
+  billingFrequency: BillingFrequency | null;
+  /** The year's value of the fee. */
+  annualFee: string | null;
+  /** Year value less invoices issued on the engagement in the year, never below 0. */
+  unbilled: string | null;
+  /** For PATCH /engagements/:id/years/:fy. */
+  yearVersion: number;
+  feePeriodSetAt: string | null;
+}
+
+/** GET /entities/:id/fees */
+export interface ClientFees {
+  financialYear: string;
+  rows: ClientFeeRow[];
+  /** fee.agree: the amount and period can be changed in the row. */
+  canEdit: boolean;
+}
+
+/**
+ * How a fee is invoiced when the engagement's billing frequency was never set
+ * up: a monthly fee monthly, a quarterly fee quarterly, a one-time fee once,
+ * everything else once a year.
+ */
+export function frequencyOfFeePeriod(period: FeePeriod | null | undefined): BillingFrequency {
+  if (period === 'monthly' || period === 'quarterly' || period === 'one_time') return period;
+  return 'annual';
+}
 
 /** The 1:1 commercial configuration for an engagement (spec §31). */
 export interface EngagementCommercial {

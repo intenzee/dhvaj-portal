@@ -12,10 +12,12 @@ import {
   STREAMS,
   STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
+  annualFee,
   type AddComplianceYearInput,
   type ComplianceEngagementYear,
   type ComplianceYearInput,
   type EngagementKind,
+  type FeePeriod,
   type IndependenceCheckInput,
   type IndependenceCheckResult,
   type IndependenceFinding,
@@ -57,6 +59,8 @@ interface YearRow {
   streams: Stream[];
   stream_registrations: Partial<Record<Stream, string[]>>;
   fee_amount: string | null;
+  fee_period: FeePeriod;
+  fee_period_set_at: Date | null;
   billing_model: string | null;
   budget_hours: Partial<Record<Stream, number>>;
   engagement_letter_ref: string | null;
@@ -68,7 +72,7 @@ interface YearRow {
 }
 
 const YEAR_COLUMNS = `id, engagement_id, financial_year, streams, stream_registrations, fee_amount,
-  billing_model, budget_hours, engagement_letter_ref, engagement_letter_date::text, s144_approval_ref,
+  fee_period, fee_period_set_at, billing_model, budget_hours, engagement_letter_ref, engagement_letter_date::text, s144_approval_ref,
   status, closed_at, version`;
 
 /** What the creation flow needs to know about the client before it inserts. */
@@ -590,8 +594,11 @@ export class EngagementKindsService {
     await client.query(
       `INSERT INTO hsdg.compliance_engagement_years
          (engagement_id, financial_year, streams, stream_registrations, fee_amount, billing_model,
-          budget_hours, engagement_letter_ref, engagement_letter_date, s144_approval_ref)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          budget_hours, engagement_letter_ref, engagement_letter_date, s144_approval_ref,
+          fee_period, fee_period_set_by, fee_period_set_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+               CASE WHEN $5::numeric IS NULL THEN NULL ELSE hsdg.ctx_employee_id() END,
+               CASE WHEN $5::numeric IS NULL THEN NULL ELSE now() END)`,
       [
         engagementId,
         year.financialYear,
@@ -603,6 +610,7 @@ export class EngagementKindsService {
         blank(year.engagementLetterRef),
         year.engagementLetterDate ?? null,
         blank(year.s144ApprovalRef),
+        year.feePeriod ?? 'annual',
       ],
     );
   }
@@ -716,6 +724,11 @@ export class EngagementKindsService {
         sets.push(`${col} = $${params.length}`);
       };
       if (input.feeAmount !== undefined) set('fee_amount', input.feeAmount);
+      // Saving the fee with its period confirms the period (CM-9 lists unconfirmed ones).
+      if (input.feePeriod !== undefined) {
+        set('fee_period', input.feePeriod);
+        sets.push('fee_period_set_by = hsdg.ctx_employee_id()', 'fee_period_set_at = now()');
+      }
       if (input.billingModel !== undefined) set('billing_model', input.billingModel);
       if (input.budgetHours !== undefined) {
         set('budget_hours', JSON.stringify(validBudget(input.budgetHours, before.streams)));
@@ -921,6 +934,9 @@ export class EngagementKindsService {
       streams: STREAMS.filter((s) => r.streams.includes(s)),
       streamRegistrations: r.stream_registrations,
       feeAmount: r.fee_amount === null ? null : Number(r.fee_amount),
+      feePeriod: r.fee_period,
+      annualFee: annualFee(r.fee_amount, r.fee_period),
+      feePeriodSetAt: r.fee_period_set_at ? r.fee_period_set_at.toISOString() : null,
       billingModel: r.billing_model,
       budgetHours: r.budget_hours,
       engagementLetterRef: r.engagement_letter_ref,
