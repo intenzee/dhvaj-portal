@@ -23,6 +23,7 @@ import { PossibleDuplicatesList } from '@/components/entities/duplicate-clients'
 import { useDuplicates } from '@/components/entities/merge-clients-modal';
 import { useClientListTeams } from '@/components/teams/client-list-teams';
 import { OfficesToCombineList, useBranchCandidates } from '@/components/entities/offices-review';
+import { DataCheckView } from '@/components/entities/data-check';
 
 const PAGE_SIZE = 25;
 
@@ -66,7 +67,8 @@ function EntitiesInner(): JSX.Element {
   const [offset, setOffset] = useState(0);
   const [missing, setMissing] = useState<MissingFilter | ''>('');
   const [sections, setSectionsUrl] = useUrlSections();
-  const [view, setView] = useState<'all' | 'duplicates' | 'offices'>('all');
+  const [view, setView] = useState<'all' | 'duplicates' | 'offices' | 'checks'>('all');
+  const canManage = can(principal, PERMISSION.entityManage);
   const dupes = useDuplicates();
   const dupeCount = dupes.data?.length ?? 0;
   const offices = useBranchCandidates();
@@ -132,7 +134,7 @@ function EntitiesInner(): JSX.Element {
         }
       />
 
-      {(dupeCount > 0 || officeCount > 0 || view !== 'all') && (
+      {(canManage || dupeCount > 0 || officeCount > 0 || view !== 'all') && (
         <div
           role="tablist"
           aria-label="Clients view"
@@ -143,6 +145,7 @@ function EntitiesInner(): JSX.Element {
               ['all', 'All clients'],
               ['duplicates', `Possible duplicates (${dupeCount})`],
               ['offices', `Offices to combine (${officeCount})`],
+              ...(canManage ? ([['checks', 'Data check']] as const) : []),
             ] as const
           ).map(([v, label]) => (
             <button
@@ -167,6 +170,8 @@ function EntitiesInner(): JSX.Element {
         <PossibleDuplicatesList />
       ) : view === 'offices' ? (
         <OfficesToCombineList />
+      ) : view === 'checks' ? (
+        <DataCheckView onOpenOffices={() => setView('offices')} />
       ) : (
         <>
           <SectionChips value={sections} onChange={setSections} className="mb-3" />
