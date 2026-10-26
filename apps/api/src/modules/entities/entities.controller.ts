@@ -70,6 +70,7 @@ export class EntitiesController {
     if (query.search) filter.search = query.search;
     if (query.section?.length) filter.section = query.section;
     if (query.missing) filter.missing = query.missing;
+    if (query.team) filter.team = query.team;
     const result = await this.entities.listEntities(
       rlsContextFromPrincipal(principal),
       filter,

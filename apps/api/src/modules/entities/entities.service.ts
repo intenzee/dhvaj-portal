@@ -57,6 +57,7 @@ import type {
   RelationshipStatus,
   RelationshipType,
   SecurityType,
+  ClientTeamRef,
 } from '@hsdg/contracts';
 
 // Summary-level columns, shared by the list and detail selects so mapSummary
@@ -66,7 +67,7 @@ const ENTITY_SUMMARY_COLS = `
   e.pan, e.status, e.legal_status, e.regulatory_profile_status, e.listing_status,
   e.current_accounting_framework, e.country_of_incorporation, e.client_id,
   e.group_id, e.incorporation_date, e.version, e.home_office_id,
-  e.entity_type_id, e.parent_entity_id`;
+  e.entity_type_id, e.parent_entity_id, e.team_id`;
 
 /**
  * The client's missing master items (§5/§27/§28) as a text[] of
@@ -105,7 +106,8 @@ const ENTITY_SUMMARY_SELECT = `
          (SELECT count(*) FROM hsdg.entity_registrations r WHERE r.entity_id = e.id) AS registration_count,
          (SELECT ec.full_name FROM hsdg.entity_contacts ec
             WHERE ec.entity_id = e.id AND ec.is_primary LIMIT 1) AS primary_contact_name,
-         ${missingInfoSql('e', 'et.category')} AS missing_info
+         ${missingInfoSql('e', 'et.category')} AS missing_info,
+         hsdg.client_team_ref(e.team_id) AS team
   FROM hsdg.entities e
   JOIN hsdg.entity_types et ON et.id = e.entity_type_id
   JOIN hsdg.offices o ON o.id = e.home_office_id`;
@@ -137,6 +139,8 @@ interface SummaryRow {
   registration_count: string;
   primary_contact_name: string | null;
   missing_info: MissingInfoCode[];
+  team_id: string | null;
+  team: ClientTeamRef | null;
 }
 
 interface DetailRow extends SummaryRow {
@@ -232,6 +236,12 @@ export class EntitiesService {
         conditions.push(`$${params.length} = ANY(${missing})`);
       }
     }
+    if (filter.team === 'none') conditions.push('e.team_id IS NULL');
+    else if (filter.team === 'mine') conditions.push('hsdg.is_on_client_team(e.team_id)');
+    else if (filter.team) {
+      params.push(filter.team);
+      conditions.push(`e.team_id = $${params.length}`);
+    }
     if (filter.section?.length) {
       // A client is in a section while it has a live engagement there.
       params.push(filter.section, CLOSED_ENGAGEMENT_STATUSES);
@@ -256,7 +266,8 @@ export class EntitiesService {
                 (SELECT ec.full_name FROM hsdg.entity_contacts ec
                    WHERE ec.entity_id = sub.id AND ec.is_primary LIMIT 1)
                   AS primary_contact_name,
-                ${missingInfoSql('sub', 'sub.type_category')} AS missing_info
+                ${missingInfoSql('sub', 'sub.type_category')} AS missing_info,
+                hsdg.client_team_ref(sub.team_id) AS team
          FROM (
            SELECT ${ENTITY_SUMMARY_COLS}, o.code AS office_code,
                   et.slug AS type_slug, et.name AS type_name, et.category AS type_category,
@@ -1846,6 +1857,7 @@ function mapSummary(row: SummaryRow): EntitySummary {
       severity: 'recommended' as const,
     })),
     version: row.version,
+    team: row.team ?? null,
   };
 }
 

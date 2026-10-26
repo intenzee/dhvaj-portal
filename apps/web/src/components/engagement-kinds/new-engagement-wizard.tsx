@@ -51,6 +51,7 @@ import { ExpandToggle } from '@/components/inline-panel';
 import { AddGstinDialog } from '@/components/filing/add-gstin-dialog';
 import { PriorFiledPicker } from '@/components/filing/prior-filed-picker';
 import { todayIst } from '@/components/work/my-task-columns';
+import { useClientTeamDefaults } from '@/components/teams/wizard-team-defaults';
 
 interface ServiceOption {
   id: string;
@@ -182,7 +183,9 @@ export function NewEngagementWizard(): JSX.Element {
   const [serviceId, setServiceId] = useState('');
   const [periodLabel, setPeriodLabel] = useState('FY');
   // Compliance
-  const [years, setYears] = useState<YearDraft[]>([{ financialYear: currentFy, fee: '', feePeriod: 'annual' }]);
+  const [years, setYears] = useState<YearDraft[]>([
+    { financialYear: currentFy, fee: '', feePeriod: 'annual' },
+  ]);
   const [streams, setStreams] = useState<Stream[]>([]);
   const [registrations, setRegistrations] = useState<Partial<Record<Stream, string[]>>>({});
   const [leads, setLeads] = useState<Partial<Record<Stream, string>>>({});
@@ -199,6 +202,11 @@ export function NewEngagementWizard(): JSX.Element {
     queryFn: () => apiFetch<EntityDetail>(`/entities/${entity!.id}`),
     enabled: !!entity,
   });
+  const teamDefaults = useClientTeamDefaults(
+    entity ? entityDetail.data?.team : null,
+    partnerId,
+    setPartnerId,
+  );
   const streamCatalogue = useQuery({
     queryKey: ['streams'],
     queryFn: () => apiFetch<StreamCatalogueEntry[]>('/streams'),
@@ -312,9 +320,10 @@ export function NewEngagementWizard(): JSX.Element {
       const sorted = [...ys].sort((a, b) => a.financialYear.localeCompare(b.financialYear));
       const edge = delta < 0 ? sorted[0] : sorted[sorted.length - 1];
       const fy = shiftFinancialYear(edge?.financialYear ?? currentFy, delta);
-      return [...ys, { financialYear: fy, fee: '', feePeriod: ys[ys.length - 1]?.feePeriod ?? 'annual' }].sort((a, b) =>
-        a.financialYear.localeCompare(b.financialYear),
-      );
+      return [
+        ...ys,
+        { financialYear: fy, fee: '', feePeriod: ys[ys.length - 1]?.feePeriod ?? 'annual' },
+      ].sort((a, b) => a.financialYear.localeCompare(b.financialYear));
     });
 
   const validYears = years.map((y) => y.financialYear).filter((fy) => FY_RE.test(fy));
@@ -345,6 +354,8 @@ export function NewEngagementWizard(): JSX.Element {
         engagementPartnerEmployeeId: partnerId || undefined,
         engagementManagerEmployeeId: managerId || undefined,
         acknowledgedIndependenceRules: acks.length > 0 ? acks : undefined,
+        teamMemberEmployeeIds:
+          teamDefaults.memberIds.length > 0 ? teamDefaults.memberIds : undefined,
       };
       const body =
         kind === 'compliance'
@@ -515,6 +526,8 @@ export function NewEngagementWizard(): JSX.Element {
               })}
             </div>
           )}
+
+          {step === 1 && teamDefaults.panel}
 
           {step === 1 && kind === 'statutory_audit' && (
             <>

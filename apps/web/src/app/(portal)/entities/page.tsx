@@ -21,6 +21,7 @@ import { MISSING_FILTER_OPTIONS, MissingDataMarker } from '@/components/entities
 import { ExportClientMasterButton } from '@/components/entities/client-master';
 import { PossibleDuplicatesList } from '@/components/entities/duplicate-clients';
 import { useDuplicates } from '@/components/entities/merge-clients-modal';
+import { useClientListTeams } from '@/components/teams/client-list-teams';
 
 const PAGE_SIZE = 25;
 
@@ -65,11 +66,19 @@ function EntitiesInner(): JSX.Element {
     setOffset(0);
   };
 
+  const teams = useClientListTeams(() => setOffset(0));
   const q = useQuery({
-    queryKey: ['entities', search, sections, missing, offset],
+    queryKey: ['entities', search, sections, missing, offset, teams.team],
     queryFn: () =>
       apiFetch<Paginated<EntityRow>>(
-        entityListPath({ limit: PAGE_SIZE, offset, search, sections, missing: missing || null }),
+        entityListPath({
+          limit: PAGE_SIZE,
+          offset,
+          search,
+          sections,
+          missing: missing || null,
+          team: teams.team,
+        }),
       ),
   });
 
@@ -165,7 +174,9 @@ function EntitiesInner(): JSX.Element {
                 </option>
               ))}
             </select>
+            {teams.filter}
           </div>
+          {teams.bulkBar}
 
           <Card className="p-0">
             {q.isLoading && (
@@ -175,7 +186,7 @@ function EntitiesInner(): JSX.Element {
             )}
             {q.data && (
               <DataTable
-                columns={columns}
+                columns={teams.withTeamColumns(columns, q.data.items)}
                 data={q.data.items}
                 empty={
                   missing

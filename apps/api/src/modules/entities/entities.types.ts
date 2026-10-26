@@ -22,6 +22,7 @@ import type {
   RelationshipStatus,
   RelationshipType,
   SecurityType,
+  ClientTeamRef,
 } from '@hsdg/contracts';
 
 export interface EntityTypeRecord {
@@ -124,6 +125,8 @@ export interface EntitySummary {
   /** Progressive-completion signal (§5/§27/§28); absence is never "N/A". */
   missingInfo: MissingInfoItem[];
   version: number;
+  /** CM-8: the client's team, if any. */
+  team: ClientTeamRef | null;
 }
 
 export interface AddressRecord {
@@ -448,4 +451,6 @@ export interface EntityFilter {
   section?: WorkSection[];
   /** Something missing from the master ('any'), nothing ('none'), or one item. */
   missing?: MissingFilter;
+  /** CM-8: a team id, 'none' (no team) or 'mine' (a team I am on). */
+  team?: string;
 }

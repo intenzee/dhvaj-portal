@@ -23,6 +23,8 @@ export function entityListPath(o: {
   search?: string;
   sections?: readonly WorkSection[];
   missing?: MissingFilter | null;
+  /** CM-8: a team id, 'mine' or 'none'. */
+  team?: string | null;
 }): string {
   return withQuery('/entities', {
     limit: o.limit,
@@ -30,6 +32,7 @@ export function entityListPath(o: {
     search: o.search,
     missing: o.missing,
     section: workSectionsParam(o.sections ?? []),
+    team: o.team,
   });
 }
 

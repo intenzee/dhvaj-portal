@@ -43,6 +43,7 @@ import { FeatureRolloutsModule } from './modules/feature-rollouts/feature-rollou
 import { CredentialsModule } from './modules/credentials/credentials.module';
 import { NoticeIntakeModule } from './modules/notice-intake/notice-intake.module';
 import { PeopleModule } from './modules/people/people.module';
+import { TeamsModule } from './modules/teams/teams.module';
 
 /**
  * Composition root of the modular monolith.
@@ -129,6 +130,7 @@ import { PeopleModule } from './modules/people/people.module';
     NoticeIntakeModule,
     PayrollModule,
     PeopleModule,
+    TeamsModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.
