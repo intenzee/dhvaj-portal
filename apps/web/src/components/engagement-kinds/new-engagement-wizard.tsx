@@ -329,20 +329,25 @@ export function NewEngagementWizard(): JSX.Element {
   const validYears = years.map((y) => y.financialYear).filter((fy) => FY_RE.test(fy));
   const priorToSend = priorFiledFor(priorFiled, streams, validYears);
 
-  /** The client's GSTIN, added from the wizard; then ticked for the stream. */
-  const addGstin = async (stream: Stream, gstin: string): Promise<void> => {
+  /** The client's GSTIN (GST) or TAN (TDS), added from the wizard; then ticked for the stream. */
+  const addGstin = async (stream: Stream, number: string): Promise<void> => {
+    const type = STREAM_REGISTRATION_TYPES[stream][0]!;
     const detail = await apiFetch<EntityDetail>(`/entities/${entity!.id}/registrations`, {
       method: 'POST',
-      body: { registrationType: 'gstin', registrationNumber: gstin, stateCode: gstin.slice(0, 2) },
+      body: {
+        registrationType: type,
+        registrationNumber: number,
+        ...(type === 'gstin' ? { stateCode: number.slice(0, 2) } : {}),
+      },
     });
     qc.setQueryData(['entity', entity!.id], detail);
     const added = detail.registrations.find(
-      (r) => r.registrationType.toLowerCase() === 'gstin' && r.registrationNumber === gstin,
+      (r) => r.registrationType.toLowerCase() === type && r.registrationNumber === number,
     );
     if (added) {
       setRegistrations((m) => ({ ...m, [stream]: [...(m[stream] ?? []), added.id] }));
     }
-    toast(`GSTIN ${gstin} added to the client.`);
+    toast(`${type.toUpperCase()} ${number} added to the client.`);
   };
 
   const create = useMutation({
@@ -450,6 +455,7 @@ export function NewEngagementWizard(): JSX.Element {
       {gstinFor && entity && (
         <AddGstinDialog
           clientName={entity.label}
+          kind={gstinFor === 'tds' ? 'tan' : 'gstin'}
           onClose={() => setGstinFor(null)}
           onSave={(gstin) => addGstin(gstinFor, gstin)}
         />
@@ -702,8 +708,10 @@ export function NewEngagementWizard(): JSX.Element {
                                     <div className="flex flex-wrap items-center gap-2 rounded-md bg-warning-50 px-2 py-1.5 text-xs text-warning-700">
                                       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                                       <span className="min-w-0 flex-1">
-                                        GSTIN missing — the {sc.label} months are built without it,
-                                        and the {sc.label} tab asks for it until it is filled in.
+                                        {pendingLabel(sc.stream)} missing — the {sc.label}{' '}
+                                        {sc.stream === 'gst' ? 'months' : 'quarters'} are built
+                                        without it, and the {sc.label} tab asks for it until it is
+                                        filled in.
                                       </span>
                                       {canManageClients && (
                                         <Button
@@ -711,7 +719,7 @@ export function NewEngagementWizard(): JSX.Element {
                                           variant="secondary"
                                           onClick={() => setGstinFor(sc.stream)}
                                         >
-                                          Add GSTIN now
+                                          Add {pendingLabel(sc.stream)} now
                                         </Button>
                                       )}
                                     </div>
@@ -1076,6 +1084,9 @@ export function IndependencePanel({
     </div>
   );
 }
+
+/** 'GSTIN' for GST, 'TAN' for TDS: what a stream waits on when it is missing. */
+const pendingLabel = (s: Stream): string => STREAM_REGISTRATION_TYPES[s].join(' / ').toUpperCase();
 
 function Row({ label, value }: { label: string; value: string }): JSX.Element {
   return (

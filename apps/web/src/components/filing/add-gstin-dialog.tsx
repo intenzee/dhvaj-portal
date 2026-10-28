@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { GSTIN_REGEX } from '@hsdg/contracts';
+import { GSTIN_REGEX, TAN_REGEX } from '@hsdg/contracts';
 import { ApiError } from '@/lib/api';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
@@ -13,25 +13,52 @@ export function stateCodeOfGstin(gstin: string): string | null {
   return /^[0-9]{2}/.test(gstin) ? gstin.slice(0, 2) : null;
 }
 
+/** A registration a stream can wait on: the GSTIN for GST, the TAN for TDS. */
+export type PendingRegistrationKind = 'gstin' | 'tan';
+
+const KINDS: Record<
+  PendingRegistrationKind,
+  { label: string; length: number; regex: RegExp; example: string; periods: string }
+> = {
+  gstin: {
+    label: 'GSTIN',
+    length: 15,
+    regex: GSTIN_REGEX,
+    example: '27AAACA1234A1Z5',
+    periods: 'GST months',
+  },
+  tan: {
+    label: 'TAN',
+    length: 10,
+    regex: TAN_REGEX,
+    example: 'DELA12345B',
+    periods: 'TDS quarters',
+  },
+};
+
 /**
- * The client's GSTIN, entered in place (a GST engagement opened before it was
- * on file). `onSave` does the write; its error is shown here.
+ * The client's GSTIN or TAN, entered in place (a GST / TDS engagement opened
+ * before it was on file). `onSave` does the write; its error is shown here.
  */
 export function AddGstinDialog({
   clientName,
+  kind = 'gstin',
   onClose,
   onSave,
 }: {
   clientName?: string | null;
+  kind?: PendingRegistrationKind;
   onClose: () => void;
-  onSave: (gstin: string) => Promise<void>;
+  onSave: (number: string) => Promise<void>;
 }): JSX.Element {
-  const [gstin, setGstin] = useState('');
+  const k = KINDS[kind];
+  const [number, setNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const value = gstin.trim().toUpperCase();
-  const valid = GSTIN_REGEX.test(value);
-  const state = stateCodeOfGstin(value);
+  const value = number.trim().toUpperCase();
+  const valid = k.regex.test(value);
+  const state = kind === 'gstin' ? stateCodeOfGstin(value) : null;
+  const left = k.length - value.length;
 
   const submit = async (): Promise<void> => {
     if (!valid) return;
@@ -41,7 +68,7 @@ export function AddGstinDialog({
       await onSave(value);
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not add the GSTIN.');
+      setError(err instanceof ApiError ? err.message : `Could not add the ${k.label}.`);
     } finally {
       setBusy(false);
     }
@@ -51,7 +78,7 @@ export function AddGstinDialog({
     <Modal
       open
       onClose={onClose}
-      title="Add the client’s GSTIN"
+      title={`Add the client’s ${k.label}`}
       description={
         clientName
           ? `${clientName} — saved on the client’s registrations.`
@@ -63,7 +90,7 @@ export function AddGstinDialog({
             Cancel
           </Button>
           <Button disabled={!valid || busy} onClick={() => void submit()}>
-            {busy ? 'Saving…' : 'Save GSTIN'}
+            {busy ? 'Saving…' : `Save ${k.label}`}
           </Button>
         </>
       }
@@ -76,31 +103,33 @@ export function AddGstinDialog({
         }}
       >
         <Field
-          label="GSTIN"
+          label={k.label}
           required
           hint={
             value.length === 0
-              ? '15 characters, e.g. 27AAACA1234A1Z5.'
+              ? `${k.length} characters, e.g. ${k.example}.`
               : valid
-                ? `State ${gstStateLabel(state)}.`
-                : value.length < 15
-                  ? `${15 - value.length} more character${15 - value.length === 1 ? '' : 's'}.`
-                  : 'That is not a valid GSTIN.'
+                ? kind === 'gstin'
+                  ? `State ${gstStateLabel(state)}.`
+                  : 'Looks right.'
+                : left > 0
+                  ? `${left} more character${left === 1 ? '' : 's'}.`
+                  : `That is not a valid ${k.label}.`
           }
         >
           <Input
             autoFocus
-            aria-label="GSTIN"
+            aria-label={k.label}
             className="font-mono uppercase"
-            maxLength={15}
-            value={gstin}
-            onChange={(e) => setGstin(e.target.value.toUpperCase())}
-            placeholder="27AAACA1234A1Z5"
+            maxLength={k.length}
+            value={number}
+            onChange={(e) => setNumber(e.target.value.toUpperCase())}
+            placeholder={k.example}
           />
         </Field>
         <p className="text-xs text-ink-muted">
-          The GST months already built move onto this GSTIN — anything marked filed or worked on
-          stays as it is.
+          The {k.periods} already built move onto this {k.label} — anything marked filed or worked
+          on stays as it is.
         </p>
         {error && (
           <p role="alert" className="text-sm text-danger-700">

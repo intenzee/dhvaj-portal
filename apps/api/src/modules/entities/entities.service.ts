@@ -9,13 +9,16 @@ import {
 import type { PoolClient, QueryResult } from 'pg';
 import {
   ENTITY_STATUS,
+  GSTIN_REGEX,
   GST_STATES,
   MISSING_INFO_LABEL,
   PENDING_REGISTRATION_STREAMS,
   REGULATORY_PROFILE_STATUS,
   ROLE,
+  STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
   ENTITY_TYPE_SOURCE,
+  TAN_REGEX,
   TAX_ID_ERROR,
   cleanPan,
   firmTypeFromIds,
@@ -803,10 +806,10 @@ export class EntitiesService {
   }
 
   /**
-   * The registration a stream has been waiting on (a GST engagement opened
-   * before the client's GSTIN was on file), entered from the engagement: its
-   * leads may add it as well as those who manage clients. The calendar
-   * rebuilds and the pending filings move onto the GSTIN, work kept.
+   * The registration a stream has been waiting on (a GST / TDS engagement
+   * opened before the client's GSTIN / TAN was on file), entered from the
+   * engagement: its leads may add it as well as those who manage clients. The
+   * calendar rebuilds and the pending filings move onto it, work kept.
    */
   async addStreamRegistration(
     ctx: RlsContext,
@@ -816,8 +819,16 @@ export class EntitiesService {
     managesClients: boolean,
   ): Promise<EntityDetail> {
     if (!PENDING_REGISTRATION_STREAMS.includes(stream)) {
-      throw new BadRequestException('Only a GST stream can wait on its registration.');
+      throw new BadRequestException('Only a GST or TDS stream can wait on its registration.');
     }
+    const type = STREAM_REGISTRATION_TYPES[stream][0] as RegistrationType;
+    const number = input.registrationNumber.trim().toUpperCase();
+    if (type === 'gstin' && !GSTIN_REGEX.test(number))
+      throw new BadRequestException(
+        'That is not a valid GSTIN (15 characters, e.g. 27AAACA1234A1Z5).',
+      );
+    if (type === 'tan' && !TAN_REGEX.test(number))
+      throw new BadRequestException('That is not a valid TAN (10 characters, e.g. DELA12345B).');
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{ entity_id: string; kind: string; is_lead: boolean }>(
         `SELECT e.entity_id, e.kind, hsdg.is_engagement_lead(e.id) AS is_lead
@@ -827,18 +838,19 @@ export class EntitiesService {
       const eng = rows[0];
       if (!eng) throw new NotFoundException('Engagement not found.');
       if (eng.kind !== 'compliance') {
-        throw new BadRequestException('Only a Compliance engagement has a GST stream.');
+        throw new BadRequestException(
+          `Only a Compliance engagement has a ${STREAM_LABEL[stream]} stream.`,
+        );
       }
       if (!managesClients && !eng.is_lead) {
         throw new ForbiddenException(
-          'Only the engagement’s partner or manager can add the client’s GSTIN here — or ask a partner to add it on the client’s page.',
+          `Only the engagement’s partner or manager can add the client’s ${type.toUpperCase()} here — or ask a partner to add it on the client’s page.`,
         );
       }
-      const number = input.registrationNumber.trim().toUpperCase();
       return this.addRegistrationWith(client, ctx, eng.entity_id, {
-        registrationType: STREAM_REGISTRATION_TYPES[stream][0] as RegistrationType,
+        registrationType: type,
         registrationNumber: number,
-        stateCode: input.stateCode ?? number.slice(0, 2),
+        ...(type === 'gstin' ? { stateCode: input.stateCode ?? number.slice(0, 2) } : {}),
         status: 'active',
       });
     });

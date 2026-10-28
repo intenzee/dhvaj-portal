@@ -8,8 +8,9 @@ import type { EntityDetail } from './entities.types';
 import { StreamRegistrationDto, StreamRegistrationParamDto } from './dto/stream-registration.dto';
 
 /**
- * "GSTIN missing" on a GST tab: the engagement's leads enter the client's
- * GSTIN where they work, without the client page (which needs entity.manage).
+ * "GSTIN missing" on a GST tab, "TAN missing" on a TDS tab: the engagement's
+ * leads enter the client's GSTIN / TAN where they work, without the client
+ * page (which needs entity.manage).
  */
 @ApiTags('entities')
 @Controller('engagements')
@@ -19,7 +20,8 @@ export class StreamRegistrationController {
   @Post(':id/streams/:stream/registration')
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
-    summary: 'Add the GSTIN a GST stream is waiting on (engagement lead or client manager)',
+    summary:
+      'Add the GSTIN / TAN a GST / TDS stream is waiting on (engagement lead or client manager)',
   })
   addRegistration(
     @CurrentPrincipal() principal: Principal,

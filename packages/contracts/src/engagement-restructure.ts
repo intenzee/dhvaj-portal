@@ -97,7 +97,7 @@ export const STREAM_REGISTRATION_TYPES: Record<Stream, readonly string[]> = {
  * file: the filings wait on "registration pending" and move onto the
  * registration (status and work kept) as soon as it is added.
  */
-export const PENDING_REGISTRATION_STREAMS: readonly Stream[] = ['gst'];
+export const PENDING_REGISTRATION_STREAMS: readonly Stream[] = ['gst', 'tds'];
 
 /**
  * "Filed before the portal" — how a stream's periods are offered when a

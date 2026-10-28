@@ -286,6 +286,67 @@ describe('GST without a GSTIN, and periods filed before the portal (e2e)', () =>
     });
   });
 
+  describe('a TDS engagement for a client with no TAN', () => {
+    let entityId: string;
+    let eng: string;
+    const tdsFilings = async () =>
+      (
+        await su.query<{ id: string; code: string; registration_id: string | null }>(
+          `SELECT ci.id, r.code, ci.registration_id
+             FROM hsdg.compliance_instances ci
+             JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
+            WHERE ci.engagement_id = $1 AND r.code IN ('TDS_F131', 'TDS_F140', 'TDS_CHALLAN')`,
+          [eng],
+        )
+      ).rows;
+
+    beforeAll(async () => {
+      entityId = await createClient(freshPan());
+      eng = (await createGst(entityId, { streams: ['tds'] }).expect(201)).body.id as string;
+    });
+
+    it('builds the TDS quarters without a TAN and says the TAN is missing', async () => {
+      const f = await tdsFilings();
+      expect(f.length).toBeGreaterThan(4);
+      expect(f.every((x) => x.registration_id === null)).toBe(true);
+      const t = (
+        await http()
+          .get(`/api/v1/engagements/${eng}/streams/tds/tree?fy=2026-27`)
+          .set(bearer(pa))
+          .expect(200)
+      ).body as { registrationPending: boolean };
+      expect(t.registrationPending).toBe(true);
+    });
+
+    it('the TAN added later takes the quarters, even with an empty TAN pick saved on the year', async () => {
+      // The Services tab saves the year's picks; before the TAN existed it saved none.
+      await su.query(
+        `UPDATE hsdg.compliance_engagement_years SET stream_registrations = '{"tds": []}'
+          WHERE engagement_id = $1`,
+        [eng],
+      );
+      const before = await tdsFilings();
+      await http()
+        .post(`/api/v1/engagements/${eng}/streams/tds/registration`)
+        .set(bearer(mx))
+        .send({ registrationNumber: 'NOTATAN' })
+        .expect(400);
+      const tan = `${letters(4)}${digits(5)}${letters(1)}`;
+      const res = await http()
+        .post(`/api/v1/engagements/${eng}/streams/tds/registration`)
+        .set(bearer(mx))
+        .send({ registrationNumber: tan.toLowerCase() })
+        .expect(201);
+      const reg = (
+        res.body.registrations as Array<{ id: string; registrationNumber: string }>
+      ).find((r) => r.registrationNumber === tan)!;
+      const after = await tdsFilings();
+      expect(after.every((x) => x.registration_id === reg.id)).toBe(true);
+      // Moved, not rebuilt.
+      expect(after.map((x) => x.id).sort()).toEqual(before.map((x) => x.id).sort());
+    });
+  });
+
   it('takes the GST sheet’s marks kept on a client with no GSTIN', async () => {
     const entityId = await createClient(freshPan());
     await su.query(

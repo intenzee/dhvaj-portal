@@ -232,9 +232,11 @@ export function StreamTab({
     tree.periods.some(
       (p) => p.items.length > 0 || Object.values(p.sections).some((x) => x?.length),
     );
-  // GST is built even without a GSTIN: say the months are not built yet and
-  // offer to build them now, with the GSTIN to follow.
+  // GST and TDS are built even without the GSTIN / TAN: say the periods are
+  // not built yet and offer to build them now, with the number to follow.
   const canWaitOnRegistration = PENDING_REGISTRATION_STREAMS.includes(stream);
+  const pendingStream = stream === 'gst' || stream === 'tds' ? stream : null;
+  const periodsWord = stream === 'gst' ? 'months' : 'quarters';
   if (
     stream !== 'roc' &&
     !regTypes.includes('entity') &&
@@ -244,15 +246,20 @@ export function StreamTab({
     const kind = regTypes.join(' / ').toUpperCase();
     return (
       <div className="space-y-3">
-        {canWaitOnRegistration && (
-          <GstinMissingBanner engagementId={engagementId} isLead={ctx.isLead} />
+        {canWaitOnRegistration && pendingStream && (
+          <GstinMissingBanner
+            engagementId={engagementId}
+            isLead={ctx.isLead}
+            stream={pendingStream}
+          />
         )}
         <Card>
           <CardBody className="space-y-3">
             {canWaitOnRegistration ? (
               <>
                 <p className="text-sm text-ink">
-                  The {STREAM_LABEL[stream]} months for this engagement have not been built yet.
+                  The {STREAM_LABEL[stream]} {periodsWord} for this engagement have not been built
+                  yet.
                 </p>
                 <p className="text-xs text-ink-muted">
                   Build them now — they are worked without the {kind} until it is added, then move
@@ -278,7 +285,7 @@ export function StreamTab({
                   {rebuild.isPending
                     ? 'Building…'
                     : canWaitOnRegistration
-                      ? `Build ${STREAM_LABEL[stream]} months`
+                      ? `Build ${STREAM_LABEL[stream]} ${periodsWord}`
                       : 'Rebuild calendar'}
                 </Button>
                 {rebuild.isSuccess && rebuild.data.created === 0 && (
@@ -319,8 +326,12 @@ export function StreamTab({
   let lastQuarter: string | null = null;
   return (
     <div className="space-y-4">
-      {tree.registrationPending && canWaitOnRegistration && (
-        <GstinMissingBanner engagementId={engagementId} isLead={ctx.isLead} />
+      {tree.registrationPending && canWaitOnRegistration && pendingStream && (
+        <GstinMissingBanner
+          engagementId={engagementId}
+          isLead={ctx.isLead}
+          stream={pendingStream}
+        />
       )}
       <div className="flex flex-wrap items-center gap-2">
         {tree.registrations.length > 1 && (

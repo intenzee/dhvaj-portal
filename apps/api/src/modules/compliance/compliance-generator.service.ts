@@ -512,13 +512,17 @@ export class ComplianceGeneratorService {
     const desired: Desired[] = [];
     for (const year of years.rows) {
       for (const stream of year.streams) {
-        const chosen = year.stream_registrations?.[stream];
+        // An empty pick is no pick: a year saved before the client's TAN or
+        // GSTIN was on file must still take the one added later.
+        const picked = year.stream_registrations?.[stream];
+        const chosen = picked?.length ? picked : undefined;
         const types = STREAM_REGISTRATION_TYPES[stream];
         const streamRegs = activeRegs.filter(
           (r) => types.includes(r.registration_type) && (!chosen || chosen.includes(r.id)),
         );
-        // No GSTIN on the client yet: the GST months are built all the same,
-        // on "registration pending", and move onto the GSTIN once it is added.
+        // No GSTIN / TAN on the client yet: the GST months and TDS quarters are
+        // built all the same, on "registration pending", and move onto the
+        // registration once it is added.
         const pendingRegistration =
           PENDING_REGISTRATION_STREAMS.includes(stream) &&
           !activeRegs.some((r) => types.includes(r.registration_type));
