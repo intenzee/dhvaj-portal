@@ -127,9 +127,12 @@ export function StreamTab({
   ctx,
   defaultFy,
   team = [],
+  clientName,
 }: {
   engagementId: string;
   stream: Stream;
+  /** Named on "Add GSTIN / TAN", so it is plain whose number is being added. */
+  clientName?: string | null;
   ctx: TaskActionContext;
   /** For "filed by" on the lodge form. */
   team?: { employeeId: string; employeeName: string }[];
@@ -251,6 +254,7 @@ export function StreamTab({
             engagementId={engagementId}
             isLead={ctx.isLead}
             stream={pendingStream}
+            clientName={clientName}
           />
         )}
         <Card>
@@ -331,6 +335,7 @@ export function StreamTab({
           engagementId={engagementId}
           isLead={ctx.isLead}
           stream={pendingStream}
+          clientName={clientName}
         />
       )}
       <div className="flex flex-wrap items-center gap-2">

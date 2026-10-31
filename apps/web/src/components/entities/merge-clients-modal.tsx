@@ -107,7 +107,7 @@ export function DuplicateConflictNotice({
   return (
     <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm">
       <div className="flex items-center gap-1.5 font-semibold text-warning-700">
-        <AlertTriangle className="h-4 w-4" /> {humanize(identifier.type).toUpperCase()}{' '}
+        <AlertTriangle className="h-4 w-4" /> Not saved: {humanize(identifier.type).toUpperCase()}{' '}
         {identifier.value} is already on another client
       </div>
       <p className="mt-1 text-ink">
@@ -119,7 +119,7 @@ export function DuplicateConflictNotice({
             holds it.{' '}
             {entityId === null
               ? 'It is likely the client you are adding: open it instead of creating a second one.'
-              : 'If they are one business, merge the two clients instead of adding it twice.'}
+              : 'If it was put there by mistake, remove it from that client first; if they are one business, merge the two clients instead of adding it twice.'}
           </>
         ) : (
           <>

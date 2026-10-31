@@ -345,6 +345,50 @@ describe('GST without a GSTIN, and periods filed before the portal (e2e)', () =>
       // Moved, not rebuilt.
       expect(after.map((x) => x.id).sort()).toEqual(before.map((x) => x.id).sort());
     });
+
+    it('a TAN on another client is refused by name; removed there, it lands on this one', async () => {
+      const mp = await token('mp@dhvaj.in');
+      const holder = await createClient(freshPan());
+      const waiting = await createClient(freshPan());
+      const tds = (await createGst(waiting, { streams: ['tds'] }).expect(201)).body.id as string;
+      const tan = `${letters(4)}${digits(5)}${letters(1)}`;
+      const added = await http()
+        .post(`/api/v1/entities/${holder}/registrations`)
+        .set(bearer(mp))
+        .send({ registrationType: 'tan', registrationNumber: tan })
+        .expect(201);
+      const reg = (
+        added.body.registrations as Array<{ id: string; registrationNumber: string }>
+      ).find((r) => r.registrationNumber === tan)!;
+
+      const refused = await http()
+        .post(`/api/v1/engagements/${tds}/streams/tds/registration`)
+        .set(bearer(mx))
+        .send({ registrationNumber: tan })
+        .expect(409);
+      expect(refused.body.message).toMatch(new RegExp(`^Not saved: TAN ${tan} is already on `));
+      expect(refused.body.message).toContain(added.body.legalName);
+      const onHolder = await su.query(
+        `SELECT entity_id FROM hsdg.entity_registrations WHERE registration_number = $1`,
+        [tan],
+      );
+      expect(onHolder.rows).toEqual([{ entity_id: holder }]);
+
+      await http()
+        .delete(`/api/v1/entities/${holder}/registrations/${reg.id}`)
+        .set(bearer(mp))
+        .expect(200);
+      await http()
+        .post(`/api/v1/engagements/${tds}/streams/tds/registration`)
+        .set(bearer(mx))
+        .send({ registrationNumber: tan })
+        .expect(201);
+      const moved = await su.query(
+        `SELECT entity_id FROM hsdg.entity_registrations WHERE registration_number = $1`,
+        [tan],
+      );
+      expect(moved.rows).toEqual([{ entity_id: waiting }]);
+    });
   });
 
   it('takes the GST sheet’s marks kept on a client with no GSTIN', async () => {

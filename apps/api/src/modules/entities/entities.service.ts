@@ -1555,7 +1555,7 @@ export class EntitiesService {
     const body: DuplicateClientConflict = {
       code: 'duplicate_client',
       message:
-        `${label} is already on ${holder.legal_name} (${holder.entity_code}). ` +
+        `Not saved: ${label} is already on ${holder.legal_name} (${holder.entity_code}). ` +
         (entityId
           ? 'If they are one client, merge them; if it was put there by mistake, remove it from that client first.'
           : 'Open that client instead of adding it again.'),

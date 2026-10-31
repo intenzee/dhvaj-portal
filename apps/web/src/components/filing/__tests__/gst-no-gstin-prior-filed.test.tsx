@@ -54,6 +54,12 @@ describe('GstinMissingBanner', () => {
     expect(screen.queryByRole('button', { name: 'Save GSTIN' })).not.toBeInTheDocument();
   });
 
+  it('names the client on the TAN pop-up', () => {
+    wrap(<GstinMissingBanner engagementId="e1" isLead stream="tds" clientName="Drift Logistics" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add TAN' }));
+    expect(screen.getByText(/^Drift Logistics — saved on the client/)).toBeInTheDocument();
+  });
+
   it('points anyone else to the engagement’s leads', () => {
     wrap(<GstinMissingBanner engagementId="e1" isLead={false} />);
     expect(screen.queryByRole('button', { name: 'Add GSTIN' })).not.toBeInTheDocument();

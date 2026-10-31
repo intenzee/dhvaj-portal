@@ -503,6 +503,7 @@ export default function EngagementDetailPage(): JSX.Element {
             key={tab}
             engagementId={e.id}
             stream={tab as Stream}
+            clientName={e.entityName}
             ctx={ctx}
             defaultFy={pageFy}
             team={leadsTeam}

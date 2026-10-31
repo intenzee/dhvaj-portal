@@ -461,7 +461,7 @@ describe('GST with several GSTINs (e2e)', () => {
 
       const other = await add(taken).expect(409);
       expect(other.body.message).toBe(
-        `GSTIN ${taken} is already on Southern Holder ${p} Pvt Ltd (${south.body.entityCode}). If they are one client, merge them; if it was put there by mistake, remove it from that client first.`,
+        `Not saved: GSTIN ${taken} is already on Southern Holder ${p} Pvt Ltd (${south.body.entityCode}). If they are one client, merge them; if it was put there by mistake, remove it from that client first.`,
       );
       // Named for the merge popup, though Partner A cannot open it.
       expect(other.body).toMatchObject({

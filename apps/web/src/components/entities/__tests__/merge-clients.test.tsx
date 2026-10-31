@@ -212,7 +212,9 @@ describe('a GSTIN already on another client', () => {
     await userEvent.type(screen.getByPlaceholderText('27AAACA1234A1Z5'), '06AAKFT1234Q1Z5');
     await userEvent.click(screen.getByRole('button', { name: 'Add registration' }));
 
-    expect(await screen.findByText(/is already on another client/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/^Not saved:.*is already on another client/),
+    ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: `${firm.legalName} (ENT00011)` })).toHaveAttribute(
       'href',
       '/entities/firm',
