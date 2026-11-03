@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { OPEN_TASK_STATUSES } from '@hsdg/contracts';
 import type {
   BillingModel,
   EngagementConfidentiality,
@@ -318,13 +319,20 @@ export async function selectEngagementDetail(
     full_name: string;
     role_on_engagement: EngagementDetail['team'][number]['roleOnEngagement'];
     assigned_at: Date;
+    open_task_count: number;
   }>(
-    `SELECT t.id, t.employee_id, e.employee_code, e.full_name, t.role_on_engagement, t.assigned_at
+    // Open tasks each person does or reviews here: who is busy, and what a
+    // removal hands over. Counted through the reader's own RLS.
+    `SELECT t.id, t.employee_id, e.employee_code, e.full_name, t.role_on_engagement, t.assigned_at,
+            (SELECT count(*)::int FROM hsdg.tasks ot
+              WHERE ot.engagement_id = t.engagement_id AND ot.status = ANY($2::text[])
+                AND (ot.assigned_to_employee_id = t.employee_id
+                     OR ot.reviewer_employee_id = t.employee_id)) AS open_task_count
      FROM hsdg.engagement_team t
      JOIN hsdg.employees e ON e.id = t.employee_id
      WHERE t.engagement_id = $1
      ORDER BY t.assigned_at`,
-    [id],
+    [id, OPEN_TASK_STATUSES],
   );
   const services = await selectEngagementServices(client, id);
   const coveredEntities = await selectEngagementCoveredEntities(client, id);
@@ -337,6 +345,7 @@ export async function selectEngagementDetail(
       employeeName: m.full_name,
       roleOnEngagement: m.role_on_engagement,
       assignedAt: m.assigned_at.toISOString(),
+      openTaskCount: m.open_task_count,
     })),
     services,
     coveredEntities,

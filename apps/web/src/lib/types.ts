@@ -74,6 +74,8 @@ export interface TeamMember {
   employeeCode: string;
   employeeName: string;
   roleOnEngagement: string;
+  /** Open tasks they do or review here; a removal hands these over. */
+  openTaskCount?: number;
 }
 
 export interface EngagementDetail extends EngagementRow {

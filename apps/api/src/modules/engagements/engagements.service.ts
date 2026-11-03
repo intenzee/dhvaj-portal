@@ -10,6 +10,7 @@ import {
   EP_OPTIONAL_STATUSES,
   FIRM_CHECK,
   NOTIFICATION_TYPE,
+  OPEN_TASK_STATUSES,
   STATUTORY_AUDIT_SERVICE_CODE,
   type EngagementStatus,
 } from '@hsdg/contracts';
@@ -37,6 +38,16 @@ import type {
   EngagementSummary,
   UpdateEngagementInput,
 } from './engagements.types';
+
+/** An engagement past doing: its people change only with engagement.assign. */
+const FINISHED_STATUSES: readonly EngagementStatus[] = [
+  'completed',
+  'closed',
+  'declined',
+  'withdrawn',
+  'cancelled',
+  'merged',
+];
 
 /** Initial status of a service line, faithful to the parent engagement's stage
  *  (mirrors the SQL hsdg.engagement_service_status_from used at backfill). */
@@ -387,17 +398,49 @@ export class EngagementsService {
     });
   }
 
-  /** Change the Engagement Manager. The route requires engagement.assign. */
+  /**
+   * Who changes an engagement's people. engagement.assign (the Managing
+   * Partner, an administrator) changes anything, at any stage. While the
+   * engagement is still open, its own Engagement Partner changes its manager
+   * and team, and its Manager its team. RLS agrees: both are its leads.
+   */
+  private assertMayChange(
+    ctx: RlsContext,
+    e: EngagementDetail,
+    canAssign: boolean,
+    what: 'team' | 'manager',
+  ): void {
+    if (canAssign) return;
+    const me = ctx.employeeId;
+    const isEp = !!me && e.engagementPartnerId === me;
+    const isManager = !!me && e.engagementManagerId === me;
+    if (what === 'manager' ? !isEp : !(isEp || isManager)) {
+      throw new ForbiddenException(
+        what === 'manager'
+          ? 'Only the Engagement Partner, the Managing Partner or an administrator can change the manager.'
+          : 'Only the Engagement Partner, the Manager, the Managing Partner or an administrator can change the team.',
+      );
+    }
+    if (FINISHED_STATUSES.includes(e.status)) {
+      throw new ForbiddenException(
+        'This engagement is finished. Ask the Managing Partner or an administrator to change its people.',
+      );
+    }
+  }
+
+  /** Change the Engagement Manager: engagement.assign, or the engagement's EP. */
   async reassignManager(
     ctx: RlsContext,
     id: string,
     newManagerEmployeeId: string,
     reason: string | undefined,
-    expectedVersion?: number,
+    expectedVersion: number | undefined,
+    canAssign: boolean,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
+      this.assertMayChange(ctx, before, canAssign, 'manager');
 
       await this.setLead(
         client,
@@ -414,6 +457,24 @@ export class EngagementsService {
         before: { engagementManagerId: before.engagementManagerId },
         after: { engagementManagerId: after!.engagementManagerId },
         reason: reason ?? null,
+      });
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.teamChanged,
+        recipientEmployeeIds: [after!.engagementManagerId],
+        title: `You are the Manager — ${after!.engagementCode} · ${after!.entityName}`,
+        body: `You now manage ${after!.engagementCode} (${after!.entityName}).`,
+        engagementId: id,
+        objectType: 'engagement',
+        objectId: id,
+      });
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.teamChanged,
+        recipientEmployeeIds: [before.engagementManagerId],
+        title: `No longer the Manager — ${after!.engagementCode} · ${after!.entityName}`,
+        body: `${after!.engagementManagerName ?? 'Someone else'} now manages ${after!.engagementCode} (${after!.entityName}).`,
+        engagementId: id,
+        objectType: 'engagement',
+        objectId: id,
       });
       return after!;
     });
@@ -460,14 +521,17 @@ export class EngagementsService {
     }
   }
 
+  /** Add someone to the team: engagement.assign, or the engagement's EP or Manager. */
   async assignTeamMember(
     ctx: RlsContext,
     id: string,
     input: AssignTeamMemberInput,
+    canAssign: boolean,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
+      this.assertMayChange(ctx, before, canAssign, 'team');
       await this.allowPeopleChange(client);
       try {
         await client.query(
@@ -486,25 +550,97 @@ export class EngagementsService {
         objectId: id,
         after: { employeeId: input.employeeId, role: input.roleOnEngagement ?? 'member' },
       });
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.teamChanged,
+        recipientEmployeeIds: [input.employeeId],
+        title: `Added to the team — ${after!.engagementCode} · ${after!.entityName}`,
+        body: `You are on the team for ${after!.engagementCode} (${after!.entityName}).`,
+        engagementId: id,
+        objectType: 'engagement',
+        objectId: id,
+      });
       return after!;
     });
   }
 
+  /**
+   * Take someone off the team: engagement.assign, or the engagement's EP or
+   * Manager. The Partner and Manager are changed, not removed. Their open
+   * tasks (to do or to review) go to `handoverTo`, someone still on the
+   * engagement; with open tasks and no one named, nothing changes.
+   */
   async removeTeamMember(
     ctx: RlsContext,
     id: string,
     employeeId: string,
+    handoverTo: string | undefined,
+    canAssign: boolean,
   ): Promise<EngagementDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
+      this.assertMayChange(ctx, before, canAssign, 'team');
+      if (employeeId === before.engagementPartnerId) {
+        throw new ConflictException(
+          `${before.engagementPartnerName ?? 'They'} is the Engagement Partner. Change the Engagement Partner first.`,
+        );
+      }
+      if (employeeId === before.engagementManagerId) {
+        throw new ConflictException(
+          `${before.engagementManagerName ?? 'They'} is the Manager. Change the Manager first.`,
+        );
+      }
+      const member = before.team.find((m) => m.employeeId === employeeId);
+      if (!member) throw new NotFoundException('Team member not found on this engagement.');
+
+      const { rows: open } = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM hsdg.tasks
+          WHERE engagement_id = $1 AND status = ANY($3::text[])
+            AND (assigned_to_employee_id = $2 OR reviewer_employee_id = $2)`,
+        [id, employeeId, OPEN_TASK_STATUSES],
+      );
+      const openTasks = open[0]!.n;
+      let handedOver = 0;
+      if (openTasks > 0) {
+        if (!handoverTo) {
+          throw new ConflictException(
+            `${member.employeeName} has ${openTasks} open task${openTasks === 1 ? '' : 's'} on this engagement. Choose who takes ${openTasks === 1 ? 'it' : 'them'} over.`,
+          );
+        }
+        const onEngagement =
+          handoverTo !== employeeId &&
+          (handoverTo === before.engagementPartnerId ||
+            handoverTo === before.engagementManagerId ||
+            before.team.some((m) => m.employeeId === handoverTo));
+        if (!onEngagement) {
+          throw new BadRequestException(
+            'Hand the open tasks to someone else on this engagement: its Partner, Manager or team.',
+          );
+        }
+        const moved = await client.query(
+          `UPDATE hsdg.tasks
+              SET assigned_to_employee_id = CASE WHEN assigned_to_employee_id = $2 THEN $3
+                                                 ELSE assigned_to_employee_id END,
+                  reviewer_employee_id = CASE WHEN reviewer_employee_id = $2 THEN $3
+                                              ELSE reviewer_employee_id END,
+                  version = version + 1
+            WHERE engagement_id = $1 AND status = ANY($4::text[])
+              AND (assigned_to_employee_id = $2 OR reviewer_employee_id = $2)`,
+          [id, employeeId, handoverTo, OPEN_TASK_STATUSES],
+        );
+        handedOver = moved.rowCount ?? 0;
+        if (handedOver !== openTasks) {
+          throw new ForbiddenException('Not permitted to hand over these tasks.');
+        }
+      }
+
       await this.allowPeopleChange(client);
       const result = await client.query(
         `DELETE FROM hsdg.engagement_team WHERE engagement_id = $1 AND employee_id = $2`,
         [id, employeeId],
       );
       if ((result.rowCount ?? 0) === 0) {
-        throw new NotFoundException('Team member not found on this engagement.');
+        throw new ForbiddenException('Not permitted to change this engagement’s team.');
       }
       await this.bumpVersion(client, id);
       const after = await selectEngagementDetail(client, id);
@@ -512,8 +648,31 @@ export class EngagementsService {
         action: 'engagement.team_removed',
         objectType: 'engagement',
         objectId: id,
-        after: { employeeId },
+        after: { employeeId, ...(handedOver ? { handoverTo, tasksHandedOver: handedOver } : {}) },
       });
+      const where = `${after!.engagementCode} (${after!.entityName})`;
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.teamChanged,
+        recipientEmployeeIds: [employeeId],
+        title: `Off the team — ${after!.engagementCode} · ${after!.entityName}`,
+        body: handedOver
+          ? `You are no longer on ${where}. Your ${handedOver} open task${handedOver === 1 ? '' : 's'} there went to a colleague.`
+          : `You are no longer on ${where}.`,
+        engagementId: id,
+        objectType: 'engagement',
+        objectId: id,
+      });
+      if (handedOver) {
+        await this.notifications.emitWith(client, ctx, {
+          type: NOTIFICATION_TYPE.taskAssigned,
+          recipientEmployeeIds: [handoverTo!],
+          title: `${handedOver} task${handedOver === 1 ? '' : 's'} handed to you — ${after!.engagementCode} · ${after!.entityName}`,
+          body: `${member.employeeName} left the team for ${where}; their open tasks are yours now.`,
+          engagementId: id,
+          objectType: 'engagement',
+          objectId: id,
+        });
+      }
       return after!;
     });
   }

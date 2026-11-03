@@ -110,6 +110,8 @@ export interface EngagementTeamMember {
   employeeName: string;
   roleOnEngagement: TeamRole;
   assignedAt: string;
+  /** Open tasks they do or review on this engagement (as the reader sees them). */
+  openTaskCount: number;
 }
 
 export interface EngagementDetail extends EngagementSummary {

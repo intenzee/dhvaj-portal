@@ -26,6 +26,14 @@ const engagement = {
 };
 const team = [
   { id: 't1', employeeId: 'sy', employeeName: 'Senior Y', roleOnEngagement: 'member' },
+  {
+    id: 't2',
+    employeeId: 'ak',
+    employeeName: 'Article K',
+    roleOnEngagement: 'member',
+    openTaskCount: 3,
+  },
+  { id: 't3', employeeId: 'mx', employeeName: 'Manager X', roleOnEngagement: 'in_charge' },
 ] as TeamMember[];
 
 beforeEach(() => apiFetch.mockReset());
@@ -35,23 +43,57 @@ describe('who changes the people on an engagement', () => {
     render(
       wrap(
         <>
-          <LeadsCard engagement={engagement} canChange={false} />
+          <LeadsCard engagement={engagement} canChangePartner={false} canChangeManager={false} />
           <TeamSection engagementId="eng" team={team} canChange={false} />
         </>,
       ),
     );
     expect(screen.getByText('Partner A')).toBeTruthy();
-    expect(screen.getByText('Manager X')).toBeTruthy();
+    expect(screen.getAllByText('Manager X')).toHaveLength(2);
     expect(screen.getByText('Senior Y')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /change/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /add/i })).toBeNull();
     expect(screen.queryByLabelText('Remove Senior Y')).toBeNull();
   });
 
-  it('lets the Managing Partner or an administrator add and remove', () => {
-    render(wrap(<TeamSection engagementId="eng" team={team} canChange />));
+  it('lets whoever may change the team add and remove — never the partner or manager, who are changed', () => {
+    render(wrap(<TeamSection engagementId="eng" team={team} canChange leads={engagement} />));
     expect(screen.getByRole('button', { name: /add/i })).toBeTruthy();
     expect(screen.getByLabelText('Remove Senior Y')).toBeTruthy();
+    expect(screen.queryByLabelText('Remove Manager X')).toBeNull();
+    expect(screen.getByText('3 open')).toBeTruthy();
+  });
+
+  it('the EP changes the manager but not the partner', () => {
+    render(wrap(<LeadsCard engagement={engagement} canChangePartner={false} canChangeManager />));
+    expect(screen.getByRole('button', { name: 'Change Manager' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Change Engagement Partner' })).toBeNull();
+  });
+
+  it('removing someone with open tasks asks who takes them over, from the people on the engagement', async () => {
+    apiFetch.mockResolvedValue({});
+    render(wrap(<TeamSection engagementId="eng" team={team} canChange leads={engagement} />));
+    fireEvent.click(screen.getByLabelText('Remove Article K'));
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(screen.getByText(/has 3 open tasks here/)).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Article K' })).toBeNull();
+    expect(screen.getByRole('option', { name: /Partner A — Engagement Partner/ })).toBeTruthy();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'sy' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Hand over and remove' }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/engagements/eng/team/ak?handoverTo=sy', {
+        method: 'DELETE',
+      }),
+    );
+  });
+
+  it('removes someone with no open tasks straight away', async () => {
+    apiFetch.mockResolvedValue({});
+    render(wrap(<TeamSection engagementId="eng" team={team} canChange leads={engagement} />));
+    fireEvent.click(screen.getByLabelText('Remove Senior Y'));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/engagements/eng/team/sy', { method: 'DELETE' }),
+    );
   });
 
   it('changes the partner with the engagement version, offering partners only', async () => {
@@ -82,7 +124,7 @@ describe('who changes the people on an engagement', () => {
           ]
         : {},
     );
-    render(wrap(<LeadsCard engagement={engagement} canChange />));
+    render(wrap(<LeadsCard engagement={engagement} canChangePartner canChangeManager />));
     fireEvent.click(screen.getByRole('button', { name: 'Change Engagement Partner' }));
     await screen.findByRole('option', { name: /Partner B/ });
     expect(screen.queryByRole('option', { name: /Manager Z/ })).toBeNull();
@@ -112,7 +154,7 @@ describe('who changes the people on an engagement', () => {
           ]
         : {},
     );
-    render(wrap(<LeadsCard engagement={engagement} canChange />));
+    render(wrap(<LeadsCard engagement={engagement} canChangePartner canChangeManager />));
     fireEvent.click(screen.getByRole('button', { name: 'Change Manager' }));
     await screen.findByRole('option', { name: /Partner B/ });
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pb' } });

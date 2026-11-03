@@ -84,6 +84,7 @@ const TYPE_TONE: Record<string, 'danger' | 'warn' | 'info' | 'neutral'> = {
   client_dependency_reminder: 'warn',
   task_assigned: 'info',
   ep_changed: 'info',
+  team_changed: 'info',
   engagement_reopened: 'info',
 };
 export const toneForType = (type: string): 'danger' | 'warn' | 'info' | 'neutral' =>

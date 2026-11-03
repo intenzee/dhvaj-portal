@@ -2,6 +2,16 @@ import { PERMISSION } from '@hsdg/contracts';
 import { can, type Principal } from './principal';
 import type { EngagementDetail } from './types';
 
+/** Past doing: only engagement.assign changes its people (mirrors the API). */
+const FINISHED_STATUSES: readonly string[] = [
+  'completed',
+  'closed',
+  'declined',
+  'withdrawn',
+  'cancelled',
+  'merged',
+];
+
 /**
  * What the current user may do to an engagement — a UI mirror of the server's
  * rules, used only to hide buttons that would be refused. The server stays the
@@ -13,8 +23,10 @@ import type { EngagementDetail } from './types';
  *  - an EP review, and sign-off under an EP-required review model, must be the
  *    accountable EP (EngagementReviewsService);
  *  - reopen is Managing-Partner-only by effective role (managingPartnerOnlyGuard);
- *  - the partner, manager and team change with `engagement.assign` (Managing
- *    Partner and administrator), at any stage; everyone else only sees them;
+ *  - `engagement.assign` (Managing Partner, administrator) changes the
+ *    partner, manager and team at any stage; while the engagement is open its
+ *    own EP changes the manager and team and its manager the team; everyone
+ *    else only sees them (EngagementsService.assertMayChange);
  *  - complete needs a current sign-off and no open review points
  *    (reviewSignedOffGuard).
  */
@@ -27,8 +39,12 @@ export interface EngagementAbilities {
   /** A lead who cannot sign off only because the review model needs the EP. */
   awaitingEpSignOff: boolean;
   canReopen: boolean;
-  /** May change the partner, manager and team. */
-  canChangePeople: boolean;
+  /** May change the Engagement Partner (engagement.assign). */
+  canChangePartner: boolean;
+  /** May change the manager: engagement.assign, or the EP while it is open. */
+  canChangeManager: boolean;
+  /** May add and remove team: engagement.assign, or the EP or manager while it is open. */
+  canChangeTeam: boolean;
   /** Why Complete would be refused right now, or null if it would pass. */
   completeBlockedReason: string | null;
 }
@@ -55,6 +71,8 @@ export function engagementAbilities(
   const canManage = can(principal, PERMISSION.engagementManage) && (isMp || isEp || isManager);
 
   const reviewOpen = canManage && e.status === 'active' && !e.isSignedOff;
+  const canAssign = can(principal, PERMISSION.engagementAssign);
+  const open = !FINISHED_STATUSES.includes(e.status);
   const epGateBlocks = e.effectiveReviewModel.requiresEpSignoff && !isEp;
 
   let completeBlockedReason: string | null = null;
@@ -73,7 +91,9 @@ export function engagementAbilities(
     canSignOff: reviewOpen && !epGateBlocks,
     awaitingEpSignOff: reviewOpen && epGateBlocks,
     canReopen: canManage && isMp,
-    canChangePeople: can(principal, PERMISSION.engagementAssign),
+    canChangePartner: canAssign,
+    canChangeManager: canAssign || (open && isEp),
+    canChangeTeam: canAssign || (open && (isEp || isManager)),
     completeBlockedReason,
   };
 }

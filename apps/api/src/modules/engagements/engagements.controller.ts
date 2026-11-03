@@ -183,10 +183,11 @@ export class EngagementsController {
   }
 
   @Post(':id/reassign-manager')
-  @RequirePermissions(PERMISSION.engagementAssign)
+  @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({
     summary: 'Change the Engagement Manager (audited)',
-    description: 'Managing Partner or administrator, at any stage.',
+    description:
+      'Managing Partner or administrator at any stage; the Engagement Partner while the engagement is open.',
   })
   reassignManager(
     @CurrentPrincipal() principal: Principal,
@@ -199,29 +200,50 @@ export class EngagementsController {
       dto.engagementManagerEmployeeId,
       dto.reason,
       dto.version,
+      principal.permissions.includes(PERMISSION.engagementAssign),
     );
   }
 
   @Post(':id/team')
-  @RequirePermissions(PERMISSION.engagementAssign)
-  @ApiOperation({ summary: 'Assign a team member (audited)' })
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Assign a team member (audited)',
+    description:
+      'Managing Partner or administrator at any stage; the Engagement Partner or Manager while the engagement is open.',
+  })
   assignTeam(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: AssignTeamMemberDto,
   ): Promise<EngagementDetail> {
-    return this.engagements.assignTeamMember(rlsContextFromPrincipal(principal), id, dto);
+    return this.engagements.assignTeamMember(
+      rlsContextFromPrincipal(principal),
+      id,
+      dto,
+      principal.permissions.includes(PERMISSION.engagementAssign),
+    );
   }
 
   @Delete(':id/team/:employeeId')
-  @RequirePermissions(PERMISSION.engagementAssign)
-  @ApiOperation({ summary: 'Remove a team member (audited)' })
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Remove a team member (audited)',
+    description:
+      'Who may: as for adding. Their open tasks go to `handoverTo`, required when they have any.',
+  })
   removeTeam(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('employeeId', new ParseUUIDPipe()) employeeId: string,
+    @Query('handoverTo', new ParseUUIDPipe({ optional: true })) handoverTo?: string,
   ): Promise<EngagementDetail> {
-    return this.engagements.removeTeamMember(rlsContextFromPrincipal(principal), id, employeeId);
+    return this.engagements.removeTeamMember(
+      rlsContextFromPrincipal(principal),
+      id,
+      employeeId,
+      handoverTo,
+      principal.permissions.includes(PERMISSION.engagementAssign),
+    );
   }
 
   // ── Services (multi-service engagements, §9–§10) ─────────────────────────

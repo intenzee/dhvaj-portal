@@ -19,10 +19,14 @@ const LEAD_LABEL: Record<LeadRole, string> = {
   manager: 'Manager',
 };
 
-/** The partner and manager; the Managing Partner or an administrator changes them. */
+/**
+ * The partner and manager. The Managing Partner or an administrator changes
+ * either; the Engagement Partner changes the manager while the engagement is open.
+ */
 export function LeadsCard({
   engagement: e,
-  canChange,
+  canChangePartner,
+  canChangeManager,
 }: {
   engagement: Pick<
     EngagementDetail,
@@ -33,9 +37,14 @@ export function LeadsCard({
     | 'engagementManagerId'
     | 'engagementManagerName'
   >;
-  canChange: boolean;
+  canChangePartner: boolean;
+  canChangeManager: boolean;
 }): JSX.Element {
   const [changing, setChanging] = useState<LeadRole | null>(null);
+  const canChange: Record<LeadRole, boolean> = {
+    partner: canChangePartner,
+    manager: canChangeManager,
+  };
   const rows: { role: LeadRole; name: string | null }[] = [
     { role: 'partner', name: e.engagementPartnerName },
     { role: 'manager', name: e.engagementManagerName },
@@ -51,7 +60,7 @@ export function LeadsCard({
             <span className="text-ink-muted">{LEAD_LABEL[role]}</span>
             <div className="flex items-center gap-2">
               <span className={name ? 'text-ink' : 'text-ink-faint'}>{name ?? 'Not set'}</span>
-              {canChange && (
+              {canChange[role] && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -156,11 +165,20 @@ export function TeamSection({
   engagementId,
   team,
   canChange,
+  leads,
 }: {
   engagementId: string;
   team: TeamMember[];
-  /** Managing Partner or administrator; everyone else only sees the team. */
+  /** Managing Partner or administrator, or (while it is open) the engagement's EP or manager. */
   canChange: boolean;
+  /** The partner and manager are changed on the Leads card, never removed here. */
+  leads?: Pick<
+    EngagementDetail,
+    | 'engagementPartnerId'
+    | 'engagementPartnerName'
+    | 'engagementManagerId'
+    | 'engagementManagerName'
+  >;
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
@@ -168,6 +186,7 @@ export function TeamSection({
   const [filter, setFilter] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [role, setRole] = useState<string>('member');
+  const [removing, setRemoving] = useState<TeamMember | null>(null);
 
   const employees = useQuery({
     queryKey: ['employees', 'all'],
@@ -192,7 +211,8 @@ export function TeamSection({
       setEmployeeId('');
       setFilter('');
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not add member.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not add member.', 'error'),
   });
 
   const remove = useMutation({
@@ -202,9 +222,11 @@ export function TeamSection({
       toast('Team member removed.');
       invalidate();
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not remove member.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not remove member.', 'error'),
   });
 
+  const leadIds = new Set([leads?.engagementPartnerId, leads?.engagementManagerId].filter(Boolean));
   const assignedIds = new Set(team.map((m) => m.employeeId));
   const options = (employees.data?.items ?? []).filter(
     (e) =>
@@ -224,25 +246,37 @@ export function TeamSection({
       </CardHeader>
       <CardBody className="space-y-2">
         {team.length === 0 && <p className="text-sm text-ink-faint">No team assigned yet.</p>}
-        {team.map((m) => (
-          <div key={m.id} className="flex items-center justify-between text-sm">
-            <span className="text-ink">{m.employeeName}</span>
-            <div className="flex items-center gap-2">
-              <Badge>{humanize(m.roleOnEngagement)}</Badge>
-              {canChange && (
-                <button
-                  onClick={() => remove.mutate(m.employeeId)}
-                  disabled={remove.isPending}
-                  className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
-                  aria-label={`Remove ${m.employeeName}`}
-                  title="Remove"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
+        {team.map((m) => {
+          const openTasks = m.openTaskCount ?? 0;
+          const isLead = leadIds.has(m.employeeId);
+          return (
+            <div key={m.id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="min-w-0 break-words text-ink">{m.employeeName}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                {openTasks > 0 && (
+                  <span
+                    className="text-xs text-ink-muted"
+                    title="Open tasks they do or review here"
+                  >
+                    {openTasks} open
+                  </span>
+                )}
+                <Badge>{humanize(m.roleOnEngagement)}</Badge>
+                {canChange && !isLead && (
+                  <button
+                    onClick={() => (openTasks > 0 ? setRemoving(m) : remove.mutate(m.employeeId))}
+                    disabled={remove.isPending}
+                    className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
+                    aria-label={`Remove ${m.employeeName}`}
+                    title="Remove"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </CardBody>
 
       <Modal
@@ -263,7 +297,11 @@ export function TeamSection({
       >
         <div className="space-y-3">
           <Field label="Filter">
-            <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Type a name…" />
+            <Input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Type a name…"
+            />
           </Field>
           <Field label="Employee" required>
             <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
@@ -286,6 +324,99 @@ export function TeamSection({
           </Field>
         </div>
       </Modal>
+
+      {removing && (
+        <HandOverModal
+          engagementId={engagementId}
+          member={removing}
+          team={team}
+          leads={leads}
+          onClose={() => setRemoving(null)}
+          onDone={invalidate}
+        />
+      )}
     </Card>
+  );
+}
+
+/** Removing someone with open tasks: pick who takes them over, then remove. */
+function HandOverModal({
+  engagementId,
+  member,
+  team,
+  leads,
+  onClose,
+  onDone,
+}: {
+  engagementId: string;
+  member: TeamMember;
+  team: TeamMember[];
+  leads?: Pick<
+    EngagementDetail,
+    | 'engagementPartnerId'
+    | 'engagementPartnerName'
+    | 'engagementManagerId'
+    | 'engagementManagerName'
+  >;
+  onClose: () => void;
+  onDone: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const [to, setTo] = useState('');
+  const n = member.openTaskCount ?? 0;
+  const people = new Map<string, string>();
+  if (leads?.engagementPartnerId)
+    people.set(
+      leads.engagementPartnerId,
+      `${leads.engagementPartnerName ?? 'Partner'} — Engagement Partner`,
+    );
+  if (leads?.engagementManagerId)
+    people.set(leads.engagementManagerId, `${leads.engagementManagerName ?? 'Manager'} — Manager`);
+  for (const m of team) if (!people.has(m.employeeId)) people.set(m.employeeId, m.employeeName);
+  people.delete(member.employeeId);
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch(
+        `/engagements/${engagementId}/team/${member.employeeId}?handoverTo=${encodeURIComponent(to)}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: () => {
+      toast(`${member.employeeName} removed; their tasks were handed over.`);
+      onDone();
+      onClose();
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not remove member.', 'error'),
+  });
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Remove ${member.employeeName}`}
+      description={`${member.employeeName} has ${n} open task${n === 1 ? '' : 's'} here, to do or to review. Choose who takes ${n === 1 ? 'it' : 'them'} over.`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!to || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? 'Removing…' : 'Hand over and remove'}
+          </Button>
+        </>
+      }
+    >
+      <Field label="Hand the open tasks to" required>
+        <Select value={to} onChange={(ev) => setTo(ev.target.value)}>
+          <option value="">Select a person…</option>
+          {[...people].map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </Modal>
   );
 }

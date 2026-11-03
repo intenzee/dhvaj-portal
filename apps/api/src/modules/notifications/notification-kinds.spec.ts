@@ -8,8 +8,8 @@ import {
 import { previousDay } from './notification-digest.scheduler';
 
 describe('notification kinds (WF-305)', () => {
-  it('classifies and names all 39 types', () => {
-    expect(NOTIFICATION_TYPES).toHaveLength(39);
+  it('classifies and names all 40 types', () => {
+    expect(NOTIFICATION_TYPES).toHaveLength(40);
     for (const t of NOTIFICATION_TYPES) {
       expect(Object.values(NOTIFICATION_KIND)).toContain(NOTIFICATION_TYPE_KIND[t]);
       expect(NOTIFICATION_TYPE_LABEL[t]).toBeTruthy();

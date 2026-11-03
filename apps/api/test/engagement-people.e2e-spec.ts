@@ -5,8 +5,10 @@ import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 
 /**
- * An engagement's partner, manager and team, at any stage: the Managing
- * Partner and the administrator change them, everyone else only sees them.
+ * An engagement's partner, manager and team. The Managing Partner and the
+ * administrator change them at any stage. While it is open, its own Engagement
+ * Partner changes the manager and team, and its Manager the team. Everyone
+ * else only sees them. Removing someone hands their open tasks over.
  */
 describe('Who changes an engagement’s people (e2e)', () => {
   let app: INestApplication;
@@ -79,6 +81,18 @@ describe('Who changes an engagement’s people (e2e)', () => {
         )
       ).rows[0]!.n,
     );
+
+  /** Titles of the notifications of a type an employee got about an engagement, oldest first. */
+  const notified = async (employeeId: string, type: string, id: string): Promise<string[]> =>
+    (
+      await su.query<{ title: string }>(
+        `SELECT n.title FROM hsdg.notifications n
+           JOIN hsdg.employees e ON e.user_id = n.recipient_user_id
+          WHERE e.id = $1 AND n.type = $2 AND n.engagement_id = $3
+          ORDER BY n.created_at, n.title`,
+        [employeeId, type, id],
+      )
+    ).rows.map((r) => r.title);
 
   beforeAll(async () => {
     await seedIdentityFixtures();
@@ -167,28 +181,142 @@ describe('Who changes an engagement’s people (e2e)', () => {
       .expect(403);
   });
 
-  it('everyone else only sees them: partner, manager and team member are all refused', async () => {
+  it('the Engagement Partner changes the manager and team, the Manager the team; neither the partner', async () => {
     const { id } = await running();
-    for (const who of [pa, mx, sy]) {
-      const seen = await http().get(`/api/v1/engagements/${id}`).set(bearer(who)).expect(200);
-      expect(seen.body.team).toHaveLength(1);
+    for (const who of [pa, mx]) {
       await http()
         .post(`/api/v1/engagements/${id}/reassign-partner`)
         .set(bearer(who))
         .send({ engagementPartnerEmployeeId: partnerB })
         .expect(403);
-      await http()
-        .post(`/api/v1/engagements/${id}/reassign-manager`)
-        .set(bearer(who))
-        .send({ engagementManagerEmployeeId: partnerB })
-        .expect(403);
+    }
+    // The Manager adds and removes team, but cannot replace themself.
+    await http()
+      .post(`/api/v1/engagements/${id}/reassign-manager`)
+      .set(bearer(mx))
+      .send({ engagementManagerEmployeeId: partnerB })
+      .expect(403);
+    const added = await http()
+      .post(`/api/v1/engagements/${id}/team`)
+      .set(bearer(mx))
+      .send({ employeeId: partnerB })
+      .expect(201);
+    expect(added.body.team.map((m: { employeeId: string }) => m.employeeId)).toContain(partnerB);
+    await http().delete(`/api/v1/engagements/${id}/team/${partnerB}`).set(bearer(mx)).expect(200);
+
+    // The EP changes the manager.
+    const manager = await http()
+      .post(`/api/v1/engagements/${id}/reassign-manager`)
+      .set(bearer(pa))
+      .send({ engagementManagerEmployeeId: managingPartner, reason: 'cover' })
+      .expect(201);
+    expect(manager.body.engagementManagerId).toBe(managingPartner);
+    expect(await audited(id, 'engagement.manager_changed')).toBe(1);
+    expect(await notified(managerX, 'team_changed', id)).toEqual([
+      expect.stringMatching(/^No longer the Manager/),
+    ]);
+    expect(await notified(partnerB, 'team_changed', id)).toEqual([
+      expect.stringMatching(/^Added to the team/),
+      expect.stringMatching(/^Off the team/),
+    ]);
+  });
+
+  it('a team member only sees them', async () => {
+    const { id } = await running();
+    const seen = await http().get(`/api/v1/engagements/${id}`).set(bearer(sy)).expect(200);
+    expect(seen.body.team).toHaveLength(1);
+    await http()
+      .post(`/api/v1/engagements/${id}/reassign-partner`)
+      .set(bearer(sy))
+      .send({ engagementPartnerEmployeeId: partnerB })
+      .expect(403);
+    await http()
+      .post(`/api/v1/engagements/${id}/reassign-manager`)
+      .set(bearer(sy))
+      .send({ engagementManagerEmployeeId: partnerB })
+      .expect(403);
+    await http()
+      .post(`/api/v1/engagements/${id}/team`)
+      .set(bearer(sy))
+      .send({ employeeId: partnerB })
+      .expect(403);
+    await http().delete(`/api/v1/engagements/${id}/team/${seniorY}`).set(bearer(sy)).expect(403);
+  });
+
+  it('the partner and manager are changed, not removed', async () => {
+    const { id } = await running();
+    const refused = await http()
+      .delete(`/api/v1/engagements/${id}/team/${managerX}`)
+      .set(bearer(pa))
+      .expect(409);
+    expect(refused.body.message).toContain('Change the Manager first');
+  });
+
+  it('removing someone with open tasks hands them to someone on the engagement', async () => {
+    const { id } = await running();
+    const { rows } = await su.query<{ id: string }>(
+      `INSERT INTO hsdg.tasks (engagement_id, title, status, assigned_to_employee_id, completed_at)
+       VALUES ($1, 'Prepare GSTR-1', 'todo', $2, NULL), ($1, 'Bank recon', 'in_progress', $2, NULL),
+              ($1, 'Old one', 'done', $2, now())
+       RETURNING id`,
+      [id, seniorY],
+    );
+    const seen = await http().get(`/api/v1/engagements/${id}`).set(bearer(mx)).expect(200);
+    expect(seen.body.team[0]).toMatchObject({ employeeId: seniorY, openTaskCount: 2 });
+
+    const asked = await http()
+      .delete(`/api/v1/engagements/${id}/team/${seniorY}`)
+      .set(bearer(mx))
+      .expect(409);
+    expect(asked.body.message).toContain('has 2 open tasks');
+    await http()
+      .delete(`/api/v1/engagements/${id}/team/${seniorY}?handoverTo=${partnerB}`)
+      .set(bearer(mx))
+      .expect(400);
+
+    const done = await http()
+      .delete(`/api/v1/engagements/${id}/team/${seniorY}?handoverTo=${managerX}`)
+      .set(bearer(mx))
+      .expect(200);
+    expect(done.body.team).toEqual([]);
+    const owners = await su.query<{ title: string; assigned_to_employee_id: string }>(
+      `SELECT title, assigned_to_employee_id FROM hsdg.tasks WHERE id = ANY($1::uuid[]) ORDER BY title`,
+      [rows.map((r) => r.id)],
+    );
+    expect(owners.rows).toEqual([
+      { title: 'Bank recon', assigned_to_employee_id: managerX },
+      { title: 'Old one', assigned_to_employee_id: seniorY },
+      { title: 'Prepare GSTR-1', assigned_to_employee_id: managerX },
+    ]);
+    expect(await notified(seniorY, 'team_changed', id)).toEqual([
+      expect.stringMatching(/^Added to the team/),
+      expect.stringMatching(/^Off the team/),
+    ]);
+    expect(await notified(managerX, 'task_assigned', id)).toEqual([
+      expect.stringMatching(/^2 tasks handed to you/),
+    ]);
+  });
+
+  it('a finished engagement’s people are the Managing Partner’s or an administrator’s to change', async () => {
+    const { id } = await running();
+    await su.query(`UPDATE hsdg.engagements SET status = 'completed' WHERE id = $1`, [id]);
+    for (const who of [pa, mx]) {
       await http()
         .post(`/api/v1/engagements/${id}/team`)
         .set(bearer(who))
         .send({ employeeId: partnerB })
         .expect(403);
-      await http().delete(`/api/v1/engagements/${id}/team/${seniorY}`).set(bearer(who)).expect(403);
     }
+    await http()
+      .post(`/api/v1/engagements/${id}/reassign-manager`)
+      .set(bearer(pa))
+      .send({ engagementManagerEmployeeId: partnerB })
+      .expect(403);
+    await http()
+      .post(`/api/v1/engagements/${id}/team`)
+      .set(bearer(mp))
+      .send({ employeeId: partnerB })
+      .expect(201);
   });
 
   it('a lead keeps the rest of the update, but not the manager through it', async () => {

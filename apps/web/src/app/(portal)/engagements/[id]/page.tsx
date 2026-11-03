@@ -322,7 +322,7 @@ export default function EngagementDetailPage(): JSX.Element {
     return <EmptyState>Engagement not found, or you don&rsquo;t have access to it.</EmptyState>;
 
   const e = eng.data;
-  const canChangePeople = engagementAbilities(principal, e).canChangePeople;
+  const people = engagementAbilities(principal, e);
   const ctx: TaskActionContext = taskContextFor(principal, e, checks);
   const tabs = tabsQ.data;
   const leadsTeam = planningTeam(e);
@@ -831,8 +831,17 @@ export default function EngagementDetailPage(): JSX.Element {
       {tab === 'team' && (
         <>
           {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} />}
-          <LeadsCard engagement={e} canChange={canChangePeople} />
-          <TeamSection engagementId={e.id} team={e.team} canChange={canChangePeople} />
+          <LeadsCard
+            engagement={e}
+            canChangePartner={people.canChangePartner}
+            canChangeManager={people.canChangeManager}
+          />
+          <TeamSection
+            engagementId={e.id}
+            team={e.team}
+            canChange={people.canChangeTeam}
+            leads={e}
+          />
         </>
       )}
 
