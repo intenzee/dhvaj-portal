@@ -71,7 +71,10 @@ JOIN hsdg.offices o ON o.code = v.office_code
 LEFT JOIN hsdg.users u ON u.email = v.email::citext
 ON CONFLICT (employee_code) DO NOTHING;
 
--- Reporting lines (org structure only — no access is derived from these).
+-- Reporting lines. A Partner / Manager sees their tree's people, tasks and
+-- engagements (1773500000000_reporting_tree), so Senior Y reports to the
+-- Managing Partner (firm-wide anyway): Partner B stays a partner with no
+-- reach into Partner A's engagements, as the access specs expect.
 UPDATE hsdg.employees e SET reports_to_id = m.id
 FROM hsdg.employees m
 WHERE e.reports_to_id IS NULL
@@ -80,7 +83,7 @@ WHERE e.reports_to_id IS NULL
     ('EMP003', 'EMP001'),  -- Partner A  -> Managing Partner
     ('EMP004', 'EMP001'),  -- Partner B  -> Managing Partner
     ('EMP005', 'EMP003'),  -- Manager X  -> Partner A
-    ('EMP006', 'EMP004'),  -- Senior Y   -> Partner B
+    ('EMP006', 'EMP001'),  -- Senior Y   -> Managing Partner
     ('EMP007', 'EMP005'),  -- Article N  -> Manager X
     ('EMP008', 'EMP006'),  -- Article S  -> Senior Y
     ('EMP009', 'EMP001'),  -- Accounts A -> Managing Partner

@@ -19,6 +19,8 @@ export const RLS_SETTINGS = {
   employeeId: 'hsdg.employee_id',
   /** Every role held, comma-separated — read by hsdg.ctx_has_role(). */
   roles: 'hsdg.roles',
+  /** The acting person and everyone under them (reports_to), as a uuid list — hsdg.ctx_subtree(). */
+  subtree: 'hsdg.subtree',
 } as const;
 
 /**

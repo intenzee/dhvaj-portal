@@ -311,7 +311,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
         .expect(404);
     });
 
-    it('does not let a non-assignee non-lead update a task (403)', async () => {
+    it('does not let a non-assignee non-lead update a task (404: a strict firm hides it)', async () => {
       const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const seniorY = await findEmployeeId('EMP006');
@@ -330,7 +330,9 @@ describe('Tasks & Client Dependencies (e2e)', () => {
         .post(`/api/v1/engagements/${eng}/tasks/${task.body.id}/status`)
         .set(bearer(await token('senior.y@dhvaj.in')))
         .send({ status: 'in_progress' })
-        .expect(403);
+        // task_assignee_only (on in the seed): a Senior sees their own tasks and
+        // the ones they gave, not the EP's — so the task is not found (C-2).
+        .expect(404);
     });
   });
 });

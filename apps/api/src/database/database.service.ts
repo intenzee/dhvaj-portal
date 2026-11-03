@@ -144,7 +144,11 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
               set_config($9, $10, true),
               set_config($11, $12, true),
               set_config($13, $14, true),
-              set_config($15, $16, true)`,
+              set_config($15, $16, true),
+              -- The reporting tree, once per request (hsdg.ctx_subtree()).
+              -- Firm-wide roles need none.
+              set_config($17, CASE WHEN $10 = '' OR $4 IN ('system', 'managing_partner', 'admin')
+                                   THEN '{}' ELSE hsdg.subtree_of($10::uuid)::text END, true)`,
       [
         RLS_SETTINGS.userId,
         context.userId,
@@ -164,6 +168,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         this.ambient(CLS_CHANGE_LABEL),
         RLS_SETTINGS.roles,
         (context.roles ?? []).join(','),
+        RLS_SETTINGS.subtree,
       ],
     );
   }
