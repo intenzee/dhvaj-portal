@@ -1,4 +1,4 @@
-import { workItemHref } from '@hsdg/contracts';
+import { periodKeyLabel, workItemHref } from '@hsdg/contracts';
 import {
   workFilingContextOf,
   workLinkFilingOf,
@@ -64,5 +64,15 @@ describe('workFilingContextOf', () => {
       workFilingContextOf(row({}))?.periodLabel,
     );
     expect(workFilingContextOf(row({ wl_instance_id: null }))).toBeNull();
+  });
+});
+
+describe('periodKeyLabel', () => {
+  it('names months, quarters, halves and financial years', () => {
+    expect(periodKeyLabel('2026-10')).toBe('Oct 2026');
+    expect(periodKeyLabel('2026-27:Q3')).toBe('Q3 2026-27');
+    expect(periodKeyLabel('2026-27:CH2')).toBe('Jul–Dec 2026');
+    expect(periodKeyLabel('2026-27')).toBe('FY 2026-27');
+    expect(periodKeyLabel('2026-27:DIN:01234567')).toBe('FY 2026-27 · DIN 01234567');
   });
 });

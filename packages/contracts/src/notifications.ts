@@ -80,6 +80,8 @@ export const NOTIFICATION_TYPE = {
   employeeExitReassign: 'employee_exit_reassign',
   /** Added to or taken off an engagement's team, or made / unmade its Manager. */
   teamChanged: 'team_changed',
+  /** Phase 2, C-3/C-4: someone gave you a set of tasks (one per set, not per task). */
+  workSetAssigned: 'work_set_assigned',
   /** C-5 — whoever holds a task asked the person who gave it (Ask on My Work). */
   taskQuestion: 'task_question',
 } as const;
@@ -163,6 +165,7 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   invoice_overdue: A,
   employee_exit_reassign: A,
   team_changed: I,
+  work_set_assigned: A,
   task_question: A,
 };
 
@@ -212,6 +215,7 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   invoice_overdue: 'Invoice overdue',
   employee_exit_reassign: 'Someone is leaving — reassign their work',
   team_changed: 'Engagement team changed',
+  work_set_assigned: 'Work given to you',
   task_question: 'Question on a task you gave',
 };
 

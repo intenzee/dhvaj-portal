@@ -8,6 +8,7 @@ import {
   MessageSquareWarning,
   ListTodo,
   ListChecks,
+  Send,
   ClipboardCheck,
   CalendarClock,
   FileText,
@@ -116,6 +117,17 @@ export const NAV_SECTIONS: NavSection[] = [
         permission: PERMISSION.engagementRead,
         ready: true,
         badge: { queryKey: ['work', 'reviews', 'count'], path: '/work/reviews/count' },
+      },
+      {
+        label: 'Assign work',
+        href: '/work-sets',
+        icon: Send,
+        hint: 'Give a set of open tasks to someone, and split the sets given to you.',
+        permission: PERMISSION.engagementRead,
+        // Keeps a preparer's sidebar at seven; they open their sets from the
+        // notification or from My Work.
+        hideFor: PREPARER_ROLES,
+        ready: true,
       },
       {
         label: 'Notifications',
