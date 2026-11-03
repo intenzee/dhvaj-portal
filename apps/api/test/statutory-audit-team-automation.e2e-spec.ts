@@ -132,7 +132,7 @@ describe('Statutory Audit — Team from the file (e2e)', () => {
       ['Senior Y', 'in_charge'],
       ['Article North', 'member'],
     ] as const) {
-      await post(pa, `/api/v1/engagements/${engId}/team`, {
+      await post(mp, `/api/v1/engagements/${engId}/team`, {
         employeeId: ids.get(name),
         roleOnEngagement: role,
       }).expect(201);

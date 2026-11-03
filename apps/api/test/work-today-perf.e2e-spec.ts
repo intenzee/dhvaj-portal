@@ -80,7 +80,7 @@ describe('Today under load (e2e)', () => {
     const me = await employeeId('EMP006');
     await http()
       .post(`/api/v1/engagements/${eng}/team`)
-      .set(bearer(pa))
+      .set(bearer(await token('mp@dhvaj.in')))
       .send({ employeeId: me, roleOnEngagement: 'in_charge' })
       .expect(201);
 

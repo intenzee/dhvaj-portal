@@ -224,7 +224,7 @@ describe('Statutory Audit — 03.1 Planning Intelligence engine (e2e)', () => {
     const seniorY = (emps.body.items as Array<{ employeeCode: string; id: string }>).find(
       (e) => e.employeeCode === 'EMP006',
     )!.id;
-    await post(pa, `/api/v1/engagements/${f.engId}/team`, {
+    await post(mp, `/api/v1/engagements/${f.engId}/team`, {
       employeeId: seniorY,
       roleOnEngagement: 'in_charge',
     }).expect(201);

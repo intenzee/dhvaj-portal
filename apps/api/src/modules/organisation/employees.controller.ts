@@ -11,7 +11,11 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSION, type Paginated } from '@hsdg/contracts';
-import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
+import {
+  CurrentPrincipal,
+  RequireAnyPermission,
+  RequirePermissions,
+} from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { paginate } from '../../common/pagination/pagination.dto';
 import { OrganisationService } from './organisation.service';
@@ -46,7 +50,7 @@ export class EmployeesController {
 
   // Declared before ':id' so "leads" is not parsed as an employee id.
   @Get('leads')
-  @RequirePermissions(PERMISSION.engagementCreate)
+  @RequireAnyPermission(PERMISSION.engagementCreate, PERMISSION.engagementAssign)
   @ApiOperation({
     summary: 'Who can lead an engagement, in every office',
     description:

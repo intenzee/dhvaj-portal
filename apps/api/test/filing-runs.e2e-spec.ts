@@ -80,7 +80,7 @@ describe('Filing runs + client chasing (e2e)', () => {
     if (opts.team)
       await http()
         .post(`/api/v1/engagements/${eng}/team`)
-        .set(bearer(lead))
+        .set(bearer(mp))
         .send({ employeeId: opts.team, roleOnEngagement: 'in_charge' })
         .expect(201);
     const inst = (

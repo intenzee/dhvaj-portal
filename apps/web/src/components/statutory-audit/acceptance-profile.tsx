@@ -4,10 +4,10 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Database, ExternalLink, Pencil } from 'lucide-react';
-import type { MasterFact, Paginated } from '@hsdg/contracts';
+import type { MasterFact } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import type { EmployeeRow, EngagementDetail, OfficeRow } from '@/lib/types';
+import type { EngagementDetail, OfficeRow } from '@/lib/types';
 import { Button } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
 import { MasterFactList } from './master-fact-list';
@@ -62,7 +62,7 @@ export function ProfileFacts({
   );
 }
 
-/** Update the engagement master's own fields (manager, office, target completion). */
+/** Update the engagement master's own fields (office, target completion). */
 function EngagementCorrection({ engagementId }: { engagementId: string }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
@@ -72,20 +72,14 @@ function EngagementCorrection({ engagementId }: { engagementId: string }): JSX.E
     queryFn: () => apiFetch<EngagementDetail>(`/engagements/${engagementId}`),
     enabled: open,
   });
-  const employees = useQuery({
-    queryKey: ['employees', 'all'],
-    queryFn: () => apiFetch<Paginated<EmployeeRow>>('/employees?limit=100'),
-    enabled: open,
-  });
   const offices = useQuery({
     queryKey: ['offices'],
     queryFn: () => apiFetch<OfficeRow[]>('/offices'),
     enabled: open,
   });
-  const [form, setForm] = useState<{ manager?: string; office?: string; end?: string }>({});
+  const [form, setForm] = useState<{ office?: string; end?: string }>({});
   const e = eng.data;
   const value = {
-    manager: form.manager ?? e?.engagementManagerId ?? '',
     office: form.office ?? e?.officeCode ?? '',
     end: form.end ?? e?.plannedEndDate ?? '',
   };
@@ -94,7 +88,6 @@ function EngagementCorrection({ engagementId }: { engagementId: string }): JSX.E
       apiFetch(`/engagements/${engagementId}`, {
         method: 'PATCH',
         body: {
-          engagementManagerEmployeeId: value.manager || null,
           officeCode: value.office || undefined,
           plannedEndDate: value.end || null,
           version: e!.version,
@@ -119,23 +112,10 @@ function EngagementCorrection({ engagementId }: { engagementId: string }): JSX.E
   return (
     <div className="space-y-3 rounded-lg border border-line p-3">
       <p className="text-xs text-ink-muted">
-        These change the engagement itself. The Engagement Partner is changed by a managing
-        partner from the engagement page.
+        These change the engagement itself. The Managing Partner or an administrator changes the
+        Engagement Partner and manager on the Team tab.
       </p>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Engagement manager">
-          <Select
-            value={value.manager}
-            onChange={(ev) => setForm({ ...form, manager: ev.target.value })}
-          >
-            <option value="">None</option>
-            {(employees.data?.items ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.fullName} · {p.gradeName}
-              </option>
-            ))}
-          </Select>
-        </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Office">
           <Select value={value.office} onChange={(ev) => setForm({ ...form, office: ev.target.value })}>
             {(offices.data ?? [])

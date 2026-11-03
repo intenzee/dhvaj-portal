@@ -212,7 +212,7 @@ describe('Documents (e2e)', () => {
       const seniorY = await findEmployeeId('EMP006');
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: seniorY, roleOnEngagement: 'in_charge' })
         .expect(201);
 
@@ -333,11 +333,12 @@ describe('Documents (e2e)', () => {
       expect(res.body.items).toHaveLength(0);
     });
 
-    it('forbids a caller without engagement.read (403)', async () => {
-      await request(app.getHttpServer())
+    it('lists nothing to the platform admin, who reads engagements but not their work', async () => {
+      const res = await request(app.getHttpServer())
         .get('/api/v1/documents')
         .set(bearer(await token('admin@dhvaj.in')))
-        .expect(403);
+        .expect(200);
+      expect(res.body.items).toHaveLength(0);
     });
   });
 });

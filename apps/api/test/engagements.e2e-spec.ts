@@ -123,12 +123,12 @@ describe('Engagement Core (e2e)', () => {
       expect(codes(res.body.items)).toContain('SA/00001');
     });
 
-    it('forbids the platform admin (no engagement.read) from listing engagements (403)', async () => {
-      // Checkpoint role separation: technical admin has no engagement access.
-      await request(app.getHttpServer())
-        .get('/api/v1/engagements')
+    it('lets the platform admin list engagements, to change their people', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/engagements?limit=100')
         .set(bearer(await token('admin@dhvaj.in')))
-        .expect(403);
+        .expect(200);
+      expect(res.body.total).toBeGreaterThan(0);
     });
   });
 
@@ -218,7 +218,7 @@ describe('Engagement Core (e2e)', () => {
 
       const assigned = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${created.body.id}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: articleN, roleOnEngagement: 'member' })
         .expect(201);
       expect(
@@ -227,7 +227,7 @@ describe('Engagement Core (e2e)', () => {
 
       const removed = await request(app.getHttpServer())
         .delete(`/api/v1/engagements/${created.body.id}/team/${articleN}`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(removed.body.team.some((t: { employeeId: string }) => t.employeeId === articleN)).toBe(
         false,
@@ -539,7 +539,7 @@ describe('Engagement Core (e2e)', () => {
       const article = await findEmployeeId('EMP007');
       const assigned = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${created.body.id}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: article, roleOnEngagement: 'member' })
         .expect(201);
       expect(assigned.body.version).toBeGreaterThan(created.body.version);

@@ -78,7 +78,7 @@ describe('Statutory Audit — 03.2 governance (e2e)', () => {
       engagementManagerEmployeeId: ids.get('Manager X'),
     }).expect(201);
     const id = e.body.id as string;
-    await post(pa, `/api/v1/engagements/${id}/team`, {
+    await post(mp, `/api/v1/engagements/${id}/team`, {
       employeeId: ids.get('Senior Y'),
       roleOnEngagement: 'in_charge',
     }).expect(201);

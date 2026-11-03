@@ -71,7 +71,7 @@ describe('Filing workspace (e2e)', () => {
       .expect(200);
     await http()
       .post(`/api/v1/engagements/${eng}/team`)
-      .set(bearer(pa))
+      .set(bearer(await token('mp@dhvaj.in')))
       .send({ employeeId: await employeeId('EMP006'), roleOnEngagement: 'in_charge' })
       .expect(201);
 

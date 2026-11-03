@@ -74,7 +74,7 @@ describe('Workflow settings (e2e)', () => {
       .expect(200);
     await http()
       .post(`/api/v1/engagements/${eng}/team`)
-      .set(bearer(pa))
+      .set(bearer(await token('mp@dhvaj.in')))
       .send({ employeeId: seniorY, roleOnEngagement: 'in_charge' })
       .expect(201);
     // The rule's stream is the engagement's stream line, so the line's lead is its stream lead.
@@ -268,7 +268,7 @@ describe('Workflow settings (e2e)', () => {
     const { eng, line } = await filing();
     await http()
       .post(`/api/v1/engagements/${eng}/team`)
-      .set(bearer(pa))
+      .set(bearer(await token('mp@dhvaj.in')))
       .send({ employeeId: articleNorth, roleOnEngagement: 'member' })
       .expect(201);
     await su.query(`UPDATE hsdg.engagement_services SET lead_employee_id = $2 WHERE id = $1`, [

@@ -390,7 +390,7 @@ describe('Firm calendar v2 (e2e)', () => {
       )!.id;
       await http()
         .post(`/api/v1/engagements/${firmEng}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: managerX, roleOnEngagement: 'in_charge' })
         .expect(201);
       await http()

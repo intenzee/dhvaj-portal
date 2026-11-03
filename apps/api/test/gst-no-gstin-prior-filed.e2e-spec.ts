@@ -154,7 +154,7 @@ describe('GST without a GSTIN, and periods filed before the portal (e2e)', () =>
       ).body.id as string;
       await http()
         .post(`/api/v1/engagements/${eng}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: seniorY, roleOnEngagement: 'in_charge' })
         .expect(201);
     });

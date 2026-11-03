@@ -46,7 +46,7 @@ describe('Work sections (e2e)', () => {
     const id = res.body.id as string;
     await http()
       .post(`/api/v1/engagements/${id}/team`)
-      .set(bearer(pa))
+      .set(bearer(await token('mp@dhvaj.in')))
       .send({ employeeId: seniorY, roleOnEngagement: 'in_charge' })
       .expect(201);
     return id;

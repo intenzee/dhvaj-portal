@@ -109,7 +109,7 @@ describe('Statutory Audit — 03.4 scope & approach governance (e2e)', () => {
       engagementManagerEmployeeId: ids.get('Manager X'),
     }).expect(201);
     engId = e.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/team`, {
+    await post(mp, `/api/v1/engagements/${engId}/team`, {
       employeeId: ids.get('Senior Y'),
       roleOnEngagement: 'in_charge',
     }).expect(201);
@@ -448,8 +448,9 @@ describe('Statutory Audit — 03.4 scope & approach governance (e2e)', () => {
   });
   it('S9 — a Platform Admin gets no client data or 03.4 authority by role alone', async () => {
     const ad = await token('admin@dhvaj.in');
-    await get(ad, scope).expect(403);
-    await get(ad, `${scope}/handoff`).expect(403);
+    // They read the engagement, not its audit file: RLS hides it.
+    await get(ad, scope).expect(404);
+    await get(ad, `${scope}/handoff`).expect(404);
     await post(ad, `${scope}/partner-actions`, { action: 'challenge', note: 'x' }).expect(403);
     await post(ad, `${scope}/revisions`, { trigger: 'other', reason: 'x' }).expect(403);
   });

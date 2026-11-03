@@ -73,7 +73,7 @@ describe('Accounts desk and the ad-hoc issue rule (e2e)', () => {
     // Manager X bills NORTH clients; on the team, they see the engagement too.
     await http()
       .post(`/api/v1/engagements/${eng}/team`)
-      .set(bearer(pa))
+      .set(bearer(await token('mp@dhvaj.in')))
       .send({ employeeId: managerX, roleOnEngagement: 'member' })
       .expect(201);
     return { eng, client };

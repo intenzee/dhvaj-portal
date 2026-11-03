@@ -617,7 +617,7 @@ describe('ROC events (e2e)', () => {
       );
       await http()
         .post(`/api/v1/engagements/${eng}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: emp.rows[0]!.id, roleOnEngagement: 'member' })
         .expect(201);
       await http()

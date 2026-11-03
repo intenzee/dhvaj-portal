@@ -39,7 +39,11 @@ import { UpdateEngagementDto } from './dto/update-engagement.dto';
 import { AddServiceDto } from './dto/add-service.dto';
 import { AddCoveredEntityDto } from './dto/add-covered-entity.dto';
 import { EngagementListQueryDto } from './dto/engagement-list-query.dto';
-import { AssignTeamMemberDto, ReassignPartnerDto } from './dto/engagement-commands.dto';
+import {
+  AssignTeamMemberDto,
+  ReassignManagerDto,
+  ReassignPartnerDto,
+} from './dto/engagement-commands.dto';
 import {
   LifecycleTransitionDto,
   PutOnHoldDto,
@@ -147,14 +151,22 @@ export class EngagementsController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateEngagementDto,
   ): Promise<EngagementDetail> {
+    if (
+      dto.engagementManagerEmployeeId !== undefined &&
+      !principal.permissions.includes(PERMISSION.engagementAssign)
+    ) {
+      throw new ForbiddenException(
+        'Only the Managing Partner or an administrator can change the manager.',
+      );
+    }
     return this.engagements.updateEngagement(rlsContextFromPrincipal(principal), id, dto);
   }
 
   @Post(':id/reassign-partner')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementAssign)
   @ApiOperation({
     summary: 'Change the accountable Engagement Partner (audited)',
-    description: 'Changing accountability requires firm-wide authority.',
+    description: 'Managing Partner or administrator, at any stage.',
   })
   reassignPartner(
     @CurrentPrincipal() principal: Principal,
@@ -170,8 +182,28 @@ export class EngagementsController {
     );
   }
 
+  @Post(':id/reassign-manager')
+  @RequirePermissions(PERMISSION.engagementAssign)
+  @ApiOperation({
+    summary: 'Change the Engagement Manager (audited)',
+    description: 'Managing Partner or administrator, at any stage.',
+  })
+  reassignManager(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ReassignManagerDto,
+  ): Promise<EngagementDetail> {
+    return this.engagements.reassignManager(
+      rlsContextFromPrincipal(principal),
+      id,
+      dto.engagementManagerEmployeeId,
+      dto.reason,
+      dto.version,
+    );
+  }
+
   @Post(':id/team')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementAssign)
   @ApiOperation({ summary: 'Assign a team member (audited)' })
   assignTeam(
     @CurrentPrincipal() principal: Principal,
@@ -182,7 +214,7 @@ export class EngagementsController {
   }
 
   @Delete(':id/team/:employeeId')
-  @RequirePermissions(PERMISSION.engagementManage)
+  @RequirePermissions(PERMISSION.engagementAssign)
   @ApiOperation({ summary: 'Remove a team member (audited)' })
   removeTeam(
     @CurrentPrincipal() principal: Principal,

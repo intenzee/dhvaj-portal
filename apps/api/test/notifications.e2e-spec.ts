@@ -128,7 +128,7 @@ describe('Notifications (e2e)', () => {
       const seniorY = await findEmployeeId('EMP006');
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng.id}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: seniorY, roleOnEngagement: 'in_charge' })
         .expect(201);
 

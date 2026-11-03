@@ -245,7 +245,7 @@ describe('Administration (e2e)', () => {
         expect(after).toMatchObject({ id: promoted!.id, gradeSlug: 'manager' });
       });
 
-      it('lists engagement leads from every office, narrowly, to anyone who creates engagements', async () => {
+      it('lists engagement leads from every office, narrowly, to anyone who creates or assigns engagements', async () => {
         const senior = await token('senior.y@dhvaj.in'); // SOUTH, not firm-wide
         const leads = await request(app.getHttpServer())
           .get('/api/v1/employees/leads')
@@ -260,10 +260,11 @@ describe('Administration (e2e)', () => {
           ['fullName', 'gradeName', 'gradeSlug', 'id', 'isPartner', 'officeCode'].sort(),
         );
 
+        // The administrator creates no engagements, but changes their leads.
         await request(app.getHttpServer())
           .get('/api/v1/employees/leads')
           .set(bearer(await token('admin@dhvaj.in')))
-          .expect(403);
+          .expect(200);
       });
 
       it('drops someone from the engagement leads once their login is deactivated', async () => {

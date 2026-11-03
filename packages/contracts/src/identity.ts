@@ -92,6 +92,8 @@ export const PERMISSION = {
   /** Create an engagement — every staff role. Running it stays with engagement.manage. */
   engagementCreate: 'engagement.create',
   engagementManage: 'engagement.manage',
+  /** Change an engagement's partner, manager and team: Managing Partner and admin. */
+  engagementAssign: 'engagement.assign',
   complianceRead: 'compliance.read',
   complianceManage: 'compliance.manage',
   taskUpdate: 'task.update',

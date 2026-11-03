@@ -2,22 +2,165 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X } from 'lucide-react';
+import { Pencil, Plus, X } from 'lucide-react';
 import { TEAM_ROLES, type Paginated } from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
-import type { EmployeeRow, TeamMember } from '@/lib/types';
+import type { EmployeeRow, EngagementDetail, EngagementLeadRow, TeamMember } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardBody, Badge, Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select } from '@/components/form';
 
+type LeadRole = 'partner' | 'manager';
+
+const LEAD_LABEL: Record<LeadRole, string> = {
+  partner: 'Engagement Partner',
+  manager: 'Manager',
+};
+
+/** The partner and manager; the Managing Partner or an administrator changes them. */
+export function LeadsCard({
+  engagement: e,
+  canChange,
+}: {
+  engagement: Pick<
+    EngagementDetail,
+    | 'id'
+    | 'version'
+    | 'engagementPartnerId'
+    | 'engagementPartnerName'
+    | 'engagementManagerId'
+    | 'engagementManagerName'
+  >;
+  canChange: boolean;
+}): JSX.Element {
+  const [changing, setChanging] = useState<LeadRole | null>(null);
+  const rows: { role: LeadRole; name: string | null }[] = [
+    { role: 'partner', name: e.engagementPartnerName },
+    { role: 'manager', name: e.engagementManagerName },
+  ];
+  return (
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle>Leads</CardTitle>
+      </CardHeader>
+      <CardBody className="space-y-2">
+        {rows.map(({ role, name }) => (
+          <div key={role} className="flex items-center justify-between gap-2 text-sm">
+            <span className="text-ink-muted">{LEAD_LABEL[role]}</span>
+            <div className="flex items-center gap-2">
+              <span className={name ? 'text-ink' : 'text-ink-faint'}>{name ?? 'Not set'}</span>
+              {canChange && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Change ${LEAD_LABEL[role]}`}
+                  onClick={() => setChanging(role)}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Change
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </CardBody>
+      {changing && (
+        <ChangeLeadModal engagement={e} role={changing} onClose={() => setChanging(null)} />
+      )}
+    </Card>
+  );
+}
+
+function ChangeLeadModal({
+  engagement: e,
+  role,
+  onClose,
+}: {
+  engagement: Pick<
+    EngagementDetail,
+    'id' | 'version' | 'engagementPartnerId' | 'engagementManagerId'
+  >;
+  role: LeadRole;
+  onClose: () => void;
+}): JSX.Element {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [employeeId, setEmployeeId] = useState('');
+  const [reason, setReason] = useState('');
+  const current = role === 'partner' ? e.engagementPartnerId : e.engagementManagerId;
+  const leads = useQuery({
+    queryKey: ['employees', 'leads'],
+    queryFn: () => apiFetch<EngagementLeadRow[]>('/employees/leads'),
+  });
+  const options = (leads.data ?? []).filter(
+    (p) => p.id !== current && (role === 'manager' || p.isPartner),
+  );
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch(`/engagements/${e.id}/reassign-${role}`, {
+        method: 'POST',
+        body: {
+          ...(role === 'partner'
+            ? { engagementPartnerEmployeeId: employeeId }
+            : { engagementManagerEmployeeId: employeeId }),
+          ...(reason.trim() ? { reason: reason.trim() } : {}),
+          version: e.version,
+        },
+      }),
+    onSuccess: () => {
+      toast(`${LEAD_LABEL[role]} changed.`);
+      void qc.invalidateQueries({ queryKey: ['engagement', e.id] });
+      onClose();
+    },
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Could not make the change.', 'error'),
+  });
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Change ${LEAD_LABEL[role]}`}
+      description="The change is recorded in the audit trail."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!employeeId || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? 'Saving…' : 'Change'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label={`New ${LEAD_LABEL[role]}`} required>
+          <Select value={employeeId} onChange={(ev) => setEmployeeId(ev.target.value)}>
+            <option value="">Select a person…</option>
+            {options.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.fullName} — {p.gradeName} ({p.officeCode})
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Reason">
+          <Input value={reason} onChange={(ev) => setReason(ev.target.value)} />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
 export function TeamSection({
   engagementId,
   team,
+  canChange,
 }: {
   engagementId: string;
   team: TeamMember[];
+  /** Managing Partner or administrator; everyone else only sees the team. */
+  canChange: boolean;
 }): JSX.Element {
   const qc = useQueryClient();
   const toast = useToast();
@@ -73,9 +216,11 @@ export function TeamSection({
     <Card>
       <CardHeader className="flex items-center justify-between">
         <CardTitle>Team ({team.length})</CardTitle>
-        <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> Add
-        </Button>
+        {canChange && (
+          <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        )}
       </CardHeader>
       <CardBody className="space-y-2">
         {team.length === 0 && <p className="text-sm text-ink-faint">No team assigned yet.</p>}
@@ -84,15 +229,17 @@ export function TeamSection({
             <span className="text-ink">{m.employeeName}</span>
             <div className="flex items-center gap-2">
               <Badge>{humanize(m.roleOnEngagement)}</Badge>
-              <button
-                onClick={() => remove.mutate(m.employeeId)}
-                disabled={remove.isPending}
-                className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
-                aria-label={`Remove ${m.employeeName}`}
-                title="Remove"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+              {canChange && (
+                <button
+                  onClick={() => remove.mutate(m.employeeId)}
+                  disabled={remove.isPending}
+                  className="rounded p-0.5 text-ink-faint hover:bg-surface-sunken hover:text-danger-600"
+                  aria-label={`Remove ${m.employeeName}`}
+                  title="Remove"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </div>
         ))}

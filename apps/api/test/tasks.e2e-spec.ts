@@ -141,7 +141,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
       // Add Senior Y to the team so they can be assigned + see the task.
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: seniorY, roleOnEngagement: 'in_charge' })
         .expect(201);
 
@@ -317,7 +317,7 @@ describe('Tasks & Client Dependencies (e2e)', () => {
       const seniorY = await findEmployeeId('EMP006');
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/team`)
-        .set(bearer(pa))
+        .set(bearer(await token('mp@dhvaj.in')))
         .send({ employeeId: seniorY })
         .expect(201);
       // Task assigned to nobody (or to the EP), so Senior Y is a member but not the assignee.

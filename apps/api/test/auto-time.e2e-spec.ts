@@ -108,7 +108,7 @@ describe('Automatic time (e2e)', () => {
     );
     await http()
       .post(`/api/v1/engagements/${eng}/team`)
-      .set(bearer(pa))
+      .set(bearer(await token('mp@dhvaj.in')))
       .send({ employeeId: seniorY, roleOnEngagement: 'in_charge' })
       .expect(201);
     const task = async (title: string): Promise<string> =>

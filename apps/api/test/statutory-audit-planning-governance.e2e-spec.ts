@@ -110,7 +110,7 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
       engagementManagerEmployeeId: ids.get('Manager X'),
     }).expect(201);
     engId = e.body.id as string;
-    await post(pa, `/api/v1/engagements/${engId}/team`, {
+    await post(await token('mp@dhvaj.in'), `/api/v1/engagements/${engId}/team`, {
       employeeId: ids.get('Senior Y'),
       roleOnEngagement: 'in_charge',
     }).expect(201);
@@ -149,8 +149,9 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
       partnerReview: true,
       partnerSignals: true,
     });
-    // Platform Admin: no client data by role alone.
-    await get(admin, `${base}/planning-governance`).expect(403);
+    // Platform Admin: no client data by role alone. They read the engagement,
+    // not its audit file, so RLS hides it.
+    await get(admin, `${base}/planning-governance`).expect(404);
 
     // A Senior's signal is a PROPOSAL the Manager assesses.
     const proposal = await post(sy, `${base}/planning-signals`, {
@@ -674,7 +675,7 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
         engagementManagerEmployeeId: ids.get('Manager X'),
       }).expect(201);
       const id = e.body.id as string;
-      await post(pa, `/api/v1/engagements/${id}/team`, {
+      await post(await token('mp@dhvaj.in'), `/api/v1/engagements/${id}/team`, {
         employeeId: ids.get('Senior Y'),
         roleOnEngagement: 'in_charge',
       }).expect(201);

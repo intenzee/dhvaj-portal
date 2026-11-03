@@ -345,7 +345,13 @@ export class EngagementsService {
     });
   }
 
-  /** Change the accountable EP. RLS requires firm-wide authority (governance). */
+  /** engagement.assign held the door; this lets an administrator's write through
+   *  RLS for the rest of this transaction. The Managing Partner does not need it. */
+  private async allowPeopleChange(client: PoolClient): Promise<void> {
+    await client.query(`SELECT set_config('hsdg.changing_people', 'on', true)`);
+  }
+
+  /** Change the accountable EP. The route requires engagement.assign. */
   async reassignPartner(
     ctx: RlsContext,
     id: string,
@@ -357,38 +363,7 @@ export class EngagementsService {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
 
-      // Optimistic concurrency is enforced atomically in the WHERE (not a
-      // read-then-write compare), so a concurrent version bump between the read
-      // above and this UPDATE cannot be lost.
-      const params: unknown[] = [newEpEmployeeId, id];
-      let versionClause = '';
-      if (expectedVersion !== undefined) {
-        params.push(expectedVersion);
-        versionClause = ` AND version = $${params.length}`;
-      }
-      let updated: number;
-      try {
-        const result = await client.query(
-          `UPDATE hsdg.engagements
-           SET engagement_partner_id = $1, version = version + 1
-           WHERE id = $2${versionClause}`,
-          params,
-        );
-        updated = result.rowCount ?? 0;
-      } catch (err) {
-        throw translatePgError(err);
-      }
-      if (updated === 0) {
-        // Distinguish a stale version (the row moved on) from an RLS/governance
-        // denial (e.g. a non-firm-wide EP trying to hand off accountability).
-        const current = await selectEngagementDetail(client, id);
-        if (current && expectedVersion !== undefined && current.version !== expectedVersion) {
-          throw new ConflictException(
-            'Engagement was modified by someone else. Refresh and retry (stale version).',
-          );
-        }
-        throw new ForbiddenException('Not permitted to reassign the Engagement Partner.');
-      }
+      await this.setLead(client, id, 'engagement_partner_id', newEpEmployeeId, expectedVersion);
       const after = await selectEngagementDetail(client, id);
       await this.audit.recordWith(client, ctx, {
         action: 'engagement.ep_changed',
@@ -412,6 +387,79 @@ export class EngagementsService {
     });
   }
 
+  /** Change the Engagement Manager. The route requires engagement.assign. */
+  async reassignManager(
+    ctx: RlsContext,
+    id: string,
+    newManagerEmployeeId: string,
+    reason: string | undefined,
+    expectedVersion?: number,
+  ): Promise<EngagementDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const before = await selectEngagementDetail(client, id);
+      if (!before) throw new NotFoundException('Engagement not found.');
+
+      await this.setLead(
+        client,
+        id,
+        'engagement_manager_id',
+        newManagerEmployeeId,
+        expectedVersion,
+      );
+      const after = await selectEngagementDetail(client, id);
+      await this.audit.recordWith(client, ctx, {
+        action: 'engagement.manager_changed',
+        objectType: 'engagement',
+        objectId: id,
+        before: { engagementManagerId: before.engagementManagerId },
+        after: { engagementManagerId: after!.engagementManagerId },
+        reason: reason ?? null,
+      });
+      return after!;
+    });
+  }
+
+  private async setLead(
+    client: PoolClient,
+    id: string,
+    column: 'engagement_partner_id' | 'engagement_manager_id',
+    employeeId: string,
+    expectedVersion?: number,
+  ): Promise<void> {
+    await this.allowPeopleChange(client);
+    // Optimistic concurrency is enforced atomically in the WHERE (not a
+    // read-then-write compare), so a concurrent version bump between the read
+    // and this UPDATE cannot be lost.
+    const params: unknown[] = [employeeId, id];
+    let versionClause = '';
+    if (expectedVersion !== undefined) {
+      params.push(expectedVersion);
+      versionClause = ` AND version = $${params.length}`;
+    }
+    let updated: number;
+    try {
+      const result = await client.query(
+        `UPDATE hsdg.engagements
+         SET ${column} = $1, version = version + 1
+         WHERE id = $2${versionClause}`,
+        params,
+      );
+      updated = result.rowCount ?? 0;
+    } catch (err) {
+      throw translatePgError(err);
+    }
+    if (updated === 0) {
+      // Distinguish a stale version (the row moved on) from an RLS denial.
+      const current = await selectEngagementDetail(client, id);
+      if (current && expectedVersion !== undefined && current.version !== expectedVersion) {
+        throw new ConflictException(
+          'Engagement was modified by someone else. Refresh and retry (stale version).',
+        );
+      }
+      throw new ForbiddenException('Not permitted to change this engagement’s leads.');
+    }
+  }
+
   async assignTeamMember(
     ctx: RlsContext,
     id: string,
@@ -420,6 +468,7 @@ export class EngagementsService {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
+      await this.allowPeopleChange(client);
       try {
         await client.query(
           `INSERT INTO hsdg.engagement_team (engagement_id, employee_id, role_on_engagement)
@@ -449,6 +498,7 @@ export class EngagementsService {
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await selectEngagementDetail(client, id);
       if (!before) throw new NotFoundException('Engagement not found.');
+      await this.allowPeopleChange(client);
       const result = await client.query(
         `DELETE FROM hsdg.engagement_team WHERE engagement_id = $1 AND employee_id = $2`,
         [id, employeeId],

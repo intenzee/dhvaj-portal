@@ -27,7 +27,7 @@ import { useWorkLinkFocus } from '@/lib/work-focus';
 import type { TaskActionContext } from '@/lib/work-types';
 import { StreamTab } from '@/components/filing/stream-tab';
 import { WorkList } from '@/components/tasks/work-list';
-import { ActivityTab, TimePanel } from '@/components/engagement/activity-tab';
+import { ActivityTab } from '@/components/engagement/activity-tab';
 import { BillFromTime } from '@/components/engagement/bill-from-time';
 import { DocumentsTab } from '@/components/engagement/documents-tab';
 import {
@@ -58,7 +58,7 @@ import { CreateTaskModal } from '@/components/actions/create-task-modal';
 import { RequestDependencyModal } from '@/components/actions/request-dependency-modal';
 import { TaskStatusControl } from '@/components/actions/task-status-control';
 import { ClientDependencyActions } from '@/components/actions/client-dependency-actions';
-import { TeamSection } from '@/components/actions/team-section';
+import { LeadsCard, TeamSection } from '@/components/actions/team-section';
 import { ServicesSection } from '@/components/actions/services-section';
 import { ScopePerYearEditor } from '@/components/engagement-kinds/scope-per-year-editor';
 import { CoveredEntitiesSection } from '@/components/actions/covered-entities-section';
@@ -170,7 +170,7 @@ function complianceTabs(
     {
       key: 'activity',
       label: 'Activity',
-      hint: 'Everything that happened, comments, and recorded time.',
+      hint: 'Everything that happened, and comments.',
     },
     {
       key: 'invoices',
@@ -201,7 +201,7 @@ const AUDIT_TABS: { key: TabKey; label: string; hint: string }[] = [
   {
     key: 'activity',
     label: 'Activity',
-    hint: 'Everything that happened, comments, and recorded time.',
+    hint: 'Everything that happened, and comments.',
   },
   { key: 'invoices', label: 'Invoices', hint: 'Raise invoices and record payments received.' },
 ];
@@ -276,7 +276,6 @@ export default function EngagementDetailPage(): JSX.Element {
     });
   useWorkLinkFocus();
   const gstOn = isOn(FEATURE_FLAG.gstTab);
-  const autoTimeOn = isOn(FEATURE_FLAG.autoTime);
   const [deadlinesFor, setDeadlinesFor] = useState<ComplianceRow | null>(null);
   // Tasks open their work inline under their row; several can be open at once.
   const [openTasks, setOpenTasks] = useState<ReadonlySet<string>>(new Set());
@@ -323,7 +322,7 @@ export default function EngagementDetailPage(): JSX.Element {
     return <EmptyState>Engagement not found, or you don&rsquo;t have access to it.</EmptyState>;
 
   const e = eng.data;
-  const me = principal?.employeeId ?? null;
+  const canChangePeople = engagementAbilities(principal, e).canChangePeople;
   const ctx: TaskActionContext = taskContextFor(principal, e, checks);
   const tabs = tabsQ.data;
   const leadsTeam = planningTeam(e);
@@ -832,7 +831,8 @@ export default function EngagementDetailPage(): JSX.Element {
       {tab === 'team' && (
         <>
           {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} />}
-          <TeamSection engagementId={e.id} team={e.team} />
+          <LeadsCard engagement={e} canChange={canChangePeople} />
+          <TeamSection engagementId={e.id} team={e.team} canChange={canChangePeople} />
         </>
       )}
 
@@ -841,26 +841,7 @@ export default function EngagementDetailPage(): JSX.Element {
 
       {/* ── Activity (lifecycle history) ─────────────────────────────────── */}
       {tab === 'activity' && layout !== 'legacy' && (
-        <ActivityTab
-          engagementId={e.id}
-          team={leadsTeam}
-          isLead={ctx.isLead}
-          timeView={
-            autoTimeOn && layout === 'compliance' ? (
-              <TimePanel
-                engagementId={e.id}
-                isLead={ctx.isLead}
-                me={me}
-                streams={(tabs?.streams ?? []).map((s) => ({
-                  stream: s.stream,
-                  engagementServiceId: s.engagementServiceId,
-                }))}
-              />
-            ) : (
-              <TimeSection engagementId={e.id} />
-            )
-          }
-        />
+        <ActivityTab engagementId={e.id} team={leadsTeam} isLead={ctx.isLead} />
       )}
       {tab === 'activity' && layout === 'legacy' && (
         <section>

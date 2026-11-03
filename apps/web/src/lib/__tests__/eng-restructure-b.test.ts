@@ -9,8 +9,6 @@ import { documentFilters } from '@/components/engagement/documents-tab';
 import { dueItemRef } from '@/components/engagement/overview-widgets';
 import { workItemHref } from '@hsdg/contracts';
 import { figurePayload, referenceError } from '@/components/filing/instance-workspace';
-import { adjustableEntries } from '@/components/engagement/activity-tab';
-import type { TimeEntryRecord } from '@hsdg/contracts';
 import { periodParam, pillTone } from '@/components/filing/stream-tab';
 
 jest.mock('next/navigation', () => ({
@@ -176,52 +174,12 @@ describe('filing helpers', () => {
   });
 });
 
-describe('lodge and time-correction guards', () => {
+describe('lodge guards', () => {
   it('checks a GST ARN', () => {
     expect(referenceError('arn', 'AA190920261234X')).toBeNull();
     expect(referenceError('arn', 'aa190920261234x')).toMatch(/15 upper-case/);
     expect(referenceError('arn', 'AA1909')).toMatch(/15 upper-case/);
     expect(referenceError('srn', 'F12345678')).toBeNull();
     expect(referenceError('ack', ' ')).toMatch(/Enter/);
-  });
-  it('offers only my finished original entries from the last 3 days', () => {
-    const now = Date.parse('2026-10-12T10:00:00Z');
-    const base = {
-      engagementId: 'e',
-      employeeName: 'A',
-      durationSeconds: 600,
-      note: null,
-      stoppedReason: null,
-      taskId: null,
-      taskTitle: null,
-      engagementServiceId: null,
-      entryKind: 'work',
-      source: 'auto',
-      category: null,
-      isBillable: true,
-    };
-    const e = (over: Record<string, unknown>) =>
-      ({
-        ...base,
-        id: 'x',
-        employeeId: 'me',
-        startedAt: '2026-10-11T05:00:00Z',
-        endedAt: '2026-10-11T05:10:00Z',
-        isRunning: false,
-        adjustsEntryId: null,
-        ...over,
-      }) as unknown as TimeEntryRecord;
-    const out = adjustableEntries(
-      [
-        e({ id: 'ok' }),
-        e({ id: 'other', employeeId: 'B' }),
-        e({ id: 'running', isRunning: true, endedAt: null }),
-        e({ id: 'adj', adjustsEntryId: 'ok' }),
-        e({ id: 'old', startedAt: '2026-10-01T05:00:00Z' }),
-      ],
-      'me',
-      now,
-    ).map((x) => x.id);
-    expect(out).toEqual(['ok']);
   });
 });

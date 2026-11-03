@@ -13,6 +13,8 @@ import type { EngagementDetail } from './types';
  *  - an EP review, and sign-off under an EP-required review model, must be the
  *    accountable EP (EngagementReviewsService);
  *  - reopen is Managing-Partner-only by effective role (managingPartnerOnlyGuard);
+ *  - the partner, manager and team change with `engagement.assign` (Managing
+ *    Partner and administrator), at any stage; everyone else only sees them;
  *  - complete needs a current sign-off and no open review points
  *    (reviewSignedOffGuard).
  */
@@ -25,6 +27,8 @@ export interface EngagementAbilities {
   /** A lead who cannot sign off only because the review model needs the EP. */
   awaitingEpSignOff: boolean;
   canReopen: boolean;
+  /** May change the partner, manager and team. */
+  canChangePeople: boolean;
   /** Why Complete would be refused right now, or null if it would pass. */
   completeBlockedReason: string | null;
 }
@@ -69,6 +73,7 @@ export function engagementAbilities(
     canSignOff: reviewOpen && !epGateBlocks,
     awaitingEpSignOff: reviewOpen && epGateBlocks,
     canReopen: canManage && isMp,
+    canChangePeople: can(principal, PERMISSION.engagementAssign),
     completeBlockedReason,
   };
 }

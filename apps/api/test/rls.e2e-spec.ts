@@ -13,7 +13,14 @@ describe('RLS (database-level, independent of the application)', () => {
   let userIds: Record<string, string>;
   let officeIds: Record<string, string>;
 
-  type Ctx = { userId?: string; role?: string; officeId?: string; employeeId?: string };
+  type Ctx = {
+    userId?: string;
+    role?: string;
+    roles?: string[];
+    officeId?: string;
+    employeeId?: string;
+    changingPeople?: boolean;
+  };
 
   /** Run a read under a security context, in a rolled-back transaction. */
   async function underContext<T>(ctx: Ctx, sql: string): Promise<T[]> {
@@ -21,8 +28,13 @@ describe('RLS (database-level, independent of the application)', () => {
     try {
       await app.query('SELECT set_config($1,$2,true)', ['hsdg.user_id', ctx.userId ?? '']);
       await app.query('SELECT set_config($1,$2,true)', ['hsdg.role', ctx.role ?? '']);
+      await app.query('SELECT set_config($1,$2,true)', ['hsdg.roles', (ctx.roles ?? []).join(',')]);
       await app.query('SELECT set_config($1,$2,true)', ['hsdg.office_id', ctx.officeId ?? '']);
       await app.query('SELECT set_config($1,$2,true)', ['hsdg.employee_id', ctx.employeeId ?? '']);
+      await app.query('SELECT set_config($1,$2,true)', [
+        'hsdg.changing_people',
+        ctx.changingPeople ? 'on' : '',
+      ]);
       const { rows } = await app.query(sql);
       return rows as T[];
     } finally {
@@ -334,9 +346,18 @@ describe('RLS (database-level, independent of the application)', () => {
   // Partner) from technical/platform administration (admin). Admin keeps
   // identity/HR/config/audit reach but must NOT have automatic access to
   // client/engagement data. Enforced at the database layer (migration 0009).
+  // Since engagement.assign, holding the admin role reads engagements and
+  // their clients to change their people, and writes only for that change.
   describe('role separation: platform admin vs business firm-wide (checkpoint)', () => {
     // Lazy: officeIds is only populated in beforeAll, after describe collection.
     const adminNorth = (): Ctx => ({ role: 'admin', officeId: officeIds['NORTH'] });
+    const seeSomeEngagement = async (): Promise<{ id: string; entity_id: string }> => {
+      const rows = await underContext<{ id: string; entity_id: string }>(
+        { role: 'managing_partner', officeId: officeIds['NORTH'] },
+        `SELECT id, entity_id FROM hsdg.engagements LIMIT 1`,
+      );
+      return rows[0]!;
+    };
 
     it('denies the platform admin business firm-wide reach into engagements', async () => {
       // admin is not assigned to any engagement and is not business-firm-wide.
@@ -354,6 +375,30 @@ describe('RLS (database-level, independent of the application)', () => {
       expect(names).toContain('Acme Manufacturing Pvt Ltd'); // North
       // …never the whole firm.
       expect(names).not.toContain('Coastal Foods Pvt Ltd'); // South
+    });
+
+    it('lets a held admin role read engagements, and write only for a people change', async () => {
+      const seen = await seeSomeEngagement();
+      const held: Ctx = { role: 'admin', roles: ['admin'], officeId: officeIds['NORTH'] };
+      expect(await underContext(held, `SELECT id FROM hsdg.engagements`)).not.toHaveLength(0);
+      expect(
+        await underContext(held, `SELECT 1 FROM hsdg.entities WHERE id = '${seen.entity_id}'`),
+      ).toHaveLength(1);
+      const write = `UPDATE hsdg.engagements SET version = version WHERE id = '${seen.id}' RETURNING id`;
+      expect(await underContext(held, write)).toHaveLength(0);
+      expect(await underContext({ ...held, changingPeople: true }, write)).toHaveLength(1);
+      // The flag alone is nothing: it must be the administrator who sets it.
+      expect(
+        await underContext(
+          {
+            role: 'manager',
+            roles: ['manager'],
+            changingPeople: true,
+            officeId: officeIds['NORTH'],
+          },
+          write,
+        ),
+      ).toHaveLength(0);
     });
 
     it('keeps the platform admin firm-wide for identity/HR and audit (unchanged)', async () => {
