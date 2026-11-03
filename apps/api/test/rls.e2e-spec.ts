@@ -42,13 +42,18 @@ describe('RLS (database-level, independent of the application)', () => {
     }
   }
 
+  let su: Client;
+
   beforeAll(async () => {
     ({ userIds, officeIds } = await seedIdentityFixtures());
     app = new Client({ connectionString: process.env.DATABASE_URL });
     await app.connect();
+    su = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
+    await su.connect();
   });
 
   afterAll(async () => {
+    await su?.end();
     await app?.end();
   });
 
@@ -300,6 +305,32 @@ describe('RLS (database-level, independent of the application)', () => {
         `SELECT engagement_code FROM hsdg.engagements`,
       );
       expect(rows.map((r) => r.engagement_code)).not.toContain('SA/00001');
+    });
+
+    it('shows a partner the engagements their reporting tree works on (C-2)', async () => {
+      // Put Senior Y (on the Acme team) under Partner B: Acme comes with them.
+      const partnerB = await emp('EMP004');
+      const before = await su.query<{ reports_to_id: string | null }>(
+        `SELECT reports_to_id FROM hsdg.employees WHERE employee_code = 'EMP006'`,
+      );
+      await su.query(
+        `UPDATE hsdg.employees SET reports_to_id = $1 WHERE employee_code = 'EMP006'`,
+        [partnerB],
+      );
+      try {
+        const rows = await underEmp<{ engagement_code: string }>(
+          'partner',
+          'SOUTH',
+          partnerB,
+          `SELECT engagement_code FROM hsdg.engagements`,
+        );
+        expect(rows.map((r) => r.engagement_code)).toContain('SA/00001');
+      } finally {
+        await su.query(
+          `UPDATE hsdg.employees SET reports_to_id = $1 WHERE employee_code = 'EMP006'`,
+          [before.rows[0]?.reports_to_id ?? null],
+        );
+      }
     });
 
     it('grants the Managing Partner every engagement (firm-wide)', async () => {

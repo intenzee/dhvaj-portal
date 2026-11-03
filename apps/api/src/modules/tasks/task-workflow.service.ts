@@ -42,6 +42,7 @@ import {
   type TransitionPlan,
 } from './task-workflow';
 import { ensureOnEngagement } from './task-people';
+import { recordAssignment, type AssignmentChange } from './task-assignments';
 import type { TaskRecord } from './tasks.types';
 import { notLinkedToEmployee } from '../../common/errors/staff-link.messages';
 
@@ -94,6 +95,8 @@ interface TaskCtxRow {
   engagement_partner_id: string | null;
   engagement_manager_id: string | null;
   stream_lead_id: string | null;
+  /** Who gave the task, when still active and on the engagement — the default reviewer. */
+  giver_reviewer_id: string | null;
 }
 
 /**
@@ -228,6 +231,10 @@ export class TaskWorkflowService {
       // Questions for the partners, 2: the firm chooses who reviews by default.
       reviewerId =
         body.reviewerEmployeeId ??
+        // The person who gave the work reviews it, before the firm's default.
+        (plan.defaultReviewer && row.giver_reviewer_id !== assigneeId
+          ? row.giver_reviewer_id
+          : null) ??
         reviewerCandidates(
           (await workflowPolicy(client)).defaultReviewer,
           {
@@ -306,8 +313,30 @@ export class TaskWorkflowService {
       add('completed_at = NULL');
       add('completed_by_employee_id = NULL');
     }
+    if (action === 'start') add('started_at = COALESCE(started_at, now())');
     const eventReason = body.reason?.trim() || reason || null;
     await this.updateTask(client, taskId, engagementId, body.version, sets, params, eventReason);
+    // Taking an unassigned task, or a reviewer filled in, goes in the assignment history.
+    const handed: AssignmentChange[] = [];
+    if (assigneeId !== row.assigned_to_employee_id) {
+      handed.push({
+        taskId,
+        kind: 'assignee',
+        from: row.assigned_to_employee_id,
+        to: assigneeId,
+        by: me,
+      });
+    }
+    if (reviewerId !== row.reviewer_employee_id) {
+      handed.push({
+        taskId,
+        kind: 'reviewer',
+        from: row.reviewer_employee_id,
+        to: reviewerId,
+        by: me,
+      });
+    }
+    await recordAssignment(client, handed);
 
     // 4. Open the caller's clock.
     if (plan.open && autoTime && me && !alreadyRunning) {
@@ -406,7 +435,13 @@ export class TaskWorkflowService {
               e.kind AS engagement_kind, e.status AS engagement_status,
               e.engagement_partner_id, e.engagement_manager_id,
               (SELECT es.lead_employee_id FROM hsdg.engagement_services es
-                WHERE es.id = t.engagement_service_id) AS stream_lead_id
+                WHERE es.id = t.engagement_service_id) AS stream_lead_id,
+              (SELECT g.id FROM hsdg.employees g
+                WHERE g.id = t.assigned_by_employee_id AND g.employment_status <> 'exited'
+                  AND (g.id IN (e.engagement_partner_id, e.engagement_manager_id)
+                       OR EXISTS (SELECT 1 FROM hsdg.engagement_team et
+                                   WHERE et.engagement_id = t.engagement_id AND et.employee_id = g.id))
+              ) AS giver_reviewer_id
          FROM hsdg.tasks t
          JOIN hsdg.engagements e ON e.id = t.engagement_id
         WHERE t.id = $1 AND t.engagement_id = $2`,
