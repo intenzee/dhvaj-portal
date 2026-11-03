@@ -61,6 +61,11 @@ export interface TaskRecord {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** Who gave the task (C-5: the default reviewer, "Ask <giver>"). */
+  assignedById: string | null;
+  assignedByName: string | null;
+  /** When the task was first started. */
+  startedAt: string | null;
 }
 
 export interface TaskDetail extends TaskRecord {

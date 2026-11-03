@@ -36,6 +36,8 @@ import { drawerItemsFrom, FilingDrawer, useDrawerOpener } from '@/components/fil
 import { noticeColumns, noticeHref } from '@/components/notices/notice-bits';
 import { fetchNotices, noticesKey } from '@/lib/notices-api';
 import { DEFAULT_NOTICE_FILTERS, noticeListPath } from '@/lib/notices';
+import { ArticleWork } from '@/components/my-work/article-work';
+import { MySets } from '@/components/my-work/my-sets';
 
 const myNoticeColumns = noticeColumns({ owner: false });
 
@@ -160,6 +162,9 @@ function MyWorkInner(): JSX.Element {
   const canTeam = workLinks && can(principal, PERMISSION.engagementManage);
   const [scope, setScope] = useState<TaskScope>('mine');
   const teamScope = canTeam && scope === 'team';
+  // C-5: someone who leads no engagement (an Article, a Senior) gets their work
+  // by when it is due, one next step per row, and the sets given to them.
+  const articleView = !can(principal, PERMISSION.engagementManage);
   const teamTaskColumns = useMemo<ColumnDef<MyTask, unknown>[]>(
     () => [
       ...linkedTaskColumns.slice(0, 1),
@@ -303,20 +308,41 @@ function MyWorkInner(): JSX.Element {
               />
             </div>
           )}
-          <Card className="p-0">
-            {tasks.isLoading && (
-              <div className="p-4">
-                <Spinner />
-              </div>
-            )}
-            {tasks.data && (
-              <DataTable
-                columns={teamScope ? teamTaskColumns : workLinks ? linkedTaskColumns : taskColumns}
-                data={sortedTasks}
-                empty={teamScope ? 'No open tasks on your team.' : 'No open tasks assigned to you.'}
-              />
-            )}
-          </Card>
+          {articleView ? (
+            <>
+              <MySets />
+              {tasks.isLoading && <Spinner />}
+              {tasks.data && (
+                <ArticleWork
+                  tasks={tasks.data.items}
+                  today={today}
+                  me={principal?.employeeId ?? null}
+                  hrefOf={workHref}
+                  onOpen={openInDrawer}
+                  onDocuments={setDocsForTask}
+                />
+              )}
+            </>
+          ) : (
+            <Card className="p-0">
+              {tasks.isLoading && (
+                <div className="p-4">
+                  <Spinner />
+                </div>
+              )}
+              {tasks.data && (
+                <DataTable
+                  columns={
+                    teamScope ? teamTaskColumns : workLinks ? linkedTaskColumns : taskColumns
+                  }
+                  data={sortedTasks}
+                  empty={
+                    teamScope ? 'No open tasks on your team.' : 'No open tasks assigned to you.'
+                  }
+                />
+              )}
+            </Card>
+          )}
         </>
       )}
       {tab === 'client-dependencies' && (

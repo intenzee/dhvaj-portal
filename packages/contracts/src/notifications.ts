@@ -80,6 +80,8 @@ export const NOTIFICATION_TYPE = {
   employeeExitReassign: 'employee_exit_reassign',
   /** Added to or taken off an engagement's team, or made / unmade its Manager. */
   teamChanged: 'team_changed',
+  /** C-5 — whoever holds a task asked the person who gave it (Ask on My Work). */
+  taskQuestion: 'task_question',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -161,6 +163,7 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   invoice_overdue: A,
   employee_exit_reassign: A,
   team_changed: I,
+  task_question: A,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -209,6 +212,7 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   invoice_overdue: 'Invoice overdue',
   employee_exit_reassign: 'Someone is leaving — reassign their work',
   team_changed: 'Engagement team changed',
+  task_question: 'Question on a task you gave',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */

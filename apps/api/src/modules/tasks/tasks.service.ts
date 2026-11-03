@@ -77,6 +77,9 @@ export interface TaskRow {
   version: number;
   created_at: Date;
   updated_at: Date;
+  assigned_by_employee_id: string | null;
+  assigned_by_name: string | null;
+  started_at: Date | null;
 }
 
 const NOT_ON_TEAM =
@@ -112,13 +115,15 @@ export const TASK_BASE = `
          t.engagement_service_id, tsv.stream, t.reviewer_employee_id, re.full_name AS reviewer_name,
          t.work_type, t.source_compliance_instance_id, t.audit_work_area_id,
          t.sent_for_review_at, t.review_started_at,
-         t.version, t.created_at, t.updated_at
+         t.version, t.created_at, t.updated_at,
+         t.assigned_by_employee_id, gbe.full_name AS assigned_by_name, t.started_at
   FROM hsdg.tasks t
   LEFT JOIN hsdg.employees ae ON ae.id = t.assigned_to_employee_id
   LEFT JOIN hsdg.employees ce ON ce.id = t.created_by_employee_id
   LEFT JOIN hsdg.employees cbe ON cbe.id = t.completed_by_employee_id
   LEFT JOIN hsdg.employees obe ON obe.id = t.out_of_scope_approved_by_employee_id
   LEFT JOIN hsdg.employees re ON re.id = t.reviewer_employee_id
+  LEFT JOIN hsdg.employees gbe ON gbe.id = t.assigned_by_employee_id
   LEFT JOIN hsdg.engagement_services tes ON tes.id = t.engagement_service_id
   LEFT JOIN hsdg.services tsv ON tsv.id = tes.service_id`;
 
@@ -782,6 +787,9 @@ function mapTask(row: TaskRow): TaskRecord {
     version: row.version,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+    assignedById: row.assigned_by_employee_id ?? null,
+    assignedByName: row.assigned_by_name ?? null,
+    startedAt: row.started_at ? row.started_at.toISOString() : null,
   };
 }
 

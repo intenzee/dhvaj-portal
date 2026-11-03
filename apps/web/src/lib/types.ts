@@ -124,6 +124,14 @@ export interface MyTask {
   stream?: string | null;
   /** Where the row opens (Staff Workflow WF-102); absent from older APIs. */
   link?: WorkItemRef | null;
+  /** C-5 — who holds it, who reviews it, who gave it, and when it was started. */
+  assignedToId?: string | null;
+  reviewerId?: string | null;
+  reviewerName?: string | null;
+  assignedById?: string | null;
+  assignedByName?: string | null;
+  startedAt?: string | null;
+  complianceInstanceId?: string | null;
 }
 
 export interface MyClientDependency {

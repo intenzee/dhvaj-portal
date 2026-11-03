@@ -304,4 +304,45 @@ describe('Reporting tree scope (e2e)', () => {
       expect(history.rowCount).toBe(1);
     });
   });
+
+  describe('C-5 My Work: the giver on each row, Ask <giver>', () => {
+    it('lists the giver and when the work started', async () => {
+      const res = await http()
+        .get('/api/v1/work/tasks?limit=100')
+        .set(bearer(await token(A.email)))
+        .expect(200);
+      const row = (res.body.items as { id: string }[]).find((t) => t.id === tA) as
+        { assignedById: string; assignedByName: string; startedAt: string | null } | undefined;
+      expect(row).toMatchObject({
+        assignedById: S.employeeId,
+        assignedByName: `Tree Senior ${tag}`,
+      });
+      expect(row!.startedAt).toBeTruthy();
+    });
+
+    it('sends the question to the person who gave the task', async () => {
+      const res = await http()
+        .post(`/api/v1/engagements/${e1}/tasks/${tA}/ask`)
+        .set(bearer(await token(A.email)))
+        .send({ question: 'Which invoices are in?' })
+        .expect(201);
+      expect(res.body).toEqual({ askedId: S.employeeId, askedName: `Tree Senior ${tag}` });
+      const { rows } = await su.query<{ body: string }>(
+        `SELECT n.body FROM hsdg.notifications n
+           JOIN hsdg.employees e ON e.user_id = n.recipient_user_id
+          WHERE e.id = $1 AND n.type = 'task_question' AND n.object_id = $2`,
+        [S.employeeId, tA],
+      );
+      expect(rows.map((r) => r.body)).toEqual(['Which invoices are in?']);
+    });
+
+    it('says whom to ask when nobody gave the task', async () => {
+      const res = await http()
+        .post(`/api/v1/engagements/${e1}/tasks/${tO}/ask`)
+        .set(bearer(await token(O.email)))
+        .send({ question: 'Anyone?' })
+        .expect(400);
+      expect(res.body.message).toMatch(/Manager or Partner/);
+    });
+  });
 });
