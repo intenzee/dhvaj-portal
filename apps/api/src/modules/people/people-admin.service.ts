@@ -34,12 +34,13 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { STORAGE_PROVIDER, type StorageProvider } from '../documents/storage/storage-provider';
 import { istToday } from '../engagements/time/auto-time';
+import { OPEN_TASK_SQL, moveOpenWork } from '../tasks/task-assignments';
 import { PeopleService } from './people.service';
 import { peopleChecks } from './people-admin';
 
 /** Engagements still running: the ones a leader must hand over. */
 const OPEN_ENGAGEMENT = `status NOT IN ('completed', 'closed', 'declined', 'withdrawn', 'cancelled', 'merged')`;
-const OPEN_TASK = `status NOT IN ('done', 'cancelled')`;
+const OPEN_TASK = OPEN_TASK_SQL;
 
 interface RosterDbRow {
   id: string;
@@ -143,34 +144,12 @@ export class PeopleAdminService {
         throw new BadRequestException(`${to.full_name} has left; pick someone who is here.`);
       }
 
-      // They join the team of every engagement the work sits on.
-      await client.query(
-        `INSERT INTO hsdg.engagement_team (engagement_id, employee_id, role_on_engagement)
-         SELECT DISTINCT t.engagement_id, $2::uuid, 'member'
-           FROM hsdg.tasks t JOIN hsdg.engagements g ON g.id = t.engagement_id
-          WHERE (t.assigned_to_employee_id = $1 OR t.reviewer_employee_id = $1) AND t.${OPEN_TASK}
-            AND g.engagement_partner_id IS DISTINCT FROM $2
-            AND g.engagement_manager_id IS DISTINCT FROM $2
-         ON CONFLICT (engagement_id, employee_id) DO NOTHING`,
-        [input.fromEmployeeId, input.toEmployeeId],
-      );
-
-      const move = async (column: string, kind: 'assignee' | 'reviewer'): Promise<number> => {
-        const extra = kind === 'assignee' ? ', assigned_by_employee_id = $3' : '';
-        const { rowCount } = await client.query(
-          `WITH moved AS (
-             UPDATE hsdg.tasks SET ${column} = $2${extra}, version = version + 1
-              WHERE ${column} = $1 AND ${OPEN_TASK}
-             RETURNING id)
-           INSERT INTO hsdg.task_assignments
-             (task_id, kind, from_employee_id, to_employee_id, by_employee_id, reason)
-           SELECT id, '${kind}', $1, $2, $3, $4 FROM moved`,
-          [input.fromEmployeeId, input.toEmployeeId, ctx.employeeId ?? null, reason],
-        );
-        return rowCount ?? 0;
-      };
-      const assigned = await move('assigned_to_employee_id', 'assignee');
-      const reviews = await move('reviewer_employee_id', 'reviewer');
+      const { assigned, reviews } = await moveOpenWork(client, {
+        from: input.fromEmployeeId,
+        to: input.toEmployeeId,
+        by: ctx.employeeId ?? null,
+        reason,
+      });
 
       await this.audit.recordWith(client, ctx, {
         action: 'employee.work_moved',
