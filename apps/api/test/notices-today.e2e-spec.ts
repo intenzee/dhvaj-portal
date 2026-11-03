@@ -140,6 +140,8 @@ describe('Notices on Today, search and the bell (e2e)', () => {
 
     const view = await today(mx);
     expect(view.groups.map((g) => g.group)).toEqual([
+      'overdue',
+      'due_today',
       'prepare',
       'review',
       'notices',

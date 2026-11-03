@@ -7,10 +7,11 @@ import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
 
 /**
- * Staff Workflow WF-201 — GET /work/today: my day in four groups (to prepare,
- * to review, waiting on client, due this week), each overdue first then by
- * internal date, with a `link` on every row. RLS-scoped: a partner off the
- * engagement sees none of it.
+ * Staff Workflow WF-201 — GET /work/today: my day in groups (overdue, due
+ * today, to prepare, to review, waiting on client, due this week), each by its
+ * earlier of internal and statutory dates, with a `link` on every row. The
+ * engagement's partner and manager see their filings on the day they fall due.
+ * RLS-scoped: a partner off the engagement sees none of it.
  */
 describe('Today (e2e)', () => {
   let app: INestApplication;
@@ -166,6 +167,8 @@ describe('Today (e2e)', () => {
     const { eng, inst, task } = await setup();
     const view = await today(sy);
     expect(view.groups.map((g) => g.group)).toEqual([
+      'overdue',
+      'due_today',
       'prepare',
       'review',
       'notices',
@@ -201,17 +204,59 @@ describe('Today (e2e)', () => {
     );
   });
 
-  it('overdue first, then by internal date', async () => {
+  it('past due goes to Overdue, due today to Due today, the rest stays To prepare', async () => {
     const { eng, ruleCode, task } = await setup(5);
     const late = await addFiling(eng, ruleCode, '2026-08', -2);
+    const now = await addFiling(eng, ruleCode, '2026-07', 0);
     await su.query(
-      `UPDATE hsdg.tasks SET assigned_to_employee_id = $2 WHERE source_compliance_instance_id = $1`,
-      [late, emp006],
+      `UPDATE hsdg.tasks SET assigned_to_employee_id = $2
+        WHERE source_compliance_instance_id = ANY($1::uuid[])`,
+      [[late, now], emp006],
     );
-    const mine = group(await today(sy, `?engagementId=${eng}`), 'prepare');
-    expect(mine.map((i) => i.link.instanceId)).toEqual([late, expect.any(String)]);
-    expect(mine[0]!.isOverdue).toBe(true);
-    expect(mine[1]!.key).toBe(`task:${task}`);
+    const view = await today(sy, `?engagementId=${eng}`);
+    expect(group(view, 'overdue').map((i) => i.link.instanceId)).toEqual([late]);
+    expect(group(view, 'overdue')[0]).toMatchObject({ isOverdue: true, group: 'overdue' });
+    expect(group(view, 'due_today').map((i) => i.link.instanceId)).toEqual([now]);
+    expect(group(view, 'due_today')[0]!.isOverdue).toBe(false);
+    expect(keys(view, 'prepare')).toEqual([`task:${task}`]);
+  });
+
+  it("the engagement's partner and manager see a filing due today though they neither prepare nor lead it", async () => {
+    // The CR/00063 case: the alert said "Due today" but Today showed nothing,
+    // because only the preparer, reviewer and stream lead were looked at.
+    const { eng, ruleCode, inst } = await setup(5);
+    const now = await addFiling(eng, ruleCode, '2026-07', 0);
+    await su.query(`DELETE FROM hsdg.tasks WHERE source_compliance_instance_id = $1`, [now]);
+    await su.query(
+      `UPDATE hsdg.tasks SET reviewer_employee_id = NULL WHERE source_compliance_instance_id = $1`,
+      [inst],
+    );
+    for (const t of [pa, mx]) {
+      const view = await today(t, `?engagementId=${eng}`);
+      expect(keys(view, 'due_today')).toEqual([`filing:${now}`]);
+      // Not a week out: the partner and manager see what is due today or late.
+      expect(view.groups.flatMap((g) => g.items.map((i) => i.link.instanceId))).not.toContain(inst);
+    }
+  });
+
+  it('a filing is due by its statutory date when that comes before the internal one; past it, Overdue', async () => {
+    const { eng, ruleCode } = await setup(5);
+    const stat = await addFiling(eng, ruleCode, '2026-07', 2);
+    const late = await addFiling(eng, ruleCode, '2026-06', 2);
+    await su.query(`DELETE FROM hsdg.tasks WHERE source_compliance_instance_id = ANY($1::uuid[])`, [
+      [stat, late],
+    ]);
+    await su.query(
+      `UPDATE hsdg.compliance_instances
+          SET statutory_deadline = CASE WHEN id = $1 THEN ${inDays(0)} ELSE ${inDays(-1)} END
+        WHERE id = ANY($2::uuid[])`,
+      [stat, [stat, late]],
+    );
+    const view = await today(pa, `?engagementId=${eng}`);
+    expect(group(view, 'due_today').map((i) => i.link.instanceId)).toEqual([stat]);
+    expect(group(view, 'due_today')[0]!.isOverdue).toBe(false);
+    expect(group(view, 'overdue').map((i) => i.link.instanceId)).toEqual([late]);
+    expect(group(view, 'overdue')[0]!.isOverdue).toBe(true);
   });
 
   it('Waiting on client: my blocked task once (not its raised request), and a request I am responsible for', async () => {

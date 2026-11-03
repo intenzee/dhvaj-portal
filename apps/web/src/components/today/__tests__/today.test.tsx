@@ -7,7 +7,9 @@ import {
   todayContextLine,
   todayDateLead,
   todayDrawerItems,
+  todayGroupSplit,
   todayRows,
+  todayUrgentLine,
   todayWorkTask,
 } from '../today-model';
 import { workHrefFor } from '@/lib/work-href';
@@ -123,6 +125,8 @@ const request = item({
 const view: TodayView = {
   today: '2026-10-14',
   groups: [
+    { group: 'overdue', items: [], total: 0 },
+    { group: 'due_today', items: [], total: 0 },
     { group: 'prepare', items: [gst, call], total: 2 },
     { group: 'review', items: [], total: 0 },
     { group: 'waiting', items: [request], total: 1 },
@@ -153,12 +157,12 @@ beforeEach(() => {
 });
 
 describe('Today page (WF-201)', () => {
-  it('shows the four groups with counts and the top item actionable in one click', async () => {
+  it('shows the groups with work and counts, folds the empty ones into one line, top item actionable in one click', async () => {
     renderPage();
     const prepare = await screen.findByRole('region', { name: /To prepare/ });
     expect(within(prepare).getByText('2')).toBeTruthy();
-    expect(screen.getByRole('region', { name: /To review/ })).toBeTruthy();
-    expect(screen.getByText('Nothing waiting for your review.')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: /To review/ })).toBeNull();
+    expect(screen.getByText(/^Nothing in .*To review/)).toBeTruthy();
     const first = within(prepare).getAllByRole('listitem')[0]!;
     expect(within(first).getByText('GSTR-1 · Sep 2026')).toBeTruthy();
     expect(within(first).getByTitle('Internal due date').className).toContain('text-danger-600');
@@ -292,6 +296,22 @@ describe('Today page (WF-201)', () => {
 });
 
 describe('today-model', () => {
+  it('folds the empty groups into one line and counts what is urgent', () => {
+    const split = todayGroupSplit(view);
+    expect(split.shown.map((g) => g.group)).toEqual(['prepare', 'waiting']);
+    expect(split.quiet).toBe('Nothing in Overdue, Due today, To review or Due this week.');
+    expect(todayUrgentLine(view)).toBeNull();
+    const urgent: TodayView = {
+      ...view,
+      groups: [
+        { group: 'overdue', items: [gst], total: 2 },
+        { group: 'due_today', items: [call], total: 1 },
+      ],
+    };
+    expect(todayGroupSplit(urgent).quiet).toBeNull();
+    expect(todayUrgentLine(urgent)).toBe('2 overdue · 1 due today');
+  });
+
   it('rows run group by group; the drawer lists each filing once', () => {
     expect(todayRows(view).map((i) => i.key)).toEqual(['task:t1', 'task:t2', 'client_request:r1']);
     expect(todayRows(undefined)).toEqual([]);

@@ -1,4 +1,10 @@
-import type { TodayItem, TodayView } from '@hsdg/contracts';
+import {
+  TODAY_GROUP,
+  TODAY_GROUP_LABEL,
+  type TodayGroup,
+  type TodayItem,
+  type TodayView,
+} from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import type { WorkTask } from '@/lib/work-types';
 import { drawerItemsFrom, type DrawerItem } from '@/components/filing/filing-drawer';
@@ -22,6 +28,36 @@ export function todayQuery(engagementId?: string): {
           : '/work/today',
       ),
   };
+}
+
+/**
+ * The groups with work in them, and one quiet line naming the rest ("Nothing
+ * in To prepare, To review or Notices.") — an empty day reads as one line, not
+ * six empty cards. Null when every group has work.
+ */
+export function todayGroupSplit(view: TodayView | undefined): {
+  shown: TodayView['groups'];
+  quiet: string | null;
+} {
+  const groups = view?.groups ?? [];
+  const shown = groups.filter((g) => g.total > 0);
+  const empty = groups.filter((g) => g.total === 0).map((g) => TODAY_GROUP_LABEL[g.group]);
+  if (empty.length === 0) return { shown, quiet: null };
+  const names =
+    empty.length === 1
+      ? empty[0]!
+      : `${empty.slice(0, -1).join(', ')} or ${empty[empty.length - 1]!}`;
+  return { shown, quiet: `Nothing in ${names}.` };
+}
+
+/** The header's count line: "2 overdue · 1 due today" (null when neither). */
+export function todayUrgentLine(view: TodayView | undefined): string | null {
+  const count = (g: TodayGroup): number => view?.groups.find((x) => x.group === g)?.total ?? 0;
+  const parts = [
+    count(TODAY_GROUP.overdue) && `${count(TODAY_GROUP.overdue)} overdue`,
+    count(TODAY_GROUP.dueToday) && `${count(TODAY_GROUP.dueToday)} due today`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
 }
 
 /** Every row in display order (group by group). */

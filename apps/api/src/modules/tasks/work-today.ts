@@ -5,6 +5,7 @@ import {
   WORK_REVIEW_TYPE,
   compareTodayItems,
   isPastDate,
+  todayDueDate,
   type TodayGroup,
   type TodayItem,
   type TodayView,
@@ -38,7 +39,7 @@ export function reviewToToday(r: WorkReviewItem, today: string, me: string): Tod
       internalDate: r.internalDate,
       statutoryDate: r.statutoryDate,
       status: 'in_review',
-      isOverdue: isPastDate(r.internalDate, today),
+      isOverdue: isPastDate(todayDueDate(r), today),
       task: {
         id: r.taskId,
         title: r.title,
@@ -71,14 +72,22 @@ export function reviewToToday(r: WorkReviewItem, today: string, me: string): Tod
  * ff_notices is off, and `write_offs` when ff_billing_v2 is off or the caller
  * cannot approve.
  */
-export type TodayRows = Record<Exclude<TodayGroup, 'notices' | 'write_offs'>, TodayItem[]> & {
+export type TodayRows = Record<
+  Exclude<TodayGroup, 'notices' | 'write_offs' | 'overdue' | 'due_today'>,
+  TodayItem[]
+> & {
   notices?: TodayItem[];
   write_offs?: TodayItem[];
 };
 
+/** Groups whose rows due today or past move up to Overdue / Due today. */
+const LIFTED: readonly TodayGroup[] = [TODAY_GROUP.prepare, TODAY_GROUP.dueSoon];
+
 /**
  * The groups, each in Today's order. A filing already on a row above (its
  * task to prepare, review or chase) is not repeated under "Due this week".
+ * Rows to prepare and filings due that are past their due date or due today
+ * lead the day as Overdue and Due today (kept as they are, group aside).
  */
 export function buildTodayView(today: string, rows: TodayRows, engagementId?: string): TodayView {
   const keep = (items: TodayItem[]): TodayItem[] =>
@@ -87,14 +96,30 @@ export function buildTodayView(today: string, rows: TodayRows, engagementId?: st
   for (const g of [TODAY_GROUP.prepare, TODAY_GROUP.review, TODAY_GROUP.waiting] as const) {
     for (const i of keep(rows[g])) if (i.link.instanceId) listed.add(i.link.instanceId);
   }
-  const groups = TODAY_GROUPS.flatMap((group) => {
-    const own = rows[group];
-    if (!own) return [];
+  const byGroup: Partial<Record<TodayGroup, TodayItem[]>> = {
+    [TODAY_GROUP.overdue]: [],
+    [TODAY_GROUP.dueToday]: [],
+  };
+  for (const group of TODAY_GROUPS) {
+    const own = (rows as Partial<Record<TodayGroup, TodayItem[]>>)[group];
+    if (!own) continue;
     let items = keep(own);
     if (group === TODAY_GROUP.dueSoon) {
       items = items.filter((i) => !i.link.instanceId || !listed.has(i.link.instanceId));
     }
-    items = [...items].sort(compareTodayItems);
+    const stay: TodayItem[] = [];
+    for (const i of items) {
+      const due = LIFTED.includes(group) ? todayDueDate(i) : null;
+      if (due !== null && due < today) byGroup.overdue!.push({ ...i, group: TODAY_GROUP.overdue });
+      else if (due === today) byGroup.due_today!.push({ ...i, group: TODAY_GROUP.dueToday });
+      else stay.push(i);
+    }
+    byGroup[group] = stay;
+  }
+  const groups = TODAY_GROUPS.flatMap((group) => {
+    const own = byGroup[group];
+    if (!own) return [];
+    const items = [...own].sort(compareTodayItems);
     return [{ group, items: items.slice(0, TODAY_GROUP_LIMIT), total: items.length }];
   });
   return { today, groups };

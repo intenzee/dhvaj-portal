@@ -122,7 +122,10 @@ describe('Today under load (e2e)', () => {
     const median = ms[2]!;
 
     const totals = new Map<string, number>(runs[0]!.body.groups.map((g) => [g.group, g.total]));
-    expect(totals.get('prepare')! - (baseline.get('prepare') ?? 0)).toBe(300);
+    // A task due today or before is lifted out of To prepare into Due today / Overdue.
+    const toDo = (m: Map<string, number>): number =>
+      ['prepare', 'due_today', 'overdue'].reduce((n, g) => n + (m.get(g) ?? 0), 0);
+    expect(toDo(totals) - toDo(baseline)).toBe(300);
     expect(totals.get('waiting')! - (baseline.get('waiting') ?? 0)).toBe(200);
     // Each group sends its most urgent rows only; the totals above stay exact.
     for (const g of runs[0]!.body.groups) expect(g.items.length).toBeLessThanOrEqual(100);

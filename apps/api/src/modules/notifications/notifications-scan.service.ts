@@ -18,6 +18,20 @@ import { AppConfigService } from '../../config/config.module';
 import { NotificationsService } from './notifications.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { inDays, noticeHearingDue, noticeReplyBand } from './notice-reminders';
+import {
+  WORK_LINK_COLUMNS,
+  filingTitle,
+  workFilingContextOf,
+  workLinkJoin,
+  type WorkLinkSqlRow,
+} from '../../common/work-links';
+
+/**
+ * The firm's day is the India day: the database runs in UTC, so CURRENT_DATE
+ * is still yesterday until 05:30 IST and a filing due today would read "tomorrow".
+ */
+const IST_TODAY_EXPR = `timezone('Asia/Kolkata', now())::date`;
+const IST_TODAY = `(SELECT ${IST_TODAY_EXPR} AS d)`;
 
 /** What one sweep produced, by event type. */
 export interface ScanResult {
@@ -75,7 +89,7 @@ interface OverdueInvoiceRow {
   auto_sent: number[];
 }
 
-interface DueComplianceRow {
+interface DueComplianceRow extends WorkLinkSqlRow {
   id: string;
   engagement_id: string;
   engagement_code: string;
@@ -185,33 +199,38 @@ export class NotificationsScanService {
       const { rows: compliance } = await client.query<DueComplianceRow>(
         `SELECT ci.id, ci.engagement_id, e.engagement_code, ent.legal_name AS entity_name,
                 e.engagement_partner_id, e.engagement_manager_id,
-                cr.due_date_category,
+                cr.due_date_category, ${WORK_LINK_COLUMNS},
                 COALESCE(ci.internal_sla_override, ci.internal_sla_date)::text AS effective_sla,
                 COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)::text
                   AS effective_statutory,
-                COALESCE(ci.internal_sla_override, ci.internal_sla_date) < CURRENT_DATE AS sla_overdue,
+                COALESCE(ci.internal_sla_override, ci.internal_sla_date) < today.d AS sla_overdue,
                 COALESCE(ci.internal_sla_override, ci.internal_sla_date)
-                  BETWEEN CURRENT_DATE AND CURRENT_DATE + $1::int AS sla_approaching,
+                  BETWEEN today.d AND today.d + $1::int AS sla_approaching,
                 COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)
-                  BETWEEN CURRENT_DATE + 1 AND CURRENT_DATE + $2::int AS statutory_approaching,
+                  BETWEEN today.d + 1 AND today.d + $2::int AS statutory_approaching,
                 COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)
-                  = CURRENT_DATE AS statutory_due_today,
+                  = today.d AS statutory_due_today,
                 COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)
-                  < CURRENT_DATE AS statutory_overdue,
+                  < today.d AS statutory_overdue,
                 COALESCE(ci.statutory_deadline_override, ge.revised_due_date, ci.statutory_deadline)
-                  < CURRENT_DATE - $3::int AS statutory_critical
+                  < today.d - $3::int AS statutory_critical
          FROM hsdg.compliance_instances ci
          JOIN hsdg.engagements e ON e.id = ci.engagement_id
          JOIN hsdg.entities ent ON ent.id = e.entity_id
          JOIN hsdg.compliance_rules cr ON cr.id = ci.compliance_rule_id
          LEFT JOIN hsdg.government_extensions ge ON ge.id = ci.government_extension_id
+         CROSS JOIN ${IST_TODAY} today
+         ${workLinkJoin('ci.id')}
          WHERE ci.status = 'open'`,
         [slaLead, deadlineLead, criticalDays],
       );
 
       for (const row of compliance) {
         const leads = [row.engagement_partner_id, row.engagement_manager_id];
-        const context = `${row.engagement_code} · ${row.entity_name}`;
+        // The filing first ("Form 140 · Q2 2026-27 — CR/00063 · Jayant Gupta"):
+        // a client has many filings, and the alert should say which one.
+        const filing = filingTitle(workFilingContextOf(row), '');
+        const context = `${filing ? `${filing} — ` : ''}${row.engagement_code} · ${row.entity_name}`;
         if (row.sla_overdue) {
           result.internalSlaOverdue += await this.notifications.emitWith(client, ctx, {
             type: NOTIFICATION_TYPE.internalSlaOverdue,
@@ -307,7 +326,7 @@ export class NotificationsScanService {
          FROM hsdg.compliance_instance_deadlines d
          JOIN hsdg.engagements e ON e.id = d.engagement_id
          JOIN hsdg.entities ent ON ent.id = e.entity_id
-         WHERE d.status = 'open' AND d.due_date < CURRENT_DATE`,
+         WHERE d.status = 'open' AND d.due_date < ${IST_TODAY_EXPR}`,
       );
 
       for (const row of layers) {
@@ -342,7 +361,7 @@ export class NotificationsScanService {
         `SELECT cd.id, cd.engagement_id, e.engagement_code, ent.legal_name AS entity_name,
                 cd.requested_info, cd.responsible_employee_id, e.engagement_partner_id,
                 es.lead_employee_id AS stream_lead_id, pc.email::text AS client_email,
-                (cd.escalation_date IS NOT NULL AND cd.escalation_date <= CURRENT_DATE) AS escalation_overdue
+                (cd.escalation_date IS NOT NULL AND cd.escalation_date <= ${IST_TODAY_EXPR}) AS escalation_overdue
          FROM hsdg.client_dependencies cd
          JOIN hsdg.engagements e ON e.id = cd.engagement_id
          JOIN hsdg.entities ent ON ent.id = e.entity_id
@@ -355,8 +374,8 @@ export class NotificationsScanService {
          ) pc ON true
          WHERE cd.status IN ('pending','partially_received')
            AND (
-             (cd.reminder_date IS NOT NULL AND cd.reminder_date <= CURRENT_DATE)
-             OR (cd.escalation_date IS NOT NULL AND cd.escalation_date <= CURRENT_DATE)
+             (cd.reminder_date IS NOT NULL AND cd.reminder_date <= ${IST_TODAY_EXPR})
+             OR (cd.escalation_date IS NOT NULL AND cd.escalation_date <= ${IST_TODAY_EXPR})
            )`,
       );
 

@@ -17,11 +17,16 @@ import type { WorkFilingContext } from './work-queue';
  *   clients I bill, waiting for my decision (PS-205). Present only when
  *   ff_billing_v2 is on for my office and I hold billing.approve.
  * - waiting: my blocked tasks, and open client requests I am responsible for.
- * - due_soon: open filings on work I prepare, review or lead whose internal
- *   date is within a week (or past) — including filings with no task yet —
- *   less any already listed above.
+ * - due_soon: open filings on work I prepare, review or lead whose due date
+ *   (the earlier of the internal and statutory dates) is within a week —
+ *   including filings with no task yet — less any already listed above. The
+ *   engagement's partner and manager also get its filings due today or past.
+ * - overdue / due_today: the rows from prepare and due_soon whose due date is
+ *   past / today, lifted to the top so the day's deadlines come first.
  */
 export const TODAY_GROUP = {
+  overdue: 'overdue',
+  dueToday: 'due_today',
   prepare: 'prepare',
   review: 'review',
   notices: 'notices',
@@ -33,6 +38,8 @@ export type TodayGroup = (typeof TODAY_GROUP)[keyof typeof TODAY_GROUP];
 export const TODAY_GROUPS: TodayGroup[] = Object.values(TODAY_GROUP);
 
 export const TODAY_GROUP_LABEL: Record<TodayGroup, string> = {
+  overdue: 'Overdue',
+  due_today: 'Due today',
   prepare: 'To prepare',
   review: 'To review',
   notices: 'Notices',
@@ -118,7 +125,7 @@ export interface TodayItem {
   statutoryDate: string | null;
   /** The task's / request's / filing's own status. */
   status: string;
-  /** Past its internal date (IST) and still open. */
+  /** Past its due date (IST, see todayDueDate) and still open. */
   isOverdue: boolean;
   blockedByOpenCount: number;
   /** The task, when the row is one (or the filing has one). */
@@ -150,19 +157,31 @@ export interface TodayView {
 }
 
 /**
- * Today's order inside a group: overdue first, then by internal date, undated
- * last, then title. Pure — shared by the API, web and mobile, and tested.
+ * Today's order inside a group: overdue first, then by due date (todayDueDate),
+ * undated last, then title. Pure — shared by the API, web and mobile, and tested.
  */
 export function compareTodayItems(a: TodayItem, b: TodayItem): number {
   if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
-  const da = a.internalDate;
-  const db = b.internalDate;
+  const da = todayDueDate(a);
+  const db = todayDueDate(b);
   if (da !== db) {
     if (da === null) return 1;
     if (db === null) return -1;
     return da < db ? -1 : 1;
   }
   return a.title.localeCompare(b.title) || a.key.localeCompare(b.key);
+}
+
+/**
+ * The date a row is due by: the earlier of its internal and statutory dates,
+ * whichever are set — the firm's date normally, the law's when it falls
+ * first or the firm set none. Pure — shared by the API and web, and tested.
+ */
+export function todayDueDate(i: Pick<TodayItem, 'internalDate' | 'statutoryDate'>): string | null {
+  const { internalDate: a, statutoryDate: b } = i;
+  if (a === null) return b;
+  if (b === null) return a;
+  return b < a ? b : a;
 }
 
 /** Is a date (YYYY-MM-DD) before `today`? Null is never overdue. */

@@ -8,6 +8,7 @@ import {
   isPastDate,
   noticeClock,
   noticeTypeLabel,
+  todayDueDate,
   whatsappNumber,
   type NoticeStatus,
   type NoticeStream,
@@ -224,7 +225,10 @@ export class WorkTodayService {
         internalDate,
         statutoryDate: filing?.statutoryDate ?? null,
         status: task.status,
-        isOverdue: isPastDate(internalDate, today),
+        isOverdue: isPastDate(
+          todayDueDate({ internalDate, statutoryDate: filing?.statutoryDate ?? null }),
+          today,
+        ),
         blockedByOpenCount: r.tk_blocked_by_open_count ?? 0,
         task,
         link: workLinkOf(
@@ -423,10 +427,14 @@ export class WorkTodayService {
   }
 
   /**
-   * Open filings due internally within a week (or already past), on work I
-   * prepare or review (the filing's task) or lead (its stream) — with or
-   * without a task. The candidate ids come from my tasks and my streams first,
-   * so the filing table is probed by key, never scanned.
+   * Open filings due within a week (or already past), on work I prepare or
+   * review (the filing's task) or lead (its stream) — with or without a task.
+   * "Due" is the earlier of the internal and statutory dates, so a filing the
+   * law wants first, or one with no internal date, is not missed. The
+   * engagement's partner and manager — the people the Due today alert goes to
+   * — also get its filings due today or past, not the whole week. The
+   * candidate ids come from my tasks, streams and engagements first, so the
+   * filing table is probed by key, never scanned.
    */
   private async filingsDueSoon(
     client: PoolClient,
@@ -435,7 +443,7 @@ export class WorkTodayService {
     today: string,
   ): Promise<TodayItem[]> {
     const { rows } = await client.query<FilingRow>(
-      `WITH mine AS (
+      `WITH doing AS (
          SELECT mt.source_compliance_instance_id AS id FROM hsdg.tasks mt
           WHERE mt.assigned_to_employee_id = $1 AND mt.source_compliance_instance_id IS NOT NULL
          UNION
@@ -445,6 +453,24 @@ export class WorkTodayService {
          SELECT mci.id FROM hsdg.engagement_services mes
            JOIN hsdg.compliance_instances mci ON mci.engagement_service_id = mes.id
           WHERE mes.lead_employee_id = $1
+       ),
+       leads AS (
+         SELECT lci.id FROM hsdg.engagements le
+           JOIN hsdg.compliance_instances lci ON lci.engagement_id = le.id
+          WHERE (le.engagement_partner_id = $1 OR le.engagement_manager_id = $1)
+            AND lci.status = 'open'
+            -- Cheap pre-filter on the row itself; a government extension only
+            -- moves the date later, so the exact test below loses nothing.
+            AND LEAST(COALESCE(lci.internal_sla_override, lci.internal_sla_date),
+                      COALESCE(lci.statutory_deadline_override, lci.statutory_deadline))
+                <= $2::date
+       ),
+       mine AS (
+         SELECT id, bool_or(is_doer) AS is_doer
+           FROM (SELECT id, true AS is_doer FROM doing
+                 UNION ALL
+                 SELECT id, false FROM leads) m
+          GROUP BY id
        )
        SELECT ${ENGAGEMENT_COLS}, ci.workflow_status, ${TASK_COLS('ft')}, ${WORK_LINK_COLUMNS}
          FROM mine
@@ -454,7 +480,8 @@ export class WorkTodayService {
          ${TASK_PEOPLE('ft')}
          ${workLinkJoin('ci.id')}
         WHERE ci.status = 'open' AND ci.workflow_status NOT IN ('filed', 'not_applicable')
-          AND COALESCE(ci.internal_sla_override, ci.internal_sla_date) <= $2::date + $3::int
+          AND LEAST(wl.internal_date::date, wl.statutory_date::date)
+              <= $2::date + CASE WHEN mine.is_doer THEN $3::int ELSE 0 END
           AND eng.status <> ALL($4::text[])
           AND ($5::uuid IS NULL OR ci.engagement_id = $5)`,
       [me, today, TODAY_DUE_WITHIN_DAYS, CLOSED_ENGAGEMENT_STATUSES, engagementId],
@@ -472,7 +499,7 @@ export class WorkTodayService {
         internalDate: filing.internalDate,
         statutoryDate: filing.statutoryDate,
         status: task?.status ?? r.workflow_status,
-        isOverdue: isPastDate(filing.internalDate, today),
+        isOverdue: isPastDate(todayDueDate(filing), today),
         blockedByOpenCount: r.tk_blocked_by_open_count ?? 0,
         task,
         link: workLinkOf(

@@ -33,7 +33,7 @@ const onFiling = (instanceId: string) => ({
 });
 
 describe('buildTodayView (WF-201)', () => {
-  it('returns the four groups in order, each overdue first then by internal date', () => {
+  it('returns the groups in order: past due lifted to Overdue, the rest by due date', () => {
     const view = buildTodayView(TODAY, {
       prepare: [
         item({ key: 'undated' }),
@@ -46,9 +46,17 @@ describe('buildTodayView (WF-201)', () => {
       due_soon: [],
     });
     expect(view.today).toBe(TODAY);
-    expect(view.groups.map((g) => g.group)).toEqual(['prepare', 'review', 'waiting', 'due_soon']);
-    expect(view.groups[0]!.items.map((i) => i.key)).toEqual(['late', 'soon', 'later', 'undated']);
-    expect(view.groups[0]!.total).toBe(4);
+    expect(view.groups.map((g) => g.group)).toEqual([
+      'overdue',
+      'due_today',
+      'prepare',
+      'review',
+      'waiting',
+      'due_soon',
+    ]);
+    expect(view.groups[0]!.items.map((i) => [i.key, i.group])).toEqual([['late', 'overdue']]);
+    expect(view.groups[2]!.items.map((i) => i.key)).toEqual(['soon', 'later', 'undated']);
+    expect(view.groups[2]!.total).toBe(3);
   });
 
   it('adds Notices after To review only when its rows are passed (ff_notices on), earliest clock first (PS-102)', () => {
@@ -65,13 +73,15 @@ describe('buildTodayView (WF-201)', () => {
       ],
     });
     expect(view.groups.map((g) => g.group)).toEqual([
+      'overdue',
+      'due_today',
       'prepare',
       'review',
       'notices',
       'waiting',
       'due_soon',
     ]);
-    expect(view.groups[2]!.items.map((i) => i.key)).toEqual(['notice:a', 'notice:c', 'notice:b']);
+    expect(view.groups[4]!.items.map((i) => i.key)).toEqual(['notice:a', 'notice:c', 'notice:b']);
   });
 
   it('adds Write-offs to approve after Notices only when its rows are passed (PS-205)', () => {
@@ -96,6 +106,8 @@ describe('buildTodayView (WF-201)', () => {
       ],
     });
     expect(view.groups.map((g) => g.group)).toEqual([
+      'overdue',
+      'due_today',
       'prepare',
       'review',
       'notices',
@@ -103,7 +115,7 @@ describe('buildTodayView (WF-201)', () => {
       'waiting',
       'due_soon',
     ]);
-    expect(view.groups[3]!.items.map((i) => i.key)).toEqual(['credit_note:a', 'write_off:b']);
+    expect(view.groups[5]!.items.map((i) => i.key)).toEqual(['credit_note:a', 'write_off:b']);
   });
 
   it('a filing already listed above is not repeated under Due this week', () => {
@@ -131,10 +143,51 @@ describe('buildTodayView (WF-201)', () => {
       waiting: [],
       due_soon: [],
     });
-    const prepare = v.groups[0]!;
-    expect(prepare.total).toBe(TODAY_GROUP_LIMIT + 21);
+    const prepare = v.groups.find((g) => g.group === 'prepare')!;
+    expect(prepare.total).toBe(TODAY_GROUP_LIMIT + 20);
     expect(prepare.items).toHaveLength(TODAY_GROUP_LIMIT);
-    expect(prepare.items[0]!.key).toBe('late');
+    expect(prepare.items[0]!.internalDate).toBe('2026-11-01');
+    expect(v.groups[0]!.items.map((i) => i.key)).toEqual(['late']);
+  });
+
+  it('a filing due today by either date is Due today, even with no internal date', () => {
+    const view = buildTodayView(TODAY, {
+      prepare: [item({ key: 'task:t1', internalDate: '2026-10-20', statutoryDate: TODAY })],
+      review: [],
+      waiting: [],
+      due_soon: [
+        item({
+          key: 'filing:i1',
+          kind: 'filing',
+          group: 'due_soon',
+          statutoryDate: TODAY,
+          link: onFiling('i1'),
+        }),
+        item({
+          key: 'filing:i2',
+          kind: 'filing',
+          group: 'due_soon',
+          internalDate: '2026-10-12',
+          statutoryDate: '2026-10-20',
+          link: onFiling('i2'),
+        }),
+        item({
+          key: 'filing:i3',
+          kind: 'filing',
+          group: 'due_soon',
+          statutoryDate: '2026-10-18',
+          link: onFiling('i3'),
+        }),
+      ],
+    });
+    const keys = (g: string) => view.groups.find((x) => x.group === g)!.items.map((i) => i.key);
+    expect(keys('due_today')).toEqual(['filing:i1', 'task:t1']);
+    expect(keys('overdue')).toEqual(['filing:i2']);
+    expect(keys('due_soon')).toEqual(['filing:i3']);
+    expect(keys('prepare')).toEqual([]);
+    expect(
+      view.groups.find((x) => x.group === 'due_today')!.items.every((i) => i.group === 'due_today'),
+    ).toBe(true);
   });
 
   it('?engagementId= keeps one engagement in every group', () => {
@@ -176,7 +229,7 @@ describe('reviewToToday', () => {
     filing: null,
   };
 
-  it('a filing sent to me is a task row I can start reviewing, overdue by its internal date', () => {
+  it('a filing sent to me is a task row I can start reviewing, overdue by its earlier date', () => {
     const row = reviewToToday(filingReview, TODAY, 'me');
     expect(row).toMatchObject({
       key: 'task:t2',

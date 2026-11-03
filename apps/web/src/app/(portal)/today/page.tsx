@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { FEATURE_FLAG, TODAY_GROUP_LABEL, type TodayGroup, type TodayItem } from '@hsdg/contracts';
+import { FEATURE_FLAG, TODAY_GROUP, TODAY_GROUP_LABEL, type TodayItem } from '@hsdg/contracts';
 import { useAuth } from '@/lib/auth';
 import { useFeatureFlags } from '@/lib/feature-flags';
 import { taskContextFor } from '@/lib/engagement-context';
@@ -23,19 +23,12 @@ import {
   todayContextLine,
   todayDateLead,
   todayDrawerItems,
+  todayGroupSplit,
   todayQuery,
   todayRows,
+  todayUrgentLine,
   todayWorkTask,
 } from '@/components/today/today-model';
-
-const EMPTY: Record<TodayGroup, string> = {
-  prepare: 'Nothing to prepare.',
-  review: 'Nothing waiting for your review.',
-  notices: 'No notice of yours has a date running.',
-  write_offs: 'No write-off or credit note waiting for you.',
-  waiting: 'Not waiting on any client.',
-  due_soon: 'No other filings due this week.',
-};
 
 /** A key press that belongs to a field or carries a modifier is not a shortcut. */
 function isTyping(e: KeyboardEvent): boolean {
@@ -49,10 +42,10 @@ function isTyping(e: KeyboardEvent): boolean {
 }
 
 /**
- * Staff Workflow WF-201 — Today: the day's work in one ordered list. To
- * prepare, to review, notices (PS-102), write-offs to approve (PS-205),
- * waiting on client, due this week —
- * overdue first. A
+ * Staff Workflow WF-201 — Today: the day's work in one ordered list. Overdue
+ * and due today first, then to prepare, to review, notices (PS-102),
+ * write-offs to approve (PS-205), waiting on client, due this week; groups
+ * with nothing in them fold into one quiet line. A
  * filing opens in the drawer over the list (WF-202); its next move (Start work,
  * Start review …) is a button on the row. j / k move, Enter opens.
  */
@@ -67,6 +60,7 @@ function TodayScreen(): JSX.Element {
   const q = useQuery({ ...query, enabled: on });
 
   const rows = useMemo(() => todayRows(q.data), [q.data]);
+  const split = useMemo(() => todayGroupSplit(q.data), [q.data]);
   const drawerItems = useMemo(() => todayDrawerItems(rows, workHref), [rows, workHref]);
   const checks = useFirmChecks();
   const ctx = useMemo(() => taskContextFor(principal, {}, checks), [principal, checks]);
@@ -121,13 +115,20 @@ function TodayScreen(): JSX.Element {
   }
 
   const todayLabel = q.data ? formatDate(q.data.today) : '';
+  const urgent = todayUrgentLine(q.data);
   let index = -1;
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Today"
-        subtitle={`${todayLabel ? `${todayLabel} · ` : ''}Overdue first, then by internal due date. j / k to move, Enter to open.`}
+        subtitle={[
+          todayLabel,
+          urgent,
+          'Earliest due date first (internal or statutory). j / k to move, Enter to open.',
+        ]
+          .filter(Boolean)
+          .join(' · ')}
       />
       {(q.isLoading || flags.isLoading) && <Spinner label="Loading your day…" />}
       {q.isError && (
@@ -135,11 +136,15 @@ function TodayScreen(): JSX.Element {
       )}
       {q.data && (
         <div ref={listRef} className="space-y-5">
-          {q.data.groups.map((g) => (
+          {split.shown.length === 0 && <EmptyState>Nothing waiting for you today.</EmptyState>}
+          {split.shown.map((g) => (
             <section key={g.group} aria-labelledby={`today-${g.group}`}>
               <h2
                 id={`today-${g.group}`}
-                className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-ink-muted"
+                className={cn(
+                  'mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-ink-muted',
+                  g.group === TODAY_GROUP.overdue && 'text-danger-600',
+                )}
               >
                 {TODAY_GROUP_LABEL[g.group]}
                 <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-xs font-semibold text-ink">
@@ -147,97 +152,98 @@ function TodayScreen(): JSX.Element {
                 </span>
               </h2>
               <Card className="p-0">
-                {g.items.length === 0 ? (
-                  <p className="px-4 py-3 text-sm text-ink-faint">{EMPTY[g.group]}</p>
-                ) : (
-                  <ul className="divide-y divide-line">
-                    {g.items.map((item) => {
-                      index += 1;
-                      const i = index;
-                      const task = todayWorkTask(item);
-                      const href = workHref(item);
-                      return (
-                        <li
-                          key={item.key}
-                          data-row={i}
-                          aria-current={selected === i ? 'true' : undefined}
-                          onClick={() => setSelected(i)}
-                          className={cn(
-                            'flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3',
-                            selected === i && 'bg-primary-50 ring-1 ring-inset ring-primary-300',
-                            drawer.openId &&
-                              drawer.openId === item.link.instanceId &&
-                              'bg-surface-sunken',
-                          )}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <Link
-                              href={href}
-                              onClick={(e) => {
-                                // A plain click works the filing in the drawer; Ctrl/Cmd-click opens the page.
-                                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-                                if (!item.link.instanceId) return;
-                                e.preventDefault();
-                                drawer.open(item.link.instanceId);
-                              }}
-                              className="block truncate font-medium text-ink hover:underline"
+                <ul className="divide-y divide-line">
+                  {g.items.map((item) => {
+                    index += 1;
+                    const i = index;
+                    const task = todayWorkTask(item);
+                    const href = workHref(item);
+                    return (
+                      <li
+                        key={item.key}
+                        data-row={i}
+                        aria-current={selected === i ? 'true' : undefined}
+                        onClick={() => setSelected(i)}
+                        className={cn(
+                          'flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3',
+                          selected === i && 'bg-primary-50 ring-1 ring-inset ring-primary-300',
+                          drawer.openId &&
+                            drawer.openId === item.link.instanceId &&
+                            'bg-surface-sunken',
+                        )}
+                      >
+                        <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
+                          <Link
+                            href={href}
+                            onClick={(e) => {
+                              // A plain click works the filing in the drawer; Ctrl/Cmd-click opens the page.
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                              if (!item.link.instanceId) return;
+                              e.preventDefault();
+                              drawer.open(item.link.instanceId);
+                            }}
+                            className="line-clamp-2 break-words font-medium text-ink hover:underline"
+                          >
+                            {item.title}
+                          </Link>
+                          <span className="line-clamp-2 break-words text-xs text-ink-faint">
+                            {todayContextLine(item)}
+                          </span>
+                        </div>
+                        <div className="w-36 shrink-0 text-sm">
+                          {item.internalDate ? (
+                            <span
+                              title="Internal due date"
+                              className={cn(
+                                'block',
+                                item.isOverdue
+                                  ? 'font-medium text-danger-600'
+                                  : item.group === TODAY_GROUP.dueToday
+                                    ? 'font-medium text-warn-700'
+                                    : 'text-ink',
+                              )}
                             >
-                              {item.title}
-                            </Link>
-                            <span className="block truncate text-xs text-ink-faint">
-                              {todayContextLine(item)}
+                              {todayDateLead(item) ? `${todayDateLead(item)} ` : 'Internal '}
+                              {deadlineLabel(item.internalDate)}
                             </span>
-                          </div>
-                          <div className="w-36 shrink-0 text-sm">
-                            {item.internalDate ? (
-                              <span
-                                title="Internal due date"
-                                className={
-                                  item.isOverdue ? 'font-medium text-danger-600' : 'text-ink'
-                                }
-                              >
-                                {todayDateLead(item) && `${todayDateLead(item)} `}
-                                {deadlineLabel(item.internalDate)}
-                              </span>
-                            ) : (
-                              <span className="text-ink-faint">—</span>
-                            )}
-                            {item.statutoryDate && (
-                              <span
-                                title="Statutory due date"
-                                className="block text-xs text-ink-faint"
-                              >
-                                {item.notice ? 'Department' : 'Statutory'}{' '}
-                                {formatDate(item.statutoryDate)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="w-28 shrink-0">
-                            <StatusBadge status={item.status} />
-                          </div>
-                          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                            {task && <TaskActions task={task} ctx={ctx} only={PRIMARY} />}
-                            {item.adjustment && (
-                              <DecideAdjustmentButtons
-                                adjustment={item.adjustment}
-                                listKey={query.queryKey}
-                              />
-                            )}
-                            {item.group === 'waiting' && item.link.instanceId && (
-                              <RemindClientButton
-                                instanceId={item.link.instanceId}
-                                offersWhatsapp={item.offersWhatsapp}
-                              />
-                            )}
-                            <Button size="sm" variant="secondary" onClick={() => openItem(item)}>
-                              Open
-                            </Button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+                          ) : (
+                            <span className="block text-xs text-ink-faint">No internal date</span>
+                          )}
+                          {item.statutoryDate && (
+                            <span
+                              title="Statutory due date"
+                              className="block text-xs text-ink-faint"
+                            >
+                              {item.notice ? 'Department' : 'Statutory'}{' '}
+                              {formatDate(item.statutoryDate)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="w-28 shrink-0">
+                          <StatusBadge status={item.status} />
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                          {task && <TaskActions task={task} ctx={ctx} only={PRIMARY} />}
+                          {item.adjustment && (
+                            <DecideAdjustmentButtons
+                              adjustment={item.adjustment}
+                              listKey={query.queryKey}
+                            />
+                          )}
+                          {item.group === 'waiting' && item.link.instanceId && (
+                            <RemindClientButton
+                              instanceId={item.link.instanceId}
+                              offersWhatsapp={item.offersWhatsapp}
+                            />
+                          )}
+                          <Button size="sm" variant="secondary" onClick={() => openItem(item)}>
+                            Open
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
                 {g.total > g.items.length && (
                   <p className="border-t border-line px-4 py-2 text-xs text-ink-muted">
                     Showing the {g.items.length} most urgent of {g.total}.{' '}
@@ -249,6 +255,9 @@ function TodayScreen(): JSX.Element {
               </Card>
             </section>
           ))}
+          {split.shown.length > 0 && split.quiet && (
+            <p className="text-sm text-ink-faint">{split.quiet}</p>
+          )}
         </div>
       )}
       <FilingDrawer items={drawerItems} listKey={query.queryKey} />
