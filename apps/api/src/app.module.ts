@@ -20,6 +20,7 @@ import { EngagementsModule } from './modules/engagements/engagements.module';
 import { ComponentsModule } from './modules/components/components.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { TasksModule } from './modules/tasks/tasks.module';
+import { WorkSetsModule } from './modules/work-sets/work-sets.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -108,6 +109,7 @@ import { TeamsModule } from './modules/teams/teams.module';
     ComponentsModule,
     ComplianceModule,
     TasksModule,
+    WorkSetsModule,
     DocumentsModule,
     DocumentTemplatesModule,
     NotificationsModule,

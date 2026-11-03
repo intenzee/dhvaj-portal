@@ -41,9 +41,12 @@ export function listPath(tab: NotificationTab): string {
 
 /** Where a notification opens: its stored work link, else its engagement. */
 export function notificationHref(
-  n: Pick<NotificationItem, 'link' | 'engagementId'>,
+  n: Pick<NotificationItem, 'link' | 'engagementId'> &
+    Partial<Pick<NotificationItem, 'objectType' | 'objectId'>>,
 ): string | null {
   if (n.link) return workItemHref(n.link);
+  // A set of work may span engagements: it opens on its own page.
+  if (n.objectType === 'work_set' && n.objectId) return `/work-sets/${n.objectId}`;
   return n.engagementId ? `/engagements/${n.engagementId}` : null;
 }
 
@@ -83,6 +86,7 @@ const TYPE_TONE: Record<string, 'danger' | 'warn' | 'info' | 'neutral'> = {
   time_adjustment_pending: 'warn',
   client_dependency_reminder: 'warn',
   task_assigned: 'info',
+  work_set_assigned: 'info',
   ep_changed: 'info',
   team_changed: 'info',
   engagement_reopened: 'info',
