@@ -141,7 +141,7 @@ export class WorkSetsService {
         `t.status NOT IN ('done', 'cancelled')`,
         `((SELECT hsdg.ctx_is_business_firmwide())
           OR hsdg.is_engagement_lead(t.engagement_id)
-          OR t.assigned_to_employee_id = ANY ((SELECT hsdg.ctx_subtree())))`,
+          OR t.assigned_to_employee_id = ANY ((SELECT hsdg.ctx_subtree())::uuid[]))`,
       ];
       const add = (sql: (p: string) => string, value: unknown): void => {
         params.push(value);
@@ -298,7 +298,7 @@ export class WorkSetsService {
         throw new BadRequestException('Some of those tasks are not in this set.');
       }
       const { rows: holders } = await client.query<{ ok: boolean }>(
-        `SELECT bool_and(t.assigned_to_employee_id = ANY ((SELECT hsdg.ctx_subtree()))) AS ok
+        `SELECT bool_and(t.assigned_to_employee_id = ANY ((SELECT hsdg.ctx_subtree())::uuid[])) AS ok
            FROM hsdg.tasks t WHERE t.id = ANY ($1::uuid[])`,
         [taskIds],
       );
@@ -374,7 +374,7 @@ export class WorkSetsService {
         WHERE e.employment_status <> 'exited' AND e.deleted_at IS NULL
           AND COALESCE(u.is_active, true)
           AND e.id IS DISTINCT FROM $1
-          AND ($2 OR e.id = ANY ((SELECT hsdg.ctx_subtree())))
+          AND ($2 OR e.id = ANY ((SELECT hsdg.ctx_subtree())::uuid[]))
         ORDER BY gr.rank DESC NULLS LAST, e.full_name`,
       [ctx.employeeId ?? null, scope === 'anyone'],
     );
