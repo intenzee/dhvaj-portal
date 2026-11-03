@@ -5,7 +5,7 @@ import { Search, X } from 'lucide-react';
 import type { TeamPerson } from '@hsdg/contracts';
 import { Select } from '@/components/form';
 
-/** The overseeing partner: active partner-grade people only. */
+/** The overseeing partner: active people whose grade and main role are both a partner's (team_people). */
 export function PartnerSelect({
   people,
   value,
