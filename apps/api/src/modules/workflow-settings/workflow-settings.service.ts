@@ -196,7 +196,9 @@ export class WorkflowSettingsService {
       } catch (err) {
         const code = (err as { code?: string }).code;
         if (code === '42501')
-          throw new ForbiddenException('Only a partner may set internal due dates.');
+          throw new ForbiddenException(
+            'Only a partner or an administrator may set internal due dates.',
+          );
         if (code === '22023') throw new BadRequestException((err as Error).message);
         throw err;
       }

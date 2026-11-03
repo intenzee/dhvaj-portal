@@ -362,7 +362,7 @@ describe('Compliance Engine (e2e)', () => {
         .expect(403);
     });
 
-    it('lets the platform admin configure rules but NOT manage engagement compliance', async () => {
+    it('lets the administrator configure rules and generate on an engagement (B-1)', async () => {
       const admin = await token('admin@dhvaj.in');
       const code = `ADM_${unique()}`;
       // admin has compliance.manage (config authority).
@@ -376,14 +376,14 @@ describe('Compliance Engine (e2e)', () => {
         .set(bearer(admin))
         .send({ effectiveFrom: '2020-04-01', calculationBasis: 'fy_end', offsetMonths: 7 })
         .expect(201);
-      // …but no engagement.manage ⇒ cannot generate on an engagement.
+      // …and, holding every permission since B-1, generate on an engagement.
       const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa, '2026-27');
       await request(app.getHttpServer())
         .post(`/api/v1/engagements/${eng}/compliance`)
         .set(bearer(admin))
         .send({ complianceRuleCode: code })
-        .expect(403);
+        .expect(201);
     });
 
     it('forbids a Senior (no engagement.manage) from generating an instance (403)', async () => {

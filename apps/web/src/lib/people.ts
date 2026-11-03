@@ -9,10 +9,9 @@ import { can, type Principal } from '@/lib/principal';
 import type { AdminEmployeeRow } from '@/lib/types';
 
 /**
- * HR or the Managing Partner — the people who see attendance, workload, the
- * articleship register and the HR vault. The administrator keeps the employee
- * master (`employee.manage`) but none of these; the database enforces it, and
- * this only decides what the page offers.
+ * HR, the Managing Partner or an administrator — the people who see
+ * attendance, workload, the articleship register and the HR vault. The
+ * database enforces it, and this only decides what the page offers.
  */
 export function readsPeople(principal: Principal | null): boolean {
   return can(principal, PERMISSION.timeReadAttendance);

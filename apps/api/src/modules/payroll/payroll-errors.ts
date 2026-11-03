@@ -61,7 +61,9 @@ export async function assertCanSeePay(client: PoolClient): Promise<void> {
 export async function assertMayApprovePay(client: PoolClient): Promise<void> {
   const { rows } = await client.query<{ ok: boolean }>(`SELECT hsdg.ctx_may_approve_pay() AS ok`);
   if (!rows[0]?.ok) {
-    throw new ForbiddenException('Only the Managing Partner or the named alternate approves pay.');
+    throw new ForbiddenException(
+      'Only the Managing Partner, an administrator or the named alternate approves pay.',
+    );
   }
 }
 

@@ -21,7 +21,10 @@ jest.mock('@/lib/api', () => ({
 }));
 let principal: Record<string, unknown> = {};
 jest.mock('@/lib/auth', () => ({ useAuth: () => ({ principal }) }));
-jest.mock('@/lib/principal', () => ({ can: () => true }));
+jest.mock('@/lib/principal', () => ({
+  ...jest.requireActual('@/lib/principal'),
+  can: () => true,
+}));
 const toast = jest.fn();
 jest.mock('@/lib/toast', () => ({ useToast: () => toast }));
 const push = jest.fn();

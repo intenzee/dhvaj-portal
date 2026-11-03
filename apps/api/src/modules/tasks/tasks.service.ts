@@ -92,7 +92,7 @@ export interface TaskEditOptions {
 }
 
 /** Who held engagement.manage when adding and editing tasks needed it. */
-const TASK_EDITOR_ROLES: string[] = [ROLE.managingPartner, ROLE.partner, ROLE.manager];
+const TASK_EDITOR_ROLES: string[] = [ROLE.managingPartner, ROLE.admin, ROLE.partner, ROLE.manager];
 
 export const TASK_BASE = `
   SELECT t.id, t.engagement_id, t.title, t.description,

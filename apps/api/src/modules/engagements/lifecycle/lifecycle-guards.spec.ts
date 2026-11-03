@@ -101,12 +101,12 @@ describe('lifecycle guards', () => {
   });
 
   describe('managingPartnerOnlyGuard', () => {
-    it('passes for the Managing Partner', () => {
-      const c = ctx({ ctx: { userId: 'u1', role: ROLE.managingPartner } });
+    it.each([ROLE.managingPartner, ROLE.admin])('passes for role "%s" (B-1)', (role) => {
+      const c = ctx({ ctx: { userId: 'u1', role } });
       expect(() => managingPartnerOnlyGuard.check(c)).not.toThrow();
     });
 
-    it.each([ROLE.partner, ROLE.manager, ROLE.admin, ROLE.senior, ROLE.article])(
+    it.each([ROLE.partner, ROLE.manager, ROLE.senior, ROLE.article])(
       'rejects role "%s"',
       (role) => {
         const c = ctx({ ctx: { userId: 'u1', role } });

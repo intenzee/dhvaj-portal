@@ -14,7 +14,6 @@ import {
   MISSING_INFO_LABEL,
   PENDING_REGISTRATION_STREAMS,
   REGULATORY_PROFILE_STATUS,
-  ROLE,
   STREAM_LABEL,
   STREAM_REGISTRATION_TYPES,
   ENTITY_TYPE_SOURCE,
@@ -32,6 +31,7 @@ import {
   type MissingInfoCode,
   type RegistrationType,
   type Stream,
+  isBusinessFirmwide,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -652,14 +652,16 @@ export class EntitiesService {
 
   /**
    * Delete a client entered by mistake (a duplicate, a wrong import). The
-   * Managing Partner only — the entities_delete policy says the same. Its own
+   * The Managing Partner or an administrator — the entities_delete policy says the same. Its own
    * master goes with it (registrations, contacts, addresses, logins, return
    * marks…, by ON DELETE CASCADE); a client with work or billing is never
    * deleted (409) — close it (status) instead. Audited with the full master.
    */
   async deleteEntity(ctx: RlsContext, id: string): Promise<void> {
-    if (ctx.role !== ROLE.managingPartner) {
-      throw new ForbiddenException('Only the Managing Partner can delete a client.');
+    if (!isBusinessFirmwide(ctx.role, ctx.roles)) {
+      throw new ForbiddenException(
+        'Only the Managing Partner or an administrator can delete a client.',
+      );
     }
     return this.db.withRlsContext(ctx, async (client) => {
       const before = await this.selectDetail(client, id);

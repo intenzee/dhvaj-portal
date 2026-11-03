@@ -108,3 +108,4 @@ export * from './teams';
 export * from './tax-ids';
 export * from './branches';
 export * from './data-checks';
+export * from './people-admin';

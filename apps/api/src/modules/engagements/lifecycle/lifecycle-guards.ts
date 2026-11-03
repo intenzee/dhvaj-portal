@@ -1,5 +1,10 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { FIRM_CHECK, LIFECYCLE_ACTION, ROLE, type LifecycleAction } from '@hsdg/contracts';
+import {
+  FIRM_CHECK,
+  isBusinessFirmwide,
+  LIFECYCLE_ACTION,
+  type LifecycleAction,
+} from '@hsdg/contracts';
 import { isStrict } from '../../workflow-settings/firm-checks';
 import type { LifecycleGuard, LifecycleGuardContext } from './lifecycle.types';
 
@@ -27,16 +32,18 @@ export const epRequiredGuard: LifecycleGuard = {
 
 /**
  * Governance actions (currently: reopen) require the Managing Partner
- * specifically — never a generic "firm-wide" shortcut, and never satisfied by
- * the platform admin (who is deliberately not business-firm-wide; ADR-0009).
+ * or an administrator (B-1: the administrator sees and does everything) — never
+ * a generic "firm-wide" shortcut.
  * The engagements_update RLS floor alone would also let the EP/manager
  * through, so this is an explicit application-layer ceiling on top of it.
  */
 export const managingPartnerOnlyGuard: LifecycleGuard = {
   name: 'managing-partner-only',
   check({ ctx }: LifecycleGuardContext) {
-    if (ctx.role !== ROLE.managingPartner) {
-      throw new ForbiddenException('Only the Managing Partner may perform this action.');
+    if (!isBusinessFirmwide(ctx.role, ctx.roles)) {
+      throw new ForbiddenException(
+        'Only the Managing Partner or an administrator may perform this action.',
+      );
     }
   },
 };

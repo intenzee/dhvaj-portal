@@ -314,8 +314,9 @@ describe('Payroll tax and exits — phase 2b (e2e)', () => {
       expect(res.body.message).toMatch(/own/i);
     });
 
-    it("shows no one else's declaration or proof to the Administrator, a Partner, a Manager or the Accountant", async () => {
-      for (const t of [admin, pa, mx, accounts]) {
+    it("shows no one else's declaration or proof to a Partner, a Manager or the Accountant (the Administrator sees everything, B-1)", async () => {
+      await http().get('/api/v1/payroll/tax/2026/declarations').set(bearer(admin)).expect(200);
+      for (const t of [pa, mx, accounts]) {
         await http().get('/api/v1/payroll/tax/2026/declarations').set(bearer(t)).expect(403);
         await http()
           .get(`/api/v1/payroll/tax/2026/declarations/${emp.EMP010}`)
@@ -324,7 +325,6 @@ describe('Payroll tax and exits — phase 2b (e2e)', () => {
         await http().get(`/api/v1/payroll/tax/proofs/${proofId}/file`).set(bearer(t)).expect(403);
       }
       for (const [email, role] of [
-        ['admin@dhvaj.in', 'admin'],
         ['partner.a@dhvaj.in', 'partner'],
         ['manager.x@dhvaj.in', 'manager'],
       ] as const) {
@@ -456,7 +456,7 @@ describe('Payroll tax and exits — phase 2b (e2e)', () => {
         `SELECT count(*)::text AS n FROM hsdg.audit_events WHERE action = 'payroll.form138.exported'`,
       );
       expect(Number(audited[0]!.n)).toBe(1);
-      for (const t of [admin, pa, accounts])
+      for (const t of [pa, accounts])
         await http().get('/api/v1/payroll/tax/2026/form138/4').set(bearer(t)).expect(403);
 
       const f130 = (
@@ -519,7 +519,7 @@ describe('Payroll tax and exits — phase 2b (e2e)', () => {
       expect(list.find((r) => r.employeeCode === 'EMP009')).toEqual(
         expect.objectContaining({ status: 'not_started', dueBy: '2027-02-17' }),
       );
-      for (const t of [admin, pa, mx, accounts]) {
+      for (const t of [pa, mx, accounts]) {
         await http().get('/api/v1/payroll/exits').set(bearer(t)).expect(403);
         await http().get(url()).set(bearer(t)).expect(403);
       }
@@ -651,7 +651,7 @@ describe('Payroll tax and exits — phase 2b (e2e)', () => {
       expect(b.dueBy).toBe('2027-11-30');
       const a = b.rows.find((r: { employeeCode: string }) => r.employeeCode === 'EMP009');
       expect(a.eligible).toBe(false);
-      for (const t of [admin, pa, accounts])
+      for (const t of [pa, accounts])
         await http().get('/api/v1/payroll/bonus/2026').set(bearer(t)).expect(403);
     });
   });

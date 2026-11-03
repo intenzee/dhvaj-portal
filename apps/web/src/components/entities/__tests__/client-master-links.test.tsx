@@ -11,7 +11,7 @@ jest.mock('@/lib/api', () => ({
   ApiError: class ApiError extends Error {},
 }));
 jest.mock('@/lib/auth', () => ({ useAuth: () => ({ principal: {} }) }));
-jest.mock('@/lib/principal', () => ({ can: () => true }));
+jest.mock('@/lib/principal', () => ({ can: () => true, hasRole: () => false }));
 jest.mock('@/lib/toast', () => ({ useToast: () => jest.fn() }));
 
 let search = '';

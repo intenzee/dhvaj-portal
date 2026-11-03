@@ -34,7 +34,7 @@ import {
  * one business-firm-wide authority (platform `admin` is intentionally excluded
  * from engagement data, so it could not see documents anyway).
  */
-const DOCUMENT_DELETE_ROLES: readonly string[] = [ROLE.managingPartner];
+const DOCUMENT_DELETE_ROLES: readonly string[] = [ROLE.managingPartner, ROLE.admin];
 
 /**
  * PS-101 — a notice's papers. Filing a notice, a reply or an order (and

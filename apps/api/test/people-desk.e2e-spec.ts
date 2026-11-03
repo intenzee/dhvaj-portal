@@ -106,13 +106,13 @@ describe('People desk (e2e)', () => {
       }
     });
 
-    it('gives HR workload as counts, and the administrator none', async () => {
+    it('gives HR workload as counts, and the administrator too (B-1)', async () => {
       const res = await http().get('/api/v1/people/workload').set(bearer(hr)).expect(200);
       expect(res.body.rows.length).toBeGreaterThan(0);
       const row = res.body.rows[0] as Record<string, unknown>;
       expect(row).not.toHaveProperty('engagements');
       expect(typeof row.activeEngagements).toBe('number');
-      await http().get('/api/v1/people/workload').set(bearer(admin)).expect(403);
+      await http().get('/api/v1/people/workload').set(bearer(admin)).expect(200);
     });
 
     it('shows HR none of the client work itself', async () => {
@@ -147,11 +147,12 @@ describe('People desk (e2e)', () => {
       );
     });
 
-    it('gives the administrator the employee-master queues only', async () => {
+    it('gives the administrator every queue, like HR (B-1)', async () => {
       const res = await http().get('/api/v1/people/desk').set(bearer(admin)).expect(200);
-      expect(res.body.workload.available).toBe(false);
+      const forHr = await http().get('/api/v1/people/desk').set(bearer(hr)).expect(200);
+      expect(res.body.workload.available).toBe(true);
       expect(res.body.queues.map((q: { key: string }) => q.key).sort()).toEqual(
-        ['exit_passed_login_on', 'no_login'].sort(),
+        forHr.body.queues.map((q: { key: string }) => q.key).sort(),
       );
     });
   });
@@ -181,7 +182,7 @@ describe('People desk (e2e)', () => {
       expect(res.body.leaveTakenDays).toBe(1.5);
     });
 
-    it('lets the principal read it but not change it; the administrator sees nothing', async () => {
+    it('lets the principal read it but not change it; the administrator sees it all (B-1)', async () => {
       const list = await http().get('/api/v1/people/articles').set(bearer(pa)).expect(200);
       expect(list.body.map((a: { employeeId: string }) => a.employeeId)).toContain(articleNorth);
       await http()
@@ -190,7 +191,9 @@ describe('People desk (e2e)', () => {
         .send({ fromDate: '2026-06-01', days: 1, toDate: '2026-06-01', kind: 'leave' })
         .expect(403);
       const adminList = await http().get('/api/v1/people/articles').set(bearer(admin)).expect(200);
-      expect(adminList.body).toHaveLength(0);
+      expect(adminList.body.map((a: { employeeId: string }) => a.employeeId)).toContain(
+        articleNorth,
+      );
     });
 
     it('refuses a principal who is not a partner', async () => {
@@ -363,17 +366,17 @@ describe('People desk (e2e)', () => {
       expect(withArchived.body.map((d: { id: string }) => d.id)).toContain(id);
     });
 
-    it('shows the administrator an empty vault and refuses an upload', async () => {
+    it('opens the vault to the administrator, upload included (B-1)', async () => {
+      const up = await http()
+        .post(`/api/v1/people/employees/${articleNorth}/documents`)
+        .set(bearer(admin))
+        .send({ kind: 'nda', title: 'NDA', filename: 'nda.pdf', contentBase64: file })
+        .expect(201);
       const list = await http()
         .get(`/api/v1/people/employees/${articleNorth}/documents`)
         .set(bearer(admin))
         .expect(200);
-      expect(list.body).toHaveLength(0);
-      await http()
-        .post(`/api/v1/people/employees/${articleNorth}/documents`)
-        .set(bearer(admin))
-        .send({ kind: 'nda', title: 'NDA', filename: 'nda.pdf', contentBase64: file })
-        .expect(403);
+      expect(list.body.map((d: { id: string }) => d.id)).toContain(up.body.id);
     });
   });
 });

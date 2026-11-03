@@ -343,12 +343,11 @@ describe('RLS (database-level, independent of the application)', () => {
   });
 
   // The Phase 0–5 checkpoint separated business firm-wide authority (Managing
-  // Partner) from technical/platform administration (admin). Admin keeps
-  // identity/HR/config/audit reach but must NOT have automatic access to
-  // client/engagement data. Enforced at the database layer (migration 0009).
-  // Since engagement.assign, holding the admin role reads engagements and
-  // their clients to change their people, and writes only for that change.
-  describe('role separation: platform admin vs business firm-wide (checkpoint)', () => {
+  // Partner) from platform administration (admin, migration 0009). B-1
+  // (1773420000000_admin_everything) reverses that at the firm's request: the
+  // administrator sees and does everything the Managing Partner does, whether
+  // admin is the effective role or one of several held.
+  describe('role separation: the administrator is business firm-wide (B-1)', () => {
     // Lazy: officeIds is only populated in beforeAll, after describe collection.
     const adminNorth = (): Ctx => ({ role: 'admin', officeId: officeIds['NORTH'] });
     const seeSomeEngagement = async (): Promise<{ id: string; entity_id: string }> => {
@@ -359,25 +358,26 @@ describe('RLS (database-level, independent of the application)', () => {
       return rows[0]!;
     };
 
-    it('denies the platform admin business firm-wide reach into engagements', async () => {
-      // admin is not assigned to any engagement and is not business-firm-wide.
+    it('gives the administrator firm-wide reach into engagements', async () => {
+      const mp = await underContext(
+        { role: 'managing_partner', officeId: officeIds['NORTH'] },
+        `SELECT id FROM hsdg.engagements`,
+      );
       const rows = await underContext(adminNorth(), `SELECT id FROM hsdg.engagements`);
-      expect(rows).toHaveLength(0);
+      expect(rows.length).toBe(mp.length);
     });
 
-    it('denies the platform admin cross-office client visibility (not firm-wide)', async () => {
+    it('gives the administrator every office’s clients', async () => {
       const rows = await underContext<{ legal_name: string }>(
         adminNorth(),
         `SELECT legal_name FROM hsdg.entities`,
       );
       const names = rows.map((r) => r.legal_name);
-      // Only its own office's clients are visible via the generic office branch…
       expect(names).toContain('Acme Manufacturing Pvt Ltd'); // North
-      // …never the whole firm.
-      expect(names).not.toContain('Coastal Foods Pvt Ltd'); // South
+      expect(names).toContain('Coastal Foods Pvt Ltd'); // South
     });
 
-    it('lets a held admin role read engagements, and write only for a people change', async () => {
+    it('lets a held admin role read and change engagements; the people flag alone is nothing', async () => {
       const seen = await seeSomeEngagement();
       const held: Ctx = { role: 'admin', roles: ['admin'], officeId: officeIds['NORTH'] };
       expect(await underContext(held, `SELECT id FROM hsdg.engagements`)).not.toHaveLength(0);
@@ -385,8 +385,14 @@ describe('RLS (database-level, independent of the application)', () => {
         await underContext(held, `SELECT 1 FROM hsdg.entities WHERE id = '${seen.entity_id}'`),
       ).toHaveLength(1);
       const write = `UPDATE hsdg.engagements SET version = version WHERE id = '${seen.id}' RETURNING id`;
-      expect(await underContext(held, write)).toHaveLength(0);
-      expect(await underContext({ ...held, changingPeople: true }, write)).toHaveLength(1);
+      expect(await underContext(held, write)).toHaveLength(1);
+      // Held beside a lower effective role, admin still reaches everything.
+      expect(
+        await underContext(
+          { role: 'manager', roles: ['manager', 'admin'], officeId: officeIds['NORTH'] },
+          write,
+        ),
+      ).toHaveLength(1);
       // The flag alone is nothing: it must be the administrator who sets it.
       expect(
         await underContext(
@@ -924,7 +930,7 @@ describe('RLS (database-level, independent of the application)', () => {
       }
     });
 
-    it('only engagement-working roles hold task.update (not the platform admin)', async () => {
+    it('engagement-working roles and the administrator hold task.update', async () => {
       const rows = await underContext<{ slug: string }>(
         { role: 'managing_partner' },
         `SELECT r.slug FROM hsdg.role_permissions rp
@@ -933,8 +939,9 @@ describe('RLS (database-level, independent of the application)', () => {
          WHERE p.slug = 'task.update' ORDER BY r.slug`,
       );
       const slugs = rows.map((r) => r.slug);
-      expect(slugs).toEqual(expect.arrayContaining(['senior', 'article', 'manager', 'partner']));
-      expect(slugs).not.toContain('admin');
+      expect(slugs).toEqual(
+        expect.arrayContaining(['senior', 'article', 'manager', 'partner', 'admin']),
+      );
     });
   });
 
@@ -1134,7 +1141,7 @@ describe('RLS (database-level, independent of the application)', () => {
       }
     });
 
-    it('only the Managing Partner holds notification.scan; every role holds notification.read', async () => {
+    it('only the Managing Partner and the administrator hold notification.scan; every role holds notification.read', async () => {
       const scan = await underContext<{ slug: string }>(
         { role: 'managing_partner' },
         `SELECT r.slug FROM hsdg.role_permissions rp
@@ -1142,7 +1149,7 @@ describe('RLS (database-level, independent of the application)', () => {
          JOIN hsdg.permissions p ON p.id = rp.permission_id
          WHERE p.slug = 'notification.scan' ORDER BY r.slug`,
       );
-      expect(scan.map((r) => r.slug)).toEqual(['managing_partner']);
+      expect(scan.map((r) => r.slug)).toEqual(['admin', 'managing_partner']);
       const read = await underContext<{ slug: string }>(
         { role: 'managing_partner' },
         `SELECT r.slug FROM hsdg.role_permissions rp

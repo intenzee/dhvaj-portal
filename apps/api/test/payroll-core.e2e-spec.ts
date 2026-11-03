@@ -191,8 +191,8 @@ describe('Payroll core — phase 2a (e2e)', () => {
       .send({ field: 'account' })
       .expect(201);
     expect(shown.body.value).toBe('111122223333');
-    // The Administrator, a Partner and the Accountant cannot see pay at all.
-    for (const t of [admin, pa, accounts]) {
+    // A Partner and the Accountant cannot see pay at all (the Administrator can, B-1).
+    for (const t of [pa, accounts]) {
       await http()
         .post(`/api/v1/payroll/employees/${emp.EMP005}/pay-details/reveal`)
         .set(bearer(t))
@@ -248,8 +248,9 @@ describe('Payroll core — phase 2a (e2e)', () => {
     version = run.body.version;
   });
 
-  it('shows no pay line to the Administrator, a Partner, a Manager or the Accountant', async () => {
-    for (const t of [admin, pa, mx])
+  it('shows no pay line to a Partner, a Manager or the Accountant', async () => {
+    await http().get(`/api/v1/payroll/runs/${runId}`).set(bearer(admin)).expect(200);
+    for (const t of [pa, mx])
       await http().get(`/api/v1/payroll/runs/${runId}`).set(bearer(t)).expect(403);
     await http().get(`/api/v1/payroll/runs/${runId}`).set(bearer(accounts)).expect(403);
     // The Accountant's list shows no run until its figures are fixed.
@@ -257,7 +258,6 @@ describe('Payroll core — phase 2a (e2e)', () => {
       (await http().get('/api/v1/payroll/runs').set(bearer(accounts)).expect(200)).body,
     ).toEqual([]);
     for (const [email, role] of [
-      ['admin@dhvaj.in', 'admin'],
       ['partner.a@dhvaj.in', 'partner'],
       ['manager.x@dhvaj.in', 'manager'],
       ['accounts@dhvaj.in', 'accountant'],
