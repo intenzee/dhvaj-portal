@@ -297,7 +297,10 @@ export class TaskWorkflowService {
         sets.push(sql.replace('?', `$${params.length}`));
       }
     };
-    if (assigneeId !== row.assigned_to_employee_id) add('assigned_to_employee_id = ?', assigneeId);
+    if (assigneeId !== row.assigned_to_employee_id) {
+      add('assigned_to_employee_id = ?', assigneeId);
+      add('assigned_at = now()');
+    }
     if (reviewerId !== row.reviewer_employee_id) add('reviewer_employee_id = ?', reviewerId);
     if (plan.review === 'sent') {
       add('sent_for_review_at = now()');

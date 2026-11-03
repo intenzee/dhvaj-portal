@@ -82,7 +82,7 @@ export async function moveOpenWork(
   const move = async (column: string, kind: AssignmentKind): Promise<number> => {
     const assignee = kind === 'assignee';
     const { rows } = await client.query<{ id: string }>(
-      `UPDATE hsdg.tasks SET ${column} = $2${assignee ? ', assigned_by_employee_id = $3' : ''},
+      `UPDATE hsdg.tasks SET ${column} = $2${assignee ? ', assigned_by_employee_id = $3, assigned_at = now()' : ''},
               version = version + 1
         WHERE ${column} = $1 AND ${OPEN_TASK_SQL}
        RETURNING id`,

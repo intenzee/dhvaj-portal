@@ -1,32 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
+import type { WorkSetSummary } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { Card } from '@/components/ui';
 import { CompletionBar } from '@/components/completion';
 
-/**
- * One row of GET /work-sets — the shape of WorkSetSummary in
- * packages/contracts/src/work-sets.ts (C-3, the other track). Kept here until
- * that contract is on this branch; at merge, import the type from
- * '@hsdg/contracts' and delete this copy.
- */
-export interface MyWorkSet {
-  id: string;
-  name: string;
-  assignedToId: string;
-  assignedToName: string;
-  assignedById: string | null;
-  assignedByName: string | null;
-  dueDate: string | null;
-  note: string | null;
-  taskCount: number;
-  openCount: number;
-  doneCount: number;
-  createdAt: string;
-  closedAt: string | null;
-}
+/** One row of GET /work-sets?mine=assigned_to (C-3). */
+export type MyWorkSet = WorkSetSummary;
 
 /** Open sets first, then by due date (none last). Pure. */
 export function sortSets(sets: MyWorkSet[]): MyWorkSet[] {
@@ -46,7 +29,12 @@ export function MySetsList({ sets }: { sets: MyWorkSet[] }): JSX.Element | null 
         {sortSets(sets).map((s) => (
           <li key={s.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-ink">{s.name}</span>
+              <Link
+                href={`/work-sets/${s.id}`}
+                className="block truncate text-sm font-medium text-primary-700 hover:underline"
+              >
+                {s.name}
+              </Link>
               <span className="block truncate text-xs text-ink-faint">
                 {s.assignedByName ? `From ${s.assignedByName}` : 'Set'}
                 {s.dueDate ? ` · due ${formatDate(s.dueDate)}` : ''}

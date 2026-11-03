@@ -445,11 +445,17 @@ function MyWorkInner(): JSX.Element {
         <Link href="/engagements" className="text-primary-600 hover:underline">
           Browse engagements
         </Link>
-        . Sets of work given to you are on{' '}
-        <Link href="/work-sets" className="text-primary-600 hover:underline">
-          Assign work
-        </Link>
         .
+        {!articleView && (
+          <>
+            {' '}
+            Sets of work given to you are on{' '}
+            <Link href="/work-sets" className="text-primary-600 hover:underline">
+              Assign work
+            </Link>
+            .
+          </>
+        )}
       </p>
 
       {docsForTask && (
