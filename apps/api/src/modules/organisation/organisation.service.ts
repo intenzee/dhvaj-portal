@@ -68,7 +68,8 @@ export class OrganisationService {
     filter: EmployeeFilter,
     page: PageParams,
   ): Promise<PageResult<EmployeeRecord>> {
-    const conditions: string[] = [];
+    // A person deleted permanently stays only as a name on past work.
+    const conditions: string[] = ['e.deleted_at IS NULL'];
     const params: unknown[] = [];
     if (filter.status) {
       params.push(filter.status);
@@ -82,7 +83,7 @@ export class OrganisationService {
       params.push(filter.officeCode);
       conditions.push(`o.code = $${params.length}`);
     }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const where = `WHERE ${conditions.join(' AND ')}`;
     const limitParam = `$${params.length + 1}`;
     const offsetParam = `$${params.length + 2}`;
     params.push(page.limit, page.offset);
@@ -123,7 +124,7 @@ export class OrganisationService {
   async listPartners(ctx: RlsContext): Promise<EmployeeRecord[]> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<EmployeeRow>(
-        `${EMPLOYEE_SELECT} WHERE g.is_partner_grade ORDER BY e.full_name`,
+        `${EMPLOYEE_SELECT} WHERE g.is_partner_grade AND e.deleted_at IS NULL ORDER BY e.full_name`,
       );
       return rows.map(mapEmployee);
     });

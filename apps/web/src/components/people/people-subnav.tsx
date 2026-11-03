@@ -23,6 +23,12 @@ export function PeopleSubnav(): JSX.Element {
       label: 'Employees',
       show: can(principal, PERMISSION.employeeManage),
     },
+    // B-2: the Managing Partner and the administrator (user.manage).
+    {
+      href: '/people/manage',
+      label: 'Manage people',
+      show: can(principal, PERMISSION.userManage),
+    },
     { href: '/people/articles', label: 'Articles', show: can(principal, PERMISSION.employeeManage) },
     {
       href: '/people/joiners-leavers',

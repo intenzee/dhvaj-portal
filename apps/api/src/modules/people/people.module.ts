@@ -9,6 +9,8 @@ import { ArticleshipService } from './articleship.service';
 import { HrDocumentsController } from './hr-documents.controller';
 import { HrDocumentsService } from './hr-documents.service';
 import { PeopleController } from './people.controller';
+import { PeopleAdminController } from './people-admin.controller';
+import { PeopleAdminService } from './people-admin.service';
 import { PeopleExitsScheduler } from './people-exits.scheduler';
 import { PeopleService } from './people.service';
 
@@ -19,8 +21,19 @@ import { PeopleService } from './people.service';
  */
 @Module({
   imports: [AuditModule, IdentityModule, NotificationsModule, OrganisationModule, StorageModule],
-  controllers: [PeopleController, ArticleshipController, HrDocumentsController],
-  providers: [PeopleService, ArticleshipService, HrDocumentsService, PeopleExitsScheduler],
+  controllers: [
+    PeopleController,
+    PeopleAdminController,
+    ArticleshipController,
+    HrDocumentsController,
+  ],
+  providers: [
+    PeopleService,
+    PeopleAdminService,
+    ArticleshipService,
+    HrDocumentsService,
+    PeopleExitsScheduler,
+  ],
   exports: [PeopleService, HrDocumentsService, PeopleExitsScheduler],
 })
 export class PeopleModule {}
