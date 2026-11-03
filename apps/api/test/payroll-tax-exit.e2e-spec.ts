@@ -325,7 +325,6 @@ describe('Payroll tax and exits — phase 2b (e2e)', () => {
         await http().get(`/api/v1/payroll/tax/proofs/${proofId}/file`).set(bearer(t)).expect(403);
       }
       for (const [email, role] of [
-        ['admin@dhvaj.in', 'admin'],
         ['partner.a@dhvaj.in', 'partner'],
         ['manager.x@dhvaj.in', 'manager'],
       ] as const) {

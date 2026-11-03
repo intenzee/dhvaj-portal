@@ -153,18 +153,13 @@ describe('Who changes an engagement’s people (e2e)', () => {
     expect(added.body.team.map((m: { employeeId: string }) => m.employeeId)).toEqual([seniorY]);
   });
 
-  it('gives the administrator no say over the engagement’s work', async () => {
+  it('gives the administrator a say over the engagement’s work, like the Managing Partner (B-1)', async () => {
     const { id } = await running();
     await http()
       .post(`/api/v1/engagements/${id}/put-on-hold`)
       .set(bearer(admin))
-      .send({ reason: 'not theirs to do' })
-      .expect(403);
-    await http()
-      .patch(`/api/v1/engagements/${id}`)
-      .set(bearer(admin))
-      .send({ plannedEndDate: '2026-12-31' })
-      .expect(403);
+      .send({ reason: 'waiting on the client', expectedResumeDate: '2026-12-01' })
+      .expect(201);
   });
 
   it('everyone else only sees them: partner, manager and team member are all refused', async () => {

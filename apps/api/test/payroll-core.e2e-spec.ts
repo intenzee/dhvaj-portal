@@ -258,7 +258,6 @@ describe('Payroll core — phase 2a (e2e)', () => {
       (await http().get('/api/v1/payroll/runs').set(bearer(accounts)).expect(200)).body,
     ).toEqual([]);
     for (const [email, role] of [
-      ['admin@dhvaj.in', 'admin'],
       ['partner.a@dhvaj.in', 'partner'],
       ['manager.x@dhvaj.in', 'manager'],
       ['accounts@dhvaj.in', 'accountant'],

@@ -30,7 +30,7 @@ describe('People screen and leaving the firm (e2e)', () => {
     name: string,
     grade: string,
     role: string | null,
-    status: 'active' | 'inactive' = 'active',
+    status: 'active' | 'exited' = 'active',
   ): Promise<{ employeeId: string; userId: string | null; email: string | null }> {
     let userId: string | null = null;
     let email: string | null = null;
@@ -49,8 +49,10 @@ describe('People screen and leaving the firm (e2e)', () => {
     }
     const e = await su.query<{ id: string }>(
       `INSERT INTO hsdg.employees
-         (employee_code, full_name, grade_id, primary_office_id, date_of_joining, user_id, employment_status)
-       SELECT $1, $2, (SELECT id FROM hsdg.grades WHERE slug = $3), o.id, '2024-01-01', $4, $5
+         (employee_code, full_name, grade_id, primary_office_id, date_of_joining, user_id,
+          employment_status, date_of_exit)
+       SELECT $1, $2, (SELECT id FROM hsdg.grades WHERE slug = $3), o.id, '2024-01-01', $4, $5,
+              CASE WHEN $5 = 'exited' THEN DATE '2025-03-31' END
          FROM hsdg.offices o WHERE o.code = 'NORTH' RETURNING id`,
       [`P${tag}${Math.floor(Math.random() * 1000)}`, name, grade, userId, status],
     );
@@ -126,7 +128,7 @@ describe('People screen and leaving the firm (e2e)', () => {
 
     it('offers only active people who are partners by grade and by role as leads', async () => {
       const notReally = await person(`Article On Partner Grade ${tag}`, 'partner', 'article');
-      const left = await person(`Inactive Partner ${tag}`, 'partner', 'partner', 'inactive');
+      const left = await person(`Left Partner ${tag}`, 'partner', 'partner', 'exited');
       const real = await person(`Real Partner ${tag}`, 'partner', 'partner');
       const leads = (await http().get('/api/v1/employees/leads').set(bearer(mp)).expect(200))
         .body as { id: string; isPartner: boolean }[];
@@ -238,7 +240,7 @@ describe('People screen and leaving the firm (e2e)', () => {
 
   describe('B-3 deleting permanently', () => {
     it('is the administrator’s alone, and lists what stands in the way', async () => {
-      const lead = await person(`Blocked ${tag}`, 'senior', 'senior');
+      const lead = await person(`Blocked ${tag}`, 'manager', 'manager');
       await task('Still open', lead.employeeId);
       await su.query(`UPDATE hsdg.engagements SET engagement_manager_id = $1 WHERE id = $2`, [
         lead.employeeId,
