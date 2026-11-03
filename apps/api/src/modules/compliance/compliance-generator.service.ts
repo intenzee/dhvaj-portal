@@ -378,6 +378,15 @@ function versionOn(versions: readonly VersionRow[], date: string): VersionRow | 
   return best;
 }
 
+/**
+ * No live task on filing `ci` beyond the calendar's own one still untouched (to
+ * do, never handed on): nobody has been given or started its work.
+ */
+const NO_WORK_ON_FILING = `NOT EXISTS (
+  SELECT 1 FROM hsdg.tasks tk
+   WHERE tk.source_compliance_instance_id = ci.id AND tk.status <> 'cancelled'
+     AND NOT (tk.auto_created AND tk.status = 'todo' AND tk.assigned_by_employee_id IS NULL))`;
+
 /** Runs on the generator's transaction for every batch of new instances. */
 export type InstancesCreatedHook = (
   client: PoolClient,
@@ -869,14 +878,21 @@ export class ComplianceGeneratorService {
       );
     }
 
+    let retiredIds: string[] = [];
     if (toRetire.length > 0) {
-      await client.query(
-        `UPDATE hsdg.compliance_instances
+      // A filing someone was given or started stays, flagged for its lead.
+      const { rows } = await client.query<{ id: string }>(
+        `UPDATE hsdg.compliance_instances ci
             SET workflow_status = 'not_applicable', notes = $2,
-                version = version + 1, updated_at = now()
-          WHERE id = ANY($1::uuid[]) AND workflow_status = 'not_started'`,
+                version = ci.version + 1, updated_at = now()
+          WHERE ci.id = ANY($1::uuid[]) AND ci.workflow_status = 'not_started'
+            AND ${NO_WORK_ON_FILING}
+         RETURNING ci.id`,
         [toRetire, GENERATOR_NA_NOTE],
       );
+      retiredIds = rows.map((r) => r.id);
+      const retired = new Set(retiredIds);
+      toFlag.push(...toRetire.filter((id) => !retired.has(id)));
     }
 
     if (toFlag.length > 0) {
@@ -893,7 +909,7 @@ export class ComplianceGeneratorService {
       created: createdIds.length,
       moved: toMove.length,
       flagged: toFlag.length,
-      notApplicable: toRetire.length,
+      notApplicable: retiredIds.length,
       createdIds,
       movedItems: toMove.map((m) => ({
         id: m.id,
@@ -901,7 +917,7 @@ export class ComplianceGeneratorService {
         to: m.d.statutoryDeadline,
       })),
       flaggedIds: toFlag,
-      notApplicableIds: toRetire,
+      notApplicableIds: retiredIds,
     };
   }
 
@@ -1037,9 +1053,7 @@ export class ComplianceGeneratorService {
           SET workflow_status = 'not_applicable', notes = $4,
               version = ci.version + 1, updated_at = now()
         WHERE ${inStreams} AND ci.workflow_status = 'not_started'
-          AND NOT EXISTS (SELECT 1 FROM hsdg.tasks tk
-                           WHERE tk.source_compliance_instance_id = ci.id
-                             AND tk.status <> 'cancelled')`,
+          AND ${NO_WORK_ON_FILING}`,
       [engagementId, financialYear, streams, STREAM_ENDED_NOTE],
     );
     const flagged = await client.query(

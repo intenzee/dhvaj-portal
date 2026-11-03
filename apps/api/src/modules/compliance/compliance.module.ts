@@ -63,10 +63,14 @@ import {
 export class ComplianceModule implements OnModuleInit {
   constructor(private readonly generator: ComplianceGeneratorService) {}
 
-  /** Every generated filing starts with its checklist (Change 5), in the same transaction. */
+  /**
+   * Every generated filing starts with its checklist (Change 5) and its task
+   * (Phase 2, C-1), in the same transaction.
+   */
   onModuleInit(): void {
     this.generator.onInstancesCreated(async (client, ids) => {
       for (const id of ids) await seedChecklistForInstance(client, id);
+      await client.query(`SELECT hsdg.make_filing_tasks($1::uuid[])`, [ids]);
     });
   }
 }

@@ -544,7 +544,10 @@ export function periodKeyLabel(periodKey: string | null | undefined): string {
   if (!periodKey) return '—';
   if (periodKey.startsWith('EVT:')) return 'Event';
   const month = /^(\d{4})-(\d{2})$/.exec(periodKey);
-  if (month) return `${MONTHS[Number(month[2]) - 1]} ${month[1]}`;
+  // '2026-27' is a financial year, not a 27th month.
+  if (month && Number(month[2]) !== (Number(month[1]) + 1) % 100) {
+    return `${MONTHS[Number(month[2]) - 1]} ${month[1]}`;
+  }
   const [fy, part, din] = periodKey.split(':');
   if (part === 'DIN') return `FY ${fy} · DIN ${din}`;
   if (fy && (part === 'CH1' || part === 'CH2')) return calendarHalfLabel(fy, part);

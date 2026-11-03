@@ -42,6 +42,7 @@ import type {
   TaskRecord,
   UpdateTaskInput,
 } from './tasks.types';
+import { TAKE_OVER_CALENDAR_TASK_SQL } from './calendar-tasks';
 
 export interface TaskRow {
   id: string;
@@ -169,32 +170,39 @@ export class TasksService {
       if (input.auditAreaId) await this.requireAuditArea(client, engagementId, input.auditAreaId);
       let id: string;
       try {
-        const { rows } = await client.query<{ id: string }>(
-          `INSERT INTO hsdg.tasks
-             (engagement_id, title, description, assigned_to_employee_id, created_by_employee_id,
-              priority, due_date, is_out_of_scope, is_billable,
-              engagement_service_id, reviewer_employee_id, work_type, source_compliance_instance_id,
-              audit_work_area_id)
-           VALUES ($1,$2,$3,$4,$5,COALESCE($6,'normal'),$7,COALESCE($8,false),COALESCE($9,false),
-                   $10,$11,$12,$13,$14)
-           RETURNING id`,
-          [
-            engagementId,
-            input.title,
-            input.description ?? null,
-            input.assignedToEmployeeId ?? null,
-            ctx.employeeId ?? null,
-            input.priority ?? null,
-            input.dueDate ?? null,
-            input.isOutOfScope ?? null,
-            input.isBillable ?? null,
-            links.engagementServiceId,
-            input.reviewerEmployeeId ?? null,
-            input.workType ?? (input.complianceInstanceId ? 'filing' : null),
-            input.complianceInstanceId ?? null,
-            input.auditAreaId ?? null,
-          ],
-        );
+        const params = [
+          engagementId,
+          input.title,
+          input.description ?? null,
+          input.assignedToEmployeeId ?? null,
+          ctx.employeeId ?? null,
+          input.priority ?? null,
+          input.dueDate ?? null,
+          input.isOutOfScope ?? null,
+          input.isBillable ?? null,
+          links.engagementServiceId,
+          input.reviewerEmployeeId ?? null,
+          input.workType ?? (input.complianceInstanceId ? 'filing' : null),
+          input.complianceInstanceId ?? null,
+          input.auditAreaId ?? null,
+        ];
+        // A filing's untouched calendar task is taken over, not doubled (C-1).
+        const taken = input.complianceInstanceId
+          ? await client.query<{ id: string }>(TAKE_OVER_CALENDAR_TASK_SQL, params)
+          : null;
+        const { rows } = taken?.rows.length
+          ? taken
+          : await client.query<{ id: string }>(
+              `INSERT INTO hsdg.tasks
+               (engagement_id, title, description, assigned_to_employee_id, created_by_employee_id,
+                priority, due_date, is_out_of_scope, is_billable,
+                engagement_service_id, reviewer_employee_id, work_type, source_compliance_instance_id,
+                audit_work_area_id)
+             VALUES ($1,$2,$3,$4,$5,COALESCE($6,'normal'),$7,COALESCE($8,false),COALESCE($9,false),
+                     $10,$11,$12,$13,$14)
+             RETURNING id`,
+              params,
+            );
         id = rows[0]!.id;
       } catch (err) {
         throw mapTaskError(err);
