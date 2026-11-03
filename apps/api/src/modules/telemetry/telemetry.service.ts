@@ -17,6 +17,7 @@ import {
   type WorkflowMeasuresReport,
   type WorkflowTarget,
   type WorkflowTargetRule,
+  isBusinessFirmwide,
 } from '@hsdg/contracts';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../../database/database.service';
@@ -183,7 +184,7 @@ export class TelemetryService {
     if (to > istToday()) throw new BadRequestException('A baseline is a window already measured');
     const officeId = q.officeId ?? null;
     // A partner measures only their office's people, so that is what they baseline.
-    if (ctx.role !== 'managing_partner' && (!officeId || officeId !== ctx.officeId))
+    if (!isBusinessFirmwide(ctx.role, ctx.roles) && (!officeId || officeId !== ctx.officeId))
       throw new ForbiddenException('A partner saves the baseline for their own office');
     return this.db.withRlsContext(ctx, async (client) => {
       const raw = await this.rawMeasures(client, from, to, days, officeId);

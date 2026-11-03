@@ -149,9 +149,8 @@ describe('Statutory Audit — 03.1 governance & dynamics (e2e)', () => {
       partnerReview: true,
       partnerSignals: true,
     });
-    // Platform Admin: no client data by role alone. They read the engagement,
-    // not its audit file, so RLS hides it.
-    await get(admin, `${base}/planning-governance`).expect(404);
+    // The administrator sees everything the Managing Partner sees (B-1).
+    await get(admin, `${base}/planning-governance`).expect(200);
 
     // A Senior's signal is a PROPOSAL the Manager assesses.
     const proposal = await post(sy, `${base}/planning-signals`, {

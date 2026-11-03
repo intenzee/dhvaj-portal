@@ -38,7 +38,7 @@ export default function PayrollSettingsPage(): JSX.Element {
         subtitle="PF, ESI, professional tax, gratuity and the articles’ stipend minimum. A change applies from its date; earlier months keep the rules they ran on."
         back={{ href: '/payroll', label: 'Payroll' }}
       />
-      {hasRole(principal, ROLE.managingPartner) && <Approver />}
+      {hasRole(principal, ROLE.managingPartner, ROLE.admin) && <Approver />}
       {settings.isLoading ? (
         <Spinner />
       ) : settings.error || !settings.data ? (

@@ -28,6 +28,7 @@ import {
   type PeopleWorkloadRow,
   type StartExitInput,
   type StartExitResult,
+  isBusinessFirmwide,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -591,9 +592,9 @@ const EMPLOYEE_MASTER_QUEUES = new Set<PeopleDeskQueue>([
   PEOPLE_DESK_QUEUE.exitPassedLoginOn,
 ]);
 
-/** HR or the Managing Partner — as hsdg.ctx_reads_people() decides it. */
+/** HR, the Managing Partner or an administrator — as hsdg.ctx_reads_people() decides it. */
 function readsPeople(ctx: RlsContext): boolean {
-  return ctx.role === ROLE.managingPartner || (ctx.roles ?? []).includes(ROLE.hr);
+  return isBusinessFirmwide(ctx.role, ctx.roles) || (ctx.roles ?? []).includes(ROLE.hr);
 }
 
 function mapAttendance(r: AttendanceRow): AttendanceDay {

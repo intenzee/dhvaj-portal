@@ -90,7 +90,7 @@ const AGM_RULES: ReadonlySet<string> = new Set(['ROC_AGM', 'ROC_FIRST_AGM']);
 
 /** The prefix on compliance_instances.notes that records a waiver reason. */
 const NA_NOTE_PREFIX = 'Not applicable: ';
-const PARTNER_ROLES = new Set(['partner', 'managing_partner']);
+const PARTNER_ROLES = new Set(['partner', 'managing_partner', 'admin']);
 /** The read-only group for documents filed against the filing but no slot. */
 export const UNSORTED_SLOT = 'UNSORTED';
 

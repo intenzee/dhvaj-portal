@@ -55,6 +55,18 @@ export const ROLE_PRECEDENCE: RoleSlug[] = [
 ];
 
 /**
+ * The Managing Partner or an administrator: every client, engagement, person
+ * and action in the firm (B-1). The same test as hsdg.ctx_is_business_firmwide():
+ * the effective role is the Managing Partner, or `admin` is among the roles held.
+ */
+export function isBusinessFirmwide(
+  role: string | null | undefined,
+  roles: readonly string[] = [],
+): boolean {
+  return role === ROLE.managingPartner || role === ROLE.admin || roles.includes(ROLE.admin);
+}
+
+/**
  * Roles HR may give with `user.onboard` (spec §4.5). Anyone holding a role
  * outside this list is managed by an administrator only.
  */

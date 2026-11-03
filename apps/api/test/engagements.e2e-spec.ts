@@ -338,7 +338,7 @@ describe('Engagement Core (e2e)', () => {
       }
     };
 
-    it('grants engagement.create to every staff role (not the platform admin)', async () => {
+    it('grants engagement.create to every staff role and the administrator', async () => {
       const db = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
       await db.connect();
       try {
@@ -349,6 +349,7 @@ describe('Engagement Core (e2e)', () => {
             WHERE p.slug = 'engagement.create' ORDER BY r.slug`,
         );
         expect(rows.map((r) => r.slug)).toEqual([
+          'admin',
           'article',
           'manager',
           'managing_partner',
@@ -948,14 +949,14 @@ describe('Engagement Core (e2e)', () => {
           .expect(403);
       });
 
-      it('the platform admin cannot reopen — no business-firm-wide governance merely from the admin role', async () => {
+      it('the administrator can reopen, like the Managing Partner (B-1)', async () => {
         const pa = await token('partner.a@dhvaj.in');
         const eng = await completeEngagement(pa);
         await request(app.getHttpServer())
           .post(`/api/v1/engagements/${eng.id}/reopen`)
           .set(bearer(await token('admin@dhvaj.in')))
-          .send({ reason: 'admin attempted reopen' })
-          .expect(403);
+          .send({ reason: 'admin reopened', version: eng.version })
+          .expect(201);
       });
 
       it('a Senior (no engagement.manage) cannot perform any lifecycle action', async () => {

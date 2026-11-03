@@ -53,7 +53,7 @@ export function useIsPayApprover(): boolean {
   });
   if (!principal) return false;
   return (
-    hasRole(principal, ROLE.managingPartner) ||
+    hasRole(principal, ROLE.managingPartner, ROLE.admin) ||
     (approvers.data ?? []).some((a) => a.userId === principal.userId)
   );
 }

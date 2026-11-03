@@ -19,7 +19,7 @@ export function taskContextFor(
     me,
     checks,
     isLead:
-      hasRole(principal, ROLE.managingPartner) ||
+      hasRole(principal, ROLE.managingPartner, ROLE.admin) ||
       (!!me && (me === e.engagementPartnerId || me === e.engagementManagerId)),
   };
 }

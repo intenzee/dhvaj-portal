@@ -19,7 +19,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { humanize } from '@/lib/format';
 import { useToast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
-import { can } from '@/lib/principal';
+import { can, hasRole } from '@/lib/principal';
 import { PERMISSION } from '@hsdg/contracts';
 import type { EntityDetail, EntityType, OfficeRow } from '@/lib/types';
 import { Button } from '@/components/ui';
@@ -41,8 +41,8 @@ export function EntityDetailActions({ entity }: { entity: EntityDetail }): JSX.E
   const [open, setOpen] = useState<null | 'edit' | 'registration' | 'contact' | 'delete'>(null);
 
   if (!can(principal, PERMISSION.entityManage)) return null;
-  // The API lets the Managing Partner (by effective role) delete, and only them.
-  const mayDelete = principal?.effectiveRole === ROLE.managingPartner;
+  // The API lets the Managing Partner and an administrator delete, and only them.
+  const mayDelete = hasRole(principal, ROLE.managingPartner, ROLE.admin);
 
   return (
     <div className="flex flex-wrap gap-2">
