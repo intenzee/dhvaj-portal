@@ -23,6 +23,8 @@ describe('Who changes an engagement’s people (e2e)', () => {
   let managerX: string;
   let seniorY: string;
   let serviceId: string;
+  /** Every engagement this suite makes — Partner B comes off them all afterwards. */
+  const made: string[] = [];
 
   const http = () => request(app.getHttpServer());
   const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
@@ -58,6 +60,7 @@ describe('Who changes an engagement’s people (e2e)', () => {
       })
       .expect(201);
     const id = created.body.id as string;
+    made.push(id);
     await http()
       .post(`/api/v1/engagements/${id}/team`)
       .set(bearer(mp))
@@ -113,6 +116,24 @@ describe('Who changes an engagement’s people (e2e)', () => {
   });
 
   afterAll(async () => {
+    // A Partner sees whoever shares an engagement with them: leave Partner A
+    // (North) and Partner B (South) on no team together, or the organisation
+    // suite's office scoping no longer holds.
+    if (su && made.length) {
+      const partnerA = await employee('EMP003');
+      await su.query(
+        `UPDATE hsdg.engagements SET engagement_partner_id = $2 WHERE id = ANY($1) AND engagement_partner_id = $3`,
+        [made, partnerA, partnerB],
+      );
+      await su.query(
+        `UPDATE hsdg.engagements SET engagement_manager_id = $2 WHERE id = ANY($1) AND engagement_manager_id = $3`,
+        [made, managerX, partnerB],
+      );
+      await su.query(
+        `DELETE FROM hsdg.engagement_team WHERE engagement_id = ANY($1) AND employee_id = $2`,
+        [made, partnerB],
+      );
+    }
     await su?.end();
     await app?.close();
   });

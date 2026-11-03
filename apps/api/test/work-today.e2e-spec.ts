@@ -198,7 +198,13 @@ describe('Today (e2e)', () => {
     const myWork = async (status: string): Promise<number> =>
       (await http().get(`/api/v1/work/tasks?limit=1&status=${status}`).set(bearer(sy)).expect(200))
         .body.total as number;
-    const prepare = view.groups.find((g) => g.group === 'prepare')!.total;
+    // Past-due and due-today tasks are lifted out of To prepare into Overdue / Due today.
+    const lifted = view.groups.filter((g) => g.group === 'overdue' || g.group === 'due_today');
+    for (const g of lifted) expect(g.items).toHaveLength(g.total);
+    const liftedTasks = lifted
+      .flatMap((g) => g.items)
+      .filter((i) => i.kind === 'task' && i.status !== 'in_review').length;
+    const prepare = view.groups.find((g) => g.group === 'prepare')!.total + liftedTasks;
     expect(prepare).toBe(
       (await myWork('todo')) + (await myWork('in_progress')) + (await myWork('paused')),
     );
