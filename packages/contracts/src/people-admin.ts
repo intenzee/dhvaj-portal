@@ -138,6 +138,22 @@ export interface MoveWorkResult {
   reviews: number;
 }
 
+/**
+ * GET /people/employees/:id/move-work — whether the caller may move this
+ * person's open work (C-6), and to whom. The Managing Partner and an
+ * administrator move anyone's, to anyone; a Partner / Manager / Senior moves
+ * the work of someone below them, to someone in their own tree.
+ */
+export interface MoveWorkOptions {
+  employeeId: string;
+  fullName: string;
+  /** Open tasks the caller can see that this person does or reviews. */
+  openTasks: number;
+  canMove: boolean;
+  /** Who may take the work; empty when canMove is false. */
+  takers: { employeeId: string; fullName: string }[];
+}
+
 /** POST /people/employees/:id/deactivate */
 export interface DeactivateInput {
   /** Defaults to today; never in the future (deactivating is now). */

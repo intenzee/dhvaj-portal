@@ -62,7 +62,8 @@ export const OPEN_TASK_SQL = `status NOT IN ('done', 'cancelled')`;
  * C-6 hand-over: every open task one person does or reviews goes to another,
  * each move recorded through recordAssignment. The receiver joins the team of
  * each engagement the work sits on (unless they already lead it) so they can
- * see it. The caller decides who may do this and audits it.
+ * see it. The caller decides who may do this and audits it; for a tree lead,
+ * RLS keeps it to their tree (tasks_update_tree, engagement_team_insert_tree).
  */
 export async function moveOpenWork(
   client: PoolClient,

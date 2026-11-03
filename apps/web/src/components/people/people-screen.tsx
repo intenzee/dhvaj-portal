@@ -18,7 +18,6 @@ import {
   type DeletePersonResult,
   type GradeSlug,
   type MainRole,
-  type MoveWorkResult,
   type PeopleCheck,
   type PeopleRoster,
   type PeopleRosterRow,
@@ -32,6 +31,7 @@ import type { OfficeRow } from '@/lib/types';
 import { cn } from '@/lib/cn';
 import { Badge, Button, EmptyState, Panel, Spinner } from '@/components/ui';
 import { Input, Select } from '@/components/form';
+import { MoveWorkForm } from './move-work';
 
 const GRADE_LABEL: Record<GradeSlug, string> = {
   partner: 'Partner',
@@ -459,8 +459,6 @@ export function LeavePanel({
   const toast = useToast();
   const mayDelete = hasRole(principal, ROLE.admin);
   const left = p.employmentStatus === 'exited';
-  const [to, setTo] = useState('');
-  const [reason, setReason] = useState('');
   const [exitDate, setExitDate] = useState(istToday());
   const [exitReason, setExitReason] = useState('');
   const [typed, setTyped] = useState('');
@@ -474,23 +472,6 @@ export function LeavePanel({
   const takers = people.filter(
     (o) => o.employeeId !== p.employeeId && o.employmentStatus !== 'exited' && o.loginActive,
   );
-
-  const move = useMutation({
-    mutationFn: () =>
-      apiFetch<MoveWorkResult>('/people/admin/move-work', {
-        method: 'POST',
-        body: { fromEmployeeId: p.employeeId, toEmployeeId: to, reason: reason.trim() },
-      }),
-    onSuccess: (r) => {
-      toast(
-        `Moved ${r.assigned} task${r.assigned === 1 ? '' : 's'} and ${r.reviews} review${r.reviews === 1 ? '' : 's'}.`,
-      );
-      setReason('');
-      refresh();
-      void qc.invalidateQueries({ queryKey: ['people', 'delete-check', p.employeeId] });
-    },
-    onError: (err) => toast(errorText(err, 'Could not move the work.'), 'error'),
-  });
 
   const deactivate = useMutation({
     mutationFn: () =>
@@ -536,40 +517,15 @@ export function LeavePanel({
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
-      <section aria-label="Move open work" className="space-y-2">
-        <h4 className="font-semibold text-ink">Move open work</h4>
-        <p className="text-xs text-ink-muted">
-          {p.openTasks === 0
-            ? 'Nothing open is theirs.'
-            : `${p.openTasks} open task${p.openTasks === 1 ? '' : 's'} (doing or reviewing) go to the person you pick; they join those engagements’ teams.`}
-        </p>
-        <Select
-          id={`move-to-${p.employeeId}`}
-          aria-label="Move to"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-        >
-          <option value="">— Move to… —</option>
-          {takers.map((o) => (
-            <option key={o.employeeId} value={o.employeeId}>
-              {o.fullName}
-            </option>
-          ))}
-        </Select>
-        <Input
-          aria-label="Why the work is moving"
-          placeholder="Why (kept on each task)"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
-        <Button
-          size="sm"
-          disabled={!to || !reason.trim() || p.openTasks === 0 || move.isPending}
-          onClick={() => move.mutate()}
-        >
-          {move.isPending ? 'Moving…' : 'Move all open work'}
-        </Button>
-      </section>
+      <MoveWorkForm
+        fromId={p.employeeId}
+        openTasks={p.openTasks}
+        takers={takers}
+        onMoved={() => {
+          refresh();
+          void qc.invalidateQueries({ queryKey: ['people', 'delete-check', p.employeeId] });
+        }}
+      />
 
       <section aria-label="Deactivate" className="space-y-2">
         <h4 className="font-semibold text-ink">Deactivate</h4>

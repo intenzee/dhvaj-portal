@@ -345,4 +345,74 @@ describe('Reporting tree scope (e2e)', () => {
       expect(res.body.message).toMatch(/Manager or Partner/);
     });
   });
+
+  describe('C-6 moving all open work down the tree', () => {
+    let A2: Person;
+    let t2: string;
+    const options = async (who: Person, of: Person) =>
+      (
+        await http()
+          .get(`/api/v1/people/employees/${of.employeeId}/move-work`)
+          .set(bearer(await token(who.email)))
+          .expect(200)
+      ).body as { canMove: boolean; openTasks: number; takers: { employeeId: string }[] };
+    const move = async (who: Person, from: Person, to: Person, status: number) =>
+      http()
+        .post('/api/v1/people/admin/move-work')
+        .set(bearer(await token(who.email)))
+        .send({ fromEmployeeId: from.employeeId, toEmployeeId: to.employeeId, reason: 'On leave' })
+        .expect(status);
+
+    beforeAll(async () => {
+      await setStrict(true);
+      A2 = await person(`Tree Article Two ${tag}`, 'article', S.employeeId, 'SOUTH');
+      await onTeam(e2, A2);
+      t2 = await task(e2, 'Second article work', A2, M);
+    });
+
+    it('offers the move to those above the person, with their own tree as takers', async () => {
+      const m = await options(M, A2);
+      expect(m).toMatchObject({ canMove: true, openTasks: 1 });
+      const takers = m.takers.map((t) => t.employeeId);
+      expect(takers).toEqual(expect.arrayContaining([M.employeeId, S.employeeId, A.employeeId]));
+      expect(takers).not.toContain(A2.employeeId);
+      expect(takers).not.toContain(O.employeeId);
+      expect(takers).not.toContain(P.employeeId);
+
+      expect(await options(A, S)).toMatchObject({ canMove: false, takers: [] });
+      expect(await options(S, M)).toMatchObject({ canMove: false, takers: [] });
+      expect((await options(M, M)).canMove).toBe(false);
+    });
+
+    it('refuses outside the tree, naming who can', async () => {
+      const outside = await move(M, A2, O, 403);
+      expect(outside.body.message).toMatch(/reporting line/);
+      const above = await move(S, M, A, 403);
+      expect(above.body.message).toMatch(/Managing Partner/);
+    });
+
+    it('moves the work, and the taker joins the team so they can see it', async () => {
+      const res = await move(M, A2, S, 201);
+      expect(res.body).toEqual({ assigned: 1, reviews: 0 });
+      const { rows } = await su.query<{
+        assigned_to_employee_id: string;
+        assigned_by_employee_id: string;
+        assigned_at: Date | null;
+        on_team: boolean;
+      }>(
+        `SELECT t.assigned_to_employee_id, t.assigned_by_employee_id, t.assigned_at,
+                EXISTS (SELECT 1 FROM hsdg.engagement_team et
+                         WHERE et.engagement_id = t.engagement_id AND et.employee_id = $2) AS on_team
+           FROM hsdg.tasks t WHERE t.id = $1`,
+        [t2, S.employeeId],
+      );
+      expect(rows[0]).toMatchObject({
+        assigned_to_employee_id: S.employeeId,
+        assigned_by_employee_id: M.employeeId,
+        on_team: true,
+      });
+      expect(rows[0]!.assigned_at).toBeTruthy();
+      expect((await options(M, A2)).openTasks).toBe(0);
+    });
+  });
 });

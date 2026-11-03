@@ -23,6 +23,7 @@ import {
   type EmploymentStatus,
   type GradeSlug,
   type MoveWorkInput,
+  type MoveWorkOptions,
   type MoveWorkResult,
   type PeopleRoster,
   type PeopleRosterRow,
@@ -41,6 +42,11 @@ import { peopleChecks } from './people-admin';
 /** Engagements still running: the ones a leader must hand over. */
 const OPEN_ENGAGEMENT = `status NOT IN ('completed', 'closed', 'declined', 'withdrawn', 'cancelled', 'merged')`;
 const OPEN_TASK = OPEN_TASK_SQL;
+
+/** C-6: these move the work of someone below them, within their own tree. */
+const TREE_MOVERS = new Set<string>([ROLE.partner, ROLE.manager, ROLE.senior]);
+const MOVE_REFUSAL =
+  'Only the Managing Partner, an administrator, or someone above them in the reporting line can move their work.';
 
 interface RosterDbRow {
   id: string;
@@ -119,13 +125,25 @@ export class PeopleAdminService {
    * person joins each engagement's team so they can see the work.
    */
   async moveWork(ctx: RlsContext, input: MoveWorkInput): Promise<MoveWorkResult> {
-    requireFirmwide(ctx, 'Only the Managing Partner or an administrator can move someone’s work.');
+    const firmwide = isBusinessFirmwide(ctx.role, ctx.roles ?? []);
+    if (!firmwide && !treeMover(ctx)) throw new ForbiddenException(MOVE_REFUSAL);
     const reason = input.reason.trim();
     if (!reason) throw new BadRequestException('Say why the work is moving.');
     if (input.fromEmployeeId === input.toEmployeeId) {
       throw new BadRequestException('Pick someone else to take the work.');
     }
     return this.db.withRlsContext(ctx, async (client) => {
+      if (!firmwide) {
+        const tree = await inTree(client, [input.fromEmployeeId, input.toEmployeeId]);
+        if (input.fromEmployeeId === ctx.employeeId || !tree[0]) {
+          throw new ForbiddenException(MOVE_REFUSAL);
+        }
+        if (!tree[1]) {
+          throw new ForbiddenException(
+            'Pick someone in your own reporting line to take the work, or ask the Managing Partner.',
+          );
+        }
+      }
       const { rows: people } = await client.query<{
         id: string;
         full_name: string;
@@ -159,6 +177,42 @@ export class PeopleAdminService {
         reason,
       });
       return { assigned, reviews };
+    });
+  }
+
+  /**
+   * C-6: may the caller move this person's open work, and to whom. Firm-wide:
+   * anyone's, to anyone here. A Partner / Manager / Senior: someone below them,
+   * to someone in their own tree (themselves included).
+   */
+  async moveWorkOptions(ctx: RlsContext, id: string): Promise<MoveWorkOptions> {
+    const firmwide = isBusinessFirmwide(ctx.role, ctx.roles ?? []);
+    return this.db.withRlsContext(ctx, async (client) => {
+      const person = await this.requireLive(client, id);
+      const openTasks = await this.openTaskCount(client, id);
+      const canMove =
+        firmwide ||
+        (treeMover(ctx) && id !== ctx.employeeId && (await inTree(client, [id]))[0] === true);
+      if (!canMove) {
+        return { employeeId: id, fullName: person.full_name, openTasks, canMove, takers: [] };
+      }
+      const { rows } = await client.query<{ id: string; full_name: string }>(
+        `SELECT e.id, e.full_name
+           FROM hsdg.employees e LEFT JOIN hsdg.users u ON u.id = e.user_id
+          WHERE e.id <> $1 AND e.deleted_at IS NULL AND e.employment_status <> 'exited'
+            -- Has a login, not turned off (another office's login row is out of sight).
+            AND e.user_id IS NOT NULL AND u.is_active IS NOT FALSE
+            ${firmwide ? '' : 'AND e.id = ANY (hsdg.ctx_subtree())'}
+          ORDER BY e.full_name`,
+        [id],
+      );
+      return {
+        employeeId: id,
+        fullName: person.full_name,
+        openTasks,
+        canMove,
+        takers: rows.map((r) => ({ employeeId: r.id, fullName: r.full_name })),
+      };
     });
   }
 
@@ -356,6 +410,20 @@ function norm(s: string): string {
 
 function requireFirmwide(ctx: RlsContext, message: string): void {
   if (!isBusinessFirmwide(ctx.role, ctx.roles ?? [])) throw new ForbiddenException(message);
+}
+
+function treeMover(ctx: RlsContext): boolean {
+  return !!ctx.employeeId && TREE_MOVERS.has(ctx.role);
+}
+
+/** For each id, whether it is in the caller's reporting tree (hsdg.subtree). */
+async function inTree(client: PoolClient, ids: string[]): Promise<boolean[]> {
+  const { rows } = await client.query<{ inside: boolean }>(
+    `SELECT x = ANY (hsdg.ctx_subtree()) AS inside
+       FROM unnest($1::uuid[]) WITH ORDINALITY AS u(x, n) ORDER BY n`,
+    [ids],
+  );
+  return rows.map((r) => r.inside);
 }
 
 function requireAdministrator(ctx: RlsContext): void {

@@ -3,10 +3,10 @@
 import { useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { PERMISSION } from '@hsdg/contracts';
+import { PERMISSION, ROLE } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { can, type Principal } from '@/lib/principal';
+import { can, hasRole, type Principal } from '@/lib/principal';
 import { readsPeople } from '@/lib/people';
 import { cn } from '@/lib/cn';
 import type { AdminEmployeeRow } from '@/lib/types';
@@ -19,6 +19,7 @@ import { PeopleSubnav } from '@/components/people/people-subnav';
 import { SalaryTab } from '@/components/payroll/salary-tab';
 import { BankIdsTab } from '@/components/payroll/bank-ids-tab';
 import { Badge, EmptyState, PageHeader, Spinner } from '@/components/ui';
+import { MoveWorkTab, useMoveWorkOptions } from '@/components/people/move-work';
 
 interface PersonTab {
   id: string;
@@ -81,6 +82,12 @@ export default function PersonPage(): JSX.Element {
     queryFn: () => apiFetch<AdminEmployeeRow>(`/employees/${id}`),
     enabled: can(principal, PERMISSION.employeeRead),
   });
+  // C-6: the server says whether this viewer may move the person's open work.
+  const moves = useMoveWorkOptions(
+    id,
+    !!employee.data &&
+      hasRole(principal, ROLE.managingPartner, ROLE.admin, ROLE.partner, ROLE.manager, ROLE.senior),
+  );
   const back = { href: '/people/employees', label: 'Employees' };
 
   if (!can(principal, PERMISSION.employeeRead)) {
@@ -103,6 +110,15 @@ export default function PersonPage(): JSX.Element {
 
   const e = employee.data;
   const tabs = TABS.filter((t) => t.show(principal, e));
+  const moveOptions = moves.data;
+  if (moveOptions?.canMove) {
+    tabs.push({
+      id: 'work',
+      label: 'Open work',
+      show: () => true,
+      render: () => <MoveWorkTab options={moveOptions} />,
+    });
+  }
   const current = tabs.find((t) => t.id === tab) ?? tabs[0]!;
 
   return (

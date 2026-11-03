@@ -4,6 +4,7 @@ import {
   PERMISSION,
   type DeletePersonCheck,
   type DeletePersonResult,
+  type MoveWorkOptions,
   type MoveWorkResult,
   type PeopleRoster,
   type StartExitResult,
@@ -35,17 +36,30 @@ export class PeopleAdminController {
   }
 
   @Post('admin/move-work')
-  @RequirePermissions(PERMISSION.userManage)
+  @RequirePermissions(PERMISSION.employeeRead)
   @ApiOperation({
     summary: 'Move all of one person’s open work to another (audited)',
     description:
-      'Open tasks they do or review go to the new person, who joins those engagements’ teams. Each move is kept in the task’s assignment history with the reason.',
+      'Open tasks they do or review go to the new person, who joins those engagements’ teams. Each move is kept in the task’s assignment history with the reason. The Managing Partner and an administrator move anyone’s; a Partner / Manager / Senior moves the work of someone below them, to someone in their own reporting line.',
   })
   moveWork(
     @CurrentPrincipal() principal: Principal,
     @Body() dto: MoveWorkDto,
   ): Promise<MoveWorkResult> {
     return this.admin.moveWork(rlsContextFromPrincipal(principal), dto);
+  }
+
+  @Get('employees/:id/move-work')
+  @RequirePermissions(PERMISSION.employeeRead)
+  @ApiOperation({
+    summary: 'Whether you may move this person’s open work, and to whom',
+    description: 'canMove is false (and takers empty) when it is not yours to move.',
+  })
+  moveWorkOptions(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<MoveWorkOptions> {
+    return this.admin.moveWorkOptions(rlsContextFromPrincipal(principal), id);
   }
 
   @Post('employees/:id/deactivate')
