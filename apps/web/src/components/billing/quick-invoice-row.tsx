@@ -20,6 +20,7 @@ import { useToast } from '@/lib/toast';
 import { Button } from '@/components/ui';
 import { Input, Select } from '@/components/form';
 import { InvoiceSend } from './invoice-send';
+import { useBillingSettings } from './invoice-gst';
 
 const inr = (n: number): string =>
   n.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
@@ -68,12 +69,19 @@ export function QuickInvoiceRow({
   const [amount, setAmount] = useState('');
   const [rate, setRate] = useState<QuickInvoiceGstRate>(QUICK_INVOICE_DEFAULT_GST_RATE);
   const [last, setLast] = useState<
-    (QuickInvoiceResult & { engagementServiceId: string; amount: string; rate: QuickInvoiceGstRate }) | null
+    | (QuickInvoiceResult & {
+        engagementServiceId: string;
+        amount: string;
+        rate: QuickInvoiceGstRate;
+      })
+    | null
   >(null);
 
+  // No GST is charged until the firm's GST state (GSTIN) is set.
+  const { gstMode } = useBillingSettings();
   const list = services.data ?? [];
   const chosen = serviceId || (list.length === 1 ? list[0]!.engagementServiceId : '');
-  const preview = quickPreview(amount, rate);
+  const preview = quickPreview(amount, gstMode ? rate : 0);
 
   const pick = (id: string): void => {
     setServiceId(id);
@@ -100,7 +108,8 @@ export function QuickInvoiceRow({
           : `Saved as a draft${r.notIssuedReason ? ` — ${r.notIssuedReason}` : '.'}`,
       );
     },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not make the invoice.', 'error'),
+    onError: (e) =>
+      toast(e instanceof ApiError ? e.message : 'Could not make the invoice.', 'error'),
   });
 
   const repeat = useMutation({
@@ -136,7 +145,10 @@ export function QuickInvoiceRow({
     : null;
 
   return (
-    <div className="mb-3 rounded-lg border border-line bg-surface-raised p-3" data-testid="quick-invoice">
+    <div
+      className="mb-3 rounded-lg border border-line bg-surface-raised p-3"
+      data-testid="quick-invoice"
+    >
       <form className="flex flex-wrap items-center gap-2" onSubmit={submit}>
         <Zap className="h-4 w-4 text-primary-600" aria-hidden />
         <Select
@@ -160,38 +172,42 @@ export function QuickInvoiceRow({
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
         />
-        <Select
-          className="w-24"
-          aria-label="GST rate"
-          value={String(rate)}
-          onChange={(e) => setRate(Number(e.target.value) as QuickInvoiceGstRate)}
-        >
-          {QUICK_INVOICE_GST_RATES.map((r) => (
-            <option key={r} value={String(r)}>
-              {r}% GST
-            </option>
-          ))}
-        </Select>
+        {gstMode && (
+          <Select
+            className="w-28"
+            aria-label="GST rate"
+            value={String(rate)}
+            onChange={(e) => setRate(Number(e.target.value) as QuickInvoiceGstRate)}
+          >
+            {QUICK_INVOICE_GST_RATES.map((r) => (
+              <option key={r} value={String(r)}>
+                {r}% GST
+              </option>
+            ))}
+          </Select>
+        )}
         <Button type="submit" size="sm" disabled={!chosen || !preview || create.isPending}>
           Make invoice ↵
         </Button>
       </form>
       <p className="mt-1.5 text-xs text-ink-muted">
         {preview ?? 'Pick the service, type the amount before GST and press Enter.'}
+        {!gstMode && ' No GST is charged until the firm’s GSTIN is set on the Billing page.'}
       </p>
 
       {last && (
-        <div className="mt-3 space-y-2 border-t border-line pt-3" data-testid="quick-invoice-result">
+        <div
+          className="mt-3 space-y-2 border-t border-line pt-3"
+          data-testid="quick-invoice-result"
+        >
           <p className="text-sm text-ink">
             {last.issued ? (
               <>
-                Issued <span className="font-medium">{last.invoice.invoiceNumber}</span> — send it to
-                the client:
+                Issued <span className="font-medium">{last.invoice.invoiceNumber}</span> — send it
+                to the client:
               </>
             ) : (
-              <>
-                Saved as a draft. {last.notIssuedReason ?? ''} Open it below to issue it.
-              </>
+              <>Saved as a draft. {last.notIssuedReason ?? ''} Open it below to issue it.</>
             )}
           </p>
           {last.issued && last.invoice.invoiceNumber && (

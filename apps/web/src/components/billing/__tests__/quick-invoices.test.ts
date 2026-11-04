@@ -105,6 +105,8 @@ describe('monthly invoices', () => {
   it('says how much, on which day and when next', () => {
     expect(scheduleSummary(s)).toMatch(/^₹15,000\.00 \+ 18% GST \(₹17,700\.00\) on the 5th · next /);
     expect(scheduleSummary({ ...s, mode: 'paused' })).toMatch(/paused$/);
+    // No GSTIN on the firm: no GST is charged, so none is shown.
+    expect(scheduleSummary(s, false)).toMatch(/^₹15,000\.00, no GST on the 5th/);
   });
 
   it('opens with the schedule’s values, or defaults', () => {

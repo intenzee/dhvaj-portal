@@ -24,6 +24,7 @@ import { Badge, Button, Card } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
 import { ExpandToggle } from '@/components/inline-panel';
 import { ordinal, serviceLabel } from './quick-invoice-row';
+import { useBillingSettings } from './invoice-gst';
 
 export const MODE_LABEL: Record<RecurringInvoiceMode, string> = {
   active: 'Issued automatically',
@@ -38,12 +39,13 @@ const inr = (n: number): string =>
  * "₹15,000 + 18% GST (₹17,700) on the 5th · next 5 Dec 2026" — or "Paused".
  * Pure — tested.
  */
-export function scheduleSummary(s: RecurringInvoiceSchedule): string {
-  const t = quickInvoiceTotals(s.amount, s.gstRate);
+export function scheduleSummary(s: RecurringInvoiceSchedule, gstMode = true): string {
+  const rate = gstMode ? s.gstRate : 0;
+  const t = quickInvoiceTotals(s.amount, rate);
   const money = t
-    ? s.gstRate === 0
+    ? rate === 0
       ? `${inr(t.taxable)}, no GST`
-      : `${inr(t.taxable)} + ${s.gstRate}% GST (${inr(t.total)})`
+      : `${inr(t.taxable)} + ${rate}% GST (${inr(t.total)})`
     : s.amount;
   const when =
     s.mode === RECURRING_INVOICE_MODE.paused
@@ -131,6 +133,7 @@ function ScheduleRow({
   const qc = useQueryClient();
   const toast = useToast();
   const s = service.schedule;
+  const { gstMode } = useBillingSettings();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(() => scheduleForm(s));
   const day = validDay(form.dayOfMonth);
@@ -209,7 +212,7 @@ function ScheduleRow({
             >
               {MODE_LABEL[s.mode]}
             </Badge>
-            <span className="text-xs text-ink-muted">{scheduleSummary(s)}</span>
+            <span className="text-xs text-ink-muted">{scheduleSummary(s, gstMode)}</span>
             {mayEdit && s.mode !== RECURRING_INVOICE_MODE.paused && (
               <Button
                 size="sm"
@@ -250,21 +253,26 @@ function ScheduleRow({
               onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
             />
           </Field>
-          <Field label="GST">
-            <Select
-              value={String(form.gstRate)}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, gstRate: Number(e.target.value) as QuickInvoiceGstRate }))
-              }
-            >
-              {QUICK_INVOICE_GST_RATES.map((r) => (
-                <option key={r} value={String(r)}>
-                  {r}%
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Day of the month" hint={day ? undefined : '1 to 28, so every month has it.'}>
+          {gstMode && (
+            <Field label="GST">
+              <Select
+                value={String(form.gstRate)}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, gstRate: Number(e.target.value) as QuickInvoiceGstRate }))
+                }
+              >
+                {QUICK_INVOICE_GST_RATES.map((r) => (
+                  <option key={r} value={String(r)}>
+                    {r}%
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          <Field
+            label="Day of the month"
+            hint={day ? undefined : '1 to 28, so every month has it.'}
+          >
             <Input
               inputMode="numeric"
               value={form.dayOfMonth}
@@ -279,7 +287,9 @@ function ScheduleRow({
               }
             >
               <option value={RECURRING_INVOICE_MODE.active}>Issue it as is</option>
-              <option value={RECURRING_INVOICE_MODE.manual}>Make a draft to change and issue</option>
+              <option value={RECURRING_INVOICE_MODE.manual}>
+                Make a draft to change and issue
+              </option>
               <option value={RECURRING_INVOICE_MODE.paused}>Nothing (paused)</option>
             </Select>
           </Field>
