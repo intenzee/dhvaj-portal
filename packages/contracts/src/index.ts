@@ -120,3 +120,4 @@ export * from './tax-audit-review';
 export * from './tax-audit-filing';
 export * from './tax-audit-milestones';
 export * from './registers';
+export * from './practice-finance';

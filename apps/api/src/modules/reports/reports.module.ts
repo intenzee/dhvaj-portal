@@ -4,6 +4,9 @@ import { NoticesReportService } from './notices-report.service';
 import { ReportsController } from './reports.controller';
 import { ResourcesController } from './resources.controller';
 import { EngagementsModule } from '../engagements/engagements.module';
+import { AuditModule } from '../audit/audit.module';
+import { ProfitabilityService } from './profitability.service';
+import { ProfitabilityController, RateCardsController } from './profitability.controller';
 
 /**
  * Reports & MIS: management aggregations over the RLS-protected read models
@@ -13,8 +16,14 @@ import { EngagementsModule } from '../engagements/engagements.module';
  * partners' notices report (PS-105).
  */
 @Module({
-  imports: [EngagementsModule],
-  controllers: [ReportsController, ResourcesController],
-  providers: [ReportsService, NoticesReportService],
+  imports: [EngagementsModule, AuditModule],
+  controllers: [
+    ReportsController,
+    ResourcesController,
+    ProfitabilityController,
+    RateCardsController,
+  ],
+  providers: [ReportsService, NoticesReportService, ProfitabilityService],
+  exports: [ProfitabilityService],
 })
 export class ReportsModule {}

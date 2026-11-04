@@ -455,6 +455,15 @@ export const NAV_SECTIONS: NavSection[] = [
         ready: true,
       },
       {
+        label: 'Profitability',
+        href: '/reports/profitability',
+        icon: TrendingUp,
+        hint: 'Time cost, realisation and margins by client, engagement, service and partner.',
+        permission: PERMISSION.practiceFinance,
+        hideFor: PREPARER_ROLES,
+        ready: true,
+      },
+      {
         label: 'Resource Management',
         href: '/resources',
         icon: Users,

@@ -291,6 +291,16 @@ describe('DSC register (PS-305)', () => {
   });
 });
 
+describe('Profitability (PS-302)', () => {
+  it('shows only with practice.finance, and never to a preparer', () => {
+    const labels = (p: Principal) => visibleNav(p, { workLinks: true }).map((i) => i.label);
+    expect(labels(principal([PERMISSION.reportRead]))).not.toContain('Profitability');
+    expect(labels(principal([PERMISSION.practiceFinance]))).toContain('Profitability');
+    const senior: Principal = { ...principal([PERMISSION.practiceFinance]), roles: ['senior'] };
+    expect(labels(senior)).not.toContain('Profitability');
+  });
+});
+
 describe('Accountant and HR desks (roles spec §5)', () => {
   const ACCOUNTANT = [
     PERMISSION.billingManage,
