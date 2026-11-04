@@ -13,6 +13,12 @@ import {
   REMINDER_CHANNEL_SETTINGS,
   REMINDER_CHANNEL_SETTING_LABEL,
   TAX_AUDIT_LIMIT_MAX,
+  TAX_AUDIT_MILESTONES,
+  TAX_AUDIT_MILESTONE_LABEL,
+  TAX_AUDIT_MILESTONE_OFFSET_MAX,
+  TAX_AUDIT_MILESTONE_ROLE,
+  TAX_AUDIT_MILESTONE_ROLE_LABEL,
+  type TaxAuditMilestoneOffsets,
   type FormInternalDue,
   type FormInternalDueList,
   type FormInternalDueUpdate,
@@ -26,7 +32,8 @@ import { can } from '@/lib/principal';
 import { Button, Spinner } from '@/components/ui';
 import { Field, Input, Select } from '@/components/form';
 
-type Draft = Omit<UpdateWorkflowSettingsInput, 'version'>;
+// The tax audit milestone offsets have their own form below.
+type Draft = Omit<UpdateWorkflowSettingsInput, 'version' | 'taxAuditMilestoneOffsets'>;
 
 const draftOf = (s: WorkflowSettings): Required<Draft> => ({
   defaultReviewer: s.defaultReviewer,
@@ -50,6 +57,9 @@ export function WorkflowSection(): JSX.Element {
       <PolicyForm mayManage={mayManage} />
       <div className="border-t border-line pt-6">
         <InternalDueTable mayManage={mayManage} />
+      </div>
+      <div className="border-t border-line pt-6">
+        <MilestoneOffsetsForm mayManage={mayManage} />
       </div>
     </div>
   );
@@ -365,5 +375,105 @@ function InternalDueRow({
         )}
       </td>
     </tr>
+  );
+}
+
+/**
+ * F-9: days before a tax audit's due date each internal milestone falls. A
+ * missed one puts the audit on its owner's Today and on the board as at risk.
+ */
+function MilestoneOffsetsForm({ mayManage }: { mayManage: boolean }): JSX.Element {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const settings = useQuery({
+    queryKey: ['workflow-settings'],
+    queryFn: () => apiFetch<WorkflowSettings>('/workflow-settings'),
+  });
+  const [draft, setDraft] = useState<TaxAuditMilestoneOffsets | null>(null);
+  useEffect(() => {
+    if (settings.data) setDraft(settings.data.taxAuditMilestoneOffsets);
+  }, [settings.data]);
+  const save = useMutation({
+    mutationFn: () => {
+      const current = settings.data!.taxAuditMilestoneOffsets;
+      const changed = Object.fromEntries(
+        TAX_AUDIT_MILESTONES.filter((k) => draft![k] !== current[k]).map((k) => [k, draft![k]]),
+      );
+      return apiFetch<WorkflowSettings>('/workflow-settings', {
+        method: 'PATCH',
+        body: { version: settings.data!.version, taxAuditMilestoneOffsets: changed },
+      });
+    },
+    onSuccess: (next) => {
+      qc.setQueryData(['workflow-settings'], next);
+      toast('Tax audit milestones saved.');
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.status === 409) {
+        void qc.invalidateQueries({ queryKey: ['workflow-settings'] });
+        toast('Someone else changed the policy; it has been reloaded.', 'error');
+        return;
+      }
+      toast(err instanceof ApiError ? err.message : 'Could not save the milestones.', 'error');
+    },
+  });
+
+  if (settings.isLoading || !draft) return <Spinner label="Loading the tax audit milestones…" />;
+  const current = settings.data!.taxAuditMilestoneOffsets;
+  const dirty = TAX_AUDIT_MILESTONES.some((k) => draft[k] !== current[k]);
+  const invalid = TAX_AUDIT_MILESTONES.some(
+    (k) => !Number.isInteger(draft[k]) || draft[k] < 0 || draft[k] > TAX_AUDIT_MILESTONE_OFFSET_MAX,
+  );
+
+  return (
+    <form
+      aria-label="Tax audit milestones"
+      className="space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+    >
+      <div>
+        <h2 className="text-base font-semibold text-ink">Tax audit milestones</h2>
+        <p className="text-sm text-ink-muted">
+          Days before the tax audit report’s due date each step should be done. A missed one shows
+          on its owner’s Today and on the tax audit board.
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        {TAX_AUDIT_MILESTONES.map((k) => (
+          <Field
+            key={k}
+            label={TAX_AUDIT_MILESTONE_LABEL[k]}
+            hint={`${TAX_AUDIT_MILESTONE_ROLE_LABEL[TAX_AUDIT_MILESTONE_ROLE[k]]} · days before due`}
+          >
+            <Input
+              type="number"
+              min={0}
+              max={TAX_AUDIT_MILESTONE_OFFSET_MAX}
+              value={draft[k]}
+              disabled={!mayManage}
+              onChange={(e) => setDraft((d) => (d ? { ...d, [k]: e.target.valueAsNumber } : d))}
+            />
+          </Field>
+        ))}
+      </div>
+      {mayManage && (
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!dirty || save.isPending}
+            onClick={() => setDraft(current)}
+          >
+            Discard
+          </Button>
+          <Button type="submit" disabled={!dirty || invalid || save.isPending}>
+            {save.isPending ? 'Saving…' : 'Save milestones'}
+          </Button>
+        </div>
+      )}
+    </form>
   );
 }

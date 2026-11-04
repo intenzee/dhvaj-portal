@@ -70,7 +70,8 @@ export function reviewToToday(r: WorkReviewItem, today: string, me: string): Tod
 /**
  * Today's rows by group; `notices` is absent (and the group left out) when
  * ff_notices is off, and `write_offs` when ff_billing_v2 is off or the caller
- * cannot approve.
+ * cannot approve. `milestones` are tax audits with a milestone of mine past
+ * its internal date (F-9); they always lead under Overdue.
  */
 export type TodayRows = Record<
   Exclude<TodayGroup, 'notices' | 'write_offs' | 'overdue' | 'due_today'>,
@@ -78,6 +79,7 @@ export type TodayRows = Record<
 > & {
   notices?: TodayItem[];
   write_offs?: TodayItem[];
+  milestones?: TodayItem[];
 };
 
 /** Groups whose rows due today or past move up to Overdue / Due today. */
@@ -115,6 +117,9 @@ export function buildTodayView(today: string, rows: TodayRows, engagementId?: st
       else stay.push(i);
     }
     byGroup[group] = stay;
+  }
+  for (const i of keep(rows.milestones ?? [])) {
+    byGroup.overdue!.push({ ...i, group: TODAY_GROUP.overdue });
   }
   const groups = TODAY_GROUPS.flatMap((group) => {
     const own = byGroup[group];

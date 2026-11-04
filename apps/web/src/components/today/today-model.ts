@@ -75,7 +75,8 @@ export function todayDrawerItems(
 
 /**
  * The row's second line: client, then the filing (form · period ·
- * registration), the notice's type, or the engagement.
+ * registration), the notice's type, the tax audit milestones missed, or the
+ * engagement.
  */
 export function todayContextLine(i: TodayItem): string {
   if (i.notice) {
@@ -90,6 +91,10 @@ export function todayContextLine(i: TodayItem): string {
   if (i.adjustment) {
     const by = i.adjustment.requestedByName ? `${i.adjustment.requestedByName}: ` : '';
     return `${i.entityName} · ${by}${i.adjustment.reason}`;
+  }
+  if (i.taxAudit) {
+    // F-9: the milestones missed, beyond the one the title names.
+    return [i.entityName, `Missed: ${i.taxAudit.missed.join(', ')}`, i.engagementCode].join(' · ');
   }
   const what = i.filing
     ? [i.filing.formLabel, i.filing.periodLabel, i.filing.registrationNumber]
@@ -137,5 +142,6 @@ export function stepSelection(current: number, delta: 1 | -1, length: number): n
 /** The date cell's lead-in: a notice's row says which date it is (Reply due / Hearing / Appeal by). */
 export function todayDateLead(i: TodayItem): string | null {
   if (i.adjustment) return 'Asked';
+  if (i.taxAudit) return 'Milestone';
   return i.notice ? i.notice.clockLabel : null;
 }

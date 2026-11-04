@@ -5,6 +5,7 @@ import { DocumentTemplatesModule } from '../document-templates/document-template
 import { DocumentsModule } from '../documents/documents.module';
 import { TaxAuditAcceptanceService } from './tax-audit-acceptance.service';
 import { TaxAuditApplicabilityService } from './tax-audit-applicability.service';
+import { TaxAuditMilestonesService } from './tax-audit-milestones.service';
 import { TaxAuditsController } from './tax-audits.controller';
 import { TaxAuditsService } from './tax-audits.service';
 
@@ -12,6 +13,11 @@ import { TaxAuditsService } from './tax-audits.service';
 @Module({
   imports: [AuditModule, ComplianceModule, DocumentsModule, DocumentTemplatesModule],
   controllers: [TaxAuditsController],
-  providers: [TaxAuditsService, TaxAuditApplicabilityService, TaxAuditAcceptanceService],
+  providers: [
+    TaxAuditsService,
+    TaxAuditApplicabilityService,
+    TaxAuditAcceptanceService,
+    TaxAuditMilestonesService,
+  ],
 })
 export class TaxAuditsModule {}

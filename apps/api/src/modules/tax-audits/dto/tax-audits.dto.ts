@@ -21,6 +21,7 @@ import {
   TAX_AUDIT_FORMS,
   TAX_AUDIT_PRESUMPTIVE_SCHEMES,
   type SaveTaxAuditAcceptanceInput,
+  type SaveTaxAuditMilestoneInput,
   type TaxAuditAcceptanceStepInput,
   type TaxAuditForm,
   type UploadPreviousAuditorLetterInput,
@@ -189,4 +190,28 @@ export class TaxAuditAcceptanceStepDto implements TaxAuditAcceptanceStepInput {
   @IsString()
   @MaxLength(80)
   variantKey?: string;
+}
+
+/** F-9: PUT …/milestones/:milestone — tick or untick, and/or name its owner. */
+export class SaveTaxAuditMilestoneDto implements SaveTaxAuditMilestoneInput {
+  @ApiPropertyOptional({ description: 'Done (true) or not yet (false).' })
+  @IsOptional()
+  @IsBoolean()
+  done?: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'The person who answers for it; null puts it back to the role’s person.',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  ownerId?: string | null;
+}
+
+/** F-9: GET /tax-audits/board. */
+export class TaxAuditBoardQueryDto {
+  @ApiProperty({ example: '2025-26' })
+  @Matches(/^[0-9]{4}-[0-9]{2}$/, { message: 'The financial year must look like 2025-26.' })
+  financialYear!: string;
 }

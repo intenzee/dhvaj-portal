@@ -377,6 +377,16 @@ export class TaxAuditAcceptanceService {
           WHERE id = $1`,
         [auditId, ctx.employeeId ?? null],
       );
+      // F-9: the "Accepted, appointment letter signed" milestone, ticked by whoever accepted.
+      await client.query(
+        `INSERT INTO hsdg.tax_audit_milestones (tax_audit_id, milestone, done_at, done_by_employee_id)
+         VALUES ($1, 'accepted', now(), $2)
+         ON CONFLICT (tax_audit_id, milestone) DO UPDATE
+           SET done_at = COALESCE(tax_audit_milestones.done_at, EXCLUDED.done_at),
+               done_by_employee_id = COALESCE(tax_audit_milestones.done_by_employee_id,
+                                              EXCLUDED.done_by_employee_id)`,
+        [auditId, ctx.employeeId ?? null],
+      );
       await this.audit.recordWith(client, ctx, {
         action: 'tax_audit.accepted',
         objectType: 'tax_audit',

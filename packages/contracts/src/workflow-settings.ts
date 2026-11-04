@@ -3,6 +3,7 @@
  * (Admin → Workflow). GET /workflow-settings, PATCH by `workflow.manage`.
  */
 import type { FirmChecks } from './firm-checks';
+import type { TaxAuditMilestoneOffsets } from './tax-audit-milestones';
 
 /** Who reviews a task sent for review without a reviewer named. */
 export const DEFAULT_REVIEWER = {
@@ -70,6 +71,8 @@ export interface WorkflowSettings {
    * most; a firm may set it lower, never higher).
    */
   taxAuditLimit: number;
+  /** Days before a tax audit's due date each internal milestone falls (F-9). */
+  taxAuditMilestoneOffsets: TaxAuditMilestoneOffsets;
   /** The firm's checks, each on or off (Admin → Workflow → Checks). */
   checks: FirmChecks;
   /** Whether the viewer may switch checks: the managing partner or the administrator. */
@@ -90,6 +93,8 @@ export interface UpdateWorkflowSettingsInput {
   clientReminderDays?: number;
   clientEscalationDays?: number;
   taxAuditLimit?: number;
+  /** Any subset; each 0–365 days. */
+  taxAuditMilestoneOffsets?: Partial<TaxAuditMilestoneOffsets>;
 }
 
 /** ICAI's ceiling on tax audit reports a partner signs in a financial year. */

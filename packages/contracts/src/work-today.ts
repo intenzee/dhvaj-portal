@@ -22,7 +22,8 @@ import type { WorkFilingContext } from './work-queue';
  *   including filings with no task yet — less any already listed above. The
  *   engagement's partner and manager also get its filings due today or past.
  * - overdue / due_today: the rows from prepare and due_soon whose due date is
- *   past / today, lifted to the top so the day's deadlines come first.
+ *   past / today, lifted to the top so the day's deadlines come first. A tax
+ *   audit with a milestone of mine past its internal date (F-9) is Overdue too.
  */
 export const TODAY_GROUP = {
   overdue: 'overdue',
@@ -67,6 +68,7 @@ export const TODAY_ITEM_KIND = {
   notice: 'notice',
   writeOff: 'write_off',
   creditNote: 'credit_note',
+  taxAuditMilestone: 'tax_audit_milestone',
 } as const;
 export type TodayItemKind = (typeof TODAY_ITEM_KIND)[keyof typeof TODAY_ITEM_KIND];
 
@@ -94,6 +96,14 @@ export interface TodayNotice {
   /** What the row's date is: the reply, the hearing or the appeal. */
   clockLabel: NoticeClockLabel;
   amountDemanded: string | null;
+}
+
+/** The tax audit behind an Overdue milestone row (F-9): the milestones I missed on it. */
+export interface TodayTaxAuditMilestones {
+  auditId: string;
+  financialYear: string;
+  /** Labels of the missed milestones I own, earliest first. */
+  missed: string[];
 }
 
 /** The request behind a "Write-offs to approve" row (PS-205). */
@@ -134,6 +144,8 @@ export interface TodayItem {
   notice?: TodayNotice;
   /** The write-off or credit note, on a "Write-offs to approve" row. */
   adjustment?: TodayAdjustment;
+  /** The tax audit, on a missed-milestone row (always under Overdue). */
+  taxAudit?: TodayTaxAuditMilestones;
   link: WorkItemRef;
   /**
    * Rows waiting on the client of a filing: offer a WhatsApp reminder beside

@@ -31,6 +31,7 @@ import {
 } from '../../common/work-links';
 import { CLOSED_ENGAGEMENT_STATUSES } from '../compliance/compliance-calendar-v2.service';
 import { clientPhoneSql } from '../filing-workspace/client-chase';
+import { missedTaxAuditMilestones } from '../tax-audits/tax-audit-milestones.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { WorkReviewsService } from './work-reviews.service';
 import { buildTodayView, reviewToToday, type TodayRows } from './work-today';
@@ -161,6 +162,7 @@ export class WorkTodayService {
           ...(opts.writeOffs
             ? { [TODAY_GROUP.writeOffs]: await this.writeOffsToApprove(client, me, eng) }
             : {}),
+          milestones: await missedTaxAuditMilestones(client, me, eng, today),
         },
         engagementId,
       );

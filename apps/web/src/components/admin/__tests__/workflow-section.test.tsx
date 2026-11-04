@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
+  DEFAULT_TAX_AUDIT_MILESTONE_OFFSETS,
   PERMISSION,
   RELAXED_FIRM_CHECKS,
   type FormInternalDueList,
@@ -33,6 +34,7 @@ const SETTINGS: WorkflowSettings = {
   clientReminderDays: 5,
   clientEscalationDays: 2,
   taxAuditLimit: 60,
+  taxAuditMilestoneOffsets: DEFAULT_TAX_AUDIT_MILESTONE_OFFSETS,
   checks: RELAXED_FIRM_CHECKS,
   checksEditable: false,
   version: 3,
