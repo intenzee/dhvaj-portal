@@ -421,6 +421,100 @@ describe('GST with several GSTINs (e2e)', () => {
     });
   });
 
+  describe('(f) the wrong GSTIN picked for the year, removed, and the right one entered', () => {
+    let entityId: string;
+    let eng: string;
+    let p: string;
+    let wrong: string;
+
+    const yearPick = () =>
+      superuser(
+        async (db) =>
+          (
+            await db.query<{ picks: Record<string, string[]> }>(
+              `SELECT stream_registrations AS picks FROM hsdg.compliance_engagement_years
+                WHERE engagement_id = $1 AND financial_year = '2026-27'`,
+              [eng],
+            )
+          ).rows[0]!.picks,
+      );
+
+    beforeAll(async () => {
+      p = pan('N');
+      const entity = await createClient('Wrong GSTIN Traders', p, [
+        { registrationType: 'gstin', registrationNumber: gstin('07', p), stateCode: '07' },
+      ]);
+      entityId = entity.id;
+      wrong = entity.registrations[0]!.id;
+      eng = (
+        await createGstEngagement(entityId, { streamRegistrations: { gst: [wrong] } }).expect(201)
+      ).body.id as string;
+    });
+
+    it('builds the months on the GSTIN entered after the wrong one went (was "GSTIN missing")', async () => {
+      expect(Object.keys(await countsByRegistration(eng))).toEqual([wrong]);
+      await http()
+        .delete(`/api/v1/entities/${entityId}/registrations/${wrong}`)
+        .set(bearer(pa))
+        .expect(200);
+      // The year no longer asks for the removed GSTIN.
+      expect((await yearPick()).gst ?? []).toEqual([]);
+
+      const added = await http()
+        .post(`/api/v1/entities/${entityId}/registrations`)
+        .set(bearer(pa))
+        .send({ registrationType: 'gstin', registrationNumber: gstin('09', p), stateCode: '09' })
+        .expect(201);
+      const right = (
+        added.body.registrations as Array<{ id: string; registrationNumber: string }>
+      ).find((r) => r.registrationNumber === gstin('09', p))!.id;
+
+      const counts = await countsByRegistration(eng);
+      expect(Object.keys(counts)).toEqual([right]);
+      expect(counts[right]).toMatchObject({ GST_GSTR1_M: 12, GST_GSTR3B_M: 12 });
+      const tree = await gstTree(eng);
+      expect(tree.registrations.map((r) => r.number)).toEqual([gstin('09', p)]);
+      expect(tree.registrationPending).toBe(false);
+    });
+
+    it('a year still picking a GSTIN that is gone takes the active one on a rebuild', async () => {
+      await superuser((db) =>
+        db.query(
+          `UPDATE hsdg.compliance_engagement_years
+              SET stream_registrations = jsonb_build_object('gst', jsonb_build_array(gen_random_uuid()::text))
+            WHERE engagement_id = $1`,
+          [eng],
+        ),
+      );
+      await http()
+        .post(`/api/v1/engagements/${eng}/compliance/generate-calendar`)
+        .set(bearer(pa))
+        .send({})
+        .expect(200);
+      const counts = await countsByRegistration(eng);
+      expect(Object.values(counts)).toEqual([
+        expect.objectContaining({ GST_GSTR1_M: 12, GST_GSTR3B_M: 12 }),
+      ]);
+    });
+
+    it('editing the GSTIN in place keeps its months on it', async () => {
+      const entity = await http().get(`/api/v1/entities/${entityId}`).set(bearer(pa)).expect(200);
+      const reg = (entity.body.registrations as Array<{ id: string }>)[0]!.id;
+      await http()
+        .patch(`/api/v1/entities/${entityId}/registrations/${reg}`)
+        .set(bearer(pa))
+        .send({ registrationNumber: gstin('27', p) })
+        .expect(200);
+      const tree = await gstTree(eng);
+      expect(tree.registrations.map((r) => [r.number, r.stateCode])).toEqual([
+        [gstin('27', p), '27'],
+      ]);
+      expect(await countsByRegistration(eng)).toEqual({
+        [reg]: expect.objectContaining({ GST_GSTR1_M: 12, GST_GSTR3B_M: 12 }),
+      });
+    });
+  });
+
   describe('(e) a GSTIN already recorded on a client', () => {
     it('names the client holding it, even one of another office', async () => {
       // South's client, which Partner A (North) cannot see.

@@ -537,10 +537,14 @@ export class ComplianceGeneratorService {
     for (const year of years.rows) {
       for (const stream of year.streams) {
         // An empty pick is no pick: a year saved before the client's TAN or
-        // GSTIN was on file must still take the one added later.
-        const picked = year.stream_registrations?.[stream];
-        const chosen = picked?.length ? picked : undefined;
+        // GSTIN was on file must still take the one added later. So is a pick
+        // of none of the client's active registrations (a wrong GSTIN removed
+        // or cancelled, the right one entered): the year takes the new one.
         const types = STREAM_REGISTRATION_TYPES[stream];
+        const picked = (year.stream_registrations?.[stream] ?? []).filter((id) =>
+          activeRegs.some((r) => r.id === id && types.includes(r.registration_type)),
+        );
+        const chosen = picked.length ? picked : undefined;
         const streamRegs = activeRegs.filter(
           (r) => types.includes(r.registration_type) && (!chosen || chosen.includes(r.id)),
         );

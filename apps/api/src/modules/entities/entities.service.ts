@@ -1022,6 +1022,7 @@ export class EntitiesService {
         registrationId,
       );
       await this.flagReassessmentIfComplete(client, entityId);
+      await this.regenerateCalendars(client, entityId);
     });
   }
 
