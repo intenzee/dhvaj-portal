@@ -6,6 +6,8 @@ import { ComplianceModule } from '../compliance/compliance.module';
 import { StorageModule } from '../documents/storage/storage.module';
 import { EngagementPurgeService } from './purge/engagement-purge.service';
 import { EngagementPurgeController } from './purge/engagement-purge.controller';
+import { StreamLeadController } from './stream-lead/stream-lead.controller';
+import { StreamLeadService } from './stream-lead/stream-lead.service';
 import { EngagementKindsService } from './engagement-kinds.service';
 import { EngagementKindsController, StreamsController } from './engagement-kinds.controller';
 import { EngagementsService } from './engagements.service';
@@ -51,6 +53,7 @@ import { EngagementTabsController } from './tabs/engagement-tabs.controller';
     EngagementActivityController,
     EngagementTabsController,
     EngagementPurgeController,
+    StreamLeadController,
   ],
   providers: [
     EngagementsService,
@@ -64,6 +67,7 @@ import { EngagementTabsController } from './tabs/engagement-tabs.controller';
     ActivityService,
     EngagementTabsService,
     EngagementPurgeService,
+    StreamLeadService,
   ],
   exports: [
     EngagementsService,

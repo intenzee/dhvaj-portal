@@ -434,7 +434,7 @@ export default function EngagementDetailPage(): JSX.Element {
         <div className="space-y-4">
           <OpenNoticesWidget engagementId={e.id} />
           {layout !== 'legacy' && tabs && <OverviewWidgets engagementId={e.id} tabs={tabs} />}
-          {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} />}
+          {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} engagementId={e.id} />}
           <Card>
             <CardHeader>
               <CardTitle>Overview</CardTitle>
@@ -857,7 +857,7 @@ export default function EngagementDetailPage(): JSX.Element {
       {/* ── Team ─────────────────────────────────────────────────────────── */}
       {tab === 'team' && (
         <>
-          {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} />}
+          {layout === 'compliance' && tabs && <StreamLeadsCard tabs={tabs} engagementId={e.id} />}
           <LeadsCard
             engagement={e}
             canChangePartner={people.canChangePartner}

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
   STREAM_LABEL,
+  STREAM_LEAD_ROLES,
   feeWithPeriod,
   rupees,
   type ActivityPage,
@@ -15,6 +16,9 @@ import {
   workItemHref,
 } from '@hsdg/contracts';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { hasRole } from '@/lib/principal';
+import { StreamLeadEditor } from '@/components/engagement/stream-lead-editor';
 import { formatDate, formatMoney } from '@/lib/format';
 import { Card, CardBody, CardHeader, CardTitle, EmptyState } from '@/components/ui';
 import { FilingStatusBadge, daysLeftText, dueTone } from '@/components/filing/filing-status';
@@ -210,8 +214,17 @@ function Stat({
   );
 }
 
-/** Team tab — who leads each stream (the stream service line's lead). */
-export function StreamLeadsCard({ tabs }: { tabs: EngagementTabs }): JSX.Element | null {
+/** Team tab — who leads each stream (the stream service line's lead). An
+ *  administrator or the Managing Partner can change it in place. */
+export function StreamLeadsCard({
+  tabs,
+  engagementId,
+}: {
+  tabs: EngagementTabs;
+  engagementId?: string;
+}): JSX.Element | null {
+  const { principal } = useAuth();
+  const canChange = !!engagementId && hasRole(principal, ...STREAM_LEAD_ROLES);
   if (tabs.streams.length === 0) return null;
   return (
     <Card className="mb-4">
@@ -223,12 +236,20 @@ export function StreamLeadsCard({ tabs }: { tabs: EngagementTabs }): JSX.Element
           {tabs.streams.map((s) => (
             <li
               key={s.stream}
-              className="flex items-center justify-between rounded-md border border-line px-3 py-2"
+              className="flex flex-wrap items-center justify-between gap-x-2 rounded-md border border-line px-3 py-2"
             >
               <span className="font-medium">{STREAM_LABEL[s.stream as Stream] ?? s.stream}</span>
               <span className={s.leadName ? 'text-ink' : 'text-ink-muted'}>
                 {s.leadName ?? 'No lead set'}
               </span>
+              {canChange && engagementId && s.engagementServiceId && (
+                <StreamLeadEditor
+                  engagementId={engagementId}
+                  lineId={s.engagementServiceId}
+                  streamLabel={STREAM_LABEL[s.stream as Stream] ?? s.stream}
+                  currentLeadId={s.leadEmployeeId}
+                />
+              )}
             </li>
           ))}
         </ul>
