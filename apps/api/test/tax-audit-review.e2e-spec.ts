@@ -120,12 +120,15 @@ describe('Tax audit review and observations (e2e)', () => {
       await http().post(`${base()}/clauses/open`).set(pa).send({ version: ws.version }).expect(200)
     ).body as TaxAuditWorkspace;
     wp34 = opened.papers.find((p) => p.clauseNo === '34')!.id;
-    // Every clause but 34 is settled (straight in the table, the task trigger off).
+    // Every clause but 34 is settled, its portal draft (F-6) confirmed (straight
+    // in the table, the task trigger off).
     await su.query('BEGIN');
     await su.query(`SET LOCAL session_replication_role = replica`);
     await su.query(
       `UPDATE hsdg.tax_audit_working_papers
-          SET status = 'done', done_at = now(), done_by_employee_id = $2, preparer_employee_id = $3
+          SET status = 'done', done_at = now(), done_by_employee_id = $2, preparer_employee_id = $3,
+              draft_confirmed_at = CASE WHEN draft_source IS NOT NULL THEN now() END,
+              draft_confirmed_by_employee_id = CASE WHEN draft_source IS NOT NULL THEN $2::uuid END
         WHERE tax_audit_id = $1 AND status <> 'not_applicable' AND clause_no <> '34'`,
       [auditId, srEmp, artEmp],
     );
