@@ -2,6 +2,7 @@ import {
   TODAY_GROUP,
   TODAY_GROUP_LIMIT,
   TODAY_GROUPS,
+  TODAY_ITEM_KIND,
   WORK_REVIEW_TYPE,
   compareTodayItems,
   isPastDate,
@@ -107,7 +108,14 @@ export function buildTodayView(today: string, rows: TodayRows, engagementId?: st
     if (!own) continue;
     let items = keep(own);
     if (group === TODAY_GROUP.dueSoon) {
-      items = items.filter((i) => !i.link.instanceId || !listed.has(i.link.instanceId));
+      // A filing listed above is not repeated; an ITR to e-verify (PS-403) is
+      // its own job, so it stays even while the filing's task is still open.
+      items = items.filter(
+        (i) =>
+          i.kind === TODAY_ITEM_KIND.itrVerify ||
+          !i.link.instanceId ||
+          !listed.has(i.link.instanceId),
+      );
     }
     const stay: TodayItem[] = [];
     for (const i of items) {

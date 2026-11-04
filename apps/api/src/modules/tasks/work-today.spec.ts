@@ -132,6 +132,27 @@ describe('buildTodayView (WF-201)', () => {
     expect(due.total).toBe(1);
   });
 
+  it('an ITR to e-verify stays under Due this week while its filing is listed above (PS-403)', () => {
+    const view = buildTodayView(TODAY, {
+      prepare: [item({ key: 'task:t1', link: onFiling('i1') })],
+      review: [],
+      waiting: [],
+      due_soon: [
+        item({ key: 'filing:i1', kind: 'filing', group: 'due_soon', link: onFiling('i1') }),
+        item({
+          key: 'itr_verify:r1',
+          kind: 'itr_verify',
+          group: 'due_soon',
+          internalDate: '2026-10-18',
+          statutoryDate: '2026-10-18',
+          link: onFiling('i1'),
+        }),
+      ],
+    });
+    const due = view.groups.find((g) => g.group === 'due_soon')!;
+    expect(due.items.map((i) => i.key)).toEqual(['itr_verify:r1']);
+  });
+
   it('sends the most urgent TODAY_GROUP_LIMIT rows of a group and counts them all', () => {
     const many = Array.from({ length: TODAY_GROUP_LIMIT + 20 }, (_, n) =>
       item({ key: `t${n}`, internalDate: `2026-11-${String((n % 28) + 1).padStart(2, '0')}` }),
