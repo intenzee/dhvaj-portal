@@ -47,6 +47,7 @@ export function notificationHref(
   if (n.link) return workItemHref(n.link);
   // A set of work may span engagements: it opens on its own page.
   if (n.objectType === 'work_set' && n.objectId) return `/work-sets/${n.objectId}`;
+  if (n.objectType === 'quick_task' && n.objectId) return `/quick-tasks?t=${n.objectId}`;
   return n.engagementId ? `/engagements/${n.engagementId}` : null;
 }
 

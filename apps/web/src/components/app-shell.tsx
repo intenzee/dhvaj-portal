@@ -18,6 +18,7 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
+  MessageSquarePlus,
   type LucideIcon,
 } from 'lucide-react';
 import { FEATURE_FLAG, PERMISSION, type PermissionSlug } from '@hsdg/contracts';
@@ -37,6 +38,8 @@ import { AwayResumeBanner } from './time/away-resume-banner';
 import { HelpPanel } from './help/help-panel';
 import { TelemetryTracker } from './telemetry-tracker';
 import { ChangePasswordModal } from './change-password-modal';
+import { NewQuickTaskModal } from './quick-tasks/new-quick-task-modal';
+import { QuickTaskInboxButton } from './quick-tasks/quick-task-inbox';
 
 /** "New …" quick-create actions, shown only to users who may create that thing. */
 const CREATE_ACTIONS: {
@@ -198,6 +201,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             <RunningTimerBanner />
             <AwayResumeBanner />
             <ThemeToggle />
+            <QuickTaskInboxButton />
             <NotificationBell />
             <button
               onClick={() => setHelpOpen(true)}
@@ -365,7 +369,10 @@ function QuickCreate({
   collapsed: boolean;
 }): JSX.Element | null {
   const [open, setOpen] = useState(false);
+  const [composing, setComposing] = useState(false);
   const actions = CREATE_ACTIONS.filter((a) => can(principal, a.permission));
+  // A quick task needs only an employee record to give it.
+  const mayTask = !!principal.employeeId && can(principal, PERMISSION.notificationRead);
 
   useEffect(() => {
     if (!open) return;
@@ -376,7 +383,7 @@ function QuickCreate({
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  if (actions.length === 0) return null;
+  if (actions.length === 0 && !mayTask) return null;
 
   return (
     <div className={cn('relative pb-3', collapsed ? 'px-2' : 'px-3')}>
@@ -402,6 +409,20 @@ function QuickCreate({
               collapsed ? 'left-full top-0 ml-2' : 'left-3 right-3 w-auto',
             )}
           >
+            {mayTask && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  setComposing(true);
+                }}
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-ink hover:bg-surface-sunken"
+              >
+                <MessageSquarePlus className="h-4 w-4 text-ink-muted" aria-hidden />
+                New task
+              </button>
+            )}
             {actions.map((a) => {
               const Icon = a.icon;
               return (
@@ -420,6 +441,7 @@ function QuickCreate({
           </div>
         </>
       )}
+      {composing && <NewQuickTaskModal onClose={() => setComposing(false)} />}
     </div>
   );
 }
