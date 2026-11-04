@@ -1196,7 +1196,7 @@ const PT_HALF_YEARLY_STATES = any(ptState('33'), ptState('32'));
  * Act 1948, now the Code on Social Security, 2020). PT is a state levy, so its
  * dates are per state (the registration's GST state code) and each one is
  * marked for the stream lead to verify before it is relied on. Seeded by
- * 1773981000000_payroll_stream_rules.sql (generated from this list).
+ * 1773999100000_payroll_stream_rules.sql (generated from this list).
  */
 export const PAYROLL_RULES: SeedRule[] = [
   {

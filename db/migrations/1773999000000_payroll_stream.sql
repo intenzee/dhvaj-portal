@@ -10,7 +10,7 @@
 --   · The stream lists (services, compliance years, rule versions) take
 --     'payroll', rule versions may run on a PF, ESIC or PT registration, and
 --     the live service STREAM_PAYROLL is added. Its rules and checklist are in
---     1773981000000_payroll_stream_rules.sql (generated).
+--     1773999100000_payroll_stream_rules.sql (generated).
 --   · The two old services are retired for new engagements. A Compliance
 --     engagement holds only stream services, so none carries them and there
 --     is nothing to move: engagements of other kinds on them stay as they are.
