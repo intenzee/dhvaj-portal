@@ -23,7 +23,7 @@ describe('Notice intake from the PDF (e2e)', () => {
   let mp: string;
   let pa: string;
   let pb: string;
-  let admin: string;
+  let hr: string;
   let entityId: string;
   let engagementId: string;
   let engagementCode: string;
@@ -92,7 +92,7 @@ describe('Notice intake from the PDF (e2e)', () => {
     mp = await token('mp@dhvaj.in');
     pa = await token('partner.a@dhvaj.in');
     pb = await token('partner.b@dhvaj.in');
-    admin = await token('admin@dhvaj.in');
+    hr = await token('hr@dhvaj.in');
 
     // A client of its own with a (synthetic) PAN and GSTIN.
     entityId = await freshClient(
@@ -243,7 +243,7 @@ describe('Notice intake from the PDF (e2e)', () => {
       .set(bearer(pa))
       .send({ documentId: 'nope' })
       .expect(400);
-    await intake(admin, gstDoc).expect(403);
+    await intake(hr, gstDoc).expect(403);
   });
 
   it('is behind ff_notices: 404 when the firm has it off', async () => {

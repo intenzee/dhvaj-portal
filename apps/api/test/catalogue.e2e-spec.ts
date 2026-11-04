@@ -299,10 +299,10 @@ describe('Service Catalogue (e2e)', () => {
       expect(codes).toContain('OTHER_PROF');
     });
 
-    it('forbids an admin (no service.manage_other) from creating under OTHER (403)', async () => {
+    it('forbids a partner (no service.manage_other) from creating under OTHER (403)', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/services')
-        .set(bearer(await token('admin@dhvaj.in')))
+        .set(bearer(await token('partner.a@dhvaj.in')))
         .send({
           serviceLineCode: 'OTHER',
           code: code('OTH'),

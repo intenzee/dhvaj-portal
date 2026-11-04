@@ -152,14 +152,20 @@ describe('Clients: missing data and delete (e2e)', () => {
     await su.query(`DELETE FROM hsdg.client_credentials WHERE entity_id = $1`, [id]);
   });
 
-  it('lets only the Managing Partner delete a client', async () => {
+  it('lets only the Managing Partner or the administrator delete a client', async () => {
     await http().delete(`/api/v1/entities/${bare}`).set(bearer(pa)).expect(403);
-    const admin = await token('admin@dhvaj.in');
-    await http().delete(`/api/v1/entities/${bare}`).set(bearer(admin)).expect(403);
+    const hr = await token('hr@dhvaj.in');
+    await http().delete(`/api/v1/entities/${bare}`).set(bearer(hr)).expect(403);
     await http().get(`/api/v1/entities/${bare}`).set(bearer(pa)).expect(200);
     await http()
       .delete('/api/v1/entities/00000000-0000-4000-8000-000000000000')
       .set(bearer(mp))
+      .expect(404);
+    // The administrator gets past the check too (B-1): an unknown client is a 404.
+    const admin = await token('admin@dhvaj.in');
+    await http()
+      .delete('/api/v1/entities/00000000-0000-4000-8000-000000000000')
+      .set(bearer(admin))
       .expect(404);
   });
 

@@ -333,12 +333,19 @@ describe('Documents (e2e)', () => {
       expect(res.body.items).toHaveLength(0);
     });
 
-    it('lists nothing to the platform admin, who reads engagements but not their work', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/documents')
-        .set(bearer(await token('admin@dhvaj.in')))
-        .expect(200);
-      expect(res.body.items).toHaveLength(0);
+    it('lists to the administrator what it lists to the Managing Partner (B-1)', async () => {
+      const ids = async (email: string): Promise<string[]> =>
+        (
+          (
+            await request(app.getHttpServer())
+              .get('/api/v1/documents?limit=50')
+              .set(bearer(await token(email)))
+              .expect(200)
+          ).body.items as Array<{ id: string }>
+        ).map((d) => d.id);
+      const admin = await ids('admin@dhvaj.in');
+      expect(admin.length).toBeGreaterThan(0);
+      expect(admin).toEqual(await ids('mp@dhvaj.in'));
     });
   });
 });

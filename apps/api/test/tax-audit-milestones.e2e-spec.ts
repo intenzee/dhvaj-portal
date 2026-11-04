@@ -44,8 +44,11 @@ describe('Tax audit milestones and board (e2e)', () => {
   };
   const view = async (who = pa) =>
     (await http().get(base()).set(who).expect(200)).body as TaxAuditMilestones;
+  // Narrowed to the audit's engagement: other suites' overdue work would push
+  // it past the group's limit on a shared database.
   const overdue = async (who: Record<string, string>) => {
-    const v = (await http().get('/api/v1/work/today').set(who).expect(200)).body as TodayView;
+    const v = (await http().get(`/api/v1/work/today?engagementId=${eng}`).set(who).expect(200))
+      .body as TodayView;
     return v.groups.find((g) => g.group === 'overdue')!.items;
   };
   const setDue = (date: string) =>

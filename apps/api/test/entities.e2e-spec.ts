@@ -53,12 +53,17 @@ describe('Entity Master (e2e)', () => {
       expect(names).not.toContain('Coastal Foods Pvt Ltd'); // South
     });
 
-    it('forbids the platform admin (no entity.read) from listing clients (403)', async () => {
-      // Checkpoint role separation: technical admin has no client-data access.
+    it('forbids HR (no entity.read) from listing clients (403); the administrator lists them', async () => {
+      // Role separation: HR has no client-data access. The administrator holds
+      // every permission the Managing Partner does (B-1).
+      await request(app.getHttpServer())
+        .get('/api/v1/entities')
+        .set(bearer(await token('hr@dhvaj.in')))
+        .expect(403);
       await request(app.getHttpServer())
         .get('/api/v1/entities')
         .set(bearer(await token('admin@dhvaj.in')))
-        .expect(403);
+        .expect(200);
     });
 
     // Regression: unknown query params used to 400 under forbidNonWhitelisted.
