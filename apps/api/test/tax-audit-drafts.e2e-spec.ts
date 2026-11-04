@@ -204,12 +204,12 @@ describe('Tax audit drafts from portal data (e2e)', () => {
       figures: { itc_igst: 1000, itc_cgst: 400, itc_sgst: 400, itc_cess: 0 },
     });
 
-    // Last year's tax audit of the client, its depreciation and ratios done.
+    // Last year's tax audit of the client, filed, its depreciation and ratios done.
     const {
       rows: [ly],
     } = await su.query<{ id: string }>(
       `INSERT INTO hsdg.tax_audits (engagement_id, financial_year, stage)
-       VALUES ($1, '2024-25', 'clause_work') RETURNING id`,
+       VALUES ($1, '2024-25', 'filed') RETURNING id`,
       [eng],
     );
     const {

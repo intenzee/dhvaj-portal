@@ -21,6 +21,7 @@ describe('Tax audit year rollover (e2e)', () => {
   let auditId: string;
   let instanceId: string;
   let nextId: string;
+  let libId: string;
   const FY = '2023-24';
   const NEXT = '2024-25';
   const http = () => request(app.getHttpServer());
@@ -40,6 +41,28 @@ describe('Tax audit year rollover (e2e)', () => {
               completed_at = CASE WHEN $2 = 'filed' THEN TIMESTAMPTZ '2024-09-20T10:00:00+05:30' END
         WHERE id = $1`,
       [instanceId, status],
+    );
+
+  /** A done working paper of the clause on the audit, on the first library. */
+  const donePaper = (audit: string, no: string, answer: Record<string, string>) =>
+    su.query(
+      `WITH c AS (
+             SELECT c.id, c.clause_no, c.default_package, c.default_grade
+               FROM hsdg.tax_audit_clause_library c
+              WHERE c.library_version_id = $3 AND c.clause_no = $4),
+           p AS (
+             INSERT INTO hsdg.tax_audit_clause_packages (tax_audit_id, engagement_id, package, grade)
+             SELECT $1, $2, c.default_package, c.default_grade FROM c
+             ON CONFLICT DO NOTHING RETURNING id, package)
+           INSERT INTO hsdg.tax_audit_working_papers
+             (tax_audit_id, engagement_id, package_id, library_clause_id, clause_no, status, answer, done_at)
+           SELECT $1, $2,
+                  COALESCE((SELECT id FROM p),
+                           (SELECT k.id FROM hsdg.tax_audit_clause_packages k, c
+                             WHERE k.tax_audit_id = $1 AND k.package = c.default_package)),
+                  c.id, c.clause_no, 'done', $5::jsonb, now()
+             FROM c`,
+      [audit, eng, libId, no, JSON.stringify(answer)],
     );
 
   beforeAll(async () => {
@@ -94,30 +117,12 @@ describe('Tax audit year rollover (e2e)', () => {
         WHERE id = $1`,
       [auditId, partnerA, lib!.id],
     );
-    for (const [no, answer] of [
-      ['10', { a: 'Trading in textiles\t09005', b: 'No change' }],
-      ['34', { a: '26Q\t194C\t120000\t0', b: '26Q\tQ1\t2023-07-31\t2023-07-20\tYes' }],
-    ] as const) {
-      await su.query(
-        `WITH c AS (
-           SELECT c.id, c.clause_no, c.default_package, c.default_grade
-             FROM hsdg.tax_audit_clause_library c
-            WHERE c.library_version_id = $3 AND c.clause_no = $4),
-         p AS (
-           INSERT INTO hsdg.tax_audit_clause_packages (tax_audit_id, engagement_id, package, grade)
-           SELECT $1, $2, c.default_package, c.default_grade FROM c
-           ON CONFLICT DO NOTHING RETURNING id, package)
-         INSERT INTO hsdg.tax_audit_working_papers
-           (tax_audit_id, engagement_id, package_id, library_clause_id, clause_no, status, answer, done_at)
-         SELECT $1, $2,
-                COALESCE((SELECT id FROM p),
-                         (SELECT k.id FROM hsdg.tax_audit_clause_packages k, c
-                           WHERE k.tax_audit_id = $1 AND k.package = c.default_package)),
-                c.id, c.clause_no, 'done', $5::jsonb, now()
-           FROM c`,
-        [auditId, eng, lib!.id, no, JSON.stringify(answer)],
-      );
-    }
+    libId = lib!.id;
+    await donePaper(auditId, '10', { a: 'Trading in textiles\t09005', b: 'No change' });
+    await donePaper(auditId, '34', {
+      a: '26Q\t194C\t120000\t0',
+      b: '26Q\tQ1\t2023-07-31\t2023-07-20\tYes',
+    });
   });
 
   afterAll(async () => {
@@ -179,7 +184,29 @@ describe('Tax audit year rollover (e2e)', () => {
     expect(saved).toMatchObject({ formType: '3CA', signingPartnerId: partnerA });
   });
 
-  it('opening next year’s 3CD work carries last year’s answers as drafts', async () => {
+  it('opening next year’s 3CD work carries last year’s filed answers as drafts', async () => {
+    // A revised report of last year, still in hand, its clause 10 already
+    // done differently: not what was reported, so not carried.
+    const { rows: cols } = await su.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM information_schema.columns
+        WHERE table_schema = 'hsdg' AND table_name = 'tax_audits' AND column_name = 'revision_reason'`,
+    );
+    const revised = cols[0]!.n > 0; // F-8 asks a revision for its reason.
+    const {
+      rows: [rev],
+    } = await su.query<{ id: string }>(
+      revised
+        ? `INSERT INTO hsdg.tax_audits
+             (engagement_id, financial_year, revision, stage, clause_library_version_id,
+              revised_from_id, revision_reason)
+           VALUES ($1, $2, 1, 'clause_work', $3, $4, 'Turnover corrected.') RETURNING id`
+        : `INSERT INTO hsdg.tax_audits
+             (engagement_id, financial_year, revision, stage, clause_library_version_id)
+           VALUES ($1, $2, 1, 'clause_work', $3) RETURNING id`,
+      revised ? [eng, FY, libId, auditId] : [eng, FY, libId],
+    );
+    await donePaper(rev!.id, '10', { a: 'Revised: trading in yarn\t09006', b: 'Changed' });
+
     await su.query(`UPDATE hsdg.tax_audits SET stage = 'information' WHERE id = $1`, [nextId]);
     const base = `/api/v1/engagements/${eng}/tax-audits/${nextId}`;
     const v0 = (await http().get(`${base}/clauses`).set(pa).expect(200)).body as TaxAuditWorkspace;
