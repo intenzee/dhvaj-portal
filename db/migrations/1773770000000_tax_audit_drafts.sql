@@ -10,7 +10,8 @@
 --                   and the year's s.44AB applicability decision
 --   GST and TDS     the year's returns the firm filed for the entity, on any
 --                   of its engagements (filing records not undone)
---   last year       the done answers of last year's tax audit of the entity
+--   last year       the done answers of last year's filed tax audit of the
+--                   entity (its latest filed revision: what was reported)
 --   MSME list       the client's answer to the "List of MSME suppliers" ask
 --
 -- The filings sit on the client's compliance engagements, which the audit's
@@ -158,7 +159,7 @@ BEGIN
                             WHERE w.tax_audit_id = la.id AND w.status = 'done'))
         FROM hsdg.tax_audits la
         JOIN hsdg.engagements le ON le.id = la.engagement_id
-       WHERE le.entity_id = v_entity AND la.financial_year = v_prev
+       WHERE le.entity_id = v_entity AND la.financial_year = v_prev AND la.stage = 'filed'
          AND EXISTS (SELECT 1 FROM hsdg.tax_audit_working_papers w
                       WHERE w.tax_audit_id = la.id AND w.status = 'done')
        ORDER BY la.revision DESC
