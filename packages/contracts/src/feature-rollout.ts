@@ -30,6 +30,7 @@ export const FEATURE_FLAG_LABEL: Record<FeatureFlag, string> = {
   ff_registers: 'Practice Services 3 — UDIN and DSC registers',
   ff_certificates: 'Practice Services 4 — the certificates desk and register',
   ff_client_kyc: 'Practice Services 4 — client KYC and acceptance',
+  ff_itr_desk: 'Practice Services 4 — the ITR desk (individual returns at volume)',
 };
 
 /** One flag on Admin → Rollout. */

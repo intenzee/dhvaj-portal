@@ -523,6 +523,8 @@ export const FEATURE_FLAG = {
   certificates: 'ff_certificates',
   /** Practice Services Phase 4: client KYC and acceptance for non-audit clients (PS-404). */
   clientKyc: 'ff_client_kyc',
+  /** Practice Services Phase 4: individual returns at volume — the ITR desk (PS-403). */
+  itrDesk: 'ff_itr_desk',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);

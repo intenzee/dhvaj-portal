@@ -332,116 +332,126 @@ export class NoticesService {
 
   /** POST /notices — record a notice on an engagement the caller works on. */
   async create(ctx: RlsContext, input: CreateNoticeRequest): Promise<Notice> {
-    return this.db.withRlsContext(ctx, async (client) => {
-      const { rows: engs } = await client.query<{
-        id: string;
-        entity_id: string;
-        kind: string | null;
-        is_member: boolean;
-      }>(
-        `SELECT id, entity_id, kind, hsdg.is_engagement_member(id) AS is_member
-           FROM hsdg.engagements WHERE id = $1`,
-        [input.engagementId],
-      );
-      const eng = engs[0];
-      if (!eng) throw new NotFoundException('Engagement not found.');
-      if (!eng.is_member)
-        throw new ForbiddenException('Only the engagement team can record a notice here.');
-      if (eng.kind !== 'compliance' && eng.kind !== 'assignment')
-        throw new BadRequestException(
-          'A notice is worked under a Compliance or Assignment engagement.',
-        );
-      const { rows: types } = await client.query<{
-        id: string;
-        default_reply_days: number | null;
-      }>(`SELECT id, default_reply_days FROM hsdg.notice_types WHERE code = $1 AND is_active`, [
-        input.noticeTypeCode,
-      ]);
-      const type = types[0];
-      if (!type) throw new BadRequestException(`Unknown notice type ${input.noticeTypeCode}.`);
-      if (input.registrationId)
-        await this.requireRegistration(client, eng.entity_id, input.registrationId);
-      const ownerId = input.ownerId ?? ctx.employeeId;
-      if (!ownerId) throw new BadRequestException('Choose who owns the notice.');
-      await this.requireOnTeam(client, ctx, eng.id, ownerId, 'owner');
-      if (input.reviewerId)
-        await this.requireOnTeam(client, ctx, eng.id, input.reviewerId, 'reviewer');
-      const replyDueOn =
-        input.replyDueOn === undefined
-          ? defaultReplyDue(input.issuedOn, type.default_reply_days)
-          : input.replyDueOn;
+    return this.db.withRlsContext(ctx, (client) => this.createWith(client, ctx, input));
+  }
 
-      let id: string;
-      try {
-        const { rows } = await client.query<{ id: string }>(
-          `INSERT INTO hsdg.notices
-             (entity_id, engagement_id, registration_id, notice_type_id, reference_no, issued_on,
-              received_on, served_via, financial_year, assessment_year, period_from, period_to,
-              amount_demanded, reply_due_on, internal_due_override, owner_employee_id,
-              reviewer_employee_id, summary, created_by_employee_id, updated_by_employee_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'portal'),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$19)
-           RETURNING id`,
-          [
-            eng.entity_id,
-            eng.id,
-            input.registrationId ?? null,
-            type.id,
-            input.referenceNo.trim(),
-            input.issuedOn,
-            input.receivedOn,
-            input.servedVia ?? null,
-            input.financialYear ?? null,
-            input.assessmentYear ?? null,
-            input.periodFrom ?? null,
-            input.periodTo ?? null,
-            input.amountDemanded ?? null,
-            replyDueOn,
-            input.internalDueOverride ?? null,
-            ownerId,
-            input.reviewerId ?? null,
-            input.summary?.trim() || null,
-            ctx.employeeId ?? null,
-          ],
-        );
-        id = rows[0]!.id;
-      } catch (err) {
-        throw noticePgError(err, input.referenceNo.trim());
-      }
-      if (input.documentId) await this.linkDocument(client, id, eng.id, input.documentId, 'notice');
-      await this.audit.recordWith(client, ctx, {
-        action: 'notice.created',
-        objectType: 'notice',
-        objectId: id,
-        after: {
-          engagementId: eng.id,
-          noticeTypeCode: input.noticeTypeCode,
-          referenceNo: input.referenceNo.trim(),
-          issuedOn: input.issuedOn,
-          receivedOn: input.receivedOn,
+  /**
+   * POST /notices inside the caller's transaction — PS-403 opens a notice from
+   * an ITR's intimation and links it to the return in the same one.
+   */
+  async createWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    input: CreateNoticeRequest,
+  ): Promise<Notice> {
+    const { rows: engs } = await client.query<{
+      id: string;
+      entity_id: string;
+      kind: string | null;
+      is_member: boolean;
+    }>(
+      `SELECT id, entity_id, kind, hsdg.is_engagement_member(id) AS is_member
+         FROM hsdg.engagements WHERE id = $1`,
+      [input.engagementId],
+    );
+    const eng = engs[0];
+    if (!eng) throw new NotFoundException('Engagement not found.');
+    if (!eng.is_member)
+      throw new ForbiddenException('Only the engagement team can record a notice here.');
+    if (eng.kind !== 'compliance' && eng.kind !== 'assignment')
+      throw new BadRequestException(
+        'A notice is worked under a Compliance or Assignment engagement.',
+      );
+    const { rows: types } = await client.query<{
+      id: string;
+      default_reply_days: number | null;
+    }>(`SELECT id, default_reply_days FROM hsdg.notice_types WHERE code = $1 AND is_active`, [
+      input.noticeTypeCode,
+    ]);
+    const type = types[0];
+    if (!type) throw new BadRequestException(`Unknown notice type ${input.noticeTypeCode}.`);
+    if (input.registrationId)
+      await this.requireRegistration(client, eng.entity_id, input.registrationId);
+    const ownerId = input.ownerId ?? ctx.employeeId;
+    if (!ownerId) throw new BadRequestException('Choose who owns the notice.');
+    await this.requireOnTeam(client, ctx, eng.id, ownerId, 'owner');
+    if (input.reviewerId)
+      await this.requireOnTeam(client, ctx, eng.id, input.reviewerId, 'reviewer');
+    const replyDueOn =
+      input.replyDueOn === undefined
+        ? defaultReplyDue(input.issuedOn, type.default_reply_days)
+        : input.replyDueOn;
+
+    let id: string;
+    try {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO hsdg.notices
+           (entity_id, engagement_id, registration_id, notice_type_id, reference_no, issued_on,
+            received_on, served_via, financial_year, assessment_year, period_from, period_to,
+            amount_demanded, reply_due_on, internal_due_override, owner_employee_id,
+            reviewer_employee_id, summary, created_by_employee_id, updated_by_employee_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'portal'),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$19)
+         RETURNING id`,
+        [
+          eng.entity_id,
+          eng.id,
+          input.registrationId ?? null,
+          type.id,
+          input.referenceNo.trim(),
+          input.issuedOn,
+          input.receivedOn,
+          input.servedVia ?? null,
+          input.financialYear ?? null,
+          input.assessmentYear ?? null,
+          input.periodFrom ?? null,
+          input.periodTo ?? null,
+          input.amountDemanded ?? null,
           replyDueOn,
+          input.internalDueOverride ?? null,
           ownerId,
-          documentId: input.documentId ?? null,
-        },
-      });
-      const notice = await this.getWith(client, id, { canManage: true });
-      // PS-102 — the owner and reviewer hear of it (never the person who recorded it,
-      // as task_assigned skips self-assignment). Cleared by the notice's own trigger.
-      await this.notifications.emitWith(client, ctx, {
-        type: NOTIFICATION_TYPE.noticeReceived,
-        recipientEmployeeIds: [ownerId, input.reviewerId ?? null].filter(
-          (e): e is string => Boolean(e) && e !== ctx.employeeId,
-        ),
-        title: `Notice received — ${notice.noticeType.form ?? notice.noticeType.title} ${
-          notice.referenceNo
-        } · ${notice.entityName}`,
+          input.reviewerId ?? null,
+          input.summary?.trim() || null,
+          ctx.employeeId ?? null,
+        ],
+      );
+      id = rows[0]!.id;
+    } catch (err) {
+      throw noticePgError(err, input.referenceNo.trim());
+    }
+    if (input.documentId) await this.linkDocument(client, id, eng.id, input.documentId, 'notice');
+    await this.audit.recordWith(client, ctx, {
+      action: 'notice.created',
+      objectType: 'notice',
+      objectId: id,
+      after: {
         engagementId: eng.id,
-        objectType: 'notice',
-        objectId: id,
-        dedupKey: `notice_received:${id}`,
-        link: { engagementId: eng.id, engagementKind: eng.kind as EngagementKind, noticeId: id },
-      });
-      return notice;
+        noticeTypeCode: input.noticeTypeCode,
+        referenceNo: input.referenceNo.trim(),
+        issuedOn: input.issuedOn,
+        receivedOn: input.receivedOn,
+        replyDueOn,
+        ownerId,
+        documentId: input.documentId ?? null,
+      },
     });
+    const notice = await this.getWith(client, id, { canManage: true });
+    // PS-102 — the owner and reviewer hear of it (never the person who recorded it,
+    // as task_assigned skips self-assignment). Cleared by the notice's own trigger.
+    await this.notifications.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.noticeReceived,
+      recipientEmployeeIds: [ownerId, input.reviewerId ?? null].filter(
+        (e): e is string => Boolean(e) && e !== ctx.employeeId,
+      ),
+      title: `Notice received — ${notice.noticeType.form ?? notice.noticeType.title} ${
+        notice.referenceNo
+      } · ${notice.entityName}`,
+      engagementId: eng.id,
+      objectType: 'notice',
+      objectId: id,
+      dedupKey: `notice_received:${id}`,
+      link: { engagementId: eng.id, engagementKind: eng.kind as EngagementKind, noticeId: id },
+    });
+    return notice;
   }
 
   /** PATCH /notices/:id — any subset of the fields, with the version read. */

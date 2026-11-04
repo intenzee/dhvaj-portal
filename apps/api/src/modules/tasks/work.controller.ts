@@ -61,6 +61,7 @@ export class WorkController {
       writeOffs:
         this.flags.isOnFor(FEATURE_FLAG.billing, principal.officeCode) &&
         principal.permissions.includes(PERMISSION.billingApprove),
+      itr: this.flags.isOnFor(FEATURE_FLAG.itrDesk, principal.officeCode),
     });
   }
 

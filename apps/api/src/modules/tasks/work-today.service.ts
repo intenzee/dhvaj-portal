@@ -5,7 +5,11 @@ import {
   TODAY_DUE_WITHIN_DAYS,
   TODAY_GROUP,
   formatInr,
+  ITR_VERIFY_DAYS_DEFAULT,
+  ITR_VERIFY_RULE_CODE,
+  ITR_VERIFY_WARN_DAYS,
   isPastDate,
+  itrYearLabel,
   noticeClock,
   noticeTypeLabel,
   todayDueDate,
@@ -109,6 +113,15 @@ interface NoticeRow extends EngagementCols {
   type_title: string;
 }
 
+interface ItrVerifyRow extends EngagementCols {
+  id: string;
+  instance_id: string;
+  financial_year: string;
+  reference_no: string | null;
+  filed_on: string;
+  due_on: string;
+}
+
 interface FilingRow extends EngagementCols, WorkLinkSqlRow, TaskCols {
   workflow_status: string;
 }
@@ -128,12 +141,13 @@ export class WorkTodayService {
   /**
    * `opts.notices`: ff_notices is on for the caller's office (adds the Notices
    * group). `opts.writeOffs`: ff_billing_v2 is on and the caller holds
-   * billing.approve (adds Write-offs to approve, PS-205).
+   * billing.approve (adds Write-offs to approve, PS-205). `opts.itr`:
+   * ff_itr_desk is on (filed ITRs to e-verify join Due this week, PS-403).
    */
   async today(
     ctx: RlsContext,
     engagementId?: string,
-    opts: { notices?: boolean; writeOffs?: boolean } = {},
+    opts: { notices?: boolean; writeOffs?: boolean; itr?: boolean } = {},
   ): Promise<TodayView> {
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{ today: string }>(
@@ -155,7 +169,10 @@ export class WorkTodayService {
             ...tasks.filter((t) => t.group === TODAY_GROUP.waiting),
             ...(await this.myRequests(client, me, eng, today, listedWaiting(tasks))),
           ]),
-          [TODAY_GROUP.dueSoon]: await this.filingsDueSoon(client, me, eng, today),
+          [TODAY_GROUP.dueSoon]: [
+            ...(await this.filingsDueSoon(client, me, eng, today)),
+            ...(opts.itr ? await this.itrsToVerify(client, me, eng, today) : []),
+          ],
           ...(opts.notices
             ? { [TODAY_GROUP.notices]: await this.myNotices(client, me, eng, today) }
             : {}),
@@ -360,6 +377,75 @@ export class WorkTodayService {
       };
       return [item];
     });
+  }
+
+  /**
+   * PS-403: filed ITRs on work I prepare, review or lead, not yet e-verified,
+   * whose window (filing + the ITR_VERIFICATION_DUE days) closes within a week
+   * or has closed. Dated by that day; a lapsed one lifts to Overdue.
+   */
+  private async itrsToVerify(
+    client: PoolClient,
+    me: string,
+    engagementId: string | null,
+    today: string,
+  ): Promise<TodayItem[]> {
+    const { rows } = await client.query<ItrVerifyRow>(
+      `SELECT * FROM (
+         SELECT ${ENGAGEMENT_COLS}, ir.id, ci.id AS instance_id, ci.financial_year,
+                fr.reference_no, fr.filed_on::text AS filed_on,
+                (fr.filed_on + COALESCE(vd.offset_days, $5::int))::text AS due_on
+           FROM hsdg.itr_returns ir
+           JOIN hsdg.compliance_instances ci ON ci.id = ir.compliance_instance_id
+           JOIN hsdg.filing_records fr ON fr.compliance_instance_id = ci.id AND fr.undone_at IS NULL
+           ${ENGAGEMENT_JOIN('ir.engagement_id')}
+           LEFT JOIN LATERAL (
+             SELECT v.offset_days FROM hsdg.compliance_rule_versions v
+               JOIN hsdg.compliance_rules vr ON vr.id = v.compliance_rule_id
+              WHERE vr.code = $6 AND v.effective_from <= fr.filed_on
+                AND (v.effective_to IS NULL OR v.effective_to >= fr.filed_on)
+              ORDER BY v.effective_from DESC LIMIT 1) vd ON true
+          WHERE ir.e_verified_on IS NULL
+            AND eng.status <> ALL($4::text[])
+            AND ($3::uuid IS NULL OR ir.engagement_id = $3)
+            AND (eng.engagement_partner_id = $1 OR eng.engagement_manager_id = $1
+                 OR EXISTS (SELECT 1 FROM hsdg.tasks t
+                             WHERE t.source_compliance_instance_id = ci.id
+                               AND (t.assigned_to_employee_id = $1 OR t.reviewer_employee_id = $1))
+                 OR EXISTS (SELECT 1 FROM hsdg.engagement_services es
+                             WHERE es.id = ci.engagement_service_id AND es.lead_employee_id = $1))
+       ) r
+       WHERE r.due_on::date <= $2::date + $7::int`,
+      [
+        me,
+        today,
+        engagementId,
+        CLOSED_ENGAGEMENT_STATUSES,
+        ITR_VERIFY_DAYS_DEFAULT,
+        ITR_VERIFY_RULE_CODE,
+        ITR_VERIFY_WARN_DAYS,
+      ],
+    );
+    return rows.map((r) => ({
+      key: `itr_verify:${r.id}`,
+      kind: 'itr_verify',
+      group: TODAY_GROUP.dueSoon,
+      title: `E-verify ITR · ${itrYearLabel(r.financial_year)}`,
+      ...engagementOf(r),
+      filing: null,
+      internalDate: r.due_on,
+      statutoryDate: r.due_on,
+      status: 'filed',
+      isOverdue: isPastDate(r.due_on, today),
+      blockedByOpenCount: 0,
+      task: null,
+      itr: { returnId: r.id, ackNo: r.reference_no, filedOn: r.filed_on, eVerifyDueOn: r.due_on },
+      link: {
+        engagementId: r.engagement_id,
+        engagementKind: r.engagement_kind,
+        instanceId: r.instance_id,
+      },
+    }));
   }
 
   /**

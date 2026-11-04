@@ -21,6 +21,8 @@ import type { WorkFilingContext } from './work-queue';
  *   (the earlier of the internal and statutory dates) is within a week —
  *   including filings with no task yet — less any already listed above. The
  *   engagement's partner and manager also get its filings due today or past.
+ *   With ff_itr_desk on, filed ITRs not yet e-verified whose 30-day window
+ *   closes within a week (or has closed) join it (PS-403).
  * - overdue / due_today: the rows from prepare and due_soon whose due date is
  *   past / today, lifted to the top so the day's deadlines come first. A tax
  *   audit with a milestone of mine past its internal date (F-9) is Overdue too.
@@ -69,6 +71,7 @@ export const TODAY_ITEM_KIND = {
   writeOff: 'write_off',
   creditNote: 'credit_note',
   taxAuditMilestone: 'tax_audit_milestone',
+  itrVerify: 'itr_verify',
 } as const;
 export type TodayItemKind = (typeof TODAY_ITEM_KIND)[keyof typeof TODAY_ITEM_KIND];
 
@@ -104,6 +107,14 @@ export interface TodayTaxAuditMilestones {
   financialYear: string;
   /** Labels of the missed milestones I own, earliest first. */
   missed: string[];
+}
+
+/** A filed ITR still to be e-verified (PS-403), dated by its e-verify due date. */
+export interface TodayItrVerify {
+  returnId: string;
+  ackNo: string | null;
+  filedOn: string;
+  eVerifyDueOn: string;
 }
 
 /** The request behind a "Write-offs to approve" row (PS-205). */
@@ -146,6 +157,8 @@ export interface TodayItem {
   adjustment?: TodayAdjustment;
   /** The tax audit, on a missed-milestone row (always under Overdue). */
   taxAudit?: TodayTaxAuditMilestones;
+  /** The return, on an ITR e-verification row (under Due this week, or Overdue). */
+  itr?: TodayItrVerify;
   link: WorkItemRef;
   /**
    * Rows waiting on the client of a filing: offer a WhatsApp reminder beside
