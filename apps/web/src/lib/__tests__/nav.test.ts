@@ -327,3 +327,34 @@ describe('Accountant and HR desks (roles spec §5)', () => {
     expect(sections(p)).toContain('Accounts');
   });
 });
+
+describe('Progress in the sidebar (D-2)', () => {
+  const as = (roles: RoleSlug[], effectiveRole?: RoleSlug) => ({
+    ...principal([PERMISSION.engagementRead]),
+    roles,
+    effectiveRole,
+  });
+  const seesProgress = (p: Principal, workLinks = false) =>
+    visibleNav(p, { workLinks }).some((i) => i.href === '/progress');
+
+  it.each(['senior', 'manager', 'partner', 'managing_partner', 'admin'] as RoleSlug[])(
+    'a %s sees it',
+    (role) => {
+      expect(seesProgress(as([role]))).toBe(true);
+    },
+  );
+
+  it.each(['article', 'accountant', 'hr'] as RoleSlug[])('an %s never does', (role) => {
+    expect(seesProgress(as([role]))).toBe(false);
+    expect(seesProgress(as([role]), true)).toBe(false);
+  });
+
+  it('with ff_work_links a Senior opens it from My Work (the seven-item sidebar); a Manager keeps it', () => {
+    expect(seesProgress(as(['senior']), true)).toBe(false);
+    expect(seesProgress(as(['manager']), true)).toBe(true);
+  });
+
+  it('judges by the effective role when one is set', () => {
+    expect(seesProgress(as(['article', 'manager'], 'article'))).toBe(false);
+  });
+});

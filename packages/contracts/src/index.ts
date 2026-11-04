@@ -112,3 +112,4 @@ export * from './people-admin';
 export * from './work-sets';
 export * from './tax-audits';
 export * from './tax-audit-applicability';
+export * from './progress';

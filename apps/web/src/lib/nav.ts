@@ -32,6 +32,7 @@ import {
   Banknote,
   ScrollText,
   UsersRound,
+  TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
 import type { Principal } from './principal';
@@ -60,6 +61,8 @@ export interface NavItem {
   badge?: { queryKey: readonly string[]; path: string };
   /** Shown only while this rollout flag is on (e.g. Today behind ff_today_view). */
   flag?: 'todayView' | 'filingRuns' | 'notices';
+  /** Shown only to someone holding one of these roles (the effective role when set). */
+  onlyFor?: RoleSlug[];
 }
 
 /** Preparers: their sidebar is trimmed to the client work (WF-107). */
@@ -127,6 +130,17 @@ export const NAV_SECTIONS: NavSection[] = [
         permission: PERMISSION.engagementRead,
         // Keeps a preparer's sidebar at seven; they open their sets from the
         // notification or from My Work.
+        hideFor: PREPARER_ROLES,
+        ready: true,
+      },
+      {
+        label: 'Progress',
+        href: '/progress',
+        icon: TrendingUp,
+        hint: 'Who has done what this period — by person, client or filing, overdue first.',
+        permission: PERMISSION.engagementRead,
+        onlyFor: [ROLE.managingPartner, ROLE.admin, ROLE.partner, ROLE.manager, ROLE.senior],
+        // A Senior opens it from My Work, keeping a preparer's sidebar at seven.
         hideFor: PREPARER_ROLES,
         ready: true,
       },
@@ -478,6 +492,12 @@ function onlyIn(principal: Principal | null, roles: RoleSlug[]): boolean {
   return held.length > 0 && held.every((r) => roles.includes(r));
 }
 
+function holdsAny(principal: Principal | null, roles: RoleSlug[]): boolean {
+  if (!principal) return false;
+  const held = principal.effectiveRole ? [principal.effectiveRole] : principal.roles;
+  return held.some((r) => roles.includes(r));
+}
+
 function canSee(item: NavItem, principal: Principal | null, opts: NavOptions): boolean {
   if (item.permission) {
     const held = principal?.permissions ?? [];
@@ -486,6 +506,7 @@ function canSee(item: NavItem, principal: Principal | null, opts: NavOptions): b
   }
   if (item.flag && !opts[item.flag]) return false;
   if (item.practice && isDeskOnly(principal)) return false;
+  if (item.onlyFor && !holdsAny(principal, item.onlyFor)) return false;
   if (!opts.workLinks) return true;
   if (item.foldedInto) return false;
   return !(item.hideFor && onlyIn(principal, item.hideFor));
