@@ -289,6 +289,7 @@ function SidebarContent({
     filingRuns: isOn(FEATURE_FLAG.filingRuns),
     notices: isOn(FEATURE_FLAG.notices),
     registers: isOn(FEATURE_FLAG.registers),
+    certificates: isOn(FEATURE_FLAG.certificates),
   });
   const activeHref = activeNavHref(
     sections.flatMap((s) => s.items),

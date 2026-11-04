@@ -519,6 +519,10 @@ export const FEATURE_FLAG = {
   partnerRisk: 'ff_partner_risk',
   /** Practice Services Phase 3: the UDIN and DSC registers. */
   registers: 'ff_registers',
+  /** Practice Services Phase 4: the certificates desk and its register (PS-402). */
+  certificates: 'ff_certificates',
+  /** Practice Services Phase 4: client KYC and acceptance for non-audit clients (PS-404). */
+  clientKyc: 'ff_client_kyc',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);

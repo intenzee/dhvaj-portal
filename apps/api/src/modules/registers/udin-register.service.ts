@@ -347,14 +347,24 @@ export class UdinRegisterService {
     const reason = input.reason?.trim();
     if (!reason) throw new BadRequestException('Say why the UDIN is revoked.');
     return this.db.withRlsContext(ctx, async (client) => {
-      const { rows } = await client.query<{ status: UdinStatus; version: number; udin: string }>(
-        `SELECT status, version, udin FROM hsdg.udin_register WHERE id = $1 FOR UPDATE`,
-        [id],
-      );
+      const { rows } = await client.query<{
+        status: UdinStatus;
+        version: number;
+        udin: string;
+        source: string;
+      }>(`SELECT status, version, udin, source FROM hsdg.udin_register WHERE id = $1 FOR UPDATE`, [
+        id,
+      ]);
       const r = rows[0];
       if (!r) throw new NotFoundException('UDIN not found.');
       if (r.version !== input.version) throw new ConflictException(STALE);
       if (r.status === 'revoked') throw new ConflictException('This UDIN is already revoked.');
+      // A certificate's UDIN goes with the certificate: revoke the certificate.
+      if (r.source === 'certificate') {
+        throw new ConflictException(
+          'Revoke the certificate on its engagement; its UDIN goes with it.',
+        );
+      }
       await client.query(
         `UPDATE hsdg.udin_register
             SET status = 'revoked', revoked_reason = $2, revoked_at = now(),

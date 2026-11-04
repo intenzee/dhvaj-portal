@@ -371,6 +371,7 @@ const SOURCE_LABEL: Record<UdinEntry['source'], string> = {
   manual: 'Added by hand',
   archive: 'From the audit file archive',
   tax_audit: 'From the tax audit',
+  certificate: 'From the certificates desk',
 };
 
 function UdinDetail({

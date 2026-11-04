@@ -43,6 +43,7 @@ import { FeatureFlagsModule } from './common/feature-flags/feature-flags.module'
 import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspace.module';
 import { NoticesModule } from './modules/notices/notices.module';
 import { RegistersModule } from './modules/registers/registers.module';
+import { CertificatesModule } from './modules/certificates/certificates.module';
 import { SearchModule } from './modules/search/search.module';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-settings.module';
@@ -145,6 +146,7 @@ import { TeamsModule } from './modules/teams/teams.module';
     PeopleModule,
     TeamsModule,
     RegistersModule,
+    CertificatesModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

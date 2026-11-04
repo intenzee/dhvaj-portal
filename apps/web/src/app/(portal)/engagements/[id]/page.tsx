@@ -33,6 +33,7 @@ import { WorkList } from '@/components/tasks/work-list';
 import { ActivityTab } from '@/components/engagement/activity-tab';
 import { BillFromTime } from '@/components/engagement/bill-from-time';
 import { DocumentsTab } from '@/components/engagement/documents-tab';
+import { CertificatesTab } from '@/components/certificates/certificates-tab';
 import {
   OverviewWidgets,
   ScopeByYearCard,
@@ -187,6 +188,16 @@ function complianceTabs(
 }
 
 /** Change 3 — the six Statutory Audit tabs. */
+/** PS-402: an Assignment engagement's certificates, after Documents. */
+const CERTIFICATES_TAB = {
+  key: 'certificates',
+  label: 'Certificates',
+  hint: 'Certificates on this assignment: fill the template, review, sign with the UDIN, issue.',
+};
+const TABS_WITH_CERTIFICATES = TABS.flatMap((t) =>
+  t.key === 'documents' ? [t, CERTIFICATES_TAB] : [t],
+);
+
 const AUDIT_TABS: { key: TabKey; label: string; hint: string }[] = [
   {
     key: 'overview',
@@ -261,7 +272,9 @@ export default function EngagementDetailPage(): JSX.Element {
       ? complianceTabs(tabsQ.data, pageFy)
       : layout === 'audit'
         ? AUDIT_TABS
-        : TABS;
+        : kind === ENGAGEMENT_KIND.assignment && isOn(FEATURE_FLAG.certificates)
+          ? TABS_WITH_CERTIFICATES
+          : TABS;
   const requested = url.get('tab') ?? 'overview';
   const tab: TabKey = visibleTabs.some((t) => t.key === requested) ? requested : 'overview';
   // A link to a tab this engagement doesn't have (a stream that was ended, say)
@@ -870,6 +883,8 @@ export default function EngagementDetailPage(): JSX.Element {
       {tab === 'time' && <TimeSection engagementId={e.id} />}
 
       {/* ── Activity (lifecycle history) ─────────────────────────────────── */}
+      {tab === 'certificates' && <CertificatesTab engagementId={e.id} />}
+
       {tab === 'activity' && layout !== 'legacy' && (
         <ActivityTab engagementId={e.id} team={leadsTeam} isLead={ctx.isLead} />
       )}

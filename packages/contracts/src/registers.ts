@@ -29,7 +29,7 @@ export const UDIN_DOCUMENT_KIND_LABEL: Record<UdinDocumentKind, string> = {
   other: 'Other',
 };
 
-export type UdinSource = 'manual' | 'archive' | 'tax_audit';
+export type UdinSource = 'manual' | 'archive' | 'tax_audit' | 'certificate';
 export type UdinStatus = 'active' | 'revoked';
 
 /** The default UDIN window (days after signing), until the firm sets its own. */

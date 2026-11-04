@@ -28,6 +28,8 @@ export const FEATURE_FLAG_LABEL: Record<FeatureFlag, string> = {
   ff_billing_v2: 'Practice Services 2 — GST invoices, receipts, receivables, 26AS',
   ff_partner_risk: 'Practice Services 3 — the partner risk dashboard',
   ff_registers: 'Practice Services 3 — UDIN and DSC registers',
+  ff_certificates: 'Practice Services 4 — the certificates desk and register',
+  ff_client_kyc: 'Practice Services 4 — client KYC and acceptance',
 };
 
 /** One flag on Admin → Rollout. */
