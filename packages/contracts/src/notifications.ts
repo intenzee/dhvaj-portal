@@ -84,6 +84,8 @@ export const NOTIFICATION_TYPE = {
   workSetAssigned: 'work_set_assigned',
   /** C-5 — whoever holds a task asked the person who gave it (Ask on My Work). */
   taskQuestion: 'task_question',
+  /** PS-304: a signed report still has no UDIN and its window ends in 7 days (signing partner). */
+  udinWindowClosing: 'udin_window_closing',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -167,6 +169,7 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   team_changed: I,
   work_set_assigned: A,
   task_question: A,
+  udin_window_closing: A,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -217,6 +220,7 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   team_changed: 'Engagement team changed',
   work_set_assigned: 'Work given to you',
   task_question: 'Question on a task you gave',
+  udin_window_closing: 'UDIN still to generate',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */

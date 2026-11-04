@@ -31,6 +31,7 @@ import {
   Gauge,
   Banknote,
   ScrollText,
+  Stamp,
   UsersRound,
   TrendingUp,
   type LucideIcon,
@@ -60,7 +61,7 @@ export interface NavItem {
   /** With ff_work_links: a count pill read from `path` (`{ total }`), e.g. reviews waiting (WF-105). */
   badge?: { queryKey: readonly string[]; path: string };
   /** Shown only while this rollout flag is on (e.g. Today behind ff_today_view). */
-  flag?: 'todayView' | 'filingRuns' | 'notices';
+  flag?: 'todayView' | 'filingRuns' | 'notices' | 'registers';
   /** Shown only to someone holding one of these roles (the effective role when set). */
   onlyFor?: RoleSlug[];
 }
@@ -80,6 +81,8 @@ export interface NavOptions {
   filingRuns?: boolean;
   /** ff_notices: the notice register (Practice Services PS-102). */
   notices?: boolean;
+  /** ff_registers: the UDIN and DSC registers (Practice Services PS-304/305). */
+  registers?: boolean;
 }
 
 export interface NavSection {
@@ -476,6 +479,17 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'Users, roles, offices, firm templates and the firm’s workflow policy.',
         // Partners set the workflow policy without administering users.
         permission: [PERMISSION.userManage, PERMISSION.workflowManage],
+        hideFor: PREPARER_ROLES,
+        ready: true,
+      },
+      {
+        label: 'UDIN register',
+        href: '/registers/udin',
+        icon: Stamp,
+        hint: 'Every UDIN the firm generated, and the reports signed without one, against the window.',
+        // Register keepers (incl. the Accountant) and the engagement side.
+        permission: [PERMISSION.registerManage, PERMISSION.engagementRead],
+        flag: 'registers',
         hideFor: PREPARER_ROLES,
         ready: true,
       },

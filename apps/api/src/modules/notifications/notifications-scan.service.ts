@@ -10,12 +10,16 @@ import {
   isNoticeOpen,
   type EngagementKind,
   type NoticeStatus,
+  UDIN_DOCUMENT_KIND_LABEL,
+  UDIN_WINDOW_NUDGE_DAYS,
+  type UdinDocumentKind,
 } from '@hsdg/contracts';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AppConfigService } from '../../config/config.module';
 import { NotificationsService } from './notifications.service';
+import { UDIN_PENDING_SQL, udinWindowDays } from '../registers/udin-register.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { inDays, noticeHearingDue, noticeReplyBand } from './notice-reminders';
 import {
@@ -49,6 +53,7 @@ export interface ScanResult {
   noticeHearingDue: number;
   invoiceOverdue: number;
   invoiceRemindersSent: number;
+  udinWindowClosing: number;
   total: number;
 }
 
@@ -179,6 +184,7 @@ export class NotificationsScanService {
         noticeHearingDue: 0,
         invoiceOverdue: 0,
         invoiceRemindersSent: 0,
+        udinWindowClosing: 0,
         total: 0,
       };
 
@@ -430,8 +436,10 @@ export class NotificationsScanService {
 
       await this.scanNotices(client, ctx, result);
       await this.scanOverdueInvoices(client, ctx, result);
+      await this.scanUdinWindows(client, ctx, result);
 
       result.total =
+        result.udinWindowClosing +
         result.invoiceOverdue +
         result.noticeReplyDue +
         result.noticeHearingDue +
@@ -618,5 +626,70 @@ export class NotificationsScanService {
       });
       result.clientDeliveryEnqueued += sent;
     }
+  }
+
+  /**
+   * PS-304 — a report signed without a UDIN: the signing partner is nudged once
+   * when the firm's window (udin_window_days) has a week or less to run. One
+   * dedup key per report and window end; registering the UDIN resolves it.
+   * Only where ff_registers is on for the engagement's office.
+   */
+  private async scanUdinWindows(
+    client: PoolClient,
+    ctx: RlsContext,
+    result: ScanResult,
+  ): Promise<void> {
+    const windowDays = await udinWindowDays(client);
+    const { rows } = await client.query<{
+      source_kind: 'archive' | 'tax_audit';
+      source_id: string;
+      document_kind: UdinDocumentKind;
+      entity_name: string;
+      engagement_id: string;
+      engagement_code: string;
+      engagement_kind: EngagementKind;
+      financial_year: string | null;
+      partner_id: string | null;
+      signed_on: string;
+      window_ends_on: string;
+      days_left: number;
+      office_code: string;
+    }>(
+      `SELECT x.*, x.signed_on::text AS signed_on, o.code AS office_code
+         FROM (${UDIN_PENDING_SQL}) x
+         JOIN hsdg.engagements e ON e.id = x.engagement_id
+         JOIN hsdg.offices o ON o.id = e.office_id
+        WHERE x.days_left BETWEEN 0 AND $3 AND x.partner_id IS NOT NULL`,
+      [await this.istToday(client), windowDays, UDIN_WINDOW_NUDGE_DAYS],
+    );
+    for (const row of rows) {
+      if (!this.flags.isOnFor(FEATURE_FLAG.registers, row.office_code)) continue;
+      const doc = `${UDIN_DOCUMENT_KIND_LABEL[row.document_kind]}${row.financial_year ? ` FY ${row.financial_year}` : ''}`;
+      const what = `${doc} · ${row.entity_name}`;
+      result.udinWindowClosing += await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.udinWindowClosing,
+        recipientEmployeeIds: [row.partner_id],
+        title: `UDIN still to generate ${inDays(Number(row.days_left))} — ${what}`,
+        body: `${what} (${row.engagement_code}) was signed on ${row.signed_on} without a UDIN. The firm's ${windowDays}-day window ends on ${row.window_ends_on}.`,
+        engagementId: row.engagement_id,
+        objectType: row.source_kind === 'tax_audit' ? 'tax_audit' : 'service_workflow_instance',
+        objectId: row.source_id,
+        link:
+          row.source_kind === 'tax_audit'
+            ? {
+                engagementId: row.engagement_id,
+                engagementKind: row.engagement_kind,
+                stream: 'tax_audit',
+                financialYear: row.financial_year,
+              }
+            : { engagementId: row.engagement_id, engagementKind: row.engagement_kind },
+        dedupKey: `udin_window_closing:${row.source_id}:${row.window_ends_on}`,
+      });
+    }
+  }
+
+  private async istToday(client: PoolClient): Promise<string> {
+    const { rows } = await client.query<{ d: string }>(`SELECT ${IST_TODAY_EXPR}::text AS d`);
+    return rows[0]!.d;
   }
 }
