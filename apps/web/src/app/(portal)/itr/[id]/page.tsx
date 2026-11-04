@@ -53,10 +53,12 @@ import {
   fetchItrIncome,
   fetchItrReturn,
   importItrStatement,
+  intimationOpensNotice,
   itrIncomeKey,
   itrKey,
   itrReturnKey,
   moveItrRefund,
+  normaliseAmount,
   recordItrIntimation,
   refundMoveNeedsAmount,
   refundMoves,
@@ -65,6 +67,7 @@ import {
 } from '@/lib/itr-api';
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner } from '@/components/ui';
 import { Field, Input, Select, Textarea } from '@/components/form';
+import { ReminderToSendPanel, type ReminderToSend } from '@/components/filing/client-chase';
 
 const MATCH_TONE: Record<ItrMatchStatus, string> = {
   matched: 'success',
@@ -205,13 +208,15 @@ function DetailsCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
     refundClaimed: r.refundClaimed ?? '',
     notes: r.notes ?? '',
   });
+  const claimed = form.refundClaimed.trim() ? normaliseAmount(form.refundClaimed) : null;
+  const badClaim = !!form.refundClaimed.trim() && claimed === null;
   const save = useMutation({
     mutationFn: () =>
       updateItrReturn(r, {
         itrForm: (form.itrForm || null) as ItrForm | null,
         regime: (form.regime || null) as ItrRegime | null,
         returnType: form.returnType,
-        refundClaimed: form.refundClaimed.trim() || null,
+        refundClaimed: claimed,
         notes: form.notes.trim() || null,
       }),
     onSuccess: (next) => {
@@ -266,7 +271,10 @@ function DetailsCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
             ))}
           </Select>
         </Field>
-        <Field label="Refund claimed (₹)">
+        <Field
+          label="Refund claimed (₹)"
+          hint={badClaim ? 'An amount in rupees, e.g. 15,000 or 15000.50.' : undefined}
+        >
           <Input
             disabled={!edit}
             inputMode="decimal"
@@ -286,7 +294,7 @@ function DetailsCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
       </Field>
       {edit && (
         <div className="flex justify-end">
-          <Button size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+          <Button size="sm" disabled={badClaim || save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? 'Saving…' : 'Save'}
           </Button>
         </div>
@@ -299,6 +307,9 @@ function FilingCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
   const toast = useToast();
   const [on, setOn] = useState(istToday());
   const [mode, setMode] = useState<ItrVerifyMode>('aadhaar_otp');
+  // WhatsApp / copy: kept on screen to open or copy — a window opened after
+  // the request returns is blocked as a pop-up.
+  const [toSend, setToSend] = useState<ReminderToSend | null>(null);
   const verify = useMutation({
     mutationFn: () => eVerifyItr(r, { eVerifiedOn: on, mode }),
     onSuccess: (next) => {
@@ -315,12 +326,23 @@ function FilingCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
   const remind = useMutation({
     mutationFn: () => remindItrVerify(r.id),
     onSuccess: (m) => {
-      if (m.channel === 'email') toast(`Reminder e-mailed${m.to ? ` to ${m.to}` : ''}.`, 'success');
-      else if (m.waUrl) window.open(m.waUrl, '_blank', 'noopener');
-      else {
-        void navigator.clipboard?.writeText(m.text);
-        toast('Reminder copied — paste it to the client.', 'success');
+      if (m.channel === 'email') {
+        setToSend(null);
+        toast(`Reminder e-mailed${m.to ? ` to ${m.to}` : ''}.`, 'success');
+        return;
       }
+      const base = {
+        instanceId: r.complianceInstanceId,
+        client: r.entityName,
+        text: m.text,
+        waitingOn: [],
+        raised: 0,
+      };
+      setToSend(
+        m.channel === 'whatsapp' && m.waUrl
+          ? { ...base, channel: 'whatsapp', waUrl: m.waUrl }
+          : { ...base, channel: 'copy', fallback: m.fallback ?? null },
+      );
     },
     onError,
   });
@@ -349,6 +371,7 @@ function FilingCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
             <Input
               type="date"
               value={on}
+              min={r.filedOn ?? undefined}
               max={istToday()}
               onChange={(e) => setOn(e.target.value)}
             />
@@ -375,6 +398,7 @@ function FilingCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
           </Button>
         </div>
       )}
+      {toSend && !r.eVerifiedOn && <ReminderToSendPanel reminder={toSend} />}
     </Section>
   );
 }
@@ -387,11 +411,12 @@ function RefundCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
   const [on, setOn] = useState(istToday());
   const [note, setNote] = useState('');
   const needs = to !== '' && refundMoveNeedsAmount(to);
+  const settled = needs ? normaliseAmount(amount) : null;
   const move = useMutation({
     mutationFn: () =>
       moveItrRefund(r, {
         to: to as ItrRefundStatus,
-        amount: needs ? amount.trim() : null,
+        amount: settled,
         on: needs ? on : null,
         note: note.trim() || null,
       }),
@@ -440,7 +465,13 @@ function RefundCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
                 />
               </Field>
               <Field label="On">
-                <Input type="date" value={on} onChange={(e) => setOn(e.target.value)} />
+                <Input
+                  type="date"
+                  value={on}
+                  min={r.filedOn ?? undefined}
+                  max={istToday()}
+                  onChange={(e) => setOn(e.target.value)}
+                />
               </Field>
             </>
           )}
@@ -449,7 +480,7 @@ function RefundCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
           </Field>
           <Button
             size="sm"
-            disabled={!to || (needs && (!amount.trim() || !on)) || move.isPending}
+            disabled={!to || (needs && (!settled || !on)) || move.isPending}
             onClick={() => move.mutate()}
           >
             Move
@@ -469,10 +500,14 @@ function IntimationCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
     receivedOn: istToday(),
     result: 'no_change' as ItrIntimationResult,
     amount: '',
-    openNotice: true,
+    // null: the default for the kind and result (a demand or a 245 opens one).
+    openNotice: null as boolean | null,
   });
   const set = (patch: Partial<typeof f>): void => setF((x) => ({ ...x, ...patch }));
   const hasAmount = f.kind === '245' || f.result !== 'no_change';
+  const amount = hasAmount ? normaliseAmount(f.amount) : null;
+  const openNotice = f.openNotice ?? intimationOpensNotice(f.kind, f.result);
+  const today = istToday();
   const record = useMutation({
     mutationFn: () =>
       recordItrIntimation(r, {
@@ -481,12 +516,12 @@ function IntimationCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
         issuedOn: f.issuedOn,
         receivedOn: f.receivedOn,
         ...(f.kind === '143_1' ? { result: f.result } : {}),
-        amount: hasAmount && f.amount.trim() ? f.amount.trim() : null,
-        openNotice: f.openNotice,
+        amount,
+        openNotice,
       }),
     onSuccess: (res) => {
       onSaved(res.return);
-      set({ referenceNo: '', amount: '' });
+      set({ referenceNo: '', amount: '', openNotice: null });
       toast(
         res.noticeId ? 'Recorded, and opened on the notice register.' : 'Intimation recorded.',
         'success',
@@ -553,6 +588,8 @@ function IntimationCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
             <Input
               type="date"
               value={f.issuedOn}
+              min={r.filedOn ?? undefined}
+              max={today}
               onChange={(e) => set({ issuedOn: e.target.value })}
             />
           </Field>
@@ -560,11 +597,16 @@ function IntimationCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
             <Input
               type="date"
               value={f.receivedOn}
+              min={f.issuedOn || undefined}
+              max={today}
               onChange={(e) => set({ receivedOn: e.target.value })}
             />
           </Field>
           {hasAmount && (
-            <Field label="Amount (₹)">
+            <Field
+              label={f.kind === '245' ? 'Proposed set-off (₹)' : 'Amount determined (₹)'}
+              required
+            >
               <Input
                 inputMode="decimal"
                 value={f.amount}
@@ -575,15 +617,22 @@ function IntimationCard({ r, edit, onSaved, onError }: CardProps): JSX.Element {
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input
               type="checkbox"
-              checked={f.openNotice}
+              checked={openNotice}
               onChange={(e) => set({ openNotice: e.target.checked })}
             />
-            Open it on the notice register (a demand or set-off always needs a reply)
+            Open it on the notice register (on for a demand or a set-off, which need a reply)
           </label>
           <div className="flex justify-end">
             <Button
               size="sm"
-              disabled={!f.referenceNo.trim() || !f.issuedOn || !f.receivedOn || record.isPending}
+              disabled={
+                !f.referenceNo.trim() ||
+                !f.issuedOn ||
+                !f.receivedOn ||
+                f.receivedOn < f.issuedOn ||
+                (hasAmount && !amount) ||
+                record.isPending
+              }
               onClick={() => record.mutate()}
             >
               Record

@@ -3,8 +3,12 @@ import { visibleNav } from '../nav';
 import {
   currentItrYear,
   filterSeason,
+  intimationOpensNotice,
   itrActionable,
   itrReturnHref,
+  itrScopeOf,
+  itrYearOf,
+  normaliseAmount,
   itrSeasonPath,
   itrYearOptions,
   refundMoveNeedsAmount,
@@ -116,5 +120,32 @@ describe('the ITR desk in the sidebar', () => {
   it('shows only while ff_itr_desk is on', () => {
     expect(hrefs(true)).toContain('/itr');
     expect(hrefs(false)).not.toContain('/itr');
+  });
+});
+
+describe('ITR desk inputs', () => {
+  it('reads amounts as typed, in the API shape', () => {
+    expect(normaliseAmount('15,000')).toBe('15000');
+    expect(normaliseAmount(' ₹ 1,20,000.50 ')).toBe('120000.50');
+    expect(normaliseAmount('Rs. 9100')).toBe('9100');
+    expect(normaliseAmount('12.345')).toBeNull();
+    expect(normaliseAmount('-5')).toBeNull();
+    expect(normaliseAmount('')).toBeNull();
+  });
+
+  it('never sends a bad scope or year from the URL', () => {
+    expect(itrScopeOf('mine')).toBe('mine');
+    expect(itrScopeOf('everyone')).toBe('all');
+    expect(itrScopeOf(null)).toBe('all');
+    expect(itrYearOf('2024-25', '2026-11-05')).toBe('2024-25');
+    expect(itrYearOf('2024-26', '2026-11-05')).toBe('2025-26');
+    expect(itrYearOf('x', '2026-11-05')).toBe('2025-26');
+  });
+
+  it('opens a notice by default only for a demand or a 245 set-off', () => {
+    expect(intimationOpensNotice('143_1', 'demand')).toBe(true);
+    expect(intimationOpensNotice('143_1', 'refund')).toBe(false);
+    expect(intimationOpensNotice('143_1', 'no_change')).toBe(false);
+    expect(intimationOpensNotice('245', 'no_change')).toBe(true);
   });
 });

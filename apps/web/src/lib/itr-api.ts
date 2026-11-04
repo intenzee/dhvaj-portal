@@ -25,7 +25,8 @@ import {
 import { apiFetch } from './api';
 
 export const itrKey = ['itr'] as const;
-export const itrSeasonKey = (fy: string, scope: ItrScope) => [...itrKey, 'season', fy, scope] as const;
+export const itrSeasonKey = (fy: string, scope: ItrScope) =>
+  [...itrKey, 'season', fy, scope] as const;
 export const itrReturnKey = (id: string) => [...itrKey, 'return', id] as const;
 export const itrIncomeKey = (id: string) => [...itrKey, 'income', id] as const;
 
@@ -65,10 +66,7 @@ export interface ItrSeasonFilters {
 }
 
 /** The grid's rows for these filters (client, PAN, engagement code or ack no.). */
-export function filterSeason(
-  rows: readonly ItrSeasonRow[],
-  f: ItrSeasonFilters,
-): ItrSeasonRow[] {
+export function filterSeason(rows: readonly ItrSeasonRow[], f: ItrSeasonFilters): ItrSeasonRow[] {
   const q = f.search.trim().toLowerCase();
   return rows.filter(
     (r) =>
@@ -100,6 +98,35 @@ export function itrActionable(
 export function refundMoves(status: ItrRefundStatus): ItrRefundStatus[] {
   return ITR_REFUND_MOVES[status];
 }
+
+/**
+ * An amount as typed ("15,000", "₹ 1,20,000.50", " 9100 ") in the API's
+ * shape (digits, up to two decimals), or null when it isn't one.
+ */
+export function normaliseAmount(typed: string): string | null {
+  const s = typed.replace(/[₹,\s]/g, '').replace(/^rs\.?/i, '');
+  return /^\d{1,12}(\.\d{1,2})?$/.test(s) ? s : null;
+}
+
+/** The scope in the URL, or 'all' for anything else (a bad link must not 400). */
+export function itrScopeOf(v: string | null): ItrScope {
+  return v === 'mine' || v === 'team' ? v : 'all';
+}
+
+/** The year in the URL when it is one (YYYY-YY, consecutive), else the current season. */
+export function itrYearOf(v: string | null, today: string): string {
+  const m = v ? /^(\d{4})-(\d{2})$/.exec(v) : null;
+  if (m && (Number(m[1]) + 1) % 100 === Number(m[2])) return v as string;
+  return currentItrYear(today);
+}
+
+/**
+ * Whether recording an intimation opens a notice by default: a 245 set-off
+ * and a 143(1) demand need a reply; a refund or "accepted as filed" does not
+ * (the API's own default).
+ */
+export const intimationOpensNotice = (kind: '143_1' | '245', result: string): boolean =>
+  kind === '245' || result === 'demand';
 
 /** A move that settles the refund needs its amount (and a date). */
 export const refundMoveNeedsAmount = (to: ItrRefundStatus): boolean =>

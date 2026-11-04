@@ -27,11 +27,12 @@ import { cn } from '@/lib/cn';
 import {
   ITR_REFUND_TONE,
   ITR_STAGE_TONE,
-  currentItrYear,
   fetchItrSeason,
   filterSeason,
   itrActionable,
   itrKey,
+  itrScopeOf,
+  itrYearOf,
   itrReturnHref,
   itrSeasonKey,
   itrYearOptions,
@@ -71,9 +72,11 @@ function ItrSeasonScreen(): JSX.Element {
   const router = useRouter();
   const url = useUrlState();
   const today = istToday();
-  const fy = url.get('fy') ?? currentItrYear(today);
-  const scope = (url.get('scope') as ItrScope | null) ?? 'all';
-  const stage = (url.get('stage') ?? '') as ItrStage | '';
+  const fy = itrYearOf(url.get('fy'), today);
+  const scope = itrScopeOf(url.get('scope'));
+  const stage = (ITR_STAGES as readonly string[]).includes(url.get('stage') ?? '')
+    ? (url.get('stage') as ItrStage)
+    : '';
   const overdue = url.get('overdue') === '1';
   const [term, setTerm] = useState(url.get('q') ?? '');
 
@@ -351,7 +354,12 @@ function ItrSeasonScreen(): JSX.Element {
                         : ''}
                     </div>
                   </td>
-                  <td className="px-3 py-2">{r.itrForm ? ITR_FORM_LABEL[r.itrForm] : '—'}</td>
+                  <td
+                    className="px-3 py-2"
+                    title={r.itrForm ? ITR_FORM_LABEL[r.itrForm] : undefined}
+                  >
+                    {r.itrForm ?? '—'}
+                  </td>
                   <td className="px-3 py-2 text-xs">
                     <div>{r.preparerName ?? 'Unassigned'}</div>
                     {r.reviewerName && (
