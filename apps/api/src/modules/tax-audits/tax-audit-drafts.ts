@@ -11,6 +11,10 @@
  *   18, 32, 40  last year's tax audit of the client (its done answers)
  *   22, 26      the MSME supplier list, once the client has sent it
  *
+ * Any other clause, or one whose own source is empty, carries last year's
+ * answer when last year's tax audit answered it on the same Act's form
+ * (F-10: "last year's answers are copied in as drafts").
+ *
  * Every draft says where it came from and the preparer must confirm it; a
  * clause whose source has nothing yet gets no draft, so nothing blocks review
  * for nothing. The builders are pure; applyDrafts() writes them.
@@ -57,6 +61,8 @@ export interface DraftSources {
   lastYear: {
     auditId: string;
     financialYear: string;
+    /** Last year's library version; null when its 3CD work was never opened. */
+    libraryVersionId: string | null;
     answers: Record<string, TaxAuditAnswer>;
   } | null;
   msme: { status: string; receivedDate: string | null } | null;
@@ -347,6 +353,17 @@ function msmeList(clauseNo: string, s: DraftSources): ClauseDraft | null {
   };
 }
 
+/** Last year's answer as it was, for any clause it answered (F-10). */
+function carried(clauseNo: string, s: DraftSources): ClauseDraft | null {
+  const prev = s.lastYear?.answers[clauseNo];
+  if (!prev || Object.keys(prev).length === 0) return null;
+  return {
+    source: 'last_year',
+    answer: { ...prev },
+    note: `Last year's answer (FY ${s.lastYear!.financialYear} tax audit), carried over: check it still holds this year.`,
+  };
+}
+
 const BUILDERS: Record<
   TaxAuditDraftSource,
   (clauseNo: string, s: DraftSources) => ClauseDraft | null
@@ -358,15 +375,17 @@ const BUILDERS: Record<
   msme_list: msmeList,
 };
 
-/** The clause's draft, its fields checked against the clause; null when its source is empty. */
+/**
+ * The clause's draft, its fields checked against the clause: from its own
+ * source, else last year's answer; null when neither has anything.
+ */
 export function draftFor(
   clauseNo: string,
   source: TaxAuditDraftSource | null,
   subItems: readonly TaxAuditSubItem[],
   s: DraftSources,
 ): ClauseDraft | null {
-  if (!source) return null;
-  const d = BUILDERS[source](clauseNo, s);
+  const d = (source ? BUILDERS[source](clauseNo, s) : null) ?? carried(clauseNo, s);
   if (!d) return null;
   // Only what the clause can hold, of the kind it holds.
   const answer = Object.fromEntries(
@@ -386,6 +405,29 @@ function stable(v: unknown): string {
     .sort()
     .map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`)
     .join(',')}}`;
+}
+
+/**
+ * Last year's answers carry only onto the same Act's form: a clause number
+ * under the Income-tax Act 2025 is not the 1961 Act's clause.
+ */
+async function sameForm(
+  client: PoolClient,
+  auditId: string,
+  s: DraftSources,
+): Promise<DraftSources> {
+  if (!s.lastYear?.libraryVersionId) return s;
+  const { rows } = await client.query<{ same: boolean }>(
+    `SELECT lv.act = tv.act AS same
+       FROM hsdg.tax_audit_clause_library_versions lv,
+            hsdg.tax_audit_clause_library_versions tv
+      WHERE lv.id = $1
+        AND tv.id = (SELECT l.library_version_id FROM hsdg.tax_audit_working_papers w
+                       JOIN hsdg.tax_audit_clause_library l ON l.id = w.library_clause_id
+                      WHERE w.tax_audit_id = $2 LIMIT 1)`,
+    [s.lastYear.libraryVersionId, auditId],
+  );
+  return rows[0]?.same === false ? { ...s, lastYear: null } : s;
 }
 
 interface DraftPaperRow {
@@ -418,7 +460,7 @@ export async function applyDrafts(client: PoolClient, auditId: string): Promise<
   } = await client.query<{ s: DraftSources }>(`SELECT hsdg.tax_audit_draft_sources($1) AS s`, [
     auditId,
   ]);
-  const sources = src!.s;
+  const sources = await sameForm(client, auditId, src!.s);
   const { rows: papers } = await client.query<DraftPaperRow>(
     `SELECT w.id, w.clause_no, w.status, l.draft_source AS library_source, l.sub_items,
             w.draft_source, w.draft_answer, w.draft_note, w.draft_confirmed_at

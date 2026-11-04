@@ -53,8 +53,8 @@ CREATE POLICY client_dependencies_tax_audit_counting ON hsdg.client_dependencies
 --   incorporationDate, address}, registrations [{type, number, state}],
 --   applicability {applicable, clause}, filings [{stream, form, registration,
 --   periodKey, periodStart, periodEnd, dueDate, filedOn, isNil, figures,
---   lateFee, interest}], lastYear {auditId, financialYear, answers {clause:
---   answer}} or null, msme {status, receivedDate} or null.
+--   lateFee, interest}], lastYear {auditId, financialYear, libraryVersionId,
+--   answers {clause: answer}} or null, msme {status, receivedDate} or null.
 -- Raises 42501 unless the caller is a member of the audit's engagement.
 CREATE FUNCTION hsdg.tax_audit_draft_sources(p_audit uuid)
 RETURNS jsonb
@@ -152,6 +152,7 @@ BEGIN
     'lastYear', (
       SELECT jsonb_build_object(
                'auditId', la.id, 'financialYear', la.financial_year,
+               'libraryVersionId', la.clause_library_version_id,
                'answers', (SELECT COALESCE(jsonb_object_agg(w.clause_no, w.answer), '{}'::jsonb)
                              FROM hsdg.tax_audit_working_papers w
                             WHERE w.tax_audit_id = la.id AND w.status = 'done'))

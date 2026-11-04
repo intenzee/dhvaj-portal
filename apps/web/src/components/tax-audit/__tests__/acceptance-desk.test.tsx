@@ -32,6 +32,7 @@ const desk = (over: Partial<TaxAuditAcceptance> = {}): TaxAuditAcceptance => ({
   appointmentLetter: null,
   acceptedAt: null,
   acceptedByName: null,
+  proposal: null,
   limit: 60,
   partners: [
     {
@@ -129,6 +130,65 @@ describe('AcceptanceDesk', () => {
       }),
     );
     expect(toast).toHaveBeenCalledWith('Tax audit accepted.');
+  });
+
+  it('proposes last year’s form, partner and team, and takes them in one go', async () => {
+    const proposal = {
+      fromAuditId: 'a0',
+      fromFinancialYear: '2024-25',
+      formType: '3CB' as const,
+      signingPartnerId: 'p1',
+      signingPartnerName: 'Deepak',
+      team: ['Deepak (engagement partner)', 'Riya (in charge)'],
+    };
+    apiFetch.mockResolvedValue(
+      desk({
+        proposal,
+        previousAuditor: { changed: null, name: null, letterDocumentId: null, letterTitle: null },
+      }),
+    );
+    render(wrap(<AcceptanceDesk engagementId="g1" auditId="a1" />));
+    const last = await screen.findByRole('region', { name: 'Last year' });
+    expect(last).toHaveTextContent('Rolled over from FY 2024-25');
+    expect(last).toHaveTextContent('Form 3CB, signed by Deepak');
+    expect(last).toHaveTextContent('Riya (in charge)');
+    fireEvent.click(screen.getByRole('button', { name: 'Take last year’s choices' }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(URL, {
+        method: 'PUT',
+        body: {
+          version: 4,
+          formType: '3CB',
+          signingPartnerId: 'p1',
+          previousAuditorChanged: false,
+        },
+      }),
+    );
+  });
+
+  it('says why last year’s partner is not offered, and takes the rest', async () => {
+    apiFetch.mockResolvedValue(
+      desk({
+        proposal: {
+          fromAuditId: 'a0',
+          fromFinancialYear: '2024-25',
+          formType: '3CA',
+          signingPartnerId: 'p2',
+          signingPartnerName: 'Tanmoy',
+          team: [],
+        },
+      }),
+    );
+    render(wrap(<AcceptanceDesk engagementId="g1" auditId="a1" />));
+    const last = await screen.findByRole('region', { name: 'Last year' });
+    expect(last).toHaveTextContent('Tanmoy: 60 of 60 for FY 2025-26 — 60 of 60');
+    fireEvent.click(screen.getByRole('button', { name: 'Take last year’s choices' }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(URL, {
+        method: 'PUT',
+        body: { version: 4, formType: '3CA' },
+      }),
+    );
   });
 
   it('hides the controls from someone who cannot accept', async () => {

@@ -196,6 +196,7 @@ describe('last year (clauses 18, 32, 40)', () => {
     lastYear: {
       auditId: 'a0',
       financialYear: '2024-25',
+      libraryVersionId: null,
       answers: {
         '18': { blocks: 'Plant\t15\t1000\t0\t0\t150\t850\nFurniture\t10\t500\t0\t0\t50\t450' },
         '32': { a: '2022-23\tBusiness loss\t40000', b: 'No change', c: 0 },
@@ -231,6 +232,36 @@ describe('last year (clauses 18, 32, 40)', () => {
         lastYear: { ...s.lastYear!, answers: {} },
       }),
     ).toBeNull();
+  });
+});
+
+describe('last year carried (F-10)', () => {
+  const ly: DraftSources['lastYear'] = {
+    auditId: 'a0',
+    financialYear: '2024-25',
+    libraryVersionId: 'v1',
+    answers: {
+      '21': { items: 'Penalty\t5000' },
+      '34': { a: '26Q\t194C\t120000', b: 'All in time' },
+      '10': {},
+    },
+  };
+
+  it('carries last year’s answer onto a clause with no source of its own', () => {
+    const d = draftFor('21', null, [T('items', 'table')], { ...base, lastYear: ly })!;
+    expect(d).toMatchObject({ source: 'last_year', answer: { items: 'Penalty\t5000' } });
+    expect(d.note).toMatch(/FY 2024-25 tax audit/);
+    expect(draftFor('10', null, [T('a', 'table')], { ...base, lastYear: ly })).toBeNull();
+  });
+
+  it('prefers this year’s own source, and carries when that source is empty', () => {
+    const items = [T('a', 'table'), T('b', 'table'), T('c', 'table')];
+    const withTds = { ...base, lastYear: ly, filings: [filing({})] };
+    expect(draftFor('34', 'tds_filings', items, withTds)?.source).toBe('tds_filings');
+    expect(draftFor('34', 'tds_filings', items, { ...base, lastYear: ly })).toMatchObject({
+      source: 'last_year',
+      answer: { a: '26Q\t194C\t120000', b: 'All in time' },
+    });
   });
 });
 

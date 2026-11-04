@@ -39,6 +39,8 @@ describe('Tax audits (e2e)', () => {
       filedOn: string | null;
       applicabilityReason: string | null;
     }[];
+  // Filing a year rolls the next one over (F-10): the year under test is picked by its FY.
+  const thisYear = async () => (await audits()).find((r) => r.financialYear === '2026-27')!;
 
   beforeAll(async () => {
     await seedIdentityFixtures();
@@ -110,7 +112,7 @@ describe('Tax audits (e2e)', () => {
         WHERE id = $1`,
       [a!.instanceId],
     );
-    expect((await audits())[0]).toMatchObject({
+    expect(await thisYear()).toMatchObject({
       stage: 'filed',
       filedOn: '2027-09-20',
       daysLeft: null,
@@ -121,7 +123,7 @@ describe('Tax audits (e2e)', () => {
         WHERE id = $1`,
       [a!.instanceId],
     );
-    expect((await audits())[0]).toMatchObject({ stage: 'not_started', filedOn: null });
+    expect(await thisYear()).toMatchObject({ stage: 'not_started', filedOn: null });
   });
 
   it('the firm cannot keep the books of a year it tax-audits', async () => {
@@ -186,7 +188,7 @@ describe('Tax audits (e2e)', () => {
 
     it('the calculator saying no takes the report off the calendar, with its reason', async () => {
       // Only a filing nobody has started comes off; work under way stays.
-      const instanceId = (await audits())[0]!.instanceId;
+      const instanceId = (await thisYear()).instanceId;
       await su.query(
         `UPDATE hsdg.compliance_instances SET workflow_status = 'not_started' WHERE id = $1`,
         [instanceId],
@@ -203,7 +205,7 @@ describe('Tax audits (e2e)', () => {
         override: null,
         version: 1,
       });
-      expect((await audits())[0]).toMatchObject({
+      expect(await thisYear()).toMatchObject({
         stage: 'not_applicable',
         filingStatus: 'not_applicable',
         applicabilityReason: res.body.reason,
@@ -228,7 +230,7 @@ describe('Tax audits (e2e)', () => {
         computed: { applicable: false },
         version: 2,
       });
-      expect((await audits())[0]).toMatchObject({
+      expect(await thisYear()).toMatchObject({
         stage: 'not_started',
         filingStatus: 'not_started',
       });
