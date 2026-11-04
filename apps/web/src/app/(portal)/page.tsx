@@ -16,6 +16,7 @@ import { ReviewQueuePanel } from '@/components/dashboard/review-queue';
 import { ClientDependenciesPanel } from '@/components/dashboard/client-dependencies';
 import { ComplianceMiniCalendar } from '@/components/dashboard/compliance-mini-calendar';
 import { ProfileCard } from '@/components/dashboard/profile-card';
+import { RiskSection } from '@/components/dashboard/risk-section';
 import { LandingRedirect } from '@/components/landing-redirect';
 import { useFoldedHref } from '@/components/work/folded-route';
 
@@ -51,6 +52,8 @@ export default function HomePage(): JSX.Element {
       </div>
 
       <GettingStarted />
+
+      <RiskSection />
 
       {/* Stat strip */}
       {summary.isLoading && <Spinner label="Loading your dashboard…" />}

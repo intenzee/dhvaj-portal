@@ -167,6 +167,30 @@ export class UnbilledService {
     });
   }
 
+  /**
+   * PS-301 · every fee period that ended more than `minAgeDays` ago and is on
+   * no invoice, across the engagements the caller bills (the risk dashboard).
+   */
+  async agedItems(
+    client: PoolClient,
+    asOf: string,
+    minAgeDays: number,
+  ): Promise<
+    (UnbilledItem & { engagementId: string; engagementCode: string; clientName: string })[]
+  > {
+    const engagements = await this.unbilled(client, asOf, {}, await billingFromOf(client));
+    return engagements.flatMap((e) =>
+      e.items
+        .filter((i) => i.ageDays > minAgeDays)
+        .map((i) => ({
+          ...i,
+          engagementId: e.engagementId,
+          engagementCode: e.engagementCode,
+          clientName: e.clientName,
+        })),
+    );
+  }
+
   /** The chosen periods onto a new draft invoice for the engagement. */
   draft(ctx: RlsContext, input: DraftFromUnbilledInput): Promise<InvoiceDetail> {
     return this.db.withRlsContext(ctx, async (client) => {

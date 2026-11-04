@@ -121,3 +121,4 @@ export * from './tax-audit-filing';
 export * from './tax-audit-milestones';
 export * from './change-log';
 export * from './quick-tasks';
+export * from './risk';

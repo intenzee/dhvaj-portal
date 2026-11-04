@@ -502,6 +502,8 @@ export const FEATURE_FLAG = {
   notices: 'ff_notices',
   /** Practice Services Phase 2: GST invoices, receipts, credit notes, receivables, 26AS. */
   billing: 'ff_billing_v2',
+  /** Practice Services Phase 3: the partner risk dashboard on Home (PS-301). */
+  partnerRisk: 'ff_partner_risk',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);
