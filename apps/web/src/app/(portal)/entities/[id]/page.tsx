@@ -31,6 +31,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { DataTable } from '@/components/data-table';
 import {
   EntityDetailActions,
+  EditRegistrationButton,
   RemoveRegistrationButton,
 } from '@/components/entities/entity-actions';
 import { RegulatoryProfile } from '@/components/entities/regulatory-profile';
@@ -253,6 +254,9 @@ export default function EntityDetailPage(): JSX.Element {
                       <span title="Verified" className="text-success-600">
                         <ShieldCheck className="h-4 w-4" />
                       </span>
+                    )}
+                    {canManage && !e.mergedInto && (
+                      <EditRegistrationButton entityId={e.id} pan={e.pan} registration={r} />
                     )}
                     {canManage && <RemoveRegistrationButton entityId={e.id} registration={r} />}
                   </div>

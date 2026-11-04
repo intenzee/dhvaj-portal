@@ -21,7 +21,7 @@ import { useToast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { can, hasRole } from '@/lib/principal';
 import { PERMISSION } from '@hsdg/contracts';
-import type { EntityDetail, EntityType, OfficeRow } from '@/lib/types';
+import type { EntityDetail, EntityType, OfficeRow, Registration } from '@/lib/types';
 import { Button } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { Field, Input, Select, Textarea } from '@/components/form';
@@ -200,6 +200,179 @@ export function RemoveRegistrationButton({
     >
       <Trash2 className="h-4 w-4" />
     </button>
+  );
+}
+
+/** Pencil button on a registration row: correct its number, state, status or dates. */
+export function EditRegistrationButton({
+  entityId,
+  pan,
+  registration,
+}: {
+  entityId: string;
+  pan?: string | null;
+  registration: Registration;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const label = `${humanize(registration.registrationType)} ${registration.registrationNumber}`;
+  return (
+    <>
+      <button
+        type="button"
+        className="rounded p-1 text-ink-faint hover:bg-surface-sunken hover:text-ink"
+        onClick={() => setOpen(true)}
+        aria-label={`Edit ${label}`}
+        title="Edit"
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      {open && (
+        <EditRegistrationModal
+          entityId={entityId}
+          pan={pan}
+          registration={registration}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Edit a registration in place — a GSTIN typed wrong is corrected here, and
+ * its filings stay on it (the calendar rebuilds for the new number).
+ */
+export function EditRegistrationModal({
+  entityId,
+  pan,
+  registration,
+  onClose,
+}: {
+  entityId: string;
+  pan?: string | null;
+  registration: Registration;
+  onClose: () => void;
+}): JSX.Element {
+  const toast = useToast();
+  const invalidate = useEntityInvalidate(entityId);
+  const isGstin = registration.registrationType === 'gstin';
+
+  const [registrationNumber, setRegistrationNumber] = useState(registration.registrationNumber);
+  const [status, setStatus] = useState<string>(registration.status);
+  const [stateCode, setStateCode] = useState(registration.stateCode ?? '');
+  const [stateAck, setStateAck] = useState(false);
+  const [validFrom, setValidFrom] = useState(registration.validFrom ?? '');
+  const [validTo, setValidTo] = useState(registration.validTo ?? '');
+  const [conflict, setConflict] = useState<DuplicateClientConflict | null>(null);
+  const [taxConflict, setTaxConflict] = useState<TaxIdConflict | null>(null);
+  const number = registrationNumber.trim().toUpperCase();
+  const clash = isGstin && gstinBlocks(number, pan);
+
+  const body = (): Record<string, unknown> => {
+    const b: Record<string, unknown> = {};
+    if (number !== registration.registrationNumber) b.registrationNumber = number;
+    if (status !== registration.status) b.status = status;
+    if ((stateCode || null) !== (registration.stateCode ?? null)) b.stateCode = stateCode || null;
+    if ((validFrom || null) !== (registration.validFrom ?? null)) b.validFrom = validFrom || null;
+    if ((validTo || null) !== (registration.validTo ?? null)) b.validTo = validTo || null;
+    if (stateAck) b.stateMismatchAcknowledged = true;
+    return b;
+  };
+  const changed = Object.keys(body()).some((k) => k !== 'stateMismatchAcknowledged');
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch(`/entities/${entityId}/registrations/${registration.id}`, {
+        method: 'PATCH',
+        body: body(),
+      }),
+    onSuccess: () => {
+      toast('Registration updated.');
+      invalidate();
+      onClose();
+    },
+    onError: (err) => {
+      const dupe = duplicateConflictOf(err);
+      const tax = taxIdConflictOf(err);
+      setConflict(dupe);
+      setTaxConflict(tax);
+      if (!dupe && !tax)
+        toast(
+          err instanceof ApiError ? err.message : 'Could not update the registration.',
+          'error',
+        );
+    },
+  });
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Edit ${isGstin ? 'GSTIN' : humanize(registration.registrationType)}`}
+      description={registration.registrationNumber}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={number.length === 0 || !changed || clash || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? 'Saving…' : 'Save'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {conflict && (
+          <DuplicateConflictNotice conflict={conflict} entityId={entityId} onMerged={onClose} />
+        )}
+        {taxConflict && <TaxIdConflictNotice conflict={taxConflict} />}
+        <Field label="Registration number" required>
+          <Input
+            value={registrationNumber}
+            autoFocus
+            onChange={(e) => setRegistrationNumber(e.target.value.toUpperCase())}
+          />
+          {isGstin && <GstinHint value={registrationNumber} pan={pan} />}
+        </Field>
+        {isGstin && number !== registration.registrationNumber && (
+          <p className="text-sm text-ink-muted">
+            The filings already made for this GSTIN stay on it, and its open engagements are rebuilt
+            for the new number.
+          </p>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+              {REGISTRATION_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {humanize(s)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="State">
+            <GstStateSelect
+              value={stateCode}
+              onChange={setStateCode}
+              gstin={isGstin ? registrationNumber : null}
+              acknowledged={stateAck}
+              onAcknowledge={setStateAck}
+            />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Valid from">
+            <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+          </Field>
+          <Field label="Valid to">
+            <Input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} />
+          </Field>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
