@@ -1,4 +1,15 @@
 import { GST_STATES, formatInr, type GstSplit } from '@hsdg/contracts';
+import { fitInto, type PdfImage } from './pdf-image';
+
+/** Where the firm is paid: printed under the totals when any of it is on file. */
+export interface FirmBank {
+  accountName: string | null;
+  bankName: string | null;
+  accountNumber: string | null;
+  ifsc: string | null;
+  branch: string | null;
+  upiId: string | null;
+}
 
 /**
  * PS-201 · the issued invoice as a PDF. A tax invoice is text and rules, so a
@@ -9,7 +20,19 @@ import { GST_STATES, formatInr, type GstSplit } from '@hsdg/contracts';
  * words, and whether tax is payable on reverse charge.
  */
 export interface InvoicePdfData {
-  firm: { name: string; address: string | null; gstin: string | null; stateCode: string | null };
+  firm: {
+    name: string;
+    address: string | null;
+    gstin: string | null;
+    stateCode: string | null;
+    pan?: string | null;
+    frn?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+    bank?: FirmBank | null;
+    logo?: PdfImage | null;
+  };
   client: { name: string; pan: string | null; gstin: string | null };
   invoiceNumber: string;
   issueDate: string;
@@ -67,6 +90,38 @@ export class Page {
   rule(x1: number, y1: number, x2: number, y2: number, width = 0.5): void {
     this.ops.push(`${width} w ${x1} ${y1} m ${x2} ${y2} l S`);
   }
+  /** Draw the document's image (/Im1) with its bottom-left at x, y. */
+  image(x: number, y: number, w: number, h: number): void {
+    this.ops.push(`q ${w} 0 0 ${h} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im1 Do Q`);
+  }
+}
+
+/** The firm's lines under its name: address, GSTIN/state, PAN/FRN, contact. Pure — tested. */
+export function firmHeaderLines(f: InvoicePdfData['firm']): string[] {
+  const out = wrap(f.address ?? '', 80).filter(Boolean);
+  if (f.gstin) out.push(`GSTIN: ${f.gstin}   State: ${stateLabel(f.stateCode)}`);
+  const ids = [f.pan && `PAN: ${f.pan}`, f.frn && `FRN: ${f.frn}`].filter(Boolean);
+  if (ids.length) out.push(ids.join('   '));
+  const contact = [f.phone && `Phone: ${f.phone}`, f.email && `Email: ${f.email}`, f.website]
+    .filter(Boolean)
+    .join('   ');
+  if (contact) out.push(contact);
+  return out;
+}
+
+/** The "Bank details" block, or nothing when none is on file. Pure — tested. */
+export function bankLines(b: FirmBank | null | undefined): string[] {
+  if (!b) return [];
+  const out = [
+    b.accountName && `Account name: ${b.accountName}`,
+    (b.bankName || b.branch) && `Bank: ${[b.bankName, b.branch].filter(Boolean).join(', ')}`,
+    (b.accountNumber || b.ifsc) &&
+      [b.accountNumber && `A/c no: ${b.accountNumber}`, b.ifsc && `IFSC: ${b.ifsc}`]
+        .filter(Boolean)
+        .join('   '),
+    b.upiId && `UPI: ${b.upiId}`,
+  ].filter((l): l is string => Boolean(l));
+  return out;
 }
 
 /** Break text into lines of at most `max` characters on word boundaries. */
@@ -109,17 +164,21 @@ export function renderInvoicePdf(d: InvoicePdfData): Buffer {
     y = A4.h - MARGIN;
   };
 
-  // Header: the firm, then TAX INVOICE.
-  page.text(MARGIN, y, d.firm.name, 14, true);
+  // Header: the logo (if any) and the firm, then TAX INVOICE.
+  const top = y;
+  let x = MARGIN;
+  if (d.firm.logo) {
+    const box = fitInto(d.firm.logo, 64, 56);
+    page.image(MARGIN, top + 10 - box.h, box.w, box.h);
+    x = MARGIN + box.w + 12;
+  }
+  page.text(x, y, d.firm.name, 14, true);
   y -= 14;
-  for (const l of wrap(d.firm.address ?? '', 80).filter(Boolean)) {
-    page.text(MARGIN, y, l, 9);
+  for (const l of firmHeaderLines(d.firm)) {
+    page.text(x, y, l, 9);
     y -= 11;
   }
-  if (d.firm.gstin) {
-    page.text(MARGIN, y, `GSTIN: ${d.firm.gstin}   State: ${stateLabel(d.firm.stateCode)}`, 9);
-    y -= 11;
-  }
+  if (d.firm.logo) y = Math.min(y, top + 10 - fitInto(d.firm.logo, 64, 56).h - 4);
   y -= 8;
   page.text(MARGIN, y, 'TAX INVOICE', 13, true);
   page.right(right, y, `Invoice No. ${d.invoiceNumber}`, 10, true);
@@ -226,20 +285,32 @@ export function renderInvoicePdf(d: InvoicePdfData): Buffer {
       y -= 11;
     }
   }
-  need(40);
+  const bank = bankLines(d.firm.bank);
+  need(Math.max(40, bank.length ? 24 + 12 * (bank.length + 1) : 0));
   y -= 24;
-  page.right(right, y, `For ${d.firm.name}`, 9, true);
-  y -= 30;
-  page.right(right, y, 'Authorised signatory', 9);
+  const signY = y;
+  if (bank.length) {
+    page.text(MARGIN, y, 'Bank details', 9, true);
+    y -= 12;
+    for (const l of bank) {
+      page.text(MARGIN, y, l, 9);
+      y -= 11;
+    }
+  }
+  page.right(right, signY, `For ${d.firm.name}`, 9, true);
+  page.right(right, signY - 30, 'Authorised signatory', 9);
 
   pages.forEach((p, i) => {
     p.right(right, MARGIN - 20, `Page ${i + 1} of ${pages.length}`, 7);
   });
-  return assemble(pages);
+  return assemble(pages, d.firm.logo ?? null);
 }
 
-/** Objects: 1 catalog, 2 pages, 3–4 fonts, then a page and its content per page. */
-export function assemble(pages: Page[]): Buffer {
+/**
+ * Objects: 1 catalog, 2 pages, 3–4 fonts, then a page and its content per
+ * page, then the image (if any) as /Im1 on every page.
+ */
+export function assemble(pages: Page[], image: PdfImage | null = null): Buffer {
   const objects: string[] = [];
   const pageIds = pages.map((_, i) => 5 + i * 2);
   objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
@@ -247,12 +318,20 @@ export function assemble(pages: Page[]): Buffer {
   objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
   objects[4] =
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+  const imageId = image ? 5 + pages.length * 2 : null;
+  if (image && imageId) {
+    objects[imageId] =
+      `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} ` +
+      `/ColorSpace /${image.colorSpace} /BitsPerComponent 8 /Filter /${image.filter} ` +
+      `/Length ${image.data.length} >>\nstream\n${image.data.toString('latin1')}\nendstream`;
+  }
+  const xobject = imageId ? ` /XObject << /Im1 ${imageId} 0 R >>` : '';
   pages.forEach((p, i) => {
     const pageId = pageIds[i]!;
     const stream = p.ops.join('\n');
     objects[pageId] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${A4.w} ${A4.h}] ` +
-      `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${pageId + 1} 0 R >>`;
+      `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobject} >> /Contents ${pageId + 1} 0 R >>`;
     objects[pageId + 1] =
       `<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`;
   });

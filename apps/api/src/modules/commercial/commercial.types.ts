@@ -13,6 +13,8 @@ export interface InvoiceLineInput {
   quantity?: string;
   unitAmount?: string;
   engagementComponentId?: string | null;
+  /** Quick invoices: which of the engagement's services the line bills. */
+  engagementServiceId?: string | null;
   sortOrder?: number;
   sacCode?: string;
   gstRate?: number;

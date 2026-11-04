@@ -6,6 +6,7 @@ import { ComplianceModule } from '../compliance/compliance.module';
 import { EngagementsModule } from '../engagements/engagements.module';
 import { PeopleModule } from '../people/people.module';
 import { PartnerPacksModule } from '../partner-packs/partner-packs.module';
+import { BillingModule } from '../billing/billing.module';
 import { ComplianceSchedulerService } from './compliance-scheduler.service';
 import { CronController } from './cron.controller';
 
@@ -24,6 +25,7 @@ import { CronController } from './cron.controller';
     FilingWorkspaceModule,
     PeopleModule,
     PartnerPacksModule,
+    BillingModule,
   ],
   controllers: [CronController],
   providers: [ComplianceSchedulerService],

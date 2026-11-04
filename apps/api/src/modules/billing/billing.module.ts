@@ -16,11 +16,27 @@ import { TdsPdfReader } from './tds-pdf-reader';
 import { TdsCreditsService } from './tds-credits.service';
 import { TimeBillingService } from './time-billing.service';
 import { UnbilledService } from './unbilled.service';
+import { FirmProfileService } from './quick/firm-profile.service';
+import {
+  FirmProfileController,
+  InvoiceLinksPublicController,
+  QuickInvoicesController,
+} from './quick/quick-invoices.controller';
+import { QuickInvoicesService } from './quick/quick-invoices.service';
+import { RecurringInvoicesScheduler } from './quick/recurring-invoices.scheduler';
+import { RecurringInvoicesService } from './quick/recurring-invoices.service';
 
 /** Practice Services Phase 2 · Fees to cash (PS-201 onwards). */
 @Module({
   imports: [AuditModule, CommercialModule, NotificationsModule, StorageModule],
-  controllers: [BillingController, ReceivablesController, ClientFeesController],
+  controllers: [
+    BillingController,
+    ReceivablesController,
+    ClientFeesController,
+    QuickInvoicesController,
+    FirmProfileController,
+    InvoiceLinksPublicController,
+  ],
   providers: [
     BillingSettingsService,
     ClientFeesService,
@@ -32,6 +48,10 @@ import { UnbilledService } from './unbilled.service';
     TdsCreditsService,
     TdsPdfReader,
     TimeBillingService,
+    FirmProfileService,
+    QuickInvoicesService,
+    RecurringInvoicesService,
+    RecurringInvoicesScheduler,
   ],
   exports: [
     AdjustmentsService,
@@ -39,6 +59,7 @@ import { UnbilledService } from './unbilled.service';
     ReversalRequestsService,
     TdsCreditsService,
     UnbilledService,
+    RecurringInvoicesScheduler,
   ],
 })
 export class BillingModule {}

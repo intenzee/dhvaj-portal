@@ -11,6 +11,7 @@ import { NotificationDigestScheduler } from '../notifications/notification-diges
 import { istToday } from '../engagements/time/auto-time';
 import { PeopleExitsScheduler } from '../people/people-exits.scheduler';
 import { PartnerPacksScheduler, isPackDay } from '../partner-packs/partner-packs.scheduler';
+import { RecurringInvoicesScheduler } from '../billing/quick/recurring-invoices.scheduler';
 
 /**
  * HTTP trigger for the background jobs on hosts with no long-running process
@@ -31,6 +32,7 @@ export class CronController {
     private readonly digest: NotificationDigestScheduler,
     private readonly exits: PeopleExitsScheduler,
     private readonly packs: PartnerPacksScheduler,
+    private readonly invoices: RecurringInvoicesScheduler,
   ) {}
 
   @Get()
@@ -48,6 +50,8 @@ export class CronController {
     if (istToday(new Date()).endsWith('-01')) await this.monthlyRequest.run();
     // Last month's partner packs on the 3rd (IST), before the drain sends them.
     if (isPackDay(istToday(new Date()))) await this.packs.run();
+    // The monthly invoices due today (issued, or drafts), before the drain.
+    await this.invoices.run();
     // Yesterday's informational notices in one message (once a day).
     await this.digest.run();
     await this.scheduler.runOutboxDrain();

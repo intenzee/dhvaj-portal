@@ -35,6 +35,7 @@ import { AuditService } from '../audit/audit.service';
 import { STORAGE_PROVIDER, type StorageProvider } from '../documents/storage/storage-provider';
 import { istToday } from '../compliance/compliance-profile';
 import { renderInvoicePdf } from '../billing/invoice-pdf';
+import { firmForPdf, type FirmPdfRow } from '../billing/firm-pdf';
 import type {
   CreateInvoiceInput,
   InvoiceLineInput,
@@ -779,10 +780,10 @@ export class CommercialService {
     await client.query(
       `INSERT INTO hsdg.invoice_line_items
          (invoice_id, engagement_id, engagement_component_id, description, quantity, unit_amount,
-          sort_order, sac_code, gst_rate)
+          sort_order, sac_code, gst_rate, engagement_service_id)
        VALUES ($1, $2, $3, $4, COALESCE($5::numeric,1), COALESCE($6::numeric,0), $7,
                COALESCE($8, (SELECT sac_default FROM hsdg.firm_settings LIMIT 1)),
-               COALESCE($9::numeric, 18))`,
+               COALESCE($9::numeric, 18), $10)`,
       [
         invoiceId,
         engagementId,
@@ -793,6 +794,7 @@ export class CommercialService {
         line.sortOrder ?? sortOrder,
         line.sacCode ?? null,
         line.gstRate ?? null,
+        line.engagementServiceId ?? null,
       ],
     );
   }
@@ -919,12 +921,12 @@ export class CommercialService {
     invoiceId: string,
   ): Promise<void> {
     const inv = await this.selectInvoiceDetail(client, engagementId, invoiceId);
-    const { rows: firmRows } = await client.query<{
-      firm_name: string;
-      address: string | null;
-      gstin: string | null;
-      state_code: string | null;
-    }>(`SELECT firm_name, address, gstin, state_code FROM hsdg.firm_settings LIMIT 1`);
+    const { rows: firmRows } = await client.query<FirmPdfRow>(
+      `SELECT firm_name, address, gstin, state_code, frn, email, pan, phone, website,
+              bank_account_name, bank_name, bank_account_number, bank_ifsc, bank_branch, upi_id,
+              logo, logo_content_type
+         FROM hsdg.firm_settings LIMIT 1`,
+    );
     const { rows: clientRows } = await client.query<{ legal_name: string; pan: string | null }>(
       `SELECT legal_name, pan FROM hsdg.entity_billing_profiles WHERE id = $1`,
       [inv.clientEntityId],
@@ -936,12 +938,7 @@ export class CommercialService {
       inv.placeOfSupplyState,
     );
     const pdf = renderInvoicePdf({
-      firm: {
-        name: firm?.firm_name ?? '',
-        address: firm?.address ?? null,
-        gstin: firm?.gstin ?? null,
-        stateCode: firm?.state_code ?? null,
-      },
+      firm: firmForPdf(firm),
       client: {
         name: clientRows[0]?.legal_name ?? '',
         pan: clientRows[0]?.pan ?? null,
