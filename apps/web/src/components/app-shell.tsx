@@ -291,6 +291,7 @@ function SidebarContent({
     registers: isOn(FEATURE_FLAG.registers),
     certificates: isOn(FEATURE_FLAG.certificates),
     clientKyc: isOn(FEATURE_FLAG.clientKyc),
+    itrDesk: isOn(FEATURE_FLAG.itrDesk),
   });
   const activeHref = activeNavHref(
     sections.flatMap((s) => s.items),

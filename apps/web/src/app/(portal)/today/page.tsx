@@ -11,6 +11,7 @@ import { taskContextFor } from '@/lib/engagement-context';
 import { useFirmChecks } from '@/lib/firm-checks';
 import { deadlineLabel, formatDate } from '@/lib/format';
 import { useWorkHref } from '@/lib/work-href';
+import { itrReturnHref } from '@/lib/itr-api';
 import { cn } from '@/lib/cn';
 import { Button, Card, EmptyState, PageHeader, Spinner } from '@/components/ui';
 import { StatusBadge } from '@/components/status-badge';
@@ -54,7 +55,12 @@ function TodayScreen(): JSX.Element {
   const router = useRouter();
   const flags = useFeatureFlags();
   const on = flags.isOn(FEATURE_FLAG.todayView);
-  const workHref = useWorkHref();
+  const linkHref = useWorkHref();
+  // An e-verify row opens its return on the ITR desk, not the filing drawer (PS-403).
+  const workHref = useCallback(
+    (i: TodayItem) => (i.itr ? itrReturnHref(i.itr.returnId) : linkHref(i)),
+    [linkHref],
+  );
   const drawer = useOpenFiling();
   const query = todayQuery();
   const q = useQuery({ ...query, enabled: on });
@@ -69,7 +75,7 @@ function TodayScreen(): JSX.Element {
 
   const openItem = useCallback(
     (i: TodayItem) => {
-      if (i.link.instanceId) drawer.open(i.link.instanceId);
+      if (i.link.instanceId && !i.itr) drawer.open(i.link.instanceId);
       else router.push(workHref(i));
     },
     [drawer, router, workHref],
@@ -178,7 +184,7 @@ function TodayScreen(): JSX.Element {
                             onClick={(e) => {
                               // A plain click works the filing in the drawer; Ctrl/Cmd-click opens the page.
                               if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-                              if (!item.link.instanceId) return;
+                              if (!item.link.instanceId || item.itr) return;
                               e.preventDefault();
                               drawer.open(item.link.instanceId);
                             }}

@@ -11,7 +11,6 @@ import {
   type FilingRunBulkResult,
   type FilingRunRemindResult,
   type FilingRunRow,
-  type Paginated,
 } from '@hsdg/contracts';
 import { ApiError, apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -21,11 +20,9 @@ import { useToast } from '@/lib/toast';
 import { useUrlState } from '@/lib/url-state';
 import { useFirmChecks } from '@/lib/firm-checks';
 import { deadlineLabel, formatDate } from '@/lib/format';
-import type { EmployeeRow } from '@/lib/types';
 import { cn } from '@/lib/cn';
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner } from '@/components/ui';
 import { Field, Select } from '@/components/form';
-import { Modal } from '@/components/modal';
 import { StatusBadge } from '@/components/status-badge';
 import { FilingStatusBadge } from '@/components/filing/filing-status';
 import { FilingDrawer, useOpenFiling, type DrawerItem } from '@/components/filing/filing-drawer';
@@ -51,22 +48,13 @@ import {
   type BulkAction,
   type RunScope,
 } from '@/components/compliance/filing-runs-model';
+import { BulkAssignModal } from '@/components/compliance/bulk-assign-modal';
 
 const SCOPES: readonly (readonly [RunScope, string])[] = [
   ['all', 'All I can see'],
   ['mine', 'Mine'],
   ['team', 'My team'],
 ];
-
-/** "Keep" leaves the field as it is; "none" clears it. */
-const KEEP = '__keep__';
-const NONE = '__none__';
-
-function pick(v: string): string | null | undefined {
-  if (v === KEEP) return undefined;
-  if (v === NONE) return null;
-  return v;
-}
 
 /** Bulk outcome, kept on screen until dismissed so each refused filing can be read. */
 interface Outcome {
@@ -366,7 +354,7 @@ function RunsScreen(): JSX.Element {
         </Card>
       )}
 
-      <AssignModal
+      <BulkAssignModal
         open={assignOpen}
         instanceIds={toAssign}
         onClose={() => setAssignOpen(false)}
@@ -490,104 +478,6 @@ function RunRow({
         )}
       </td>
     </tr>
-  );
-}
-
-/** Bulk assign: one preparer and / or reviewer onto every ticked filing the caller leads. */
-function AssignModal({
-  open,
-  instanceIds,
-  onClose,
-  onDone,
-}: {
-  open: boolean;
-  instanceIds: string[];
-  onClose: () => void;
-  onDone: (r: FilingRunBulkResult) => void;
-}): JSX.Element | null {
-  const toast = useToast();
-  const [preparer, setPreparer] = useState(KEEP);
-  const [reviewer, setReviewer] = useState(KEEP);
-  const employees = useQuery({
-    queryKey: ['employees', 'all'],
-    queryFn: () => apiFetch<Paginated<EmployeeRow>>('/employees?limit=100'),
-    enabled: open,
-  });
-  const assign = useMutation({
-    mutationFn: () => {
-      const p = pick(preparer);
-      const r = pick(reviewer);
-      return apiFetch<FilingRunBulkResult>('/compliance/runs/assign', {
-        method: 'POST',
-        body: {
-          instanceIds,
-          ...(p !== undefined ? { preparerId: p } : {}),
-          ...(r !== undefined ? { reviewerId: r } : {}),
-        },
-      });
-    },
-    onSuccess: (r) => {
-      setPreparer(KEEP);
-      setReviewer(KEEP);
-      onDone(r);
-    },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Could not assign.', 'error'),
-  });
-  const people = employees.data?.items ?? [];
-  const sameAsPreparer = preparer !== KEEP && preparer !== NONE && preparer === reviewer;
-  const nothing = preparer === KEEP && reviewer === KEEP;
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={`Assign ${instanceIds.length} filing${instanceIds.length === 1 ? '' : 's'}`}
-      description="Only filings you lead are assigned; the rest are reported back."
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            disabled={nothing || sameAsPreparer || assign.isPending}
-            onClick={() => assign.mutate()}
-          >
-            {assign.isPending ? 'Assigning…' : 'Assign'}
-          </Button>
-        </div>
-      }
-    >
-      <div className="space-y-3">
-        {employees.isLoading && <Spinner label="Loading people…" />}
-        <Field label="Preparer">
-          <Select value={preparer} onChange={(e) => setPreparer(e.target.value)}>
-            <option value={KEEP}>Keep as it is</option>
-            <option value={NONE}>Unassign</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.fullName} · {p.gradeName}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Reviewer">
-          <Select value={reviewer} onChange={(e) => setReviewer(e.target.value)}>
-            <option value={KEEP}>Keep as it is</option>
-            <option value={NONE}>No reviewer</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.fullName} · {p.gradeName}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {sameAsPreparer && (
-          <p className="text-sm text-danger-600">
-            The preparer and the reviewer must be different people.
-          </p>
-        )}
-      </div>
-    </Modal>
   );
 }
 

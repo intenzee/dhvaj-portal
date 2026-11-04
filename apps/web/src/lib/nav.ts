@@ -65,7 +65,8 @@ export interface NavItem {
   /** With ff_work_links: a count pill read from `path` (`{ total }`), e.g. reviews waiting (WF-105). */
   badge?: { queryKey: readonly string[]; path: string };
   /** Shown only while this rollout flag is on (e.g. Today behind ff_today_view). */
-  flag?: 'todayView' | 'filingRuns' | 'notices' | 'registers' | 'certificates' | 'clientKyc';
+  flag?:
+    'todayView' | 'filingRuns' | 'notices' | 'registers' | 'certificates' | 'clientKyc' | 'itrDesk';
   /** Shown only to someone holding one of these roles (the effective role when set). */
   onlyFor?: RoleSlug[];
 }
@@ -91,6 +92,8 @@ export interface NavOptions {
   certificates?: boolean;
   /** ff_client_kyc: the client KYC register (Practice Services PS-404). */
   clientKyc?: boolean;
+  /** ff_itr_desk: the ITR desk, individual returns at volume (Practice Services PS-403). */
+  itrDesk?: boolean;
 }
 
 export interface NavSection {
@@ -242,6 +245,15 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'One form and period across every client — assign and remind in bulk, lodge one by one.',
         permission: PERMISSION.engagementRead,
         flag: 'filingRuns',
+        ready: true,
+      },
+      {
+        label: 'ITR desk',
+        href: '/itr',
+        icon: Receipt,
+        hint: 'The season’s individual returns — assign in bulk, e-verify, refunds and 26AS / AIS matching.',
+        permission: PERMISSION.engagementRead,
+        flag: 'itrDesk',
         ready: true,
       },
       {

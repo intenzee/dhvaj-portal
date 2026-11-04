@@ -107,7 +107,7 @@ export function toggleSelection(
 /** Drop selected ids no longer in the run (after a period change or a refetch). */
 export function pruneSelection(
   selected: ReadonlySet<string>,
-  rows: readonly FilingRunRow[],
+  rows: readonly Pick<FilingRunRow, 'instanceId'>[],
 ): Set<string> {
   const ids = new Set(rows.map((r) => r.instanceId));
   return new Set([...selected].filter((id) => ids.has(id)));
