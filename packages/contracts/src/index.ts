@@ -110,3 +110,4 @@ export * from './branches';
 export * from './data-checks';
 export * from './people-admin';
 export * from './work-sets';
+export * from './progress';

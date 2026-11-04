@@ -10,6 +10,8 @@ import { WorkController } from './work.controller';
 import { WorkReviewsService } from './work-reviews.service';
 import { WorkTodayService } from './work-today.service';
 import { TaskQuestionsController } from './task-questions.controller';
+import { ProgressController } from './progress.controller';
+import { ProgressService } from './progress.service';
 
 /**
  * Tasks & client dependencies (Phase 9). Internal work items (assignment, due
@@ -24,6 +26,7 @@ import { TaskQuestionsController } from './task-questions.controller';
     ClientDependenciesController,
     WorkController,
     TaskQuestionsController,
+    ProgressController,
   ],
   providers: [
     TasksService,
@@ -31,6 +34,7 @@ import { TaskQuestionsController } from './task-questions.controller';
     ClientDependenciesService,
     WorkReviewsService,
     WorkTodayService,
+    ProgressService,
   ],
   exports: [TasksService, TaskWorkflowService, ClientDependenciesService],
 })
