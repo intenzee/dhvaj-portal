@@ -115,3 +115,4 @@ export * from './tax-audit-applicability';
 export * from './progress';
 export * from './tax-audit-acceptance';
 export * from './tax-audit-clauses';
+export * from './tax-audit-workspace';

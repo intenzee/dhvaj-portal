@@ -9,19 +9,22 @@ import { TaxAuditClauseLibraryService } from './tax-audit-clause-library.service
 import { TaxAuditApplicabilityService } from './tax-audit-applicability.service';
 import { TaxAuditsController } from './tax-audits.controller';
 import { TaxAuditsService } from './tax-audits.service';
+import { TaxAuditWorkspaceController } from './tax-audit-workspace.controller';
+import { TaxAuditWorkspaceService } from './tax-audit-workspace.service';
 
 /**
  * Tax Audit (Phases 3–5): the yearly audits, applicability and the radar,
- * acceptance, and the Form 3CD clause library.
+ * acceptance, the Form 3CD clause library and the clause workspace.
  */
 @Module({
   imports: [AuditModule, ComplianceModule, DocumentsModule, DocumentTemplatesModule],
-  controllers: [TaxAuditsController, TaxAuditClauseLibraryController],
+  controllers: [TaxAuditsController, TaxAuditClauseLibraryController, TaxAuditWorkspaceController],
   providers: [
     TaxAuditsService,
     TaxAuditApplicabilityService,
     TaxAuditAcceptanceService,
     TaxAuditClauseLibraryService,
+    TaxAuditWorkspaceService,
   ],
 })
 export class TaxAuditsModule {}
