@@ -24,7 +24,7 @@ describe('Tax audit clause workspace (e2e)', () => {
   let artEmp: string;
   let eng: string;
   let auditId: string;
-  const FY = '2026-27';
+  const FY = '2025-26';
   const http = () => request(app.getHttpServer());
   const as = async (email: string) => ({
     Authorization: `Bearer ${(await http().post('/api/v1/auth/dev-token').send({ email }).expect(201)).body.accessToken}`,
@@ -247,7 +247,7 @@ describe('Tax audit clause workspace (e2e)', () => {
         .send({
           filename: 'traces-default-summary.txt',
           contentType: 'text/plain',
-          contentBase64: Buffer.from('No defaults for FY 2026-27').toString('base64'),
+          contentBase64: Buffer.from('No defaults for FY 2025-26').toString('base64'),
         })
         .expect(200)
     ).body as TaxAuditWorkspace;

@@ -37,6 +37,7 @@ import {
   type TaxAuditWorkspace,
   type TaxAuditWpStatus,
   type UploadTaxAuditWpEvidenceInput,
+  taxAuditRegime,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -177,7 +178,10 @@ export class TaxAuditWorkspaceService {
       const lib = await libraryVersionForYear(client, a.financial_year);
       if (!lib) {
         throw new BadRequestException(
-          `No Form 3CD library version is published for FY ${a.financial_year}.`,
+          `No ${taxAuditRegime(a.financial_year).particulars} clause library is published for FY ${a.financial_year}` +
+            (taxAuditRegime(a.financial_year).act === '2025'
+              ? ': enter and publish the Form 26 clauses under Admin first.'
+              : '.'),
         );
       }
       const { rows: clauses } = await client.query<{

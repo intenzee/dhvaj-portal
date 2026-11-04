@@ -20,6 +20,7 @@ import {
   type TaxAuditLibraryView,
   type TaxAuditPackage,
   type TaxAuditSubItem,
+  taxAuditRegime,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -452,8 +453,10 @@ export class TaxAuditClauseLibraryService {
 
 /**
  * The library version an audit of `financialYear` runs on: the newest
- * published version whose first year is on or before it (F-5 stores it on the
- * audit when its clause work starts, so later versions never move it).
+ * published version of that year's Act (3CD under the 1961 Act up to FY
+ * 2025-26, Form 26 under the 2025 Act after) whose first year is on or before
+ * it. F-5 stores it on the audit when its clause work starts, so later
+ * versions never move it.
  */
 export async function libraryVersionForYear(
   client: PoolClient,
@@ -461,9 +464,9 @@ export async function libraryVersionForYear(
 ): Promise<{ id: string; versionNo: number } | null> {
   const { rows } = await client.query<{ id: string; version_no: number }>(
     `SELECT id, version_no FROM hsdg.tax_audit_clause_library_versions
-      WHERE status = 'published' AND applies_from_fy <= $1
+      WHERE status = 'published' AND applies_from_fy <= $1 AND act = $2
       ORDER BY applies_from_fy DESC, version_no DESC LIMIT 1`,
-    [financialYear],
+    [financialYear, taxAuditRegime(financialYear).act],
   );
   return rows[0] ? { id: rows[0].id, versionNo: rows[0].version_no } : null;
 }

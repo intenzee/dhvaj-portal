@@ -38,6 +38,43 @@ export const TAX_AUDIT_STAGE_LABEL: Record<TaxAuditStage, string> = {
 export const TAX_AUDIT_FORMS = ['3CA', '3CB'] as const;
 export type TaxAuditForm = (typeof TAX_AUDIT_FORMS)[number];
 
+/**
+ * The first tax year under the Income-tax Act 2025. Its tax audit (section 63,
+ * rule 47 of the Income-tax Rules 2026) is reported in one Form 26, which
+ * takes the place of 3CA / 3CB and the 3CD particulars. FY 2025-26 and earlier
+ * are still audited under s.44AB of the 1961 Act, in 3CA / 3CB with 3CD.
+ */
+export const TAX_AUDIT_FORM_26_FROM_FY = '2026-27';
+
+/** Which Act and report a year's tax audit falls under. */
+export function taxAuditRegime(financialYear: string): {
+  act: '1961' | '2025';
+  section: string;
+  /** The report, e.g. 'Form 3CA / 3CB with 3CD' or 'Form 26'. */
+  report: string;
+  /** The particulars the clauses fill: '3CD' or 'Form 26'. */
+  particulars: string;
+} {
+  return financialYear >= TAX_AUDIT_FORM_26_FROM_FY
+    ? { act: '2025', section: 's.63, Income-tax Act 2025', report: 'Form 26', particulars: 'Form 26' }
+    : {
+        act: '1961',
+        section: 's.44AB, Income-tax Act 1961',
+        report: 'Form 3CA / 3CB with 3CD',
+        particulars: '3CD',
+      };
+}
+
+/**
+ * A year's form, as the firm says it: "Form 3CB" up to FY 2025-26; from
+ * 2026-27, "Form 26" with the case that 3CA / 3CB used to tell apart.
+ */
+export function taxAuditFormLabel(financialYear: string, form: TaxAuditForm | null): string {
+  if (financialYear < TAX_AUDIT_FORM_26_FROM_FY) return form ? `Form ${form}` : 'Form 3CA / 3CB';
+  if (!form) return 'Form 26';
+  return form === '3CA' ? 'Form 26 (audited under another law)' : 'Form 26 (tax audit only)';
+}
+
 /** One year's audit on the engagement's Tax Audit tab (GET /engagements/:id/tax-audits). */
 export interface TaxAuditRow {
   id: string;

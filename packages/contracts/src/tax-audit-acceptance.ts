@@ -31,6 +31,8 @@ export interface TaxAuditSigningPartner {
   offered: boolean;
   /** Why not, when not offered. */
   reason: string | null;
+  /** Offered, but near the limit: "52 of 60 — 8 left for FY 2025-26". */
+  warning: string | null;
 }
 
 /** GET …/acceptance */
@@ -119,6 +121,17 @@ export function partnerLoadSummary(
   return `${name}: ${reports} of ${limit} for FY ${financialYear}`;
 }
 
+/**
+ * A partner is warned from this many reports in a year (50 of the 60 the
+ * ICAI allows), so the last few are planned rather than found at signing.
+ */
+export const TAX_AUDIT_WARN_AT = 50;
+
+/** The warning point for the firm's limit: 50 at 60, ten short of a lower limit. */
+export function taxAuditWarnAt(limit: number): number {
+  return Math.max(1, Math.min(TAX_AUDIT_WARN_AT, limit - 10));
+}
+
 /** COP valid on the IST date `today` (YYYY-MM-DD): valid until today or later. */
 export function copValid(copValidUntil: string | null, today: string): boolean {
   return copValidUntil !== null && copValidUntil >= today;
@@ -134,12 +147,13 @@ export function signingPartnerOffer(
   financialYear: string,
   today: string,
   current = false,
-): { offered: boolean; reason: string | null; summary: string } {
+): { offered: boolean; reason: string | null; summary: string; warning: string | null } {
   const summary = partnerLoadSummary(p.name, p.reports, limit, financialYear);
   if (!copValid(p.copValidUntil, today)) {
     return {
       offered: false,
       summary,
+      warning: null,
       reason: p.copValidUntil
         ? `COP expired on ${p.copValidUntil}. An administrator updates it under Admin → People.`
         : 'No certificate of practice on the partner profile. An administrator adds it under Admin → People.',
@@ -149,10 +163,15 @@ export function signingPartnerOffer(
     return {
       offered: false,
       summary,
+      warning: null,
       reason: `${p.reports} of ${limit} tax audit reports for FY ${financialYear}: no room for another.`,
     };
   }
-  return { offered: true, reason: null, summary };
+  const warning =
+    p.reports >= taxAuditWarnAt(limit)
+      ? `${p.reports} of ${limit} — ${Math.max(0, limit - p.reports)} left for FY ${financialYear}`
+      : null;
+  return { offered: true, reason: null, summary, warning };
 }
 
 /** What still stands between a tax audit and its acceptance. */

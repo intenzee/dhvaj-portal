@@ -44,6 +44,7 @@ const desk = (over: Partial<TaxAuditAcceptance> = {}): TaxAuditAcceptance => ({
       summary: 'Deepak: 41 of 60 for FY 2025-26',
       offered: true,
       reason: null,
+      warning: null,
     },
     {
       employeeId: 'p2',
@@ -54,6 +55,7 @@ const desk = (over: Partial<TaxAuditAcceptance> = {}): TaxAuditAcceptance => ({
       summary: 'Tanmoy: 60 of 60 for FY 2025-26',
       offered: false,
       reason: '60 of 60 tax audit reports for FY 2025-26: no room for another.',
+      warning: null,
     },
     {
       employeeId: 'p3',
@@ -64,6 +66,7 @@ const desk = (over: Partial<TaxAuditAcceptance> = {}): TaxAuditAcceptance => ({
       summary: 'Asha: 0 of 60 for FY 2025-26',
       offered: false,
       reason: 'No certificate of practice on the partner profile.',
+      warning: null,
     },
   ],
   missing: [
@@ -91,6 +94,41 @@ describe('AcceptanceDesk', () => {
     const notOffered = screen.getByRole('list', { name: 'Partners not offered' });
     expect(notOffered).toHaveTextContent('Tanmoy: 60 of 60 for FY 2025-26');
     expect(notOffered).toHaveTextContent('No certificate of practice');
+  });
+
+  it('warns when the chosen partner is near the yearly limit (50 of 60)', async () => {
+    const base = desk();
+    apiFetch.mockResolvedValue(
+      desk({
+        signingPartnerId: 'p1',
+        partners: [
+          {
+            ...base.partners[0]!,
+            reports: 52,
+            summary: 'Deepak: 52 of 60 for FY 2025-26',
+            warning: '52 of 60 — 8 left for FY 2025-26',
+          },
+          ...base.partners.slice(1),
+        ],
+      }),
+    );
+    render(wrap(<AcceptanceDesk engagementId="g1" auditId="a1" />));
+    const picker = (await screen.findByLabelText(/^Signing partner/)) as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toContain(
+      'Deepak: 52 of 60 for FY 2025-26 — near the limit',
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Near the yearly limit: 52 of 60 — 8 left for FY 2025-26.',
+    );
+  });
+
+  it('labels the form Form 26 from tax year 2026-27', async () => {
+    apiFetch.mockResolvedValue(desk({ financialYear: '2026-27' }));
+    render(wrap(<AcceptanceDesk engagementId="g1" auditId="a1" />));
+    await screen.findByLabelText(/^Signing partner/);
+    const form = screen.getByRole('option', { name: 'Form 26 (tax audit only)' });
+    expect(form).toBeInTheDocument();
+    expect(screen.getByText(/Income-tax Act 2025: one Form 26/)).toBeInTheDocument();
   });
 
   it('saves the chosen partner with the version read', async () => {

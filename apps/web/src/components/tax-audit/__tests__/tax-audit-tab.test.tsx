@@ -79,7 +79,8 @@ describe('TaxAuditTab', () => {
     expect(await screen.findByText('FY 2026-27')).toBeInTheDocument();
     expect(apiFetch).toHaveBeenCalledWith('/engagements/g1/tax-audits');
     expect(screen.getByText('Not started')).toBeInTheDocument();
-    expect(screen.getByText('Form 3CB')).toBeInTheDocument();
+    // FY 2026-27 is under the Income-tax Act 2025: one Form 26.
+    expect(screen.getByText('Form 26 (tax audit only)')).toBeInTheDocument();
     expect(screen.getByText('Meera Rao')).toBeInTheDocument();
     expect(screen.getByText('Filed')).toBeInTheDocument();
     expect(screen.getByText('26123456ABCDEF1234')).toBeInTheDocument();

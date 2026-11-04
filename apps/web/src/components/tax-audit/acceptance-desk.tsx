@@ -4,6 +4,8 @@ import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   TAX_AUDIT_FORMS,
+  taxAuditFormLabel,
+  taxAuditRegime,
   type SaveTaxAuditAcceptanceInput,
   type TaxAuditAcceptance,
   type TaxAuditForm,
@@ -130,7 +132,7 @@ function AcceptanceForm({
           <p className="text-ink-muted">
             Last year:{' '}
             {[
-              proposal.formType && `Form ${proposal.formType}`,
+              proposal.formType && taxAuditFormLabel(a.financialYear, proposal.formType),
               proposal.signingPartnerName && `signed by ${proposal.signingPartnerName}`,
             ]
               .filter(Boolean)
@@ -261,7 +263,11 @@ function AcceptanceForm({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
               label="Form"
-              hint="3CA: accounts audited under another law; 3CB: audited only for tax."
+              hint={
+                taxAuditRegime(a.financialYear).act === '2025'
+                  ? `FY ${a.financialYear} is under the Income-tax Act 2025: one Form 26 (s.63, rule 47). Say whether the accounts are audited under another law.`
+                  : '3CA: accounts audited under another law; 3CB: audited only for tax.'
+              }
             >
               <Select
                 value={a.formType ?? ''}
@@ -273,7 +279,7 @@ function AcceptanceForm({
                 <option value="">Choose…</option>
                 {TAX_AUDIT_FORMS.map((f) => (
                   <option key={f} value={f}>
-                    Form {f}
+                    {taxAuditFormLabel(a.financialYear, f)}
                   </option>
                 ))}
               </Select>
@@ -291,14 +297,23 @@ function AcceptanceForm({
                 {offered.map((p) => (
                   <option key={p.employeeId} value={p.employeeId}>
                     {p.summary}
+                    {p.warning ? ' — near the limit' : ''}
                   </option>
                 ))}
               </Select>
+              {(() => {
+                const chosen = offered.find((p) => p.employeeId === a.signingPartnerId);
+                return chosen?.warning ? (
+                  <p role="status" className="mt-1 text-xs font-medium text-warning-700">
+                    Near the yearly limit: {chosen.warning}.
+                  </p>
+                ) : null;
+              })()}
             </Field>
           </div>
         ) : (
           <p className="text-ink-muted">
-            {a.formType ? `Form ${a.formType}` : 'No form yet'} ·{' '}
+            {a.formType ? taxAuditFormLabel(a.financialYear, a.formType) : 'No form yet'} ·{' '}
             {a.signingPartnerName ?? 'no signing partner yet'}
           </p>
         )}

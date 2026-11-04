@@ -4,6 +4,7 @@ import {
   copValid,
   partnerLoadSummary,
   signingPartnerOffer,
+  taxAuditWarnAt,
 } from '@hsdg/contracts';
 import { signingRefusal, taxAuditIndependence } from './tax-audit-acceptance.service';
 
@@ -30,7 +31,29 @@ describe('tax audit acceptance (F-3)', () => {
           FY,
           TODAY,
         ),
-      ).toEqual({ offered: true, reason: null, summary: 'Deepak: 41 of 60 for FY 2025-26' });
+      ).toEqual({
+        offered: true,
+        reason: null,
+        summary: 'Deepak: 41 of 60 for FY 2025-26',
+        warning: null,
+      });
+    });
+
+    it('warns from the 50th report, still offering the partner', () => {
+      const at = (reports: number, limit = 60) =>
+        signingPartnerOffer(
+          { name: 'Harvinder', copValidUntil: '2027-03-31', reports },
+          limit,
+          FY,
+          TODAY,
+        );
+      expect(at(49).warning).toBeNull();
+      expect(at(50)).toMatchObject({ offered: true, warning: '50 of 60 — 10 left for FY 2025-26' });
+      expect(at(59).warning).toBe('59 of 60 — 1 left for FY 2025-26');
+      // A lower firm limit warns ten short of it.
+      expect(taxAuditWarnAt(60)).toBe(50);
+      expect(taxAuditWarnAt(40)).toBe(30);
+      expect(at(30, 40).warning).toBe('30 of 40 — 10 left for FY 2025-26');
     });
 
     it('refuses a 61st report, with the count', () => {

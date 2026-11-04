@@ -3,6 +3,7 @@
 import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
+  taxAuditFormLabel,
   TAX_AUDIT_STAGE_LABEL,
   type TaxAuditApplicability,
   type TaxAuditRow,
@@ -189,7 +190,9 @@ export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Ele
                     <td className="py-2 pr-3">
                       <Badge tone={STAGE_TONE[a.stage]}>{TAX_AUDIT_STAGE_LABEL[a.stage]}</Badge>
                     </td>
-                    <td className="py-2 pr-3">{a.formType ? `Form ${a.formType}` : '—'}</td>
+                    <td className="py-2 pr-3">
+                      {a.formType ? taxAuditFormLabel(a.financialYear, a.formType) : '—'}
+                    </td>
                     <td className="py-2 pr-3">{a.signingPartnerName ?? '—'}</td>
                     <td
                       className={

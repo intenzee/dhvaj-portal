@@ -26,7 +26,7 @@ describe('Tax audit review and observations (e2e)', () => {
   let eng: string;
   let auditId: string;
   let wp34: string;
-  const FY = '2026-27';
+  const FY = '2025-26';
   const http = () => request(app.getHttpServer());
   const as = async (email: string) => ({
     Authorization: `Bearer ${(await http().post('/api/v1/auth/dev-token').send({ email }).expect(201)).body.accessToken}`,

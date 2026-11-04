@@ -2,7 +2,12 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { TAX_AUDIT_STAGE_LABEL, type TaxAuditFiling } from '@hsdg/contracts';
+import {
+  TAX_AUDIT_STAGE_LABEL,
+  taxAuditFormLabel,
+  taxAuditRegime,
+  type TaxAuditFiling,
+} from '@hsdg/contracts';
 import { apiFetch, ApiError } from '@/lib/api';
 import { blobToBase64 } from '@/lib/file-kind';
 import { formatDate } from '@/lib/format';
@@ -125,7 +130,8 @@ export function FilingDesk({
 
       <section className="space-y-2">
         <h4 className="font-medium text-ink">
-          Form {f.formType ?? '3CA / 3CB'} and 3CD, FY {f.financialYear}
+          {taxAuditFormLabel(f.financialYear, f.formType ?? null)}
+          {taxAuditRegime(f.financialYear).act === '1961' ? ' and 3CD' : ''}, FY {f.financialYear}
         </h4>
         <ol className="space-y-1">
           <Step label="Signed" done={!!f.signedAt}>
