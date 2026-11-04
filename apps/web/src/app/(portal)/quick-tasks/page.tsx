@@ -65,8 +65,10 @@ function Row({
               <AlarmClock className="h-3 w-3" /> Late
             </span>
           )}
-          {t.entityLabel && (
-            <span className="truncate text-[11px] text-ink-faint">{t.entityLabel}</span>
+          {(t.entityLabel || t.engagementLabel) && (
+            <span className="truncate text-[11px] text-ink-faint">
+              {[t.entityLabel, t.engagementLabel].filter(Boolean).join(' · ')}
+            </span>
           )}
           {t.unread > 0 && (
             <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-success-600 px-1.5 text-[11px] font-semibold text-white">

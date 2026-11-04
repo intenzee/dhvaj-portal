@@ -69,6 +69,9 @@ export interface QuickTaskSummary {
   status: QuickTaskStatus;
   entityId: string | null;
   entityLabel: string | null;
+  /** The engagement it was given from, if any. */
+  engagementId: string | null;
+  engagementLabel: string | null;
   assignedBy: QuickTaskPerson;
   assignedTo: QuickTaskPerson;
   /** The caller's side: they gave it, or it was given to them. */
@@ -99,6 +102,8 @@ export interface QuickTaskDetail extends QuickTaskSummary {
 /** POST /quick-tasks */
 export interface CreateQuickTaskInput {
   entityId?: string | null;
+  /** Given from an engagement's page: the client defaults to the engagement's. */
+  engagementId?: string | null;
   title: string;
   details?: string | null;
   assignedToEmployeeId: string;

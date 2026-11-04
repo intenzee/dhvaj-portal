@@ -37,6 +37,8 @@ interface TaskRow {
   status: QuickTaskStatus;
   entity_id: string | null;
   entity_label: string | null;
+  engagement_id: string | null;
+  engagement_label: string | null;
   assigned_by_employee_id: string;
   assigned_to_employee_id: string;
   eta_at: Date | null;
@@ -65,6 +67,7 @@ export type QuickTaskBox = 'inbox' | 'sent' | 'all';
 
 const TASK_SQL = `
   SELECT q.id, q.number::text, q.title, q.details, q.urgent, q.status, q.entity_id, q.entity_label,
+         q.engagement_id, q.engagement_label,
          q.assigned_by_employee_id, q.assigned_to_employee_id, q.eta_at, q.due_at, q.received_at,
          q.started_at, q.done_at, q.cancelled_at, q.last_activity_at, q.created_at, q.version,
          (SELECT COALESCE(m.body, '') FROM hsdg.quick_task_messages m
@@ -148,6 +151,8 @@ export class QuickTasksService {
       status: r.status,
       entityId: r.entity_id,
       entityLabel: r.entity_label,
+      engagementId: r.engagement_id,
+      engagementLabel: r.engagement_label,
       assignedBy: this.person(people, r.assigned_by_employee_id),
       assignedTo: this.person(people, r.assigned_to_employee_id),
       side:
@@ -188,11 +193,25 @@ export class QuickTasksService {
         throw new BadRequestException(
           'Pick someone with a portal login who is still with the firm.',
         );
+      let entityId = input.entityId ?? null;
       let entityLabel: string | null = null;
-      if (input.entityId) {
+      let engagementLabel: string | null = null;
+      if (input.engagementId) {
+        // Only an engagement the assigner can open; its client unless they picked another.
+        const { rows } = await client.query<{ entity_id: string; label: string }>(
+          `SELECT g.entity_id, g.engagement_code || ' · ' || s.name AS label
+             FROM hsdg.engagements g JOIN hsdg.services s ON s.id = g.service_id
+            WHERE g.id = $1`,
+          [input.engagementId],
+        );
+        if (!rows[0]) throw new NotFoundException('Engagement not found.');
+        engagementLabel = rows[0].label;
+        entityId ??= rows[0].entity_id;
+      }
+      if (entityId) {
         const { rows } = await client.query<{ label: string }>(
           `SELECT entity_code || ' · ' || legal_name AS label FROM hsdg.entities WHERE id = $1`,
-          [input.entityId],
+          [entityId],
         );
         if (!rows[0]) throw new NotFoundException('Client not found.');
         entityLabel = rows[0].label;
@@ -200,11 +219,11 @@ export class QuickTasksService {
       const { rows } = await client.query<{ id: string; number: string }>(
         `INSERT INTO hsdg.quick_tasks
            (entity_id, entity_label, title, details, urgent, assigned_by_employee_id,
-            assigned_to_employee_id, due_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            assigned_to_employee_id, due_at, engagement_id, engagement_label)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id, number::text`,
         [
-          input.entityId ?? null,
+          entityId,
           entityLabel,
           title,
           input.details?.trim() || null,
@@ -212,6 +231,8 @@ export class QuickTasksService {
           me,
           input.assignedToEmployeeId,
           input.dueAt ?? null,
+          input.engagementId ?? null,
+          engagementLabel,
         ],
       );
       const task = rows[0]!;
@@ -243,6 +264,7 @@ export class QuickTasksService {
     box: QuickTaskBox,
     state: 'open' | 'closed' | 'all',
     q?: string,
+    engagementId?: string,
   ): Promise<QuickTaskSummary[]> {
     const me = ctx.employeeId ?? null;
     return this.db.withRlsContext(ctx, async (client) => {
@@ -252,6 +274,10 @@ export class QuickTasksService {
       if (box === 'sent') conds.push('q.assigned_by_employee_id = $1::uuid');
       if (state === 'open') conds.push(`q.status IN ('sent', 'received', 'doing')`);
       if (state === 'closed') conds.push(`q.status IN ('done', 'cancelled')`);
+      if (engagementId) {
+        params.push(engagementId);
+        conds.push(`q.engagement_id = $${params.length}::uuid`);
+      }
       if (q?.trim()) {
         params.push(`%${q.trim()}%`);
         conds.push(`(q.title ILIKE $${params.length} OR q.entity_label ILIKE $${params.length})`);

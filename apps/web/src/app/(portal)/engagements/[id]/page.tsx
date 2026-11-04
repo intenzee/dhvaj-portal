@@ -53,6 +53,7 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { NextUpStrip } from '@/components/today/next-up';
+import { EngagementQuickTasks } from '@/components/quick-tasks/engagement-quick-tasks';
 import { StatusBadge, PriorityBadge } from '@/components/status-badge';
 import { LifecycleActions } from '@/components/actions/lifecycle-actions';
 import { ReviewActions } from '@/components/actions/review-actions';
@@ -407,6 +408,13 @@ export default function EngagementDetailPage(): JSX.Element {
           </button>
         ))}
       </div>
+      <EngagementQuickTasks
+        engagement={{
+          id: e.id,
+          label: e.engagementCode,
+          client: { id: e.entityId, label: e.entityName },
+        }}
+      />
       <p className="mb-4 mt-2 text-xs text-ink-muted">
         {visibleTabs.find((t) => t.key === tab)?.hint}
       </p>

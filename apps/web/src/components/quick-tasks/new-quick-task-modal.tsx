@@ -34,16 +34,30 @@ function neededBy(minutes: number | null): string | null {
   return new Date(Math.max(evening, now.getTime() + 30 * 60_000)).toISOString();
 }
 
+/** Given from an engagement's page: the task carries it and the client starts as its. */
+export interface QuickTaskEngagement {
+  id: string;
+  label: string;
+  client: Picked;
+}
+
 /**
  * New → New task: the client, what to do, who does it. Sent at once — it pops
- * up on their screen and in their bell, and they answer from there.
+ * up on their screen and in their bell, and they answer from there. From an
+ * engagement's page it stays on the page after sending.
  */
-export function NewQuickTaskModal({ onClose }: { onClose: () => void }): JSX.Element {
+export function NewQuickTaskModal({
+  onClose,
+  engagement,
+}: {
+  onClose: () => void;
+  engagement?: QuickTaskEngagement;
+}): JSX.Element {
   const { principal } = useAuth();
   const toast = useToast();
   const router = useRouter();
   const qc = useQueryClient();
-  const [client, setClient] = useState<Picked | null>(null);
+  const [client, setClient] = useState<Picked | null>(engagement?.client ?? null);
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
   const [person, setPerson] = useState<QuickTaskPerson | null>(null);
@@ -56,6 +70,7 @@ export function NewQuickTaskModal({ onClose }: { onClose: () => void }): JSX.Ele
         method: 'POST',
         body: {
           entityId: client?.id ?? null,
+          engagementId: engagement?.id ?? null,
           title: title.trim(),
           details: details.trim() || null,
           assignedToEmployeeId: person!.id,
@@ -67,7 +82,7 @@ export function NewQuickTaskModal({ onClose }: { onClose: () => void }): JSX.Ele
       void qc.invalidateQueries({ queryKey: QUICK_TASK_KEYS.all });
       toast(`Sent to ${t.assignedTo.name}.`);
       onClose();
-      router.push(`/quick-tasks?t=${t.id}`);
+      if (!engagement) router.push(`/quick-tasks?t=${t.id}`);
     },
     onError: (err) =>
       toast(err instanceof ApiError ? err.message : 'Could not send the task.', 'error'),
@@ -79,7 +94,7 @@ export function NewQuickTaskModal({ onClose }: { onClose: () => void }): JSX.Ele
     <Modal
       open
       onClose={onClose}
-      title="New task"
+      title={engagement ? `New task · ${engagement.label}` : 'New task'}
       description="Goes straight to them — they answer Received, Doing (with a time) or Done."
       footer={
         <>

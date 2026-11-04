@@ -28,6 +28,7 @@ import { QuickTasksService, type QuickTaskBox } from './quick-tasks.service';
 
 export class CreateQuickTaskDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() entityId?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() engagementId?: string | null;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(500) title!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(4000) details?: string | null;
   @ApiProperty() @IsUUID() assignedToEmployeeId!: string;
@@ -59,6 +60,7 @@ class QuickTaskListQueryDto {
   @IsIn(['open', 'closed', 'all'])
   state?: 'open' | 'closed' | 'all';
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(120) q?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() engagementId?: string;
 }
 
 @ApiTags('quick-tasks')
@@ -87,7 +89,13 @@ export class QuickTasksController {
     @CurrentPrincipal() p: Principal,
     @Query() q: QuickTaskListQueryDto,
   ): Promise<QuickTaskSummary[]> {
-    return this.tasks.list(rlsContextFromPrincipal(p), q.box ?? 'all', q.state ?? 'all', q.q);
+    return this.tasks.list(
+      rlsContextFromPrincipal(p),
+      q.box ?? 'all',
+      q.state ?? 'all',
+      q.q,
+      q.engagementId,
+    );
   }
 
   @Post()

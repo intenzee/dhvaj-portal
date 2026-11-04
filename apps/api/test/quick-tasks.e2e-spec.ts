@@ -175,4 +175,52 @@ describe('Quick tasks (e2e)', () => {
     // Writing goes on after it closes.
     await reply(sy, { body: 'Noted' }).expect(201);
   });
+
+  it('given from an engagement, it carries the engagement and its client', async () => {
+    const list = await http()
+      .get('/api/v1/engagements?search=SA/00001&limit=100')
+      .set(bearer(pa))
+      .expect(200);
+    const eng = (
+      list.body.items as { id: string; engagementCode: string; entityId: string }[]
+    ).find((e) => e.engagementCode === 'SA/00001')!;
+    const t = (
+      await http()
+        .post('/api/v1/quick-tasks')
+        .set(bearer(pa))
+        .send({
+          engagementId: eng.id,
+          title: 'Chase the bank confirmation',
+          assignedToEmployeeId: senior.id,
+        })
+        .expect(201)
+    ).body as QuickTaskDetail;
+    expect(t).toMatchObject({
+      engagementId: eng.id,
+      engagementLabel: expect.stringMatching(/^SA\/00001 · /),
+      entityId: eng.entityId,
+      entityLabel: expect.stringMatching(/^ENT\d+ · /),
+    });
+    // The engagement's strip: its open tasks only.
+    const open = async (tok: string) =>
+      (
+        await http()
+          .get(`/api/v1/quick-tasks?engagementId=${eng.id}&state=open`)
+          .set(bearer(tok))
+          .expect(200)
+      ).body as QuickTaskSummary[];
+    expect((await open(pa)).map((x) => x.id)).toContain(t.id);
+    expect((await open(sy)).map((x) => x.id)).toContain(t.id);
+    expect((await open(pa)).map((x) => x.id)).not.toContain(task.id);
+    expect((await open(mx)).map((x) => x.id)).not.toContain(t.id);
+    await http()
+      .post('/api/v1/quick-tasks')
+      .set(bearer(pa))
+      .send({
+        engagementId: '00000000-0000-4000-8000-000000000000',
+        title: 'Nowhere',
+        assignedToEmployeeId: senior.id,
+      })
+      .expect(404);
+  });
 });
