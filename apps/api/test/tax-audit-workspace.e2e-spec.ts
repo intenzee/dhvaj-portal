@@ -382,7 +382,12 @@ describe('Tax audit clause workspace (e2e)', () => {
   });
 
   it('a signed report closes the 3CD work', async () => {
-    await su.query(`UPDATE hsdg.tax_audits SET stage = 'signed' WHERE id = $1`, [auditId]);
+    // A signed report carries its UDIN (F-8); a fresh one each run, as UDINs are unique.
+    const udin = `26${String(Date.now()).slice(-6)}WSPACE${String(Date.now() % 9973).padStart(4, '0')}`;
+    await su.query(
+      `UPDATE hsdg.tax_audits SET stage = 'signed', udin = $2, signed_at = now() WHERE id = $1`,
+      [auditId, udin],
+    );
     const v = await view(art);
     expect(v.editable).toBe(false);
     const p = paper(v, '36A');

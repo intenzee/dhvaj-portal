@@ -117,3 +117,4 @@ export * from './tax-audit-acceptance';
 export * from './tax-audit-clauses';
 export * from './tax-audit-workspace';
 export * from './tax-audit-review';
+export * from './tax-audit-filing';

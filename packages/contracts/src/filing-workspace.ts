@@ -162,7 +162,9 @@ export interface CrossCheckWarning {
     | 'reference_missing'
     | 'reference_format'
     | 'filed_date'
-    | 'figures_missing';
+    | 'figures_missing'
+    // The tax audit report and the ITR that waits on it (F-8).
+    | 'tax_audit_pending';
   message: string;
 }
 

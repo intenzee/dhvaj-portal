@@ -15,6 +15,10 @@ import {
   DSC_REQUEST_CODE,
   dscWarningText,
   rocLateCharges,
+  itrWaitReason,
+  reportLodgeReason,
+  ITR_AFTER_TAX_AUDIT_RULES,
+  TAX_AUDIT_IN_HAND,
   type CarriedAnswer,
   type CinProfileAttributes,
   type ChecklistAutoTick,
@@ -29,6 +33,7 @@ import {
   type LateChargeEstimate,
   type PeriodSection,
   type Stream,
+  type TaxAuditStage,
   type WorkspaceSlot,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
@@ -653,6 +658,8 @@ export class FilingWorkspaceService {
       if (inst.workflow_status === 'not_applicable') {
         throw new ConflictException('This filing is marked Not applicable — lift that first.');
       }
+      const wait = await this.taxAuditWait(client, inst);
+      if (wait.block) throw new ConflictException(wait.block);
       const stage = mayLodge(
         {
           isLead: inst.is_lead,
@@ -1324,6 +1331,12 @@ export class FilingWorkspaceService {
     );
 
     const warnings = await this.warnings(client, inst, figures.figures, live);
+    if (!live && !['filed', 'not_applicable'].includes(inst.workflow_status)) {
+      const wait = await this.taxAuditWait(client, inst);
+      if (wait.block) can.lodge = false;
+      const message = wait.block ?? wait.note;
+      if (message) warnings.push({ code: 'tax_audit_pending', message });
+    }
     if (live) {
       warnings.push(
         ...lodgeWarnings({
@@ -1615,6 +1628,41 @@ export class FilingWorkspaceService {
     } catch (err) {
       throw mapPgError(err);
     }
+  }
+
+  /**
+   * F-8: the year's tax audit report is lodged from the Tax audit tab once
+   * the client accepts it, and the audit-case ITR waits until it is filed.
+   * While the portal is not running the report (Not started), the ITR only
+   * notes it and the filing lodges as before.
+   */
+  private async taxAuditWait(
+    client: PoolClient,
+    inst: InstanceRow,
+  ): Promise<{ block: string | null; note: string | null }> {
+    if (inst.rule_code === 'IT_TAX_AUDIT') {
+      const { rows } = await client.query<{ stage: TaxAuditStage }>(
+        `SELECT stage FROM hsdg.tax_audits WHERE compliance_instance_id = $1`,
+        [inst.id],
+      );
+      return { block: rows[0] ? reportLodgeReason(rows[0].stage) : null, note: null };
+    }
+    if (
+      !inst.financial_year ||
+      !(ITR_AFTER_TAX_AUDIT_RULES as readonly string[]).includes(inst.rule_code)
+    ) {
+      return { block: null, note: null };
+    }
+    const { rows } = await client.query<{ stage: TaxAuditStage }>(
+      `SELECT stage FROM hsdg.tax_audits
+        WHERE engagement_id = $1 AND financial_year = $2 AND revision = 0`,
+      [inst.engagement_id, inst.financial_year],
+    );
+    const stage = rows[0]?.stage ?? null;
+    const reason = itrWaitReason(inst.financial_year, stage);
+    return stage && TAX_AUDIT_IN_HAND.includes(stage)
+      ? { block: reason, note: null }
+      : { block: null, note: reason };
   }
 
   private async loadInstance(client: PoolClient, id: string): Promise<InstanceRow> {
