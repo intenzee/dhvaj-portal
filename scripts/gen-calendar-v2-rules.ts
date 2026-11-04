@@ -12,7 +12,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { STREAM_SERVICE_CODE } from '@hsdg/contracts';
+import { STREAM_SERVICE_CODE, type Stream } from '@hsdg/contracts';
 import {
   CALENDAR_V2_EXTENSIONS,
   CALENDAR_V2_RULES,
@@ -33,6 +33,14 @@ function dayBefore(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Streams added after these migrations: their rules are seeded on the stream
+ * they began in, and the stream's own migration moves them (Tax Audit:
+ * 1773650000000_tax_audit_stream.sql), so the files stay as they ran.
+ */
+const SEEDED_ON: Partial<Record<Stream, Stream>> = { tax_audit: 'income_tax' };
+const seededStream = (s: Stream): Stream => SEEDED_ON[s] ?? s;
+
 const ruleRows = (catalogue: SeedRule[]) =>
   catalogue.map((r) => ({
     code: r.code,
@@ -40,7 +48,7 @@ const ruleRows = (catalogue: SeedRule[]) =>
     description: r.notes,
     category: r.category,
     due_date_category: r.dueDateCategory,
-    service_code: STREAM_SERVICE_CODE[r.stream],
+    service_code: STREAM_SERVICE_CODE[seededStream(r.stream)],
   }));
 
 const versionRows = (catalogue: SeedRule[]) =>
@@ -56,7 +64,7 @@ const versionRows = (catalogue: SeedRule[]) =>
       internal_sla_offset_days: r.internalSlaOffsetDays,
       condition: r.condition ?? null,
       notes: r.notes,
-      stream: r.stream,
+      stream: seededStream(r.stream),
       registration_scope: r.registrationScope,
       frequency: r.frequency,
       form_label: v.formLabel,

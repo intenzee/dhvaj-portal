@@ -80,8 +80,9 @@ export const CLIENT_MASTER_LOGIN_CELLS: readonly {
   { portal: 'eway_bill', account: 'main', user: 'ewayUser', password: 'ewayPassword' },
 ];
 
-/** The Yes / No service columns and the stream each opens. */
-export const CLIENT_MASTER_STREAM_FIELDS: Record<Stream, ClientMasterField> = {
+/** The Yes / No service columns and the stream each opens. The workbook has no
+ *  Tax Audit column: that stream follows the s.44AB applicability check instead. */
+export const CLIENT_MASTER_STREAM_FIELDS: Partial<Record<Stream, ClientMasterField>> = {
   gst: 'gst',
   tds: 'tds',
   income_tax: 'incomeTax',

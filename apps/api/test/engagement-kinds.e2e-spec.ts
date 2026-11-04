@@ -72,7 +72,7 @@ describe('Engagement kinds (e2e)', () => {
     await app?.close();
   });
 
-  it('lists the six streams in tab order, each with its service', async () => {
+  it('lists the seven streams in tab order, each with its service', async () => {
     const res = await http().get('/api/v1/streams').set(bearer(pa)).expect(200);
     expect(res.body.map((s: { stream: string }) => s.stream)).toEqual([
       'mis',
@@ -80,6 +80,7 @@ describe('Engagement kinds (e2e)', () => {
       'gst',
       'tds',
       'income_tax',
+      'tax_audit',
       'roc',
     ]);
     expect(res.body[2]).toMatchObject({ serviceCode: 'STREAM_GST', registrationTypes: ['gstin'] });

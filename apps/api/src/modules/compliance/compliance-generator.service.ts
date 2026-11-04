@@ -217,6 +217,8 @@ export interface EntityFacts {
   turnoverKnown?: boolean;
   entityCategory: string | null;
   entityTypeSlug: string | null;
+  /** The year's tax audit applicability decision (F-2), by financial year. */
+  taxAuditByYear?: Readonly<Record<string, boolean>>;
 }
 
 /** Build the condition context for one registration in one period (pure; exported for tests). */
@@ -226,11 +228,14 @@ export function buildRuleContext(
   registration: Pick<Registration, 'registration_number' | 'state_code'> | null,
   profile: Pick<ProfileRow, 'gst_scheme' | 'qrmp_category' | 'attributes'> | null,
   panProfile: Pick<ProfileRow, 'attributes'> | null,
+  financialYear?: string,
 ): Record<string, unknown> {
   const isCompany = facts.entityCategory === 'company';
   const attrs = (profile?.attributes ?? {}) as Record<string, unknown>;
   const pan = (panProfile?.attributes ?? {}) as PanProfileAttributes;
-  const taxAudit = pan.taxAudit ?? facts.turnover > 10_000_000;
+  // The year's worked-out decision wins over the PAN profile and the default.
+  const decided = financialYear === undefined ? undefined : facts.taxAuditByYear?.[financialYear];
+  const taxAudit = decided ?? pan.taxAudit ?? facts.turnover > 10_000_000;
   const ctx: Record<string, unknown> = {
     turnover: facts.turnover,
     is_company: isCompany,
@@ -431,6 +436,16 @@ export class ComplianceGeneratorService {
       turnoverKnown: e.annual_turnover !== null,
       entityCategory: e.category,
       entityTypeSlug: e.slug,
+      taxAuditByYear: Object.fromEntries(
+        (
+          await client.query<{ financial_year: string; applicable: boolean }>(
+            `SELECT financial_year, COALESCE(override_applicable, computed_applicable) AS applicable
+               FROM hsdg.tax_audit_applicability
+              WHERE engagement_id = $1`,
+            [engagementId],
+          )
+        ).rows.map((r) => [r.financial_year, r.applicable]),
+      ),
     };
 
     const years = await client.query<{
@@ -635,7 +650,14 @@ export class ComplianceGeneratorService {
       ? findEvent(a.events, row.event_type, a.period.financialYear, regId)
       : undefined;
     const ctx = {
-      ...buildRuleContext(a.facts, a.target.scope, a.target.registration, profile, panProfile),
+      ...buildRuleContext(
+        a.facts,
+        a.target.scope,
+        a.target.registration,
+        profile,
+        panProfile,
+        a.period.financialYear,
+      ),
       ...eventContext(ruleEvent),
     };
     let version = applyVariants(toVersion(row), ctx);

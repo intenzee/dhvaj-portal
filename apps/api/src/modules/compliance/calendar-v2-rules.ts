@@ -618,7 +618,7 @@ export const CALENDAR_V2_RULES: SeedRule[] = [
     code: 'IT_TAX_AUDIT',
     name: 'Tax audit report',
     notes: 'Tax audit report u/s 44AB — 30 September.',
-    stream: 'income_tax',
+    stream: 'tax_audit',
     category: 'income_tax',
     dueDateCategory: 'STATUTORY_RULE',
     registrationScope: 'pan',

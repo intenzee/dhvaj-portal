@@ -80,6 +80,7 @@ export const ENGAGEMENT_TAB = {
   gst: 'gst',
   tds: 'tds',
   incomeTax: 'income_tax',
+  taxAudit: 'tax_audit',
   roc: 'roc',
   auditFile: 'audit_file',
   documents: 'documents',

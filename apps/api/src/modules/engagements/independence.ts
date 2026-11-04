@@ -45,6 +45,7 @@ export interface IndependenceProposal {
 /** Bookkeeping, MIS (management services) and internal audit — s.144(a), (b), (d). */
 const S144_PROHIBITED_STREAMS: readonly Stream[] = ['bookkeeping', 'mis'];
 /** Filing streams a company's auditor may provide with board approval. */
+/** Tax audit is an audit, not a s.144 service: it needs no approval. */
 const S144_PERMITTED_STREAMS: readonly Stream[] = ['gst', 'tds', 'income_tax', 'roc'];
 
 export const INTERNAL_AUDIT_SERVICE_CODE = 'INT_AUDIT';
@@ -139,12 +140,29 @@ export function evaluateIndependence(
   }
 
   // ── s.44AB: the accountant who keeps the books cannot do the tax audit.
+  //    Both are streams of a Compliance engagement, so this one counts the
+  //    engagement's own years too, and the two added together.
   const addsBooks = streams.includes('bookkeeping');
-  const addsTaxAudit = codes.includes(TAX_AUDIT_SERVICE_CODE);
-  const taxConflicts = [
-    ...(addsBooks ? overlapping('tax_audit') : []),
-    ...(addsTaxAudit ? overlapping('bookkeeping') : []),
-  ];
+  const addsTaxAudit = codes.includes(TAX_AUDIT_SERVICE_CODE) || streams.includes('tax_audit');
+  const anyOverlapping = (kind: IndependenceFactKind): IndependenceFact[] =>
+    allFacts.filter((f) => f.fact === kind && years.has(f.financialYear));
+  if (addsBooks && addsTaxAudit) {
+    findings.push({
+      rule: INDEPENDENCE_RULE.taxAuditBookkeeper,
+      outcome: 'block',
+      financialYear: p.financialYears[0] ?? null,
+      message:
+        'Section 44AB: the firm cannot keep the books of a year and do its tax audit too ' +
+        '(ICAI guidance). Take one of Bookkeeping or Tax Audit.',
+    });
+  }
+  const taxConflicts =
+    addsBooks && addsTaxAudit
+      ? []
+      : [
+          ...(addsBooks ? anyOverlapping('tax_audit') : []),
+          ...(addsTaxAudit ? anyOverlapping('bookkeeping') : []),
+        ];
   if (taxConflicts.length) {
     findings.push({
       rule: INDEPENDENCE_RULE.taxAuditBookkeeper,

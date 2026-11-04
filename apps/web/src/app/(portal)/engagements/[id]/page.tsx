@@ -26,6 +26,7 @@ import { useUrlState } from '@/lib/url-state';
 import { useWorkLinkFocus } from '@/lib/work-focus';
 import type { TaskActionContext } from '@/lib/work-types';
 import { StreamTab } from '@/components/filing/stream-tab';
+import { TaxAuditTab } from '@/components/tax-audit/tax-audit-tab';
 import { WorkList } from '@/components/tasks/work-list';
 import { ActivityTab } from '@/components/engagement/activity-tab';
 import { BillFromTime } from '@/components/engagement/bill-from-time';
@@ -136,10 +137,11 @@ const STREAM_HINT: Record<Stream, string> = {
   gst: 'GST month by month: Outward, Inward and Summary, each worked and lodged here.',
   tds: 'TDS deposits and quarterly returns.',
   income_tax: 'Advance tax, the return and assessments.',
+  tax_audit: 'One tax audit a year (s.44AB): stage, signing partner, UDIN and filing.',
   roc: 'ROC / MCA annual filings and event forms.',
 };
 
-const STREAM_ORDER: Stream[] = ['mis', 'bookkeeping', 'gst', 'tds', 'income_tax', 'roc'];
+const STREAM_ORDER: Stream[] = ['mis', 'bookkeeping', 'gst', 'tds', 'income_tax', 'tax_audit', 'roc'];
 
 /** Change 3 — the 12 Compliance tabs (stream tabs only when in scope for the year). */
 function complianceTabs(
@@ -494,7 +496,14 @@ export default function EngagementDetailPage(): JSX.Element {
         </div>
       )}
 
-      {/* ── Stream tabs (Change 5/6): MIS, Bookkeeping, GST, TDS, IT, ROC ──── */}
+      {/* ── Tax Audit (F-1): the yearly audits, above the stream's filing ──── */}
+      {layout === 'compliance' && tab === 'tax_audit' && (
+        <div className="mb-6">
+          <TaxAuditTab engagementId={e.id} />
+        </div>
+      )}
+
+      {/* ── Stream tabs (Change 5/6): MIS, Bookkeeping, GST, TDS, IT, TA, ROC ── */}
       {layout === 'compliance' &&
         STREAM_ORDER.includes(tab as Stream) &&
         !(tab === 'gst' && !gstOn) && (

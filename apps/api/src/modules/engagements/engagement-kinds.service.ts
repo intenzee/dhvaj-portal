@@ -46,7 +46,7 @@ const STATUTORY_AUDIT_CODE = STATUTORY_AUDIT_SERVICE_CODE;
 const KIND_SERVICE_MISMATCH: Record<EngagementKind, string> = {
   statutory_audit: 'A Statutory Audit engagement carries the Statutory Audit service only.',
   compliance:
-    'A Compliance engagement carries stream services (GST, TDS, Income Tax, ROC, Bookkeeping, MIS) only.',
+    'A Compliance engagement carries stream services (GST, TDS, Income Tax, Tax Audit, ROC, Bookkeeping, MIS) only.',
   assignment:
     'An assignment cannot carry the Statutory Audit or a stream service — create a Statutory Audit or ' +
     'Compliance engagement instead.',

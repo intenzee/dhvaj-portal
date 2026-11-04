@@ -34,23 +34,35 @@ export const ENGAGEMENT_KIND_LABEL: Record<EngagementKind, string> = {
   assignment: 'Other assignment',
 };
 
-/** The six compliance streams (services.stream, rule version stream). */
+/** The seven compliance streams (services.stream, rule version stream). Tax Audit
+ *  (s.44AB) joined in Phase 3 (F-1): one row per financial year, on the PAN. */
 export const STREAM = {
   gst: 'gst',
   tds: 'tds',
   incomeTax: 'income_tax',
+  taxAudit: 'tax_audit',
   roc: 'roc',
   bookkeeping: 'bookkeeping',
   mis: 'mis',
 } as const;
 export type Stream = (typeof STREAM)[keyof typeof STREAM];
-/** In tab order (spec Change 3: MIS, Bookkeeping, GST, TDS, Income Tax, ROC). */
-export const STREAMS: Stream[] = ['mis', 'bookkeeping', 'gst', 'tds', 'income_tax', 'roc'];
+/** In tab order (spec Change 3: MIS, Bookkeeping, GST, TDS, Income Tax, ROC; Tax Audit
+ *  sits beside Income Tax). */
+export const STREAMS: Stream[] = [
+  'mis',
+  'bookkeeping',
+  'gst',
+  'tds',
+  'income_tax',
+  'tax_audit',
+  'roc',
+];
 
 export const STREAM_LABEL: Record<Stream, string> = {
   gst: 'GST',
   tds: 'TDS / TCS',
   income_tax: 'Income Tax',
+  tax_audit: 'Tax Audit',
   roc: 'ROC / MCA',
   bookkeeping: 'Bookkeeping',
   mis: 'MIS',
@@ -61,6 +73,7 @@ export const STREAM_SERVICE_CODE: Record<Stream, string> = {
   gst: 'STREAM_GST',
   tds: 'STREAM_TDS',
   income_tax: 'STREAM_INCOME_TAX',
+  tax_audit: 'STREAM_TAX_AUDIT',
   roc: 'STREAM_ROC',
   bookkeeping: 'STREAM_BOOKKEEPING',
   mis: 'STREAM_MIS',
@@ -87,6 +100,7 @@ export const STREAM_REGISTRATION_TYPES: Record<Stream, readonly string[]> = {
   gst: ['gstin'],
   tds: ['tan'],
   income_tax: ['pan'],
+  tax_audit: ['pan'],
   roc: ['cin', 'llpin'],
   bookkeeping: ['entity'],
   mis: ['entity'],
@@ -106,18 +120,21 @@ export const PENDING_REGISTRATION_STREAMS: readonly Stream[] = ['gst', 'tds'];
  * returns where the stream has any. A choice is sent as tokens: 'YYYY-MM' for
  * each month it covers, 'FY:YYYY-YY' for the year's annual returns.
  */
-export const STREAM_PRIOR_FILED_GRAIN: Record<Stream, 'month' | 'quarter'> = {
+export const STREAM_PRIOR_FILED_GRAIN: Record<Stream, 'month' | 'quarter' | 'year'> = {
   gst: 'month',
   bookkeeping: 'month',
   mis: 'month',
   tds: 'quarter',
   income_tax: 'quarter',
   roc: 'quarter',
+  // One report a year: only the year's annual return is offered.
+  tax_audit: 'year',
 };
 export const STREAM_HAS_ANNUAL_RETURNS: Record<Stream, boolean> = {
   gst: true,
   tds: true,
   income_tax: true,
+  tax_audit: true,
   roc: true,
   bookkeeping: false,
   mis: false,
@@ -173,18 +190,21 @@ export function priorFiledChoices(
 ): { periods: PriorFiledChoice[]; annual: PriorFiledChoice | null } {
   const months = fyMonthKeys(financialYear);
   const label = (k: string): string => `${MONTH_ABBR[Number(k.slice(5, 7)) - 1]} ${k.slice(2, 4)}`;
-  const periods =
-    STREAM_PRIOR_FILED_GRAIN[stream] === 'month'
-      ? months.map((k) => ({ key: k, label: label(k), tokens: [k], firstMonth: k }))
-      : [0, 1, 2, 3].map((q) => {
-          const ms = months.slice(q * 3, q * 3 + 3);
-          return {
-            key: `${financialYear}:Q${q + 1}`,
-            label: `Q${q + 1} (${label(ms[0]!).slice(0, 3)}–${label(ms[2]!).slice(0, 3)})`,
-            tokens: ms,
-            firstMonth: ms[0]!,
-          };
-        });
+  const grain = STREAM_PRIOR_FILED_GRAIN[stream];
+  const periods: PriorFiledChoice[] =
+    grain === 'year'
+      ? []
+      : grain === 'month'
+        ? months.map((k) => ({ key: k, label: label(k), tokens: [k], firstMonth: k }))
+        : [0, 1, 2, 3].map((q) => {
+            const ms = months.slice(q * 3, q * 3 + 3);
+            return {
+              key: `${financialYear}:Q${q + 1}`,
+              label: `Q${q + 1} (${label(ms[0]!).slice(0, 3)}–${label(ms[2]!).slice(0, 3)})`,
+              tokens: ms,
+              firstMonth: ms[0]!,
+            };
+          });
   const annual = STREAM_HAS_ANNUAL_RETURNS[stream]
     ? {
         key: financialYear,

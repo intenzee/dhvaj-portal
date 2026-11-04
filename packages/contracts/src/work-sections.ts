@@ -14,6 +14,7 @@ export const WORK_SECTIONS: WorkSection[] = [
   'gst',
   'tds',
   'income_tax',
+  'tax_audit',
   'roc',
   'bookkeeping',
   'mis',

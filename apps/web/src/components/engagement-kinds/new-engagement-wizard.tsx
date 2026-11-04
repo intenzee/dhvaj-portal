@@ -131,7 +131,7 @@ const KIND_OPTIONS: {
     kind: 'compliance',
     title: 'Compliance',
     blurb:
-      'The standing engagement for GST, TDS/TCS, Income Tax, ROC, Bookkeeping and MIS, with a row per year in scope.',
+      'The standing engagement for GST, TDS/TCS, Income Tax, Tax Audit, ROC, Bookkeeping and MIS, with a row per year in scope.',
     icon: FileStack,
   },
   {

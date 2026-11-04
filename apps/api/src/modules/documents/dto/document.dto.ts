@@ -212,7 +212,7 @@ export class DocumentListQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({ description: 'Change 6 — only documents in this stream (gst, tds, …).' })
   @IsOptional()
-  @IsIn(['gst', 'tds', 'income_tax', 'roc', 'bookkeeping', 'mis'])
+  @IsIn(['gst', 'tds', 'income_tax', 'tax_audit', 'roc', 'bookkeeping', 'mis'])
   stream?: string;
 
   @ApiPropertyOptional({ description: "Only documents of filings in this FY, e.g. '2026-27'." })

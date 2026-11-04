@@ -33,7 +33,7 @@ describe('work sections', () => {
   });
 
   it('knows which sections are filing streams', () => {
-    expect(STREAM_SECTIONS).toEqual(['gst', 'tds', 'income_tax', 'roc', 'bookkeeping', 'mis']);
+    expect(STREAM_SECTIONS).toEqual(['gst', 'tds', 'income_tax', 'tax_audit', 'roc', 'bookkeeping', 'mis']);
     expect(isStreamSection('gst')).toBe(true);
     expect(isStreamSection('statutory_audit')).toBe(false);
     expect(WORK_SECTION_LABEL.income_tax).toBe('Income Tax');

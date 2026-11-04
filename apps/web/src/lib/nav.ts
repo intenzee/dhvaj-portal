@@ -9,6 +9,7 @@ import {
   ListTodo,
   ListChecks,
   Send,
+  FileSearch,
   ClipboardCheck,
   CalendarClock,
   FileText,
@@ -216,6 +217,15 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'One form and period across every client — assign and remind in bulk, lodge one by one.',
         permission: PERMISSION.engagementRead,
         flag: 'filingRuns',
+        ready: true,
+      },
+      {
+        label: 'Tax audits',
+        href: '/tax-audits',
+        icon: FileSearch,
+        hint: 'Clients likely to need a tax audit this year, with the reason, and whether it is in their scope.',
+        permission: PERMISSION.engagementRead,
+        hideFor: PREPARER_ROLES,
         ready: true,
       },
       {

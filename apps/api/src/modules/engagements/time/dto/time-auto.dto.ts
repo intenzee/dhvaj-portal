@@ -98,6 +98,6 @@ export class TimeSummaryQueryDto {
 
   @ApiPropertyOptional({ description: 'Only time in this stream (gst, tds, …).' })
   @IsOptional()
-  @IsIn(['gst', 'tds', 'income_tax', 'roc', 'bookkeeping', 'mis'])
+  @IsIn(['gst', 'tds', 'income_tax', 'tax_audit', 'roc', 'bookkeeping', 'mis'])
   stream?: string;
 }

@@ -174,6 +174,24 @@ describe('independence guard matrix (entity type × streams × open audit)', () 
       expect(f!.message).toMatch(/keeps this client's books for FY 2026-27 \(CR\/00003\)/);
     });
 
+    it('blocks the Tax Audit stream on a year whose books the engagement itself keeps', () => {
+      const own = fact('bookkeeping', '2026-27', 'CR/00003', 'eng-1');
+      const p = compliance(['tax_audit'], { engagementId: 'eng-1' });
+      expect(rules(p, [own])).toEqual(['TAX_AUDIT_BY_BOOKKEEPER:block']);
+    });
+
+    it('blocks taking Bookkeeping and Tax Audit together', () => {
+      const [f, ...rest] = evaluateIndependence(compliance(['bookkeeping', 'tax_audit']), []);
+      expect(rest).toEqual([]);
+      expect(f).toMatchObject({ rule: 'TAX_AUDIT_BY_BOOKKEEPER', outcome: 'block' });
+      expect(f!.message).toMatch(/Take one of Bookkeeping or Tax Audit/);
+    });
+
+    it('asks no s.144 approval for a company auditor taking its tax audit', () => {
+      const p = compliance(['tax_audit'], { isCompany: true });
+      expect(rules(p, [fact('statutory_audit')])).toEqual([]);
+    });
+
     it('allows a tax audit with only filing streams in scope', () => {
       const p: IndependenceProposal = {
         isCompany: false,

@@ -456,7 +456,10 @@ function readRow(
   else if (get('addressLine2') || get('city') || stateRaw || pincode)
     warnings.push('The address has no "Address line 1"; left out.');
 
-  const streams = STREAMS.filter((s) => YES_RE.test(get(CLIENT_MASTER_STREAM_FIELDS[s])));
+  const streams = STREAMS.filter((s) => {
+    const field = CLIENT_MASTER_STREAM_FIELDS[s];
+    return field !== undefined && YES_RE.test(get(field));
+  });
   let financialYear: string | null = null;
   if (get('financialYear')) {
     financialYear = parseFinancialYear(get('financialYear'));
