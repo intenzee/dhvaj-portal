@@ -107,14 +107,18 @@ describe('Reports & MIS (e2e)', () => {
         .set(bearer(await token('mp@dhvaj.in')))
         .expect(200);
       expect(Array.isArray(res.body.rows)).toBe(true);
-      // Every listed employee has some visible involvement (the report filters zeros).
+      // Every listed employee has some visible involvement, or chargeable time
+      // this month (PS-302); the report filters zeros.
       for (const r of res.body.rows as Array<{
         asEp: number;
         asManager: number;
         asMember: number;
         openTasks: number;
+        chargeableHours?: number;
       }>) {
-        expect(r.asEp + r.asManager + r.asMember + r.openTasks).toBeGreaterThan(0);
+        expect(
+          r.asEp + r.asManager + r.asMember + r.openTasks + (r.chargeableHours ?? 0),
+        ).toBeGreaterThan(0);
       }
     });
   });

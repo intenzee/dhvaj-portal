@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Download, FileText, Gavel } from 'lucide-react';
+import { Download, FileText, Gavel, TrendingUp } from 'lucide-react';
 import {
   FEATURE_FLAG,
   PERMISSION,
@@ -63,8 +63,18 @@ export default function ReportsPage(): JSX.Element {
         title="Reports & MIS"
         subtitle="Management summaries across the engagements you can see (partners see the whole firm)."
         actions={
-          isOn(FEATURE_FLAG.notices) || isOn(FEATURE_FLAG.partnerRisk) ? (
+          isOn(FEATURE_FLAG.notices) ||
+          isOn(FEATURE_FLAG.partnerRisk) ||
+          can(principal, PERMISSION.practiceFinance) ? (
             <div className="flex flex-wrap gap-2">
+              {can(principal, PERMISSION.practiceFinance) && (
+                <Link
+                  href="/reports/profitability"
+                  className="inline-flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
+                >
+                  <TrendingUp className="h-4 w-4" aria-hidden /> Profitability
+                </Link>
+              )}
               {isOn(FEATURE_FLAG.partnerRisk) && (
                 <Link
                   href="/reports/partner-packs"
@@ -522,6 +532,9 @@ function UtilisationReportView(): JSX.Element {
                 'As Member',
                 'Open tasks',
                 'Overdue tasks',
+                'Chargeable hours',
+                'Available hours',
+                'Chargeable %',
               ],
               rows.map((r) => [
                 r.employeeName,
@@ -532,6 +545,9 @@ function UtilisationReportView(): JSX.Element {
                 r.asMember,
                 r.openTasks,
                 r.overdueTasks,
+                r.chargeableHours ?? '',
+                r.availableHours ?? '',
+                r.chargeablePct ?? '',
               ]),
             )
           }
@@ -552,6 +568,12 @@ function UtilisationReportView(): JSX.Element {
                 <th className="py-2 pr-4 font-semibold">Member</th>
                 <th className="py-2 pr-4 font-semibold">Open tasks</th>
                 <th className="py-2 pr-4 font-semibold">Overdue</th>
+                <th
+                  className="py-2 pr-4 font-semibold"
+                  title="Billable hours this month to date, against the working hours so far"
+                >
+                  Chargeable
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -575,6 +597,9 @@ function UtilisationReportView(): JSX.Element {
                       r.overdueTasks
                     )}
                   </td>
+                  <td className="py-2 pr-4 tabular-nums">
+                    <ChargeableCell row={r} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -582,5 +607,20 @@ function UtilisationReportView(): JSX.Element {
         </div>
       )}
     </Section>
+  );
+}
+
+/** PS-302: chargeable hours of the available, this month to date. */
+function ChargeableCell({ row }: { row: UtilisationReport['rows'][number] }): JSX.Element {
+  if (row.chargeableHours === undefined) return <span className="text-ink-faint">—</span>;
+  return (
+    <span title={`${row.chargeableHours} of ${row.availableHours ?? 0} working hours`}>
+      {row.chargeablePct === null || row.chargeablePct === undefined
+        ? `${row.chargeableHours}h`
+        : `${row.chargeablePct}%`}
+      <span className="ml-1 text-xs text-ink-faint">
+        {row.chargeableHours}/{row.availableHours ?? 0}h
+      </span>
+    </span>
   );
 }

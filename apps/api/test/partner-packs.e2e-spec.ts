@@ -7,6 +7,7 @@ import {
   partnerPackMonth,
   type PartnerPackFigures,
   type PartnerPackSummary,
+  type ProfitabilityReport,
   type ReceiptRecord,
   type RiskDashboard,
 } from '@hsdg/contracts';
@@ -161,6 +162,30 @@ describe('PS-303 partner packs (e2e)', () => {
       [from, to],
     );
     expect(f.invoiced).toEqual({ count: rows[0]!.n, amount: rows[0]!.amount });
+  });
+
+  it('profitability equals the profitability report for the month (PS-302)', async () => {
+    const report = async (t: string, partnerId?: string) =>
+      (
+        await http()
+          .get(
+            `/api/v1/reports/profitability?from=${from}&to=${to}&by=client${partnerId ? `&partnerId=${partnerId}` : ''}`,
+          )
+          .set(bearer(t))
+          .expect(200)
+      ).body as ProfitabilityReport;
+    const firm = await figures(mp, (await build(mp)).id);
+    const r = (await report(mp)).totals;
+    expect(firm.profitability).toEqual({
+      timeCost: r.timeCost,
+      standardValue: r.standardValue,
+      billed: r.billed,
+      realisationPct: r.realisationPct,
+      margin: r.margin,
+    });
+    const own = await figures(pa, (await build(pa)).id);
+    const ra = (await report(pa, own.partner.employeeId)).totals;
+    expect(own.profitability).toMatchObject({ timeCost: ra.timeCost, margin: ra.margin });
   });
 
   it('a filing filed this month moves the pack, and building again keeps one pack', async () => {

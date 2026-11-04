@@ -114,7 +114,12 @@ export function renderPartnerPackPdf(d: PartnerPackFigures, firmName: string | n
     row('Margin', rs(d.profitability.margin), true);
   } else {
     room(14);
-    p.text(MARGIN, y, 'Shown here once cost rates are set up (PS-302).', 9);
+    p.text(
+      MARGIN,
+      y,
+      'Shown here for partners with Practice finance once cost rates are set up.',
+      9,
+    );
     y -= 13;
   }
 

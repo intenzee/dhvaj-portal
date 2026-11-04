@@ -44,6 +44,12 @@ export interface UtilisationRow {
   asMember: number;
   openTasks: number;
   overdueTasks: number;
+  /** PS-302: billable hours logged this month to date (IST). */
+  chargeableHours?: number;
+  /** PS-302: working hours this month to date — the firm's calendar less holidays. */
+  availableHours?: number;
+  /** PS-302: chargeable ÷ available, as a percentage (1 dp); null with no working day yet. */
+  chargeablePct?: number | null;
 }
 
 export interface UtilisationReport {

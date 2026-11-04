@@ -19,6 +19,7 @@ import { IdentityService } from '../identity/identity.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RiskService } from '../dashboard/risk.service';
 import { pickEffectiveRole } from '../auth/auth.service';
+import { partnerMonthProfitability } from '../reports/profitability.service';
 import { renderPartnerPackPdf } from './partner-pack-pdf';
 
 /** Who a pack is for: the partner, as the database sees them. */
@@ -83,9 +84,16 @@ export class PartnerPacksService {
   async figures(partner: PackPartner, month: string): Promise<PartnerPackFigures> {
     const { from, to } = monthBounds(month);
     const board = await this.risk.dashboard(partner.ctx, PARTNER_PACK_RISK_ITEMS);
-    const month$ = await this.db.withRlsContext(partner.ctx, (client) =>
-      this.monthFigures(client, from, to),
-    );
+    const scope = FIRM_WIDE.includes(partner.ctx.role) ? 'firm' : 'own';
+    const { month$, profitability } = await this.db.withRlsContext(partner.ctx, async (client) => ({
+      month$: await this.monthFigures(client, from, to),
+      // PS-302: the firm's (MP) or the partner's own engagements; null without practice.finance.
+      profitability: await partnerMonthProfitability(client, partner.ctx, {
+        from,
+        to,
+        ...(scope === 'own' ? { partnerId: partner.employeeId } : {}),
+      }),
+    }));
     return {
       month,
       from,
@@ -96,7 +104,7 @@ export class PartnerPacksService {
         name: partner.name,
         officeCode: partner.officeCode,
       },
-      scope: FIRM_WIDE.includes(partner.ctx.role) ? 'firm' : 'own',
+      scope,
       risk: board.tiles.map((t) => ({
         key: t.key,
         label: RISK_TILE_LABEL[t.key],
@@ -106,7 +114,7 @@ export class PartnerPacksService {
         items: t.items.map((i) => ({ title: i.title, detail: i.detail, dueOn: i.dueOn })),
       })),
       ...month$,
-      profitability: null,
+      profitability,
     };
   }
 

@@ -211,7 +211,7 @@ export class ReportsService {
   /** Per-employee workload over engagements/tasks the caller can see (RLS-scoped). */
   private async utilisationRows(client: PoolClient): Promise<UtilisationRow[]> {
     // The inner subqueries are RLS-scoped, so counts reflect visible rows only;
-    // the outer WHERE drops employees with no visible involvement.
+    // the outer WHERE drops employees with no visible involvement (or chargeable time).
     const { rows } = await client.query<{
       employee_id: string;
       employee_name: string;
@@ -222,6 +222,7 @@ export class ReportsService {
       as_member: string;
       open_tasks: string;
       overdue_tasks: string;
+      chargeable_seconds: string;
     }>(
       `SELECT * FROM (
            SELECT emp.id AS employee_id, emp.full_name AS employee_name,
@@ -239,15 +240,24 @@ export class ReportsService {
                   (SELECT count(*) FROM hsdg.tasks tk
                      WHERE tk.assigned_to_employee_id = emp.id
                        AND tk.status NOT IN ('done', 'cancelled')
-                       AND tk.due_date IS NOT NULL AND tk.due_date < CURRENT_DATE) AS overdue_tasks
+                       AND tk.due_date IS NOT NULL AND tk.due_date < CURRENT_DATE) AS overdue_tasks,
+                  -- PS-302: billable hours this IST month to date.
+                  (SELECT COALESCE(sum(t.duration_seconds) FILTER (WHERE t.is_billable), 0)
+                     FROM hsdg.effective_time_entries t
+                    WHERE t.employee_id = emp.id AND t.ended_at IS NOT NULL
+                      AND (t.started_at AT TIME ZONE 'Asia/Kolkata')::date
+                          >= date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')::date
+                  ) AS chargeable_seconds
            FROM hsdg.employees emp
            JOIN hsdg.grades g ON g.id = emp.grade_id
            JOIN hsdg.offices o ON o.id = emp.primary_office_id
          ) u
          WHERE (u.as_ep + u.as_manager + u.as_member + u.open_tasks) > 0
+            OR u.chargeable_seconds > 0
          ORDER BY (u.as_ep + u.as_manager + u.as_member) DESC, u.open_tasks DESC, u.employee_name`,
     );
 
+    const available = await availableHoursThisMonth(client);
     return rows.map((r) => ({
       employeeId: r.employee_id,
       employeeName: r.employee_name,
@@ -258,8 +268,41 @@ export class ReportsService {
       asMember: Number(r.as_member),
       openTasks: Number(r.open_tasks),
       overdueTasks: Number(r.overdue_tasks),
+      ...utilisationOf(Number(r.chargeable_seconds), available),
     }));
   }
+}
+
+/**
+ * PS-302: the working hours this IST month to date — the firm's working
+ * weekdays less compliance_holidays, times its hours a day. (Approved leave
+ * comes off here once leave is recorded.)
+ */
+export async function availableHoursThisMonth(client: PoolClient): Promise<number> {
+  const { rows } = await client.query<{ hours: string | null }>(
+    `SELECT count(d.day) * max(fs.working_hours_per_day) AS hours
+       FROM (SELECT working_weekdays, working_hours_per_day FROM hsdg.firm_settings LIMIT 1) fs
+       CROSS JOIN LATERAL generate_series(
+         date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')::date,
+         (now() AT TIME ZONE 'Asia/Kolkata')::date, interval '1 day') AS d(day)
+      WHERE extract(isodow FROM d.day)::smallint = ANY (fs.working_weekdays)
+        AND NOT EXISTS (SELECT 1 FROM hsdg.compliance_holidays h WHERE h.holiday_date = d.day::date)`,
+  );
+  return Number(rows[0]?.hours ?? 0);
+}
+
+/** Chargeable hours, available hours and their ratio (%, 1 dp). Pure — tested. */
+export function utilisationOf(
+  chargeableSeconds: number,
+  availableHours: number,
+): { chargeableHours: number; availableHours: number; chargeablePct: number | null } {
+  const chargeableHours = Math.round((chargeableSeconds / 3600) * 100) / 100;
+  return {
+    chargeableHours,
+    availableHours,
+    chargeablePct:
+      availableHours > 0 ? Math.round((chargeableHours / availableHours) * 1000) / 10 : null,
+  };
 }
 
 /** Roll utilisation rows up into a stable, count-ordered group list. */
