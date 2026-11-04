@@ -227,7 +227,32 @@ export function ClauseWorkspace({
       </section>
 
       <section className="space-y-2">
-        <h4 className="font-medium text-ink">Clauses</h4>
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="font-medium text-ink">Clauses</h4>
+          {lead && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                run({
+                  path: '/clauses/refresh-drafts',
+                  body: { version: w.version },
+                  message: 'Drafts brought up to date with the portal.',
+                })
+              }
+            >
+              Refresh drafts
+            </Button>
+          )}
+        </div>
+        {lead && (
+          <p className="text-xs text-ink-faint">
+            Clauses the portal can answer (client master, the GST and TDS returns the firm filed,
+            last year’s tax audit, the MSME list) open with a draft. Refresh once more has come in;
+            a changed draft needs confirming again.
+          </p>
+        )}
         <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
           {w.papers.map((wp) => (
             <li key={wp.id}>
@@ -275,6 +300,30 @@ function PackageRow({ p }: { p: TaxAuditPackageRow }): JSX.Element {
       <td className="py-1 pr-3">{p.assigneeName ?? 'Not given out'}</td>
       <td className="py-1">{packageProgress(p.counts)}</td>
     </tr>
+  );
+}
+
+/** What the portal's draft says, field by field (tables as their rows). */
+function DraftValues({ wp }: { wp: TaxAuditWorkingPaper }): JSX.Element | null {
+  const d = wp.draftAnswer;
+  if (!d) return null;
+  const shown = answerFields(wp.subItems).filter((f) => d[f.key] !== undefined && d[f.key] !== '');
+  if (shown.length === 0) return null;
+  const text = (v: TaxAuditAnswer[string]): string =>
+    typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v);
+  return (
+    <dl className="space-y-1 text-xs" aria-label="Draft values">
+      {shown.map((f) => (
+        <div key={f.key}>
+          <dt className="text-ink-faint">{f.label}</dt>
+          <dd
+            className={f.kind === 'table' ? 'whitespace-pre-wrap font-mono text-ink' : 'text-ink'}
+          >
+            {text(d[f.key]!)}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -393,6 +442,7 @@ function PaperEditor({
                   : ''}
               </p>
               {wp.draftNote && <p className="text-xs text-ink-muted">{wp.draftNote}</p>}
+              <DraftValues wp={wp} />
               {prepare && !wp.draftConfirmedAt && (
                 <Button
                   size="sm"

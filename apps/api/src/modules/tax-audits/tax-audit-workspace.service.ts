@@ -44,6 +44,7 @@ import { AuditService } from '../audit/audit.service';
 import { DocumentsService } from '../documents/documents.service';
 import { istToday } from '../engagements/time/auto-time';
 import { libraryVersionForYear } from './tax-audit-clause-library.service';
+import { applyDrafts } from './tax-audit-drafts';
 
 const LEAD_ONLY = 'Only the engagement’s partner or manager does this.';
 const NOT_YOURS =
@@ -237,6 +238,8 @@ export class TaxAuditWorkspaceService {
           );
         }
       }
+      // F-6: clauses the portal can answer open with a draft to confirm.
+      const drafts = await applyDrafts(client, auditId);
       await client.query(
         `UPDATE hsdg.tax_audits
             SET clause_library_version_id = $2, clause_work_opened_at = now(),
@@ -248,8 +251,39 @@ export class TaxAuditWorkspaceService {
         action: 'tax_audit.clause_work_opened',
         objectType: 'tax_audit',
         objectId: auditId,
-        after: { libraryVersionNo: lib.versionNo, clauses: clauses.length },
+        after: {
+          libraryVersionNo: lib.versionNo,
+          clauses: clauses.length,
+          drafted: drafts.drafted,
+        },
       });
+      return this.view(client, ctx, engagementId, auditId);
+    });
+  }
+
+  /**
+   * Draft again from what the portal knows now (F-6): the MSME list has come
+   * in, a return was filed. Clauses still being prepared only; a changed
+   * draft needs confirming again and the answer is never touched.
+   */
+  async refreshDrafts(
+    ctx: RlsContext,
+    engagementId: string,
+    auditId: string,
+    input: TaxAuditVersionInput,
+  ): Promise<TaxAuditWorkspace> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const a = await this.lead(client, engagementId, auditId, input.version);
+      this.requireWorkOpen(a);
+      const drafts = await applyDrafts(client, auditId);
+      if (drafts.drafted.length || drafts.cleared.length) {
+        await this.audit.recordWith(client, ctx, {
+          action: 'tax_audit.drafts_refreshed',
+          objectType: 'tax_audit',
+          objectId: auditId,
+          after: { ...drafts },
+        });
+      }
       return this.view(client, ctx, engagementId, auditId);
     });
   }

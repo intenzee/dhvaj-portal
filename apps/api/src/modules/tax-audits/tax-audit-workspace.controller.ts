@@ -64,6 +64,21 @@ export class TaxAuditWorkspaceController {
     return this.workspace.open(rlsContextFromPrincipal(p), id, auditId, body);
   }
 
+  @Post(`${AUDIT}/clauses/refresh-drafts`)
+  @HttpCode(200)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Draft the clauses still being prepared again from portal data (lead only)',
+  })
+  refreshDrafts(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+    @Body() body: TaxAuditVersionDto,
+  ): Promise<TaxAuditWorkspace> {
+    return this.workspace.refreshDrafts(rlsContextFromPrincipal(p), id, auditId, body);
+  }
+
   @Put(`${AUDIT}/facts`)
   @RequirePermissions(PERMISSION.engagementRead)
   @ApiOperation({ summary: 'What the audit knows about the assessee; ruled-out clauses fall away' })
