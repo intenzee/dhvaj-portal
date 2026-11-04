@@ -36,6 +36,7 @@ import { InstanceWorkspace } from './instance-workspace';
 import { RocEvents } from './roc-events';
 import { PeriodCleanup } from './period-cleanup';
 import { GstinMissingBanner } from './gstin-missing-banner';
+import { registrationCaption } from './registration-caption';
 import { PriorFiledPanel } from './prior-filed-panel';
 
 const GST_SECTIONS: { key: PeriodSection; label: string }[] = [
@@ -364,12 +365,17 @@ export function StreamTab({
             })}
           </div>
         )}
-        {tree.registrations.length === 1 && (
-          <span className="text-xs text-ink-muted">
-            {tree.registrations[0]!.label}{' '}
-            <span className="font-mono">{tree.registrations[0]!.number}</span>
-          </span>
-        )}
+        {tree.registrations.length === 1 &&
+          (() => {
+            const c = registrationCaption(tree.registrations[0]!);
+            return (
+              <span className="text-xs text-ink-muted">
+                {c.kind && <>{c.kind} </>}
+                <span className="font-mono">{c.number}</span>
+                {c.extra && <> · {c.extra}</>}
+              </span>
+            );
+          })()}
         <span className="ml-auto" />
         {ctx.isLead && fy && (
           <Button
