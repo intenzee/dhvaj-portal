@@ -18,6 +18,7 @@ import {
   type TaxAuditAcceptance,
   type TaxAuditAcceptanceStepInput,
   type TaxAuditForm,
+  type TaxAuditRolloverProposal,
   type TaxAuditSigningPartner,
   type TaxAuditStage,
   type UploadPreviousAuditorLetterInput,
@@ -67,6 +68,7 @@ interface AuditRow {
   appointment_letter_title: string | null;
   accepted_at: Date | null;
   accepted_by_name: string | null;
+  rolled_from_audit_id: string | null;
   version: number;
 }
 
@@ -402,7 +404,7 @@ export class TaxAuditAcceptanceService {
               a.previous_auditor_changed, a.previous_auditor_name,
               a.previous_auditor_letter_document_id, pd.title AS previous_auditor_letter_title,
               a.appointment_letter_document_id, ad.title AS appointment_letter_title,
-              a.accepted_at, ab.full_name AS accepted_by_name, a.version
+              a.accepted_at, ab.full_name AS accepted_by_name, a.rolled_from_audit_id, a.version
          FROM hsdg.tax_audits a
          JOIN hsdg.engagements e ON e.id = a.engagement_id
          LEFT JOIN hsdg.employees sp ON sp.id = a.signing_partner_id
@@ -439,6 +441,55 @@ export class TaxAuditAcceptanceService {
       );
     }
     return a;
+  }
+
+  /** What last year's filed audit proposes for this year (F-10). */
+  private async proposal(
+    client: PoolClient,
+    fromId: string | null,
+  ): Promise<TaxAuditRolloverProposal | null> {
+    if (!fromId) return null;
+    const { rows } = await client.query<{
+      id: string;
+      engagement_id: string;
+      financial_year: string;
+      form_type: TaxAuditForm | null;
+      signing_partner_id: string | null;
+      signing_partner_name: string | null;
+    }>(
+      `SELECT p.id, p.engagement_id, p.financial_year, p.form_type, p.signing_partner_id,
+              sp.full_name AS signing_partner_name
+         FROM hsdg.tax_audits p
+         LEFT JOIN hsdg.employees sp ON sp.id = p.signing_partner_id
+        WHERE p.id = $1`,
+      [fromId],
+    );
+    const p = rows[0];
+    if (!p) return null;
+    const team = await client.query<{ label: string }>(
+      `SELECT x.label FROM (
+         SELECT ep.full_name || ' (engagement partner)' AS label, 0 AS o
+           FROM hsdg.engagements e JOIN hsdg.employees ep ON ep.id = e.engagement_partner_id
+          WHERE e.id = $1
+         UNION ALL
+         SELECT em.full_name || ' (engagement manager)', 1
+           FROM hsdg.engagements e JOIN hsdg.employees em ON em.id = e.engagement_manager_id
+          WHERE e.id = $1
+         UNION ALL
+         SELECT m.full_name || ' (' || replace(t.role_on_engagement, '_', ' ') || ')', 2
+           FROM hsdg.engagement_team t JOIN hsdg.employees m ON m.id = t.employee_id
+          WHERE t.engagement_id = $1 AND m.employment_status <> 'exited') x
+        ORDER BY x.o, x.label`,
+      [p.engagement_id],
+    );
+    return {
+      fromAuditId: p.id,
+      fromFinancialYear: p.financial_year,
+      formType: p.form_type,
+      signingPartnerId: p.signing_partner_id,
+      signingPartnerName: p.signing_partner_name,
+      team: [...new Set(team.rows.map((r) => r.label))],
+    };
   }
 
   private async isLead(client: PoolClient, engagementId: string): Promise<boolean> {
@@ -546,6 +597,7 @@ export class TaxAuditAcceptanceService {
     const limit = await this.limit(client);
     const partners = await this.partners(client, a, limit);
     const lead = await this.isLead(client, engagementId);
+    const proposal = await this.proposal(client, a.rolled_from_audit_id);
     return {
       auditId: a.id,
       engagementId: a.engagement_id,
@@ -573,6 +625,7 @@ export class TaxAuditAcceptanceService {
         : null,
       acceptedAt: a.accepted_at?.toISOString() ?? null,
       acceptedByName: a.accepted_by_name,
+      proposal,
       limit,
       partners,
       missing: acceptanceMissing({

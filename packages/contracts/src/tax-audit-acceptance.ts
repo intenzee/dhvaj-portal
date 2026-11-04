@@ -34,6 +34,21 @@ export interface TaxAuditSigningPartner {
 }
 
 /** GET …/acceptance */
+/**
+ * F-10: last year's filed audit this year's row was rolled over from, and
+ * what it proposes — the form, the signing partner (offered again only if
+ * still within the COP and the limit) and the engagement's team.
+ */
+export interface TaxAuditRolloverProposal {
+  fromAuditId: string;
+  fromFinancialYear: string;
+  formType: TaxAuditForm | null;
+  signingPartnerId: string | null;
+  signingPartnerName: string | null;
+  /** "Partner A (engagement partner)", "Senior Y (in charge)", … */
+  team: string[];
+}
+
 export interface TaxAuditAcceptance {
   auditId: string;
   engagementId: string;
@@ -59,6 +74,8 @@ export interface TaxAuditAcceptance {
   appointmentLetter: { documentId: string; title: string } | null;
   acceptedAt: string | null;
   acceptedByName: string | null;
+  /** Rolled over from last year's filed audit (F-10); null otherwise. */
+  proposal: TaxAuditRolloverProposal | null;
   /** The firm's yearly limit of reports a partner (60 at most). */
   limit: number;
   partners: TaxAuditSigningPartner[];

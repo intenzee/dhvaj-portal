@@ -180,6 +180,45 @@ describe('ClauseWorkspace', () => {
     );
   });
 
+  it('shows the portal’s draft field by field, confirms it, and lets the lead refresh drafts', async () => {
+    apiFetch.mockResolvedValue(
+      ws({
+        papers: [
+          paper({
+            draftSource: 'tds_filings',
+            draftAnswer: { a: true, b: '26Q\tQ1\t2025-07-31\t2025-07-25\tYes' },
+            draftNote: 'From the 1 TDS/TCS return the firm filed for FY 2025-26.',
+          }),
+        ],
+      }),
+    );
+    render(wrap(<ClauseWorkspace engagementId="g1" auditId="a1" />));
+    fireEvent.click(await screen.findByRole('button', { name: /TDS and TCS/ }));
+    const values = document.querySelector('dl[aria-label="Draft values"]')!;
+    expect(values).not.toBeNull();
+    expect(values).toHaveTextContent('Required to deduct');
+    expect(values).toHaveTextContent('Yes');
+    expect(values).toHaveTextContent('26Q');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm the draft' }));
+    await waitFor(() => expect(callTo(`${BASE}/clauses/w34/confirm-draft`)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh drafts' }));
+    await waitFor(() =>
+      expect(callTo(`${BASE}/clauses/refresh-drafts`)![1]).toEqual({
+        method: 'POST',
+        body: { version: 3 },
+      }),
+    );
+  });
+
+  it('offers no draft refresh to someone who is not the partner or manager', async () => {
+    apiFetch.mockResolvedValue(ws({ canLead: false }));
+    render(wrap(<ClauseWorkspace engagementId="g1" auditId="a1" />));
+    expect(await screen.findByRole('button', { name: /TDS and TCS/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh drafts' })).toBeNull();
+  });
+
   it('lets a reviewer send a clause back only with a comment', async () => {
     apiFetch.mockResolvedValue(
       ws({

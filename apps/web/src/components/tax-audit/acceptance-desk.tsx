@@ -103,6 +103,17 @@ function AcceptanceForm({
   const edit = a.canEdit;
   const offered = a.partners.filter((p) => p.offered);
   const notOffered = a.partners.filter((p) => !p.offered);
+  const proposal = a.proposal;
+  const proposedPartner = proposal?.signingPartnerId
+    ? a.partners.find((p) => p.employeeId === proposal.signingPartnerId)
+    : undefined;
+  // What taking last year's choices would still fill in.
+  const carry: Omit<SaveTaxAuditAcceptanceInput, 'version'> = {};
+  if (proposal && !a.formType && proposal.formType) carry.formType = proposal.formType;
+  if (proposal && !a.signingPartnerId && proposedPartner?.offered) {
+    carry.signingPartnerId = proposedPartner.employeeId;
+  }
+  if (proposal && a.previousAuditor.changed === null) carry.previousAuditorChanged = false;
 
   return (
     <div className="space-y-4 text-sm">
@@ -111,6 +122,40 @@ function AcceptanceForm({
           <Badge tone="success">Accepted</Badge> {formatDate(a.acceptedAt)}
           {a.acceptedByName ? ` by ${a.acceptedByName}` : ''}.
         </p>
+      )}
+
+      {proposal && (
+        <section className="space-y-1" aria-label="Last year">
+          <h4 className="font-medium text-ink">Rolled over from FY {proposal.fromFinancialYear}</h4>
+          <p className="text-ink-muted">
+            Last year:{' '}
+            {[
+              proposal.formType && `Form ${proposal.formType}`,
+              proposal.signingPartnerName && `signed by ${proposal.signingPartnerName}`,
+            ]
+              .filter(Boolean)
+              .join(', ') || 'no form or signing partner recorded'}
+            .
+          </p>
+          {proposal.team.length > 0 && (
+            <p className="text-ink-muted">The same team carries on: {proposal.team.join(', ')}.</p>
+          )}
+          {edit && proposedPartner && !proposedPartner.offered && !a.signingPartnerId && (
+            <p className="text-xs text-ink-faint">
+              {proposedPartner.summary} — {proposedPartner.reason}
+            </p>
+          )}
+          {edit && Object.keys(carry).length > 0 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => save.mutate(carry)}
+            >
+              Take last year’s choices
+            </Button>
+          )}
+        </section>
       )}
 
       <section className="space-y-1">
