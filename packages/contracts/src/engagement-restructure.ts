@@ -34,11 +34,13 @@ export const ENGAGEMENT_KIND_LABEL: Record<EngagementKind, string> = {
   assignment: 'Other assignment',
 };
 
-/** The seven compliance streams (services.stream, rule version stream). Tax Audit
- *  (s.44AB) joined in Phase 3 (F-1): one row per financial year, on the PAN. */
+/** The eight compliance streams (services.stream, rule version stream). Tax Audit
+ *  (s.44AB) joined in Phase 3 (F-1): one row per financial year, on the PAN.
+ *  Payroll & Labour (PS-405): PF, ESI and PT returns on their registrations. */
 export const STREAM = {
   gst: 'gst',
   tds: 'tds',
+  payroll: 'payroll',
   incomeTax: 'income_tax',
   taxAudit: 'tax_audit',
   roc: 'roc',
@@ -47,12 +49,13 @@ export const STREAM = {
 } as const;
 export type Stream = (typeof STREAM)[keyof typeof STREAM];
 /** In tab order (spec Change 3: MIS, Bookkeeping, GST, TDS, Income Tax, ROC; Tax Audit
- *  sits beside Income Tax). */
+ *  sits beside Income Tax, Payroll & Labour after TDS). */
 export const STREAMS: Stream[] = [
   'mis',
   'bookkeeping',
   'gst',
   'tds',
+  'payroll',
   'income_tax',
   'tax_audit',
   'roc',
@@ -61,6 +64,7 @@ export const STREAMS: Stream[] = [
 export const STREAM_LABEL: Record<Stream, string> = {
   gst: 'GST',
   tds: 'TDS / TCS',
+  payroll: 'Payroll & Labour',
   income_tax: 'Income Tax',
   tax_audit: 'Tax Audit',
   roc: 'ROC / MCA',
@@ -72,6 +76,7 @@ export const STREAM_LABEL: Record<Stream, string> = {
 export const STREAM_SERVICE_CODE: Record<Stream, string> = {
   gst: 'STREAM_GST',
   tds: 'STREAM_TDS',
+  payroll: 'STREAM_PAYROLL',
   income_tax: 'STREAM_INCOME_TAX',
   tax_audit: 'STREAM_TAX_AUDIT',
   roc: 'STREAM_ROC',
@@ -90,6 +95,11 @@ export const REGISTRATION_SCOPE = {
   entity: 'entity',
   /** Per director (DIR-3 KYC) — instances keyed by DIN on the CIN. */
   din: 'din',
+  /** Payroll & Labour: the EPF establishment code, the ESIC employer code, and
+   *  each state's Professional Tax registration. */
+  pf: 'pf',
+  esic: 'esic',
+  pt: 'pt',
 } as const;
 export type RegistrationScope = (typeof REGISTRATION_SCOPE)[keyof typeof REGISTRATION_SCOPE];
 export const REGISTRATION_SCOPES: RegistrationScope[] = Object.values(REGISTRATION_SCOPE);
@@ -99,6 +109,7 @@ export const REGISTRATION_SCOPES: RegistrationScope[] = Object.values(REGISTRATI
 export const STREAM_REGISTRATION_TYPES: Record<Stream, readonly string[]> = {
   gst: ['gstin'],
   tds: ['tan'],
+  payroll: ['pf', 'esic', 'pt'],
   income_tax: ['pan'],
   tax_audit: ['pan'],
   roc: ['cin', 'llpin'],
@@ -125,6 +136,7 @@ export const STREAM_PRIOR_FILED_GRAIN: Record<Stream, 'month' | 'quarter' | 'yea
   bookkeeping: 'month',
   mis: 'month',
   tds: 'quarter',
+  payroll: 'month',
   income_tax: 'quarter',
   roc: 'quarter',
   // One report a year: only the year's annual return is offered.
@@ -133,6 +145,7 @@ export const STREAM_PRIOR_FILED_GRAIN: Record<Stream, 'month' | 'quarter' | 'yea
 export const STREAM_HAS_ANNUAL_RETURNS: Record<Stream, boolean> = {
   gst: true,
   tds: true,
+  payroll: true,
   income_tax: true,
   tax_audit: true,
   roc: true,

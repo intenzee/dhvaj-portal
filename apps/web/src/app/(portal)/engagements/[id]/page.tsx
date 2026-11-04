@@ -11,6 +11,7 @@ import {
   FEATURE_FLAG,
   ROLE,
   STREAM_LABEL,
+  STREAMS,
   TASK_STATUS,
   type EngagementTabs,
   type Paginated,
@@ -138,20 +139,13 @@ const STREAM_HINT: Record<Stream, string> = {
   bookkeeping: 'Bookkeeping by period — data in, books closed.',
   gst: 'GST month by month: Outward, Inward and Summary, each worked and lodged here.',
   tds: 'TDS deposits and quarterly returns.',
+  payroll: 'PF, ESI and Professional Tax returns, month by month, on each registration.',
   income_tax: 'Advance tax, the return and assessments.',
   tax_audit: 'One tax audit a year (s.44AB): stage, signing partner, UDIN and filing.',
   roc: 'ROC / MCA annual filings and event forms.',
 };
 
-const STREAM_ORDER: Stream[] = [
-  'mis',
-  'bookkeeping',
-  'gst',
-  'tds',
-  'income_tax',
-  'tax_audit',
-  'roc',
-];
+const STREAM_ORDER: Stream[] = STREAMS;
 
 /** Change 3 — the 12 Compliance tabs (stream tabs only when in scope for the year). */
 function complianceTabs(

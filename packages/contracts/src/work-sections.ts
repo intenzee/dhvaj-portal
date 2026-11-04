@@ -1,7 +1,7 @@
 /**
  * Sections — one vocabulary for "show me GST only / Income Tax only" across
  * the home calendar, tasks, clients and engagements. A section is one of the
- * six compliance STREAMS or one of the non-compliance engagement kinds
+ * compliance STREAMS or one of the non-compliance engagement kinds
  * (Statutory Audit, Other assignments). APIs take `?section=gst,income_tax`
  * (comma list, any-of); an empty list means every section.
  */
@@ -13,6 +13,7 @@ export type WorkSection = Stream | 'statutory_audit' | 'assignment';
 export const WORK_SECTIONS: WorkSection[] = [
   'gst',
   'tds',
+  'payroll',
   'income_tax',
   'tax_audit',
   'roc',

@@ -1,6 +1,7 @@
 import {
   CALENDAR_V2_RULES,
   FIRM_POLICY_RULES,
+  PAYROLL_RULES,
   seedVersion,
   type SeedRule,
 } from './calendar-v2-rules';
@@ -22,7 +23,9 @@ import {
 const NO_HOLIDAYS = new Set<string>();
 
 function rule(code: string): SeedRule {
-  const r = [...CALENDAR_V2_RULES, ...FIRM_POLICY_RULES].find((x) => x.code === code);
+  const r = [...CALENDAR_V2_RULES, ...FIRM_POLICY_RULES, ...PAYROLL_RULES].find(
+    (x) => x.code === code,
+  );
   if (!r) throw new Error(`no seed rule ${code}`);
   return r;
 }
@@ -477,6 +480,54 @@ describe('compliance-periods', () => {
         expect(r.dueDateCategory).toBe('HSDG_RECURRING');
         expect(CALENDAR_V2_RULES.some((x) => x.code === r.code)).toBe(false);
       }
+    });
+  });
+
+  describe('Payroll & Labour (PS-405)', () => {
+    it('PF ECR and the ESI contribution are due by the 15th of the next month', () => {
+      expect(due('PAY_PF_ECR', '2026-27', '2026-10')!.statutoryDeadline).toBe('2026-11-15');
+      expect(due('PAY_PF_ECR', '2026-27', '2027-03')!.statutoryDeadline).toBe('2027-04-15');
+      expect(due('PAY_ESI_MONTHLY', '2026-27', '2027-01')!.statutoryDeadline).toBe('2027-02-15');
+    });
+    it('the ESI return of contributions: Apr–Sep by 11 Nov, Oct–Mar by 11 May', () => {
+      expect(due('PAY_ESI_RETURN', '2026-27', '2026-27:H1')!.statutoryDeadline).toBe('2026-11-11');
+      expect(due('PAY_ESI_RETURN', '2026-27', '2026-27:H2')!.statutoryDeadline).toBe('2027-05-11');
+    });
+    it('PT follows the state of the PT registration', () => {
+      const st = (code: string) => ({ pt_state: code });
+      expect(due('PAY_PT_MONTHLY', '2026-27', '2026-10', st('27'))).toMatchObject({
+        statutoryDeadline: '2026-10-31',
+      });
+      expect(
+        applyVariants(seedVersion(rule('PAY_PT_MONTHLY'), '2026-10-31'), st('27')).formLabel,
+      ).toBe('PTRC return (Form III)');
+      expect(due('PAY_PT_MONTHLY', '2026-27', '2026-10', st('29'))!.statutoryDeadline).toBe(
+        '2026-11-20',
+      );
+      expect(due('PAY_PT_MONTHLY', '2026-27', '2026-10', st('19'))!.statutoryDeadline).toBe(
+        '2026-11-21',
+      );
+      expect(due('PAY_PT_MONTHLY', '2026-27', '2026-10', st('36'))!.statutoryDeadline).toBe(
+        '2026-11-10',
+      );
+    });
+    it('Tamil Nadu and Kerala pay PT by the half-year, not the month', () => {
+      for (const code of ['33', '32']) {
+        expect(conditionHolds(rule('PAY_PT_MONTHLY').condition, { pt_state: code })).toBe(false);
+        expect(conditionHolds(rule('PAY_PT_HALF_YEARLY').condition, { pt_state: code })).toBe(true);
+      }
+      expect(conditionHolds(rule('PAY_PT_HALF_YEARLY').condition, { pt_state: '27' })).toBe(false);
+      expect(due('PAY_PT_HALF_YEARLY', '2026-27', '2026-27:H1')!.statutoryDeadline).toBe(
+        '2026-09-30',
+      );
+      expect(due('PAY_PT_HALF_YEARLY', '2026-27', '2026-27:H2')!.statutoryDeadline).toBe(
+        '2027-03-31',
+      );
+    });
+    it('every PT date and the ESI return wait on the stream lead to verify', () => {
+      const verify = PAYROLL_RULES.filter((r) => r.verification === 'verify').map((r) => r.code);
+      expect(verify.sort()).toEqual(['PAY_ESI_RETURN', 'PAY_PT_HALF_YEARLY', 'PAY_PT_MONTHLY']);
+      for (const r of PAYROLL_RULES) expect(r.stream).toBe('payroll');
     });
   });
 });

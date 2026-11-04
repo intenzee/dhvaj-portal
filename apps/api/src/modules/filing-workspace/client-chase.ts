@@ -39,6 +39,7 @@ export const CLIENT_DATA_SLOTS: readonly string[] = [
   'BANK_STATEMENT',
   'IT_DATA',
   'DEDUCTEE_DATA',
+  'PAYROLL_DATA',
   'MSME_DATA',
   'DPT_DATA',
   'PAS6_DATA',

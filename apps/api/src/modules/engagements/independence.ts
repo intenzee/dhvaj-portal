@@ -44,9 +44,17 @@ export interface IndependenceProposal {
 
 /** Bookkeeping, MIS (management services) and internal audit — s.144(a), (b), (d). */
 const S144_PROHIBITED_STREAMS: readonly Stream[] = ['bookkeeping', 'mis'];
-/** Filing streams a company's auditor may provide with board approval. */
-/** Tax audit is an audit, not a s.144 service: it needs no approval. */
-const S144_PERMITTED_STREAMS: readonly Stream[] = ['gst', 'tds', 'income_tax', 'roc'];
+/** Filing streams a company's auditor may provide with board approval. Tax
+ *  audit is an audit, not a s.144 service: it needs no approval. Payroll &
+ *  Labour is the PF / ESI / PT returns; running the payroll itself would be an
+ *  outsourced financial service, s.144(g). */
+export const S144_PERMITTED_STREAMS: readonly Stream[] = [
+  'gst',
+  'tds',
+  'payroll',
+  'income_tax',
+  'roc',
+];
 
 export const INTERNAL_AUDIT_SERVICE_CODE = 'INT_AUDIT';
 export const TAX_AUDIT_SERVICE_CODE = 'TAX_AUDIT';

@@ -79,6 +79,7 @@ export const ENGAGEMENT_TAB = {
   bookkeeping: 'bookkeeping',
   gst: 'gst',
   tds: 'tds',
+  payroll: 'payroll',
   incomeTax: 'income_tax',
   taxAudit: 'tax_audit',
   roc: 'roc',

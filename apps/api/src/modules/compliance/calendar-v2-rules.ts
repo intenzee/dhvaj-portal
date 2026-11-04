@@ -1184,6 +1184,144 @@ export const FIRM_POLICY_RULES: SeedRule[] = [
   },
 ];
 
+/** The Code on Social Security, 2020 (with the other three Labour Codes) in force from 21 Nov 2025. */
+const SS_CODE_FROM = '2025-11-21';
+const ptState = (code: string) => eq('pt_state', code);
+/** Professional Tax is paid half-yearly in Tamil Nadu (33) and Kerala (32). */
+const PT_HALF_YEARLY_STATES = any(ptState('33'), ptState('32'));
+
+/**
+ * Payroll & Labour (PS-405): PF and ESI on their employer codes, Professional
+ * Tax on each state's registration. PF and ESI are central (EPF Act 1952 / ESI
+ * Act 1948, now the Code on Social Security, 2020). PT is a state levy, so its
+ * dates are per state (the registration's GST state code) and each one is
+ * marked for the stream lead to verify before it is relied on. Seeded by
+ * 1773981000000_payroll_stream_rules.sql (generated from this list).
+ */
+export const PAYROLL_RULES: SeedRule[] = [
+  {
+    code: 'PAY_PF_ECR',
+    name: 'PF — ECR and challan',
+    notes:
+      'EPF, EPS and EDLI for the wage month: ECR filed and paid by the 15th of the next month.',
+    stream: 'payroll',
+    category: 'other',
+    dueDateCategory: 'STATUTORY_FIXED',
+    registrationScope: 'pf',
+    frequency: 'monthly',
+    basis: 'period_end',
+    offsetDays: 15,
+    lateFeeNote: 'Interest 12% p.a. and damages 5–25% a year on late dues (EPF Act ss.7Q, 14B).',
+    internalSlaOffsetDays: 3,
+    versions: [
+      {
+        effectiveFrom: BASE_EFFECTIVE_FROM,
+        formLabel: 'ECR',
+        sourceRef: 'EPF Scheme 1952, para 38',
+      },
+      { effectiveFrom: SS_CODE_FROM, formLabel: 'ECR', sourceRef: 'Code on Social Security, 2020' },
+    ],
+  },
+  {
+    code: 'PAY_ESI_MONTHLY',
+    name: 'ESI — monthly contribution',
+    notes:
+      'Employer and employee ESI contribution for the month, paid by the 15th of the next month.',
+    stream: 'payroll',
+    category: 'other',
+    dueDateCategory: 'STATUTORY_FIXED',
+    registrationScope: 'esic',
+    frequency: 'monthly',
+    basis: 'period_end',
+    offsetDays: 15,
+    lateFeeNote:
+      'Interest 12% p.a. and damages up to 25% on late contributions (ESI Act ss.39(5), 85B).',
+    internalSlaOffsetDays: 3,
+    versions: [
+      {
+        effectiveFrom: BASE_EFFECTIVE_FROM,
+        formLabel: 'ESI challan',
+        sourceRef: 'ESI (General) Regulations, reg. 31',
+      },
+      {
+        effectiveFrom: SS_CODE_FROM,
+        formLabel: 'ESI challan',
+        sourceRef: 'Code on Social Security, 2020',
+      },
+    ],
+  },
+  {
+    code: 'PAY_ESI_RETURN',
+    name: 'ESI — half-yearly return of contributions',
+    notes:
+      'Return of contributions for Apr–Sep by 11 Nov and Oct–Mar by 11 May (42 days after the contribution period).',
+    stream: 'payroll',
+    category: 'other',
+    dueDateCategory: 'STATUTORY_FIXED',
+    registrationScope: 'esic',
+    frequency: 'half_yearly',
+    basis: 'schedule',
+    schedule: [
+      { period: 'H1', month: 11, day: 11, year_offset: 0 },
+      { period: 'H2', month: 5, day: 11, year_offset: 1 },
+    ],
+    // ESIC takes the monthly filings as the return; confirm the portal still asks for it.
+    verification: 'verify',
+    internalSlaOffsetDays: 5,
+    versions: single('ESI return of contributions'),
+  },
+  {
+    code: 'PAY_PT_MONTHLY',
+    name: 'Professional Tax — employer return',
+    notes:
+      "Tax deducted from salaries for the month, paid with the state's return. Maharashtra by the " +
+      'last day of the month; Karnataka 20th, West Bengal 21st, Gujarat 15th, Telangana, Andhra ' +
+      'Pradesh and Madhya Pradesh 10th of the next month.',
+    stream: 'payroll',
+    category: 'other',
+    dueDateCategory: 'STATUTORY_FIXED',
+    registrationScope: 'pt',
+    frequency: 'monthly',
+    basis: 'period_end',
+    offsetDays: 15,
+    variants: [
+      { when: ptState('27'), set: { offset_days: 0, form_label: 'PTRC return (Form III)' } },
+      { when: ptState('29'), set: { offset_days: 20, form_label: 'PT return (Form 5)' } },
+      { when: ptState('19'), set: { offset_days: 21 } },
+      { when: ptState('24'), set: { offset_days: 15 } },
+      { when: ptState('36'), set: { offset_days: 10 } },
+      { when: ptState('37'), set: { offset_days: 10 } },
+      { when: ptState('23'), set: { offset_days: 10 } },
+    ],
+    condition: { not: PT_HALF_YEARLY_STATES },
+    lateFeeNote: "Interest and penalty under the state's Professional Tax Act.",
+    verification: 'verify',
+    internalSlaOffsetDays: 3,
+    versions: single('PT return'),
+  },
+  {
+    code: 'PAY_PT_HALF_YEARLY',
+    name: 'Professional Tax — half-yearly',
+    notes:
+      'Tamil Nadu and Kerala: Professional Tax for each half-year (Apr–Sep, Oct–Mar), paid by 30 Sep and 31 Mar.',
+    stream: 'payroll',
+    category: 'other',
+    dueDateCategory: 'STATUTORY_FIXED',
+    registrationScope: 'pt',
+    frequency: 'half_yearly',
+    basis: 'schedule',
+    schedule: [
+      { period: 'H1', month: 9, day: 30, year_offset: 0 },
+      { period: 'H2', month: 3, day: 31, year_offset: 1 },
+    ],
+    condition: PT_HALF_YEARLY_STATES,
+    lateFeeNote: "Interest and penalty under the state's Professional Tax Act.",
+    verification: 'verify',
+    internalSlaOffsetDays: 5,
+    versions: single('PT payment'),
+  },
+];
+
 /** Extensions seeded on the new rules (CBDT, 28 Sep 2026; 3CEB and TP ITR not extended). */
 export const CALENDAR_V2_EXTENSIONS = [
   { ruleCode: 'IT_TAX_AUDIT', original: '2026-09-30', revised: '2026-10-21' },

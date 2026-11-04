@@ -16,6 +16,7 @@ import {
 } from 'class-validator';
 import {
   OTHER_TIME_CATEGORIES,
+  STREAMS,
   TIME_SUMMARY_BY,
   type OtherTimeCategory,
   type TimeSummaryBy,
@@ -98,6 +99,6 @@ export class TimeSummaryQueryDto {
 
   @ApiPropertyOptional({ description: 'Only time in this stream (gst, tds, …).' })
   @IsOptional()
-  @IsIn(['gst', 'tds', 'income_tax', 'tax_audit', 'roc', 'bookkeeping', 'mis'])
+  @IsIn(STREAMS)
   stream?: string;
 }

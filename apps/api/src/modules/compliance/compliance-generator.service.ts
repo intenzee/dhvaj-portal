@@ -266,6 +266,10 @@ export function buildRuleContext(
       opting_composition_next_fy: g.optingCompositionNextFy ?? false,
     });
   }
+  if (scope === 'pt') {
+    // Professional Tax dates are per state: the registration's GST state code.
+    ctx.pt_state = registration?.state_code ?? null;
+  }
   if (scope === 'tan') {
     const t = attrs as TanProfileAttributes;
     Object.assign(ctx, {

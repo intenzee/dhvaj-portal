@@ -117,6 +117,12 @@ describe('buildRuleContext', () => {
     expect(optedOut).toMatchObject({ audit_case: false, tax_audit: false });
   });
 
+  it("a PT registration carries its state for that state's Professional Tax dates", () => {
+    const pt = { registration_number: 'PTRC27000001', state_code: '27' };
+    expect(buildRuleContext(company, 'pt', pt, null, null).pt_state).toBe('27');
+    expect(buildRuleContext(company, 'pt', null, null, null).pt_state).toBeNull();
+  });
+
   it('derives the QRMP category from the GSTIN state unless the profile overrides it', () => {
     const mh = { registration_number: '27AAAAA0000A1Z5', state_code: '27' };
     const dl = { registration_number: '07AAAAA0000A1Z5', state_code: '07' };
