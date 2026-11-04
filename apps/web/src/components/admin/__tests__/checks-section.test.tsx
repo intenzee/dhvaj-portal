@@ -2,7 +2,11 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { RELAXED_FIRM_CHECKS, type WorkflowSettings } from '@hsdg/contracts';
+import {
+  DEFAULT_TAX_AUDIT_MILESTONE_OFFSETS,
+  RELAXED_FIRM_CHECKS,
+  type WorkflowSettings,
+} from '@hsdg/contracts';
 import { ChecksSection } from '../checks-section';
 
 const apiFetch = jest.fn();
@@ -26,6 +30,7 @@ const settings = (over: Partial<WorkflowSettings> = {}): WorkflowSettings => ({
   clientReminderDays: 5,
   clientEscalationDays: 2,
   taxAuditLimit: 60,
+  taxAuditMilestoneOffsets: DEFAULT_TAX_AUDIT_MILESTONE_OFFSETS,
   checks: { ...RELAXED_FIRM_CHECKS, task_blockers: true },
   checksEditable: true,
   version: 7,

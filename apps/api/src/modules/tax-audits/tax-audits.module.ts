@@ -10,6 +10,7 @@ import { TaxAuditClauseLibraryService } from './tax-audit-clause-library.service
 import { TaxAuditFilingController } from './tax-audit-filing.controller';
 import { TaxAuditFilingService } from './tax-audit-filing.service';
 import { TaxAuditApplicabilityService } from './tax-audit-applicability.service';
+import { TaxAuditMilestonesService } from './tax-audit-milestones.service';
 import { TaxAuditReviewController } from './tax-audit-review.controller';
 import { TaxAuditReviewService } from './tax-audit-review.service';
 import { TaxAuditsController } from './tax-audits.controller';
@@ -45,6 +46,7 @@ import { TaxAuditWorkspaceService } from './tax-audit-workspace.service';
     TaxAuditWorkspaceService,
     TaxAuditReviewService,
     TaxAuditFilingService,
+    TaxAuditMilestonesService,
   ],
 })
 export class TaxAuditsModule {}

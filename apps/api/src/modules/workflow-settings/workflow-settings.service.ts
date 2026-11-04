@@ -8,7 +8,11 @@ import {
 import type { PoolClient } from 'pg';
 import {
   FIRM_CHECK_KEYS,
+  TAX_AUDIT_MILESTONES,
+  TAX_AUDIT_MILESTONE_LABEL,
+  TAX_AUDIT_MILESTONE_OFFSET_MAX,
   suggestedInternalDueDays,
+  taxAuditMilestoneOffsets,
   toFirmChecks,
   type FirmChecks,
   type FormInternalDue,
@@ -31,6 +35,7 @@ interface SettingsRow {
   client_reminder_days: number;
   client_escalation_days: number;
   tax_audit_limit: number;
+  tax_audit_milestone_offsets: unknown;
   strict_checks: Record<string, unknown> | null;
   version: number;
   updated_at: Date;
@@ -54,7 +59,36 @@ const COLUMNS = {
   clientReminderDays: 'client_reminder_days',
   clientEscalationDays: 'client_escalation_days',
   taxAuditLimit: 'tax_audit_limit',
-} as const satisfies Record<Exclude<keyof UpdateWorkflowSettingsInput, 'version'>, string>;
+} as const satisfies Record<
+  Exclude<keyof UpdateWorkflowSettingsInput, 'version' | 'taxAuditMilestoneOffsets'>,
+  string
+>;
+
+/** The tax audit milestone offsets sent, checked: known milestones, whole days 0–365. */
+function milestoneOffsetsOf(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new BadRequestException('Send the milestone offsets as days per milestone.');
+  }
+  const out: Record<string, number> = {};
+  for (const [key, days] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(TAX_AUDIT_MILESTONES as readonly string[]).includes(key)) {
+      throw new BadRequestException(`Unknown tax audit milestone: ${key}.`);
+    }
+    if (
+      typeof days !== 'number' ||
+      !Number.isInteger(days) ||
+      days < 0 ||
+      days > TAX_AUDIT_MILESTONE_OFFSET_MAX
+    ) {
+      const label = TAX_AUDIT_MILESTONE_LABEL[key as keyof typeof TAX_AUDIT_MILESTONE_LABEL];
+      throw new BadRequestException(
+        `${label}: give whole days from 0 to ${TAX_AUDIT_MILESTONE_OFFSET_MAX} before the due date.`,
+      );
+    }
+    out[key] = days;
+  }
+  return out;
+}
 
 /**
  * Staff Workflow · Questions for the partners, answered as firm settings
@@ -90,6 +124,12 @@ export class WorkflowSettingsService {
         if (input[key] === undefined) continue;
         values.push(input[key]);
         sets.push(`${column} = $${values.length}`);
+      }
+      if (input.taxAuditMilestoneOffsets !== undefined) {
+        values.push(JSON.stringify(milestoneOffsetsOf(input.taxAuditMilestoneOffsets)));
+        sets.push(
+          `tax_audit_milestone_offsets = tax_audit_milestone_offsets || $${values.length}::jsonb`,
+        );
       }
       values.push(ctx.employeeId ?? null);
       const res = await client.query(
@@ -220,7 +260,7 @@ export class WorkflowSettingsService {
     const { rows } = await client.query<SettingsRow>(
       `SELECT f.default_reviewer, f.article_client_scope, f.client_reminder_channel,
               f.bulk_assign_scope, f.client_reminder_days, f.client_escalation_days,
-              f.tax_audit_limit, f.strict_checks, f.version,
+              f.tax_audit_limit, f.tax_audit_milestone_offsets, f.strict_checks, f.version,
               f.updated_at, e.full_name AS updated_by_name
          FROM hsdg.firm_settings f
          LEFT JOIN hsdg.employees e ON e.id = f.updated_by_employee_id
@@ -236,6 +276,7 @@ export class WorkflowSettingsService {
       clientReminderDays: r.client_reminder_days,
       clientEscalationDays: r.client_escalation_days,
       taxAuditLimit: r.tax_audit_limit,
+      taxAuditMilestoneOffsets: taxAuditMilestoneOffsets(r.tax_audit_milestone_offsets),
       checks: toFirmChecks(r.strict_checks),
       checksEditable: canSwitchChecks(ctx),
       version: r.version,
@@ -276,9 +317,14 @@ function toForm(r: FormRow): FormInternalDue {
 
 /** The fields a PATCH named, for the audit trail. */
 function pick(s: WorkflowSettings, input: UpdateWorkflowSettingsInput): Record<string, unknown> {
-  return Object.fromEntries(
-    (Object.keys(COLUMNS) as (keyof typeof COLUMNS)[])
-      .filter((k) => input[k] !== undefined)
-      .map((k) => [k, s[k]]),
-  );
+  return {
+    ...Object.fromEntries(
+      (Object.keys(COLUMNS) as (keyof typeof COLUMNS)[])
+        .filter((k) => input[k] !== undefined)
+        .map((k) => [k, s[k]]),
+    ),
+    ...(input.taxAuditMilestoneOffsets !== undefined
+      ? { taxAuditMilestoneOffsets: s.taxAuditMilestoneOffsets }
+      : {}),
+  };
 }

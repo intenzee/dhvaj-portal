@@ -27,7 +27,7 @@ export function radarYear(today: string): string {
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
-const yearsAround = (fy: string): string[] => {
+export const yearsAround = (fy: string): string[] => {
   const start = Number(fy.slice(0, 4));
   return [start + 1, start, start - 1, start - 2].map(
     (s) => `${s}-${String((s + 1) % 100).padStart(2, '0')}`,

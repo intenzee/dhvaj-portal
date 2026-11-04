@@ -203,6 +203,50 @@ describe('buildTodayView (WF-201)', () => {
     );
     expect(view.groups.flatMap((g) => g.items.map((i) => i.key))).toEqual(['b', 'c']);
   });
+
+  it('puts a tax audit with a missed milestone under Overdue, in date order (F-9)', () => {
+    const view = buildTodayView(TODAY, {
+      prepare: [item({ key: 'late', internalDate: '2026-10-10', isOverdue: true })],
+      review: [],
+      waiting: [],
+      due_soon: [],
+      milestones: [
+        item({
+          key: 'tax_audit_milestone:a1',
+          kind: 'tax_audit_milestone',
+          group: 'overdue',
+          internalDate: '2026-09-01',
+          statutoryDate: '2026-10-31',
+          isOverdue: true,
+        }),
+        item({
+          key: 'tax_audit_milestone:a2',
+          kind: 'tax_audit_milestone',
+          group: 'overdue',
+          engagementId: 'e2',
+          internalDate: '2026-10-12',
+          isOverdue: true,
+        }),
+      ],
+    });
+    expect(view.groups[0]!.items.map((i) => i.key)).toEqual([
+      'tax_audit_milestone:a1',
+      'late',
+      'tax_audit_milestone:a2',
+    ]);
+    const narrowed = buildTodayView(
+      TODAY,
+      {
+        prepare: [],
+        review: [],
+        waiting: [],
+        due_soon: [],
+        milestones: [item({ key: 'tax_audit_milestone:a2', engagementId: 'e2', isOverdue: true })],
+      },
+      'e1',
+    );
+    expect(narrowed.groups[0]!.items).toEqual([]);
+  });
 });
 
 describe('reviewToToday', () => {

@@ -13,6 +13,8 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
   type TaxAuditAcceptance,
+  type TaxAuditBoard,
+  type TaxAuditMilestones,
   type TaxAuditApplicability,
   type TaxAuditRadarRow,
   type TaxAuditRow,
@@ -23,12 +25,15 @@ import { FyParamPipe } from '../engagements/fy-param.pipe';
 import {
   SaveTaxAuditAcceptanceDto,
   SaveTaxAuditApplicabilityDto,
+  SaveTaxAuditMilestoneDto,
   TaxAuditAcceptanceStepDto,
+  TaxAuditBoardQueryDto,
   TaxAuditRadarQueryDto,
   UploadPreviousAuditorLetterDto,
 } from './dto/tax-audits.dto';
 import { TaxAuditAcceptanceService } from './tax-audit-acceptance.service';
 import { TaxAuditApplicabilityService } from './tax-audit-applicability.service';
+import { TaxAuditMilestonesService } from './tax-audit-milestones.service';
 import { TaxAuditsService } from './tax-audits.service';
 
 /**
@@ -42,6 +47,7 @@ export class TaxAuditsController {
     private readonly audits: TaxAuditsService,
     private readonly applicability: TaxAuditApplicabilityService,
     private readonly acceptance: TaxAuditAcceptanceService,
+    private readonly milestones: TaxAuditMilestonesService,
   ) {}
 
   @Get('engagements/:id/tax-audits')
@@ -187,5 +193,49 @@ export class TaxAuditsController {
     @Body() body: TaxAuditAcceptanceStepDto,
   ): Promise<TaxAuditAcceptance> {
     return this.acceptance.accept(rlsContextFromPrincipal(principal), id, auditId, body);
+  }
+
+  @Get('tax-audits/board')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'The firm’s tax audit board for a year (Managing Partner and Partners)',
+    description:
+      'Stage counts (Not started, In progress, Completed), the audits at risk — a missed internal milestone, or past the due date with the s.271B exposure — and each partner’s reports against the limit. Read under the caller’s RLS.',
+  })
+  board(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: TaxAuditBoardQueryDto,
+  ): Promise<TaxAuditBoard> {
+    return this.milestones.board(rlsContextFromPrincipal(principal), query.financialYear);
+  }
+
+  @Get('engagements/:id/tax-audits/:auditId/milestones')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'The tax audit’s internal milestones, counted back from the due date',
+  })
+  getMilestones(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+  ): Promise<TaxAuditMilestones> {
+    return this.milestones.get(rlsContextFromPrincipal(principal), id, auditId);
+  }
+
+  @Put('engagements/:id/tax-audits/:auditId/milestones/:milestone')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Tick a milestone done (or not), or name who answers for it',
+    description:
+      'Its owner or the engagement’s partner or manager ticks the milestones no desk moves yet (information requests, information received, clause work, review); the partner or manager names an owner.',
+  })
+  saveMilestone(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+    @Param('milestone') milestone: string,
+    @Body() body: SaveTaxAuditMilestoneDto,
+  ): Promise<TaxAuditMilestones> {
+    return this.milestones.save(rlsContextFromPrincipal(principal), id, auditId, milestone, body);
   }
 }

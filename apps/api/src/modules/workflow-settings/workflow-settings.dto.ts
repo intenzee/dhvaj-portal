@@ -13,6 +13,7 @@ import {
   type DefaultReviewer,
   type FirmChecks,
   type ReminderChannelSetting,
+  type TaxAuditMilestoneOffsets,
 } from '@hsdg/contracts';
 
 export class UpdateWorkflowSettingsDto {
@@ -75,6 +76,15 @@ export class UpdateWorkflowSettingsDto {
     message: `ICAI allows at most ${TAX_AUDIT_LIMIT_MAX} tax audit reports a partner a year; the firm may set it lower, not higher.`,
   })
   taxAuditLimit?: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Days before a tax audit's due date each internal milestone falls (F-9): any subset of applicability, accepted, info_requests, info_received, clause_work, review, signed, uploaded, client_accepted; whole days 0–365.",
+    example: { review: 20 },
+  })
+  @IsOptional()
+  @IsObject()
+  taxAuditMilestoneOffsets?: Partial<TaxAuditMilestoneOffsets>;
 }
 
 export class UpdateFormInternalDueDto {

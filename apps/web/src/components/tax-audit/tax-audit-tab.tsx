@@ -16,11 +16,12 @@ import { ApplicabilityForm } from './applicability-form';
 import { ClauseWorkspace } from './clause-workspace';
 import { ReviewDesk } from './review-desk';
 import { FilingDesk } from './filing-desk';
+import { MilestonesPanel } from './milestones-panel';
 import { TAX_AUDITS_KEY } from './keys';
 
 export { TAX_AUDITS_KEY };
 
-type Desk = 'applicability' | 'acceptance' | 'clauses' | 'review' | 'filing';
+type Desk = 'applicability' | 'acceptance' | 'milestones' | 'clauses' | 'review' | 'filing';
 
 /** Stages before the 3CD work can open (it opens on acceptance). */
 const BEFORE_WORK: readonly TaxAuditStage[] = ['not_started', 'acceptance', 'not_applicable'];
@@ -65,10 +66,11 @@ export const yearOf = (a: Pick<TaxAuditRow, 'financialYear' | 'revision'>): stri
  * Tax Audit (Phase 3, F-1): one row a year — stage, form, signing partner,
  * the report's due date, client acceptance, UDIN and filing. "Applicability"
  * opens the year's calculator and override (F-2); "Acceptance" the year's
- * acceptance desk (F-3); "3CD work" the clause workspace (F-5), once the
- * audit is accepted; "Review" the review chain and observations (F-7); "Report and filing" the
- * signature, upload, the client's answer and the filing (F-8), which lodges the year's report
- * filing in the stream below.
+ * acceptance desk (F-3); "Milestones" the internal dates counted back from the
+ * due date (F-9); "3CD work" the clause workspace (F-5), once the audit is
+ * accepted; "Review" the review chain and observations (F-7); "Report and filing"
+ * the signature, upload, the client's answer and the filing (F-8), which lodges
+ * the year's report filing in the stream below.
  */
 export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Element {
   const q = useQuery({
@@ -173,6 +175,16 @@ export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Ele
                           Report and filing
                         </Button>
                       )}
+                      {a.stage !== 'not_applicable' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-expanded={open === a.id && panel === 'milestones'}
+                          onClick={() => toggle(a.id, 'milestones')}
+                        >
+                          Milestones
+                        </Button>
+                      )}
                     </td>
                     <td className="py-2 pr-3">
                       <Badge tone={STAGE_TONE[a.stage]}>{TAX_AUDIT_STAGE_LABEL[a.stage]}</Badge>
@@ -214,6 +226,8 @@ export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Ele
                           <ReviewDesk engagementId={engagementId} auditId={a.id} />
                         ) : panel === 'filing' ? (
                           <FilingDesk engagementId={engagementId} auditId={a.id} />
+                        ) : panel === 'milestones' ? (
+                          <MilestonesPanel engagementId={engagementId} auditId={a.id} />
                         ) : decisions.isLoading ? (
                           <Spinner />
                         ) : (
