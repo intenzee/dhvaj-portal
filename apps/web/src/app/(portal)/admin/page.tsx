@@ -18,6 +18,7 @@ import { AnalyticsMethodologySection } from '@/components/admin/analytics-method
 import { MaterialityMethodologySection } from '@/components/admin/materiality-methodology-section';
 import { ScopeMethodologySection } from '@/components/admin/scope-methodology-section';
 import { AuditAreaLibrarySection } from '@/components/admin/audit-area-library-section';
+import { TaxAuditClauseLibrarySection } from '@/components/admin/tax-audit-clause-library-section';
 import { WorkflowSection } from '@/components/admin/workflow-section';
 import { ChecksSection } from '@/components/admin/checks-section';
 import { RolloutSection } from '@/components/admin/rollout-section';
@@ -35,6 +36,7 @@ type Tab =
   | 'materiality'
   | 'scope'
   | 'areas'
+  | 'form-3cd'
   | 'workflow'
   | 'checks'
   | 'notice-types'
@@ -109,6 +111,10 @@ export default function AdministrationPage(): JSX.Element {
     ...(can(principal, PERMISSION.serviceManage)
       ? [{ id: 'areas' as const, label: 'Audit Area Library' }]
       : []),
+    // The Form 3CD clause library — versioned; a published version never changes.
+    ...(can(principal, PERMISSION.serviceManage)
+      ? [{ id: 'form-3cd' as const, label: 'Form 3CD Library' }]
+      : []),
     // The partners' answers to the Staff Workflow plan's questions.
     ...(setsWorkflow ? [{ id: 'workflow' as const, label: 'Workflow' }] : []),
     // The firm's checks: the MP and the administrator switch them; partners see them.
@@ -127,7 +133,7 @@ export default function AdministrationPage(): JSX.Element {
     <div>
       <PageHeader
         title="Administration"
-        subtitle="Manage portal users, role assignments, people (employee records), offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library, the firm’s workflow policy and checks, and the rollout of each phase. Every change is audited."
+        subtitle="Manage portal users, role assignments, people (employee records), offices, firm templates, the Rules Library, the Planning Signal Library, the Analytics, Materiality and Scope & Approach Methodology Libraries, the Audit Area Library, the Form 3CD clause library, the firm’s workflow policy and checks, and the rollout of each phase. Every change is audited."
       />
       <div className="mb-4 flex gap-1 border-b border-line-strong">
         {tabs.map((t) => (
@@ -164,6 +170,8 @@ export default function AdministrationPage(): JSX.Element {
             <ScopeMethodologySection />
           ) : tab === 'areas' ? (
             <AuditAreaLibrarySection />
+          ) : tab === 'form-3cd' ? (
+            <TaxAuditClauseLibrarySection />
           ) : tab === 'workflow' ? (
             <WorkflowSection />
           ) : tab === 'checks' ? (

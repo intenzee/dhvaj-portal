@@ -4,14 +4,24 @@ import { ComplianceModule } from '../compliance/compliance.module';
 import { DocumentTemplatesModule } from '../document-templates/document-templates.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { TaxAuditAcceptanceService } from './tax-audit-acceptance.service';
+import { TaxAuditClauseLibraryController } from './tax-audit-clause-library.controller';
+import { TaxAuditClauseLibraryService } from './tax-audit-clause-library.service';
 import { TaxAuditApplicabilityService } from './tax-audit-applicability.service';
 import { TaxAuditsController } from './tax-audits.controller';
 import { TaxAuditsService } from './tax-audits.service';
 
-/** Tax Audit (Phase 3, F-1/F-2): the yearly audits, applicability and the radar. */
+/**
+ * Tax Audit (Phases 3–5): the yearly audits, applicability and the radar,
+ * acceptance, and the Form 3CD clause library.
+ */
 @Module({
   imports: [AuditModule, ComplianceModule, DocumentsModule, DocumentTemplatesModule],
-  controllers: [TaxAuditsController],
-  providers: [TaxAuditsService, TaxAuditApplicabilityService, TaxAuditAcceptanceService],
+  controllers: [TaxAuditsController, TaxAuditClauseLibraryController],
+  providers: [
+    TaxAuditsService,
+    TaxAuditApplicabilityService,
+    TaxAuditAcceptanceService,
+    TaxAuditClauseLibraryService,
+  ],
 })
 export class TaxAuditsModule {}
