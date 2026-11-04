@@ -4,7 +4,7 @@ import { escalationAction, type EscalationLevel } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
-import { dateFromToday } from './date.helper';
+import { dateFromToday, istDateFromToday } from './date.helper';
 
 /**
  * Escalation ladder (§24) and calendar views (§22).
@@ -229,7 +229,9 @@ describe('Compliance escalation & calendar views (e2e)', () => {
       const pa = await token('partner.a@dhvaj.in');
       const eng = await createEngagement(pa);
       const code = await createExactRule();
-      await generate(pa, eng, code, dateFromToday(0)).expect(201); // due TODAY
+      // The scan dates by the firm's day (IST); between 00:00 and 05:30 IST that
+      // is a day ahead of the UTC date the bands above compare against.
+      await generate(pa, eng, code, istDateFromToday(0)).expect(201); // due TODAY (IST)
 
       const scan = await scanAs(mp);
       expect(scan.body.complianceDueToday).toBeGreaterThanOrEqual(1);
