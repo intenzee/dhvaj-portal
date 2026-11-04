@@ -140,7 +140,9 @@ export class EngagementsController {
         'Create it as Prospect or Pending Acceptance — the Engagement Partner accepts it.',
       );
     }
-    return this.engagements.createEngagement(rlsContextFromPrincipal(principal), dto);
+    return this.engagements.createEngagement(rlsContextFromPrincipal(principal), dto, {
+      kycGate: this.flags.isOnFor(FEATURE_FLAG.clientKyc, principal.officeCode),
+    });
   }
 
   @Patch(':id')

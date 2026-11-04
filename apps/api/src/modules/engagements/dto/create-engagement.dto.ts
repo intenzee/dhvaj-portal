@@ -10,6 +10,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  MaxLength,
   IsUUID,
   Matches,
   ValidateIf,
@@ -200,4 +201,13 @@ export class CreateEngagementDto {
   @IsArray()
   @IsIn(Object.values(INDEPENDENCE_RULE), { each: true })
   acknowledgedIndependenceRules?: IndependenceRule[];
+
+  @ApiPropertyOptional({
+    description:
+      "A partner's reason to open it while the client's KYC is not complete (when the firm requires KYC).",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  kycOverrideReason?: string;
 }

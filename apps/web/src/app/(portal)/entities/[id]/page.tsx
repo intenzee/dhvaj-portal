@@ -42,6 +42,7 @@ import { PossibleOfficeBanner } from '@/components/entities/offices-review';
 import { ComplianceProfilesCard } from '@/components/entities/compliance-profiles-card';
 import { ClientReturnsCard } from '@/components/entities/client-returns';
 import { FeesCard } from '@/components/entities/fees-card';
+import { KycCard } from '@/components/client-kyc/kyc-card';
 import { ClientTeamLine } from '@/components/teams/client-team-line';
 import {
   ClientLogins,
@@ -294,6 +295,8 @@ export default function EntityDetailPage(): JSX.Element {
       </div>
 
       {!e.mergedInto && <FeesCard entityId={e.id} />}
+
+      {isOn(FEATURE_FLAG.clientKyc) && !e.mergedInto && <KycCard entityId={e.id} />}
 
       <ClientReturnsCard
         entityId={e.id}

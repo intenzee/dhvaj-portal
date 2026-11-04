@@ -25,6 +25,7 @@ import {
 import { CLOSED_ENGAGEMENT_STATUSES } from '../compliance/compliance-calendar-v2.service';
 import { DAYS_PAST_DUE_SQL } from '../billing/receivables.service';
 import { UnbilledService } from '../billing/unbilled.service';
+import { KYC_STATUS_SQL } from '../client-kyc/kyc-gate';
 import { dscTile, udinTile, type RegisterTileFn } from './risk-registers';
 
 interface Page {
@@ -45,6 +46,7 @@ const TILE_HREF: Record<RiskTileKey, string> = {
   dsc: '/registers/dsc?view=at_risk',
   udin: '/registers/udin?view=overdue',
   approvals: '/billing/approvals',
+  kyc: '/client-kyc?status=open',
 };
 
 interface EngagementCols {
@@ -168,6 +170,10 @@ export class RiskService {
         return this.register(client, ctx, page, udinTile);
       case 'approvals':
         return this.approvals(client, page);
+      case 'kyc':
+        return this.flags.isOn(FEATURE_FLAG.clientKyc)
+          ? this.kyc(client, page)
+          : Promise.resolve({ count: 0, items: [], available: false });
     }
   }
 
@@ -402,6 +408,42 @@ export class RiskService {
         detail: `${r.entity_name} · ${r.reason}`,
         dueOn: r.requested_on,
         amount: r.amount,
+      })),
+    };
+  }
+
+  /** PS-404 · active clients with no complete KYC, or its review due. */
+  private async kyc(client: PoolClient, page: Page): Promise<TileBody> {
+    const { rows } = await client.query<{
+      id: string;
+      name: string;
+      status: 'pending' | 'expired';
+      next_review_on: string | null;
+      total: number;
+    }>(
+      `SELECT * FROM (
+         SELECT ent.id, ent.legal_name AS name, ${KYC_STATUS_SQL('$1::date')} AS status,
+                k.next_review_on::text AS next_review_on, count(*) OVER ()::int AS total
+           FROM hsdg.entities ent
+           LEFT JOIN hsdg.client_kyc k ON k.entity_id = ent.id
+          WHERE ent.status = 'active' AND ent.merged_into_id IS NULL
+            AND ${KYC_STATUS_SQL('$1::date')} <> 'complete') x
+        ORDER BY (x.status = 'expired') DESC, x.next_review_on NULLS LAST, x.name
+        LIMIT $2 OFFSET $3`,
+      [page.today, page.limit, page.offset],
+    );
+    return {
+      count: rows[0]?.total ?? 0,
+      available: true,
+      items: rows.map((r) => ({
+        ref: null,
+        href: `/entities/${r.id}`,
+        title: r.name,
+        detail:
+          r.status === 'expired'
+            ? `KYC review due since ${r.next_review_on}`
+            : 'No complete KYC on file',
+        dueOn: r.status === 'expired' ? r.next_review_on : null,
       })),
     };
   }

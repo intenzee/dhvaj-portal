@@ -44,6 +44,7 @@ import { FilingWorkspaceModule } from './modules/filing-workspace/filing-workspa
 import { NoticesModule } from './modules/notices/notices.module';
 import { RegistersModule } from './modules/registers/registers.module';
 import { CertificatesModule } from './modules/certificates/certificates.module';
+import { ClientKycModule } from './modules/client-kyc/client-kyc.module';
 import { SearchModule } from './modules/search/search.module';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { WorkflowSettingsModule } from './modules/workflow-settings/workflow-settings.module';
@@ -147,6 +148,7 @@ import { TeamsModule } from './modules/teams/teams.module';
     TeamsModule,
     RegistersModule,
     CertificatesModule,
+    ClientKycModule,
   ],
   providers: [
     // Rate limiting runs ahead of authentication/authorisation.

@@ -85,7 +85,11 @@ function RiskTileCard({ tileKey }: { tileKey: RiskTileKey }): JSX.Element {
         {q.isLoading && <Spinner />}
         {q.isError && <p className="py-2 text-xs text-danger-700">Could not load this tile.</p>}
         {t && !t.available && (
-          <p className="py-2 text-xs text-ink-muted">Shows here once the register is in use.</p>
+          <p className="py-2 text-xs text-ink-muted">
+            {tileKey === 'kyc'
+              ? 'Shows here once client KYC is switched on.'
+              : 'Shows here once the register is in use.'}
+          </p>
         )}
         {t?.available && t.count === 0 && (
           <p className="py-2 text-xs text-success-700">Nothing at risk.</p>

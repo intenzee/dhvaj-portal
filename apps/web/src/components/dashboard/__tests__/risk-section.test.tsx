@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RISK_TILE_LABEL, type RiskTile, type RiskTileKey } from '@hsdg/contracts';
+import { RISK_TILES, RISK_TILE_LABEL, type RiskTile, type RiskTileKey } from '@hsdg/contracts';
 import { RiskSection } from '../risk-section';
 
 const apiFetch = jest.fn();
@@ -49,7 +49,7 @@ beforeEach(() => {
 });
 
 describe('Risk section on the partner Home (PS-301)', () => {
-  it('loads each of the nine tiles on its own; items open the work', async () => {
+  it('loads each tile on its own; items open the work', async () => {
     renderSection({
       notices: {
         count: 1,
@@ -76,6 +76,18 @@ describe('Risk section on the partner Home (PS-301)', () => {
         ],
       },
       dsc: { available: false },
+      kyc: {
+        count: 1,
+        items: [
+          {
+            ref: null,
+            href: '/entities/c9',
+            title: 'Bharat Textiles',
+            detail: 'No complete KYC on file',
+            dueOn: null,
+          },
+        ],
+      },
     });
     const notices = await screen.findByRole('region', { name: RISK_TILE_LABEL.notices });
     expect(await within(notices).findByText('Scrutiny · ABC/1')).toBeInTheDocument();
@@ -91,7 +103,12 @@ describe('Risk section on the partner Home (PS-301)', () => {
     );
     const dsc = screen.getByRole('region', { name: RISK_TILE_LABEL.dsc });
     expect(await within(dsc).findByText(/once the register is in use/)).toBeInTheDocument();
-    expect(apiFetch).toHaveBeenCalledTimes(9);
+    const kyc = screen.getByRole('region', { name: RISK_TILE_LABEL.kyc });
+    expect((await within(kyc).findByText('Bharat Textiles')).closest('a')).toHaveAttribute(
+      'href',
+      '/entities/c9',
+    );
+    expect(apiFetch).toHaveBeenCalledTimes(RISK_TILES.length);
     expect(apiFetch.mock.calls.map((c) => c[0])).toContain(
       '/dashboard/risk/missed?limit=5&offset=0',
     );

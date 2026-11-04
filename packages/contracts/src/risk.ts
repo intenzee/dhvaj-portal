@@ -19,6 +19,7 @@ export const RISK_TILES = [
   'dsc',
   'udin',
   'approvals',
+  'kyc',
 ] as const;
 export type RiskTileKey = (typeof RISK_TILES)[number];
 
@@ -32,6 +33,7 @@ export const RISK_TILE_LABEL: Record<RiskTileKey, string> = {
   dsc: 'DSCs expiring or out of custody',
   udin: 'UDINs not generated in time',
   approvals: 'Write-offs and credit notes to approve',
+  kyc: 'Clients without KYC',
 };
 
 /** What each tile counts, under its title. */
@@ -45,6 +47,7 @@ export const RISK_TILE_HINT: Record<RiskTileKey, string> = {
   dsc: 'Expiring within 30 days, or out of custody past the return date',
   udin: 'Signed reports with no UDIN inside the window',
   approvals: 'Pending, waiting for a partner',
+  kyc: 'Active clients with no complete KYC, or its review due',
 };
 
 /** The tiles whose figure is money: they carry `amount`. */

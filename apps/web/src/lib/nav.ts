@@ -38,6 +38,7 @@ import {
   History,
   type LucideIcon,
   FileBadge,
+  UserCheck,
 } from 'lucide-react';
 import type { Principal } from './principal';
 
@@ -64,7 +65,7 @@ export interface NavItem {
   /** With ff_work_links: a count pill read from `path` (`{ total }`), e.g. reviews waiting (WF-105). */
   badge?: { queryKey: readonly string[]; path: string };
   /** Shown only while this rollout flag is on (e.g. Today behind ff_today_view). */
-  flag?: 'todayView' | 'filingRuns' | 'notices' | 'registers' | 'certificates';
+  flag?: 'todayView' | 'filingRuns' | 'notices' | 'registers' | 'certificates' | 'clientKyc';
   /** Shown only to someone holding one of these roles (the effective role when set). */
   onlyFor?: RoleSlug[];
 }
@@ -88,6 +89,8 @@ export interface NavOptions {
   registers?: boolean;
   /** ff_certificates: the certificate register (Practice Services PS-402). */
   certificates?: boolean;
+  /** ff_client_kyc: the client KYC register (Practice Services PS-404). */
+  clientKyc?: boolean;
 }
 
 export interface NavSection {
@@ -523,6 +526,16 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'Every certificate the firm issued — net worth, turnover, Form 146 — with its UDIN.',
         permission: PERMISSION.engagementRead,
         flag: 'certificates',
+        hideFor: PREPARER_ROLES,
+        ready: true,
+      },
+      {
+        label: 'KYC register',
+        href: '/client-kyc',
+        icon: UserCheck,
+        hint: 'Every active client and its KYC: pending, complete, or due for review.',
+        permission: PERMISSION.entityRead,
+        flag: 'clientKyc',
         hideFor: PREPARER_ROLES,
         ready: true,
       },

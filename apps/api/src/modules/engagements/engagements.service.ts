@@ -7,12 +7,18 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  ENGAGEMENT_KIND,
   EP_OPTIONAL_STATUSES,
   FIRM_CHECK,
+  KYC_RULE,
   NOTIFICATION_TYPE,
   OPEN_TASK_STATUSES,
+  ROLE,
   STATUTORY_AUDIT_SERVICE_CODE,
+  type EngagementKind,
   type EngagementStatus,
+  type KycGate,
+  type KycStatus,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
@@ -23,6 +29,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { StatutoryAuditWorkflowService } from '../statutory-audit/statutory-audit-workflow.service';
 import { EngagementKindsService } from './engagement-kinds.service';
 import { firmChecks, isStrict } from '../workflow-settings/firm-checks';
+import { kycStatusFor } from '../client-kyc/kyc-gate';
+import { istToday } from './time/auto-time';
 import { engagementInSectionsSql } from '../../common/sections';
 import { ENGAGEMENT_BASE, mapEngagement, selectEngagementDetail } from './engagement-detail.query';
 import type { EngagementRow } from './engagement-detail.query';
@@ -68,6 +76,11 @@ export function serviceStatusFromEngagement(status: EngagementStatus): string {
     default:
       return 'active';
   }
+}
+
+export interface CreateEngagementOptions {
+  /** PS-404: apply the firm's KYC gate (the caller's office has ff_client_kyc on). */
+  kycGate?: boolean;
 }
 
 @Injectable()
@@ -177,8 +190,14 @@ export class EngagementsService {
     return this.db.withRlsContext(ctx, (client) => selectEngagementDetail(client, id));
   }
 
-  async createEngagement(ctx: RlsContext, input: CreateEngagementInput): Promise<EngagementDetail> {
-    return this.db.withRlsContext(ctx, (client) => this.createEngagementWith(client, ctx, input));
+  async createEngagement(
+    ctx: RlsContext,
+    input: CreateEngagementInput,
+    opts: CreateEngagementOptions = {},
+  ): Promise<EngagementDetail> {
+    return this.db.withRlsContext(ctx, (client) =>
+      this.createEngagementWith(client, ctx, input, opts),
+    );
   }
 
   /** createEngagement on the caller's transaction (a notice's appeal opens one, PS-103). */
@@ -186,6 +205,7 @@ export class EngagementsService {
     client: PoolClient,
     ctx: RlsContext,
     input: CreateEngagementInput,
+    opts: CreateEngagementOptions = {},
   ): Promise<EngagementDetail> {
     // The client must be one the caller can see (office or via engagement).
     const entity = await client.query<{ id: string; home_office_id: string }>(
@@ -227,6 +247,7 @@ export class EngagementsService {
     // Kind, service, streams and years in scope; independence rules (Change 1).
     const plan = await this.kinds.planCreate(client, input);
     const status = input.status ?? 'prospect';
+    const kyc = opts.kycGate ? await this.kycGate(client, ctx, input, plan.kind) : null;
 
     // The id is minted first and the INSERT has no RETURNING: RETURNING is
     // checked against the SELECT policies before the AFTER INSERT trigger
@@ -315,7 +336,43 @@ export class EngagementsService {
       objectId: id,
       after: detail,
     });
+    if (kyc) {
+      await this.audit.recordWith(client, ctx, {
+        action: kyc.override ? 'engagement.kyc_override' : 'engagement.kyc_pending',
+        objectType: 'engagement',
+        objectId: id,
+        after: { entityId: input.entityId, kycStatus: kyc.status, gate: kyc.gate },
+        reason: kyc.override ? input.kycOverrideReason!.trim() : null,
+      });
+    }
     return detail!;
+  }
+
+  /**
+   * PS-404 · a compliance or assignment engagement for a client whose KYC is
+   * not complete: warned (audited), or — when the firm requires KYC — refused
+   * unless a partner gives a reason. Statutory audit has its own acceptance.
+   */
+  private async kycGate(
+    client: PoolClient,
+    ctx: RlsContext,
+    input: CreateEngagementInput,
+    kind: EngagementKind,
+  ): Promise<{ status: KycStatus; gate: KycGate; override: boolean } | null> {
+    if (kind !== ENGAGEMENT_KIND.compliance && kind !== ENGAGEMENT_KIND.assignment) return null;
+    const { status, gate } = await kycStatusFor(client, input.entityId, istToday());
+    if (status === 'complete' || gate === 'off') return null;
+    if (gate === 'warn') return { status, gate, override: false };
+    const partner = ctx.role === ROLE.partner || ctx.role === ROLE.managingPartner;
+    if (partner && input.kycOverrideReason?.trim()) return { status, gate, override: true };
+    throw new ConflictException({
+      statusCode: 409,
+      rule: KYC_RULE,
+      kycStatus: status,
+      message: partner
+        ? `This client’s KYC is ${status === 'expired' ? 'due for review' : 'not complete'}. Complete it, or give a reason to go ahead.`
+        : `This client’s KYC is ${status === 'expired' ? 'due for review' : 'not complete'}. Complete it first, or ask a partner to open the engagement.`,
+    });
   }
 
   async updateEngagement(

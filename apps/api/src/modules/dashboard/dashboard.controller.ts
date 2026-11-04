@@ -54,7 +54,7 @@ export class DashboardController {
   /** PS-301 · every risk tile, each with its first items. */
   @Get('risk')
   @RequirePermissions(PERMISSION.reportRead)
-  @ApiOperation({ summary: 'The partner risk dashboard: nine tiles, each with its first items' })
+  @ApiOperation({ summary: 'The partner risk dashboard: every tile, each with its first items' })
   riskDashboard(
     @CurrentPrincipal() principal: Principal,
     @Query('limit', new DefaultValuePipe(RISK_TILE_PAGE), new ParseIntPipe()) limit: number,

@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  KYC_RULE,
   ENGAGEMENT_STATUS,
   FIRM_CHECK,
   PENDING_REGISTRATION_STREAMS,
@@ -52,6 +53,7 @@ import { AddGstinDialog } from '@/components/filing/add-gstin-dialog';
 import { PriorFiledPicker } from '@/components/filing/prior-filed-picker';
 import { todayIst } from '@/components/work/my-task-columns';
 import { useClientTeamDefaults } from '@/components/teams/wizard-team-defaults';
+import { KycNotice, useKycGate } from '@/components/client-kyc/kyc-notice';
 
 interface ServiceOption {
   id: string;
@@ -195,6 +197,9 @@ export function NewEngagementWizard(): JSX.Element {
   const [gstinFor, setGstinFor] = useState<Stream | null>(null);
   // Independence
   const [acks, setAcks] = useState<IndependenceRule[]>([]);
+  // Client KYC (PS-404)
+  const [kycReason, setKycReason] = useState('');
+  const kycGate = useKycGate(entity?.id, kind);
 
   const canManageClients = can(principal, PERMISSION.entityManage);
   const entityDetail = useQuery({
@@ -359,6 +364,7 @@ export function NewEngagementWizard(): JSX.Element {
         engagementPartnerEmployeeId: partnerId || undefined,
         engagementManagerEmployeeId: managerId || undefined,
         acknowledgedIndependenceRules: acks.length > 0 ? acks : undefined,
+        kycOverrideReason: kycGate.state.needsReason ? kycReason.trim() : undefined,
         teamMemberEmployeeIds:
           teamDefaults.memberIds.length > 0 ? teamDefaults.memberIds : undefined,
       };
@@ -407,6 +413,9 @@ export function NewEngagementWizard(): JSX.Element {
         router.push(`/engagements/${String(err.body.engagementId)}?tab=services`);
         return;
       }
+      if (err instanceof ApiError && err.body?.rule === KYC_RULE) {
+        void qc.invalidateQueries({ queryKey: ['entity', entity!.id, 'kyc'] });
+      }
       toast(err instanceof ApiError ? err.message : 'Could not create the engagement.', 'error');
     },
   });
@@ -421,7 +430,10 @@ export function NewEngagementWizard(): JSX.Element {
         : FY_RE.test(financialYear);
   const detailsOk = kindDetailsOk && !needsPartner;
   const canNext = !!entity && !!kind && !(kind === 'compliance' && openCompliance);
-  const canSubmit = detailsOk && !block && acksOk && !check.isFetching && !create.isPending;
+  const kycOk =
+    !kycGate.state.blocked && (!kycGate.state.needsReason || kycReason.trim().length > 0);
+  const canSubmit =
+    detailsOk && !block && acksOk && kycOk && !check.isFetching && !create.isPending;
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -832,6 +844,16 @@ export function NewEngagementWizard(): JSX.Element {
                 onManager={setManagerId}
               />
             </>
+          )}
+
+          {step === 1 && entity && kycGate.kyc && (
+            <KycNotice
+              entityId={entity.id}
+              status={kycGate.kyc.status}
+              state={kycGate.state}
+              reason={kycReason}
+              onReason={setKycReason}
+            />
           )}
 
           {step === 1 && checkReady && (

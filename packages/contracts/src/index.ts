@@ -129,3 +129,4 @@ export * from './stream-lead';
 export * from './quick-invoices';
 export * from './live-events';
 export * from './certificates';
+export * from './client-kyc';

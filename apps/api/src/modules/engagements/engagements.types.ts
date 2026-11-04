@@ -184,6 +184,8 @@ export interface CreateEngagementInput {
   /** Filed before the portal: {stream: 'YYYY-MM' | 'FY:YYYY-YY'}. */
   priorFiled?: Partial<Record<Stream, string[]>>;
   acknowledgedIndependenceRules?: IndependenceRule[];
+  /** PS-404: a partner's reason to open the engagement while the client's KYC is not complete. */
+  kycOverrideReason?: string;
   /** CM-8: people to staff as members (the wizard pre-fills the client team's associates). */
   teamMemberEmployeeIds?: string[];
 }
