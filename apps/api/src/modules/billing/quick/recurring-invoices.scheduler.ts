@@ -35,7 +35,7 @@ export class RecurringInvoicesScheduler implements OnModuleInit {
   }
 
   /** One pass. Public for the HTTP cron trigger and tests. */
-  async run(): Promise<{ issued: number; drafts: number; failed: number } | null> {
+  async run(): Promise<{ issued: number; drafts: number; failed: number; skipped: number } | null> {
     if (this.running) return null;
     this.running = true;
     try {

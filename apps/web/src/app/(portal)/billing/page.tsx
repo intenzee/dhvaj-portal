@@ -21,6 +21,7 @@ import { useFeatureFlags } from '@/lib/feature-flags';
 import { engagementHref } from '@/components/accounts/accounts';
 import { useBillingSettings } from '@/components/billing/invoice-gst';
 import { BillingSettingsCard } from '@/components/billing/billing-settings';
+import { FirmProfileCard } from '@/components/billing/firm-profile-card';
 import { RecordReceiptModal } from '@/components/billing/record-receipt-modal';
 import { Plus } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -193,6 +194,7 @@ function Billing({ v2 }: { v2: boolean }): JSX.Element {
       {settings && (
         <div className="mt-3">
           <BillingSettingsCard settings={settings} />
+          <FirmProfileCard />
         </div>
       )}
 

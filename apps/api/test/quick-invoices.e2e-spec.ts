@@ -8,6 +8,7 @@ import type {
   QuickInvoiceResult,
   SendInvoiceResult,
 } from '@hsdg/contracts';
+import { addMonth } from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { createTestApp } from './create-test-app';
 import { freshClient } from './fresh-client.helper';
@@ -322,6 +323,9 @@ describe('Quick invoices (e2e)', () => {
   });
 
   it('monthly: active is issued on the day, manual is a draft, paused is nothing; never twice', async () => {
+    // Earlier tests billed the GST service by hand today; the runs below are
+    // on the 1st of next month, a month not yet billed.
+    const due = addMonth(`${today.slice(0, 8)}01`);
     const put = (h: Record<string, string>, svc: InvoiceService, body: Record<string, unknown>) =>
       http()
         .put(`/api/v1/engagements/${eng}/invoice-services/${svc.engagementServiceId}/schedule`)
@@ -331,6 +335,15 @@ describe('Quick invoices (e2e)', () => {
     await put(pa, gst, { amount: '10000', gstRate: 18, dayOfMonth: 29, mode: 'active' }).expect(
       400,
     );
+    // Set on today's day, right after billing this month by hand: it starts next month.
+    const todayDay = Math.min(Number(today.slice(8, 10)), 28);
+    const first = await put(pa, gst, {
+      amount: '10000',
+      gstRate: 18,
+      dayOfMonth: todayDay,
+      mode: 'active',
+    }).expect(200);
+    expect(first.body.nextRunOn.slice(0, 7) > today.slice(0, 7)).toBe(true);
     const a = await put(pa, gst, {
       amount: '10000',
       gstRate: 18,
@@ -341,10 +354,22 @@ describe('Quick invoices (e2e)', () => {
     await put(pa, incomeTax, { amount: '2500', gstRate: 18, dayOfMonth: 1, mode: 'manual' }).expect(
       200,
     );
-    // Both due today.
+    const runner = app.get(RecurringInvoicesService);
+    // Due today, but the month was billed by hand: skipped to next month, no second invoice.
+    await su.query(
+      `UPDATE hsdg.recurring_invoice_schedules SET next_run_on = $2::date WHERE engagement_service_id = $1`,
+      [gst.engagementServiceId, today],
+    );
+    const skip = await runner.runDue(today);
+    expect(skip).toMatchObject({ issued: 0, skipped: 1 });
+    expect((await services()).find((s) => s.stream === 'gst')!.schedule!.nextRunOn > today).toBe(
+      true,
+    );
+
+    // Both due on the 1st of next month.
     await su.query(
       `UPDATE hsdg.recurring_invoice_schedules SET next_run_on = $2::date WHERE engagement_id = $1`,
-      [eng, today],
+      [eng, due],
     );
     const count = async () =>
       (
@@ -354,8 +379,7 @@ describe('Quick invoices (e2e)', () => {
         )
       ).rows as { status: string; n: number }[];
     const before = await count();
-    const runner = app.get(RecurringInvoicesService);
-    const res = await runner.runDue(today);
+    const res = await runner.runDue(due);
     expect(res).toMatchObject({ issued: 1, drafts: 1, failed: 0 });
     const after = await count();
     const n = (rows: { status: string; n: number }[], s: string) =>
@@ -365,18 +389,18 @@ describe('Quick invoices (e2e)', () => {
 
     const list = await services();
     const g = list.find((s) => s.stream === 'gst')!.schedule!;
-    expect(g.lastRunOn).toBe(today);
-    expect(g.nextRunOn > today).toBe(true);
+    expect(g.lastRunOn).toBe(due);
+    expect(g.nextRunOn > due).toBe(true);
     expect(g.lastInvoiceId).toBeTruthy();
-    expect((await runner.runDue(today)).issued).toBe(0);
+    expect((await runner.runDue(due)).issued).toBe(0);
 
     // Paused: nothing even when due; resuming starts from the next such day.
     await put(pa, gst, { amount: '10000', gstRate: 18, dayOfMonth: 1, mode: 'paused' }).expect(200);
     await su.query(
       `UPDATE hsdg.recurring_invoice_schedules SET next_run_on = $2::date WHERE engagement_service_id = $1`,
-      [gst.engagementServiceId, today],
+      [gst.engagementServiceId, due],
     );
-    expect((await runner.runDue(today)).issued).toBe(0);
+    expect((await runner.runDue(due)).issued).toBe(0);
     const resumed = await put(pa, gst, {
       amount: '10000',
       gstRate: 18,

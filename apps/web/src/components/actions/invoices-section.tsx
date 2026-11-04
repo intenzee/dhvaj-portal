@@ -10,6 +10,7 @@ import {
   GST_RATES,
   GST_STATES,
   INVOICE_STATUS,
+  PERMISSION,
   gstSplit,
   type EngagementCommercial,
   type InvoiceDetail,
@@ -37,6 +38,10 @@ import {
 import { InvoiceAdjustments } from '@/components/billing/invoice-adjustments';
 import { InvoiceReminders } from '@/components/billing/invoice-reminders';
 import { FeeMilestones } from '@/components/billing/fee-milestones';
+import { InvoiceSend } from '@/components/billing/invoice-send';
+import { MonthlyInvoices } from '@/components/billing/monthly-invoices';
+import { QuickInvoiceRow } from '@/components/billing/quick-invoice-row';
+import { can } from '@/lib/principal';
 import {
   AskReversal,
   PendingReversal,
@@ -73,6 +78,9 @@ export function InvoicesSection({ engagementId }: { engagementId: string }): JSX
   const [createOpen, setCreateOpen] = useState(false);
   const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
   const feesV2 = useFeatureFlags().isOn(FEATURE_FLAG.billing);
+  const { principal } = useAuth();
+  const mayInvoice =
+    can(principal, PERMISSION.engagementManage) || can(principal, PERMISSION.billingManage);
 
   const commercial = useQuery({
     queryKey: ['engagement', engagementId, 'commercial'],
@@ -129,6 +137,7 @@ export function InvoicesSection({ engagementId }: { engagementId: string }): JSX
             <Plus className="h-4 w-4" /> New invoice
           </Button>
         </div>
+        {mayInvoice && <QuickInvoiceRow engagementId={engagementId} onCreated={invalidate} />}
         <Card className="overflow-hidden p-0">
           {invoices.isLoading && <div className="p-5"><Spinner /></div>}
           {invoices.data && items.length === 0 && (
@@ -171,6 +180,8 @@ export function InvoicesSection({ engagementId }: { engagementId: string }): JSX
           )}
         </Card>
       </section>
+
+      <MonthlyInvoices engagementId={engagementId} />
 
       {commercialOpen && commercial.data && (
         <CommercialModal
@@ -773,6 +784,12 @@ export function InvoiceDetailModal({
             </tfoot>
           </table>
 
+          {inv.hasPdf && inv.invoiceNumber && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
+            <div className="border-t border-line pt-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">Send to the client</p>
+              <InvoiceSend engagementId={engagementId} invoiceId={inv.id} invoiceNumber={inv.invoiceNumber} />
+            </div>
+          )}
           {receipts && inv.status !== INVOICE_STATUS.draft && inv.status !== INVOICE_STATUS.void && (
             <InvoiceAdjustments invoice={inv} onChanged={refresh} />
           )}

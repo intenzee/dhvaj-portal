@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { PoolClient } from 'pg';
 import {
   PERMISSION,
   RECURRING_INVOICE_MODE,
@@ -21,6 +22,28 @@ export function nextAfter(from: string, today: string): string {
   let next = addMonth(from);
   while (next <= today) next = addMonth(next);
   return next;
+}
+
+/**
+ * Whether the service already has an invoice (not void) for the month of
+ * `day` — dated in it, or a draft made in it. A month billed by hand is not
+ * billed again by the schedule.
+ */
+async function billedInMonth(
+  client: PoolClient,
+  engagementServiceId: string,
+  day: string,
+): Promise<boolean> {
+  const { rows } = await client.query(
+    `SELECT 1 FROM hsdg.invoice_line_items l
+       JOIN hsdg.invoices i ON i.id = l.invoice_id
+      WHERE l.engagement_service_id = $1 AND i.status <> 'void'
+        AND date_trunc('month', COALESCE(i.issue_date, (i.created_at AT TIME ZONE 'Asia/Kolkata')::date))
+            = date_trunc('month', $2::date)
+      LIMIT 1`,
+    [engagementServiceId, day],
+  );
+  return rows.length > 0;
 }
 
 /**
@@ -57,7 +80,11 @@ export class RecurringInvoicesService {
         before.dayOfMonth !== input.dayOfMonth ||
         (before.mode === RECURRING_INVOICE_MODE.paused &&
           input.mode !== RECURRING_INVOICE_MODE.paused);
-      const nextRunOn = restart ? firstRunOn(today, input.dayOfMonth) : before.nextRunOn;
+      let nextRunOn = restart ? firstRunOn(today, input.dayOfMonth) : before.nextRunOn;
+      // "Repeat this every month" right after billing this month starts next month.
+      if (restart && (await billedInMonth(client, engagementServiceId, nextRunOn))) {
+        nextRunOn = addMonth(nextRunOn);
+      }
       const { rows } = await client.query(
         `INSERT INTO hsdg.recurring_invoice_schedules AS r
            (engagement_id, engagement_service_id, description, amount, gst_rate, day_of_month, mode,
@@ -130,9 +157,9 @@ export class RecurringInvoicesService {
    */
   async runDue(
     today = istToday(new Date()),
-  ): Promise<{ issued: number; drafts: number; failed: number }> {
+  ): Promise<{ issued: number; drafts: number; failed: number; skipped: number }> {
     const ctx = await this.operatorContext();
-    const tally = { issued: 0, drafts: 0, failed: 0 };
+    const tally = { issued: 0, drafts: 0, failed: 0, skipped: 0 };
     if (!ctx) return tally;
     const due = await this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{
@@ -165,6 +192,21 @@ export class RecurringInvoicesService {
       let invoiceId: string | null = null;
       let error: string | null = null;
       let made = false;
+      const already = await this.db.withRlsContext(ctx, (client) =>
+        billedInMonth(client, s.engagement_service_id, s.next_run_on),
+      );
+      if (already) {
+        // Billed by hand this month: skip to the next month, no second invoice.
+        await this.db.withRlsContext(ctx, (client) =>
+          client.query(
+            `UPDATE hsdg.recurring_invoice_schedules
+                SET last_error = NULL, next_run_on = $2::date WHERE id = $1`,
+            [s.id, nextAfter(s.next_run_on, today)],
+          ),
+        );
+        tally.skipped += 1;
+        continue;
+      }
       try {
         const res = await this.quick.quick(
           ctx,
