@@ -38,6 +38,8 @@ export const DOCUMENT_TEMPLATE_KEY = {
   fsWorkbookAsDivI: 'fs_workbook_as_div_i',
   fsWorkbookIndAsDivII: 'fs_workbook_indas_div_ii',
   fsWorkbookIndAsDivIII: 'fs_workbook_indas_div_iii',
+  /** Tax Audit acceptance (F-3) — the s.44AB appointment letter. */
+  taxAuditAppointmentLetter: 'tax_audit_appointment_letter',
 } as const;
 export type DocumentTemplateKey =
   (typeof DOCUMENT_TEMPLATE_KEY)[keyof typeof DOCUMENT_TEMPLATE_KEY];
@@ -49,7 +51,7 @@ export interface DocumentTemplateDefinition {
   /** File name of a created document; `{client}` is replaced with the client's name. */
   filenamePattern: string;
   /** The audit-file section that creates it (Section 01 lists only its own). */
-  section: '01' | '02.2' | '02.3' | '02.4' | '02.5' | '02.6' | '02.8';
+  section: '01' | '02.2' | '02.3' | '02.4' | '02.5' | '02.6' | '02.8' | 'tax_audit';
   /** The file the firm uploads: a Word document (merged) or an Excel workbook. */
   format: TemplateFormat;
 }
@@ -160,6 +162,13 @@ export const DOCUMENT_TEMPLATE_DEFINITIONS: readonly DocumentTemplateDefinition[
     filenamePattern: 'Financial Statements Workbook {fy} - {client}.xlsx',
     section: '02.3',
     format: 'xlsx',
+  },
+  {
+    templateKey: DOCUMENT_TEMPLATE_KEY.taxAuditAppointmentLetter,
+    title: 'Tax audit appointment letter',
+    filenamePattern: 'Tax Audit Appointment Letter {fy} - {client}.docx',
+    section: 'tax_audit',
+    format: 'docx',
   },
 ] as const;
 
@@ -512,6 +521,10 @@ export const TEMPLATE_MERGE_FIELDS: readonly TemplateMergeField[] = [
     label: 'Downstream configuration preview',
     source: '02.8 §6',
   },
+  { key: 'taxAudit.form', label: 'Tax audit report form (3CA / 3CB)', source: 'Tax Audit' },
+  { key: 'taxAudit.assessmentYear', label: 'Assessment year', source: 'Tax Audit' },
+  { key: 'taxAudit.letterDate', label: 'Date of the appointment letter', source: 'Tax Audit' },
+  { key: 'partner.copNo', label: 'Signing partner COP no.', source: 'Partner profile' },
   { key: 'today', label: "Today's date", source: 'System' },
 ] as const;
 

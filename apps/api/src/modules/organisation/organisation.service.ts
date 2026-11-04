@@ -26,7 +26,8 @@ const EMPLOYEE_SELECT = `
          e.primary_office_id, o.code AS office_code,
          e.reports_to_id, m.full_name AS reports_to_name,
          e.employment_status, e.date_of_joining, e.date_of_exit,
-         pp.membership_no, pp.partner_since, e.version, g.rank AS grade_rank
+         pp.membership_no, pp.partner_since, pp.cop_no, pp.cop_valid_until::text,
+         e.version, g.rank AS grade_rank
   FROM hsdg.employees e
   JOIN hsdg.grades g ON g.id = e.grade_id
   JOIN hsdg.offices o ON o.id = e.primary_office_id
@@ -53,6 +54,8 @@ interface EmployeeRow {
   date_of_exit: string | null;
   membership_no: string | null;
   partner_since: string | null;
+  cop_no: string | null;
+  cop_valid_until: string | null;
   version: number;
 }
 
@@ -160,7 +163,10 @@ export class OrganisationService {
     return this.db.withRlsContext(ctx, async (client) => {
       const grade = await this.resolveGrade(client, input.gradeSlug);
       const officeId = await this.resolveOfficeId(client, input.officeCode);
-      if (!grade.isPartner && (input.membershipNo || input.partnerSince)) {
+      if (
+        !grade.isPartner &&
+        (input.membershipNo || input.partnerSince || input.copNo || input.copValidUntil)
+      ) {
         throw new BadRequestException(NOT_A_PARTNER);
       }
 
@@ -190,6 +196,8 @@ export class OrganisationService {
           await this.savePartnerProfile(client, createdId, {
             membershipNo: input.membershipNo ?? null,
             partnerSince: input.partnerSince ?? null,
+            copNo: input.copNo ?? null,
+            copValidUntil: input.copValidUntil ?? null,
           });
         }
       } catch (err) {
@@ -249,8 +257,13 @@ export class OrganisationService {
       const profile = {
         ...(input.membershipNo !== undefined ? { membershipNo: input.membershipNo } : {}),
         ...(input.partnerSince !== undefined ? { partnerSince: input.partnerSince } : {}),
+        ...(input.copNo !== undefined ? { copNo: input.copNo } : {}),
+        ...(input.copValidUntil !== undefined ? { copValidUntil: input.copValidUntil } : {}),
       };
-      if (!isPartner && (input.membershipNo || input.partnerSince)) {
+      if (
+        !isPartner &&
+        (input.membershipNo || input.partnerSince || input.copNo || input.copValidUntil)
+      ) {
         throw new BadRequestException(NOT_A_PARTNER);
       }
       // A partner without a profile (e.g. just promoted) gets one.
@@ -324,22 +337,36 @@ export class OrganisationService {
   private async savePartnerProfile(
     client: PoolClient,
     employeeId: string,
-    fields: { membershipNo?: string | null; partnerSince?: string | null },
+    fields: {
+      membershipNo?: string | null;
+      partnerSince?: string | null;
+      copNo?: string | null;
+      copValidUntil?: string | null;
+    },
   ): Promise<void> {
     await client.query(
-      `INSERT INTO hsdg.partner_profiles (employee_id, membership_no, partner_since)
-       VALUES ($1, $2, $3)
+      `INSERT INTO hsdg.partner_profiles
+         (employee_id, membership_no, partner_since, cop_no, cop_valid_until)
+       VALUES ($1, $2, $3, $6, $7)
        ON CONFLICT (employee_id) DO UPDATE SET
          membership_no = CASE WHEN $4::boolean THEN EXCLUDED.membership_no
                               ELSE hsdg.partner_profiles.membership_no END,
          partner_since = CASE WHEN $5::boolean THEN EXCLUDED.partner_since
-                              ELSE hsdg.partner_profiles.partner_since END`,
+                              ELSE hsdg.partner_profiles.partner_since END,
+         cop_no = CASE WHEN $8::boolean THEN EXCLUDED.cop_no
+                       ELSE hsdg.partner_profiles.cop_no END,
+         cop_valid_until = CASE WHEN $9::boolean THEN EXCLUDED.cop_valid_until
+                                ELSE hsdg.partner_profiles.cop_valid_until END`,
       [
         employeeId,
         fields.membershipNo ?? null,
         fields.partnerSince ?? null,
         fields.membershipNo !== undefined,
         fields.partnerSince !== undefined,
+        fields.copNo ?? null,
+        fields.copValidUntil ?? null,
+        fields.copNo !== undefined,
+        fields.copValidUntil !== undefined,
       ],
     );
   }
@@ -373,6 +400,8 @@ function mapEmployee(row: EmployeeRow): EmployeeRecord {
     dateOfExit: row.date_of_exit,
     membershipNo: row.membership_no,
     partnerSince: row.partner_since,
+    copNo: row.cop_no,
+    copValidUntil: row.cop_valid_until,
     version: row.version,
   };
 }

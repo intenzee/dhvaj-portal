@@ -13,7 +13,9 @@ jest.mock('@/lib/api', () => ({
 }));
 const toast = jest.fn();
 jest.mock('@/lib/toast', () => ({ useToast: () => toast }));
-jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn(), replace: jest.fn() }) }));
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+}));
 const permissions = ['employee.manage', 'employee.read', 'user.manage'];
 jest.mock('@/lib/auth', () => ({ useAuth: () => ({ principal: { permissions } }) }));
 
@@ -32,7 +34,13 @@ const DEEPAK: AdminUserRow = {
   isActive: true,
   roles: ['managing_partner'],
 };
-const DHARMENDER: AdminUserRow = { ...DEEPAK, id: 'u2', email: 'dharmender@dhvaj.in', displayName: 'Dharmender', roles: ['admin'] };
+const DHARMENDER: AdminUserRow = {
+  ...DEEPAK,
+  id: 'u2',
+  email: 'dharmender@dhvaj.in',
+  displayName: 'Dharmender',
+  roles: ['admin'],
+};
 const EMP: AdminEmployeeRow = {
   id: 'e1',
   employeeCode: 'DA001',
@@ -48,6 +56,8 @@ const EMP: AdminEmployeeRow = {
   dateOfExit: null,
   membershipNo: null,
   partnerSince: null,
+  copNo: null,
+  copValidUntil: null,
   version: 3,
 };
 
@@ -55,8 +65,10 @@ beforeEach(() => {
   apiFetch.mockReset();
   toast.mockReset();
   apiFetch.mockImplementation((path: string) => {
-    if (path.startsWith('/employees?')) return Promise.resolve({ items: [EMP], total: 1, limit: 25, offset: 0 });
-    if (path.startsWith('/users?')) return Promise.resolve({ items: [DEEPAK, DHARMENDER], total: 2, limit: 100, offset: 0 });
+    if (path.startsWith('/employees?'))
+      return Promise.resolve({ items: [EMP], total: 1, limit: 25, offset: 0 });
+    if (path.startsWith('/users?'))
+      return Promise.resolve({ items: [DEEPAK, DHARMENDER], total: 2, limit: 100, offset: 0 });
     if (path === '/offices') return Promise.resolve(OFFICES);
     return Promise.resolve({});
   });

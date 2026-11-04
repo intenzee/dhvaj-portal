@@ -126,4 +126,49 @@ describe('TaxAuditTab', () => {
     expect(screen.getByLabelText('Business turnover (₹)')).toHaveValue('5000000');
     expect(screen.getByLabelText('Reason')).toHaveValue('speculative turnover counted');
   });
+
+  it('opens the year’s acceptance desk under its row (F-3)', async () => {
+    apiFetch.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.endsWith('/tax-audits')
+          ? [row({ stage: 'acceptance' })]
+          : {
+              auditId: 'a1',
+              engagementId: 'g1',
+              financialYear: '2026-27',
+              stage: 'acceptance',
+              formType: null,
+              signingPartnerId: null,
+              signingPartnerName: null,
+              independence: { ok: true, findings: [], confirmedAt: null, confirmedByName: null },
+              previousAuditor: {
+                changed: null,
+                name: null,
+                letterDocumentId: null,
+                letterTitle: null,
+              },
+              appointmentLetter: null,
+              acceptedAt: null,
+              acceptedByName: null,
+              limit: 60,
+              partners: [],
+              missing: ['Choose the signing partner.'],
+              canEdit: true,
+              version: 1,
+            },
+      ),
+    );
+    render(wrap(<TaxAuditTab engagementId="g1" />));
+    fireEvent.click(await screen.findByRole('button', { name: 'Acceptance' }));
+    expect(await screen.findByText('Independence (s.44AB)')).toBeInTheDocument();
+    expect(apiFetch).toHaveBeenCalledWith('/engagements/g1/tax-audits/a1/acceptance');
+    expect(apiFetch).not.toHaveBeenCalledWith('/engagements/g1/tax-audit-applicability');
+  });
+
+  it('offers no acceptance for a year marked not applicable', async () => {
+    apiFetch.mockResolvedValue([row({ stage: 'not_applicable' })]);
+    render(wrap(<TaxAuditTab engagementId="g1" />));
+    expect(await screen.findByRole('button', { name: 'Applicability' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acceptance' })).toBeNull();
+  });
 });

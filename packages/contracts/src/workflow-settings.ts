@@ -65,6 +65,11 @@ export interface WorkflowSettings {
   clientReminderDays: number;
   /** Escalate to the stream lead this many days before it. */
   clientEscalationDays: number;
+  /**
+   * Tax audit reports one partner may sign in a financial year (ICAI: 60 at
+   * most; a firm may set it lower, never higher).
+   */
+  taxAuditLimit: number;
   /** The firm's checks, each on or off (Admin → Workflow → Checks). */
   checks: FirmChecks;
   /** Whether the viewer may switch checks: the managing partner or the administrator. */
@@ -84,7 +89,11 @@ export interface UpdateWorkflowSettingsInput {
   bulkAssignScope?: BulkAssignScope;
   clientReminderDays?: number;
   clientEscalationDays?: number;
+  taxAuditLimit?: number;
 }
+
+/** ICAI's ceiling on tax audit reports a partner signs in a financial year. */
+export const TAX_AUDIT_LIMIT_MAX = 60;
 
 /** One form's internal due date: so many days before the statutory date. */
 export interface FormInternalDue {

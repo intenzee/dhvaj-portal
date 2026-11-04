@@ -72,6 +72,25 @@ export class UpdateEmployeeDto {
   partnerSince?: string | null;
 
   @ApiPropertyOptional({
+    nullable: true,
+    example: '512345',
+    description: 'Certificate of practice number (partners only), or null to clear.',
+  })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @Matches(/^[0-9A-Za-z/-]{3,40}$/)
+  copNo?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'The date the certificate of practice is valid until (YYYY-MM-DD), or null.',
+  })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsDateString()
+  copValidUntil?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Expected current version for optimistic concurrency. Stale ⇒ 409.',
   })
   @IsOptional()

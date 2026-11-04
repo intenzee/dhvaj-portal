@@ -65,7 +65,7 @@ export function TemplatesSection(): JSX.Element {
             <TemplateGroup
               key={d.templateKey}
               templateKey={d.templateKey}
-              title={`${d.title} · Section ${d.section}`}
+              title={`${d.title} · ${d.section === 'tax_audit' ? 'Tax Audit' : `Section ${d.section}`}`}
               variants={(templates.data ?? []).filter((t) => t.templateKey === d.templateKey)}
             />
           ))

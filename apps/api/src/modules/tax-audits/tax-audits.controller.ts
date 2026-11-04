@@ -1,7 +1,18 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   PERMISSION,
+  type TaxAuditAcceptance,
   type TaxAuditApplicability,
   type TaxAuditRadarRow,
   type TaxAuditRow,
@@ -9,7 +20,14 @@ import {
 import { CurrentPrincipal, RequirePermissions } from '../auth/auth.decorators';
 import { rlsContextFromPrincipal, type Principal } from '../auth/principal';
 import { FyParamPipe } from '../engagements/fy-param.pipe';
-import { SaveTaxAuditApplicabilityDto, TaxAuditRadarQueryDto } from './dto/tax-audits.dto';
+import {
+  SaveTaxAuditAcceptanceDto,
+  SaveTaxAuditApplicabilityDto,
+  TaxAuditAcceptanceStepDto,
+  TaxAuditRadarQueryDto,
+  UploadPreviousAuditorLetterDto,
+} from './dto/tax-audits.dto';
+import { TaxAuditAcceptanceService } from './tax-audit-acceptance.service';
 import { TaxAuditApplicabilityService } from './tax-audit-applicability.service';
 import { TaxAuditsService } from './tax-audits.service';
 
@@ -23,6 +41,7 @@ export class TaxAuditsController {
   constructor(
     private readonly audits: TaxAuditsService,
     private readonly applicability: TaxAuditApplicabilityService,
+    private readonly acceptance: TaxAuditAcceptanceService,
   ) {}
 
   @Get('engagements/:id/tax-audits')
@@ -83,5 +102,90 @@ export class TaxAuditsController {
       query.financialYear,
       query.all ?? false,
     );
+  }
+
+  @Get('engagements/:id/tax-audits/:auditId/acceptance')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'The tax audit’s acceptance desk (F-3)',
+    description:
+      'The s.44AB independence check, the previous auditor, the form, the signing partners (each with their count for the year against the firm’s limit, and whether they may be chosen) and the appointment letter.',
+  })
+  acceptanceView(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+  ): Promise<TaxAuditAcceptance> {
+    return this.acceptance.get(rlsContextFromPrincipal(principal), id, auditId);
+  }
+
+  @Put('engagements/:id/tax-audits/:auditId/acceptance')
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Set the form, the signing partner and the previous auditor',
+    description:
+      'The engagement’s partner or manager only. A partner without a valid COP, or already at the firm’s limit for the year, is refused with the count.',
+  })
+  saveAcceptance(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+    @Body() body: SaveTaxAuditAcceptanceDto,
+  ): Promise<TaxAuditAcceptance> {
+    return this.acceptance.save(rlsContextFromPrincipal(principal), id, auditId, body);
+  }
+
+  @Post('engagements/:id/tax-audits/:auditId/acceptance/previous-auditor-letter')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({ summary: 'Upload the written communication to the previous auditor' })
+  uploadPreviousAuditorLetter(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+    @Body() body: UploadPreviousAuditorLetterDto,
+  ): Promise<TaxAuditAcceptance> {
+    return this.acceptance.uploadPreviousAuditorLetter(
+      rlsContextFromPrincipal(principal),
+      id,
+      auditId,
+      body,
+    );
+  }
+
+  @Post('engagements/:id/tax-audits/:auditId/acceptance/appointment-letter')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Make the appointment letter from the firm’s approved template',
+  })
+  createAppointmentLetter(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+    @Body() body: TaxAuditAcceptanceStepDto,
+  ): Promise<TaxAuditAcceptance> {
+    return this.acceptance.createAppointmentLetter(
+      rlsContextFromPrincipal(principal),
+      id,
+      auditId,
+      body,
+    );
+  }
+
+  @Post('engagements/:id/tax-audits/:auditId/acceptance/accept')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSION.engagementRead)
+  @ApiOperation({
+    summary: 'Accept the tax audit and move it on to Information from client',
+    description: 'Refused, with what is missing, until every acceptance step is done.',
+  })
+  accept(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('auditId', new ParseUUIDPipe()) auditId: string,
+    @Body() body: TaxAuditAcceptanceStepDto,
+  ): Promise<TaxAuditAcceptance> {
+    return this.acceptance.accept(rlsContextFromPrincipal(principal), id, auditId, body);
   }
 }

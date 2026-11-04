@@ -664,6 +664,9 @@ export interface AdminEmployeeRow extends EmployeeRow {
   dateOfExit: string | null;
   membershipNo: string | null;
   partnerSince: string | null;
+  /** Certificate of practice: only a holder with a valid COP signs a tax audit. */
+  copNo: string | null;
+  copValidUntil: string | null;
   version: number;
 }
 

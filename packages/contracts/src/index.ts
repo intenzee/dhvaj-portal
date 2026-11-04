@@ -113,3 +113,4 @@ export * from './work-sets';
 export * from './tax-audits';
 export * from './tax-audit-applicability';
 export * from './progress';
+export * from './tax-audit-acceptance';

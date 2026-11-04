@@ -32,6 +32,7 @@ const SETTINGS: WorkflowSettings = {
   bulkAssignScope: 'managers_and_leads',
   clientReminderDays: 5,
   clientEscalationDays: 2,
+  taxAuditLimit: 60,
   checks: RELAXED_FIRM_CHECKS,
   checksEditable: false,
   version: 3,

@@ -1,20 +1,29 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  IsBase64,
   IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
   IsOptional,
+  IsNotEmpty,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
+  TAX_AUDIT_FORMS,
   TAX_AUDIT_PRESUMPTIVE_SCHEMES,
+  type SaveTaxAuditAcceptanceInput,
+  type TaxAuditAcceptanceStepInput,
+  type TaxAuditForm,
+  type UploadPreviousAuditorLetterInput,
   type SaveTaxAuditApplicabilityInput,
   type TaxAuditApplicabilityInput,
   type TaxAuditPresumptiveScheme,
@@ -103,4 +112,81 @@ export class TaxAuditRadarQueryDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   all?: boolean;
+}
+
+/** F-3: PUT …/acceptance — any subset, with the version read. */
+export class SaveTaxAuditAcceptanceDto implements SaveTaxAuditAcceptanceInput {
+  @ApiProperty({ description: 'The tax audit’s version; a stale one is a 409.' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version!: number;
+
+  @ApiPropertyOptional({ enum: TAX_AUDIT_FORMS, nullable: true })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsIn(TAX_AUDIT_FORMS)
+  formType?: TaxAuditForm | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'A partner with a valid COP and room.' })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsUUID()
+  signingPartnerId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Another firm signed last year’s report (null: not answered).',
+  })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsBoolean()
+  previousAuditorChanged?: boolean | null;
+
+  @ApiPropertyOptional({ nullable: true, maxLength: 200 })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  @MaxLength(200)
+  previousAuditorName?: string | null;
+}
+
+/** F-3: the written communication to the previous auditor. */
+export class UploadPreviousAuditorLetterDto implements UploadPreviousAuditorLetterInput {
+  @ApiProperty()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version!: number;
+
+  @ApiProperty({ description: 'Original file name.' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(400)
+  filename!: string;
+
+  @ApiPropertyOptional({ description: 'MIME type; defaults to application/octet-stream.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  contentType?: string;
+
+  @ApiProperty({ description: 'File bytes, base64-encoded.' })
+  @IsBase64()
+  contentBase64!: string;
+}
+
+/** F-3: make the appointment letter / accept. */
+export class TaxAuditAcceptanceStepDto implements TaxAuditAcceptanceStepInput {
+  @ApiProperty()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version!: number;
+
+  @ApiPropertyOptional({ description: 'A template variant, when the firm has several.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  variantKey?: string;
 }

@@ -11,6 +11,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { Badge, Button, EmptyState, Panel, Spinner } from '@/components/ui';
+import { AcceptanceDesk } from './acceptance-desk';
 import { ApplicabilityForm } from './applicability-form';
 import { TAX_AUDITS_KEY } from './keys';
 
@@ -47,7 +48,8 @@ export const yearOf = (a: Pick<TaxAuditRow, 'financialYear' | 'revision'>): stri
 /**
  * Tax Audit (Phase 3, F-1): one row a year — stage, form, signing partner,
  * the report's due date, client acceptance, UDIN and filing. "Applicability"
- * opens the year's calculator and override (F-2). The year's report filing
+ * opens the year's calculator and override (F-2); "Acceptance" the year's
+ * acceptance desk (F-3). The year's report filing
  * itself, with its documents, sits in the stream below.
  */
 export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Element {
@@ -56,11 +58,17 @@ export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Ele
     queryFn: () => apiFetch<TaxAuditRow[]>(`/engagements/${engagementId}/tax-audits`),
   });
   const [open, setOpen] = useState<string | null>(null);
+  const [panel, setPanel] = useState<'applicability' | 'acceptance'>('applicability');
+  const toggle = (id: string, which: 'applicability' | 'acceptance'): void => {
+    const same = open === id && panel === which;
+    setOpen(same ? null : id);
+    setPanel(which);
+  };
   const decisions = useQuery({
     queryKey: [...TAX_AUDITS_KEY, 'applicability', engagementId],
     queryFn: () =>
       apiFetch<TaxAuditApplicability[]>(`/engagements/${engagementId}/tax-audit-applicability`),
-    enabled: open !== null,
+    enabled: open !== null && panel === 'applicability',
   });
 
   return (
@@ -102,11 +110,21 @@ export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Ele
                       <Button
                         size="sm"
                         variant="ghost"
-                        aria-expanded={open === a.id}
-                        onClick={() => setOpen(open === a.id ? null : a.id)}
+                        aria-expanded={open === a.id && panel === 'applicability'}
+                        onClick={() => toggle(a.id, 'applicability')}
                       >
                         Applicability
                       </Button>
+                      {a.stage !== 'not_applicable' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-expanded={open === a.id && panel === 'acceptance'}
+                          onClick={() => toggle(a.id, 'acceptance')}
+                        >
+                          Acceptance
+                        </Button>
+                      )}
                     </td>
                     <td className="py-2 pr-3">
                       <Badge tone={STAGE_TONE[a.stage]}>{TAX_AUDIT_STAGE_LABEL[a.stage]}</Badge>
@@ -140,7 +158,9 @@ export function TaxAuditTab({ engagementId }: { engagementId: string }): JSX.Ele
                   {open === a.id && (
                     <tr>
                       <td colSpan={8} className="bg-surface-sunken px-3 py-4">
-                        {decisions.isLoading ? (
+                        {panel === 'acceptance' ? (
+                          <AcceptanceDesk engagementId={engagementId} auditId={a.id} />
+                        ) : decisions.isLoading ? (
                           <Spinner />
                         ) : (
                           <ApplicabilityForm

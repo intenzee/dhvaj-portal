@@ -7,6 +7,7 @@ import {
   FIRM_CHECK_KEYS,
   DEFAULT_REVIEWERS,
   REMINDER_CHANNEL_SETTINGS,
+  TAX_AUDIT_LIMIT_MAX,
   type ArticleClientScope,
   type BulkAssignScope,
   type DefaultReviewer,
@@ -60,6 +61,20 @@ export class UpdateWorkflowSettingsDto {
   @Min(0)
   @Max(60)
   clientEscalationDays?: number;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: TAX_AUDIT_LIMIT_MAX,
+    description: 'Tax audit reports one partner may sign in a financial year (ICAI: 60 at most).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(TAX_AUDIT_LIMIT_MAX, {
+    message: `ICAI allows at most ${TAX_AUDIT_LIMIT_MAX} tax audit reports a partner a year; the firm may set it lower, not higher.`,
+  })
+  taxAuditLimit?: number;
 }
 
 export class UpdateFormInternalDueDto {

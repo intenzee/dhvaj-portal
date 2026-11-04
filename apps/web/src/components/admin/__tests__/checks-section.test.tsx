@@ -25,6 +25,7 @@ const settings = (over: Partial<WorkflowSettings> = {}): WorkflowSettings => ({
   bulkAssignScope: 'managers_and_leads',
   clientReminderDays: 5,
   clientEscalationDays: 2,
+  taxAuditLimit: 60,
   checks: { ...RELAXED_FIRM_CHECKS, task_blockers: true },
   checksEditable: true,
   version: 7,

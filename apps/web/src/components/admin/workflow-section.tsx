@@ -12,6 +12,7 @@ import {
   PERMISSION,
   REMINDER_CHANNEL_SETTINGS,
   REMINDER_CHANNEL_SETTING_LABEL,
+  TAX_AUDIT_LIMIT_MAX,
   type FormInternalDue,
   type FormInternalDueList,
   type FormInternalDueUpdate,
@@ -34,6 +35,7 @@ const draftOf = (s: WorkflowSettings): Required<Draft> => ({
   bulkAssignScope: s.bulkAssignScope,
   clientReminderDays: s.clientReminderDays,
   clientEscalationDays: s.clientEscalationDays,
+  taxAuditLimit: s.taxAuditLimit,
 });
 
 /**
@@ -96,7 +98,10 @@ function PolicyForm({ mayManage }: { mayManage: boolean }): JSX.Element {
     !Number.isInteger(draft.clientEscalationDays) ||
     draft.clientReminderDays < 0 ||
     draft.clientEscalationDays < 0 ||
-    draft.clientEscalationDays > draft.clientReminderDays;
+    draft.clientEscalationDays > draft.clientReminderDays ||
+    !Number.isInteger(draft.taxAuditLimit) ||
+    draft.taxAuditLimit < 1 ||
+    draft.taxAuditLimit > TAX_AUDIT_LIMIT_MAX;
   const set = <K extends keyof Draft>(k: K, v: Required<Draft>[K]) =>
     setDraft((d) => (d ? { ...d, [k]: v } : d));
 
@@ -203,6 +208,19 @@ function PolicyForm({ mayManage }: { mayManage: boolean }): JSX.Element {
             value={draft.clientEscalationDays}
             disabled={!mayManage}
             onChange={(e) => set('clientEscalationDays', e.target.valueAsNumber)}
+          />
+        </Field>
+        <Field
+          label="Tax audit reports a partner may sign in a year"
+          hint={`ICAI allows ${TAX_AUDIT_LIMIT_MAX}; the firm may set fewer, not more.`}
+        >
+          <Input
+            type="number"
+            min={1}
+            max={TAX_AUDIT_LIMIT_MAX}
+            value={draft.taxAuditLimit}
+            disabled={!mayManage}
+            onChange={(e) => set('taxAuditLimit', e.target.valueAsNumber)}
           />
         </Field>
       </div>

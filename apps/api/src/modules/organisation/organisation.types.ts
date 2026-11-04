@@ -32,6 +32,10 @@ export interface EmployeeRecord {
   dateOfExit: string | null;
   membershipNo: string | null;
   partnerSince: string | null;
+  /** Certificate of practice (partners): only a holder with a valid COP signs a tax audit. */
+  copNo: string | null;
+  /** ISO date the COP is valid until. */
+  copValidUntil: string | null;
   /** Optimistic-concurrency token; increments on every update. */
   version: number;
 }
@@ -53,6 +57,8 @@ export interface CreateEmployeeInput {
   employmentStatus?: EmploymentStatus;
   membershipNo?: string;
   partnerSince?: string;
+  copNo?: string;
+  copValidUntil?: string;
 }
 
 export interface UpdateEmployeeInput {
@@ -66,6 +72,8 @@ export interface UpdateEmployeeInput {
   /** Partner profile (partner grade only). */
   membershipNo?: string | null;
   partnerSince?: string | null;
+  copNo?: string | null;
+  copValidUntil?: string | null;
   /** Expected current version. If given and stale, the update fails with 409. */
   version?: number;
 }

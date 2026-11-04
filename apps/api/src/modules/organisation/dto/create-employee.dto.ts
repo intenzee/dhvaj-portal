@@ -52,4 +52,20 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsDateString()
   partnerSince?: string;
+
+  @ApiPropertyOptional({
+    example: '512345',
+    description: 'Certificate of practice number (partners only).',
+  })
+  @IsOptional()
+  @Matches(/^[0-9A-Za-z/-]{3,40}$/)
+  copNo?: string;
+
+  @ApiPropertyOptional({
+    example: '2027-03-31',
+    description: 'The date the certificate of practice is valid until (YYYY-MM-DD).',
+  })
+  @IsOptional()
+  @IsDateString()
+  copValidUntil?: string;
 }

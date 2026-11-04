@@ -204,6 +204,8 @@ export function EmployeeFormModal({
   const [userId, setUserId] = useState(employee?.userId ?? '');
   const [membershipNo, setMembershipNo] = useState(employee?.membershipNo ?? '');
   const [partnerSince, setPartnerSince] = useState(employee?.partnerSince ?? '');
+  const [copNo, setCopNo] = useState(employee?.copNo ?? '');
+  const [copValidUntil, setCopValidUntil] = useState(employee?.copValidUntil ?? '');
   const [employmentStatus, setEmploymentStatus] = useState<EmploymentStatus>(
     employee?.employmentStatus ?? 'active',
   );
@@ -244,6 +246,8 @@ export function EmployeeFormModal({
           ...(userId ? { userId } : {}),
           ...(isPartner && membershipNo.trim() ? { membershipNo: membershipNo.trim() } : {}),
           ...(isPartner && partnerSince ? { partnerSince } : {}),
+          ...(isPartner && copNo.trim() ? { copNo: copNo.trim() } : {}),
+          ...(isPartner && copValidUntil ? { copValidUntil } : {}),
         },
       }),
     onSuccess: () => {
@@ -270,6 +274,8 @@ export function EmployeeFormModal({
         if (membershipNo.trim() !== (e.membershipNo ?? ''))
           patch.membershipNo = membershipNo.trim() || null;
         if (partnerSince !== (e.partnerSince ?? '')) patch.partnerSince = partnerSince || null;
+        if (copNo.trim() !== (e.copNo ?? '')) patch.copNo = copNo.trim() || null;
+        if (copValidUntil !== (e.copValidUntil ?? '')) patch.copValidUntil = copValidUntil || null;
       }
       return apiFetch(`/employees/${e.id}`, { method: 'PATCH', body: patch });
     },
@@ -383,6 +389,16 @@ export function EmployeeFormModal({
                 type="date"
                 value={partnerSince}
                 onChange={(e) => setPartnerSince(e.target.value)}
+              />
+            </Field>
+            <Field label="COP no." hint="Certificate of practice: needed to sign a tax audit.">
+              <Input value={copNo} onChange={(e) => setCopNo(e.target.value)} />
+            </Field>
+            <Field label="COP valid until">
+              <Input
+                type="date"
+                value={copValidUntil}
+                onChange={(e) => setCopValidUntil(e.target.value)}
               />
             </Field>
           </div>

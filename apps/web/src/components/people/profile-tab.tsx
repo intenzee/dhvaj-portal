@@ -45,6 +45,8 @@ export function ProfileTab({ employee }: { employee: AdminEmployeeRow }): JSX.El
   if (employee.isPartner) {
     rows.push(['ICAI membership no.', employee.membershipNo ?? '—']);
     rows.push(['Partner since', formatDate(employee.partnerSince)]);
+    rows.push(['COP no.', employee.copNo ?? '—']);
+    rows.push(['COP valid until', formatDate(employee.copValidUntil)]);
   }
 
   return (

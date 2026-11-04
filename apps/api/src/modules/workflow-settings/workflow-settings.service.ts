@@ -30,6 +30,7 @@ interface SettingsRow {
   bulk_assign_scope: WorkflowSettings['bulkAssignScope'];
   client_reminder_days: number;
   client_escalation_days: number;
+  tax_audit_limit: number;
   strict_checks: Record<string, unknown> | null;
   version: number;
   updated_at: Date;
@@ -52,6 +53,7 @@ const COLUMNS = {
   bulkAssignScope: 'bulk_assign_scope',
   clientReminderDays: 'client_reminder_days',
   clientEscalationDays: 'client_escalation_days',
+  taxAuditLimit: 'tax_audit_limit',
 } as const satisfies Record<Exclude<keyof UpdateWorkflowSettingsInput, 'version'>, string>;
 
 /**
@@ -218,7 +220,7 @@ export class WorkflowSettingsService {
     const { rows } = await client.query<SettingsRow>(
       `SELECT f.default_reviewer, f.article_client_scope, f.client_reminder_channel,
               f.bulk_assign_scope, f.client_reminder_days, f.client_escalation_days,
-              f.strict_checks, f.version,
+              f.tax_audit_limit, f.strict_checks, f.version,
               f.updated_at, e.full_name AS updated_by_name
          FROM hsdg.firm_settings f
          LEFT JOIN hsdg.employees e ON e.id = f.updated_by_employee_id
@@ -233,6 +235,7 @@ export class WorkflowSettingsService {
       bulkAssignScope: r.bulk_assign_scope,
       clientReminderDays: r.client_reminder_days,
       clientEscalationDays: r.client_escalation_days,
+      taxAuditLimit: r.tax_audit_limit,
       checks: toFirmChecks(r.strict_checks),
       checksEditable: canSwitchChecks(ctx),
       version: r.version,
