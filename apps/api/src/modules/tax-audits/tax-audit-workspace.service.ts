@@ -44,6 +44,7 @@ import { AuditService } from '../audit/audit.service';
 import { DocumentsService } from '../documents/documents.service';
 import { istToday } from '../engagements/time/auto-time';
 import { libraryVersionForYear } from './tax-audit-clause-library.service';
+import { supersedeSignoffs } from './tax-audit-review.service';
 
 const LEAD_ONLY = 'Only the engagement’s partner or manager does this.';
 const NOT_YOURS =
@@ -262,7 +263,7 @@ export class TaxAuditWorkspaceService {
     input: SaveTaxAuditFactsInput,
   ): Promise<TaxAuditWorkspace> {
     const problems = factsProblems(input.facts as Record<string, unknown>);
-    if (problems.length) throw new BadRequestException(problems);
+    if (problems.length) throw new BadRequestException(problems.join(' '));
     return this.db.withRlsContext(ctx, async (client) => {
       const a = await this.lead(client, engagementId, auditId, input.version);
       await client.query(
@@ -286,6 +287,7 @@ export class TaxAuditWorkspaceService {
         [auditId],
       );
       let changed = 0;
+      let reopened = false;
       for (const w of rows) {
         const next = openingStatus(w.applies_when, input.facts);
         if (next === w.status) continue;
@@ -298,7 +300,9 @@ export class TaxAuditWorkspaceService {
           [w.id, next, na ? 'condition' : null, na ? w.not_applicable_reason : null],
         );
         changed += 1;
+        if (!na) reopened = true;
       }
+      if (reopened) await this.backToClauseWork(client, a, 'The facts brought a clause back.');
       await this.audit.recordWith(client, ctx, {
         action: 'tax_audit.facts_saved',
         objectType: 'tax_audit',
@@ -370,7 +374,7 @@ export class TaxAuditWorkspaceService {
     return this.db.withRlsContext(ctx, async (client) => {
       const w = await this.preparing(client, ctx, engagementId, auditId, paperId, input.version);
       const problems = answerProblems(w.sub_items, input.answer as Record<string, unknown>);
-      if (problems.length) throw new BadRequestException(problems);
+      if (problems.length) throw new BadRequestException(problems.join(' '));
       await client.query(
         `UPDATE hsdg.tax_audit_working_papers
             SET answer = $2::jsonb, status = 'in_progress',
@@ -454,7 +458,8 @@ export class TaxAuditWorkspaceService {
     input: TaxAuditVersionInput,
   ): Promise<TaxAuditWorkspace> {
     return this.db.withRlsContext(ctx, async (client) => {
-      const { w, lead } = await this.paperFor(client, engagementId, auditId, paperId);
+      const { a, w, lead } = await this.paperFor(client, engagementId, auditId, paperId);
+      this.requireWorkOpen(a);
       this.checkVersion(w.version, input.version);
       if (w.status === 'done') {
         if (!lead)
@@ -473,6 +478,7 @@ export class TaxAuditWorkspaceService {
           WHERE id = $1`,
         [paperId, worked ? 'in_progress' : 'not_started'],
       );
+      await this.backToClauseWork(client, a, `Clause ${w.clause_no} was reopened.`);
       await this.audit.recordWith(client, ctx, {
         action: 'tax_audit_wp.reopened',
         objectType: 'tax_audit_working_paper',
@@ -501,7 +507,7 @@ export class TaxAuditWorkspaceService {
         draftSource: w.draft_source,
         draftConfirmedAt: iso(w.draft_confirmed_at),
       });
-      if (blockers.length) throw new BadRequestException(blockers);
+      if (blockers.length) throw new BadRequestException(blockers.join(' '));
       await client.query(
         `UPDATE hsdg.tax_audit_working_papers
             SET status = 'in_review', sent_for_review_at = now(), reviewer_employee_id = $3,
@@ -698,6 +704,19 @@ export class TaxAuditWorkspaceService {
     }
     this.checkVersion(a.version, version);
     return a;
+  }
+
+  /**
+   * A clause open again during review sends the 3CD back to clause work, and
+   * every review level looks again (F-7).
+   */
+  private async backToClauseWork(client: PoolClient, a: AuditRow, reason: string): Promise<void> {
+    if (a.stage !== 'review') return;
+    await client.query(
+      `UPDATE hsdg.tax_audits SET stage = 'clause_work', version = version + 1 WHERE id = $1`,
+      [a.id],
+    );
+    await supersedeSignoffs(client, a.id, 'senior', reason);
   }
 
   private signed(stage: TaxAuditStage): boolean {

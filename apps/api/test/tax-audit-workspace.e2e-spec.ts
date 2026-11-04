@@ -44,6 +44,8 @@ describe('Tax audit clause workspace (e2e)', () => {
 
     // An article with a login, linked to the seeded Article North.
     const email = `article.ws.${Date.now()}@dhvaj.in`;
+    // Free Article North from an earlier suite's login first.
+    await su.query(`UPDATE hsdg.employees SET user_id = NULL WHERE employee_code = 'EMP007'`);
     const user = await http()
       .post('/api/v1/users')
       .set(await as('admin@dhvaj.in'))
