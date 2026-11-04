@@ -13,6 +13,8 @@ import {
   UDIN_DOCUMENT_KIND_LABEL,
   UDIN_WINDOW_NUDGE_DAYS,
   type UdinDocumentKind,
+  DSC_EXPIRY_NUDGE_DAYS,
+  dscExpiryBand,
 } from '@hsdg/contracts';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import { DatabaseService } from '../../database/database.service';
@@ -54,6 +56,8 @@ export interface ScanResult {
   invoiceOverdue: number;
   invoiceRemindersSent: number;
   udinWindowClosing: number;
+  dscExpiring: number;
+  dscOverdueReturn: number;
   total: number;
 }
 
@@ -185,6 +189,8 @@ export class NotificationsScanService {
         invoiceOverdue: 0,
         invoiceRemindersSent: 0,
         udinWindowClosing: 0,
+        dscExpiring: 0,
+        dscOverdueReturn: 0,
         total: 0,
       };
 
@@ -437,9 +443,12 @@ export class NotificationsScanService {
       await this.scanNotices(client, ctx, result);
       await this.scanOverdueInvoices(client, ctx, result);
       await this.scanUdinWindows(client, ctx, result);
+      await this.scanDsc(client, ctx, result);
 
       result.total =
         result.udinWindowClosing +
+        result.dscExpiring +
+        result.dscOverdueReturn +
         result.invoiceOverdue +
         result.noticeReplyDue +
         result.noticeHearingDue +
@@ -685,6 +694,79 @@ export class NotificationsScanService {
             : { engagementId: row.engagement_id, engagementKind: row.engagement_kind },
         dedupKey: `udin_window_closing:${row.source_id}:${row.window_ends_on}`,
       });
+    }
+  }
+
+  /**
+   * PS-305 — DSC tokens: whoever registered the token (and whoever has it out)
+   * is nudged once at 30 and once at 7 days before it expires, and once when a
+   * token is out past the day it was due back. Renewing (a new expiry) or
+   * bringing it back resolves the nudge. Only where ff_registers is on for the
+   * token's office.
+   */
+  private async scanDsc(client: PoolClient, ctx: RlsContext, result: ScanResult): Promise<void> {
+    const { rows } = await client.query<{
+      id: string;
+      holder_name: string;
+      entity_name: string | null;
+      valid_to: string;
+      days_left: number;
+      overdue_return: boolean;
+      expected_back_at: Date | null;
+      expected_back_on: string | null;
+      out_with: string | null;
+      recipients: (string | null)[];
+      office_code: string;
+    }>(
+      `SELECT t.id, t.holder_name, ent.legal_name AS entity_name, t.valid_to::text,
+              (t.valid_to - $1::date) AS days_left,
+              (NOT t.in_office AND t.expected_back_at < now()) AS overdue_return,
+              t.expected_back_at,
+              (t.expected_back_at AT TIME ZONE 'Asia/Kolkata')::date::text AS expected_back_on,
+              COALESCE(ow.full_name, t.out_with_name) AS out_with,
+              ARRAY[t.created_by_employee_id, t.out_with_employee_id,
+                    (SELECT m.by_employee_id FROM hsdg.dsc_movements m
+                      WHERE m.token_id = t.id AND m.kind = 'out'
+                      ORDER BY m.at DESC LIMIT 1)]::uuid[] AS recipients,
+              o.code AS office_code
+         FROM hsdg.dsc_tokens t
+         JOIN hsdg.offices o ON o.id = t.office_id
+         LEFT JOIN hsdg.entities ent ON ent.id = t.entity_id
+         LEFT JOIN hsdg.employees ow ON ow.id = t.out_with_employee_id
+        WHERE t.status = 'active'
+          AND (t.valid_to - $1::date BETWEEN 0 AND $2
+               OR (NOT t.in_office AND t.expected_back_at < now()))`,
+      [await this.istToday(client), Math.max(...DSC_EXPIRY_NUDGE_DAYS)],
+    );
+    for (const row of rows) {
+      if (!this.flags.isOnFor(FEATURE_FLAG.registers, row.office_code)) continue;
+      const who = `${row.holder_name}${row.entity_name ? ` (${row.entity_name})` : ''}`;
+      const link = { engagementId: '', engagementKind: 'compliance' as const, dscId: row.id };
+      const band = dscExpiryBand(Number(row.days_left));
+      if (band !== null) {
+        result.dscExpiring += await this.notifications.emitWith(client, ctx, {
+          type: NOTIFICATION_TYPE.dscExpiring,
+          recipientEmployeeIds: row.recipients,
+          title: `DSC expires ${inDays(Number(row.days_left))} — ${who}`,
+          body: `The DSC of ${who} is valid until ${row.valid_to}. Renew it and update the register.`,
+          objectType: 'dsc_token',
+          objectId: row.id,
+          link,
+          dedupKey: `dsc_expiring:${row.id}:${row.valid_to}:${band}`,
+        });
+      }
+      if (row.overdue_return && row.expected_back_at) {
+        result.dscOverdueReturn += await this.notifications.emitWith(client, ctx, {
+          type: NOTIFICATION_TYPE.dscOverdueReturn,
+          recipientEmployeeIds: row.recipients,
+          title: `DSC not back — ${who}`,
+          body: `The DSC of ${who} is out with ${row.out_with ?? 'someone'} and was due back on ${row.expected_back_on}. Check it in, or record where it is.`,
+          objectType: 'dsc_token',
+          objectId: row.id,
+          link,
+          dedupKey: `dsc_overdue_return:${row.id}:${row.expected_back_at.toISOString()}`,
+        });
+      }
     }
   }
 

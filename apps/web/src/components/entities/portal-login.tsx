@@ -60,7 +60,7 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-function CopyButton({ text, what }: { text: string; what: string }): JSX.Element {
+export function CopyButton({ text, what }: { text: string; what: string }): JSX.Element {
   const toast = useToast();
   return (
     <button

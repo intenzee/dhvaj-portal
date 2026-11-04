@@ -32,5 +32,6 @@ import { CredentialsService } from './credentials.service';
     ClientMasterService,
     ClientReturnsService,
   ],
+  exports: [CredentialsService],
 })
 export class CredentialsModule {}

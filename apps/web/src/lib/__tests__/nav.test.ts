@@ -278,6 +278,19 @@ describe('UDIN register (PS-304)', () => {
   });
 });
 
+describe('DSC register (PS-305)', () => {
+  it('shows with ff_registers on to engagement readers, preparers included', () => {
+    const labels = (p: Principal, registers?: boolean) =>
+      visibleNav(p, { registers, workLinks: true }).map((i) => i.label);
+    expect(labels(principal([PERMISSION.engagementRead]))).not.toContain('DSC register');
+    expect(labels(principal([PERMISSION.engagementRead]), true)).toContain('DSC register');
+    expect(labels(principal([PERMISSION.registerManage]), true)).toContain('DSC register');
+    const senior: Principal = { ...principal([PERMISSION.engagementRead]), roles: ['senior'] };
+    expect(labels(senior, true)).toContain('DSC register');
+    expect(labels(senior, true)).not.toContain('UDIN register');
+  });
+});
+
 describe('Accountant and HR desks (roles spec §5)', () => {
   const ACCOUNTANT = [
     PERMISSION.billingManage,

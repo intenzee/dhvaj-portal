@@ -1,7 +1,12 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Client } from 'pg';
-import { workItemHref, type NotificationDigest, type NotificationItem } from '@hsdg/contracts';
+import {
+  NOTIFICATION_TYPES,
+  workItemHref,
+  type NotificationDigest,
+  type NotificationItem,
+} from '@hsdg/contracts';
 import { seedIdentityFixtures } from './seed.helper';
 import { freshClient } from './fresh-client.helper';
 
@@ -322,7 +327,8 @@ describe('Actionable notifications (e2e)', () => {
       .expect(200);
     const mine = (await http().get('/api/v1/notifications/preferences').set(bearer(pa)).expect(200))
       .body as { type: string; delivery: string; editable: boolean }[];
-    expect(mine).toHaveLength(42);
+    // One preference per type, whatever later phases add.
+    expect(mine).toHaveLength(NOTIFICATION_TYPES.length);
     expect(mine.find((p) => p.type === 'ep_changed')).toMatchObject({
       delivery: 'bell',
       editable: true,

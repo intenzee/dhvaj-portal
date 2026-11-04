@@ -24,6 +24,7 @@ import {
   periodLabel,
   quarterOfMonth,
 } from './filing-rules';
+import { withRegisterDscExpiry } from '../registers/dsc-register.service';
 
 interface TreeRow {
   id: string;
@@ -214,7 +215,7 @@ export class StreamTreeService {
 
       const today = istToday(new Date());
       // P2-5: warn on open ROC items due after a director's DSC lapses.
-      const directors =
+      const profileDirectors =
         stream === 'roc' && registrationId
           ? ((
               await client.query<{ directors: CinProfileAttributes['directors'] | null }>(
@@ -226,6 +227,8 @@ export class StreamTreeService {
               )
             ).rows[0]?.directors ?? [])
           : [];
+      // PS-305: the DSC register's expiry, where it holds the director's token.
+      const directors = await withRegisterDscExpiry(client, profileDirectors);
       const toItem = (r: TreeRow): TreeItem => ({
         instanceId: r.id,
         ruleCode: r.rule_code,

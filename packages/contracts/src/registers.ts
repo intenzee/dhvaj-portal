@@ -156,3 +156,186 @@ export interface UdinPartnerOption {
   name: string;
   membershipNo: string | null;
 }
+
+/*
+ * PS-305 · DSC register and custody: every token the office holds, its
+ * expiry and where it is now. The PIN is an ADR-0035 credential, revealed
+ * only through the vault's checks and log.
+ */
+
+export const DSC_CLASSES = ['class3', 'dgft', 'other'] as const;
+export type DscClass = (typeof DSC_CLASSES)[number];
+export const DSC_CLASS_LABEL: Record<DscClass, string> = {
+  class3: 'Class 3',
+  dgft: 'DGFT',
+  other: 'Other',
+};
+
+export const DSC_USAGES = ['sign', 'encrypt', 'both'] as const;
+export type DscUsage = (typeof DSC_USAGES)[number];
+export const DSC_USAGE_LABEL: Record<DscUsage, string> = {
+  sign: 'Signing',
+  encrypt: 'Encryption',
+  both: 'Signing and encryption',
+};
+
+export const DSC_STATUSES = ['active', 'expired', 'returned_to_holder', 'lost'] as const;
+export type DscStatus = (typeof DSC_STATUSES)[number];
+export const DSC_STATUS_LABEL: Record<DscStatus, string> = {
+  active: 'Active',
+  expired: 'Expired',
+  returned_to_holder: 'Returned to holder',
+  lost: 'Lost',
+};
+
+export type DscMovementKind = 'out' | 'in' | 'returned_to_holder';
+export const DSC_MOVEMENT_LABEL: Record<DscMovementKind, string> = {
+  out: 'Checked out',
+  in: 'Checked in',
+  returned_to_holder: 'Returned to holder',
+};
+
+/** dsc_expiring nudges this many days before valid_to (and again at the second). */
+export const DSC_EXPIRY_NUDGE_DAYS = [30, 7] as const;
+/** The register's "at risk" view: expiring within this many days. */
+export const DSC_AT_RISK_DAYS = 30;
+
+/** The expiry nudge band a token is in: 30 (8–30 days left), 7 (0–7), else null. Pure. */
+export function dscExpiryBand(daysLeft: number): 30 | 7 | null {
+  if (daysLeft < 0) return null;
+  if (daysLeft <= 7) return 7;
+  if (daysLeft <= 30) return 30;
+  return null;
+}
+
+/** A token's status as shown: an active token past valid_to reads Expired. Pure. */
+export function dscEffectiveStatus(status: DscStatus, validTo: string, today: string): DscStatus {
+  return status === 'active' && validTo < today ? 'expired' : status;
+}
+
+export type DscView = 'all' | 'at_risk' | 'out' | 'expiring' | 'gone';
+
+export interface DscToken {
+  id: string;
+  officeId: string;
+  officeName: string | null;
+  holderName: string;
+  holderPan: string | null;
+  din: string | null;
+  entityId: string | null;
+  entityName: string | null;
+  class: DscClass;
+  usage: DscUsage;
+  issuer: string | null;
+  validFrom: string | null;
+  validTo: string;
+  /** Days until valid_to (negative once expired). */
+  daysToExpiry: number;
+  tokenSerial: string | null;
+  inOffice: boolean;
+  location: string | null;
+  outWithEmployeeId: string | null;
+  /** Who has it: the employee's name, or the person named at check-out. */
+  outWithName: string | null;
+  outSince: string | null;
+  expectedBackAt: string | null;
+  /** Out past expected_back_at. */
+  overdueReturn: boolean;
+  status: DscStatus;
+  statusReason: string | null;
+  notes: string | null;
+  /** A PIN is in the vault (revealed only on request). */
+  hasPin: boolean;
+  version: number;
+  link: WorkItemRef;
+}
+
+export interface DscMovement {
+  id: string;
+  kind: DscMovementKind;
+  at: string;
+  byName: string | null;
+  withName: string | null;
+  purpose: string | null;
+  expectedBackAt: string | null;
+}
+
+export interface DscTokenDetail extends DscToken {
+  movements: DscMovement[];
+  /** The caller may keep and reveal the PIN (the client's logins rule). */
+  canPin: boolean;
+}
+
+export interface DscListResponse {
+  items: DscToken[];
+  total: number;
+  /** register.manage: may add tokens and change their details. */
+  canManage: boolean;
+}
+
+export interface CreateDscTokenInput {
+  holderName: string;
+  holderPan?: string | null;
+  din?: string | null;
+  entityId?: string | null;
+  /** The office that keeps it; the caller's by default. */
+  officeId?: string | null;
+  class?: DscClass;
+  usage?: DscUsage;
+  issuer?: string | null;
+  validFrom?: string | null;
+  validTo: string;
+  tokenSerial?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  /** Kept in the vault, never in the register. */
+  pin?: string | null;
+}
+
+export interface UpdateDscTokenInput {
+  version: number;
+  holderName?: string;
+  holderPan?: string | null;
+  din?: string | null;
+  entityId?: string | null;
+  class?: DscClass;
+  usage?: DscUsage;
+  issuer?: string | null;
+  validFrom?: string | null;
+  validTo?: string;
+  tokenSerial?: string | null;
+  location?: string | null;
+  notes?: string | null;
+}
+
+export interface CheckOutDscInput {
+  version: number;
+  /** A colleague who takes it… */
+  withEmployeeId?: string | null;
+  /** …or someone else (the director, the client's accountant). */
+  withName?: string | null;
+  purpose: string;
+  /** The day it is due back (YYYY-MM-DD). */
+  expectedBackOn: string;
+}
+
+export interface CheckInDscInput {
+  version: number;
+  location?: string | null;
+}
+
+export interface ReleaseDscInput {
+  version: number;
+  status: 'returned_to_holder' | 'lost';
+  reason: string;
+}
+
+export interface SetDscPinInput {
+  pin: string;
+}
+
+export interface RevealedDscPin {
+  pin: string;
+  /** How long the screen shows it (seconds). */
+  showSeconds: number;
+}
