@@ -504,6 +504,8 @@ export const FEATURE_FLAG = {
   billing: 'ff_billing_v2',
   /** Practice Services Phase 3: the partner risk dashboard on Home (PS-301). */
   partnerRisk: 'ff_partner_risk',
+  /** Practice Services Phase 3: the UDIN and DSC registers. */
+  registers: 'ff_registers',
 } as const;
 export type FeatureFlag = (typeof FEATURE_FLAG)[keyof typeof FEATURE_FLAG];
 export const FEATURE_FLAGS: FeatureFlag[] = Object.values(FEATURE_FLAG);

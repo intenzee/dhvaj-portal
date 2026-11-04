@@ -90,6 +90,10 @@ export const NOTIFICATION_TYPE = {
   quickTaskReply: 'quick_task_reply',
   /** Your monthly partner pack (PS-303) is ready to download. */
   partnerPackReady: 'partner_pack_ready',
+  /** PS-304: a signed report still has no UDIN and its window ends in 7 days (signing partner). */
+  udinWindowClosing: 'udin_window_closing',
+  dscExpiring: 'dsc_expiring',
+  dscOverdueReturn: 'dsc_overdue_return',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -176,6 +180,9 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   quick_task_assigned: A,
   quick_task_reply: A,
   partner_pack_ready: A,
+  udin_window_closing: A,
+  dsc_expiring: A,
+  dsc_overdue_return: A,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -229,6 +236,9 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   quick_task_assigned: 'Quick task given to you',
   quick_task_reply: 'Reply on a quick task',
   partner_pack_ready: 'Monthly partner pack',
+  udin_window_closing: 'UDIN still to generate',
+  dsc_expiring: 'DSC expiring',
+  dsc_overdue_return: 'DSC not back',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */

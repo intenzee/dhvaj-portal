@@ -27,6 +27,7 @@ export const FEATURE_FLAG_LABEL: Record<FeatureFlag, string> = {
   ff_notices: 'Practice Services 1 — notices, their clock on Today, appeal deadlines',
   ff_billing_v2: 'Practice Services 2 — GST invoices, receipts, receivables, 26AS',
   ff_partner_risk: 'Practice Services 3 — the partner risk dashboard',
+  ff_registers: 'Practice Services 3 — UDIN and DSC registers',
 };
 
 /** One flag on Admin → Rollout. */

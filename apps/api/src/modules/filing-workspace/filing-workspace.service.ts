@@ -89,6 +89,7 @@ import type {
   SlotUploadDto,
 } from './dto/filing-workspace.dto';
 import { notLinkedToEmployee, notOnTeamReason } from '../../common/errors/staff-link.messages';
+import { withRegisterDscExpiry } from '../registers/dsc-register.service';
 
 /** The meetings whose "Record meeting" records the year's AGM (decision 2). */
 const AGM_RULES: ReadonlySet<string> = new Set(['ROC_AGM', 'ROC_FIRST_AGM']);
@@ -1394,7 +1395,7 @@ export class FilingWorkspaceService {
     // P2-5: a director's DSC that lapses before an open ROC item is due.
     const dsc =
       cin?.directors && !live && !['filed', 'not_applicable'].includes(inst.workflow_status)
-        ? dscWarningText(cin.directors, inst.due, today)
+        ? dscWarningText(await withRegisterDscExpiry(client, cin.directors), inst.due, today)
         : null;
     if (dsc) warnings.push({ code: 'dsc_expiring', message: `${dsc} — renew before filing.` });
 

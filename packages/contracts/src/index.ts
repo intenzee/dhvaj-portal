@@ -123,3 +123,4 @@ export * from './change-log';
 export * from './quick-tasks';
 export * from './risk';
 export * from './partner-pack';
+export * from './registers';

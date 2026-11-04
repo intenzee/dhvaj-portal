@@ -31,6 +31,13 @@ export interface WorkItemRef {
   auditAreaId?: string | null;
   /** A notice (hsdg.notices.id, PS-101): opens the notice itself. */
   noticeId?: string | null;
+  /**
+   * A UDIN register entry (hsdg.udin_register.id, PS-304): opens the register
+   * on it. A register item may have no engagement: engagementId is then ''.
+   */
+  udinId?: string | null;
+  /** A DSC token (hsdg.dsc_tokens.id, PS-305): opens the DSC register on it. */
+  dscId?: string | null;
 }
 
 /**
@@ -93,6 +100,8 @@ const NO_FILING_TAB: Record<EngagementKind, string> = {
  */
 export function workItemHref(ref: WorkItemRef): string {
   if (ref.noticeId) return `/notices/${ref.noticeId}`;
+  if (ref.udinId) return `/registers/udin?u=${encodeURIComponent(ref.udinId)}`;
+  if (ref.dscId) return `/registers/dsc?d=${encodeURIComponent(ref.dscId)}`;
   const base = `/engagements/${ref.engagementId}`;
   const p = new URLSearchParams();
   const filing = Boolean(ref.instanceId || (ref.stream && ref.periodKey));

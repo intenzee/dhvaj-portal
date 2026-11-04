@@ -148,6 +148,10 @@ export const PERMISSION = {
   teamManage: 'team.manage',
   /** CM-8: see client teams, their people and their clients — every staff role. */
   teamRead: 'team.read',
+  /** PS-302: cost rates, realisation and profitability (rates and margins). */
+  practiceFinance: 'practice.finance',
+  /** PS-304/305: add to and revoke the UDIN and DSC registers; check DSC tokens out and in. */
+  registerManage: 'register.manage',
 } as const;
 
 export type PermissionSlug = (typeof PERMISSION)[keyof typeof PERMISSION];

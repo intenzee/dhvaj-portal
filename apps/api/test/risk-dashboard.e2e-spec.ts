@@ -225,9 +225,9 @@ describe('PS-301 partner risk dashboard (e2e)', () => {
       expect(t.items.length).toBeLessThanOrEqual(10);
       expect(t.items.length).toBeLessThanOrEqual(t.count);
     }
-    // The registers arrive with PS-304 / PS-305; until then their tiles say so.
+    // The UDIN and DSC registers (PS-304 / PS-305) are in use under ff_registers.
     const registers = d.tiles.filter((t) => t.key === 'dsc' || t.key === 'udin');
-    for (const t of registers) if (!t.available) expect(t.count).toBe(0);
+    expect(registers.map((t) => t.available)).toEqual([true, true]);
   });
 
   it('counts exactly what falls in each window', async () => {
@@ -310,5 +310,25 @@ describe('PS-301 partner risk dashboard (e2e)', () => {
     await http().get('/api/v1/dashboard/risk/nonsense').set(bearer(mp)).expect(404);
     await http().get('/api/v1/dashboard/risk').set(bearer(sy)).expect(403);
     await http().get('/api/v1/dashboard/risk/missed').set(bearer(sy)).expect(403);
+  });
+
+  it('the DSC tile counts a token expiring within the month, from the register', async () => {
+    const was = await counts(mp);
+    const wasB = await counts(pb);
+    const token = (
+      await http()
+        .post('/api/v1/registers/dsc')
+        .set(bearer(mp))
+        .send({ holderName: `Risk ${tag}`, entityId, validTo: day(5) })
+        .expect(201)
+    ).body as { id: string };
+    const now = await counts(mp);
+    expect(now.dsc.n - was.dsc.n).toBe(1);
+    expect((await counts(pb)).dsc.n).toBe(wasB.dsc.n);
+    const item = await find(mp, 'dsc', (i) => i.ref?.dscId === token.id);
+    expect(item).toMatchObject({ dueOn: day(5) });
+    expect(riskItemHref(item!)).toMatch(/^\/registers\/dsc/);
+    const t = await tile(mp, 'dsc');
+    expect(t.href).toBe('/registers/dsc?view=at_risk');
   });
 });

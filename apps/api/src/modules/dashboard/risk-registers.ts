@@ -1,11 +1,13 @@
 import type { PoolClient } from 'pg';
 import type { RiskItem } from '@hsdg/contracts';
 import type { RlsContext } from '../../database/rls-context';
+import { dscAtRisk, udinOverdue } from '../registers/register-risk';
 
 /**
  * The register tiles (PS-304 UDIN, PS-305 DSC) read through the registers'
- * own risk queries. Until a register is in this build its tile says so
- * (`null`): the dashboard shows it as coming, never as a false zero.
+ * own risk queries, on the dashboard's RLS-scoped client. A tile answers
+ * `null` while its register is not in use: the dashboard then shows it as
+ * coming, never as a false zero.
  */
 export interface RegisterTileResult {
   count: number;
@@ -18,5 +20,5 @@ export type RegisterTileFn = (
   opts: { today: string; limit: number; offset: number },
 ) => Promise<RegisterTileResult | null>;
 
-export const udinTile: RegisterTileFn = async () => null;
-export const dscTile: RegisterTileFn = async () => null;
+export const udinTile: RegisterTileFn = (client, ctx, opts) => udinOverdue(client, ctx, opts);
+export const dscTile: RegisterTileFn = (client, ctx, opts) => dscAtRisk(client, ctx, opts);

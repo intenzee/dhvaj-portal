@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  FEATURE_FLAG,
   RISK_TILES,
   RISK_WINDOW,
   formatInr,
@@ -12,6 +13,7 @@ import {
   type RiskTileKey,
 } from '@hsdg/contracts';
 import { DatabaseService } from '../../database/database.service';
+import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
 import type { RlsContext } from '../../database/rls-context';
 import {
   workLinkFilingOf,
@@ -40,8 +42,8 @@ const TILE_HREF: Record<RiskTileKey, string> = {
   appeals: '/notices',
   receivables: '/billing/receivables',
   unbilled: '/billing/unbilled',
-  dsc: '/registers/dsc',
-  udin: '/registers/udin',
+  dsc: '/registers/dsc?view=at_risk',
+  udin: '/registers/udin?view=overdue',
   approvals: '/billing/approvals',
 };
 
@@ -102,6 +104,7 @@ export class RiskService {
   constructor(
     private readonly db: DatabaseService,
     private readonly unbilled: UnbilledService,
+    private readonly flags: FeatureFlagsService,
   ) {}
 
   async dashboard(ctx: RlsContext, limit: number): Promise<RiskDashboard> {
@@ -409,7 +412,8 @@ export class RiskService {
     page: Page,
     fn: RegisterTileFn,
   ): Promise<TileBody> {
-    const got = await fn(client, ctx, page);
+    // The registers' own switch: off, they are not in use (never a false zero).
+    const got = this.flags.isOn(FEATURE_FLAG.registers) ? await fn(client, ctx, page) : null;
     if (!got) return { count: 0, items: [], available: false };
     return { count: got.count, items: got.items, available: true };
   }

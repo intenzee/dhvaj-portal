@@ -49,8 +49,13 @@ export interface SaveCredentialInput extends CredentialSecret {
   pendingFrequency?: GstFrequency | null;
 }
 
+/** PS-305: a DSC token's PIN is a credential on this portal, one per token. */
+export const DSC_PIN_PORTAL = 'dsc';
+
 const NOT_READY =
   'Client logins are not set up on this server yet (CREDENTIALS_KEYS). Ask the administrator.';
+const DSC_PIN_ONLY =
+  'Only a partner or manager of the client’s office can keep a DSC PIN in the vault.';
 const MANAGE_ONLY = 'Only a partner or manager of the client’s office can change its logins.';
 
 /** The accounts each portal has. */
@@ -121,6 +126,7 @@ export class CredentialsService {
       const { rows } = await client.query<CredentialRow>(
         `${LIST_SQL}
           WHERE ($1::uuid IS NULL OR c.entity_id = $1) AND ($2::uuid IS NULL OR c.registration_id = $2)
+            AND c.portal <> 'dsc'
           ${ORDER}`,
         [by.entityId ?? null, by.registrationId ?? null],
       );
@@ -294,6 +300,8 @@ export class CredentialsService {
       );
       const was = seen.rows[0];
       if (!was) throw new NotFoundException('Login not found.');
+      if (was.portal === DSC_PIN_PORTAL)
+        throw new BadRequestException('A DSC PIN is removed from the DSC register.');
       const res = await client.query(`DELETE FROM hsdg.client_credentials WHERE id = $1`, [id]);
       if (res.rowCount === 0) throw new ForbiddenException(MANAGE_ONLY);
       await this.audit.recordWith(client, ctx, {
@@ -308,6 +316,100 @@ export class CredentialsService {
         },
       });
     });
+  }
+
+  /**
+   * PS-305 — keep (or replace) a DSC token's PIN, inside the caller's
+   * transaction. Only someone who manages the client's logins may (RLS).
+   * Returns the credential's id.
+   */
+  async saveDscPinWith(
+    client: PoolClient,
+    ctx: RlsContext,
+    input: { tokenId: string; entityId: string; holderName: string; pin: string },
+  ): Promise<string> {
+    if (!this.cipher.ready) throw new ServiceUnavailableException(NOT_READY);
+    const pin = input.pin;
+    if (!pin || pin.length > 64)
+      throw new BadRequestException('Type the PIN (up to 64 characters).');
+    const existing = await client.query<{ id: string }>(
+      `SELECT id FROM hsdg.client_credentials WHERE portal = 'dsc' AND dsc_token_id = $1`,
+      [input.tokenId],
+    );
+    const before = existing.rows[0];
+    const id = before?.id ?? randomUUID();
+    const username = input.holderName.trim() || 'DSC';
+    const sealed = this.cipher.seal(
+      { username, password: pin },
+      credentialAad(id, input.entityId, DSC_PIN_PORTAL, 'main'),
+    );
+    try {
+      if (before) {
+        const res = await client.query(
+          `UPDATE hsdg.client_credentials
+              SET entity_id = $2, username_hint = $3, ciphertext = $4, iv = $5, auth_tag = $6,
+                  key_version = $7, updated_by_user_id = $8
+            WHERE id = $1`,
+          [
+            id,
+            input.entityId,
+            usernameHint(username),
+            sealed.ciphertext,
+            sealed.iv,
+            sealed.authTag,
+            sealed.keyVersion,
+            ctx.userId,
+          ],
+        );
+        if (res.rowCount === 0) throw new ForbiddenException(DSC_PIN_ONLY);
+      } else {
+        await client.query(
+          `INSERT INTO hsdg.client_credentials
+             (id, entity_id, portal, account, dsc_token_id, username_hint, ciphertext, iv,
+              auth_tag, key_version, created_by_user_id, updated_by_user_id)
+           VALUES ($1, $2, 'dsc', 'main', $3, $4, $5, $6, $7, $8, $9, $9)`,
+          [
+            id,
+            input.entityId,
+            input.tokenId,
+            usernameHint(username),
+            sealed.ciphertext,
+            sealed.iv,
+            sealed.authTag,
+            sealed.keyVersion,
+            ctx.userId,
+          ],
+        );
+      }
+    } catch (err) {
+      if ((err as { code?: string }).code === '42501') throw new ForbiddenException(DSC_PIN_ONLY);
+      throw err;
+    }
+    await this.audit.recordWith(client, ctx, {
+      action: before ? 'credential.updated' : 'credential.saved',
+      objectType: 'client_credential',
+      objectId: id,
+      after: { entityId: input.entityId, portal: DSC_PIN_PORTAL, dscTokenId: input.tokenId },
+    });
+    return id;
+  }
+
+  /** PS-305 — forget a DSC token's PIN (the token went back to its holder, or was lost). */
+  async removeDscPinWith(client: PoolClient, ctx: RlsContext, tokenId: string): Promise<boolean> {
+    const { rows } = await client.query<{ id: string; entity_id: string }>(
+      `DELETE FROM hsdg.client_credentials WHERE portal = 'dsc' AND dsc_token_id = $1
+       RETURNING id, entity_id`,
+      [tokenId],
+    );
+    for (const r of rows) {
+      await this.audit.recordWith(client, ctx, {
+        action: 'credential.removed',
+        objectType: 'client_credential',
+        objectId: r.id,
+        before: { entityId: r.entity_id, portal: DSC_PIN_PORTAL, dscTokenId: tokenId },
+      });
+    }
+    return rows.length > 0;
   }
 
   /** POST /credentials/:id/reveal — the secret, once; the database logs the read. */

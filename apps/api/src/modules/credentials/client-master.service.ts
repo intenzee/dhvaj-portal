@@ -354,6 +354,7 @@ export class ClientMasterService {
           `SELECT c.id, c.entity_id, c.portal, c.account, c.username_hint, r.registration_number
            FROM hsdg.client_credentials c
            LEFT JOIN hsdg.entity_registrations r ON r.id = c.registration_id
+          WHERE c.portal <> 'dsc'
           ORDER BY c.portal, c.account, r.registration_number NULLS FIRST, c.created_at`,
         );
         const secrets = opts.passwords

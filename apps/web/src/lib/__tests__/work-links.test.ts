@@ -84,9 +84,10 @@ describe('workItemHref — the URL rules table', () => {
       query(href({ engagementKind: 'statutory_audit', taskId: 't1', auditAreaId: 'a1' })),
     ).toEqual({ tab: 'audit_file', phase: 'audit_areas', area: 'a1', task: 't1' });
     // The area only rides on a task with no filing, on a statutory audit.
-    expect(query(href({ engagementKind: 'assignment', taskId: 't1', auditAreaId: 'a1' }))).toEqual(
-      { tab: 'work', task: 't1' },
-    );
+    expect(query(href({ engagementKind: 'assignment', taskId: 't1', auditAreaId: 'a1' }))).toEqual({
+      tab: 'work',
+      task: 't1',
+    });
     expect(
       query(
         href({
@@ -138,4 +139,17 @@ describe('financialYearOfPeriod', () => {
     ['FY', null],
     [null, null],
   ])('%s → %s', (key, fy) => expect(financialYearOfPeriod(key)).toBe(fy));
+});
+
+describe('workItemHref — the registers (PS-304/305)', () => {
+  it('a UDIN opens its register row, with or without an engagement', () => {
+    expect(href({ udinId: 'u 1' })).toBe('/registers/udin?u=u%201');
+    expect(href({ engagementId: '', udinId: 'u1' })).toBe('/registers/udin?u=u1');
+  });
+  it('a DSC token opens its register row', () => {
+    expect(href({ engagementId: '', dscId: 'd1' })).toBe('/registers/dsc?d=d1');
+  });
+  it('a notice still wins over a register id', () => {
+    expect(href({ noticeId: 'n1', udinId: 'u1' }).startsWith('/notices/n1')).toBe(true);
+  });
 });

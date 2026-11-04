@@ -288,6 +288,7 @@ function SidebarContent({
     todayView: isOn(FEATURE_FLAG.todayView),
     filingRuns: isOn(FEATURE_FLAG.filingRuns),
     notices: isOn(FEATURE_FLAG.notices),
+    registers: isOn(FEATURE_FLAG.registers),
   });
   const activeHref = activeNavHref(
     sections.flatMap((s) => s.items),
