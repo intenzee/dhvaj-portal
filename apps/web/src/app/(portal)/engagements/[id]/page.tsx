@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from 'react';
 import Link from 'next/link';
+import { ChangeLogLink } from '@/components/change-log-link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { FolderOpen } from 'lucide-react';
@@ -141,7 +142,15 @@ const STREAM_HINT: Record<Stream, string> = {
   roc: 'ROC / MCA annual filings and event forms.',
 };
 
-const STREAM_ORDER: Stream[] = ['mis', 'bookkeeping', 'gst', 'tds', 'income_tax', 'tax_audit', 'roc'];
+const STREAM_ORDER: Stream[] = [
+  'mis',
+  'bookkeeping',
+  'gst',
+  'tds',
+  'income_tax',
+  'tax_audit',
+  'roc',
+];
 
 /** Change 3 — the 12 Compliance tabs (stream tabs only when in scope for the year). */
 function complianceTabs(
@@ -337,6 +346,7 @@ export default function EngagementDetailPage(): JSX.Element {
         subtitle={`${e.serviceName} · ${e.financialYear} ${e.periodLabel} · ${e.officeCode}`}
         actions={
           <div className="flex items-center gap-2">
+            <ChangeLogLink engagementId={e.id} />
             {hasRole(principal, ROLE.admin) && (
               <Link
                 href={`/admin?purge=${encodeURIComponent(e.engagementCode)}`}

@@ -33,6 +33,7 @@ import {
   ScrollText,
   UsersRound,
   TrendingUp,
+  History,
   type LucideIcon,
 } from 'lucide-react';
 import type { Principal } from './principal';
@@ -467,6 +468,15 @@ export const NAV_SECTIONS: NavSection[] = [
         // Billers (incl. the Accountant, who has no report.read) and report readers.
         permission: [PERMISSION.billingManage, PERMISSION.reportRead],
         hideFor: PREPARER_ROLES,
+        ready: true,
+      },
+      {
+        label: 'Change log',
+        href: '/change-log',
+        icon: History,
+        hint: 'Who added, changed or removed what on every client and engagement, field by field.',
+        permission: PERMISSION.auditRead,
+        onlyFor: [ROLE.managingPartner, ROLE.admin],
         ready: true,
       },
       {

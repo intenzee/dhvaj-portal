@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { ChangeLogLink } from '@/components/change-log-link';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -117,12 +118,11 @@ export default function EntityDetailPage(): JSX.Element {
         title={e.legalName}
         subtitle={`${e.entityCode} · ${e.typeName}${e.tradeName ? ` · ${e.tradeName}` : ''}`}
         actions={
-          canManage ? (
-            <div className="flex flex-wrap gap-2">
-              <EntityDetailActions entity={e} />
-              <MergeWithClientButton entityId={e.id} />
-            </div>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            <ChangeLogLink entityId={e.id} />
+            {canManage && <EntityDetailActions entity={e} />}
+            {canManage && <MergeWithClientButton entityId={e.id} />}
+          </div>
         }
       />
 

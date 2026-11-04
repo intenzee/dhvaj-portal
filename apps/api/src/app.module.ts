@@ -11,6 +11,7 @@ import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { ChangeLogModule } from './modules/change-log/change-log.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { OrganisationModule } from './modules/organisation/organisation.module';
 import { EntitiesModule } from './modules/entities/entities.module';
@@ -100,6 +101,7 @@ import { TeamsModule } from './modules/teams/teams.module';
     FeatureFlagsModule,
     HealthModule,
     AuditModule,
+    ChangeLogModule,
     IdentityModule,
     AuthModule,
     OrganisationModule,
