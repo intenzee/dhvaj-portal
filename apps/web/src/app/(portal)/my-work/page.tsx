@@ -38,6 +38,7 @@ import { fetchNotices, noticesKey } from '@/lib/notices-api';
 import { DEFAULT_NOTICE_FILTERS, noticeListPath } from '@/lib/notices';
 import { ArticleWork } from '@/components/my-work/article-work';
 import { MySets } from '@/components/my-work/my-sets';
+import { canSeeProgress } from '@/components/progress/progress-screen';
 
 const myNoticeColumns = noticeColumns({ owner: false });
 
@@ -452,6 +453,16 @@ function MyWorkInner(): JSX.Element {
             Sets of work given to you are on{' '}
             <Link href="/work-sets" className="text-primary-600 hover:underline">
               Assign work
+            </Link>
+            .
+          </>
+        )}
+        {canSeeProgress(principal) && (
+          <>
+            {' '}
+            How your people are doing is on{' '}
+            <Link href="/progress" className="text-primary-600 hover:underline">
+              Progress
             </Link>
             .
           </>

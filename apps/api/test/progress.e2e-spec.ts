@@ -184,6 +184,8 @@ describe('Progress tracker (e2e)', () => {
     const list = await items(mp, `groupBy=client&key=${e1}`);
     expect(list.items.slice(0, 5).every((i) => i.isOverdue)).toBe(true);
     expect(list.items[5]).toMatchObject({ progress: 'completed', isOverdue: false });
+    // Each task opens on its engagement's work tab.
+    expect(list.items[0]!.link).toMatchObject({ engagementId: e1, taskId: list.items[0]!.taskId });
   });
 
   it('a Senior sees only themselves and their Articles, and the counts match the drill-down', async () => {

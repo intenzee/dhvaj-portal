@@ -9,6 +9,8 @@
  * Article their own list — and never more than row-level security lets them.
  */
 
+import type { WorkItemRef } from './work-links';
+
 /** The tracker's own statuses; cancelled work is in none of them. */
 export const PROGRESS_STATUS = {
   /** todo */
@@ -124,6 +126,8 @@ export interface ProgressItem {
   /** "GSTR-1 · Oct 2026" when the task belongs to a filing. */
   filingLabel: string | null;
   stream: string | null;
+  /** Where the task opens: its filing's tab, or its engagement's work tab. */
+  link: WorkItemRef;
 }
 
 /** Drill-down filters: the table's filters plus one row's key and, optionally, a status. */

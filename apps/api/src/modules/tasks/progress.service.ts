@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   isBusinessFirmwide,
+  type EngagementKind,
   PROGRESS_GROUP,
   type ProgressFilters,
   type ProgressGroup,
@@ -17,6 +18,12 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import type { PageParams, PageResult } from '../../common/pagination/pagination.dto';
 import { istToday } from '../engagements/time/auto-time';
+import {
+  withWorkLinks,
+  workLinkFilingOf,
+  workLinkOf,
+  type WorkLinkSqlRow,
+} from '../../common/work-links';
 import {
   buildTimeline,
   COUNTS_SQL,
@@ -212,33 +219,21 @@ export class ProgressService {
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
       const limit = p(page.limit);
       const offset = p(page.offset);
-      const { rows } = await client.query<{
-        id: string;
-        title: string;
-        status: string;
-        progress: ProgressStatus;
-        overdue: boolean;
-        due_date: string | null;
-        engagement_id: string;
-        engagement_code: string;
-        entity_name: string;
-        client_name: string | null;
-        assignee: string | null;
-        assignee_name: string | null;
-        reviewer_name: string | null;
-        form_label: string | null;
-        period_key: string | null;
-        stream: string | null;
-        total: number;
-      }>(
-        `WITH base AS MATERIALIZED (${base})
-         SELECT b.id, t.title, b.status, b.progress, b.overdue, t.due_date::text,
-                b.engagement_id, g.engagement_code,
+      // Page the base rows first; names and links are joined for the page only.
+      const paged = `WITH base AS MATERIALIZED (${base}),
+         page AS (
+           SELECT b.*, count(*) OVER ()::int AS total
+             FROM base b
+             ${where}
+            ORDER BY b.overdue DESC, b.due_date NULLS LAST, b.created_at, b.id
+            LIMIT ${limit} OFFSET ${offset})
+         SELECT b.id, t.title, b.status, b.progress, b.overdue, b.due_date::text AS due_date,
+                b.created_at, b.engagement_id, g.engagement_code, g.kind AS engagement_kind,
                 COALESCE(en.display_name, en.legal_name) AS entity_name, c.name AS client_name,
                 b.assignee, ae.full_name AS assignee_name, re.full_name AS reviewer_name,
                 b.form_label, b.period_key, COALESCE(sv.stream, g.kind) AS stream,
-                count(*) OVER ()::int AS total
-           FROM base b
+                t.source_compliance_instance_id AS instance_id, t.audit_work_area_id, b.total
+           FROM page b
            JOIN hsdg.tasks t ON t.id = b.id
            JOIN hsdg.engagements g ON g.id = b.engagement_id
            JOIN hsdg.entities en ON en.id = g.entity_id
@@ -246,10 +241,36 @@ export class ProgressService {
            LEFT JOIN hsdg.employees ae ON ae.id = b.assignee
            LEFT JOIN hsdg.employees re ON re.id = t.reviewer_employee_id
            LEFT JOIN hsdg.engagement_services es ON es.id = t.engagement_service_id
-           LEFT JOIN hsdg.services sv ON sv.id = es.service_id
-           ${where}
-          ORDER BY b.overdue DESC, t.due_date NULLS LAST, t.created_at, b.id
-          LIMIT ${limit} OFFSET ${offset}`,
+           LEFT JOIN hsdg.services sv ON sv.id = es.service_id`;
+      const { rows } = await client.query<
+        WorkLinkSqlRow & {
+          id: string;
+          title: string;
+          status: string;
+          progress: ProgressStatus;
+          overdue: boolean;
+          due_date: string | null;
+          engagement_id: string;
+          engagement_code: string;
+          engagement_kind: EngagementKind;
+          entity_name: string;
+          client_name: string | null;
+          assignee: string | null;
+          assignee_name: string | null;
+          reviewer_name: string | null;
+          form_label: string | null;
+          period_key: string | null;
+          stream: string | null;
+          audit_work_area_id: string | null;
+          total: number;
+        }
+      >(
+        // The link's filing columns, probed for the page's rows only.
+        withWorkLinks(
+          paged,
+          'instance_id',
+          'p.overdue DESC, p.due_date NULLS LAST, p.created_at, p.id',
+        ),
         params,
       );
       return {
@@ -272,6 +293,15 @@ export class ProgressService {
           reviewerName: r.reviewer_name,
           filingLabel: r.form_label ? filingLabel(r.form_label, r.period_key) : null,
           stream: r.stream,
+          link: workLinkOf(
+            {
+              engagementId: r.engagement_id,
+              engagementKind: r.engagement_kind,
+              taskId: r.id,
+              auditAreaId: r.audit_work_area_id,
+            },
+            workLinkFilingOf(r),
+          ),
         })),
       };
     });
@@ -410,6 +440,7 @@ function baseSql(
        LEFT JOIN hsdg.compliance_rule_versions crv ON crv.id = ci.compliance_rule_version_id`
     : '';
   return `SELECT t.id, t.assigned_to_employee_id AS assignee, t.engagement_id, t.status,
+                 t.due_date, t.created_at,
                  ${PROGRESS_SQL} AS progress,
                  ${overdueSql('$1')} AS overdue${filingCols}
             FROM hsdg.tasks t
