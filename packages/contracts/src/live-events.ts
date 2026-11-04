@@ -57,3 +57,60 @@ export function parseSseFrames(buffer: string): { frames: SseFrame[]; rest: stri
   }
   return { frames, rest };
 }
+
+// ── Web Push: alerts on a closed browser or a phone ────────────────────────
+
+/** GET /push/config — whether this portal can push, and its VAPID public key. */
+export interface PushConfig {
+  enabled: boolean;
+  publicKey: string | null;
+}
+
+/** POST /push/subscriptions — the browser's PushSubscription.toJSON(). */
+export interface PushSubscribeInput {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  expirationTime?: number | null;
+}
+
+/** What the service worker receives in a push and shows as a notification. */
+export interface PushAlert {
+  kind: LiveEventKind;
+  taskId: string;
+  title: string;
+  body: string;
+  urgent: boolean;
+  /** Where a click opens. */
+  url: string;
+  at: string;
+  /** 0 the first time; 1, 2 … for the reminders of an unanswered urgent task. */
+  ring: number;
+}
+
+/**
+ * The push services a subscription may point at (Chrome/Edge/Opera/Brave via
+ * FCM, Edge via WNS, Firefox, Safari). The API posts only to these.
+ */
+export const PUSH_SERVICE_HOSTS = [
+  'fcm.googleapis.com',
+  'android.googleapis.com',
+  '.notify.windows.com',
+  '.push.services.mozilla.com',
+  'web.push.apple.com',
+  '.push.apple.com',
+] as const;
+
+/** An https endpoint on a known push service. Pure — tested. */
+export function isPushEndpoint(endpoint: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:' || u.port || u.username || u.password) return false;
+  const host = u.hostname.toLowerCase();
+  return PUSH_SERVICE_HOSTS.some((h) =>
+    h.startsWith('.') ? host.endsWith(h) && host.length > h.length : host === h,
+  );
+}

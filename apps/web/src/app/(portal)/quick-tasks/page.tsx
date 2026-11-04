@@ -11,6 +11,7 @@ import { Badge, Button, EmptyState, PageHeader, Spinner } from '@/components/ui'
 import { Input } from '@/components/form';
 import { NewQuickTaskModal } from '@/components/quick-tasks/new-quick-task-modal';
 import { QuickTaskThread } from '@/components/quick-tasks/quick-task-thread';
+import { DeviceAlerts } from '@/components/quick-tasks/device-alerts';
 import { QUICK_TASK_KEYS, STATUS_TONE, quickTime } from '@/components/quick-tasks/quick-task-api';
 
 type Box = 'inbox' | 'sent' | 'all';
@@ -106,9 +107,12 @@ function QuickTasks(): JSX.Element {
         title="Quick tasks"
         subtitle="Urgent jobs handed person to person. They answer Received, Doing (with a time) or Done."
         actions={
-          <Button onClick={() => setComposing(true)}>
-            <Plus className="h-4 w-4" /> New task
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <DeviceAlerts />
+            <Button onClick={() => setComposing(true)}>
+              <Plus className="h-4 w-4" /> New task
+            </Button>
+          </div>
         }
       />
       <div className="grid h-[calc(100vh-13rem)] min-h-[28rem] overflow-hidden rounded-xl border border-line-strong bg-surface shadow-card md:grid-cols-[22rem_1fr]">

@@ -28,6 +28,7 @@ import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LiveEventsService } from '../live/live-events.service';
+import { PushService, type TaskPush } from '../live/push.service';
 import { notLinkedToEmployee } from '../../common/errors/staff-link.messages';
 
 interface TaskRow {
@@ -113,6 +114,7 @@ export class QuickTasksService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly live: LiveEventsService,
+    private readonly push: PushService,
   ) {}
 
   private me(ctx: RlsContext, action: string): string {
@@ -189,6 +191,7 @@ export class QuickTasksService {
     const me = this.me(ctx, 'give a quick task');
     const title = input.title?.trim();
     if (!title) throw new BadRequestException('Write what is to be done.');
+    let push: TaskPush | null = null;
     const id = await this.db.withRlsContext(ctx, async (client) => {
       const people = await this.peopleMap(client);
       const to = people.get(input.assignedToEmployeeId);
@@ -257,6 +260,14 @@ export class QuickTasksService {
           urgent: input.urgent ?? true,
           fromName: people.get(me)?.full_name ?? null,
         });
+        push = {
+          kind: LIVE_EVENT.quickTaskAssigned,
+          taskId: task.id,
+          to: input.assignedToEmployeeId,
+          urgent: input.urgent ?? true,
+          fromName: people.get(me)?.full_name ?? null,
+          taskTitle: title,
+        };
       }
       await this.audit.recordWith(client, ctx, {
         action: 'quick_task.created',
@@ -266,6 +277,8 @@ export class QuickTasksService {
       });
       return task.id;
     });
+    // Their phone / closed browser, now that it has committed.
+    if (push) this.push.taskEvent(ctx, push);
     return this.get(ctx, id);
   }
 
@@ -419,6 +432,7 @@ export class QuickTasksService {
     const body = input.body?.trim() || null;
     if (!input.status && input.etaMinutes === undefined && !body)
       throw new BadRequestException('Write a message or pick an answer.');
+    let push: TaskPush | null = null;
     await this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<TaskRow>(`${TASK_SQL} WHERE q.id = $2 FOR UPDATE OF q`, [
         me,
@@ -514,8 +528,18 @@ export class QuickTasksService {
           urgent: r.urgent && QUICK_TASK_OPEN.includes(status ?? r.status),
           fromName: who,
         });
+        push = {
+          kind: LIVE_EVENT.quickTaskReply,
+          taskId: id,
+          to: other,
+          urgent: r.urgent && QUICK_TASK_OPEN.includes(status ?? r.status),
+          fromName: who,
+          taskTitle: r.title,
+          line: [line, body].filter(Boolean).join(' — ') || null,
+        };
       }
     });
+    if (push) this.push.taskEvent(ctx, push);
     return this.get(ctx, id);
   }
 }

@@ -14,6 +14,7 @@ import { ApiError, apiFetch, getToken, setToken } from './api';
 import { isSignedOut, reconnectDelay, renewalDue } from './session';
 import { entraSignIn, entraSignOut, isEntraConfigured } from './entra';
 import { newTelemetrySession } from './telemetry';
+import { stopPush } from './push';
 import type { Principal } from './principal';
 
 interface AuthState {
@@ -192,6 +193,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     // is read synchronously, so the request carries it even though it is
     // cleared on the next line; failures never block signing out.
     void apiFetch('/time/sign-out', { method: 'POST' }).catch(() => undefined);
+    // This browser stops getting the person's task alerts.
+    void stopPush();
     setToken(null);
     setPrincipal(null);
     queryClient.clear();

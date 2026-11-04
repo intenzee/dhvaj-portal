@@ -17,6 +17,7 @@ import { cn } from '@/lib/cn';
 import { connectLive, type LiveState } from '@/lib/live';
 import { useToast } from '@/lib/toast';
 import { Badge, Button, Spinner } from '@/components/ui';
+import { pushSupported, syncPush } from '@/lib/push';
 import {
   alertTitle,
   askDesktopAlerts,
@@ -28,6 +29,7 @@ import {
   startRinging,
   unlockSound,
 } from './alarm';
+import { DeviceAlerts } from './device-alerts';
 import { QUICK_TASK_KEYS, quickTime, useQuickTaskReply } from './quick-task-api';
 import { MessageBox } from './quick-reply-bar';
 import { Bubble, statusLine } from './quick-task-thread';
@@ -155,6 +157,9 @@ export function TaskAlertCenter({
 
   useEffect(() => {
     dismissed.current = loadDismissed();
+    // Alerts already on for this device: keep its subscription with the API
+    // (and with whoever is signed in now). Never asks anything.
+    void syncPush(false).catch(() => undefined);
     return unlockSound();
   }, []);
 
@@ -430,7 +435,9 @@ function TaskAlertCard({
           </>
         )}
 
-        {desktop === 'default' && (
+        {pushSupported() ? (
+          <DeviceAlerts compact />
+        ) : desktop === 'default' && (
           <button
             type="button"
             className="border-t border-line px-5 py-2 text-left text-xs text-primary-700 hover:bg-surface-sunken"

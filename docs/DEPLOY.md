@@ -145,11 +145,12 @@ Validated at boot by `apps/api/src/config/env.validation.ts`. With
 | `ONLYOFFICE_ENABLED` | A unique `ONLYOFFICE_JWT_SECRET` ≥ 32 characters. |
 | `DOC_AI_ENABLED` | `DOC_AI_ENDPOINT`, `DOC_AI_KEY`. |
 | `CLIENT_UPLOAD_ENABLED` | An https `WEB_PUBLIC_URL` (links sent to clients point at it). |
+| `WEB_PUSH_PUBLIC_KEY` / `WEB_PUSH_PRIVATE_KEY` | Both, or neither. |
 
 It starts but logs a **warning** (check the boot log) for:
 `AUTH_PROVIDER=dev` (demo only), no `TRUST_PROXY`, neither `SCHEDULER_ENABLED`
-nor `CRON_SECRET`, no `CREDENTIALS_KEYS` (client logins off), local storage
-without `STORAGE_LOCAL_DIR`.
+nor `CRON_SECRET`, no `CREDENTIALS_KEYS` (client logins off), no Web Push keys
+(task alerts reach open portal tabs only), local storage without `STORAGE_LOCAL_DIR`.
 
 Also set, as needed:
 
@@ -159,6 +160,7 @@ Also set, as needed:
 - `FEATURE_FLAG_OFFICES` (optional): a pilot list fixed by the deploy, e.g. `ff_billing_v2:NORTH`.
 - `SCHEDULER_ENABLED=true` on the API instances, **or** `CRON_SECRET` plus an external daily call to `GET /api/v1/internal/cron` with `Authorization: Bearer <CRON_SECRET>`. Scheduled jobs take a Postgres advisory lock, so several instances never run the same tick twice.
 - `CREDENTIALS_KEYS`: the vault key (§6).
+- `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT`: quick-task alerts that ring a person's phone or closed browser. Make the pair once with `npx web-push generate-vapid-keys` and keep it: a new pair makes every device turn alerts on again (the portal re-subscribes it on the next visit). `WEB_PUSH_SUBJECT` is a contact the push services may use, e.g. `mailto:it@dhvaj.in` (default: `WEB_PUBLIC_URL`). The API posts only to the browsers' own push services (Google, Microsoft, Mozilla, Apple). On iPhone/iPad, alerts work only after the portal is added to the Home Screen and opened from there.
 - `NOTIFICATION_CHANNELS`, `CLIENT_UPLOAD_*`, `SCHEDULER_*_CRON`, `COMPLIANCE_*`: optional; the defaults are in `env.validation.ts`.
 - `AUTH_PASSWORD_LOGIN` (default `true`): email + password sign-in alongside Microsoft. Password sessions are signed with a key derived from `AUTH_JWT_SECRET`; rotating that secret signs everyone out.
 - `SWAGGER_ENABLED=false` unless the API docs should be public.
@@ -263,6 +265,7 @@ they are not on already.
   - Receivables loads.
 - Client logins (if `CREDENTIALS_KEYS` is set): a test login on a test client saves, shows for 30 s, and the show is audited.
 - Client upload (if enabled): a link opens in a private window from outside the office.
+- Web Push (if the keys are set): on Quick tasks, "Turn on alerts on this device" and allow; close the portal tab; have someone give you a task: the device shows a notification with its sound.
 - The logs hold no request bodies, tokens, PANs or GSTINs.
 
 ---

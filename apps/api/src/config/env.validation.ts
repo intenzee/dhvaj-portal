@@ -302,6 +302,16 @@ export const envSchema = z.object({
   // Bearer secret for GET /internal/cron — the HTTP trigger serverless hosts
   // (Vercel Cron) use in place of the in-process scheduler. Unset = disabled.
   CRON_SECRET: z.string().min(16).optional(),
+  // Web Push (VAPID): quick-task alerts reach a person's device even when the
+  // portal is not open. Make a pair with `npx web-push generate-vapid-keys`.
+  // Both unset = push off (alerts reach open portal tabs only). The subject is
+  // who the push services can contact: a mailto: or https: URL.
+  WEB_PUSH_PUBLIC_KEY: z.string().min(40).optional(),
+  WEB_PUSH_PRIVATE_KEY: z.string().min(20).optional(),
+  WEB_PUSH_SUBJECT: z
+    .string()
+    .regex(/^(mailto:|https:\/\/)/, 'WEB_PUSH_SUBJECT must be a mailto: or https: URL')
+    .optional(),
 
   // Auto-generated deadline layers (spec §16/§17 step 8): when a STATUTORY
   // obligation is generated, add the standard review milestones as separate
@@ -475,6 +485,9 @@ export function productionConfigProblems(env: Env, raw: Record<string, unknown>)
       `ONLYOFFICE_ENABLED requires a unique ONLYOFFICE_JWT_SECRET of at least ${MIN_PROD_SECRET_LENGTH} characters.`,
     );
   }
+  if (!!env.WEB_PUSH_PUBLIC_KEY !== !!env.WEB_PUSH_PRIVATE_KEY) {
+    problems.push('WEB_PUSH_PUBLIC_KEY and WEB_PUSH_PRIVATE_KEY are set together (or neither).');
+  }
   if (env.DOC_AI_ENABLED && (!env.DOC_AI_ENDPOINT || !env.DOC_AI_KEY)) {
     problems.push('DOC_AI_ENABLED requires DOC_AI_ENDPOINT and DOC_AI_KEY.');
   }
@@ -532,6 +545,11 @@ export function productionConfigWarnings(env: Env): string[] {
   if (!env.CREDENTIALS_KEYS || env.CREDENTIALS_KEYS.trim() === '') {
     warnings.push(
       'CREDENTIALS_KEYS is not set: clients’ portal logins can be neither saved nor shown (see docs/DEPLOY.md).',
+    );
+  }
+  if (!env.WEB_PUSH_PUBLIC_KEY) {
+    warnings.push(
+      'WEB_PUSH_PUBLIC_KEY / WEB_PUSH_PRIVATE_KEY are not set: quick-task alerts reach open portal tabs only, not closed browsers or phones.',
     );
   }
   if (env.STORAGE_PROVIDER === 'local' && !env.STORAGE_LOCAL_DIR) {
