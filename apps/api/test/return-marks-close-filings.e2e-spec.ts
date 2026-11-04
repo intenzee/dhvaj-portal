@@ -168,6 +168,15 @@ describe('Client return marks close GST filings (e2e)', () => {
     const f = await filings();
     expect(f.get('GST_GSTR1_M 2026-06')?.workflow).toBe('filed');
     expect(f.get('GST_GSTR1_M 2026-07')).toEqual({ workflow: 'filed', notes: null });
+    // June's task, still Partner A's though A has left the engagement, closes with it.
+    const task = await su.query<{ status: string }>(
+      `SELECT t.status FROM hsdg.tasks t
+         JOIN hsdg.compliance_instances ci ON ci.id = t.source_compliance_instance_id
+         JOIN hsdg.compliance_rules r ON r.id = ci.compliance_rule_id
+        WHERE ci.engagement_id = $1 AND r.code = 'GST_GSTR1_M' AND ci.period_key = '2026-06'`,
+      [engagementId],
+    );
+    expect(task.rows.map((r) => r.status)).toEqual(['done']);
 
     const audit = await su.query(
       `SELECT 1 FROM hsdg.audit_events a
