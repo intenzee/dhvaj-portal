@@ -127,3 +127,4 @@ export * from './registers';
 export * from './practice-finance';
 export * from './stream-lead';
 export * from './quick-invoices';
+export * from './live-events';

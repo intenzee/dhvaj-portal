@@ -15,14 +15,14 @@ import { Badge, Spinner } from '@/components/ui';
 import { QUICK_TASK_KEYS, STATUS_TONE, quickTime } from './quick-task-api';
 import { MessageBox, QuickAnswers } from './quick-reply-bar';
 
-function statusLine(m: QuickTaskMessage): string | null {
+export function statusLine(m: QuickTaskMessage): string | null {
   if (!m.status && !m.etaAt) return null;
   if (m.status === 'sent') return 'Reopened';
   const label = m.status ? QUICK_TASK_STATUS_LABEL[m.status] : 'New time';
   return m.etaAt ? `${label} — done by ${quickTime(m.etaAt)}` : label;
 }
 
-function Bubble({
+export function Bubble({
   mine,
   name,
   at,

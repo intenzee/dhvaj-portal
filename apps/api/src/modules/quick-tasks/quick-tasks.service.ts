@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  LIVE_EVENT,
   NOTIFICATION_TYPE,
   QUICK_TASK_ASSIGNEE_STATUSES,
   QUICK_TASK_ASSIGNER_STATUSES,
@@ -26,6 +27,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { LiveEventsService } from '../live/live-events.service';
 import { notLinkedToEmployee } from '../../common/errors/staff-link.messages';
 
 interface TaskRow {
@@ -110,6 +112,7 @@ export class QuickTasksService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly live: LiveEventsService,
   ) {}
 
   private me(ctx: RlsContext, action: string): string {
@@ -246,6 +249,13 @@ export class QuickTasksService {
           objectType: 'quick_task',
           objectId: task.id,
           link: null,
+        });
+        // The pop-up on their screen, the moment this commits.
+        await this.live.publishWith(client, [input.assignedToEmployeeId], {
+          kind: LIVE_EVENT.quickTaskAssigned,
+          taskId: task.id,
+          urgent: input.urgent ?? true,
+          fromName: people.get(me)?.full_name ?? null,
         });
       }
       await this.audit.recordWith(client, ctx, {
@@ -496,6 +506,13 @@ export class QuickTasksService {
           objectType: 'quick_task',
           objectId: id,
           link: null,
+        });
+        // The answer reaches the other person's screen at once (a live chat).
+        await this.live.publishWith(client, [other], {
+          kind: LIVE_EVENT.quickTaskReply,
+          taskId: id,
+          urgent: r.urgent && QUICK_TASK_OPEN.includes(status ?? r.status),
+          fromName: who,
         });
       }
     });
