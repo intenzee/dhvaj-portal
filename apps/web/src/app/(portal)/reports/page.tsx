@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Download, Gavel } from 'lucide-react';
+import { Download, FileText, Gavel } from 'lucide-react';
 import {
   FEATURE_FLAG,
   PERMISSION,
@@ -63,13 +63,25 @@ export default function ReportsPage(): JSX.Element {
         title="Reports & MIS"
         subtitle="Management summaries across the engagements you can see (partners see the whole firm)."
         actions={
-          isOn(FEATURE_FLAG.notices) ? (
-            <Link
-              href="/reports/notices"
-              className="inline-flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
-            >
-              <Gavel className="h-4 w-4" aria-hidden /> Notices report
-            </Link>
+          isOn(FEATURE_FLAG.notices) || isOn(FEATURE_FLAG.partnerRisk) ? (
+            <div className="flex flex-wrap gap-2">
+              {isOn(FEATURE_FLAG.partnerRisk) && (
+                <Link
+                  href="/reports/partner-packs"
+                  className="inline-flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
+                >
+                  <FileText className="h-4 w-4" aria-hidden /> Partner packs
+                </Link>
+              )}
+              {isOn(FEATURE_FLAG.notices) && (
+                <Link
+                  href="/reports/notices"
+                  className="inline-flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-raised"
+                >
+                  <Gavel className="h-4 w-4" aria-hidden /> Notices report
+                </Link>
+              )}
+            </div>
           ) : undefined
         }
       />

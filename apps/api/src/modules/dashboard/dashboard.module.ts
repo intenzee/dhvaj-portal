@@ -12,6 +12,6 @@ import { RiskService } from './risk.service';
   imports: [BillingModule],
   controllers: [DashboardController],
   providers: [DashboardService, RiskService],
-  exports: [DashboardService],
+  exports: [DashboardService, RiskService],
 })
 export class DashboardModule {}

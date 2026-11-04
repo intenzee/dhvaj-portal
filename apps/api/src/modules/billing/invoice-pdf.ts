@@ -47,6 +47,7 @@ function ascii(s: string): string {
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[–—]/g, '-')
+    .replace(/·/g, '-')
     .replace(/…/g, '...')
     .replace(/[^\x20-\x7e]/g, '?');
 }

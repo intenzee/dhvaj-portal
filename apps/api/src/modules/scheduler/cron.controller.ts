@@ -10,6 +10,7 @@ import { MonthlyDataRequestScheduler } from '../filing-workspace/monthly-data-re
 import { NotificationDigestScheduler } from '../notifications/notification-digest.scheduler';
 import { istToday } from '../engagements/time/auto-time';
 import { PeopleExitsScheduler } from '../people/people-exits.scheduler';
+import { PartnerPacksScheduler, isPackDay } from '../partner-packs/partner-packs.scheduler';
 
 /**
  * HTTP trigger for the background jobs on hosts with no long-running process
@@ -29,6 +30,7 @@ export class CronController {
     private readonly monthlyRequest: MonthlyDataRequestScheduler,
     private readonly digest: NotificationDigestScheduler,
     private readonly exits: PeopleExitsScheduler,
+    private readonly packs: PartnerPacksScheduler,
   ) {}
 
   @Get()
@@ -44,6 +46,8 @@ export class CronController {
     await this.scheduler.runHorizonRoll();
     // The monthly GST data request goes out on the 1st (IST), before the drain.
     if (istToday(new Date()).endsWith('-01')) await this.monthlyRequest.run();
+    // Last month's partner packs on the 3rd (IST), before the drain sends them.
+    if (isPackDay(istToday(new Date()))) await this.packs.run();
     // Yesterday's informational notices in one message (once a day).
     await this.digest.run();
     await this.scheduler.runOutboxDrain();

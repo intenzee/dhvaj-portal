@@ -5,6 +5,7 @@ import { ComponentsModule } from '../components/components.module';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { EngagementsModule } from '../engagements/engagements.module';
 import { PeopleModule } from '../people/people.module';
+import { PartnerPacksModule } from '../partner-packs/partner-packs.module';
 import { ComplianceSchedulerService } from './compliance-scheduler.service';
 import { CronController } from './cron.controller';
 
@@ -22,6 +23,7 @@ import { CronController } from './cron.controller';
     EngagementsModule,
     FilingWorkspaceModule,
     PeopleModule,
+    PartnerPacksModule,
   ],
   controllers: [CronController],
   providers: [ComplianceSchedulerService],

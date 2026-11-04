@@ -88,6 +88,8 @@ export const NOTIFICATION_TYPE = {
   quickTaskAssigned: 'quick_task_assigned',
   /** The other person on a quick task answered (Received / Doing / Done / a message). */
   quickTaskReply: 'quick_task_reply',
+  /** Your monthly partner pack (PS-303) is ready to download. */
+  partnerPackReady: 'partner_pack_ready',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -173,6 +175,7 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   task_question: A,
   quick_task_assigned: A,
   quick_task_reply: A,
+  partner_pack_ready: A,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -225,6 +228,7 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   task_question: 'Question on a task you gave',
   quick_task_assigned: 'Quick task given to you',
   quick_task_reply: 'Reply on a quick task',
+  partner_pack_ready: 'Monthly partner pack',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */

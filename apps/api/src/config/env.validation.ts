@@ -292,6 +292,8 @@ export const envSchema = z.object({
   // Staff Workflow WF-305: yesterday's informational notices in one message,
   // 07:00 IST, once actionable notifications are on firm-wide.
   SCHEDULER_DIGEST_CRON: z.string().default('30 1 * * *'),
+  // PS-303: each partner's pack for last month, on the 3rd at 07:00 IST.
+  SCHEDULER_PARTNER_PACK_CRON: z.string().default('30 1 3 * *'),
   // HR: leavers whose date of exit has come are exited and their login
   // switched off, 00:05 IST daily.
   SCHEDULER_PEOPLE_EXITS_CRON: z.string().default('35 18 * * *'),
