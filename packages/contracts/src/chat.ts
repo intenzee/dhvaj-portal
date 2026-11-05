@@ -9,7 +9,8 @@
  *   POST /chat/conversations                  open (or find) the chat with someone
  *   GET  /chat/conversations/:id              one chat's header (the other person)
  *   GET  /chat/conversations/:id/messages     a page of messages, newest last
- *   POST /chat/conversations/:id/messages     send
+ *   POST /chat/conversations/:id/messages     send text, a photo, a voice note or a document
+ *   GET  /chat/messages/:id/file              the attachment's bytes (photo / voice inline)
  *   POST /chat/conversations/:id/read         you read everything in it
  *   POST /chat/conversations/:id/typing       you are typing (a live event, nothing kept)
  *   POST /chat/delivered                      your portal received these messages
@@ -33,7 +34,7 @@ export type ChatTick = (typeof CHAT_TICK)[keyof typeof CHAT_TICK];
 /** The longest message. */
 export const CHAT_MESSAGE_MAX = 4000;
 
-/** "Online" means the person's portal was seen within this long. */
+/** An open portal counts as online this long after each live-stream ping. */
 export const CHAT_ONLINE_WINDOW_MS = 60_000;
 
 /** How long "typing…" shows after the last typing event. */
@@ -42,13 +43,97 @@ export const CHAT_TYPING_SHOW_MS = 5_000;
 /** Send a typing event at most this often while someone types. */
 export const CHAT_TYPING_EVERY_MS = 3_000;
 
+/** What a message can carry besides text. */
+export const CHAT_ATTACHMENT_KINDS = ['image', 'voice', 'document'] as const;
+export type ChatAttachmentKind = (typeof CHAT_ATTACHMENT_KINDS)[number];
+
+/** The file types each kind accepts (the API refuses others). */
+export const CHAT_ATTACHMENT_TYPES: Record<ChatAttachmentKind, readonly string[]> = {
+  image: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'],
+  voice: [
+    'audio/webm',
+    'audio/ogg',
+    'audio/mp4',
+    'audio/mpeg',
+    'audio/aac',
+    'audio/wav',
+    'audio/x-m4a',
+  ],
+  document: [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/csv',
+    'text/plain',
+    'application/zip',
+    'application/json',
+    'application/xml',
+    'text/xml',
+    // A document may also be any image (sent as a file, not a photo).
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ],
+};
+
+/** The largest attachment (the portal's document limit, before base64). */
+export const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+
+/** The longest voice note. */
+export const CHAT_VOICE_MAX_MS = 15 * 60_000;
+
+/** The media type without parameters ("audio/webm;codecs=opus" → "audio/webm"). Pure — tested. */
+export function baseContentType(contentType: string): string {
+  return contentType.split(';')[0]!.trim().toLowerCase();
+}
+
+/** Whether a file of this type may be sent as this kind. Pure — tested. */
+export function chatAttachmentAllowed(kind: ChatAttachmentKind, contentType: string): boolean {
+  return CHAT_ATTACHMENT_TYPES[kind].includes(baseContentType(contentType));
+}
+
+export interface ChatAttachment {
+  kind: ChatAttachmentKind;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  /** Voice notes: how long. */
+  durationMs: number | null;
+}
+
+/** An attachment as sent: the file, base64. */
+export interface ChatAttachmentInput {
+  kind: ChatAttachmentKind;
+  fileName: string;
+  contentType: string;
+  contentBase64: string;
+  /** Voice notes: how long, as recorded. */
+  durationMs?: number;
+}
+
+/** The chat list's one-line preview of a message. Pure — tested. */
+export function chatPreview(m: { body: string; attachment: ChatAttachment | null }): string {
+  const a = m.attachment;
+  if (!a) return m.body;
+  if (a.kind === 'voice') {
+    const s = Math.round((a.durationMs ?? 0) / 1000);
+    return `🎤 Voice message (${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')})`;
+  }
+  if (a.kind === 'image') return m.body ? `📷 ${m.body}` : '📷 Photo';
+  return `📄 ${a.fileName}`;
+}
+
 export interface ChatPerson {
   id: string;
   name: string;
   code: string | null;
   officeCode: string | null;
   role: string | null;
-  /** Their portal was seen within CHAT_ONLINE_WINDOW_MS. */
+  /** Their portal is open now. */
   online: boolean;
   /** When their portal was last seen; null if never. */
   lastSeenAt: string | null;
@@ -60,7 +145,9 @@ export interface ChatMessage {
   senderId: string;
   /** Sent by the caller. */
   mine: boolean;
+  /** The text, or a photo's / document's caption ('' when none). */
   body: string;
+  attachment: ChatAttachment | null;
   /** The sender's own id for it, so a resend never doubles it. */
   clientRef: string | null;
   createdAt: string;
@@ -94,7 +181,9 @@ export interface OpenChatInput {
 
 /** POST /chat/conversations/:id/messages */
 export interface SendChatMessageInput {
-  body: string;
+  /** The text; optional (a caption) when there is an attachment. */
+  body?: string;
+  attachment?: ChatAttachmentInput;
   /** A uuid the sender makes, so a retried send is not stored twice. */
   clientRef?: string;
 }

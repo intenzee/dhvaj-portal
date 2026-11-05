@@ -2,16 +2,22 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { randomUUID } from 'node:crypto';
 import { Client, type PoolClient } from 'pg';
 import { Observable, type Subscriber } from 'rxjs';
-import type { LiveEvent } from '@hsdg/contracts';
+import type { ChatLiveEvent, LiveEvent } from '@hsdg/contracts';
 import { AppConfigService } from '../../config/config.module';
 
 /** The Postgres channel live events travel on, between every API instance. */
 export const LIVE_CHANNEL = 'hsdg_live';
 
+/** Every event the stream carries: quick tasks and chat. */
+export type AnyLiveEvent = LiveEvent | ChatLiveEvent;
+/** An event before it is stamped with its id and time. */
+type Draft<E> = E extends unknown ? Omit<E, 'id' | 'at'> : never;
+export type LiveEventDraft = Draft<AnyLiveEvent>;
+
 /** What goes over NOTIFY: who it is for, and the event. */
 export interface LiveEnvelope {
   to: string[];
-  event: LiveEvent;
+  event: AnyLiveEvent;
 }
 
 /** NOTIFY payloads are capped near 8 KB; ours are a few hundred bytes. */
@@ -27,7 +33,7 @@ const MAX_PAYLOAD = 7_500;
 @Injectable()
 export class LiveEventsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LiveEventsService.name);
-  private readonly streams = new Map<string, Set<Subscriber<LiveEvent>>>();
+  private readonly streams = new Map<string, Set<Subscriber<AnyLiveEvent>>>();
   private listener: Client | null = null;
   private retry: NodeJS.Timeout | null = null;
   private closing = false;
@@ -60,8 +66,8 @@ export class LiveEventsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** The events for one person, until they disconnect. */
-  subscribe(employeeId: string): Observable<LiveEvent> {
-    return new Observable<LiveEvent>((sub) => {
+  subscribe(employeeId: string): Observable<AnyLiveEvent> {
+    return new Observable<AnyLiveEvent>((sub) => {
       let set = this.streams.get(employeeId);
       if (!set) {
         set = new Set();
@@ -80,16 +86,12 @@ export class LiveEventsService implements OnModuleInit, OnModuleDestroy {
    * Queue an event inside the caller's transaction: it is sent on commit and
    * dropped on rollback.
    */
-  async publishWith(
-    client: PoolClient,
-    to: string[],
-    event: Omit<LiveEvent, 'id' | 'at'>,
-  ): Promise<void> {
+  async publishWith(client: PoolClient, to: string[], event: LiveEventDraft): Promise<void> {
     const recipients = [...new Set(to.filter(Boolean))];
     if (recipients.length === 0) return;
     const envelope: LiveEnvelope = {
       to: recipients,
-      event: { ...event, id: randomUUID(), at: new Date().toISOString() },
+      event: { ...event, id: randomUUID(), at: new Date().toISOString() } as AnyLiveEvent,
     };
     const payload = JSON.stringify(envelope);
     if (payload.length > MAX_PAYLOAD) {

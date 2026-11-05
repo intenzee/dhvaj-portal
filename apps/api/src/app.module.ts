@@ -13,6 +13,7 @@ import { IdentityModule } from './modules/identity/identity.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { ChangeLogModule } from './modules/change-log/change-log.module';
 import { QuickTasksModule } from './modules/quick-tasks/quick-tasks.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { LiveModule } from './modules/live/live.module';
 import { PartnerPacksModule } from './modules/partner-packs/partner-packs.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -110,6 +111,7 @@ import { TeamsModule } from './modules/teams/teams.module';
     AuditModule,
     ChangeLogModule,
     QuickTasksModule,
+    ChatModule,
     LiveModule,
     PartnerPacksModule,
     IdentityModule,
