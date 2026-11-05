@@ -76,31 +76,35 @@ export class AppConfigService {
     agentId: string;
     apiKey: string;
     rooms: Record<string, string>;
+    mentions: Record<string, string>;
     webUrl: string;
   } | null {
     const url = this.get('SWITCH_URL');
     const agentId = this.get('SWITCH_AGENT_ID');
     const apiKey = this.get('SWITCH_API_KEY');
     if (!url || !agentId || !apiKey) return null;
-    let rooms: Record<string, string> = {};
-    try {
-      const parsed: unknown = JSON.parse(this.get('SWITCH_ROOMS'));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        rooms = Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>).filter(
-            (e): e is [string, string] => typeof e[1] === 'string' && e[1].length > 0,
-          ),
-        );
-      }
-    } catch {
-      rooms = {};
-    }
     return {
       url: url.replace(/\/$/, ''),
       agentId,
       apiKey,
-      rooms,
+      rooms: stringMap(this.get('SWITCH_ROOMS')),
+      mentions: stringMap(this.get('SWITCH_MENTIONS')),
       webUrl: this.get('WEB_PUBLIC_URL'),
     };
+  }
+}
+
+/** A JSON object of non-empty strings; anything else reads as {}. */
+function stringMap(json: string): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (e): e is [string, string] => typeof e[1] === 'string' && e[1].length > 0,
+      ),
+    );
+  } catch {
+    return {};
   }
 }

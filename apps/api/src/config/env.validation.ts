@@ -244,6 +244,10 @@ export const envSchema = z.object({
   SWITCH_AGENT_ID: z.string().min(1).optional(),
   SWITCH_API_KEY: z.string().min(1).optional(),
   SWITCH_ROOMS: z.string().default('{}'),
+  // Notification type → Switch agent name to @mention, as JSON
+  // (e.g. {"task_review_requested":"dhvaj-reviewer"}): Switch hands an agent
+  // only the messages that name it, so this is how a post asks an agent to act.
+  SWITCH_MENTIONS: z.string().default('{}'),
 
   // ── Feature flags (Engagement Restructure phases) ─────────────────────────
   // Comma list of enabled flags (ff_engagement_kinds, ff_calendar_v2,

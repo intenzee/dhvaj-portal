@@ -50,6 +50,19 @@ describe('SwitchChannel', () => {
     );
   });
 
+  it('@mentions the agent configured for the type, and only that type', async () => {
+    const f = fakeFetch();
+    const ch = new SwitchChannel(
+      { ...config, mentions: { [NOTIFICATION_TYPE.taskReviewRequested]: 'dhvaj-reviewer' } },
+      f.impl,
+    );
+    await ch.deliver(notice());
+    await ch.deliver(notice({ type: NOTIFICATION_TYPE.taskReturned }));
+    const bodies = f.calls.map((c) => JSON.parse(String(c.init.body)).content as string);
+    expect(bodies[0]).toMatch(/^@dhvaj-reviewer \*\*GSTR-3B/);
+    expect(bodies[1]).toMatch(/^\*\*GSTR-3B/);
+  });
+
   it('posts once as the portal agent into the routed room', async () => {
     const f = fakeFetch();
     await new SwitchChannel(config, f.impl).deliver(notice());

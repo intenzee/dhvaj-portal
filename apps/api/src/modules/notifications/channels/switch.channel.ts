@@ -43,9 +43,13 @@ export function switchRoomFor(type: NotificationType): SwitchRoomKey {
   return ROOM_OF[type] ?? 'firm-ops';
 }
 
-/** The chat message for one notification: bold title, body, and a portal link. */
-export function switchMessage(n: OutboundNotification, webUrl: string): string {
-  const lines = [`**${n.title}**`];
+/**
+ * The chat message for one notification: bold title, body, and a portal link.
+ * With `mention` (a Switch agent's name) the title line @mentions it, which is
+ * what wakes that agent: Switch only hands an agent the messages that name it.
+ */
+export function switchMessage(n: OutboundNotification, webUrl: string, mention?: string): string {
+  const lines = [`${mention ? `@${mention} ` : ''}**${n.title}**`];
   if (n.body) lines.push(n.body);
   if (n.engagementId) lines.push(`${webUrl.replace(/\/$/, '')}/engagements/${n.engagementId}`);
   return lines.join('\n');
@@ -56,6 +60,8 @@ export interface SwitchChannelConfig {
   agentId: string;
   apiKey: string;
   rooms: Record<string, string>;
+  /** Notification type → the Switch agent to @mention for it (SWITCH_MENTIONS). */
+  mentions?: Record<string, string>;
   webUrl: string;
 }
 
@@ -102,7 +108,11 @@ export class SwitchChannel implements NotificationChannel {
         },
         body: JSON.stringify({
           room_id: roomId,
-          content: switchMessage(notification, this.config.webUrl),
+          content: switchMessage(
+            notification,
+            this.config.webUrl,
+            this.config.mentions?.[notification.type],
+          ),
         }),
         signal: AbortSignal.timeout(10_000),
       },
