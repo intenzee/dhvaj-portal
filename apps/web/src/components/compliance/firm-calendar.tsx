@@ -70,6 +70,20 @@ export function daysLeftLabel(
   return `${row.daysLeft} day${row.daysLeft === 1 ? '' : 's'}`;
 }
 
+/** Filed and not-applicable rows are done; the rest are still to file. */
+const isDone = (r: Pick<ComplianceCalendarRow, 'workflowStatus'>): boolean =>
+  r.workflowStatus === 'filed' || r.workflowStatus === 'not_applicable';
+
+/**
+ * Still-to-file rows first, then filed / N/A ones; each part keeps the API's
+ * order (by due date).
+ */
+export function openFirst<R extends Pick<ComplianceCalendarRow, 'workflowStatus'>>(
+  rows: readonly R[],
+): R[] {
+  return [...rows.filter((r) => !isDone(r)), ...rows.filter(isDone)];
+}
+
 /**
  * Where a calendar row opens: with ff_work_links, the filing itself (its year,
  * month or period, and part); before that, the stream tab.
@@ -169,7 +183,7 @@ export function FirmCalendar({
   });
 
   const people = employees.data?.items ?? [];
-  const rows = useMemo(() => calendar.data?.items ?? [], [calendar.data]);
+  const rows = useMemo(() => openFirst(calendar.data?.items ?? []), [calendar.data]);
   const hrefOf = useCalendarHref();
   const drawerItems = useMemo(() => drawerItemsFrom(rows, drawerTitle, hrefOf), [rows, hrefOf]);
 
