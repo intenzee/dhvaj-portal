@@ -65,7 +65,6 @@ SELECT e.id, s.id, v.fy, 'FY', e.home_office_id,
        ep.id, mgr.id, v.status, v.etype, v.prio
 FROM (VALUES
   ('ENTD01', 'GST_MONTHLY',    '2026-27', 'accepted',  'recurring_compliance', 'high',   'EMP003', 'EMP005'),
-  ('ENTD01', 'TDS_COMPLIANCE', '2026-27', 'active',    'recurring_compliance', 'normal', 'EMP003', 'EMP005'),
   ('ENTD02', 'STAT_AUDIT',     '2025-26', 'active',    'audit',                'high',   'EMP004', 'EMP005'),
   ('ENTD02', 'GST_MONTHLY',    '2026-27', 'accepted',  'recurring_compliance', 'normal', 'EMP004', NULL),
   ('ENTD03', 'TAX_AUDIT',      '2025-26', 'active',    'audit',                'urgent', 'EMP001', 'EMP005'),
@@ -86,14 +85,18 @@ WHERE NOT EXISTS (
     AND es.financial_year = v.fy AND es.period_label = 'FY'
 );
 
--- ── A multi-service engagement (§9–§10) — add GST to Sunrise's audit ──────
+-- ── Multi-service compliance engagements (§9–§10) ─────────────────────────
+-- A client has ONE open compliance engagement; further compliance services
+-- hang off it (engagements_one_open_compliance). Bharat adds TDS to its GST
+-- engagement; Sunrise adds payroll to its GST engagement (a statutory-audit
+-- engagement may only carry STAT_AUDIT).
 INSERT INTO hsdg.engagement_services (engagement_id, service_id, office_id, is_primary, status)
 SELECT eng.id, s.id, eng.office_id, false, 'active'
-FROM hsdg.engagements eng
-JOIN hsdg.entities e ON e.id = eng.entity_id AND e.entity_code = 'ENTD02'
-JOIN hsdg.services base ON base.id = eng.service_id AND base.code = 'STAT_AUDIT'
-JOIN hsdg.services s ON s.code = 'PAYROLL'
-WHERE eng.financial_year = '2025-26'
+FROM (VALUES ('ENTD01', 'TDS_COMPLIANCE'), ('ENTD02', 'STREAM_PAYROLL')) AS v(ecode, scode)
+JOIN hsdg.entities e ON e.entity_code = v.ecode
+JOIN hsdg.engagements eng ON eng.entity_id = e.id AND eng.kind = 'compliance'
+JOIN hsdg.services s ON s.code = v.scode
+WHERE eng.financial_year = '2026-27'
   AND NOT EXISTS (
     SELECT 1 FROM hsdg.engagement_services es
     WHERE es.engagement_id = eng.id AND es.service_id = s.id
