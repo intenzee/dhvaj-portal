@@ -281,7 +281,7 @@ export async function raiseClientDependencies(
                          WHERE d.compliance_instance_id = ci.id AND d.slot_code = it.slot_code)
         AND NOT EXISTS (SELECT 1 FROM hsdg.documents d
                          WHERE d.compliance_instance_id = ci.id AND d.slot_code = it.slot_code
-                           AND d.status = 'active')`,
+                           AND d.status = 'active' AND d.deleted_at IS NULL)`,
     [instanceId, CLIENT_DEPENDENCY_SLOTS],
   );
   for (const r of rows) {
@@ -325,11 +325,14 @@ export async function syncAutoTicks(client: PoolClient, instanceId: string): Pro
             document_id = (SELECT d.id FROM hsdg.documents d
                             WHERE d.compliance_instance_id = it.compliance_instance_id
                               AND d.slot_code = it.slot_code AND d.status = 'active'
+                              AND d.deleted_at IS NULL
                             ORDER BY d.created_at DESC LIMIT 1)
       WHERE it.compliance_instance_id = $1 AND it.auto_tick = 'document' AND it.status = 'open'
         AND EXISTS (SELECT 1 FROM hsdg.documents d
                      WHERE d.compliance_instance_id = it.compliance_instance_id
-                       AND d.slot_code = it.slot_code AND d.status = 'active')`,
+                       AND d.slot_code = it.slot_code AND d.status = 'active'
+                       -- A soft-deleted document no longer counts as received.
+                       AND d.deleted_at IS NULL)`,
     [instanceId],
   );
   await client.query(
