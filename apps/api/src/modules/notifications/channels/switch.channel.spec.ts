@@ -20,10 +20,16 @@ const notice = (over: Partial<OutboundNotification> = {}): OutboundNotification 
   ...over,
 });
 
-function fakeFetch(status = 200) {
+function fakeFetch(
+  status = 200,
+  rooms: { room_id: string; name: string; archived?: boolean }[] = [],
+) {
   const calls: { url: string; init: RequestInit }[] = [];
   const impl = (async (url: string, init: RequestInit) => {
     calls.push({ url, init });
+    if (url.endsWith('/ops/list_rooms')) {
+      return new Response(JSON.stringify({ result: rooms }), { status: 200 });
+    }
     return new Response(status === 200 ? '{"ok":true}' : 'nope', { status });
   }) as unknown as typeof fetch;
   return { calls, impl };
@@ -72,12 +78,47 @@ describe('SwitchChannel', () => {
     expect(JSON.parse(String(f.calls[0]!.init.body))).toMatchObject({ room_id: 'room-review' });
   });
 
+  it('finds an unpinned room by name among dhvaj-portal’s rooms, and looks again after a refusal', async () => {
+    const f = fakeFetch(200, [
+      { room_id: 'old-chase', name: 'client-chase', archived: true },
+      { room_id: 'room-chase', name: 'client-chase' },
+    ]);
+    const ch = new SwitchChannel({ ...config, rooms: {} }, f.impl);
+    await ch.deliver(notice({ type: NOTIFICATION_TYPE.documentUploaded }));
+    await ch.deliver(notice({ type: NOTIFICATION_TYPE.documentUploaded }));
+    const posts = f.calls.filter((c) => c.url.endsWith('/message'));
+    expect(posts.map((c) => JSON.parse(String(c.init.body)).room_id)).toEqual([
+      'room-chase',
+      'room-chase',
+    ]);
+    // Listed once: the second delivery used the cache.
+    expect(f.calls.filter((c) => c.url.endsWith('/ops/list_rooms'))).toHaveLength(1);
+
+    const refused = fakeFetch(500, [{ room_id: 'room-chase', name: 'client-chase' }]);
+    const ch2 = new SwitchChannel({ ...config, rooms: {} }, refused.impl);
+    await expect(
+      ch2.deliver(notice({ type: NOTIFICATION_TYPE.documentUploaded })),
+    ).rejects.toThrow();
+    await expect(
+      ch2.deliver(notice({ type: NOTIFICATION_TYPE.documentUploaded })),
+    ).rejects.toThrow();
+    expect(refused.calls.filter((c) => c.url.endsWith('/ops/list_rooms'))).toHaveLength(2);
+  });
+
+  it('throws when no room has the name, so the outbox retries later', async () => {
+    const f = fakeFetch(200, []);
+    await expect(
+      new SwitchChannel({ ...config, rooms: {} }, f.impl).deliver(notice()),
+    ).rejects.toThrow(/no room named review-queue/);
+  });
+
   it('falls back to firm-ops when the routed room is not mapped', async () => {
     const f = fakeFetch();
     await new SwitchChannel(config, f.impl).deliver(
       notice({ type: NOTIFICATION_TYPE.documentUploaded }),
     );
-    expect(JSON.parse(String(f.calls[0]!.init.body))).toMatchObject({ room_id: 'room-ops' });
+    const post = f.calls.find((c) => c.url.endsWith('/message'))!;
+    expect(JSON.parse(String(post.init.body))).toMatchObject({ room_id: 'room-ops' });
   });
 
   it('never posts a client-facing (e-mail) delivery into chat', async () => {

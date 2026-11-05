@@ -59,6 +59,7 @@ export interface SwitchChannelConfig {
   url: string;
   agentId: string;
   apiKey: string;
+  /** Room key → Switch room id (SWITCH_ROOMS). A key left out is found by name. */
   rooms: Record<string, string>;
   /** Notification type → the Switch agent to @mention for it (SWITCH_MENTIONS). */
   mentions?: Record<string, string>;
@@ -74,12 +75,19 @@ export interface SwitchChannelConfig {
  * Unlike the logging stubs this is a real transport: a failed post throws, and
  * the outbox drain retries it with backoff (it never fails the domain change,
  * which committed when the delivery was enqueued).
+ *
+ * Rooms are found by name among the rooms dhvaj-portal is in (Switch's
+ * `list_rooms`), cached for a minute and looked up again after a refused post,
+ * so a template redeployed with new rooms needs no restart. SWITCH_ROOMS pins a
+ * key to a room id instead.
  */
 export class SwitchChannel implements NotificationChannel {
   readonly name = 'switch';
   readonly audience = 'room' as const;
   readonly accepts = switchAccepts;
   private readonly logger = new Logger(SwitchChannel.name);
+  private roomCache: { at: number; byName: Map<string, string> } | null = null;
+  static readonly ROOM_CACHE_MS = 60_000;
 
   constructor(
     private readonly config: SwitchChannelConfig,
@@ -93,10 +101,10 @@ export class SwitchChannel implements NotificationChannel {
     // Rows queued before a type left the list (or by an older build) are dropped.
     if (!switchAccepts(notification.type)) return;
     const key = switchRoomFor(notification.type);
-    const roomId = this.config.rooms[key] ?? this.config.rooms['firm-ops'];
+    const roomId = await this.roomIdFor(key);
     if (!roomId) {
-      this.logger.warn(`[switch] no room for ${key} (nor firm-ops) — set SWITCH_ROOMS`);
-      return;
+      // Thrown, not skipped: the outbox retries once the room exists.
+      throw new Error(`[switch] dhvaj-portal is in no room named ${key} (nor firm-ops)`);
     }
     const res = await this.fetchImpl(
       `${this.config.url}/agents/${encodeURIComponent(this.config.agentId)}/message`,
@@ -118,8 +126,46 @@ export class SwitchChannel implements NotificationChannel {
       },
     );
     if (!res.ok) {
+      // The room may have been replaced (a redeployed template): look again next time.
+      this.roomCache = null;
       const detail = (await res.text().catch(() => '')).slice(0, 200);
       throw new Error(`Switch refused the post to ${key}: ${res.status} ${detail}`);
     }
+  }
+
+  private async roomIdFor(key: SwitchRoomKey): Promise<string | undefined> {
+    if (this.config.rooms[key]) return this.config.rooms[key];
+    const byName = await this.roomsByName();
+    const found = byName.get(key);
+    if (found) return found;
+    this.logger.warn(`[switch] dhvaj-portal is in no room named ${key}; posting to firm-ops`);
+    return this.config.rooms['firm-ops'] ?? byName.get('firm-ops');
+  }
+
+  /** The rooms dhvaj-portal is in, by name (archived ones left out). */
+  private async roomsByName(): Promise<Map<string, string>> {
+    if (this.roomCache && Date.now() - this.roomCache.at < SwitchChannel.ROOM_CACHE_MS) {
+      return this.roomCache.byName;
+    }
+    const res = await this.fetchImpl(
+      `${this.config.url}/agents/${encodeURIComponent(this.config.agentId)}/ops/list_rooms`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.config.apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: '{}',
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!res.ok) throw new Error(`Switch would not list dhvaj-portal's rooms: ${res.status}`);
+    const body = (await res.json()) as {
+      result?: { room_id: string; name: string; archived?: boolean }[];
+    };
+    const byName = new Map<string, string>();
+    for (const r of body.result ?? []) if (!r.archived) byName.set(r.name, r.room_id);
+    this.roomCache = { at: Date.now(), byName };
+    return byName;
   }
 }
