@@ -1,11 +1,13 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { NOTIFICATION_TYPE, SYSTEM_ROLE } from '@hsdg/contracts';
 import { DatabaseService } from '../../../database/database.service';
 import type { RlsContext } from '../../../database/rls-context';
 import { AppConfigService } from '../../../config/config.module';
 import { AuditService } from '../../audit/audit.service';
 import { STORAGE_PROVIDER, type StorageProvider } from '../storage/storage-provider';
 import { decodeUpload } from '../documents.upload';
+import { NotificationsService } from '../../notifications/notifications.service';
 
 /** A magic link as staff see it (never includes the token or its hash). */
 export interface ClientUploadLinkRecord {
@@ -54,7 +56,10 @@ export class ClientUploadService {
     private readonly config: AppConfigService,
     private readonly audit: AuditService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  private readonly logger = new Logger(ClientUploadService.name);
 
   get enabled(): boolean {
     return this.config.get('CLIENT_UPLOAD_ENABLED');
@@ -198,23 +203,66 @@ export class ClientUploadService {
     const contentType = input.contentType || 'application/octet-stream';
     const reference = this.storage.newReference(row.engagement_id, randomUUID());
     await this.storage.write(reference, decoded.buffer, contentType);
+    let documentId: string;
     try {
-      await this.db.query(`SELECT hsdg.create_client_document($1,$2,$3,$4,$5,$6,$7) AS id`, [
-        tokenHash,
-        (input.title?.trim() || input.filename).slice(0, 300),
-        input.filename,
-        contentType,
-        decoded.sizeBytes,
-        decoded.checksumSha256,
-        reference,
-      ]);
+      const created = await this.db.query<{ id: string }>(
+        `SELECT hsdg.create_client_document($1,$2,$3,$4,$5,$6,$7) AS id`,
+        [
+          tokenHash,
+          (input.title?.trim() || input.filename).slice(0, 300),
+          input.filename,
+          contentType,
+          decoded.sizeBytes,
+          decoded.checksumSha256,
+          reference,
+        ],
+      );
+      documentId = created.rows[0]!.id;
     } catch {
       // Compensate the orphan blob if the metadata write is rejected (e.g. the
       // link expired between info-check and write, or hit its cap).
       await this.storage.remove(reference).catch(() => undefined);
       throw new BadRequestException('This upload link is invalid or has expired.');
     }
+    // The file is in: telling the team must not undo the client's upload.
+    await this.notifyTeam(documentId, row, input.filename).catch((err: unknown) =>
+      this.logger.warn(`Client upload ${documentId}: team not notified — ${String(err)}`),
+    );
     return { ok: true };
+  }
+
+  /**
+   * "Document uploaded" to whoever asked for it (the request's raiser, the
+   * person responsible and the link's maker; else the engagement leads), as a
+   * staff upload notifies its reviewers. There is no staff principal here, so
+   * the recipients come from a definer function and the emit runs under the
+   * system context; emit_notification and the outbox are definer too.
+   */
+  private async notifyTeam(documentId: string, link: InfoRow, filename: string): Promise<void> {
+    await this.db.withRlsContext(
+      { userId: '', role: SYSTEM_ROLE, officeId: '' },
+      async (client) => {
+        const { rows } = await client.query<{ engagement_id: string; employee_id: string }>(
+          `SELECT engagement_id, employee_id FROM hsdg.client_upload_recipients($1)`,
+          [documentId],
+        );
+        if (rows.length === 0) return;
+        const who = link.entity_name ?? 'The client';
+        await this.notifications.emitWith(
+          client,
+          { userId: '', role: SYSTEM_ROLE, officeId: '' },
+          {
+            type: NOTIFICATION_TYPE.documentUploaded,
+            recipientEmployeeIds: rows.map((r) => r.employee_id),
+            title: `${who} uploaded: ${link.requested_info ?? filename}`,
+            body: `${filename} — sent through the secure upload link.`,
+            engagementId: rows[0]!.engagement_id,
+            objectType: 'document',
+            objectId: documentId,
+          },
+        );
+      },
+    );
   }
 }
 
