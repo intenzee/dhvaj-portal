@@ -40,6 +40,7 @@ import { TelemetryTracker } from './telemetry-tracker';
 import { ChangePasswordModal } from './change-password-modal';
 import { NewQuickTaskModal } from './quick-tasks/new-quick-task-modal';
 import { QuickTaskInboxButton } from './quick-tasks/quick-task-inbox';
+import { ChatButton } from './chat/chat-button';
 
 /** "New …" quick-create actions, shown only to users who may create that thing. */
 const CREATE_ACTIONS: {
@@ -201,6 +202,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
             <RunningTimerBanner />
             <AwayResumeBanner />
             <ThemeToggle />
+            <ChatButton />
             <QuickTaskInboxButton />
             <NotificationBell />
             <button

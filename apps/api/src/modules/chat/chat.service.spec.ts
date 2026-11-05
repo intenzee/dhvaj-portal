@@ -21,19 +21,19 @@ describe('chat helpers', () => {
     expect(lastSeenLabel({ online: true, lastSeenAt: null }, now)).toBe('online');
     expect(lastSeenLabel({ online: false, lastSeenAt: null }, now)).toBe('');
     expect(lastSeenLabel({ online: false, lastSeenAt: '2026-11-05T08:35:00Z' }, now)).toBe(
-      'last seen today at 14:05',
+      'last seen today at 2:05 pm',
     );
     expect(lastSeenLabel({ online: false, lastSeenAt: '2026-11-04T03:40:00Z' }, now)).toBe(
-      'last seen yesterday at 09:10',
+      'last seen yesterday at 9:10 am',
     );
     expect(lastSeenLabel({ online: false, lastSeenAt: '2026-11-03T12:30:00Z' }, now)).toBe(
-      'last seen 03 Nov at 18:00',
+      'last seen 3 Nov at 6:00 pm',
     );
     expect(lastSeenLabel({ online: false, lastSeenAt: '2025-12-31T20:00:00Z' }, now)).toBe(
-      'last seen 01 Jan at 01:30',
+      'last seen 1 Jan at 1:30 am',
     );
     expect(lastSeenLabel({ online: false, lastSeenAt: '2024-06-01T06:30:00Z' }, now)).toBe(
-      'last seen 01 Jun 2024 at 12:00',
+      'last seen 1 Jun 2024 at 12:00 pm',
     );
   });
 

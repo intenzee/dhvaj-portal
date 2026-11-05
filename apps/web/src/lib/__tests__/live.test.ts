@@ -1,5 +1,6 @@
 import { parseSseFrames } from '@hsdg/contracts';
 import { reconnectDelay } from '../live';
+import { isChatEvent, isQuickTaskEvent } from '../live-hub';
 
 describe('the live stream', () => {
   it('reads whole frames and keeps a half-read one for next time', () => {
@@ -26,5 +27,14 @@ describe('the live stream', () => {
     expect([0, 1, 2, 3, 4, 5, 6, 20].map(reconnectDelay)).toEqual([
       1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000,
     ]);
+  });
+});
+
+describe('the shared live stream', () => {
+  it('tells quick-task frames from chat frames', () => {
+    const chat = { kind: 'chat.message' } as never;
+    const task = { kind: 'quick_task.reply' } as never;
+    expect([isChatEvent(chat), isQuickTaskEvent(chat)]).toEqual([true, false]);
+    expect([isChatEvent(task), isQuickTaskEvent(task)]).toEqual([false, true]);
   });
 });

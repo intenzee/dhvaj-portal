@@ -1,7 +1,10 @@
-import { parseSseFrames, type LiveEvent } from '@hsdg/contracts';
+import { parseSseFrames, type ChatLiveEvent, type LiveEvent } from '@hsdg/contracts';
 import { API_BASE, getToken } from './api';
 
 export type LiveState = 'connecting' | 'live' | 'offline';
+
+/** Any frame the stream carries: a quick-task one or a chat one. */
+export type AnyLiveEvent = LiveEvent | ChatLiveEvent;
 
 /** The wait before reconnect attempt `n` (0-based): 1 s, 2 s, 4 s … capped at 30 s. Pure — tested. */
 export function reconnectDelay(n: number): number {
@@ -15,7 +18,7 @@ export function reconnectDelay(n: number): number {
  * a stop function.
  */
 export function connectLive(
-  onEvent: (e: LiveEvent) => void,
+  onEvent: (e: AnyLiveEvent) => void,
   onState: (s: LiveState) => void = () => undefined,
 ): () => void {
   let stopped = false;
@@ -62,7 +65,7 @@ export function connectLive(
         for (const f of frames) {
           if (f.event === 'ping') continue;
           try {
-            onEvent(JSON.parse(f.data) as LiveEvent);
+            onEvent(JSON.parse(f.data) as AnyLiveEvent);
           } catch {
             /* a frame we cannot read */
           }

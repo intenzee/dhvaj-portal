@@ -4,7 +4,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlarmClock, BellRing, Building2, CheckCheck, Clock, MessageSquareText, X } from 'lucide-react';
+import {
+  AlarmClock,
+  BellRing,
+  Building2,
+  CheckCheck,
+  Clock,
+  MessageSquareText,
+  X,
+} from 'lucide-react';
 import {
   LIVE_EVENT,
   type LiveEvent,
@@ -14,7 +22,8 @@ import {
 } from '@hsdg/contracts';
 import { ApiError, apiFetch } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { connectLive, type LiveState } from '@/lib/live';
+import type { LiveState } from '@/lib/live';
+import { isQuickTaskEvent, subscribeLive } from '@/lib/live-hub';
 import { useToast } from '@/lib/toast';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { pushSupported, syncPush } from '@/lib/push';
@@ -169,16 +178,20 @@ export function TaskAlertCenter({
 
   // The live stream: refresh the task views and raise the card.
   useEffect(() => {
-    const stop = connectLive((e) => {
-      void qc.invalidateQueries({ queryKey: QUICK_TASK_KEYS.all });
-      void qc.invalidateQueries({ queryKey: ['notifications'] });
-      // On the quick-tasks page the chat is already in front of them.
-      if (e.kind === LIVE_EVENT.quickTaskReply && pathRef.current?.startsWith('/quick-tasks')) {
-        return;
-      }
-      add(alertFromEvent(e));
-    }, (s) => onLiveRef.current?.(s));
-    return stop;
+    return subscribeLive({
+      onEvent: (e) => {
+        // Chat frames are the chat's own.
+        if (!isQuickTaskEvent(e)) return;
+        void qc.invalidateQueries({ queryKey: QUICK_TASK_KEYS.all });
+        void qc.invalidateQueries({ queryKey: ['notifications'] });
+        // On the quick-tasks page the chat is already in front of them.
+        if (e.kind === LIVE_EVENT.quickTaskReply && pathRef.current?.startsWith('/quick-tasks')) {
+          return;
+        }
+        add(alertFromEvent(e));
+      },
+      onState: (s) => onLiveRef.current?.(s),
+    });
   }, [qc, add]);
 
   // Polling (and a fresh sign-in): tasks given while they were away.
@@ -291,7 +304,8 @@ function TaskAlertCard({
   const canSet = t?.canSet ?? [];
   const acknowledge = (then?: () => void): void => {
     // Dismissing a new task tells the sender it reached them.
-    if (t && t.status === 'sent' && canSet.includes('received')) answer({ status: 'received' }, then);
+    if (t && t.status === 'sent' && canSet.includes('received'))
+      answer({ status: 'received' }, then);
     else {
       onClose();
       then?.();
@@ -372,7 +386,9 @@ function TaskAlertCard({
                 )}
                 {t.engagementLabel && <span>{t.engagementLabel}</span>}
                 {t.dueAt && (
-                  <span className="font-medium text-danger-700">Needed by {quickTime(t.dueAt)}</span>
+                  <span className="font-medium text-danger-700">
+                    Needed by {quickTime(t.dueAt)}
+                  </span>
                 )}
               </div>
               {t.details && (
@@ -385,8 +401,16 @@ function TaskAlertCard({
                 {t.messages.map((m) => {
                   const line = statusLine(m);
                   return (
-                    <Bubble key={m.id} mine={m.mine} name={m.authorName} at={m.createdAt} read={!!m.readAt}>
-                      {line && <div className={cn('font-semibold', m.body && 'mb-0.5')}>{line}</div>}
+                    <Bubble
+                      key={m.id}
+                      mine={m.mine}
+                      name={m.authorName}
+                      at={m.createdAt}
+                      read={!!m.readAt}
+                    >
+                      {line && (
+                        <div className={cn('font-semibold', m.body && 'mb-0.5')}>{line}</div>
+                      )}
                       {m.body && <div className="whitespace-pre-wrap">{m.body}</div>}
                     </Bubble>
                   );
@@ -402,7 +426,12 @@ function TaskAlertCard({
             )}
 
             <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-raised px-5 py-3">
-              <Button variant="ghost" size="sm" onClick={() => acknowledge()} disabled={reply.isPending}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => acknowledge()}
+                disabled={reply.isPending}
+              >
                 <X className="h-4 w-4" /> Dismiss
               </Button>
               {t.entityId && (
@@ -427,7 +456,11 @@ function TaskAlertCard({
                 </Button>
               )}
               {canSet.includes('done') && (
-                <Button size="sm" disabled={reply.isPending} onClick={() => answer({ status: 'done' })}>
+                <Button
+                  size="sm"
+                  disabled={reply.isPending}
+                  onClick={() => answer({ status: 'done' })}
+                >
                   <CheckCheck className="h-4 w-4" /> {t.side === 'received' ? 'Done' : 'Mark done'}
                 </Button>
               )}
@@ -437,14 +470,16 @@ function TaskAlertCard({
 
         {pushSupported() ? (
           <DeviceAlerts compact />
-        ) : desktop === 'default' && (
-          <button
-            type="button"
-            className="border-t border-line px-5 py-2 text-left text-xs text-primary-700 hover:bg-surface-sunken"
-            onClick={() => void askDesktopAlerts().then(setDesktop)}
-          >
-            Alert me even when this tab is in the background →
-          </button>
+        ) : (
+          desktop === 'default' && (
+            <button
+              type="button"
+              className="border-t border-line px-5 py-2 text-left text-xs text-primary-700 hover:bg-surface-sunken"
+              onClick={() => void askDesktopAlerts().then(setDesktop)}
+            >
+              Alert me even when this tab is in the background →
+            </button>
+          )
         )}
       </div>
     </div>

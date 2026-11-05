@@ -247,8 +247,8 @@ export function chatOnline(lastSeenAt: string | null, now: number = Date.now()):
 }
 
 /**
- * WhatsApp's header line: "online", "last seen today at 14:05", "last seen
- * yesterday at 09:10", "last seen 03 Nov at 18:00" (with the year when not
+ * WhatsApp's header line: "online", "last seen today at 2:05 pm", "last seen
+ * yesterday at 9:10 am", "last seen 3 Nov at 6:00 pm" (with the year when not
  * this year). Times in IST. Pure — tested.
  */
 export function lastSeenLabel(
@@ -261,7 +261,9 @@ export function lastSeenLabel(
   if (Number.isNaN(seen.getTime())) return '';
   const IST = 330 * 60_000;
   const day = (d: Date): string => new Date(d.getTime() + IST).toISOString().slice(0, 10);
-  const time = new Date(seen.getTime() + IST).toISOString().slice(11, 16);
+  const [hh, mm] = new Date(seen.getTime() + IST).toISOString().slice(11, 16).split(':');
+  const h = Number(hh);
+  const time = `${h % 12 || 12}:${mm} ${h < 12 ? 'am' : 'pm'}`;
   const today = day(now);
   const yesterday = day(new Date(now.getTime() - 86_400_000));
   const d = day(seen);
@@ -282,6 +284,6 @@ export function lastSeenLabel(
     'Nov',
     'Dec',
   ];
-  const label = `${dd} ${MONTHS[Number(m) - 1]}${y === today.slice(0, 4) ? '' : ` ${y}`}`;
+  const label = `${Number(dd)} ${MONTHS[Number(m) - 1]}${y === today.slice(0, 4) ? '' : ` ${y}`}`;
   return `last seen ${label} at ${time}`;
 }
