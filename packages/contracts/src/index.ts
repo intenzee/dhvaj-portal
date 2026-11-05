@@ -131,3 +131,4 @@ export * from './live-events';
 export * from './certificates';
 export * from './client-kyc';
 export * from './itr';
+export * from './chat';
