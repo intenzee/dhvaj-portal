@@ -23,6 +23,14 @@ export interface OutboundNotification {
  */
 export interface NotificationChannel {
   readonly name: string;
+  /**
+   * `recipient` (the default): one delivery per recipient, as e-mail is.
+   * `room`: a shared space (a team-chat room) hears an event once, so one
+   * delivery is enqueued per event, and client-facing deliveries skip it.
+   */
+  readonly audience?: 'recipient' | 'room';
+  /** Which notification types it carries; all of them when absent. */
+  accepts?(type: NotificationType): boolean;
   deliver(notification: OutboundNotification): Promise<void>;
 }
 

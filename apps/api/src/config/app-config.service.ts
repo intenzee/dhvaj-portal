@@ -66,4 +66,41 @@ export class AppConfigService {
       .map((c) => c.trim().toLowerCase())
       .filter(Boolean);
   }
+
+  /**
+   * The Switch team-chat channel: the server, the portal's agent identity there
+   * and the room ids by key. Null unless the server, agent and key are all set.
+   */
+  get switchChannel(): {
+    url: string;
+    agentId: string;
+    apiKey: string;
+    rooms: Record<string, string>;
+    webUrl: string;
+  } | null {
+    const url = this.get('SWITCH_URL');
+    const agentId = this.get('SWITCH_AGENT_ID');
+    const apiKey = this.get('SWITCH_API_KEY');
+    if (!url || !agentId || !apiKey) return null;
+    let rooms: Record<string, string> = {};
+    try {
+      const parsed: unknown = JSON.parse(this.get('SWITCH_ROOMS'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        rooms = Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).filter(
+            (e): e is [string, string] => typeof e[1] === 'string' && e[1].length > 0,
+          ),
+        );
+      }
+    } catch {
+      rooms = {};
+    }
+    return {
+      url: url.replace(/\/$/, ''),
+      agentId,
+      apiKey,
+      rooms,
+      webUrl: this.get('WEB_PUBLIC_URL'),
+    };
+  }
 }

@@ -84,6 +84,54 @@ describe('NotificationsService.emitWith', () => {
     expect([...(enqueueParams[0]![0] as string[])].sort()).toEqual(['user-e1', 'user-e2']);
   });
 
+  it('enqueues a room channel (Switch) once per event, a per-recipient channel for each', async () => {
+    const mail: NotificationChannel = { name: 'email', deliver: async () => {} };
+    const room: NotificationChannel = { name: 'switch', audience: 'room', deliver: async () => {} };
+    const service = new NotificationsService(db, inactiveCls, [mail, room], flags(false));
+    const { client, enqueueParams } = fakeClient((emp) => `user-${emp}`);
+
+    await service.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.taskReviewRequested,
+      recipientEmployeeIds: ['e1', 'e2', 'e3'],
+      title: 'Sent for review',
+    });
+
+    expect(enqueueParams).toHaveLength(2);
+    expect(enqueueParams[0]![1]).toBe('email');
+    expect(enqueueParams[0]![0]).toHaveLength(3);
+    expect(enqueueParams[1]![1]).toBe('switch');
+    expect(enqueueParams[1]![0]).toEqual(['user-e1']);
+  });
+
+  it('skips a channel for the types it does not accept', async () => {
+    const picky: NotificationChannel = {
+      name: 'switch',
+      accepts: (t) => t === NOTIFICATION_TYPE.taskReviewRequested,
+      deliver: async () => {},
+    };
+    const service = new NotificationsService(db, inactiveCls, [picky], flags(false));
+    const { client, enqueueParams } = fakeClient((emp) => `user-${emp}`);
+    await service.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.statutoryDeadlineOverdue,
+      recipientEmployeeIds: ['e1'],
+      title: 'Overdue',
+    });
+    expect(enqueueParams).toHaveLength(0);
+  });
+
+  it('never sends a client-facing delivery through a room channel', async () => {
+    const room: NotificationChannel = { name: 'switch', audience: 'room', deliver: async () => {} };
+    const service = new NotificationsService(db, inactiveCls, [room], flags(false));
+    const { client, enqueueParams } = fakeClient(() => null);
+    const n = await service.enqueueClientDeliveryWith(client, {
+      recipientEmail: 'client@example.com',
+      type: NOTIFICATION_TYPE.clientDependencyReminder,
+      title: 'Reminder',
+    });
+    expect(n).toBe(0);
+    expect(enqueueParams).toHaveLength(0);
+  });
+
   it('creates nothing and enqueues nothing when every recipient is null', async () => {
     const channel: NotificationChannel = { name: 'fake', deliver: async () => {} };
     const service = new NotificationsService(db, inactiveCls, [channel], flags(false));

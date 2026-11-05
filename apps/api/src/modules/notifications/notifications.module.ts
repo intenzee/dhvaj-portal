@@ -8,6 +8,7 @@ import { NotificationsController } from './notifications.controller';
 import { EXTERNAL_CHANNELS, type NotificationChannel } from './channels/notification-channel';
 import { EmailChannel } from './channels/email.channel';
 import { TeamsChannel } from './channels/teams.channel';
+import { SwitchChannel } from './channels/switch.channel';
 
 /**
  * Notification framework (Phase 11). Emits typed events (portal + pluggable
@@ -33,6 +34,8 @@ import { TeamsChannel } from './channels/teams.channel';
         const channels: NotificationChannel[] = [];
         if (enabled.has('email')) channels.push(new EmailChannel());
         if (enabled.has('teams')) channels.push(new TeamsChannel());
+        const sw = config.switchChannel;
+        if (enabled.has('switch') && sw) channels.push(new SwitchChannel(sw));
         return channels;
       },
     },

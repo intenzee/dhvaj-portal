@@ -170,11 +170,15 @@ export class NotificationsService {
       notificationKind(event.type) === NOTIFICATION_KIND.informational && this.digestFirmWide;
     if (delivered.length > 0 && this.channels.length > 0 && !waitsForDigest) {
       for (const channel of this.channels) {
+        if (channel.accepts && !channel.accepts(event.type)) continue;
+        // A room channel hears the event once (addressed to its first
+        // recipient, for the record); a per-recipient channel, everyone.
+        const to = channel.audience === 'room' ? delivered.slice(0, 1) : delivered;
         await client.query(
           `SELECT hsdg.enqueue_delivery(u.uid, $2, $3, $4, $5, $6)
            FROM unnest($1::uuid[]) AS u(uid)`,
           [
-            delivered,
+            to,
             channel.name,
             event.type,
             event.title,
@@ -248,8 +252,9 @@ export class NotificationsService {
       engagementId?: string | null;
     },
   ): Promise<number> {
-    if (!event.recipientEmail || this.channels.length === 0) return 0;
-    for (const channel of this.channels) {
+    const direct = this.channels.filter((c) => c.audience !== 'room');
+    if (!event.recipientEmail || direct.length === 0) return 0;
+    for (const channel of direct) {
       await client.query(`SELECT hsdg.enqueue_client_delivery($1, $2, $3, $4, $5, $6)`, [
         event.recipientEmail,
         channel.name,
@@ -423,14 +428,16 @@ export class NotificationsService {
    * (once per day — a re-run is a no-op). Returns how many users get one.
    */
   async sendDigests(ctx: RlsContext, day: string): Promise<{ users: number }> {
-    if (this.channels.length === 0) return { users: 0 };
+    // Personal digests are per user; a shared room (Switch) does not get them.
+    const direct = this.channels.filter((c) => c.audience !== 'room');
+    if (direct.length === 0) return { users: 0 };
     const informational = NOTIFICATION_TYPES.filter(
       (t) => notificationKind(t) === NOTIFICATION_KIND.informational,
     );
     return this.db.withRlsContext(ctx, async (client) => {
       const { rows } = await client.query<{ users: number }>(
         `SELECT hsdg.enqueue_notification_digests($1::date, $2::text[], $3::text[]) AS users`,
-        [day, informational, this.channels.map((c) => c.name)],
+        [day, informational, direct.map((c) => c.name)],
       );
       return { users: rows[0]?.users ?? 0 };
     });

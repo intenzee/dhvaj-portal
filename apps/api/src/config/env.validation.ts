@@ -235,6 +235,15 @@ export const envSchema = z.object({
   // always on; add `email` and/or `teams` to fan out to those (stub transports
   // for now). Example: NOTIFICATION_CHANNELS=portal,email
   NOTIFICATION_CHANNELS: z.string().default('portal'),
+  // The `switch` channel posts notifications into Switch team-chat rooms as a
+  // registered external agent (the portal itself). SWITCH_ROOMS maps a room key
+  // (firm-ops, compliance-desk, client-chase, review-queue, partner-signoff,
+  // notices-itr) to its Switch room id, as JSON; unmapped keys fall back to
+  // firm-ops. Without all three the channel is off even when listed.
+  SWITCH_URL: z.string().url().optional(),
+  SWITCH_AGENT_ID: z.string().min(1).optional(),
+  SWITCH_API_KEY: z.string().min(1).optional(),
+  SWITCH_ROOMS: z.string().default('{}'),
 
   // ── Feature flags (Engagement Restructure phases) ─────────────────────────
   // Comma list of enabled flags (ff_engagement_kinds, ff_calendar_v2,

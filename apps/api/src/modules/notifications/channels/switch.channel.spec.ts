@@ -1,0 +1,93 @@
+import { NOTIFICATION_TYPE } from '@hsdg/contracts';
+import type { OutboundNotification } from './notification-channel';
+import { SwitchChannel, switchAccepts, switchMessage, switchRoomFor } from './switch.channel';
+
+const config = {
+  url: 'http://switch.test',
+  agentId: 'agent-1',
+  apiKey: 'key-1',
+  rooms: { 'firm-ops': 'room-ops', 'review-queue': 'room-review' },
+  webUrl: 'http://portal.test/',
+};
+
+const notice = (over: Partial<OutboundNotification> = {}): OutboundNotification => ({
+  recipientUserId: 'user-1',
+  recipientEmail: null,
+  type: NOTIFICATION_TYPE.taskReviewRequested,
+  title: 'GSTR-3B · Oct 2026 sent for review',
+  body: 'Sharma Traders — Riya Kapoor asks you to review it.',
+  engagementId: 'eng-1',
+  ...over,
+});
+
+function fakeFetch(status = 200) {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const impl = (async (url: string, init: RequestInit) => {
+    calls.push({ url, init });
+    return new Response(status === 200 ? '{"ok":true}' : 'nope', { status });
+  }) as unknown as typeof fetch;
+  return { calls, impl };
+}
+
+describe('SwitchChannel', () => {
+  it('routes each kind of notification to its room, and the rest to firm-ops', () => {
+    expect(switchRoomFor(NOTIFICATION_TYPE.taskReviewRequested)).toBe('review-queue');
+    expect(switchRoomFor(NOTIFICATION_TYPE.documentUploaded)).toBe('client-chase');
+    expect(switchRoomFor(NOTIFICATION_TYPE.epSignoffPending)).toBe('partner-signoff');
+    expect(switchRoomFor(NOTIFICATION_TYPE.filingLodged)).toBe('compliance-desk');
+    expect(switchRoomFor(NOTIFICATION_TYPE.noticeReceived)).toBe('notices-itr');
+    expect(switchRoomFor(NOTIFICATION_TYPE.taskAssigned)).toBe('firm-ops');
+  });
+
+  it('writes the title in bold, the body, and the portal link', () => {
+    expect(switchMessage(notice(), 'http://portal.test/')).toBe(
+      '**GSTR-3B · Oct 2026 sent for review**\n' +
+        'Sharma Traders — Riya Kapoor asks you to review it.\n' +
+        'http://portal.test/engagements/eng-1',
+    );
+    expect(switchMessage(notice({ body: null, engagementId: null }), 'x')).toBe(
+      '**GSTR-3B · Oct 2026 sent for review**',
+    );
+  });
+
+  it('posts once as the portal agent into the routed room', async () => {
+    const f = fakeFetch();
+    await new SwitchChannel(config, f.impl).deliver(notice());
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0]!.url).toBe('http://switch.test/agents/agent-1/message');
+    expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer key-1');
+    expect(JSON.parse(String(f.calls[0]!.init.body))).toMatchObject({ room_id: 'room-review' });
+  });
+
+  it('falls back to firm-ops when the routed room is not mapped', async () => {
+    const f = fakeFetch();
+    await new SwitchChannel(config, f.impl).deliver(
+      notice({ type: NOTIFICATION_TYPE.documentUploaded }),
+    );
+    expect(JSON.parse(String(f.calls[0]!.init.body))).toMatchObject({ room_id: 'room-ops' });
+  });
+
+  it('never posts a client-facing (e-mail) delivery into chat', async () => {
+    const f = fakeFetch();
+    await new SwitchChannel(config, f.impl).deliver(
+      notice({ recipientUserId: null, recipientEmail: 'client@example.com' }),
+    );
+    expect(f.calls).toHaveLength(0);
+  });
+
+  it('throws on a refused post so the outbox retries it', async () => {
+    const f = fakeFetch(503);
+    await expect(new SwitchChannel(config, f.impl).deliver(notice())).rejects.toThrow(/503/);
+  });
+
+  it('keeps the date sweep out of chat', () => {
+    expect(switchAccepts(NOTIFICATION_TYPE.taskReviewRequested)).toBe(true);
+    expect(switchAccepts(NOTIFICATION_TYPE.statutoryDeadlineOverdue)).toBe(false);
+    expect(switchAccepts(NOTIFICATION_TYPE.internalSlaOverdue)).toBe(false);
+    expect(switchAccepts(NOTIFICATION_TYPE.complianceDueToday)).toBe(false);
+  });
+
+  it('is a room channel', () => {
+    expect(new SwitchChannel(config).audience).toBe('room');
+  });
+});
