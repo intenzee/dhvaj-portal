@@ -306,7 +306,8 @@ async function seedProduction(db, o) {
 // ── 4. Launch the API as hsdg_app ─────────────────────────────────────────
 async function launch() {
   process.env.DATABASE_URL = APP_URL;
-  process.env.DATABASE_SSL = 'true';
+  // Same TLS choice as setup: a local, non-TLS Postgres (docker compose) has none.
+  process.env.DATABASE_SSL = SSL ? 'true' : 'false';
   console.log('[deploy] Starting API as hsdg_app…');
   await import(path.join(ROOT, 'apps', 'api', 'dist', 'main.js'));
 }
