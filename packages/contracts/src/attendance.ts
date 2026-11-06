@@ -70,8 +70,8 @@ export const ATTENDANCE_STATUS_LABEL: Record<AttendanceStatus, string> = {
   holiday: 'Holiday',
   weekly_off: 'Weekly off',
   open: 'In progress',
-  upcoming: '',
-  none: '',
+  upcoming: 'Upcoming',
+  none: 'Not on the rolls',
 };
 /** One letter for the month grid. */
 export const ATTENDANCE_STATUS_CODE: Record<AttendanceStatus, string> = {
@@ -82,7 +82,7 @@ export const ATTENDANCE_STATUS_CODE: Record<AttendanceStatus, string> = {
   holiday: 'HO',
   weekly_off: 'WO',
   open: '·',
-  upcoming: '',
+  upcoming: 'Upcoming',
   none: '–',
 };
 

@@ -59,8 +59,8 @@ describe('visibleNav', () => {
 describe('visibleNavSections', () => {
   it('drops sections with nothing visible', () => {
     const sections = visibleNavSections(principal([]));
-    expect(sections).toHaveLength(1);
-    expect(sections[0]!.items.map((i) => i.label)).toEqual(['Home']);
+    // Everyone logs their own day, so Attendance stays with Home.
+    expect(sections.map((s) => s.items.map((i) => i.label))).toEqual([['Home'], ['My attendance']]);
   });
 
   it('groups client work under its own heading', () => {
@@ -115,12 +115,13 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
     visibleNav(p, { workLinks }).map((i) => i.label);
 
   it.each(['article', 'senior'] as RoleSlug[])(
-    'a %s sees at most 7 items: the client work',
+    'a %s sees at most 8 items: the client work and their attendance',
     (role) => {
       expect(labels(as([role]))).toEqual([
         'Home',
         'My Work',
         'Notifications',
+        'My attendance',
         'Engagements',
         'Clients',
         'Compliance',
@@ -156,6 +157,7 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
     expect(labels(as(['senior'], [PERMISSION.engagementRead]))).toEqual([
       'Home',
       'My Work',
+      'My attendance',
       'Engagements',
       'Documents',
     ]);

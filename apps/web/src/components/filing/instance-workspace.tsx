@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DSC_REQUEST_CODE,
   FILING_REFERENCE_KINDS,
+  formatWorked,
   isMeetingRule,
   isValidGstin,
   type ChecklistItem,
@@ -349,6 +350,12 @@ function WorkspaceHeader({
         <div>
           <dt className="text-ink-muted">Reviewer</dt>
           <dd>{ws.task?.reviewerName ?? '—'}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-muted">{ws.filing ? 'Hours to file' : 'Hours so far'}</dt>
+          <dd title="Everyone’s time on this filing’s task: task clock and logged hours.">
+            {ws.task?.timeSeconds ? formatWorked(ws.task.timeSeconds) : '—'}
+          </dd>
         </div>
         {inst.registrationNumber && (
           <div>

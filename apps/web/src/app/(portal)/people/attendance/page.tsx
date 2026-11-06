@@ -35,7 +35,7 @@ export default function AttendancePage(): JSX.Element {
   if (!allowed) {
     return (
       <div>
-        <PageHeader title="Attendance" />
+        <PageHeader title="Timer log" />
         <EmptyState>Attendance is for HR and the Managing Partner.</EmptyState>
       </div>
     );
@@ -75,7 +75,7 @@ export default function AttendancePage(): JSX.Element {
   return (
     <div>
       <PageHeader
-        title="Attendance"
+        title="Timer log"
         subtitle="From the timers: first start, last stop and hours by kind. Never what the time was spent on."
         actions={
           <Button size="sm" variant="secondary" onClick={exportCsv} disabled={rows.length === 0}>

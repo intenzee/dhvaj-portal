@@ -7,6 +7,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Download, List, Settings2 } fr
 import {
   FILING_STATUSES,
   FILING_STATUS_LABEL,
+  formatWorked,
   PERMISSION,
   STREAMS,
   STREAM_LABEL,
@@ -494,7 +495,10 @@ function CalendarList({ rows }: { rows: ComplianceCalendarRow[] }): JSX.Element 
                   <ItemBadges row={r} />
                 </td>
                 <td className="px-3 py-2 text-ink-muted">{r.periodLabel}</td>
-                <td className="px-3 py-2">{FILING_STATUS_LABEL[r.workflowStatus]}</td>
+                <td className="px-3 py-2">
+                  {FILING_STATUS_LABEL[r.workflowStatus]}
+                  <FiledBy row={r} />
+                </td>
                 <td
                   className={cn(
                     'whitespace-nowrap px-3 py-2',
@@ -513,6 +517,22 @@ function CalendarList({ rows }: { rows: ComplianceCalendarRow[] }): JSX.Element 
       </table>
     </Card>
   );
+}
+
+/** "by Senior Y · 2h 10m" under Filed; the hours so far while it is worked. */
+function FiledBy({ row }: { row: ComplianceCalendarRow }): JSX.Element | null {
+  const time = row.timeSeconds > 0 ? formatWorked(row.timeSeconds) : null;
+  if (row.workflowStatus === 'filed' && (row.filedByName || time)) {
+    return (
+      <span className="block text-xs text-ink-muted">
+        {row.filedByName ? `by ${row.filedByName}` : ''}
+        {row.filedByName && time ? ' · ' : ''}
+        {time ? `${time} to file` : ''}
+      </span>
+    );
+  }
+  if (time) return <span className="block text-xs text-ink-faint">{time} so far</span>;
+  return null;
 }
 
 /** A Monday-first month grid; each day lists its items in band colours. */

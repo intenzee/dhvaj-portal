@@ -29,13 +29,17 @@ export function PeopleSubnav(): JSX.Element {
       label: 'Manage people',
       show: can(principal, PERMISSION.userManage),
     },
-    { href: '/people/articles', label: 'Articles', show: can(principal, PERMISSION.employeeManage) },
+    {
+      href: '/people/articles',
+      label: 'Articles',
+      show: can(principal, PERMISSION.employeeManage),
+    },
     {
       href: '/people/joiners-leavers',
       label: 'Joiners & leavers',
       show: can(principal, PERMISSION.employeeManage),
     },
-    { href: '/people/attendance', label: 'Attendance', show: people },
+    { href: '/people/attendance', label: 'Timer log', show: people },
     {
       href: '/people/workload',
       label: 'Workload',

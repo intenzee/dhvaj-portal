@@ -185,6 +185,36 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: 'Attendance',
+    items: [
+      {
+        label: 'My attendance',
+        href: '/attendance',
+        icon: CalendarCheck,
+        hint: 'Log your day — client, task, hours, where you worked; 8 hours marks you present. Leave too.',
+        ready: true,
+      },
+      {
+        label: 'Team attendance',
+        href: '/attendance/team',
+        icon: UsersRound,
+        hint: 'The days of everyone who reports to you, and their leave to approve.',
+        onlyFor: [ROLE.managingPartner, ROLE.admin, ROLE.partner, ROLE.manager, ROLE.senior],
+        // A Senior opens it from My attendance, keeping a preparer's sidebar short.
+        hideFor: PREPARER_ROLES,
+        ready: true,
+      },
+      {
+        label: 'Attendance register',
+        href: '/attendance/register',
+        icon: ScrollText,
+        hint: 'Everyone’s month for payroll: present, half days, leave; holidays and settings.',
+        permission: PERMISSION.timeReadAttendance,
+        ready: true,
+      },
+    ],
+  },
+  {
     title: 'Client work',
     items: [
       {
@@ -371,14 +401,6 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: UserPlus,
         hint: 'Add a joiner with their login in one go; take a leaver through exit.',
         permission: PERMISSION.employeeManage,
-        ready: true,
-      },
-      {
-        label: 'Attendance',
-        href: '/people/attendance',
-        icon: CalendarCheck,
-        hint: 'Each person’s first start, last stop and hours by day — no client names.',
-        permission: PERMISSION.timeReadAttendance,
         ready: true,
       },
       {

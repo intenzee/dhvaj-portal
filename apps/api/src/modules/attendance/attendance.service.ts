@@ -282,14 +282,14 @@ export class AttendanceService {
     return this.db.withRlsContext(ctx, (client) => this.dayWith(client, emp, day, true));
   }
 
-  /** One of your team's days: read-only, client time you cannot see summed. */
+  /** One of your team's days (HR and the MP: anyone's): read-only, client time you cannot see summed. */
   async personDay(ctx: RlsContext, employeeId: string, day: string): Promise<MyDay> {
     const emp = me(ctx);
     requireDay(day);
     return this.db.withRlsContext(ctx, async (client) => {
       if (employeeId !== emp) {
         const { rows } = await client.query<{ ok: boolean }>(
-          `SELECT $1::uuid = ANY (hsdg.ctx_subtree()) AS ok`,
+          `SELECT $1::uuid = ANY (hsdg.ctx_subtree()) OR hsdg.ctx_reads_people() AS ok`,
           [employeeId],
         );
         if (!rows[0]?.ok) throw new NotFoundException('That person is not in your team.');

@@ -235,7 +235,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                 </Link>
               )}
               <Link
-                href="/me/attendance"
+                href="/attendance"
                 className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
                 aria-label="My attendance"
                 title="My attendance"
