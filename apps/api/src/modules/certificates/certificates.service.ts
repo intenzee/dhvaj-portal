@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import {
+  NOTIFICATION_TYPE,
   REGISTER_UDIN_PATTERN,
   checkCertificateFigures,
   udinMembershipNo,
@@ -28,6 +29,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { DocumentsService } from '../documents/documents.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { istToday } from '../engagements/time/auto-time';
 import { recordedDateProblem } from '../tax-audits/tax-audit-filing.service';
 import { renderCertificatePdf } from './certificate-pdf';
@@ -137,6 +139,7 @@ export class CertificatesService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly documents: DocumentsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   templates(ctx: RlsContext, asOn?: string): Promise<CertificateTemplate[]> {
@@ -432,6 +435,20 @@ export class CertificatesService {
         objectId: id,
         before: { status: 'in_review' },
         after: { status: 'signed', udin: udin.value, signedOn },
+      });
+      // Its preparer and reviewer hear of it — to issue it and bill it — never
+      // the partner who signed.
+      const t = await this.templateById(client, c.template_id);
+      await this.notifications.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.certificateSigned,
+        recipientEmployeeIds: [c.prepared_by_employee_id, c.reviewed_by_employee_id].filter(
+          (e): e is string => Boolean(e) && e !== ctx.employeeId,
+        ),
+        title: `Signed: ${t.name} · ${c.entity_name}`,
+        body: `UDIN ${udin.value}, signed by ${pr.full_name} on ${signedOn}. Issue it and raise the invoice.`,
+        engagementId,
+        objectType: 'certificate',
+        objectId: id,
       });
       return this.view(client, ctx, engagementId, id);
     });

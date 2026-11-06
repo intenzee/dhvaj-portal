@@ -40,6 +40,7 @@ describe('SwitchChannel', () => {
     expect(switchRoomFor(NOTIFICATION_TYPE.taskReviewRequested)).toBe('review-queue');
     expect(switchRoomFor(NOTIFICATION_TYPE.documentUploaded)).toBe('client-chase');
     expect(switchRoomFor(NOTIFICATION_TYPE.epSignoffPending)).toBe('partner-signoff');
+    expect(switchRoomFor(NOTIFICATION_TYPE.certificateSigned)).toBe('partner-signoff');
     expect(switchRoomFor(NOTIFICATION_TYPE.filingLodged)).toBe('compliance-desk');
     expect(switchRoomFor(NOTIFICATION_TYPE.noticeReceived)).toBe('notices-itr');
     expect(switchRoomFor(NOTIFICATION_TYPE.taskAssigned)).toBe('firm-ops');

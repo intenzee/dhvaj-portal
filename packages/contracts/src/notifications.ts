@@ -92,6 +92,8 @@ export const NOTIFICATION_TYPE = {
   partnerPackReady: 'partner_pack_ready',
   /** PS-304: a signed report still has no UDIN and its window ends in 7 days (signing partner). */
   udinWindowClosing: 'udin_window_closing',
+  /** A partner signed a certificate with its UDIN (its preparer and reviewer: issue and bill it). */
+  certificateSigned: 'certificate_signed',
   dscExpiring: 'dsc_expiring',
   dscOverdueReturn: 'dsc_overdue_return',
 } as const;
@@ -181,6 +183,7 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   quick_task_reply: A,
   partner_pack_ready: A,
   udin_window_closing: A,
+  certificate_signed: A,
   dsc_expiring: A,
   dsc_overdue_return: A,
 };
@@ -237,6 +240,7 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   quick_task_reply: 'Reply on a quick task',
   partner_pack_ready: 'Monthly partner pack',
   udin_window_closing: 'UDIN still to generate',
+  certificate_signed: 'Certificate signed',
   dsc_expiring: 'DSC expiring',
   dsc_overdue_return: 'DSC not back',
 };

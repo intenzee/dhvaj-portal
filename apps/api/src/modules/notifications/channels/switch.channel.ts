@@ -29,6 +29,7 @@ const ROOM_OF: Partial<Record<NotificationType, SwitchRoomKey>> = {
   [NOTIFICATION_TYPE.taskReviewRequested]: 'review-queue',
   [NOTIFICATION_TYPE.taskReturned]: 'review-queue',
   [NOTIFICATION_TYPE.epSignoffPending]: 'partner-signoff',
+  [NOTIFICATION_TYPE.certificateSigned]: 'partner-signoff',
   [NOTIFICATION_TYPE.noticeReceived]: 'notices-itr',
   [NOTIFICATION_TYPE.noticeReplyDue]: 'notices-itr',
   [NOTIFICATION_TYPE.noticeHearingDue]: 'notices-itr',
