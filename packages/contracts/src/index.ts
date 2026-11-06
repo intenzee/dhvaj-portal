@@ -132,3 +132,4 @@ export * from './certificates';
 export * from './client-kyc';
 export * from './itr';
 export * from './chat';
+export * from './attendance';

@@ -14,6 +14,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { ChangeLogModule } from './modules/change-log/change-log.module';
 import { QuickTasksModule } from './modules/quick-tasks/quick-tasks.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LiveModule } from './modules/live/live.module';
 import { PartnerPacksModule } from './modules/partner-packs/partner-packs.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -112,6 +113,7 @@ import { TeamsModule } from './modules/teams/teams.module';
     ChangeLogModule,
     QuickTasksModule,
     ChatModule,
+    AttendanceModule,
     LiveModule,
     PartnerPacksModule,
     IdentityModule,

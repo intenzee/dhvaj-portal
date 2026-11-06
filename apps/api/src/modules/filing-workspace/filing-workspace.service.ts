@@ -145,6 +145,7 @@ interface TaskRow {
   reviewer_name: string | null;
   review_started_at: string | null;
   version: number;
+  time_seconds: string | null;
 }
 
 interface ItemRow {
@@ -1460,6 +1461,7 @@ export class FilingWorkspaceService {
             reviewerName: task.reviewer_name,
             reviewStartedAt: task.review_started_at,
             version: task.version,
+            timeSeconds: Number(task.time_seconds ?? 0),
           }
         : null,
       checklist,
@@ -1676,7 +1678,8 @@ export class FilingWorkspaceService {
   private async loadTask(client: PoolClient, id: string): Promise<TaskRow | null> {
     const { rows } = await client.query<TaskRow>(
       `SELECT t.id, t.title, t.status, t.assigned_to_employee_id, ae.full_name AS assignee_name,
-              t.reviewer_employee_id, re.full_name AS reviewer_name, t.review_started_at, t.version
+              t.reviewer_employee_id, re.full_name AS reviewer_name, t.review_started_at, t.version,
+              (SELECT ft.seconds FROM hsdg.filing_time_seconds(ARRAY[$1::uuid]) ft)::text AS time_seconds
          FROM hsdg.tasks t
          LEFT JOIN hsdg.employees ae ON ae.id = t.assigned_to_employee_id
          LEFT JOIN hsdg.employees re ON re.id = t.reviewer_employee_id

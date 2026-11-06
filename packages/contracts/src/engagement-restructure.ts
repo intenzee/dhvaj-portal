@@ -639,6 +639,11 @@ export interface ComplianceCalendarRow {
   assigneeName: string | null;
   partnerName: string | null;
   managerName: string | null;
+  /** Who filed it: the lodge's filer, else whoever marked it filed. */
+  filedByName: string | null;
+  filedOn: string | null;
+  /** Everyone's time on the filing's task (its clock and logged hours), in seconds. */
+  timeSeconds: number;
   /** The filing's part of its period (GST: outward / inward / summary / annual). */
   section: PeriodSection | null;
   /** Where the row opens (WF-102): the filing in its stream tab. */

@@ -94,6 +94,10 @@ export const NOTIFICATION_TYPE = {
   udinWindowClosing: 'udin_window_closing',
   dscExpiring: 'dsc_expiring',
   dscOverdueReturn: 'dsc_overdue_return',
+  /** Someone who reports to you (or anyone, for HR) asked for leave. */
+  leaveRequested: 'leave_requested',
+  /** Your leave was approved or rejected. */
+  leaveDecided: 'leave_decided',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPES: NotificationType[] = Object.values(NOTIFICATION_TYPE);
@@ -183,6 +187,8 @@ export const NOTIFICATION_TYPE_KIND: Record<NotificationType, NotificationKind> 
   udin_window_closing: A,
   dsc_expiring: A,
   dsc_overdue_return: A,
+  leave_requested: A,
+  leave_decided: I,
 };
 
 export function notificationKind(type: NotificationType): NotificationKind {
@@ -239,6 +245,8 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   udin_window_closing: 'UDIN still to generate',
   dsc_expiring: 'DSC expiring',
   dsc_overdue_return: 'DSC not back',
+  leave_requested: 'Leave to approve',
+  leave_decided: 'Your leave',
 };
 
 /** Where a type reaches the user. Actionable types always reach the bell. */

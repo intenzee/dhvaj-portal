@@ -1234,8 +1234,37 @@ export class ComplianceCalendarV2Service {
         for (const r of res.rows) regs.set(r.id, r);
       }
 
+      // Who filed each one and the time its task took (everyone's, task clock and logged rows).
+      const ids = rows.map((r) => r.id);
+      const filed = new Map<string, { name: string | null; on: string | null; seconds: number }>();
+      if (ids.length) {
+        const res = await client.query<{
+          id: string;
+          filed_by: string | null;
+          filed_on: string | null;
+          seconds: string | null;
+        }>(
+          `SELECT ci.id,
+                  COALESCE(fb.full_name, cb.full_name) AS filed_by,
+                  COALESCE(fr.filed_on, (ci.completed_at AT TIME ZONE 'Asia/Kolkata')::date)::text AS filed_on,
+                  ft.seconds::text AS seconds
+             FROM unnest($1::uuid[]) AS x(id)
+             JOIN hsdg.compliance_instances ci ON ci.id = x.id
+             LEFT JOIN hsdg.filing_records fr
+               ON fr.compliance_instance_id = ci.id AND fr.undone_at IS NULL
+             LEFT JOIN hsdg.employees fb ON fb.id = fr.filed_by_employee_id
+             LEFT JOIN hsdg.employees cb ON cb.id = ci.completed_by_employee_id
+             LEFT JOIN hsdg.filing_time_seconds($1::uuid[]) ft ON ft.compliance_instance_id = ci.id`,
+          [ids],
+        );
+        for (const f of res.rows) {
+          filed.set(f.id, { name: f.filed_by, on: f.filed_on, seconds: Number(f.seconds ?? 0) });
+        }
+      }
+
       const items = rows.map((r): ComplianceCalendarRow => {
         const reg = r.registration_id ? regs.get(r.registration_id) : undefined;
+        const done = filed.get(r.id);
         const { band, daysLeft } = dueBand(r.due_date, today, r.workflow_status);
         return {
           id: r.id,
@@ -1270,6 +1299,10 @@ export class ComplianceCalendarV2Service {
           assigneeName: r.assignee_name,
           partnerName: r.partner_name,
           managerName: r.manager_name,
+          // Only a filed return has a filer; the time shows while it is worked too.
+          filedByName: r.workflow_status === 'filed' ? (done?.name ?? null) : null,
+          filedOn: r.workflow_status === 'filed' ? (done?.on ?? null) : null,
+          timeSeconds: done?.seconds ?? 0,
           section: r.section,
           // Same fields the shared work-link fragment selects; the calendar already has them.
           link: workLinkOf(

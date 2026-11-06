@@ -249,6 +249,8 @@ export interface WorkspaceTask {
   reviewerName: string | null;
   reviewStartedAt?: string | null;
   version: number;
+  /** Everyone's time on the filing's task so far (task clock and logged rows). */
+  timeSeconds?: number;
 }
 
 export interface InstanceWorkspace {

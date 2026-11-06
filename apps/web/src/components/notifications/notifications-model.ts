@@ -49,6 +49,9 @@ export function notificationHref(
   if (n.objectType === 'work_set' && n.objectId) return `/work-sets/${n.objectId}`;
   if (n.objectType === 'quick_task' && n.objectId) return `/quick-tasks?t=${n.objectId}`;
   if (n.objectType === 'partner_pack') return '/reports/partner-packs';
+  // Leave to approve opens the approvals; a decision opens your own leave.
+  if (n.objectType === 'leave_request_approval') return '/attendance/team?tab=leave';
+  if (n.objectType === 'leave_request') return '/attendance?tab=leave';
   return n.engagementId ? `/engagements/${n.engagementId}` : null;
 }
 
