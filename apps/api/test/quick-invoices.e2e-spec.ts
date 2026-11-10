@@ -303,9 +303,9 @@ describe('Quick invoices (e2e)', () => {
     const text = (pdf.body as Buffer).toString('latin1');
     expect(text.startsWith('%PDF-1.4')).toBe(true);
     expect(text).toContain('/Im1 Do');
-    expect(text).toContain('(Bank details)');
-    expect(text).toContain('PAN: AAAFD1234K');
-    expect(text).toContain('IFSC: HDFC0001234');
+    expect(text).toContain("(Company's Bank Details)");
+    expect(text).toContain('(:  AAAFD1234K)');
+    expect(text).toContain('HDFC0001234)');
     expect(
       (
         await su.query(

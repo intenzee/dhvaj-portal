@@ -927,10 +927,13 @@ export class CommercialService {
               logo, logo_content_type
          FROM hsdg.firm_settings LIMIT 1`,
     );
-    const { rows: clientRows } = await client.query<{ legal_name: string; pan: string | null }>(
-      `SELECT legal_name, pan FROM hsdg.entity_billing_profiles WHERE id = $1`,
-      [inv.clientEntityId],
-    );
+    const { rows: clientRows } = await client.query<{
+      legal_name: string;
+      pan: string | null;
+      billing_address: string | null;
+    }>(`SELECT legal_name, pan, billing_address FROM hsdg.entity_billing_profiles WHERE id = $1`, [
+      inv.clientEntityId,
+    ]);
     const firm = firmRows[0];
     const split = gstSplit(
       inv.lines.map((l) => ({ taxableValue: l.taxableValue, gstRate: l.gstRate })),
@@ -943,6 +946,7 @@ export class CommercialService {
         name: clientRows[0]?.legal_name ?? '',
         pan: clientRows[0]?.pan ?? null,
         gstin: inv.clientGstin,
+        address: clientRows[0]?.billing_address ?? null,
       },
       invoiceNumber: inv.invoiceNumber!,
       issueDate: inv.issueDate!,

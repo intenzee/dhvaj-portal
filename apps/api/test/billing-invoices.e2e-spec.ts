@@ -173,7 +173,7 @@ describe('PS-201 GST invoices (e2e)', () => {
       const text = (pdf.body as Buffer).toString('latin1');
       expect(text.startsWith('%PDF-')).toBe(true);
       expect(text).toContain(issued.body.invoiceNumber as string);
-      expect(text).toContain('(CGST @ 9%)');
+      expect(text).toContain('(CGST)');
 
       // An issued invoice is frozen.
       await http()

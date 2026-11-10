@@ -7,7 +7,7 @@ import {
   quickInvoiceDescription,
   quickInvoiceTotals,
 } from '@hsdg/contracts';
-import { bankLines, firmHeaderLines, renderInvoicePdf, type InvoicePdfData } from '../invoice-pdf';
+import { bankLines, firmBlockLines, renderInvoicePdf, type InvoicePdfData } from '../invoice-pdf';
 import { ImageError, fitInto, pdfImage } from '../pdf-image';
 import { normaliseFirmField } from './firm-profile.service';
 import { nextAfter } from './recurring-invoices.service';
@@ -109,20 +109,22 @@ describe('the firm in full on the invoice', () => {
     },
   };
 
-  it('prints address, GSTIN, PAN and FRN, then phone / e-mail / website', () => {
-    expect(firmHeaderLines(firm)).toEqual([
+  it('prints address, GSTIN and state, then phone and e-mail (PAN goes at the foot)', () => {
+    expect(firmBlockLines(firm)).toEqual([
       '12 Ring Road, New Delhi',
-      'GSTIN: 07AAAFD1234K1Z5   State: Delhi (07)',
-      'PAN: AAAFD1234K   FRN: 012345N',
-      'Phone: +91 98100 00000   Email: accounts@dhvaj.in   dhvaj.in',
+      'GSTIN/UIN: 07AAAFD1234K1Z5',
+      'State Name :  Delhi, Code : 07',
+      'Phone : +91 98100 00000',
+      'E-Mail : accounts@dhvaj.in',
     ]);
   });
 
   it('prints the bank details, and nothing when none are on file', () => {
     expect(bankLines(firm.bank)).toEqual([
-      'Account name: Dhvaj & Co',
-      'Bank: HDFC Bank, Connaught Place',
-      'A/c no: 50200012345678   IFSC: HDFC0001234',
+      "A/c Holder's Name : Dhvaj & Co",
+      'Bank Name : HDFC Bank',
+      'A/c No. : 50200012345678',
+      'Branch & IFS Code : Connaught Place & HDFC0001234',
     ]);
     expect(bankLines(null)).toEqual([]);
   });
@@ -164,8 +166,8 @@ describe('the firm in full on the invoice', () => {
     }).toString('latin1');
     expect(pdf).toContain('/XObject << /Im1');
     expect(pdf).toContain('/Im1 Do');
-    expect(pdf).toContain('(Bank details)');
-    expect(pdf).toContain('(PAN: AAAFD1234K   FRN: 012345N)');
+    expect(pdf).toContain("(Company's Bank Details)");
+    expect(pdf).toContain('(:  AAAFD1234K)');
     expect(pdf.endsWith('%%EOF\n')).toBe(true);
   });
 
