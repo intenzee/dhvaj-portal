@@ -205,6 +205,45 @@ describe('Engagement kinds (e2e)', () => {
       expect(detail.body.services.map((s: { stream: string }) => s.stream)).toContain('tds');
     });
 
+    it('a stream ended on every open year leaves the engagement and its Service column', async () => {
+      const streamsOf = async () =>
+        (await http().get(`/api/v1/engagements/${eng}`).set(bearer(pa)).expect(200)).body.services
+          .filter((s: { status: string }) => s.status !== 'cancelled')
+          .map((s: { stream: string }) => s.stream);
+      const serviceNames = async () =>
+        (
+          await http()
+            .get(`/api/v1/engagements?kind=compliance&entityId=${client}`)
+            .set(bearer(pa))
+            .expect(200)
+        ).body.items[0].serviceNames as string[];
+      const yearOf = async (fy: string) =>
+        (await http().get(`/api/v1/engagements/${eng}/years`).set(bearer(pa))).body.find(
+          (y: { financialYear: string }) => y.financialYear === fy,
+        );
+      // Income Tax still runs on the other open years, so ending it on 2026-27
+      // alone (the test above) kept its line.
+      expect(await streamsOf()).toContain('income_tax');
+      expect(await serviceNames()).toContain('Income Tax');
+      // TDS runs on 2026-27 only: ending it there takes the line off.
+      expect(await streamsOf()).toContain('tds');
+      await http()
+        .patch(`/api/v1/engagements/${eng}/years/2026-27/streams`)
+        .set(bearer(pa))
+        .send({ end: ['tds'], version: (await yearOf('2026-27')).version })
+        .expect(200);
+      expect(await streamsOf()).not.toContain('tds');
+      expect(await serviceNames()).not.toContain('TDS / TCS');
+      // Adding it back opens a fresh line.
+      await http()
+        .patch(`/api/v1/engagements/${eng}/years/2026-27/streams`)
+        .set(bearer(pa))
+        .send({ add: ['tds'], version: (await yearOf('2026-27')).version })
+        .expect(200);
+      expect(await streamsOf()).toContain('tds');
+      expect(await serviceNames()).toContain('TDS / TCS');
+    });
+
     it('filters the list by kind', async () => {
       const res = await http()
         .get(`/api/v1/engagements?kind=compliance&entityId=${client}`)

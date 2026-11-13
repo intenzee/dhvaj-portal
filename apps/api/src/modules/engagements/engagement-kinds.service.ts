@@ -585,6 +585,41 @@ export class EngagementKindsService {
     }
   }
 
+  /** A stream ended on every open year leaves the engagement: its (non-primary)
+   *  service line is cancelled with any live components under it, so the
+   *  Service column, the stream leads and the section filters stop showing it.
+   *  History stays (a soft cancel); adding the stream back opens a fresh line.
+   *  An engagement with no open year is left as it is. */
+  async retireEndedStreamLines(client: PoolClient, engagementId: string): Promise<number> {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT es.id
+         FROM hsdg.engagement_services es
+         JOIN hsdg.services s ON s.id = es.service_id
+         LEFT JOIN hsdg.services live ON live.id = s.folded_into_service_id
+        WHERE es.engagement_id = $1 AND es.status <> 'cancelled' AND NOT es.is_primary
+          AND COALESCE(s.stream, live.stream) IS NOT NULL
+          AND EXISTS (SELECT 1 FROM hsdg.compliance_engagement_years y
+                       WHERE y.engagement_id = $1 AND y.status = 'open')
+          AND NOT EXISTS (SELECT 1 FROM hsdg.compliance_engagement_years y
+                           WHERE y.engagement_id = $1 AND y.status = 'open'
+                             AND COALESCE(s.stream, live.stream) = ANY (y.streams))`,
+      [engagementId],
+    );
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return 0;
+    await client.query(
+      `UPDATE hsdg.engagement_components SET status = 'cancelled'
+        WHERE engagement_service_id = ANY ($1::uuid[])
+          AND status NOT IN ('completed', 'cancelled', 'superseded')`,
+      [ids],
+    );
+    await client.query(
+      `UPDATE hsdg.engagement_services SET status = 'cancelled' WHERE id = ANY ($1::uuid[])`,
+      [ids],
+    );
+    return ids.length;
+  }
+
   async insertYear(
     client: PoolClient,
     engagementId: string,
@@ -863,6 +898,7 @@ export class EngagementKindsService {
     );
     const ended = before.streams.filter((s) => end.has(s));
     await this.generator.endStreams(client, engagementId, fy, ended);
+    if (ended.length) await this.retireEndedStreamLines(client, engagementId);
     if (before.status === 'open') await this.generate(client, engagementId, [fy]);
     const after = await this.yearOrThrow(client, engagementId, fy, kc);
     await this.audit.recordWith(client, ctx, {
