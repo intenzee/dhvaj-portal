@@ -193,6 +193,8 @@ export class PartnerPacksService {
           objectId: pack.id,
           dedupKey: `partner_pack:${pack.id}`,
           link: null,
+          // Built for the partner on the month's schedule, as the partner.
+          sweep: true,
         });
         await client.query(`UPDATE hsdg.partner_packs SET notified_at = now() WHERE id = $1`, [
           pack.id,

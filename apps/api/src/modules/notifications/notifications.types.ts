@@ -22,4 +22,10 @@ export interface NotificationEvent {
    * or request), else the engagement. Pass it when the emitter already has it.
    */
   link?: WorkItemRef | null;
+  /**
+   * A date-driven sweep (deadlines, overdue chases): nobody's action, so the
+   * person who happened to run it is notified like anyone else. Otherwise the
+   * caller is the actor, and their own action never reaches their own inbox.
+   */
+  sweep?: boolean;
 }

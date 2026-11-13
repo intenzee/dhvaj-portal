@@ -100,6 +100,44 @@ describe('NotificationsService.emitWith', () => {
     expect(enqueueParams).toHaveLength(0);
   });
 
+  it('never notifies the person who acted, and passes them as the actor', async () => {
+    const service = new NotificationsService(db, inactiveCls, [], flags(false));
+    const { client, emitParams } = fakeClient((emp) => `user-${emp}`);
+
+    // Giving yourself a task (or a set of work) asks nothing of you.
+    expect(
+      await service.emitWith(client, ctx, {
+        type: NOTIFICATION_TYPE.workSetAssigned,
+        recipientEmployeeIds: ['e-actor'],
+        title: 'Self',
+      }),
+    ).toBe(0);
+    expect(emitParams).toHaveLength(0);
+
+    // Others still hear of it; the actor's login rides along for the SQL guard.
+    await service.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.quickTaskReply,
+      recipientEmployeeIds: ['e-actor', 'e2'],
+      title: 'Reply',
+    });
+    expect(emitParams[0]![0]).toEqual(['e2']);
+    expect(emitParams[0]![10]).toBe('u1');
+  });
+
+  it('a date-driven sweep has no actor: whoever ran it gets their own deadlines', async () => {
+    const service = new NotificationsService(db, inactiveCls, [], flags(false));
+    const { client, emitParams } = fakeClient((emp) => `user-${emp}`);
+    const created = await service.emitWith(client, ctx, {
+      type: NOTIFICATION_TYPE.internalSlaOverdue,
+      recipientEmployeeIds: ['e-actor', 'e2'],
+      title: 'Overdue',
+      sweep: true,
+    });
+    expect(created).toBe(2);
+    expect(emitParams[0]![0]).toEqual(['e-actor', 'e2']);
+    expect(emitParams[0]![10]).toBeNull();
+  });
+
   it('emit succeeds independently of external channels (durable-outbox decoupling)', async () => {
     // Delivery is decoupled to the outbox worker, so even a channel whose
     // deliver() would throw cannot make emit fail — its deliver() is never called
