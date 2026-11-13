@@ -308,9 +308,8 @@ describe('Who changes an engagement’s people (e2e)', () => {
       expect.stringMatching(/^Added to the team/),
       expect.stringMatching(/^Off the team/),
     ]);
-    expect(await notified(managerX, 'task_assigned', id)).toEqual([
-      expect.stringMatching(/^2 tasks handed to you/),
-    ]);
+    // Manager X handed them to themself: their own action never notifies them.
+    expect(await notified(managerX, 'task_assigned', id)).toEqual([]);
   });
 
   it('a finished engagement’s people are the Managing Partner’s or an administrator’s to change', async () => {
