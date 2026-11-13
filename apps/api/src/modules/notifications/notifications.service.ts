@@ -91,6 +91,30 @@ interface LinkRow extends WorkLinkSqlRow {
   request_id: string | null;
 }
 
+/**
+ * Who an event reaches: its recipients, de-duplicated, without the person who
+ * caused it — assigning a task, a set of work or a quick task, or answering one,
+ * never asks yourself to act. A date-driven sweep has no actor (whoever ran it
+ * is notified of their own deadlines like anyone else).
+ */
+export function notificationRecipients(
+  event: Pick<NotificationEvent, 'recipientEmployeeIds' | 'sweep'>,
+  ctx: Pick<RlsContext, 'employeeId'>,
+): string[] {
+  const actor = event.sweep ? null : (ctx.employeeId ?? null);
+  return [
+    ...new Set(
+      event.recipientEmployeeIds.filter((id): id is string => Boolean(id) && id !== actor),
+    ),
+  ];
+}
+
+/**
+ * The read side's guard for rows written before the actor was skipped at the
+ * source: a notification its own recipient raised never needs their action.
+ */
+const NOT_SELF_RAISED = `actor_user_id IS DISTINCT FROM recipient_user_id`;
+
 /** yyyy-mm-dd, a real day. */
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -131,20 +155,21 @@ export class NotificationsService {
    * change). De-duplicated recipients; each is resolved employee → user by the
    * emit function. Returns the number of notifications actually created.
    */
-  async emitWith(client: PoolClient, _ctx: RlsContext, event: NotificationEvent): Promise<number> {
+  async emitWith(client: PoolClient, ctx: RlsContext, event: NotificationEvent): Promise<number> {
     const correlationId = resolveAmbientCorrelationId(this.cls) ?? null;
-    const recipients = [
-      ...new Set(event.recipientEmployeeIds.filter((id): id is string => Boolean(id))),
-    ];
+    const recipients = notificationRecipients(event, ctx);
     if (recipients.length === 0) return 0;
     const link = event.link !== undefined ? event.link : await this.linkFor(client, event);
     // One round-trip for ALL recipients of this event: emit_notification is
     // called once per element of the array via unnest, rather than a JS loop of
     // one query each. This keeps every emission (dedup + recipient resolution)
     // identical while collapsing R sequential round-trips into 1 — the sweep,
-    // now run on a schedule over the whole catalogue, is the hot path.
+    // now run on a schedule over the whole catalogue, is the hot path. The
+    // actor rides along: the function records it and skips the actor's own
+    // user (an employee-less actor is still caught by their login).
     const { rows } = await client.query<{ recipient_user_id: string | null }>(
-      `SELECT hsdg.emit_notification(e.employee_id, $2,$3,$4,$5,$6,$7,$8,$9,$10) AS recipient_user_id
+      `SELECT hsdg.emit_notification(e.employee_id, $2,$3,$4,$5,$6,$7,$8,$9,$10,
+                                     NULLIF($11, '')::uuid) AS recipient_user_id
        FROM unnest($1::uuid[]) AS e(employee_id)`,
       [
         recipients,
@@ -157,6 +182,7 @@ export class NotificationsService {
         event.dedupKey ?? null,
         correlationId,
         link ? JSON.stringify(link) : null,
+        event.sweep ? null : ctx.userId || null,
       ],
     );
     const delivered = rows
@@ -291,6 +317,8 @@ export class NotificationsService {
         conds.push(`type = $${params.length}`);
       }
       if (filter.unreadOnly) conds.push(`status = 'unread'`);
+      // What needs you (the bell, unread) never lists what you did yourself.
+      if (filter.bellOnly || filter.unreadOnly) conds.push(NOT_SELF_RAISED);
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
       params.push(page.limit, page.offset);
       const { rows } = await client.query<NotificationRow>(
@@ -320,7 +348,7 @@ export class NotificationsService {
       const off = bellOnly ? await this.offBell(client) : [];
       const { rows } = await client.query<{ count: string }>(
         `SELECT count(*) AS count FROM hsdg.notifications
-          WHERE status = 'unread' AND type <> ALL($1::text[])`,
+          WHERE status = 'unread' AND type <> ALL($1::text[]) AND ${NOT_SELF_RAISED}`,
         [off],
       );
       return { unread: Number(rows[0]?.count ?? 0) };

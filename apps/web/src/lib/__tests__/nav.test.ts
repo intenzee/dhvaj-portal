@@ -1,6 +1,7 @@
 import { PERMISSION } from '@hsdg/contracts';
 import {
   NAV_ITEMS,
+  NAV_SECTIONS,
   activeNavHref,
   foldedHref,
   isDeskOnly,
@@ -63,6 +64,17 @@ describe('visibleNavSections', () => {
     expect(sections.map((s) => s.items.map((i) => i.label))).toEqual([['Home'], ['My attendance']]);
   });
 
+  it('puts Attendance directly after Client work', () => {
+    const titles = visibleNavSections(
+      principal([PERMISSION.engagementRead, PERMISSION.entityRead]),
+    ).map((s) => s.title);
+    const clientWork = titles.indexOf('Client work');
+    expect(clientWork).toBeGreaterThanOrEqual(0);
+    expect(titles[clientWork + 1]).toBe('Attendance');
+    const all = NAV_SECTIONS.map((s) => s.title);
+    expect(all.indexOf('Attendance')).toBe(all.indexOf('Client work') + 1);
+  });
+
   it('groups client work under its own heading', () => {
     const sections = visibleNavSections(
       principal([PERMISSION.engagementRead, PERMISSION.entityRead]),
@@ -121,11 +133,11 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
         'Home',
         'My Work',
         'Notifications',
-        'My attendance',
         'Engagements',
         'Clients',
         'Compliance',
         'Documents',
+        'My attendance',
       ]);
     },
   );
@@ -157,9 +169,9 @@ describe('visibleNav with ff_work_links (WF-106, WF-107)', () => {
     expect(labels(as(['senior'], [PERMISSION.engagementRead]))).toEqual([
       'Home',
       'My Work',
-      'My attendance',
       'Engagements',
       'Documents',
+      'My attendance',
     ]);
   });
 

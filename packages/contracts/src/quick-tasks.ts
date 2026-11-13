@@ -4,6 +4,8 @@
  * answer like a chat: Received, Doing (done in 1 h / 2 h / …), Done.
  */
 
+import { ROLE, type RoleSlug } from './identity';
+
 export const QUICK_TASK_STATUSES = ['sent', 'received', 'doing', 'done', 'cancelled'] as const;
 export type QuickTaskStatus = (typeof QUICK_TASK_STATUSES)[number];
 
@@ -140,4 +142,46 @@ export function quickTaskEta(minutes: number, now: Date = new Date()): Date {
     return evening.getTime() > now.getTime() ? evening : at(1, 10);
   }
   return at(1, 13);
+}
+
+/**
+ * Remind (the Today screen): a Partner, the Managing Partner or an Admin gives
+ * someone else a short job with the time they have for it. It is a quick task —
+ * urgent, due when the time runs out — so it pops up on their screen at once.
+ */
+export const REMIND_ROLES: readonly RoleSlug[] = [ROLE.managingPartner, ROLE.partner, ROLE.admin];
+
+/** The longest time a reminder can allot: a week. */
+export const REMIND_MAX_MINUTES = 7 * 24 * 60;
+
+/** POST /quick-tasks/remind. */
+export interface QuickTaskRemindInput {
+  assignedToEmployeeId: string;
+  /** The time allotted, in minutes (1 … a week). */
+  minutes: number;
+  note?: string | null;
+}
+
+/** "45 min", "2 h", "1 h 30 min", "2 days". Pure — tested. */
+export function allottedLabel(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0) {
+    const d = minutes / 1440;
+    return `${d} day${d === 1 ? '' : 's'}`;
+  }
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+/** A reminder's title and details, as its quick task. Pure — tested. */
+export function reminderText(
+  minutes: number,
+  note?: string | null,
+): { title: string; details: string } {
+  const n = note?.trim().replace(/\s+/g, ' ') ?? '';
+  return {
+    title: n ? `Reminder: ${n}`.slice(0, 500) : 'Reminder',
+    details: `Time allotted: ${allottedLabel(minutes)}.`,
+  };
 }

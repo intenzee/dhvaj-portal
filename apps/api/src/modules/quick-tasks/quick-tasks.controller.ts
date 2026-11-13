@@ -16,6 +16,7 @@ import {
 import {
   PERMISSION,
   QUICK_TASK_STATUSES,
+  REMIND_MAX_MINUTES,
   type QuickTaskDetail,
   type QuickTaskInbox,
   type QuickTaskPerson,
@@ -34,6 +35,16 @@ export class CreateQuickTaskDto {
   @ApiProperty() @IsUUID() assignedToEmployeeId!: string;
   @ApiPropertyOptional({ default: true }) @IsOptional() @IsBoolean() urgent?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dueAt?: string | null;
+}
+
+export class RemindDto {
+  @ApiProperty() @IsUUID() assignedToEmployeeId!: string;
+  @ApiProperty({ description: 'The time allotted, in minutes (1 … a week).' })
+  @IsInt()
+  @Min(1)
+  @Max(REMIND_MAX_MINUTES)
+  minutes!: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(400) note?: string | null;
 }
 
 export class QuickTaskReplyDto {
@@ -106,6 +117,16 @@ export class QuickTasksController {
     @Body() dto: CreateQuickTaskDto,
   ): Promise<QuickTaskDetail> {
     return this.tasks.create(rlsContextFromPrincipal(p), dto);
+  }
+
+  @Post('remind')
+  @RequirePermissions(PERMISSION.notificationRead)
+  @ApiOperation({
+    summary:
+      'Remind someone, with the time they have for it (Partner, Managing Partner or Admin) — it pops up on their screen',
+  })
+  remind(@CurrentPrincipal() p: Principal, @Body() dto: RemindDto): Promise<QuickTaskDetail> {
+    return this.tasks.remind(rlsContextFromPrincipal(p), dto);
   }
 
   @Get(':id')

@@ -41,6 +41,7 @@ import { ChangePasswordModal } from './change-password-modal';
 import { NewQuickTaskModal } from './quick-tasks/new-quick-task-modal';
 import { QuickTaskInboxButton } from './quick-tasks/quick-task-inbox';
 import { ChatButton } from './chat/chat-button';
+import { NotificationGate } from './notification-gate';
 
 /** "New …" quick-create actions, shown only to users who may create that thing. */
 const CREATE_ACTIONS: {
@@ -270,6 +271,8 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
       </div>
 
       <HelpPanel open={helpOpen} onClose={closeHelp} />
+      {/* Notifications are required: every load asks until they are on. */}
+      <NotificationGate />
     </div>
   );
 }

@@ -185,36 +185,6 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Attendance',
-    items: [
-      {
-        label: 'My attendance',
-        href: '/attendance',
-        icon: CalendarCheck,
-        hint: 'Log your day — client, task, hours, where you worked; 8 hours marks you present. Leave too.',
-        ready: true,
-      },
-      {
-        label: 'Team attendance',
-        href: '/attendance/team',
-        icon: UsersRound,
-        hint: 'The days of everyone who reports to you, and their leave to approve.',
-        onlyFor: [ROLE.managingPartner, ROLE.admin, ROLE.partner, ROLE.manager, ROLE.senior],
-        // A Senior opens it from My attendance, keeping a preparer's sidebar short.
-        hideFor: PREPARER_ROLES,
-        ready: true,
-      },
-      {
-        label: 'Attendance register',
-        href: '/attendance/register',
-        icon: ScrollText,
-        hint: 'Everyone’s month for payroll: present, half days, leave; holidays and settings.',
-        permission: PERMISSION.timeReadAttendance,
-        ready: true,
-      },
-    ],
-  },
-  {
     title: 'Client work',
     items: [
       {
@@ -311,6 +281,37 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: FolderOpen,
         hint: 'Working papers and client documents across your engagements.',
         permission: PERMISSION.engagementRead,
+        ready: true,
+      },
+    ],
+  },
+  {
+    // Directly after the client work, so the day's log sits next to the jobs it records.
+    title: 'Attendance',
+    items: [
+      {
+        label: 'My attendance',
+        href: '/attendance',
+        icon: CalendarCheck,
+        hint: 'Log your day — client, task, hours, where you worked; 8 hours marks you present. Leave too.',
+        ready: true,
+      },
+      {
+        label: 'Team attendance',
+        href: '/attendance/team',
+        icon: UsersRound,
+        hint: 'The days of everyone who reports to you, and their leave to approve.',
+        onlyFor: [ROLE.managingPartner, ROLE.admin, ROLE.partner, ROLE.manager, ROLE.senior],
+        // A Senior opens it from My attendance, keeping a preparer's sidebar short.
+        hideFor: PREPARER_ROLES,
+        ready: true,
+      },
+      {
+        label: 'Attendance register',
+        href: '/attendance/register',
+        icon: ScrollText,
+        hint: 'Everyone’s month for payroll: present, half days, leave; holidays and settings.',
+        permission: PERMISSION.timeReadAttendance,
         ready: true,
       },
     ],

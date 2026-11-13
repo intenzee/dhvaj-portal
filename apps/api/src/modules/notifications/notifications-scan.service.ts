@@ -21,6 +21,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { RlsContext } from '../../database/rls-context';
 import { AppConfigService } from '../../config/config.module';
 import { NotificationsService } from './notifications.service';
+import type { NotificationEvent } from './notifications.types';
 import { UDIN_PENDING_SQL, udinWindowDays } from '../registers/udin-register.service';
 import { workflowPolicy } from '../workflow-settings/workflow-policy';
 import { inDays, noticeHearingDue, noticeReplyBand } from './notice-reminders';
@@ -167,6 +168,11 @@ export class NotificationsScanService {
     private readonly flags: FeatureFlagsService,
   ) {}
 
+  /** A date-driven sweep has no actor: whoever ran it is notified like anyone else. */
+  private emit(client: PoolClient, ctx: RlsContext, event: NotificationEvent): Promise<number> {
+    return this.notifications.emitWith(client, ctx, { ...event, sweep: true });
+  }
+
   async run(ctx: RlsContext): Promise<ScanResult> {
     const slaLead = this.config.get('NOTIFICATION_SLA_LEAD_DAYS');
     const deadlineLead = this.config.get('NOTIFICATION_DEADLINE_LEAD_DAYS');
@@ -244,7 +250,7 @@ export class NotificationsScanService {
         const filing = filingTitle(workFilingContextOf(row), '');
         const context = `${filing ? `${filing} — ` : ''}${row.engagement_code} · ${row.entity_name}`;
         if (row.sla_overdue) {
-          result.internalSlaOverdue += await this.notifications.emitWith(client, ctx, {
+          result.internalSlaOverdue += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.internalSlaOverdue,
             recipientEmployeeIds: leads,
             title: `Internal SLA overdue — ${context}`,
@@ -255,7 +261,7 @@ export class NotificationsScanService {
             dedupKey: `sla_overdue:${row.id}`,
           });
         } else if (row.sla_approaching) {
-          result.internalSlaApproaching += await this.notifications.emitWith(client, ctx, {
+          result.internalSlaApproaching += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.internalSlaApproaching,
             recipientEmployeeIds: leads,
             title: `Internal SLA approaching — ${context}`,
@@ -271,7 +277,7 @@ export class NotificationsScanService {
         // §24 routes and labels it distinctly ("Client commitment overdue").
         const isClientCommitment = row.due_date_category === 'CLIENT_COMMITTED';
         if (row.statutory_approaching) {
-          result.statutoryDeadlineApproaching += await this.notifications.emitWith(client, ctx, {
+          result.statutoryDeadlineApproaching += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.statutoryDeadlineApproaching,
             recipientEmployeeIds: leads,
             title: `Statutory deadline approaching — ${context}`,
@@ -283,7 +289,7 @@ export class NotificationsScanService {
           });
         } else if (row.statutory_due_today) {
           // §24 Due Today → owner/reviewer emphasis (distinct from "approaching").
-          result.complianceDueToday += await this.notifications.emitWith(client, ctx, {
+          result.complianceDueToday += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.complianceDueToday,
             recipientEmployeeIds: leads,
             title: `Due today — ${context}`,
@@ -295,7 +301,7 @@ export class NotificationsScanService {
           });
         } else if (row.statutory_overdue && isClientCommitment) {
           // §24 Client commitment overdue → owner / manager (the engagement leads).
-          result.clientCommitmentOverdue += await this.notifications.emitWith(client, ctx, {
+          result.clientCommitmentOverdue += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.clientCommitmentOverdue,
             recipientEmployeeIds: leads,
             title: `Client commitment overdue — ${context}`,
@@ -310,7 +316,7 @@ export class NotificationsScanService {
           // (past the threshold) escalate up to the firm (managing partner).
           const recipients = row.statutory_critical ? [...leads, ...managingPartnerIds] : leads;
           const severity = row.statutory_critical ? 'CRITICAL — ' : '';
-          result.statutoryDeadlineOverdue += await this.notifications.emitWith(client, ctx, {
+          result.statutoryDeadlineOverdue += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.statutoryDeadlineOverdue,
             recipientEmployeeIds: recipients,
             title: `${severity}Statutory deadline overdue — ${context}`,
@@ -351,7 +357,7 @@ export class NotificationsScanService {
           row.engagement_partner_id,
           row.engagement_manager_id,
         ];
-        result.deadlineLayerOverdue += await this.notifications.emitWith(client, ctx, {
+        result.deadlineLayerOverdue += await this.emit(client, ctx, {
           type: NOTIFICATION_TYPE.deadlineLayerOverdue,
           recipientEmployeeIds: recipients,
           title: `${isReview ? 'Review' : 'Deadline layer'} overdue — ${row.label} · ${context}`,
@@ -398,7 +404,7 @@ export class NotificationsScanService {
       for (const row of deps) {
         const context = `${row.engagement_code} · ${row.entity_name}`;
         if (row.escalation_overdue) {
-          result.clientDependencyOverdue += await this.notifications.emitWith(client, ctx, {
+          result.clientDependencyOverdue += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.clientDependencyOverdue,
             recipientEmployeeIds: [
               row.responsible_employee_id,
@@ -426,7 +432,7 @@ export class NotificationsScanService {
               },
             );
         } else {
-          result.clientDependencyReminder += await this.notifications.emitWith(client, ctx, {
+          result.clientDependencyReminder += await this.emit(client, ctx, {
             type: NOTIFICATION_TYPE.clientDependencyReminder,
             // Prefer the responsible staff member; fall back to the EP.
             recipientEmployeeIds: [row.responsible_employee_id ?? row.engagement_partner_id],
@@ -514,7 +520,7 @@ export class NotificationsScanService {
       };
       const band = row.reply_days_left === null ? null : noticeReplyBand(row.reply_days_left);
       if (band !== null && row.internal_due_on) {
-        result.noticeReplyDue += await this.notifications.emitWith(client, ctx, {
+        result.noticeReplyDue += await this.emit(client, ctx, {
           ...base,
           type: NOTIFICATION_TYPE.noticeReplyDue,
           title: `Reply due ${inDays(row.reply_days_left!)} — ${what}`,
@@ -527,7 +533,7 @@ export class NotificationsScanService {
         row.hearing_days_left !== null &&
         noticeHearingDue(row.hearing_days_left)
       ) {
-        result.noticeHearingDue += await this.notifications.emitWith(client, ctx, {
+        result.noticeHearingDue += await this.emit(client, ctx, {
           ...base,
           type: NOTIFICATION_TYPE.noticeHearingDue,
           title: `Hearing ${inDays(row.hearing_days_left)} — ${what}`,
@@ -592,7 +598,7 @@ export class NotificationsScanService {
       const what = `${row.invoice_number ?? 'Invoice'} · ${row.entity_name}`;
       const band = invoiceOverdueNudge(days);
       if (band !== null) {
-        result.invoiceOverdue += await this.notifications.emitWith(client, ctx, {
+        result.invoiceOverdue += await this.emit(client, ctx, {
           type: NOTIFICATION_TYPE.invoiceOverdue,
           recipientEmployeeIds: [row.engagement_partner_id, row.issued_by_employee_id],
           title: `${band}+ days overdue — ${what}`,
@@ -675,7 +681,7 @@ export class NotificationsScanService {
       if (!this.flags.isOnFor(FEATURE_FLAG.registers, row.office_code)) continue;
       const doc = `${UDIN_DOCUMENT_KIND_LABEL[row.document_kind]}${row.financial_year ? ` FY ${row.financial_year}` : ''}`;
       const what = `${doc} · ${row.entity_name}`;
-      result.udinWindowClosing += await this.notifications.emitWith(client, ctx, {
+      result.udinWindowClosing += await this.emit(client, ctx, {
         type: NOTIFICATION_TYPE.udinWindowClosing,
         recipientEmployeeIds: [row.partner_id],
         title: `UDIN still to generate ${inDays(Number(row.days_left))} — ${what}`,
@@ -744,7 +750,7 @@ export class NotificationsScanService {
       const link = { engagementId: '', engagementKind: 'compliance' as const, dscId: row.id };
       const band = dscExpiryBand(Number(row.days_left));
       if (band !== null) {
-        result.dscExpiring += await this.notifications.emitWith(client, ctx, {
+        result.dscExpiring += await this.emit(client, ctx, {
           type: NOTIFICATION_TYPE.dscExpiring,
           recipientEmployeeIds: row.recipients,
           title: `DSC expires ${inDays(Number(row.days_left))} — ${who}`,
@@ -756,7 +762,7 @@ export class NotificationsScanService {
         });
       }
       if (row.overdue_return && row.expected_back_at) {
-        result.dscOverdueReturn += await this.notifications.emitWith(client, ctx, {
+        result.dscOverdueReturn += await this.emit(client, ctx, {
           type: NOTIFICATION_TYPE.dscOverdueReturn,
           recipientEmployeeIds: row.recipients,
           title: `DSC not back — ${who}`,
