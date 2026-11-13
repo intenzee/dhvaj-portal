@@ -99,7 +99,12 @@ export function QuickInvoiceRow({
         body: input,
       }),
     onSuccess: (r, input) => {
-      setLast({ ...r, engagementServiceId: input.engagementServiceId, amount: input.amount, rate });
+      setLast({
+        ...r,
+        engagementServiceId: input.engagementServiceId,
+        amount: input.amount,
+        rate: input.gstRate,
+      });
       setAmount('');
       onCreated();
       toast(
@@ -137,7 +142,8 @@ export function QuickInvoiceRow({
   const submit = (e: React.FormEvent): void => {
     e.preventDefault();
     if (!chosen || !preview || create.isPending) return;
-    create.mutate({ engagementServiceId: chosen, amount: amount.trim(), gstRate: rate });
+    // With no firm GSTIN no GST is charged, so none is stored on the line either.
+    create.mutate({ engagementServiceId: chosen, amount: amount.trim(), gstRate: gstMode ? rate : 0 });
   };
 
   const lastScheduled = last

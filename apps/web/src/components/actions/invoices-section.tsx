@@ -3,7 +3,20 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, FileText, Send, CheckCircle2, Ban, Download, Wallet, UserCheck } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  FileText,
+  Send,
+  CheckCircle2,
+  Ban,
+  Download,
+  Wallet,
+  UserCheck,
+  Pencil,
+  Check,
+  X,
+} from 'lucide-react';
 import {
   BILLING_FREQUENCIES,
   FEATURE_FLAG,
@@ -31,6 +44,7 @@ import { Field, Input, Select, Textarea } from '@/components/form';
 import {
   invoiceActions,
   invoiceNumberLabel,
+  lineRateLabel,
   stateLabel,
   taxRows,
   useBillingSettings,
@@ -517,6 +531,20 @@ export function InvoiceDetailModal({
   const [rate, setRate] = useState('18');
   const [voiding, setVoiding] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [line, setLine] = useState<{
+    id: string;
+    description: string;
+    quantity: string;
+    unitAmount: string;
+    gstRate: string;
+  } | null>(null);
+  const [details, setDetails] = useState<{
+    dueDate: string;
+    clientGstin: string;
+    notes: string;
+  } | null>(null);
   // Decision 9.3: an ad-hoc line is a partner's to issue; the rest ask.
   const [asking, setAsking] = useState<string | null>(null);
   const [askNote, setAskNote] = useState('');
@@ -555,6 +583,55 @@ export function InvoiceDetailModal({
       apiFetch(`/engagements/${engagementId}/invoices/${invoiceId}/lines/${lineId}`, { method: 'DELETE' }),
     onSuccess: refresh,
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not remove the line.', 'error'),
+  });
+  const saveLine = useMutation({
+    mutationFn: (l: NonNullable<typeof line>) =>
+      apiFetch(`/engagements/${engagementId}/invoices/${invoiceId}/lines/${l.id}`, {
+        method: 'PATCH',
+        body: {
+          description: l.description.trim(),
+          quantity: l.quantity.trim() || '1',
+          unitAmount: l.unitAmount.trim() || '0',
+          ...(gstMode ? { gstRate: Number(l.gstRate) } : {}),
+        },
+      }),
+    onSuccess: () => {
+      setLine(null);
+      toast(revisedNote);
+      refresh();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not save the line.', 'error'),
+  });
+  const saveDetails = useMutation({
+    mutationFn: (d: NonNullable<typeof details>) =>
+      apiFetch(`/engagements/${engagementId}/invoices/${invoiceId}`, {
+        method: 'PATCH',
+        body: {
+          version: invoice.data?.version,
+          dueDate: d.dueDate || undefined,
+          notes: d.notes.trim() || null,
+          ...(d.clientGstin.trim() ? { clientGstin: d.clientGstin.trim().toUpperCase() } : {}),
+        },
+      }),
+    onSuccess: () => {
+      setDetails(null);
+      toast(revisedNote);
+      refresh();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not save the invoice.', 'error'),
+  });
+  const deleteInvoice = useMutation({
+    mutationFn: () =>
+      apiFetch(`/engagements/${engagementId}/invoices/${invoiceId}`, {
+        method: 'DELETE',
+        body: deleteReason.trim() ? { reason: deleteReason.trim() } : {},
+      }),
+    onSuccess: () => {
+      toast(`Deleted ${invoice.data?.invoiceNumber ?? 'the invoice'}. Its number stays used.`);
+      onChanged();
+      onClose();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not delete the invoice.', 'error'),
   });
   const setStatus = useMutation({
     mutationFn: (v: { status: InvoiceStatus; reason?: string }) =>
@@ -598,6 +675,11 @@ export function InvoiceDetailModal({
   const inv = invoice.data;
   const isDraft = inv?.status === INVOICE_STATUS.draft;
   const may = inv ? invoiceActions(inv, principal?.permissions ?? [], receipts) : null;
+  // Lines are changed on a draft, or on an issued invoice nothing blocks.
+  const editable = !!may?.edit;
+  const revisedNote = isDraft
+    ? 'Saved.'
+    : 'Invoice revised — same number and date, PDF made again. Send it to the client again.';
   const voidable = !!receipts && inv?.status === INVOICE_STATUS.issued;
   const voidAsked = usePendingReversals(voidable).find((q) => q.invoiceId === invoiceId);
 
@@ -632,6 +714,11 @@ export function InvoiceDetailModal({
           {may?.issue && (
             <Button onClick={() => setStatus.mutate({ status: INVOICE_STATUS.issued })} disabled={setStatus.isPending}>
               <Send className="h-4 w-4" /> Issue
+            </Button>
+          )}
+          {may?.remove && !deleting && (
+            <Button variant="secondary" onClick={() => setDeleting(true)}>
+              <Trash2 className="h-4 w-4" /> Delete
             </Button>
           )}
           {may?.voidIssued && !voiding && !voidAsked && (
@@ -677,6 +764,97 @@ export function InvoiceDetailModal({
           </div>
           {isDraft && !may?.issue && (
             <p className="text-xs text-ink-faint">Issuing needs the billing.manage permission (partners and managers).</p>
+          )}
+          {inv.status !== INVOICE_STATUS.draft &&
+            inv.status !== INVOICE_STATUS.void &&
+            inv.editBlockedReason && (
+              <p className="text-xs text-ink-faint" data-testid="invoice-edit-blocked">
+                Can’t be edited or deleted: {inv.editBlockedReason}
+              </p>
+            )}
+          {inv.revisionCount > 0 && inv.revisedAt && (
+            <p className="text-xs text-ink-faint">
+              Revised {inv.revisionCount === 1 ? 'once' : `${inv.revisionCount} times`}, last on{' '}
+              {formatDate(inv.revisedAt)}.
+            </p>
+          )}
+          {editable && !details && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  setDetails({
+                    dueDate: inv.dueDate ?? '',
+                    clientGstin: inv.clientGstin ?? '',
+                    notes: inv.notes ?? '',
+                  })
+                }
+              >
+                <Pencil className="h-4 w-4" /> Edit details
+              </Button>
+            </div>
+          )}
+          {details && (
+            <div className="space-y-2 rounded-md border border-line p-3" data-testid="invoice-edit-details">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Due date">
+                  <Input
+                    type="date"
+                    value={details.dueDate}
+                    onChange={(e) => setDetails({ ...details, dueDate: e.target.value })}
+                  />
+                </Field>
+                <Field label="Client GSTIN" hint="Leave blank for an unregistered client.">
+                  <Input
+                    value={details.clientGstin}
+                    maxLength={15}
+                    onChange={(e) => setDetails({ ...details, clientGstin: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <Field label="Remarks">
+                <Textarea
+                  rows={2}
+                  maxLength={2000}
+                  value={details.notes}
+                  onChange={(e) => setDetails({ ...details, notes: e.target.value })}
+                />
+              </Field>
+              {!isDraft && (
+                <p className="text-xs text-ink-faint">
+                  An issued invoice keeps its number and date; its PDF is made again.
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setDetails(null)}>Cancel</Button>
+                <Button size="sm" onClick={() => saveDetails.mutate(details)} disabled={saveDetails.isPending}>
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
+          {deleting && (
+            <div className="flex items-end gap-2 rounded-md border border-danger-200 p-3" data-testid="invoice-delete">
+              <div className="flex-1">
+                <Field
+                  label={`Delete ${inv.invoiceNumber ?? 'this invoice'}?`}
+                  hint="It leaves the lists and the client’s balance. Its number stays used (GST numbers are never reused); the record is kept for the audit trail."
+                >
+                  <Input
+                    autoFocus
+                    placeholder="Reason (optional)"
+                    value={deleteReason}
+                    maxLength={500}
+                    onChange={(e) => setDeleteReason(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setDeleting(false)}>Cancel</Button>
+              <Button size="sm" onClick={() => deleteInvoice.mutate()} disabled={deleteInvoice.isPending}>
+                <Trash2 className="h-4 w-4" /> Delete invoice
+              </Button>
+            </div>
           )}
           {inv.status === INVOICE_STATUS.void && inv.voidedReason && (
             <p className="rounded-md bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
@@ -728,57 +906,141 @@ export function InvoiceDetailModal({
             <thead>
               <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
                 <th className="px-2 py-1.5">Description</th>
-                <th className="px-2 py-1.5">SAC · GST</th>
+                <th className="px-2 py-1.5">{gstMode ? 'SAC · GST' : 'SAC'}</th>
                 <th className="px-2 py-1.5 text-right">Qty</th>
                 <th className="px-2 py-1.5 text-right">Unit</th>
                 <th className="px-2 py-1.5 text-right">Amount</th>
-                {isDraft && <th className="px-2 py-1.5" />}
+                {editable && <th className="px-2 py-1.5" />}
               </tr>
             </thead>
             <tbody>
               {inv.lines.length === 0 && (
                 <tr><td colSpan={6} className="px-2 py-3 text-ink-faint">No lines yet.</td></tr>
               )}
-              {inv.lines.map((l) => (
+              {inv.lines.map((l) =>
+                line?.id === l.id ? (
+                  <tr key={l.id} className="border-b border-line last:border-0" data-testid="invoice-line-edit">
+                    <td className="px-2 py-1.5">
+                      <Input
+                        aria-label="Description"
+                        value={line.description}
+                        onChange={(e) => setLine({ ...line, description: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {gstMode ? (
+                        <Select
+                          className="w-20"
+                          aria-label="GST rate"
+                          value={line.gstRate}
+                          onChange={(e) => setLine({ ...line, gstRate: e.target.value })}
+                        >
+                          {GST_RATES.map((r) => (
+                            <option key={r} value={String(r)}>{r}%</option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <span className="text-ink-muted">{l.sacCode ?? '—'}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <Input
+                        className="w-16 text-right"
+                        aria-label="Quantity"
+                        value={line.quantity}
+                        onChange={(e) => setLine({ ...line, quantity: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <Input
+                        className="w-28 text-right"
+                        aria-label="Unit amount"
+                        inputMode="decimal"
+                        value={line.unitAmount}
+                        onChange={(e) => setLine({ ...line, unitAmount: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 text-right text-ink-faint">—</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                      <button
+                        type="button"
+                        className="rounded p-1 text-primary-600 hover:text-primary-700 disabled:opacity-50"
+                        onClick={() => saveLine.mutate(line)}
+                        disabled={!line.description.trim() || saveLine.isPending}
+                        aria-label="Save line"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-1 text-ink-faint hover:text-ink"
+                        onClick={() => setLine(null)}
+                        aria-label="Cancel editing"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
                 <tr key={l.id} className="border-b border-line last:border-0">
                   <td className="px-2 py-1.5 text-ink">
                     {l.description}
                     {l.componentName && <span className="ml-2 text-xs text-ink-faint">· {l.componentName}</span>}
                   </td>
                   <td className="px-2 py-1.5 text-ink-muted">
-                    {l.sacCode ?? '—'} · {Number(l.gstRate)}%
+                    {l.sacCode ?? '—'}
+                    {lineRateLabel(l.gstRate) && ` · ${lineRateLabel(l.gstRate)}`}
                   </td>
                   <td className="px-2 py-1.5 text-right text-ink-muted">{l.quantity}</td>
                   <td className="px-2 py-1.5 text-right text-ink-muted">{money(l.unitAmount, inv.currency)}</td>
                   <td className="px-2 py-1.5 text-right font-medium text-ink">{money(l.amount, inv.currency)}</td>
-                  {isDraft && (
-                    <td className="px-2 py-1.5 text-right">
+                  {editable && (
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right">
                       <button
                         type="button"
-                        className="rounded p-1 text-ink-faint hover:text-danger-600"
-                        onClick={() => removeLine.mutate(l.id)}
-                        aria-label="Remove line"
+                        className="rounded p-1 text-ink-faint hover:text-ink"
+                        onClick={() =>
+                          setLine({
+                            id: l.id,
+                            description: l.description,
+                            quantity: String(Number(l.quantity)),
+                            unitAmount: String(Number(l.unitAmount)),
+                            gstRate: String(Number(l.gstRate ?? 0)),
+                          })
+                        }
+                        aria-label="Edit line"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Pencil className="h-4 w-4" />
                       </button>
+                      {(isDraft || inv.lines.length > 1) && (
+                        <button
+                          type="button"
+                          className="rounded p-1 text-ink-faint hover:text-danger-600"
+                          onClick={() => removeLine.mutate(l.id)}
+                          aria-label="Remove line"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
-              ))}
+                ),
+              )}
             </tbody>
             <tfoot>
               <tr className="text-sm">
-                <td className="px-2 pt-2 text-right text-ink-muted" colSpan={isDraft ? 5 : 4}>Subtotal</td>
+                <td className="px-2 pt-2 text-right text-ink-muted" colSpan={editable ? 5 : 4}>Subtotal</td>
                 <td className="px-2 pt-2 text-right text-ink">{money(inv.subtotal, inv.currency)}</td>
               </tr>
               {taxRows(inv).map((t) => (
                 <tr key={t.label} className="text-sm">
-                  <td className="px-2 text-right text-ink-muted" colSpan={isDraft ? 5 : 4}>{t.label}</td>
+                  <td className="px-2 text-right text-ink-muted" colSpan={editable ? 5 : 4}>{t.label}</td>
                   <td className="px-2 text-right text-ink">{money(t.amount, inv.currency)}</td>
                 </tr>
               ))}
               <tr className="text-sm font-semibold">
-                <td className="px-2 pb-1 text-right text-ink" colSpan={isDraft ? 5 : 4}>Total</td>
+                <td className="px-2 pb-1 text-right text-ink" colSpan={editable ? 5 : 4}>Total</td>
                 <td className="px-2 pb-1 text-right text-ink">{money(inv.total, inv.currency)}</td>
               </tr>
             </tfoot>
@@ -797,7 +1059,7 @@ export function InvoiceDetailModal({
             <InvoiceReminders invoice={inv} />
           )}
 
-          {isDraft && (
+          {editable && (
             <div className="flex items-end gap-2 border-t border-line pt-3">
               <div className="flex-1">
                 <Field label="Add line">
@@ -817,6 +1079,11 @@ export function InvoiceDetailModal({
                 <Plus className="h-4 w-4" /> Add
               </Button>
             </div>
+          )}
+          {editable && !gstMode && (
+            <p className="text-xs text-ink-faint">
+              No GST is charged: the firm’s GSTIN isn’t set. Set it on Billing → Settings to charge GST.
+            </p>
           )}
           {inv.amountInWords && inv.status !== INVOICE_STATUS.draft && (
             <p className="text-sm font-medium text-ink">{inv.amountInWords}</p>

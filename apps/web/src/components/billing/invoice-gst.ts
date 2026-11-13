@@ -28,7 +28,8 @@ export function taxRows(
   inv: Pick<InvoiceRecord, 'cgst' | 'sgst' | 'igst' | 'taxAmount' | 'isReverseCharge'>,
 ): { label: string; amount: string }[] {
   const split = Number(inv.cgst) + Number(inv.sgst) + Number(inv.igst) > 0;
-  if (!split) return [{ label: 'Tax', amount: inv.taxAmount }];
+  // No GST charged: no tax line at all (not a "Tax ₹0.00").
+  if (!split) return Number(inv.taxAmount) > 0 ? [{ label: 'Tax', amount: inv.taxAmount }] : [];
   const suffix = inv.isReverseCharge ? ' (reverse charge, payable by the client)' : '';
   return Number(inv.igst) > 0
     ? [{ label: `IGST${suffix}`, amount: inv.igst }]
@@ -38,12 +39,20 @@ export function taxRows(
       ];
 }
 
+/** '18%' beside a line's SAC; '' when no GST is charged on it. Pure — tested. */
+export function lineRateLabel(gstRate: string | number | null | undefined): string {
+  const r = Number(gstRate ?? 0);
+  return r > 0 ? `${r}%` : '';
+}
+
 /**
  * Who may do what to an invoice, by permission. With receipts (ff_billing_v2)
- * payment is recorded as a receipt, not marked by hand. Pure — tested.
+ * payment is recorded as a receipt, not marked by hand. Anyone who bills may
+ * edit or delete an invoice until money, a credit note or a filed GSTR-1 is
+ * against it (editBlockedReason). Pure — tested.
  */
 export function invoiceActions(
-  inv: Pick<InvoiceRecord, 'status'>,
+  inv: Pick<InvoiceRecord, 'status'> & { editBlockedReason?: string | null },
   permissions: readonly string[],
   receipts = false,
 ): {
@@ -52,10 +61,16 @@ export function invoiceActions(
   voidIssued: boolean;
   markPaid: boolean;
   recordReceipt: boolean;
+  edit: boolean;
+  remove: boolean;
 } {
   const has = (p: string): boolean => permissions.includes(p);
   const open = inv.status === 'issued' || inv.status === 'partially_paid';
+  const bills = has(PERMISSION.billingManage) || has(PERMISSION.engagementManage);
+  const changeable = inv.status === 'draft' || (inv.status === 'issued' && !inv.editBlockedReason);
   return {
+    edit: bills && changeable,
+    remove: bills && inv.status === 'issued' && !inv.editBlockedReason,
     issue: inv.status === 'draft' && has(PERMISSION.billingManage),
     voidDraft: inv.status === 'draft',
     voidIssued: inv.status === 'issued' && has(PERMISSION.billingApprove),

@@ -158,7 +158,7 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
             <Item label="GSTIN" value={settings.gstin ?? 'Not set'} />
             <Item label="State" value={stateLabel(settings.stateCode)} />
             <Item label="SAC" value={settings.sacDefault} />
-            <Item label="Numbers" value={`${settings.invoicePrefix}/YY-YY/0001`} />
+            <Item label="Numbers" value="202627/11/01 — FY / month / serial, new each month" />
             <Item label="Payment terms" value={`${settings.invoiceTermsDays} days`} />
             <div className="col-span-full">
               <Item
@@ -206,9 +206,6 @@ export function BillingSettingsCard({ settings }: { settings: BillingSettings })
             </Field>
             <Field label="Default SAC">
               <Input value={form.sacDefault} onChange={set('sacDefault')} maxLength={8} />
-            </Field>
-            <Field label="Number prefix">
-              <Input value={form.invoicePrefix} onChange={set('invoicePrefix')} maxLength={5} />
             </Field>
             <Field label="Payment terms (days)">
               <Input

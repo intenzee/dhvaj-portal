@@ -1,12 +1,12 @@
 import { PERMISSION, type BillingSettings } from '@hsdg/contracts';
-import { invoiceActions, invoiceNumberLabel, stateLabel, taxRows } from '../invoice-gst';
+import { invoiceActions, invoiceNumberLabel, lineRateLabel, stateLabel, taxRows } from '../invoice-gst';
 import { isMonthEnd, settingsChanges } from '../billing-settings';
 
 const zero = { cgst: '0.00', sgst: '0.00', igst: '0.00', isReverseCharge: false };
 
 describe('invoiceNumberLabel', () => {
   it('shows the number, or that a draft is numbered at issue', () => {
-    expect(invoiceNumberLabel({ invoiceNumber: 'INV/26-27/0001' })).toBe('INV/26-27/0001');
+    expect(invoiceNumberLabel({ invoiceNumber: '202627/11/07' })).toBe('202627/11/07');
     expect(invoiceNumberLabel({ invoiceNumber: null })).toBe('Draft (numbered at issue)');
   });
 });
@@ -19,7 +19,19 @@ describe('stateLabel', () => {
   });
 });
 
+describe('lineRateLabel', () => {
+  it('names the rate only when GST is charged', () => {
+    expect(lineRateLabel('18.00')).toBe('18%');
+    expect(lineRateLabel('0.00')).toBe('');
+    expect(lineRateLabel(null)).toBe('');
+  });
+});
+
 describe('taxRows', () => {
+  it('shows no tax line when none is charged', () => {
+    expect(taxRows({ ...zero, taxAmount: '0.00' })).toEqual([]);
+  });
+
   it('keeps the single hand-entered tax on legacy invoices', () => {
     expect(taxRows({ ...zero, taxAmount: '180.00' })).toEqual([{ label: 'Tax', amount: '180.00' }]);
   });
@@ -49,6 +61,8 @@ describe('invoiceActions', () => {
       voidIssued: false,
       markPaid: false,
       recordReceipt: false,
+      edit: true,
+      remove: false,
     });
     expect(invoiceActions({ status: 'draft' }, []).issue).toBe(false);
   });
@@ -61,7 +75,20 @@ describe('invoiceActions', () => {
       voidIssued: true,
       markPaid: true,
       recordReceipt: false,
+      edit: true,
+      remove: true,
     });
+  });
+
+  it('lets anyone who bills edit or delete an issued invoice until something blocks it', () => {
+    expect(invoiceActions({ status: 'issued' }, manage)).toMatchObject({ edit: true, remove: true });
+    expect(
+      invoiceActions({ status: 'issued' }, [PERMISSION.engagementManage]),
+    ).toMatchObject({ edit: true, remove: true });
+    expect(invoiceActions({ status: 'issued' }, [])).toMatchObject({ edit: false, remove: false });
+    const blocked = { status: 'issued' as const, editBlockedReason: 'In a filed GSTR-1.' };
+    expect(invoiceActions(blocked, approve)).toMatchObject({ edit: false, remove: false });
+    expect(invoiceActions({ status: 'void' }, approve)).toMatchObject({ edit: false, remove: false });
   });
 
   it('records a receipt instead of marking paid once receipts are on (PS-202)', () => {
