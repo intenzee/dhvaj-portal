@@ -182,4 +182,93 @@ describe('Stream lead change (e2e)', () => {
       await su.query('ROLLBACK');
     }
   });
+
+  it('open tasks follow a lead change; a task someone gave stays while its holder has a part', async () => {
+    const syId = emp['senior.y@dhvaj.in']!;
+    const pb = emp['partner.b@dhvaj.in']!;
+    const mxId = emp['manager.x@dhvaj.in']!;
+    await setLead(mp, syId).expect(200);
+    await su.query(
+      `INSERT INTO hsdg.engagement_team (engagement_id, employee_id, role_on_engagement)
+       VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING`,
+      [eng, syId],
+    );
+    const task = async (title: string, extra: Record<string, unknown>): Promise<string> => {
+      const cols = ['engagement_id', 'title', ...Object.keys(extra)];
+      const vals = [eng, title, ...Object.values(extra)];
+      const { rows } = await su.query<{ id: string }>(
+        `INSERT INTO hsdg.tasks (${cols.join(', ')})
+         VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
+        vals,
+      );
+      return rows[0]!.id;
+    };
+    const auto = await task('Prepare GSTR-1 · Nov 2026', {
+      engagement_service_id: line,
+      assigned_to_employee_id: syId,
+      reviewer_employee_id: mxId,
+      auto_created: true,
+    });
+    const given = await task('Reconcile 2B', {
+      engagement_service_id: line,
+      assigned_to_employee_id: syId,
+      assigned_by_employee_id: emp['partner.a@dhvaj.in'],
+    });
+    const finished = await task('Filed GSTR-3B · Oct 2026', {
+      engagement_service_id: line,
+      assigned_to_employee_id: syId,
+      auto_created: true,
+      status: 'done',
+      completed_at: new Date(),
+    });
+    const managers = await task('Advance tax · Dec 2026', {
+      assigned_to_employee_id: mxId,
+      auto_created: true,
+    });
+    const holder = async (id: string) =>
+      (
+        await su.query<{ a: string | null; r: string | null }>(
+          `SELECT assigned_to_employee_id AS a, reviewer_employee_id AS r
+             FROM hsdg.tasks WHERE id = $1`,
+          [id],
+        )
+      ).rows[0]!;
+
+    // The stream lead goes from Senior Y to Partner B.
+    await setLead(mp, pb).expect(200);
+    expect(await holder(auto)).toEqual({ a: pb, r: mxId });
+    expect((await holder(given)).a).toBe(syId); // still on the team
+    expect((await holder(finished)).a).toBe(syId); // finished tasks never move
+    const moved = await su.query<{ reason: string; from_employee_id: string }>(
+      `SELECT reason, from_employee_id FROM hsdg.task_assignments WHERE task_id = $1`,
+      [auto],
+    );
+    expect(moved.rows).toEqual([
+      { reason: 'The engagement’s lead changed', from_employee_id: syId },
+    ]);
+
+    // Off the team: what they were given goes to the line's lead.
+    await su.query(
+      `DELETE FROM hsdg.engagement_team WHERE engagement_id = $1 AND employee_id = $2`,
+      [eng, syId],
+    );
+    expect((await holder(given)).a).toBe(pb);
+
+    // A new Manager takes the old Manager's auto task (it has no stream lead).
+    await http()
+      .post(`/api/v1/engagements/${eng}/reassign-manager`)
+      .set(mp)
+      .send({ engagementManagerEmployeeId: emp['hr@dhvaj.in'], reason: 'Moved desks' })
+      .expect(201);
+    expect((await holder(managers)).a).toBe(emp['hr@dhvaj.in']);
+
+    // Assign work no longer lists them under the old holder.
+    const open = await http()
+      .get(`/api/v1/work-sets/open-tasks?ownerId=${mxId}`)
+      .set(mp)
+      .expect(200);
+    const ids = (open.body as Array<{ id: string }>).map((t) => t.id);
+    expect(ids).not.toContain(auto);
+    expect(ids).not.toContain(managers);
+  });
 });
