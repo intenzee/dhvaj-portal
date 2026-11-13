@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  CHANGE_LOG_AREAS,
+  changeLogArea,
   changeLogFieldLabel,
   type ChangeLogEntry,
   type ChangeLogField,
@@ -129,7 +129,7 @@ export class ChangeLogService {
           actorName: r.actor_name,
           actorRole: r.actor_role,
           table: r.table_name,
-          area: CHANGE_LOG_AREAS[r.table_name] ?? r.table_name,
+          area: changeLogArea(r.table_name, r.changes),
           op: r.op,
           rowId: r.row_id,
           label: r.label,
@@ -176,7 +176,7 @@ export class ChangeLogService {
               COALESCE(emp.full_name, eu.full_name, u.display_name, u.email::text,
                        o.code || ' · ' || o.name, ent.entity_code || ' · ' || ent.legal_name,
                        eng.engagement_code, s.name, et.name, reg.registration_number,
-                       t.name, ind.name, g.name, b.label) AS name
+                       t.name, ind.name, g.name, b.label, d.title) AS name
          FROM ids
          LEFT JOIN hsdg.employees emp ON emp.id = ids.id
          LEFT JOIN hsdg.users u ON u.id = ids.id
@@ -190,7 +190,8 @@ export class ChangeLogService {
          LEFT JOIN hsdg.teams t ON t.id = ids.id
          LEFT JOIN hsdg.industries ind ON ind.id = ids.id
          LEFT JOIN hsdg.entity_groups g ON g.id = ids.id
-         LEFT JOIN hsdg.entity_branches b ON b.id = ids.id`,
+         LEFT JOIN hsdg.entity_branches b ON b.id = ids.id
+         LEFT JOIN hsdg.documents d ON d.id = ids.id`,
       [[...ids]],
     );
     return new Map(found.filter((f) => f.name).map((f) => [f.id, f.name]));

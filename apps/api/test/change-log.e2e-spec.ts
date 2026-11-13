@@ -130,6 +130,75 @@ describe('Change log (e2e)', () => {
     });
   });
 
+  it('records a file added to an engagement, and its new version, under that client', async () => {
+    const serviceId = (
+      await http().get('/api/v1/services?search=ITR_FILING&limit=100').set(bearer(mp)).expect(200)
+    ).body.items[0].id as string;
+    const eng = (
+      await http()
+        .post('/api/v1/engagements')
+        .set(bearer(pa))
+        .send({
+          entityId,
+          serviceId,
+          financialYear: '2026-27',
+          periodLabel: `CL${Date.now()}`,
+          status: 'accepted',
+        })
+        .expect(201)
+    ).body.id as string;
+    const doc = (
+      await http()
+        .post(`/api/v1/engagements/${eng}/documents`)
+        .set(bearer(pa))
+        .send({
+          title: 'GSTR-3B November',
+          documentType: 'working_paper',
+          filename: 'GSTR-3B Nov.pdf',
+          contentType: 'application/pdf',
+          contentBase64: Buffer.from('%PDF-1.4 synthetic').toString('base64'),
+        })
+        .expect(201)
+    ).body.id as string;
+    await http()
+      .post(`/api/v1/engagements/${eng}/documents/${doc}/versions`)
+      .set(bearer(pa))
+      .send({
+        filename: 'GSTR-3B Nov v2.pdf',
+        contentType: 'application/pdf',
+        contentBase64: Buffer.from('%PDF-1.4 synthetic v2').toString('base64'),
+      })
+      .expect(201);
+
+    const byEngagement = await log(mp, { engagementId: eng });
+    const files = byEngagement.items.filter((i) => i.table === 'document_versions');
+    expect(files.map((i) => [i.op, i.area, i.label])).toEqual([
+      ['insert', 'File version', 'GSTR-3B Nov v2.pdf'],
+      ['insert', 'File', 'GSTR-3B Nov.pdf'],
+    ]);
+    const added = files[1]!;
+    expect(added).toMatchObject({ entityId, engagementId: eng });
+    expect(added.actorName).toBeTruthy();
+    expect(added.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'File name', after: 'GSTR-3B Nov.pdf' }),
+        expect.objectContaining({ label: 'File', after: 'GSTR-3B November' }),
+      ]),
+    );
+    const keys = added.fields.map((f) => f.field);
+    expect(keys).not.toContain('storage_reference');
+    expect(keys).not.toContain('checksum_sha256');
+    // One upload is one entry: the document row and its version pointer add nothing.
+    expect(byEngagement.items.filter((i) => i.table === 'documents')).toEqual([]);
+
+    // On the client's log too.
+    const byClient = await log(admin, { entityId, table: 'document_versions' });
+    expect(byClient.items.map((i) => i.label)).toContain('GSTR-3B Nov.pdf');
+
+    // A non-firm-wide user reads none of it.
+    await http().get(`/api/v1/change-log?engagementId=${eng}`).set(bearer(pa)).expect(403);
+  });
+
   it('is for the Managing Partner and administrators only', async () => {
     await http().get('/api/v1/change-log').set(bearer(pa)).expect(403);
     const hr = await token('hr@dhvaj.in');
