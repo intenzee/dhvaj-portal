@@ -13,8 +13,12 @@ import {
   QUICK_TASK_ASSIGNER_STATUSES,
   QUICK_TASK_OPEN,
   QUICK_TASK_STATUS_LABEL,
+  REMIND_MAX_MINUTES,
+  REMIND_ROLES,
   quickTaskEta,
+  reminderText,
   type CreateQuickTaskInput,
+  type QuickTaskRemindInput,
   type QuickTaskDetail,
   type QuickTaskInbox,
   type QuickTaskMessage,
@@ -280,6 +284,40 @@ export class QuickTasksService {
     // Their phone / closed browser, now that it has committed.
     if (push) this.push.taskEvent(ctx, push);
     return this.get(ctx, id);
+  }
+
+  /**
+   * Remind (the Today screen): a Partner, the Managing Partner or an Admin —
+   * by the role they are acting as — gives someone else a short job with the
+   * time they have for it. It is an urgent quick task due when that time runs
+   * out, so it pops up on their screen at once, rings, and reaches their phone.
+   */
+  async remind(
+    ctx: RlsContext,
+    input: QuickTaskRemindInput,
+    now: Date = new Date(),
+  ): Promise<QuickTaskDetail> {
+    const me = this.me(ctx, 'send a reminder');
+    if (!(REMIND_ROLES as readonly string[]).includes(ctx.role)) {
+      throw new ForbiddenException(
+        'Only a Partner, the Managing Partner or an Admin can send a reminder.',
+      );
+    }
+    if (input.assignedToEmployeeId === me) {
+      throw new BadRequestException('Pick someone else to remind.');
+    }
+    const minutes = Math.round(input.minutes);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > REMIND_MAX_MINUTES) {
+      throw new BadRequestException('Allot between 1 minute and a week.');
+    }
+    const { title, details } = reminderText(minutes, input.note);
+    return this.create(ctx, {
+      title,
+      details,
+      assignedToEmployeeId: input.assignedToEmployeeId,
+      urgent: true,
+      dueAt: new Date(now.getTime() + minutes * 60_000).toISOString(),
+    });
   }
 
   async list(

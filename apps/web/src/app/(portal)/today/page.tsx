@@ -19,6 +19,7 @@ import { PRIMARY, TaskActions } from '@/components/tasks/task-actions';
 import { RemindClientButton } from '@/components/filing/client-chase';
 import { FilingDrawer, useOpenFiling } from '@/components/filing/filing-drawer';
 import { DecideAdjustmentButtons } from '@/components/billing/decide-adjustment';
+import { RemindButton } from '@/components/quick-tasks/remind-modal';
 import {
   stepSelection,
   todayContextLine,
@@ -135,6 +136,7 @@ function TodayScreen(): JSX.Element {
         ]
           .filter(Boolean)
           .join(' · ')}
+        actions={<RemindButton />}
       />
       {(q.isLoading || flags.isLoading) && <Spinner label="Loading your day…" />}
       {q.isError && (
