@@ -118,9 +118,11 @@ describe('PS-201 money helpers', () => {
       expect(financialYearOf('2099-12-01')).toBe('2099-00');
     });
 
-    it('fits a five-letter prefix inside rule 46’s 16 characters', () => {
-      expect(invoiceNumberFor('INV', '2026-27', 1)).toBe('INV/26-27/0001');
-      expect(invoiceNumberFor('ABCDE', '2026-27', 9999)).toHaveLength(INVOICE_NUMBER_MAX);
+    it('numbers by FY and month, the serial restarting each month', () => {
+      expect(invoiceNumberFor('2026-11-16', 7)).toBe('202627/11/07');
+      expect(invoiceNumberFor('2027-03-31', 1)).toBe('202627/03/01');
+      expect(invoiceNumberFor('2027-04-01', 123)).toBe('202728/04/123');
+      expect(invoiceNumberFor('2026-11-16', 9999).length).toBeLessThanOrEqual(INVOICE_NUMBER_MAX);
     });
   });
 });

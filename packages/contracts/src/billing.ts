@@ -26,7 +26,7 @@ export interface BillingSettings {
   /** Two-digit GST state code of the firm's registration; null until set. */
   stateCode: string | null;
   sacDefault: string;
-  /** 1–5 capitals or digits, e.g. 'INV' → INV/26-27/0001. */
+  /** Kept for invoices issued before the monthly numbers (INV/26-27/0001); new ones are 202627/11/01. */
   invoicePrefix: string;
   /** Due date = issue date + this many days unless the invoice says otherwise. */
   invoiceTermsDays: number;
@@ -272,12 +272,13 @@ export function financialYearOf(isoDate: string): string {
 }
 
 /**
- * `<prefix>/<YY-YY>/<seq>`: ('INV', '2026-27', 1) → 'INV/26-27/0001'. The year
- * is shortened so a five-letter prefix still fits rule 46's 16 characters.
- * Mirrors hsdg.next_invoice_number. Pure — tested.
+ * The firm's invoice number: `<FY start><FY end>/<month>/<serial>`, the serial
+ * restarting every month — ('2026-11-16', 7) → '202627/11/07'. Mirrors
+ * hsdg.next_invoice_number_on. Pure — tested.
  */
-export function invoiceNumberFor(prefix: string, financialYear: string, seq: number): string {
-  return `${prefix}/${financialYear.slice(2)}/${String(seq).padStart(4, '0')}`;
+export function invoiceNumberFor(issueDate: string, seq: number): string {
+  const fy = financialYearOf(issueDate);
+  return `${fy.slice(0, 4)}${fy.slice(5)}/${issueDate.slice(5, 7)}/${String(seq).padStart(2, '0')}`;
 }
 
 /** '118000' → '1,18,000.00' (lakh grouping). Pure — tested. */

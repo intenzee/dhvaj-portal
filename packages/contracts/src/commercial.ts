@@ -164,7 +164,7 @@ export interface InvoiceLineItem {
 export interface InvoiceRecord {
   id: string;
   engagementId: string;
-  /** PS-201: assigned at issue (`INV/26-27/0001`); a draft has none. */
+  /** Assigned at issue (`202627/11/07`, the serial restarting each month); a draft has none. */
   invoiceNumber: string | null;
   status: InvoiceStatus;
   currency: string;
@@ -207,6 +207,12 @@ export interface InvoiceRecord {
   amountWrittenOff: string;
   /** total − amountSettled; 0 once paid. */
   balance: string;
+  /** When an issued invoice was last edited, and how many times. */
+  revisedAt: string | null;
+  revisionCount: number;
+  /** Why it cannot be edited or deleted now (money against it, a filed
+   *  GSTR-1, void); null when it can. A draft always can. */
+  editBlockedReason: string | null;
 }
 
 /** An invoice with its lines (the detail view). */

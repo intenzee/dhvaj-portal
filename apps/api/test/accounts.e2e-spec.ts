@@ -646,7 +646,7 @@ describe('Accounts desk and the ad-hoc issue rule (e2e)', () => {
       expect(queue.find((a) => a.id === asked.body.id)).toMatchObject({
         kind: 'invoice_void',
         status: 'pending',
-        invoiceNumber: expect.stringMatching(/^INV\//),
+        invoiceNumber: expect.stringMatching(/^\d{6}\/\d{2}\/\d{2,}$/),
       });
       const approved = await http()
         .post(`/api/v1/billing/reversal-requests/${asked.body.id as string}/decision`)

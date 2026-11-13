@@ -39,6 +39,7 @@ import { firmForPdf, type FirmPdfRow } from '../billing/firm-pdf';
 import type {
   CreateInvoiceInput,
   InvoiceLineInput,
+  UpdateInvoiceLineInput,
   SetInvoiceStatusInput,
   UpdateInvoiceInput,
   UpsertCommercialInput,
@@ -92,6 +93,10 @@ interface InvoiceRow {
   amount_received: string;
   amount_credited: string;
   amount_written_off: string;
+  revised_at: Date | null;
+  revision_count: number;
+  deleted_at: Date | null;
+  in_filed_gstr1: boolean | null;
 }
 
 interface LineRow {
@@ -118,7 +123,10 @@ const INVOICE_COLUMNS = `
   i.cgst, i.sgst, i.igst, i.amount_in_words, i.financial_year, i.issued_at,
   ie.full_name AS issued_by_name, i.voided_reason, i.voided_at, ve.full_name AS voided_by_name,
   (i.pdf_storage_reference IS NOT NULL) AS has_pdf, i.amount_settled,
-  i.amount_received, i.amount_credited, i.amount_written_off`;
+  i.amount_received, i.amount_credited, i.amount_written_off,
+  i.revised_at, i.revision_count, i.deleted_at,
+  (i.issue_date IS NOT NULL AND i.issue_date <=
+     (SELECT f.gst_filed_through FROM hsdg.firm_settings f LIMIT 1)) AS in_filed_gstr1`;
 
 const INVOICE_JOINS = `
   LEFT JOIN hsdg.employee_names ce ON ce.id = i.created_by_employee_id
@@ -266,7 +274,7 @@ export class CommercialService {
       params.push(page.limit, page.offset);
       const { rows } = await client.query<InvoiceRow & { total_count: string }>(
         `SELECT x.*, count(*) OVER() AS total_count
-         FROM (${INVOICE_BASE} WHERE i.engagement_id = $1 ${statusClause}) x
+         FROM (${INVOICE_BASE} WHERE i.engagement_id = $1 AND i.deleted_at IS NULL ${statusClause}) x
          ORDER BY x.created_at DESC
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params,
@@ -291,7 +299,7 @@ export class CommercialService {
   ): Promise<PageResult<GlobalInvoiceRecord>> {
     return this.db.withRlsContext(ctx, async (client) => {
       const params: unknown[] = [];
-      const conds: string[] = [];
+      const conds: string[] = ['i.deleted_at IS NULL'];
       if (filter.status) {
         params.push(filter.status);
         conds.push(`i.status = $${params.length}`);
@@ -511,7 +519,12 @@ export class CommercialService {
   ): Promise<InvoiceDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const current = await this.loadInvoiceRow(client, engagementId, invoiceId);
-      this.assertDraft(current, 'edited');
+      const revising = await this.beginEdit(client, current);
+      if (revising && input.issueDate !== undefined && input.issueDate !== current.issue_date) {
+        throw new BadRequestException(
+          'An issued invoice keeps its date and number; void it and raise a new one to change them.',
+        );
+      }
       if (input.version !== undefined && input.version !== current.version) {
         throw new ConflictException(
           `Invoice was modified by someone else (expected v${input.version}, found v${current.version}).`,
@@ -527,7 +540,7 @@ export class CommercialService {
         sets.push(`${col} = $${params.length}`);
       };
       if (input.currency !== undefined) push('currency', input.currency);
-      if (input.issueDate !== undefined) push('issue_date', input.issueDate);
+      if (input.issueDate !== undefined && !revising) push('issue_date', input.issueDate);
       if (input.dueDate !== undefined) push('due_date', input.dueDate);
       if (input.taxAmount !== undefined) push('tax_amount', input.taxAmount);
       if (input.notes !== undefined) push('notes', input.notes);
@@ -555,12 +568,17 @@ export class CommercialService {
       } catch (err) {
         throw translateInvoiceError(err);
       }
-      await this.audit.recordWith(client, ctx, {
-        action: 'invoice.updated',
-        objectType: 'invoice',
-        objectId: invoiceId,
-        after: { fields: sets.map((s) => s.split(' = ')[0]) },
-      });
+      const fields = sets.map((s) => s.split(' = ')[0]);
+      if (revising) {
+        await this.finishRevision(client, ctx, engagementId, current, { fields });
+      } else {
+        await this.audit.recordWith(client, ctx, {
+          action: 'invoice.updated',
+          objectType: 'invoice',
+          objectId: invoiceId,
+          after: { fields },
+        });
+      }
       return this.selectInvoiceDetail(client, engagementId, invoiceId);
     });
   }
@@ -719,7 +737,7 @@ export class CommercialService {
   ): Promise<InvoiceDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const current = await this.loadInvoiceRow(client, engagementId, invoiceId);
-      this.assertDraft(current, 'edited');
+      const revising = await this.beginEdit(client, current);
       const { rows } = await client.query<{ next: number }>(
         `SELECT COALESCE(max(sort_order) + 1, 0) AS next
          FROM hsdg.invoice_line_items WHERE invoice_id = $1`,
@@ -731,12 +749,18 @@ export class CommercialService {
       } catch (err) {
         throw translateInvoiceError(err);
       }
-      await this.audit.recordWith(client, ctx, {
-        action: 'invoice.line_added',
-        objectType: 'invoice',
-        objectId: invoiceId,
-        after: { description: input.description },
-      });
+      if (revising) {
+        await this.finishRevision(client, ctx, engagementId, current, {
+          lineAdded: input.description,
+        });
+      } else {
+        await this.audit.recordWith(client, ctx, {
+          action: 'invoice.line_added',
+          objectType: 'invoice',
+          objectId: invoiceId,
+          after: { description: input.description },
+        });
+      }
       return this.selectInvoiceDetail(client, engagementId, invoiceId);
     });
   }
@@ -749,20 +773,194 @@ export class CommercialService {
   ): Promise<InvoiceDetail> {
     return this.db.withRlsContext(ctx, async (client) => {
       const current = await this.loadInvoiceRow(client, engagementId, invoiceId);
-      this.assertDraft(current, 'edited');
+      const revising = await this.beginEdit(client, current);
+      if (revising) {
+        const { rows } = await client.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM hsdg.invoice_line_items WHERE invoice_id = $1`,
+          [invoiceId],
+        );
+        if ((rows[0]?.n ?? 0) <= 1) {
+          throw new BadRequestException(
+            'An issued invoice keeps at least one line; delete the invoice instead.',
+          );
+        }
+      }
       const result = await client.query(
         `DELETE FROM hsdg.invoice_line_items WHERE id = $1 AND invoice_id = $2`,
         [lineId, invoiceId],
       );
       if ((result.rowCount ?? 0) === 0) throw new NotFoundException('Line item not found.');
       await this.retax(client, invoiceId);
+      if (revising) {
+        await this.finishRevision(client, ctx, engagementId, current, { lineRemoved: lineId });
+      } else {
+        await this.audit.recordWith(client, ctx, {
+          action: 'invoice.line_removed',
+          objectType: 'invoice',
+          objectId: invoiceId,
+          after: { lineId },
+        });
+      }
+      return this.selectInvoiceDetail(client, engagementId, invoiceId);
+    });
+  }
+
+  /** Change a line's description, quantity, amount or GST rate — a draft's, or
+   *  an issued invoice's while it may still be edited (see beginEdit). */
+  async updateLine(
+    ctx: RlsContext,
+    engagementId: string,
+    invoiceId: string,
+    lineId: string,
+    input: UpdateInvoiceLineInput,
+  ): Promise<InvoiceDetail> {
+    return this.db.withRlsContext(ctx, async (client) => {
+      const current = await this.loadInvoiceRow(client, engagementId, invoiceId);
+      const revising = await this.beginEdit(client, current);
+      const gstRate =
+        input.gstRate === undefined
+          ? undefined
+          : (await this.firmStateCode(client))
+            ? input.gstRate
+            : 0;
+      try {
+        const result = await client.query(
+          `UPDATE hsdg.invoice_line_items
+              SET description = COALESCE($3, description),
+                  quantity = COALESCE($4::numeric, quantity),
+                  unit_amount = COALESCE($5::numeric, unit_amount),
+                  gst_rate = COALESCE($6::numeric, gst_rate),
+                  sac_code = COALESCE($7, sac_code)
+            WHERE id = $1 AND invoice_id = $2`,
+          [
+            lineId,
+            invoiceId,
+            input.description?.trim() || null,
+            input.quantity ?? null,
+            input.unitAmount ?? null,
+            gstRate ?? null,
+            input.sacCode ?? null,
+          ],
+        );
+        if ((result.rowCount ?? 0) === 0) throw new NotFoundException('Line item not found.');
+        await this.retax(client, invoiceId);
+      } catch (err) {
+        throw translateInvoiceError(err);
+      }
+      const changed = Object.keys(input);
+      if (revising) {
+        await this.finishRevision(client, ctx, engagementId, current, {
+          lineChanged: lineId,
+          changed,
+        });
+      } else {
+        await this.audit.recordWith(client, ctx, {
+          action: 'invoice.line_updated',
+          objectType: 'invoice',
+          objectId: invoiceId,
+          after: { lineId, changed },
+        });
+      }
+      return this.selectInvoiceDetail(client, engagementId, invoiceId);
+    });
+  }
+
+  /**
+   * Delete an invoice. A draft disappears from the lists; an issued one is
+   * voided and hidden, its number staying used (the GSTR-1 document series
+   * shows it cancelled — numbers are never reused). Refused once money is
+   * received or credited against it, or its month is in a filed GSTR-1.
+   */
+  async deleteInvoice(
+    ctx: RlsContext,
+    engagementId: string,
+    invoiceId: string,
+    reason: string | null,
+  ): Promise<void> {
+    await this.db.withRlsContext(ctx, async (client) => {
+      const current = await this.loadInvoiceRow(client, engagementId, invoiceId);
+      if (current.deleted_at) throw new NotFoundException('Invoice not found.');
+      const blocked = editBlockedReason(current, 'deleted');
+      if (blocked && current.status !== INVOICE_STATUS.void) throw new BadRequestException(blocked);
+      const why =
+        reason?.trim() ||
+        (current.status === INVOICE_STATUS.draft ? 'Draft deleted' : 'Invoice deleted');
+      try {
+        await client.query(
+          `UPDATE hsdg.invoices
+              SET status = 'void',
+                  voided_reason = COALESCE(voided_reason, $3),
+                  voided_by_employee_id = COALESCE(voided_by_employee_id, $4),
+                  voided_at = COALESCE(voided_at, now()),
+                  deleted_at = now(), deleted_by_employee_id = $4, version = version + 1
+            WHERE id = $1 AND engagement_id = $2`,
+          [invoiceId, engagementId, why, ctx.employeeId ?? null],
+        );
+        await client.query(
+          `UPDATE hsdg.invoice_issue_requests SET closed_at = now(), closed_reason = 'void'
+            WHERE invoice_id = $1 AND closed_at IS NULL`,
+          [invoiceId],
+        );
+      } catch (err) {
+        throw translateInvoiceError(err);
+      }
       await this.audit.recordWith(client, ctx, {
-        action: 'invoice.line_removed',
+        action: 'invoice.deleted',
         objectType: 'invoice',
         objectId: invoiceId,
-        after: { lineId },
+        before: { status: current.status, total: current.total },
+        after: {
+          reason: why,
+          ...(current.invoice_number ? { invoiceNumber: current.invoice_number } : {}),
+        },
       });
-      return this.selectInvoiceDetail(client, engagementId, invoiceId);
+    });
+  }
+
+  /**
+   * Open an invoice for editing. A draft always; an issued invoice only while
+   * nothing stands on it — no money received, credited or written off, and
+   * its month not in a filed GSTR-1. For an issued one this lifts the DB's
+   * freeze for this transaction only (hsdg.revising_invoice) and returns true.
+   */
+  private async beginEdit(client: PoolClient, row: InvoiceRow): Promise<boolean> {
+    if (row.status === INVOICE_STATUS.draft) return false;
+    const blocked = editBlockedReason(row, 'edited');
+    if (blocked) throw new BadRequestException(blocked);
+    await client.query(`SELECT set_config('hsdg.revising_invoice', $1, true)`, [row.id]);
+    return true;
+  }
+
+  /** After editing an issued invoice: its PDF again (same number), the
+   *  revision counted, and the change audited with the totals before. */
+  private async finishRevision(
+    client: PoolClient,
+    ctx: RlsContext,
+    engagementId: string,
+    before: InvoiceRow,
+    change: Record<string, unknown>,
+  ): Promise<void> {
+    await client.query(
+      `UPDATE hsdg.invoices
+          SET revised_at = now(), revision_count = revision_count + 1, version = version + 1
+        WHERE id = $1`,
+      [before.id],
+    );
+    await this.storePdf(client, engagementId, before.id);
+    await client.query(`SELECT set_config('hsdg.revising_invoice', '', true)`);
+    const after = await this.loadInvoiceRow(client, engagementId, before.id);
+    await this.audit.recordWith(client, ctx, {
+      action: 'invoice.revised',
+      objectType: 'invoice',
+      objectId: before.id,
+      before: { subtotal: before.subtotal, taxAmount: before.tax_amount, total: before.total },
+      after: {
+        invoiceNumber: before.invoice_number,
+        subtotal: after.subtotal,
+        taxAmount: after.tax_amount,
+        total: after.total,
+        ...change,
+      },
     });
   }
 
@@ -777,6 +975,9 @@ export class CommercialService {
   ): Promise<void> {
     // engagement_id is synced from the invoice by a trigger; a value is still
     // required by NOT NULL at insert time, so pass the known engagement.
+    // No GST is charged until the firm's GSTIN is set, so a line then says 0%
+    // rather than show a rate the invoice does not charge.
+    const gstRate = (await this.firmStateCode(client)) ? (line.gstRate ?? null) : 0;
     await client.query(
       `INSERT INTO hsdg.invoice_line_items
          (invoice_id, engagement_id, engagement_component_id, description, quantity, unit_amount,
@@ -793,7 +994,7 @@ export class CommercialService {
         line.unitAmount ?? null,
         line.sortOrder ?? sortOrder,
         line.sacCode ?? null,
-        line.gstRate ?? null,
+        gstRate,
         line.engagementServiceId ?? null,
       ],
     );
@@ -976,14 +1177,6 @@ export class CommercialService {
     ]);
   }
 
-  private assertDraft(row: InvoiceRow, verb: string): void {
-    if (row.status !== INVOICE_STATUS.draft) {
-      throw new BadRequestException(
-        `Only a draft invoice can be ${verb}; this invoice is ${row.status}.`,
-      );
-    }
-  }
-
   private async loadInvoiceRow(
     client: PoolClient,
     engagementId: string,
@@ -1078,7 +1271,39 @@ function mapInvoice(row: InvoiceRow): InvoiceRecord {
     amountCredited: row.amount_credited,
     amountWrittenOff: row.amount_written_off,
     balance: fromPaise(toPaise(row.total) - toPaise(row.amount_settled)),
+    revisedAt: row.revised_at?.toISOString() ?? null,
+    revisionCount: row.revision_count,
+    editBlockedReason: editBlockedReason(row, 'edited'),
   };
+}
+
+/**
+ * Why an invoice cannot be edited (or deleted) now; null when it can. A draft
+ * always can. An issued one can until money is received, credited or written
+ * off against it, or its month is in a filed GSTR-1 — then the books and the
+ * GSTN already hold it: reverse the receipt, or raise a credit note. Paid,
+ * part-paid and void invoices cannot. Pure.
+ */
+export function editBlockedReason(
+  row: Pick<
+    InvoiceRow,
+    'status' | 'amount_received' | 'amount_credited' | 'amount_written_off' | 'in_filed_gstr1'
+  >,
+  verb: 'edited' | 'deleted',
+): string | null {
+  if (row.status === INVOICE_STATUS.draft) return null;
+  if (row.status === INVOICE_STATUS.void) return `A void invoice cannot be ${verb}.`;
+  if (Number(row.amount_received) > 0) {
+    return `Money is received against this invoice; reverse the receipt before it can be ${verb}.`;
+  }
+  if (Number(row.amount_credited) > 0 || Number(row.amount_written_off) > 0) {
+    return `A credit note or write-off stands on this invoice; void it before the invoice can be ${verb}.`;
+  }
+  if (row.status !== INVOICE_STATUS.issued) return `A ${row.status} invoice cannot be ${verb}.`;
+  if (row.in_filed_gstr1) {
+    return `This invoice's month is in a filed GSTR-1; raise a credit note instead.`;
+  }
+  return null;
 }
 
 function mapGlobalInvoice(row: GlobalInvoiceRow): GlobalInvoiceRecord {

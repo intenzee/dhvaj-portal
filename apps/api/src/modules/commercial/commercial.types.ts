@@ -20,6 +20,15 @@ export interface InvoiceLineInput {
   gstRate?: number;
 }
 
+/** Edit one line of a draft (or of an issued invoice that may still be edited). */
+export interface UpdateInvoiceLineInput {
+  description?: string;
+  quantity?: string;
+  unitAmount?: string;
+  sacCode?: string;
+  gstRate?: number;
+}
+
 /** PS-201: the GST facts of a draft. */
 interface InvoiceGstInput {
   clientGstin?: string | null;

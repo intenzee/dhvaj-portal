@@ -94,6 +94,45 @@ export class InvoiceLineDto {
   gstRate?: number;
 }
 
+/** Edit one line: any of its description, quantity, amount, SAC or GST rate. */
+export class UpdateInvoiceLineDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  description?: string;
+
+  @ApiPropertyOptional({ example: '1' })
+  @IsOptional()
+  @IsNumberString()
+  quantity?: string;
+
+  @ApiPropertyOptional({ example: '10000.00' })
+  @IsOptional()
+  @IsNumberString()
+  unitAmount?: string;
+
+  @ApiPropertyOptional({ example: '998221' })
+  @IsOptional()
+  @Matches(/^\d{4,8}$/, { message: 'sacCode must be a 4–8 digit SAC.' })
+  sacCode?: string;
+
+  @ApiPropertyOptional({ enum: GST_RATES, description: '0 = no GST.' })
+  @IsOptional()
+  @IsIn(GST_RATES)
+  gstRate?: number;
+}
+
+/** Delete an invoice; the reason goes on the void trail. */
+export class DeleteInvoiceDto {
+  @ApiPropertyOptional({ example: 'Raised twice by mistake' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 /** PS-201: a draft's GST facts (create and amend). */
 class InvoiceGstDto {
   @ApiPropertyOptional({ description: "The client's GSTIN; null for an unregistered client." })

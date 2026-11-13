@@ -152,7 +152,7 @@ describe('PS-201 GST invoices (e2e)', () => {
 
       const issued = await issue(pa, eng, d.id as string).expect(201);
       expect(issued.body.status).toBe('issued');
-      expect(issued.body.invoiceNumber).toMatch(/^INV\/\d{2}-\d{2}\/\d{4,}$/);
+      expect(issued.body.invoiceNumber).toMatch(/^\d{6}\/\d{2}\/\d{2,}$/);
       expect(issued.body.amountInWords).toBe(
         'Rupees One Lakh Twenty-Six Thousand Eight Hundred Fifty-One and Seventy-Eight Paise Only',
       );
@@ -175,11 +175,11 @@ describe('PS-201 GST invoices (e2e)', () => {
       expect(text).toContain(issued.body.invoiceNumber as string);
       expect(text).toContain('(CGST)');
 
-      // An issued invoice is frozen.
+      // An issued invoice keeps its date and number.
       await http()
         .patch(`/api/v1/engagements/${eng}/invoices/${d.id as string}`)
         .set(bearer(pa))
-        .send({ notes: 'late edit' })
+        .send({ issueDate: dateFromToday(-1) })
         .expect(400);
     });
 
@@ -224,6 +224,129 @@ describe('PS-201 GST invoices (e2e)', () => {
       expect(new Set(numbers.map((n) => n.split('/')[1])).size).toBe(1);
       // 100 requests: ~5 s locally, past jest's 30 s on a busy CI runner.
     }, 120_000);
+  });
+
+  describe('editing and deleting an issued invoice', () => {
+    const inv = (eng: string, id: string) => `/api/v1/engagements/${eng}/invoices/${id}`;
+
+    it('revises it in place: same number, the tax worked again, a fresh PDF', async () => {
+      const eng = await engagement();
+      const d = await draft(eng);
+      const issued = (await issue(pa, eng, d.id as string).expect(201)).body;
+      expect(issued).toMatchObject({ revisionCount: 0, editBlockedReason: null });
+
+      const noted = await http()
+        .patch(inv(eng, d.id as string))
+        .set(bearer(pa))
+        .send({ notes: 'Revised terms', version: issued.version })
+        .expect(200);
+      expect(noted.body).toMatchObject({
+        status: 'issued',
+        invoiceNumber: issued.invoiceNumber,
+        notes: 'Revised terms',
+        revisionCount: 1,
+        hasPdf: true,
+      });
+      expect(noted.body.revisedAt).toEqual(expect.any(String));
+
+      // A manager with billing.manage (no billing.approve) edits a line.
+      const mx = await token('manager.x@dhvaj.in');
+      const line = (issued.lines as Array<{ id: string }>)[1]!;
+      const edited = await http()
+        .patch(`${inv(eng, d.id as string)}/lines/${line.id}`)
+        .set(bearer(mx))
+        .send({ unitAmount: '5000.00' })
+        .expect(200);
+      // 100000 + 3 × 5000 = 115000; 9% = 10350 each half.
+      expect(edited.body).toMatchObject({
+        invoiceNumber: issued.invoiceNumber,
+        issueDate: issued.issueDate,
+        subtotal: '115000.00',
+        cgst: '10350.00',
+        sgst: '10350.00',
+        total: '135700.00',
+        revisionCount: 2,
+      });
+
+      // Lines come and go, but never the last one.
+      const added = await http()
+        .post(`${inv(eng, d.id as string)}/lines`)
+        .set(bearer(pa))
+        .send({ description: 'Out-of-pocket', unitAmount: '1000.00' })
+        .expect(201);
+      expect(added.body).toMatchObject({ subtotal: '116000.00', revisionCount: 3 });
+      const now = added.body as { lines: Array<{ id: string }> };
+      const ids = (now.lines as Array<{ id: string }>).map((l) => l.id);
+      for (const id of ids.slice(1)) {
+        await http()
+          .delete(`${inv(eng, d.id as string)}/lines/${id}`)
+          .set(bearer(pa))
+          .expect(200);
+      }
+      await http()
+        .delete(`${inv(eng, d.id as string)}/lines/${ids[0]!}`)
+        .set(bearer(pa))
+        .expect(400);
+    });
+
+    it('locks it once its month is in a filed GSTR-1', async () => {
+      const eng = await engagement();
+      const d = await draft(eng);
+      const issued = (await issue(pa, eng, d.id as string).expect(201)).body;
+      await superuser((c) =>
+        c.query(`UPDATE hsdg.firm_settings SET gst_filed_through = $1`, [issued.issueDate]),
+      );
+      try {
+        const got = (
+          await http()
+            .get(inv(eng, d.id as string))
+            .set(bearer(pa))
+            .expect(200)
+        ).body;
+        expect(got.editBlockedReason).toMatch(/filed GSTR-1/);
+        await http()
+          .patch(inv(eng, d.id as string))
+          .set(bearer(pa))
+          .send({ notes: 'too late' })
+          .expect(400);
+        await http()
+          .delete(inv(eng, d.id as string))
+          .set(bearer(pa))
+          .expect(400);
+      } finally {
+        await superuser((c) => c.query(`UPDATE hsdg.firm_settings SET gst_filed_through = NULL`));
+      }
+    });
+
+    it('deletes it for any biller, hides it, and never reuses the number', async () => {
+      const eng = await engagement();
+      const d = await draft(eng);
+      const issued = (await issue(pa, eng, d.id as string).expect(201)).body;
+      const mx = await token('manager.x@dhvaj.in');
+      await http()
+        .delete(inv(eng, d.id as string))
+        .set(bearer(mx))
+        .send({ reason: 'Duplicate' })
+        .expect(204);
+      const list = await http()
+        .get(`/api/v1/engagements/${eng}/invoices`)
+        .set(bearer(pa))
+        .expect(200);
+      const items = (list.body.items ?? list.body) as Array<{ id: string }>;
+      expect(items.some((i) => i.id === d.id)).toBe(false);
+      const row = await superuser((c) =>
+        c.query<{ status: string; deleted_at: Date | null; invoice_number: string }>(
+          `SELECT status, deleted_at, invoice_number FROM hsdg.invoices WHERE id = $1`,
+          [d.id],
+        ),
+      );
+      expect(row.rows[0]).toMatchObject({ status: 'void', invoice_number: issued.invoiceNumber });
+      expect(row.rows[0]!.deleted_at).not.toBeNull();
+
+      const next = await draft(eng);
+      const again = (await issue(pa, eng, next.id as string).expect(201)).body;
+      expect(again.invoiceNumber).not.toBe(issued.invoiceNumber);
+    });
   });
 
   describe('voiding', () => {

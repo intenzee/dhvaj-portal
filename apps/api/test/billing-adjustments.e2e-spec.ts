@@ -195,7 +195,7 @@ describe('PS-205 credit notes and write-offs (e2e)', () => {
     // No number of its own: the line names the invoice it came off.
     const lines = st.body.lines as Array<{ kind: string; reference: string | null }>;
     expect(lines[1]!.reference).toBe(lines[0]!.reference);
-    expect(lines[1]!.reference).toMatch(/^INV\//);
+    expect(lines[1]!.reference).toMatch(/^\d{6}\/\d{2}\/\d{2,}$/);
   });
 
   it('refuses the requester deciding their own request, in the API and the database', async () => {

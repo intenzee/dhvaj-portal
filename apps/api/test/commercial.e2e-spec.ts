@@ -131,14 +131,26 @@ describe('Commercial, Notes & Out-of-scope (e2e)', () => {
         .expect(201);
       expect(issued.body.status).toBe('issued');
       expect(issued.body.issueDate).toBeTruthy();
-      expect(issued.body.invoiceNumber).toMatch(/^INV\/\d{2}-\d{2}\/\d{4,}$/);
+      expect(issued.body.invoiceNumber).toMatch(/^\d{6}\/\d{2}\/\d{2,}$/);
 
-      // A line cannot be added to an issued invoice.
-      await request(app.getHttpServer())
+      // No firm GSTIN, so no GST rate is stored on a line (no "18%" on the invoice).
+      expect(
+        (issued.body.lines as Array<{ gstRate: string | null }>).map((l) => l.gstRate),
+      ).toEqual(['0.00', '0.00', '0.00']);
+
+      // A line may still be added to an issued invoice: it is revised, same number.
+      const revised = await request(app.getHttpServer())
         .post(`/api/v1/engagements/${engId}/invoices/${invId}/lines`)
         .set(bearer(pa))
-        .send({ description: 'Nope', unitAmount: '1' })
-        .expect(400);
+        .send({ description: 'Late add', unitAmount: '1', gstRate: 18 })
+        .expect(201);
+      expect(revised.body).toMatchObject({
+        invoiceNumber: issued.body.invoiceNumber,
+        revisionCount: 1,
+      });
+      expect(
+        (revised.body.lines as Array<{ gstRate: string }>).every((l) => l.gstRate === '0.00'),
+      ).toBe(true);
 
       // issued → paid is allowed; paid → draft is not.
       await request(app.getHttpServer())

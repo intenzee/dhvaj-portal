@@ -1,5 +1,6 @@
 import {
   Body,
+  HttpCode,
   Controller,
   Delete,
   Get,
@@ -30,10 +31,12 @@ import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.se
 import { CommercialService } from './commercial.service';
 import {
   CreateInvoiceDto,
+  DeleteInvoiceDto,
   InvoiceLineDto,
   InvoiceListQueryDto,
   SetInvoiceStatusDto,
   UpdateInvoiceDto,
+  UpdateInvoiceLineDto,
   UpsertCommercialDto,
 } from './dto/commercial.dto';
 
@@ -113,7 +116,10 @@ export class CommercialController {
 
   @Patch(':id/invoices/:invoiceId')
   @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
-  @ApiOperation({ summary: 'Amend a draft invoice header (audited; optimistic-locked).' })
+  @ApiOperation({
+    summary:
+      "Amend an invoice header — a draft's, or an issued invoice's until money or a filed GSTR-1 stands on it (audited; optimistic-locked).",
+  })
   updateInvoice(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -158,7 +164,7 @@ export class CommercialController {
 
   @Post(':id/invoices/:invoiceId/lines')
   @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
-  @ApiOperation({ summary: 'Add a line to a draft invoice (audited).' })
+  @ApiOperation({ summary: 'Add a line to an invoice that may be edited (audited).' })
   addLine(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -168,9 +174,52 @@ export class CommercialController {
     return this.commercial.addLine(rlsContextFromPrincipal(principal), id, invoiceId, dto);
   }
 
+  @Patch(':id/invoices/:invoiceId/lines/:lineId')
+  @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
+  @ApiOperation({
+    summary:
+      "Edit a line — a draft's, or an issued invoice's until money or a filed GSTR-1 stands on it (audited; the PDF is redone).",
+  })
+  updateLine(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+    @Param('lineId', new ParseUUIDPipe()) lineId: string,
+    @Body() dto: UpdateInvoiceLineDto,
+  ): Promise<InvoiceDetail> {
+    return this.commercial.updateLine(
+      rlsContextFromPrincipal(principal),
+      id,
+      invoiceId,
+      lineId,
+      dto,
+    );
+  }
+
+  @Delete(':id/invoices/:invoiceId')
+  @HttpCode(204)
+  @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
+  @ApiOperation({
+    summary:
+      'Delete an invoice: a draft goes; an issued one is voided and hidden, its number kept used (audited).',
+  })
+  async deleteInvoice(
+    @CurrentPrincipal() principal: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+    @Body() dto: DeleteInvoiceDto,
+  ): Promise<void> {
+    await this.commercial.deleteInvoice(
+      rlsContextFromPrincipal(principal),
+      id,
+      invoiceId,
+      dto?.reason ?? null,
+    );
+  }
+
   @Delete(':id/invoices/:invoiceId/lines/:lineId')
   @RequireAnyPermission(PERMISSION.engagementManage, PERMISSION.billingManage)
-  @ApiOperation({ summary: 'Remove a line from a draft invoice (audited).' })
+  @ApiOperation({ summary: 'Remove a line from an invoice that may be edited (audited).' })
   removeLine(
     @CurrentPrincipal() principal: Principal,
     @Param('id', new ParseUUIDPipe()) id: string,

@@ -209,7 +209,7 @@ describe('PS-206 (fix) bill from time, billed once (e2e)', () => {
     );
     await setStatus(eng, made.id, { status: 'issued' }).expect(201);
     const issued = await draft(pa, eng, [a]).expect(400);
-    expect(issued.body.message).toMatch(/on INV\//);
+    expect(issued.body.message).toMatch(/on \d{6}\/\d{2}\/\d{2,}/);
     expect(await openRows(a)).toBe(1);
 
     // Non-billable and other engagements' time is refused too.
