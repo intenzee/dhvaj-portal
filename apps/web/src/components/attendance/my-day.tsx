@@ -360,7 +360,10 @@ function EngagementSearch({
   );
 }
 
-/** "Add work": client work (engagement → stream → task) or firm work, hours and where. */
+/**
+ * "Add work": client work (engagement → stream → task), firm work by kind, or
+ * a task of your own by name — then the hours and where.
+ */
 function LogForm({
   day,
   location,
@@ -371,7 +374,8 @@ function LogForm({
   onLogged: (d: MyDay) => void;
 }): JSX.Element {
   const toast = useToast();
-  const [kind, setKind] = useState<'client' | 'firm'>('client');
+  const [kind, setKind] = useState<'client' | 'firm' | 'task'>('client');
+  const [title, setTitle] = useState('');
   const [eng, setEng] = useState<PickEngagement | null>(null);
   const [stream, setStream] = useState('');
   const [task, setTask] = useState('');
@@ -414,10 +418,10 @@ function LogForm({
         : apiFetch<MyDay>(`/attendance/day/${day}/internal`, {
             method: 'POST',
             body: {
-              category,
+              ...(kind === 'task' ? { title: title.trim() } : { category }),
               minutes,
               location: where,
-              ...(note.trim() ? { note: note.trim() } : {}),
+              ...(kind !== 'task' && note.trim() ? { note: note.trim() } : {}),
             },
           }),
     onSuccess: (d) => {
@@ -425,6 +429,7 @@ function LogForm({
       setHours('');
       setNote('');
       setTask('');
+      setTitle('');
       toast(`${minutesLabel(minutes!)} logged.`, 'success');
     },
     onError: (err) =>
@@ -432,7 +437,11 @@ function LogForm({
   });
 
   const ready =
-    !!minutes && minutes <= 720 && !!where && (kind === 'firm' || !!eng) && !log.isPending;
+    !!minutes &&
+    minutes <= 720 &&
+    !!where &&
+    (kind === 'firm' || (kind === 'task' ? !!title.trim() : !!eng)) &&
+    !log.isPending;
 
   return (
     <Card className="p-5">
@@ -456,6 +465,15 @@ function LogForm({
             onClick={() => setKind('firm')}
           >
             Firm work
+          </Button>
+          <Button
+            size="sm"
+            role="tab"
+            aria-selected={kind === 'task'}
+            variant={kind === 'task' ? 'primary' : 'secondary'}
+            onClick={() => setKind('task')}
+          >
+            Task
           </Button>
         </div>
       </div>
@@ -504,6 +522,20 @@ function LogForm({
               </Field>
             )}
           </>
+        ) : kind === 'task' ? (
+          <Field
+            label="What did you do?"
+            required
+            hint="Any work that isn’t for a client — e.g. “Firm’s bank reconciliation”."
+          >
+            <Input
+              autoFocus
+              value={title}
+              maxLength={200}
+              placeholder="Task name"
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </Field>
         ) : (
           <Field label="What" required>
             <Select
@@ -539,9 +571,11 @@ function LogForm({
         <Field label="Where you worked" required className="md:col-span-2">
           <LocationPicker value={where} onChange={setWhere} label="Where you worked" />
         </Field>
-        <Field label="Note" className="md:col-span-2" hint="Optional — e.g. “GSTR-3B for October”.">
-          <Input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
-        </Field>
+        {kind !== 'task' && (
+          <Field label="Note" className="md:col-span-2" hint="Optional — e.g. “GSTR-3B for October”.">
+            <Input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+        )}
         <div className="md:col-span-2">
           <Button type="submit" disabled={!ready}>
             <Plus className="h-4 w-4" /> {log.isPending ? 'Adding…' : 'Add'}

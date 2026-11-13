@@ -71,7 +71,9 @@ export function loggableDays(today = istToday()): string[] {
 
 /** What a row is about, in one line: "Drift Logistics · GST · GSTR-3B Oct". Pure — tested. */
 export function entryTitle(e: DayEntry, categoryLabel: (c: string) => string): string {
-  if (e.source === 'internal') return `Firm work · ${categoryLabel(e.category ?? 'other')}`;
+  if (e.source === 'internal') {
+    return e.taskTitle ?? `Firm work · ${categoryLabel(e.category ?? 'other')}`;
+  }
   return [
     e.clientName,
     e.streamName,

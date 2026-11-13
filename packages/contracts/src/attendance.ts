@@ -234,7 +234,10 @@ export interface LogWorkInput {
 }
 
 export interface LogInternalInput {
-  category: OtherTimeCategory;
+  /** Firm-work kind; 'other' when only a task name is given. */
+  category?: OtherTimeCategory;
+  /** "Add work → Task": what was done, in the person's own words (max 200). */
+  title?: string;
   minutes: number;
   location: WorkLocation;
   note?: string;

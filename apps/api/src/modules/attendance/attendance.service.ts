@@ -90,6 +90,7 @@ interface EntryRow {
 
 interface InternalRow {
   id: string;
+  title: string | null;
   category: OtherTimeCategory;
   minutes: number;
   work_location: WorkLocation;
@@ -315,7 +316,7 @@ export class AttendanceService {
       [employeeId, day],
     );
     const internal = await client.query<InternalRow>(
-      `SELECT id, category, minutes, work_location, note, created_at
+      `SELECT id, title, category, minutes, work_location, note, created_at
            FROM hsdg.internal_time_entries WHERE employee_id = $1 AND work_day = $2::date
           ORDER BY created_at`,
       [employeeId, day],
@@ -345,7 +346,8 @@ export class AttendanceService {
         clientName: null,
         streamName: null,
         taskId: null,
-        taskTitle: null,
+        // A task of their own reads by its name.
+        taskTitle: r.title,
         category: r.category,
         note: r.note,
         seconds: r.minutes * 60,
@@ -477,18 +479,24 @@ export class AttendanceService {
     const emp = me(ctx);
     requireDay(day);
     this.requireWindow(day);
+    const title = input.title?.trim() || null;
+    if (!title && !input.category) {
+      throw new BadRequestException('Say what you did: a kind of firm work, or the task’s name.');
+    }
+    const category = input.category ?? 'other';
     return this.db.withRlsContext(ctx, async (client) => {
       await this.requireRoom(client, emp, day, input.minutes);
       const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO hsdg.internal_time_entries (employee_id, work_day, minutes, category, work_location, note)
-         VALUES ($1, $2::date, $3, $4, $5, $6) RETURNING id`,
-        [emp, day, input.minutes, input.category, input.location, input.note?.trim() || null],
+        `INSERT INTO hsdg.internal_time_entries
+           (employee_id, work_day, minutes, category, work_location, note, title)
+         VALUES ($1, $2::date, $3, $4, $5, $6, $7) RETURNING id`,
+        [emp, day, input.minutes, category, input.location, input.note?.trim() || null, title],
       );
       await this.audit.recordWith(client, ctx, {
         action: 'attendance.internal_logged',
         objectType: 'internal_time_entry',
         objectId: rows[0]!.id,
-        after: { day, category: input.category, minutes: input.minutes, location: input.location },
+        after: { day, category, title, minutes: input.minutes, location: input.location },
       });
       return this.dayWith(client, emp, day, true);
     });

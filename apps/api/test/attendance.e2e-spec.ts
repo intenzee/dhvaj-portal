@@ -215,6 +215,39 @@ describe('Attendance (e2e)', () => {
     expect(d).toMatchObject({ status: 'absent', workedSeconds: 2 * H });
   });
 
+  it('a task of your own: just its name and the time; neither name nor kind is refused', async () => {
+    const day = past();
+    const d = (
+      await http()
+        .post(`/api/v1/attendance/day/${day}/internal`)
+        .set(bearer(sy))
+        .send({ title: '  Firm’s bank reconciliation ', minutes: 30, location: 'office' })
+        .expect(200)
+    ).body as MyDay;
+    const own = d.entries.find((e) => e.source === 'internal')!;
+    expect(own).toMatchObject({
+      taskTitle: 'Firm’s bank reconciliation',
+      category: 'other',
+      seconds: 30 * 60,
+      editable: true,
+    });
+    expect(d.workedSeconds).toBe(2 * H + 30 * 60);
+
+    const bad = await http()
+      .post(`/api/v1/attendance/day/${day}/internal`)
+      .set(bearer(sy))
+      .send({ minutes: 30, location: 'office' })
+      .expect(400);
+    expect(bad.body.message).toBe('Say what you did: a kind of firm work, or the task’s name.');
+    await http()
+      .post(`/api/v1/attendance/day/${day}/internal`)
+      .set(bearer(sy))
+      .send({ title: 'x'.repeat(201), minutes: 30, location: 'office' })
+      .expect(400);
+
+    await http().delete(`/api/v1/attendance/entries/${own.id}`).set(bearer(sy)).expect(200);
+  });
+
   it('keeps to today and the last 3 days, and to 16 hours a day', async () => {
     await http()
       .post(`/api/v1/attendance/day/${istDay(-5)}/internal`)

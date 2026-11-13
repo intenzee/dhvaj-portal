@@ -63,9 +63,19 @@ export class LogWorkDto {
 }
 
 export class LogInternalDto {
-  @ApiProperty({ enum: INTERNAL_WORK_CATEGORIES })
+  @ApiPropertyOptional({
+    enum: INTERNAL_WORK_CATEGORIES,
+    description: "'other' when only a title is given.",
+  })
+  @IsOptional()
   @IsIn(INTERNAL_WORK_CATEGORIES)
-  category!: OtherTimeCategory;
+  category?: OtherTimeCategory;
+
+  @ApiPropertyOptional({ description: 'A task of your own, by name: what was done (max 200).' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  title?: string;
 
   @ApiProperty({ minimum: 1, maximum: ATTENDANCE_ROW_MAX_MINUTES })
   @IsInt()
