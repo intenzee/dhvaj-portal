@@ -35,6 +35,14 @@ describe('session', () => {
     expect(renewalDue(day, (iat + 86_400 - 300) * 1000)).toBe(true);
   });
 
+  it('a 30-minute production token renews from 15 minutes on, well before it ends', () => {
+    const half = jwt({ iat, exp: iat + 1800 });
+    expect(renewalDue(half, (iat + 14 * 60) * 1000)).toBe(false);
+    expect(renewalDue(half, (iat + 15 * 60) * 1000)).toBe(true);
+    // The renewal loop runs every minute, so 15 minutes remain to get it.
+    expect(renewalDue(half, (iat + 29 * 60) * 1000)).toBe(true);
+  });
+
   it('backs off reconnecting up to 10 seconds', () => {
     expect([0, 1, 2, 3, 4, 8].map(reconnectDelay)).toEqual([1000, 2000, 4000, 8000, 10_000, 10_000]);
   });

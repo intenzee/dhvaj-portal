@@ -118,19 +118,22 @@ export function closeRunningFor(
 
 /**
  * Close only the person's running AUTO entry (sign-out). A manual stopwatch
- * keeps ADR-0034 behaviour: it never stops on its own.
+ * keeps ADR-0034 behaviour: it never stops on its own. `at` ends it earlier —
+ * an idle sign-out ends it at the last activity — clamped to the entry's start
+ * and now.
  */
 export function closeAutoFor(
   client: PoolClient,
   employeeId: string,
   reason: TimeStopReason,
+  at?: Date,
 ): Promise<ClosedEntry[]> {
   return closeWhere(
     client,
     `te.employee_id = $1 AND te.source = 'auto'`,
     [employeeId],
     reason,
-    'now',
+    at ?? 'now',
   );
 }
 

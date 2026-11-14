@@ -19,8 +19,17 @@ import {
   STREAMS,
   TIME_SUMMARY_BY,
   type OtherTimeCategory,
+  type TimeSignOutInput,
   type TimeSummaryBy,
 } from '@hsdg/contracts';
+
+/** POST /time/sign-out — an idle sign-out ends the clock at the last activity. */
+export class SignOutDto implements TimeSignOutInput {
+  @ApiPropertyOptional({ description: 'When the person was last active (ISO time).' })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  at?: string;
+}
 
 /** Activity → Time → Add other time (client call, meeting, travel …). */
 export class OtherTimeDto {

@@ -89,6 +89,11 @@ services:
         sync: false
       - key: AUTH_JWT_SECRET
         generateValue: true
+      # A portal (password) token lives 30 minutes. The browser renews it only
+      # while the person is active and signs out after 15 idle minutes; this is
+      # the server-side backstop if a tab is left open but never renews.
+      - key: AUTH_ACCESS_TTL_SECONDS
+        value: '1800'
       # The portal's address — the link on dhvaj.in opens it — and the only
       # browser origin allowed to call the API. Custom domains (docs/DEPLOY.md §0).
       - key: WEB_PUBLIC_URL

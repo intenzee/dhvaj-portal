@@ -295,4 +295,50 @@ describe('Automatic time (e2e)', () => {
     expect(await statusOf(b)).toBe('paused');
     expect(await runningCountFor(seniorY)).toBe(0);
   });
+
+  it('an idle sign-out ends the clock at the last activity, kept within the entry', async () => {
+    const { eng, a, b } = await setup();
+    // Started 30 minutes ago; last active 15 minutes after that, then idle.
+    const startedAt = new Date(Math.floor(Date.now() / 1000) * 1000 - 30 * 60_000);
+    const lastActive = new Date(startedAt.getTime() + 15 * 60_000);
+
+    await act(sy, eng, a, 'start').expect(201);
+    const entry = await openEntryOf(a);
+    await su.query(
+      `UPDATE hsdg.engagement_time_entries SET started_at = $2, last_heartbeat_at = now()
+        WHERE id = $1`,
+      [entry.id, startedAt.toISOString()],
+    );
+    await http()
+      .post('/api/v1/time/sign-out')
+      .set(bearer(sy))
+      .send({ at: lastActive.toISOString() })
+      .expect(200);
+    const [closed] = await entriesOf(a);
+    expect(closed!.stopped_reason).toBe('signed_out');
+    expect(closed!.ended_at!.toISOString()).toBe(lastActive.toISOString());
+    // The 15 idle minutes are not counted.
+    expect(closed!.duration_seconds).toBe(15 * 60);
+    expect(await statusOf(a)).toBe('paused');
+
+    // A time before the entry began ends it at its start (never a negative block).
+    await act(sy, eng, b, 'start').expect(201);
+    const entryB = await openEntryOf(b);
+    await su.query(`UPDATE hsdg.engagement_time_entries SET started_at = $2 WHERE id = $1`, [
+      entryB.id,
+      startedAt.toISOString(),
+    ]);
+    await http()
+      .post('/api/v1/time/sign-out')
+      .set(bearer(sy))
+      .send({ at: new Date(startedAt.getTime() - 3600_000).toISOString() })
+      .expect(200);
+    const [closedB] = await entriesOf(b);
+    expect(closedB!.ended_at!.toISOString()).toBe(startedAt.toISOString());
+    expect(closedB!.duration_seconds).toBe(0);
+    expect(await runningCountFor(seniorY)).toBe(0);
+
+    // Not a time.
+    await http().post('/api/v1/time/sign-out').set(bearer(sy)).send({ at: 'soon' }).expect(400);
+  });
 });
