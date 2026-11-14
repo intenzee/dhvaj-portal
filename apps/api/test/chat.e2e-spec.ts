@@ -57,6 +57,8 @@ describe('Chat (e2e)', () => {
       signal: ctrl.signal,
     });
     expect(res.status).toBe(200);
+    // The API holds LISTEN only while a stream is open: wait until it hears.
+    expect(await app.get(LiveEventsService).whenListening()).toBe(true);
     const events: (ChatLiveEvent & { frame: string })[] = [];
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
@@ -111,9 +113,6 @@ describe('Chat (e2e)', () => {
       token('manager.x@dhvaj.in'),
       token('mp@dhvaj.in'),
     ]);
-    const live = app.get(LiveEventsService);
-    for (let i = 0; i < 100 && !live.listening; i++) await new Promise((r) => setTimeout(r, 50));
-    expect(live.listening).toBe(true);
   });
 
   afterAll(async () => {

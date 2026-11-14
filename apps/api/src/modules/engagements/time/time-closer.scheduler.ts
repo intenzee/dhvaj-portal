@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit, Optional } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { SYSTEM_ROLE } from '@hsdg/contracts';
@@ -6,6 +6,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { RlsContext } from '../../../database/rls-context';
 import { AppConfigService } from '../../../config/config.module';
 import { TimeAutoService } from './time-auto.service';
+import { ActivityService, workingTick } from '../../../common/activity/activity.service';
 
 /**
  * Change 3 — the 5-minute stale-entry closer. Idle entries (no heartbeat for 15
@@ -21,18 +22,25 @@ import { TimeAutoService } from './time-auto.service';
 export class TimeCloserScheduler implements OnModuleInit {
   private readonly logger = new Logger(TimeCloserScheduler.name);
   private running = false;
+  private ranAt = 0;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly config: AppConfigService,
     private readonly registry: SchedulerRegistry,
     private readonly time: TimeAutoService,
+    @Optional() private readonly activity?: ActivityService,
   ) {}
 
   onModuleInit(): void {
     if (!this.config.get('SCHEDULER_ENABLED')) return;
     // One instance runs each tick (advisory lock), however many are up.
     const job = new CronJob(this.config.get('SCHEDULER_TIME_CLOSER_CRON'), () => {
+      // A timer only runs while someone has the portal open, so between people
+      // using it (and on the hour, the sweep's wake) there is nothing to close
+      // that cannot wait: an entry ends at its last heartbeat or the day-end
+      // cut-off whenever it is closed. No query for no one.
+      if (this.activity && !workingTick(new Date(), this.ranAt, this.activity)) return;
       void this.db
         .runExclusive('time-stale-closer', () => this.run())
         .catch((err: Error) => {
@@ -50,6 +58,7 @@ export class TimeCloserScheduler implements OnModuleInit {
   async run(now: Date = new Date()): Promise<{ idle: number; dayEnd: number } | null> {
     if (this.running) return null;
     this.running = true;
+    this.ranAt = Date.now();
     try {
       const ctx = await this.operatorContext();
       if (!ctx) {

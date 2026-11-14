@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Client, type PoolClient } from 'pg';
 import { Observable, type Subscriber } from 'rxjs';
@@ -23,34 +23,60 @@ export interface LiveEnvelope {
 /** NOTIFY payloads are capped near 8 KB; ours are a few hundred bytes. */
 const MAX_PAYLOAD = 7_500;
 
+/** LISTEN stays up this long after the last stream closes. */
+export const LISTEN_IDLE_CLOSE_MS = 30_000;
+
 /**
  * Live events (GET /live/stream). A write publishes with pg_notify inside its
  * own transaction, so the event leaves only when the write commits — and
  * reaches every API instance, each of which hands it to the streams open for
  * the people it is for. If LISTEN cannot run (e.g. a transaction pooler), the
  * web's polling still brings the same news, only later.
+ *
+ * The LISTEN connection is held only while someone has the portal open: it
+ * opens with the first stream and closes a little after the last one, and it
+ * is never re-opened for nobody. A connection held all the time — or re-made
+ * every few seconds after the database scaled to zero — would keep a
+ * serverless database (Neon) awake around the clock. With no stream open
+ * there is no one to hand an event to, so nothing is lost; people who are not
+ * looking hear through push and e-mail, which do not depend on it.
  */
 @Injectable()
-export class LiveEventsService implements OnModuleInit, OnModuleDestroy {
+export class LiveEventsService implements OnModuleDestroy {
   private readonly logger = new Logger(LiveEventsService.name);
   private readonly streams = new Map<string, Set<Subscriber<AnyLiveEvent>>>();
   private listener: Client | null = null;
+  private connecting: Promise<void> | null = null;
   private retry: NodeJS.Timeout | null = null;
+  private idleClose: NodeJS.Timeout | null = null;
   private closing = false;
+  /** How long LISTEN stays up after the last stream closes (a reload reopens it). */
+  idleCloseMs = LISTEN_IDLE_CLOSE_MS;
 
   constructor(private readonly config: AppConfigService) {}
-
-  onModuleInit(): void {
-    void this.listen();
-  }
 
   async onModuleDestroy(): Promise<void> {
     this.closing = true;
     if (this.retry) clearTimeout(this.retry);
+    if (this.idleClose) clearTimeout(this.idleClose);
     for (const subs of this.streams.values()) for (const s of subs) s.complete();
     this.streams.clear();
+    await this.connecting?.catch(() => undefined);
     await this.listener?.end().catch(() => undefined);
     this.listener = null;
+  }
+
+  /**
+   * Resolves once this instance hears NOTIFY (true), or false if it cannot
+   * right now — opening the connection if a stream wants it.
+   */
+  async whenListening(timeoutMs = 5_000): Promise<boolean> {
+    const end = Date.now() + timeoutMs;
+    while (!this.listener && Date.now() < end) {
+      if (!this.connecting && !this.retry && this.openStreams > 0) this.ensureListening();
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return this.listener !== null;
   }
 
   /** How many streams are open (for tests and health). */
@@ -74,12 +100,47 @@ export class LiveEventsService implements OnModuleInit, OnModuleDestroy {
         this.streams.set(employeeId, set);
       }
       set.add(sub);
+      this.ensureListening();
       return () => {
         const s = this.streams.get(employeeId);
         s?.delete(sub);
         if (s && s.size === 0) this.streams.delete(employeeId);
+        if (this.openStreams === 0) this.scheduleIdleClose();
       };
     });
+  }
+
+  /** Someone is watching: hold LISTEN (and stop any pending close). */
+  private ensureListening(): void {
+    if (this.idleClose) {
+      clearTimeout(this.idleClose);
+      this.idleClose = null;
+    }
+    if (this.closing || this.listener || this.connecting || this.retry) return;
+    this.connecting = this.listen().finally(() => {
+      this.connecting = null;
+    });
+  }
+
+  /** Nobody is watching: let the database sleep once the grace has passed. */
+  private scheduleIdleClose(): void {
+    if (this.idleClose || this.closing) return;
+    this.idleClose = setTimeout(() => {
+      this.idleClose = null;
+      if (this.openStreams > 0) return;
+      if (this.retry) {
+        clearTimeout(this.retry);
+        this.retry = null;
+      }
+      const client = this.listener;
+      this.listener = null;
+      if (client) {
+        client.removeAllListeners();
+        client.on('error', () => undefined);
+        void client.end().catch(() => undefined);
+      }
+    }, this.idleCloseMs);
+    this.idleClose.unref?.();
   }
 
   /**
@@ -121,15 +182,22 @@ export class LiveEventsService implements OnModuleInit, OnModuleDestroy {
       application_name: 'hsdg-api-live',
     });
     const again = (why: string): void => {
-      if (this.closing) return;
-      this.logger.warn(`Live events not listening (${why}); retrying in 5 s.`);
       if (this.listener === client) this.listener = null;
       client.removeAllListeners();
+      client.on('error', () => undefined);
       void client.end().catch(() => undefined);
+      if (this.closing) return;
+      // Nobody watching (e.g. the database scaled to zero overnight and closed
+      // the session): stay down until a stream wants it again.
+      if (this.openStreams === 0) {
+        this.logger.log(`Live events stopped listening (${why}); no one is watching.`);
+        return;
+      }
+      this.logger.warn(`Live events not listening (${why}); retrying in 5 s.`);
       if (!this.retry) {
         this.retry = setTimeout(() => {
           this.retry = null;
-          void this.listen();
+          if (this.openStreams > 0) this.ensureListening();
         }, 5_000);
         this.retry.unref?.();
       }
@@ -148,6 +216,8 @@ export class LiveEventsService implements OnModuleInit, OnModuleDestroy {
       await client.connect();
       await client.query(`LISTEN ${LIVE_CHANNEL}`);
       this.listener = client;
+      // Everyone left while it was connecting.
+      if (this.openStreams === 0) this.scheduleIdleClose();
     } catch (err) {
       again((err as Error).message);
     }

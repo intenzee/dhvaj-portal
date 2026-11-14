@@ -1,6 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { AddressInfo } from 'node:net';
+import { Client } from 'pg';
 import {
   LIVE_EVENT,
   parseSseFrames,
@@ -40,6 +41,8 @@ describe('Live events (e2e)', () => {
       signal: ctrl.signal,
     });
     expect(res.status).toBe(200);
+    // The API holds LISTEN only while a stream is open: wait until it hears.
+    expect(await app.get(LiveEventsService).whenListening()).toBe(true);
     expect(res.headers.get('content-type')).toMatch(/text\/event-stream/);
     const events: LiveEvent[] = [];
     const reader = res.body!.getReader();
@@ -88,10 +91,6 @@ describe('Live events (e2e)', () => {
     const people = (await http().get('/api/v1/quick-tasks/people').set(bearer(pa)).expect(200))
       .body as QuickTaskPerson[];
     senior = people.find((x) => x.role === 'senior')!;
-    // The API is hearing NOTIFY before anything is sent.
-    const live = app.get(LiveEventsService);
-    for (let i = 0; i < 100 && !live.listening; i++) await new Promise((r) => setTimeout(r, 50));
-    expect(live.listening).toBe(true);
   });
 
   afterAll(async () => {
@@ -175,5 +174,51 @@ describe('Live events (e2e)', () => {
     for (let i = 0; i < 40 && live.openStreams > 0; i++)
       await new Promise((r) => setTimeout(r, 50));
     expect(live.openStreams).toBe(0);
+  });
+
+  it('holds LISTEN only while someone is watching, so an idle database can sleep', async () => {
+    const live = app.get(LiveEventsService);
+    const was = live.idleCloseMs;
+    live.idleCloseMs = 200;
+    const su = new Client({ connectionString: process.env.DATABASE_SUPERUSER_URL });
+    await su.connect();
+    const listeners = async (): Promise<number> =>
+      (
+        await su.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE application_name = 'hsdg-api-live' AND datname = current_database()`,
+        )
+      ).rows[0]!.n;
+    try {
+      const y = await open(sy);
+      expect(live.listening).toBe(true);
+      await y.close();
+      for (let i = 0; i < 60 && live.listening; i++) await new Promise((r) => setTimeout(r, 50));
+      expect(live.listening).toBe(false);
+      // Nobody watching: it stays down — no reconnecting for no one.
+      await new Promise((r) => setTimeout(r, 400));
+      expect(live.listening).toBe(false);
+      for (let i = 0; i < 40 && (await listeners()) > 0; i++)
+        await new Promise((r) => setTimeout(r, 50));
+      expect(await listeners()).toBe(0);
+      // The next person to open the portal brings it back, and hears at once.
+      const back = await open(sy);
+      try {
+        expect(live.listening).toBe(true);
+        const again = (
+          await http()
+            .post('/api/v1/quick-tasks')
+            .set(bearer(pa))
+            .send({ title: 'Send the revised computation', assignedToEmployeeId: senior.id })
+            .expect(201)
+        ).body as QuickTaskDetail;
+        await back.until((x) => x.kind === LIVE_EVENT.quickTaskAssigned && x.taskId === again.id);
+      } finally {
+        await back.close();
+      }
+    } finally {
+      live.idleCloseMs = was;
+      await su.end();
+    }
   });
 });

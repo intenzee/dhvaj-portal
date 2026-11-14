@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@ne
 import { FEATURE_FLAGS, SYSTEM_ROLE, type FeatureFlag, type RolloutMode } from '@hsdg/contracts';
 import { AppConfigService } from '../../config/config.module';
 import { DatabaseService } from '../../database/database.service';
+import { ActivityService } from '../activity/activity.service';
 import { parseFeatureFlags, parseFlagOffices } from './parse-feature-flags';
 
 /** A row of hsdg.feature_rollouts: the firm's choice for a deployed flag. */
@@ -10,8 +11,12 @@ export interface RolloutRule {
   officeCodes: ReadonlySet<string>;
 }
 
-/** How often every API instance re-reads the firm's rollout choices. */
-const REFRESH_MS = 30_000;
+/**
+ * How old the firm's rollout choices may be before a request re-reads them.
+ * They are re-read only while the portal is in use — never on a bare timer,
+ * which would keep a serverless database awake all night.
+ */
+export const REFRESH_MS = 30_000;
 
 /**
  * Which phases are switched on (spec "Rollout": each phase ships behind its own
@@ -26,11 +31,14 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
   private readonly enabled: ReadonlySet<FeatureFlag>;
   private readonly offices: ReadonlyMap<FeatureFlag, ReadonlySet<string>>;
   private rules: ReadonlyMap<FeatureFlag, RolloutRule> = new Map();
-  private timer: NodeJS.Timeout | null = null;
+  private readAt = 0;
+  private reading: Promise<void> | null = null;
+  private stopListening: (() => void) | null = null;
 
   constructor(
     config: AppConfigService,
     @Optional() private readonly db?: DatabaseService,
+    @Optional() private readonly activity?: ActivityService,
   ) {
     this.enabled = parseFeatureFlags(config.get('FEATURE_FLAGS'), config.isProduction);
     this.offices = parseFlagOffices(config.get('FEATURE_FLAG_OFFICES'));
@@ -39,17 +47,37 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     if (!this.db) return;
     await this.refresh();
-    this.timer = setInterval(() => void this.refresh(), REFRESH_MS);
-    this.timer.unref();
+    // A request finding them older than REFRESH_MS has them re-read in the
+    // background (it is served by the choices in hand, at most that stale).
+    this.stopListening =
+      this.activity?.onActivity(({ at }) => {
+        // One background read at a time.
+        if (at - this.readAt >= REFRESH_MS && !this.reading) void this.refresh();
+      }) ?? null;
   }
 
   onModuleDestroy(): void {
-    if (this.timer) clearInterval(this.timer);
+    this.stopListening?.();
   }
 
-  /** Re-read the firm's rollout choices (after a change, and every 30 s). */
-  async refresh(): Promise<void> {
+  /**
+   * Re-read the firm's rollout choices — after a change (a read begun before
+   * it is not enough, so this always reads afresh) and while the portal is in
+   * use.
+   */
+  refresh(): Promise<void> {
+    if (!this.db) return Promise.resolve();
+    const next = (this.reading ?? Promise.resolve()).then(() => this.read());
+    const mine = next.finally(() => {
+      if (this.reading === mine) this.reading = null;
+    });
+    this.reading = mine;
+    return mine;
+  }
+
+  private async read(): Promise<void> {
     if (!this.db) return;
+    this.readAt = Date.now();
     try {
       const { rows } = await this.db.withRlsContext(
         { userId: '', role: SYSTEM_ROLE, officeId: '' },

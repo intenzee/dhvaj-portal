@@ -1,4 +1,10 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  type OnModuleDestroy,
+  type OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { FEATURE_FLAG, SYSTEM_ROLE } from '@hsdg/contracts';
@@ -10,6 +16,10 @@ import { NotificationOutboxService } from '../notifications/notification-outbox.
 import { ComponentInstancesService } from '../components/component-instances.service';
 import { ComplianceCalendarV2Service } from '../compliance/compliance-calendar-v2.service';
 import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.service';
+import { ActivityService, workingTick } from '../../common/activity/activity.service';
+
+/** How long after a change its e-mail waits, so a burst of changes goes in one drain. */
+export const OUTBOX_KICK_MS = 30_000;
 
 /**
  * The background scheduler (spec §17/§18/§24). The compliance engine records two
@@ -26,14 +36,24 @@ import { FeatureFlagsService } from '../../common/feature-flags/feature-flags.se
  * 'system'/'admin'. Both jobs are idempotent, so a missed or overlapping tick
  * never double-emits or double-generates; an in-process guard also skips a tick
  * whose predecessor is still running.
+ *
+ * The database is serverless and sleeps when nothing queries it. The hourly
+ * sweep and the nightly jobs wake it on purpose. The outbox drain does not
+ * poll around the clock: it runs ~30 s after a change (which is what queues
+ * e-mail), on its 5-minute tick only while people are using the portal, and
+ * on the hour, right after the sweep, so what the sweep raised goes out in the
+ * same wake.
  */
 @Injectable()
-export class ComplianceSchedulerService implements OnModuleInit {
+export class ComplianceSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ComplianceSchedulerService.name);
   private sweepRunning = false;
   private horizonRunning = false;
   private outboxRunning = false;
   private calendarRunning = false;
+  private outboxRanAt = 0;
+  private outboxKick: NodeJS.Timeout | null = null;
+  private stopListening: (() => void) | null = null;
 
   constructor(
     private readonly db: DatabaseService,
@@ -44,22 +64,39 @@ export class ComplianceSchedulerService implements OnModuleInit {
     private readonly instances: ComponentInstancesService,
     private readonly calendar: ComplianceCalendarV2Service,
     private readonly flags: FeatureFlagsService,
+    @Optional() private readonly activity?: ActivityService,
   ) {}
+
+  onModuleDestroy(): void {
+    this.stopListening?.();
+    if (this.outboxKick) clearTimeout(this.outboxKick);
+  }
 
   onModuleInit(): void {
     if (!this.config.get('SCHEDULER_ENABLED')) {
       this.logger.log('Background scheduler disabled (SCHEDULER_ENABLED=false).');
       return;
     }
-    this.register('compliance-sweep', this.config.get('SCHEDULER_SWEEP_CRON'), () =>
-      this.runSweep(),
-    );
+    this.register('compliance-sweep', this.config.get('SCHEDULER_SWEEP_CRON'), async () => {
+      await this.runSweep();
+      // What the sweep raised goes out in the same wake.
+      await this.drainExclusive();
+    });
     this.register('compliance-horizon-roll', this.config.get('SCHEDULER_HORIZON_CRON'), () =>
       this.runHorizonRoll(),
     );
-    this.register('notification-outbox-drain', this.config.get('SCHEDULER_OUTBOX_CRON'), () =>
-      this.runOutboxDrain(),
+    this.register(
+      'notification-outbox-drain',
+      this.config.get('SCHEDULER_OUTBOX_CRON'),
+      () => this.runOutboxDrain(),
+      // Only while people work (or on the hour): never a query for no one.
+      () => !this.activity || workingTick(new Date(), this.outboxRanAt, this.activity),
     );
+    // A change queues its e-mail; send it shortly after, not on the next tick.
+    this.stopListening =
+      this.activity?.onActivity(({ write }) => {
+        if (write) this.kickOutbox();
+      }) ?? null;
     this.register('compliance-calendar', this.config.get('SCHEDULER_CALENDAR_CRON'), () =>
       this.runCalendarMaintenance(),
     );
@@ -75,8 +112,15 @@ export class ComplianceSchedulerService implements OnModuleInit {
    * Register a config-driven cron job. Expressions are validated by CronJob.
    * With several API instances each tick runs on one of them (advisory lock).
    */
-  private register(name: string, cron: string, handler: () => Promise<void>): void {
+  private register(
+    name: string,
+    cron: string,
+    handler: () => Promise<void>,
+    due: () => boolean = () => true,
+  ): void {
     const job = new CronJob(cron, () => {
+      // Decided before the lock: taking it is itself a query.
+      if (!due()) return;
       void this.db.runExclusive(name, handler).catch((err: Error) => {
         this.logger.error(`Scheduled job ${name} failed: ${err.message}`, err.stack);
       });
@@ -146,6 +190,23 @@ export class ComplianceSchedulerService implements OnModuleInit {
     }
   }
 
+  /** One drain across every instance (the tick's lock). */
+  private drainExclusive(): Promise<unknown> {
+    return this.db.runExclusive('notification-outbox-drain', () => this.runOutboxDrain());
+  }
+
+  /** Drain ~30 s after a change; a burst of changes shares one drain. */
+  kickOutbox(): void {
+    if (this.outboxKick) return;
+    this.outboxKick = setTimeout(() => {
+      this.outboxKick = null;
+      void this.drainExclusive().catch((err: Error) => {
+        this.logger.error(`Outbox drain failed: ${err.message}`, err.stack);
+      });
+    }, OUTBOX_KICK_MS);
+    this.outboxKick.unref?.();
+  }
+
   /** Drain the external-delivery outbox. Public so it is unit-testable. */
   async runOutboxDrain(): Promise<void> {
     if (this.outboxRunning) {
@@ -153,6 +214,7 @@ export class ComplianceSchedulerService implements OnModuleInit {
       return;
     }
     this.outboxRunning = true;
+    this.outboxRanAt = Date.now();
     try {
       const ctx = await this.resolveOperatorContext();
       if (!ctx) {

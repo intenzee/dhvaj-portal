@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { ClsModule } from 'nestjs-cls';
@@ -8,6 +8,8 @@ import { AppConfigModule, AppConfigService } from './config/config.module';
 import { buildLoggerConfig } from './common/logging/logger.config';
 import { clsOptions } from './common/context/request-context';
 import { DatabaseModule } from './database/database.module';
+import { ActivityModule } from './common/activity/activity.module';
+import { ActivityMiddleware } from './common/activity/activity.middleware';
 import { HealthModule } from './health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -107,6 +109,7 @@ import { TeamsModule } from './modules/teams/teams.module';
     }),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    ActivityModule,
     FeatureFlagsModule,
     HealthModule,
     AuditModule,
@@ -161,4 +164,10 @@ import { TeamsModule } from './modules/teams/teams.module';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // When the portal was last used: background work that only matters while
+    // people work waits for it, so an idle database can sleep.
+    consumer.apply(ActivityMiddleware).forRoutes('*');
+  }
+}
