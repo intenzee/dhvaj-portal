@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { AFTER_SIGN_IN } from '@/components/landing-redirect';
 import { ApiError } from '@/lib/api';
+import { readSignOutNotice } from '@/lib/idle';
 import { Button, Card, CardBody } from '@/components/ui';
 import { Field, Input } from '@/components/form';
 
@@ -46,6 +47,9 @@ export default function LoginPage(): JSX.Element {
   const [mustChange, setMustChange] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  // "Signed out after 15 minutes without activity." — kept until the next sign-in.
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => setNotice(readSignOutNotice()), []);
 
   useEffect(() => {
     if (!loading && principal) router.replace(AFTER_SIGN_IN);
@@ -118,6 +122,14 @@ export default function LoginPage(): JSX.Element {
               ? 'Welcome! Choose your own password to finish signing in.'
               : 'Sign in to the practice portal.'}
           </p>
+          {notice && !mustChange && (
+            <p
+              role="status"
+              className="-mt-3 mb-5 rounded-lg border border-warn-200 bg-warn-50 px-3 py-2 text-sm text-warn-800"
+            >
+              {notice}
+            </p>
+          )}
 
           {passwordEnabled && mustChange && (
             <form onSubmit={chooseOwnPassword} className="space-y-3">

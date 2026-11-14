@@ -14,6 +14,7 @@ import {
   AdjustTimeDto,
   DecideAdjustmentDto,
   OtherTimeDto,
+  SignOutDto,
   TimeSummaryQueryDto,
 } from './dto/time-auto.dto';
 
@@ -50,9 +51,17 @@ export class TimeClockController {
   @Post('sign-out')
   @HttpCode(200)
   @RequirePermissions(PERMISSION.engagementRead)
-  @ApiOperation({ summary: "Close the caller's automatic entry on sign-out (signed_out)" })
-  signOut(@CurrentPrincipal() principal: Principal): Promise<ClockState> {
-    return this.time.signOut(rlsContextFromPrincipal(principal));
+  @ApiOperation({
+    summary: "Close the caller's automatic entry on sign-out (signed_out)",
+    description:
+      'Optional `at` (ISO time — the last activity before an idle sign-out) ends the entry ' +
+      'then instead of now; it is kept between the entry’s start and now.',
+  })
+  signOut(@CurrentPrincipal() principal: Principal, @Body() dto: SignOutDto): Promise<ClockState> {
+    return this.time.signOut(
+      rlsContextFromPrincipal(principal),
+      dto?.at ? new Date(dto.at) : undefined,
+    );
   }
 
   @Post(':entryId/adjust')

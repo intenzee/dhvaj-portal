@@ -42,6 +42,7 @@ import { NewQuickTaskModal } from './quick-tasks/new-quick-task-modal';
 import { QuickTaskInboxButton } from './quick-tasks/quick-task-inbox';
 import { ChatButton } from './chat/chat-button';
 import { NotificationGate } from './notification-gate';
+import { IdleSignOut } from './idle-sign-out';
 
 /** "New …" quick-create actions, shown only to users who may create that thing. */
 const CREATE_ACTIONS: {
@@ -254,7 +255,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                 </button>
               )}
               <button
-                onClick={logout}
+                onClick={() => logout()}
                 className="rounded-lg p-2 text-ink-faint hover:bg-surface-sunken hover:text-ink"
                 aria-label="Sign out"
                 title="Sign out"
@@ -273,6 +274,8 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
       <HelpPanel open={helpOpen} onClose={closeHelp} />
       {/* Notifications are required: every load asks until they are on. */}
       <NotificationGate />
+      {/* 15 minutes without activity signs out; push alerts keep coming. */}
+      <IdleSignOut />
     </div>
   );
 }

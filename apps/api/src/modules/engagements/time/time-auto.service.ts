@@ -86,12 +86,16 @@ export class TimeAutoService {
     return this.db.withRlsContext(ctx, (client) => clockState(client, me));
   }
 
-  /** POST /time/sign-out — close the caller's auto entry (signed_out); its task pauses. */
-  async signOut(ctx: RlsContext): Promise<ClockState> {
+  /**
+   * POST /time/sign-out — close the caller's auto entry (signed_out); its task
+   * pauses. `at` (an idle sign-out's last activity) ends it then rather than
+   * now, never before the entry began nor after now.
+   */
+  async signOut(ctx: RlsContext, at?: Date): Promise<ClockState> {
     if (!ctx.employeeId) return { running: null, resumable: null };
     const me = ctx.employeeId;
     return this.db.withRlsContext(ctx, async (client) => {
-      const closed = await closeAutoFor(client, me, TIME_STOP_REASON.signedOut);
+      const closed = await closeAutoFor(client, me, TIME_STOP_REASON.signedOut, at);
       await settleTasksAfterClose(client, closed, TIME_STOP_REASON.signedOut, false);
       return clockState(client, me);
     });

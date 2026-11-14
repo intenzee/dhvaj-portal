@@ -105,6 +105,15 @@ export const AUTO_TIME = {
   defaultDayEndHourIst: 20,
 } as const;
 
+/**
+ * POST /time/sign-out. `at` (ISO): when the person was last active — an idle
+ * sign-out closes the clock then, not 15 minutes later. The server keeps it
+ * between the entry's start and now.
+ */
+export interface TimeSignOutInput {
+  at?: string;
+}
+
 /** The caller's clock, returned by the heartbeat and every transition. */
 export interface ClockState {
   running: {
